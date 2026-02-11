@@ -14,10 +14,15 @@ Klicovy princip: **1 kontejner = 1 tym. Agenti v tymu sdili kontejner.**
 
 ```
 1. crewshipd (Go) — orchestrator, spravuje kontejnery a agent sessions
-2. Docker kontejner — izolacni boundary per team
-3. CLI adapter — Claude Code / Codex CLI / Gemini CLI / OpenCode
-4. LLM provider — Anthropic / OpenAI / Google / Ollama
+2. ContainerProvider — Docker (MVP) nebo K8s (Enterprise)
+3. StorageProvider — LocalFS (MVP) nebo S3/MinIO (Enterprise)
+4. StateProvider — bbolt (MVP) nebo PostgreSQL (Enterprise)
+5. CLI adapter — Claude Code / Codex CLI / Gemini CLI / OpenCode
+6. LLM provider — Anthropic / OpenAI / Google / Ollama
 ```
+
+> **KRITICKE:** crewshipd NIKDY nepristupuje k Docker/filesystem/bbolt primo.
+> Vse jde pres provider interface. Viz `K8S-READINESS.md` pro kompletni specifikaci.
 
 ### Flow: uzivatel posle zpravu agentovi
 
@@ -51,9 +56,13 @@ Klicovy princip: **1 kontejner = 1 tym. Agenti v tymu sdili kontejner.**
 
 ### 2.1 Vytvoreni kontejneru (pri vytvoreni tymu)
 
+> **Poznamka:** Nasledujici kod ukazuje Docker implementaci ContainerProvider.
+> K8s implementace pouziva client-go (Deployment + Pod misto Container).
+> Orchestrator vola `provider.EnsureTeamRuntime()` — nevidi implementaci.
+
 ```go
-// internal/docker/container.go
-func (m *Manager) CreateTeamContainer(ctx context.Context, team Team) error {
+// internal/provider/docker/docker.go (Docker implementace ContainerProvider)
+func (m *DockerProvider) EnsureTeamRuntime(ctx context.Context, team TeamConfig) error {
     resp, err := m.client.ContainerCreate(ctx, &container.Config{
         Image: "ghcr.io/crewship-ai/agent-runtime:latest",
         User:  "1001:1001",  // non-root

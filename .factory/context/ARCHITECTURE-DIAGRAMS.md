@@ -478,7 +478,123 @@ flowchart TD
     style Execute fill:#16a34a,color:#fff
 ```
 
-## 9. Deployment Architecture (Coolify)
+## 9. Provider Pattern (K8s Readiness)
+
+```mermaid
+graph TB
+    subgraph Crewshipd["crewshipd (business logic)"]
+        Orch["Orchestrator"]
+        LogCol["Log Collector"]
+        FileSrv["File Server"]
+        WALMgr["State Manager"]
+    end
+
+    subgraph Interfaces["Provider Interfaces"]
+        CP["ContainerProvider"]
+        SP["StorageProvider"]
+        StP["StateProvider"]
+    end
+
+    subgraph MVP["MVP Implementation"]
+        Docker["DockerProvider<br/>Docker SDK<br/>docker exec"]
+        LocalFS["LocalFSProvider<br/>os.OpenFile<br/>fsnotify"]
+        Bbolt["BboltProvider<br/>embedded KV<br/>WAL"]
+    end
+
+    subgraph Enterprise["Enterprise Implementation"]
+        K8s["K8sProvider<br/>client-go<br/>Pods / Jobs"]
+        S3["S3Provider<br/>MinIO / AWS S3<br/>event notifications"]
+        PgState["PgStateProvider<br/>PostgreSQL table<br/>shared across instances"]
+    end
+
+    Orch --> CP
+    LogCol --> SP
+    FileSrv --> SP
+    WALMgr --> StP
+
+    CP --> Docker
+    CP --> K8s
+    SP --> LocalFS
+    SP --> S3
+    StP --> Bbolt
+    StP --> PgState
+
+    subgraph Config["Configuration (env vars)"]
+        E1["CREWSHIP_CONTAINER_PROVIDER=docker|k8s"]
+        E2["CREWSHIP_STORAGE_PROVIDER=localfs|s3"]
+        E3["CREWSHIP_STATE_PROVIDER=bbolt|postgres"]
+    end
+
+    Config -.->|"selects"| Interfaces
+
+    style Crewshipd fill:#2563eb,color:#fff
+    style Interfaces fill:#7c3aed,color:#fff
+    style MVP fill:#16a34a,color:#fff
+    style Enterprise fill:#f59e0b,color:#000
+```
+
+## 10. K8s Deployment Architecture (Enterprise)
+
+```mermaid
+graph TB
+    subgraph Internet
+        Users["Users"]
+    end
+
+    subgraph K8s["Kubernetes Cluster"]
+        Ingress["Ingress Controller<br/>TLS + sticky sessions (WS)"]
+
+        subgraph Platform["Namespace: crewship"]
+            NextDeploy["Deployment: nextjs<br/>N replicas (stateless)"]
+            GoDeploy["Deployment: crewshipd<br/>N replicas"]
+            PG[("StatefulSet: postgresql<br/>1 replica + PVC")]
+            S3Store[("MinIO / S3<br/>Logs, Convos, Output")]
+
+            SvcNext["Service: nextjs"]
+            SvcGo["Service: crewshipd"]
+            SvcPG["Service: postgresql"]
+
+            HPA["HPA: autoscaler<br/>CPU/memory based"]
+            ConfigMap["ConfigMap:<br/>crewship-config"]
+            Secret["Secret:<br/>ENCRYPTION_KEY<br/>NEXTAUTH_SECRET"]
+        end
+
+        subgraph AgentNS["Namespace: crewship-agents"]
+            TeamA["Pod: team-alpha<br/>agent-runtime image<br/>UID 1001"]
+            TeamB["Pod: team-beta<br/>agent-runtime image<br/>UID 1001"]
+            NetPol["NetworkPolicy:<br/>deny all ingress<br/>allow LLM egress only"]
+        end
+    end
+
+    subgraph LLM["LLM APIs"]
+        APIs["Anthropic / OpenAI / Google"]
+    end
+
+    Users -->|"HTTPS/WSS"| Ingress
+    Ingress --> SvcNext
+    Ingress --> SvcGo
+    SvcNext --> NextDeploy
+    SvcGo --> GoDeploy
+    NextDeploy -->|"HTTP"| SvcGo
+    NextDeploy -->|"Prisma"| SvcPG
+    SvcPG --> PG
+    GoDeploy -->|"client-go"| TeamA
+    GoDeploy -->|"client-go"| TeamB
+    GoDeploy -->|"S3 API"| S3Store
+    GoDeploy -->|"PG state"| SvcPG
+    GoDeploy -->|"LISTEN/NOTIFY"| PG
+
+    TeamA -->|"allowlisted"| APIs
+    TeamB -->|"allowlisted"| APIs
+
+    HPA -.->|"scales"| GoDeploy
+
+    style Platform fill:#dbeafe,stroke:#2563eb
+    style AgentNS fill:#fef3c7,stroke:#f59e0b
+    style NetPol fill:#fee2e2,stroke:#dc2626
+```
+
+## 11. Deployment Architecture (Coolify / MVP)
 
 ```mermaid
 graph TB
