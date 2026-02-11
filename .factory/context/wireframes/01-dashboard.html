@@ -45,7 +45,7 @@ tailwind.config = {
     <!-- Nav -->
     <nav class="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
       <!-- Active: Dashboard -->
-      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md bg-primary-100 text-primary-600 font-medium text-sm">
+      <a href="01-dashboard.html" class="flex items-center gap-3 px-3 py-2 rounded-md bg-primary-100 text-primary-600 font-medium text-sm">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
         Dashboard
       </a>
@@ -65,7 +65,7 @@ tailwind.config = {
       </a>
 
       <!-- Agents -->
-      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
+      <a href="02-agents-list.html" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
         Agents
         <span class="ml-auto text-xs bg-neutral-200 text-neutral-600 px-1.5 py-0.5 rounded-full">7</span>
@@ -79,7 +79,7 @@ tailwind.config = {
       </a>
 
       <!-- Credentials -->
-      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
+      <a href="13-credentials.html" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
         Credentials
         <span class="ml-auto text-xs bg-neutral-200 text-neutral-600 px-1.5 py-0.5 rounded-full">15</span>
@@ -214,7 +214,7 @@ tailwind.config = {
         <div class="grid grid-cols-3 gap-4">
 
           <!-- Agent: Claude — SEO Writer (Running, Marketing) -->
-          <div class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors">
+          <a href="03-agent-overview.html" class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors block">
             <!-- Team color strip -->
             <div class="h-1 bg-team-marketing"></div>
             <div class="px-5 py-4">
@@ -256,12 +256,12 @@ tailwind.config = {
             </div>
             <div class="px-5 py-2.5 bg-neutral-50 border-t border-neutral-200 flex items-center justify-between">
               <span class="text-xs text-neutral-500">Started 23 min ago</span>
-              <button class="text-xs text-primary-600 font-medium hover:underline">Open chat</button>
+              <span class="text-xs text-primary-600 font-medium hover:underline">Open chat</span>
             </div>
-          </div>
+          </a>
 
           <!-- Agent: Codex — Deploy Monitor (Running, DevOps) -->
-          <div class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors">
+          <a href="03-agent-overview.html" class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors block">
             <div class="h-1 bg-team-devops"></div>
             <div class="px-5 py-4">
               <div class="flex items-start justify-between">
@@ -302,12 +302,12 @@ tailwind.config = {
             </div>
             <div class="px-5 py-2.5 bg-neutral-50 border-t border-neutral-200 flex items-center justify-between">
               <span class="text-xs text-neutral-500">Started 1h 12min ago</span>
-              <button class="text-xs text-primary-600 font-medium hover:underline">Open chat</button>
+              <span class="text-xs text-primary-600 font-medium hover:underline">Open chat</span>
             </div>
-          </div>
+          </a>
 
           <!-- Agent: Gemini — Blog Generator (Running, Content) -->
-          <div class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors">
+          <a href="03-agent-overview.html" class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors block">
             <div class="h-1 bg-team-content"></div>
             <div class="px-5 py-4">
               <div class="flex items-start justify-between">
@@ -348,12 +348,12 @@ tailwind.config = {
             </div>
             <div class="px-5 py-2.5 bg-neutral-50 border-t border-neutral-200 flex items-center justify-between">
               <span class="text-xs text-neutral-500">Started 8 min ago</span>
-              <button class="text-xs text-primary-600 font-medium hover:underline">Open chat</button>
+              <span class="text-xs text-primary-600 font-medium hover:underline">Open chat</span>
             </div>
-          </div>
+          </a>
 
           <!-- Agent: Claude — Code Reviewer (Idle, DevOps) -->
-          <div class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors">
+          <a href="03-agent-overview.html" class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors block">
             <div class="h-1 bg-team-devops"></div>
             <div class="px-5 py-4">
               <div class="flex items-start justify-between">
@@ -394,12 +394,12 @@ tailwind.config = {
             </div>
             <div class="px-5 py-2.5 bg-neutral-50 border-t border-neutral-200 flex items-center justify-between">
               <span class="text-xs text-neutral-500">Last run: 45 min ago</span>
-              <button class="text-xs text-primary-600 font-medium hover:underline">Start run</button>
+              <span class="text-xs text-primary-600 font-medium hover:underline">Start run</span>
             </div>
-          </div>
+          </a>
 
           <!-- Agent: OpenCode — Ticket Resolver (Idle, Support) -->
-          <div class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors">
+          <a href="03-agent-overview.html" class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors block">
             <div class="h-1 bg-team-support"></div>
             <div class="px-5 py-4">
               <div class="flex items-start justify-between">
@@ -440,12 +440,12 @@ tailwind.config = {
             </div>
             <div class="px-5 py-2.5 bg-neutral-50 border-t border-neutral-200 flex items-center justify-between">
               <span class="text-xs text-neutral-500">Last run: 2h ago</span>
-              <button class="text-xs text-primary-600 font-medium hover:underline">Start run</button>
+              <span class="text-xs text-primary-600 font-medium hover:underline">Start run</span>
             </div>
-          </div>
+          </a>
 
           <!-- Agent: Claude — Social Media (Idle, Marketing) -->
-          <div class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors">
+          <a href="03-agent-overview.html" class="bg-white border border-neutral-300 rounded-lg overflow-hidden hover:border-primary-300 cursor-pointer transition-colors block">
             <div class="h-1 bg-team-marketing"></div>
             <div class="px-5 py-4">
               <div class="flex items-start justify-between">
@@ -486,12 +486,12 @@ tailwind.config = {
             </div>
             <div class="px-5 py-2.5 bg-neutral-50 border-t border-neutral-200 flex items-center justify-between">
               <span class="text-xs text-neutral-500">Last run: 3h ago</span>
-              <button class="text-xs text-primary-600 font-medium hover:underline">Start run</button>
+              <span class="text-xs text-primary-600 font-medium hover:underline">Start run</span>
             </div>
-          </div>
+          </a>
 
           <!-- Agent: Codex — Data Pipeline (Error, DevOps) -->
-          <div class="bg-white border border-error-500/40 rounded-lg overflow-hidden hover:border-error-500 cursor-pointer transition-colors">
+          <a href="03-agent-overview.html" class="bg-white border border-error-500/40 rounded-lg overflow-hidden hover:border-error-500 cursor-pointer transition-colors block">
             <div class="h-1 bg-team-devops"></div>
             <div class="px-5 py-4">
               <div class="flex items-start justify-between">
@@ -524,10 +524,10 @@ tailwind.config = {
               </div>
             </div>
             <div class="px-5 py-2.5 bg-error-50/50 border-t border-error-500/20 flex items-center justify-between">
-              <button class="text-xs text-error-700 font-medium hover:underline">View logs</button>
-              <button class="text-xs text-primary-600 font-medium hover:underline">Retry run</button>
+              <span class="text-xs text-error-700 font-medium hover:underline">View logs</span>
+              <span class="text-xs text-primary-600 font-medium hover:underline">Retry run</span>
             </div>
-          </div>
+          </a>
 
         </div>
       </div>
@@ -536,7 +536,7 @@ tailwind.config = {
       <div class="bg-white border border-neutral-300 rounded-lg">
         <div class="px-6 py-4 border-b border-neutral-200 flex items-center justify-between">
           <h2 class="text-base font-semibold">Recent Runs</h2>
-          <a href="#" class="text-xs text-primary-600 hover:underline">View all runs</a>
+          <a href="02-agents-list.html" class="text-xs text-primary-600 hover:underline">View all runs</a>
         </div>
         <table class="w-full">
           <thead>
