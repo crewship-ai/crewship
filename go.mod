@@ -1,3 +1,3 @@
 module github.com/crewship-ai/crewship
 
-go 1.23
+go 1.25
