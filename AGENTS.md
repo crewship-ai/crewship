@@ -168,6 +168,11 @@ CONVERSATIONS (host):      /var/lib/crewship/conversations/  ← JSONL per sessi
 - Tailwind CSS 4 only (no inline styles, no tailwind.config.ts)
 - Design tokens in `app/globals.css` via `@theme inline`
 - Responsive: mobile-first, use `md:` and `lg:` breakpoints
+- **Layout:** 3-layer — Top Toolbar (dark, full-width, h-12) + Sidebar (256px) + Main
+- **Top Toolbar:** Logo, Organization Switcher, Search (⌘K), Docs, Notifications (bell+badge), Settings, User avatar
+- **Sidebar:** Navigation only (no logo, no user footer — both moved to toolbar)
+- **Organization Switcher:** Multi-org support, dropdown in toolbar, changes session `currentOrgId`
+- **Reference:** Adapted from Advine.ai `DashboardHeader` + `DashboardSidebar` (ppc_saas_3)
 
 ### Database
 - **Prisma schema** = source of truth (19 tables defined in `.factory/context/prd/DATABASE.md`)

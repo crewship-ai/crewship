@@ -170,33 +170,86 @@ import { LayoutDashboard, Users, Bot, Puzzle, KeyRound, ScrollText, Settings, Bo
 
 ## 5. Layout
 
-### Struktura
+### 5.1 Celkova struktura (3-layer)
 
 ```
-+-------------------+--------------------------------------+
-| Sidebar (256px)   | Main Content                         |
-|                   |                                      |
-| [Ship] Crewship   | Breadcrumb / Page header             |
-|                   |                                      |
-| Dashboard         | +------------+ +------------+        |
-| Teams             | |   Card     | |   Card     |        |
-|   > Marketing     | |            | |            |        |
-|   > DevOps        | +------------+ +------------+        |
-| Agents            |                                      |
-| Skills            | +--------------------------------+   |
-| Credentials       | |  Full-width card               |   |
-| Audit Log         | |  (tabulka, chat, logy)         |   |
-|                   | +--------------------------------+   |
-| ────────          |                                      |
-| Settings          |                                      |
-| Docs              |                                      |
-+-------------------+--------------------------------------+
++------------------------------------------------------------------+
+| Top Toolbar (h-12, bg-neutral-950, fixed)                        |
+| [Ship] Crewship  [U] Org Switcher ▾   [Search ⌘K] [📖] [🔔] [⚙] │ [PS] ▾ |
++----------+-------------------------------------------------------+
+| Sidebar  | Main Content (scrollable)                             |
+| (256px)  |                                                       |
+| bg-white | Page header (h-14, bg-white, border-b)                |
+|          | Content area (p-6)                                    |
+| Dashboard|                                                       |
+| Orchestr.|  +------------+ +------------+                        |
+| Teams    |  |   Card     | |   Card     |                        |
+| Agents   |  +------------+ +------------+                        |
+| Skills   |                                                       |
+| Credent. |  +--------------------------------+                    |
+| Audit Log|  |  Full-width card               |                    |
+|          |  +--------------------------------+                    |
++----------+-------------------------------------------------------+
 ```
 
-### Spacing
+> **Vzor:** Advine.ai `DashboardHeader` + `DashboardSidebar` (ppc_saas_3).
+> Crewship adaptuje: PPC navigace → Agent/Team/Skills, AccountProjectSwitcher → Org Switcher.
+
+### 5.2 Top Toolbar
+
+Globalni panel nad celou sirkou. Tmave pozadi (`bg-neutral-950`), vyska `h-12`.
+
+| Pozice | Obsah | Komponenta |
+|---|---|---|
+| Vlevo | Logo (Ship icon) + "Crewship" | `<Link href="/dashboard">` |
+| Stred | Organization Switcher dropdown | `OrgSwitcher` (viz 5.4) |
+| Vpravo | Search (`⌘K`), Docs, Notifications (s badge), Settings, User avatar | Icon buttons + dropdown |
+
+**Implementace:** shadcn/ui `DropdownMenu`, `Avatar`, `Tooltip`, `Button` (ghost, rounded).
+Notifications badge = cerveny kruh s poctem (`activeAlertsCount`), jako Advine.
+
+### 5.3 Sidebar
+
+Navigace bez loga a bez user footeru (oboje presunuto do Top Toolbar).
+
+| Polozka | Ikona | Badge |
+|---|---|---|
+| Dashboard | `LayoutDashboard` | — |
+| Orchestration | `Workflow` | `NEW` badge |
+| Teams | `Users` | count (4) |
+| Agents | `Bot` | count (7) |
+| Skills | `Puzzle` | count (12) |
+| Credentials | `KeyRound` | count (6) |
+| Audit Log | `ScrollText` | — |
+
+> Settings a Docs jsou v Top Toolbar, NE v sidebaru.
+
+Sidebar view modes (prevzato z Advine): Expanded / Collapsed / Expand on hover.
+Stav persistovany v `localStorage` pod klicem `sidebar_mode`.
+
+### 5.4 Organization Switcher
+
+Multi-org podpora. User muze byt clenem vice organizaci.
+Prepinac v Top Toolbar meni `currentOrgId` v session/cookie.
+
+```
+Dropdown:
+  [U] Unify Technology    ← aktivni (check)
+  [C] Client ABC Corp
+  ────────
+  + Create Organization
+  Manage Organizations →
+```
+
+Vse pod org se filtruje pres `org_id` (Teams, Agents, Credentials, Audit).
+Uz existuje v DB schema: `Organization`, `OrganizationMember`, `OrgRole`.
+
+### 5.5 Spacing
 
 | Prvek | Tailwind |
 |---|---|
+| Top Toolbar vyska | `h-12` (48px) |
+| Page header vyska | `h-14` (56px) |
 | Page padding | `p-6` (24px) |
 | Card padding | `p-6` (24px) |
 | Mezera mezi kartami | `gap-4` (16px) |
@@ -204,7 +257,7 @@ import { LayoutDashboard, Users, Bot, Puzzle, KeyRound, ScrollText, Settings, Bo
 | Sidebar sirka | `w-64` (256px) |
 | Sidebar item padding | `px-3 py-2` |
 
-### Karty
+### 5.6 Karty
 
 - `bg-card border border-border rounded-lg`
 - **Zadne stiny** (flat design, jako Meta)
