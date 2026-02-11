@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Skills</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['JetBrains Mono','monospace']},colors:{primary:{50:'#F0F6FF',100:'#E7F3FF',200:'#C5DCFC',300:'#9DC5FA',400:'#6BAAF7',500:'#4293F5',600:'#1877F2',700:'#1877C2',800:'#1565A8',900:'#0D4F8B',950:'#003366'},neutral:{50:'#F7F8FA',100:'#F0F2F5',200:'#E4E6EA',300:'#CED0D4',400:'#ADB1B5',500:'#8A8D91',600:'#65676B',700:'#4B4F54',800:'#373A3F',900:'#242628',950:'#1C1E21'},success:{50:'#E6F5EA',500:'#31A24C',700:'#1B7D36'},warning:{50:'#FFF8E6',500:'#F7B928',700:'#B06D00'},error:{50:'#FDE8E8',500:'#E34234',700:'#B32D1B'},brand:{gold:'#D4A853',teal:'#4ECDC4',navy:'#1A3C5E'},team:{marketing:'#E16B3A',devops:'#7C3AED',content:'#0891B2',support:'#D946A8'}}}}}
+</script>
+<style>body{font-size:14px}</style>
+</head>
+<body class="bg-neutral-100 font-sans text-neutral-950 antialiased">
+<div class="flex h-screen">
+
+  <!-- Sidebar -->
+  <aside class="w-64 bg-white border-r border-neutral-300 flex flex-col flex-shrink-0">
+    <div class="px-4 h-14 flex items-center gap-2.5 border-b border-neutral-300">
+      <svg class="w-6 h-6 text-primary-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>
+      <span class="text-base font-semibold">Crewship</span>
+    </div>
+    <nav class="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
+      <!-- Will be filled by the fix script on commit, but including correct sidebar inline -->
+      <a href="01-dashboard.html" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>Dashboard</a>
+      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><circle cx="18" cy="6" r="3"/><path d="M6 9v6"/><path d="M9 6h6"/><path d="M9 18h6"/><path d="M18 9v6"/></svg>Orchestration
+        <span class="ml-auto text-[10px] bg-primary-600 text-white px-1.5 py-0.5 rounded font-medium">NEW</span></a>
+      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Teams
+        <span class="ml-auto text-xs bg-neutral-200 text-neutral-600 px-1.5 py-0.5 rounded-full">4</span></a>
+      <a href="02-agents-list.html" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>Agents
+        <span class="ml-auto text-xs bg-neutral-200 text-neutral-600 px-1.5 py-0.5 rounded-full">7</span></a>
+      <a href="14-skills.html" class="flex items-center gap-3 px-3 py-2 rounded-md bg-primary-100 text-primary-600 font-medium text-sm">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.315 8.685a.98.98 0 0 1 .837-.276c.47.07.802.48.968.925a2.501 2.501 0 1 0 3.214-3.214c-.446-.166-.855-.497-.925-.968a.979.979 0 0 1 .276-.837l1.61-1.61A2.404 2.404 0 0 1 12 2c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"/></svg>Skills
+        <span class="ml-auto text-xs bg-primary-200 text-primary-700 px-1.5 py-0.5 rounded-full">12</span></a>
+      <a href="13-credentials.html" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>Credentials
+        <span class="ml-auto text-xs bg-neutral-200 text-neutral-600 px-1.5 py-0.5 rounded-full">15</span></a>
+      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2"/></svg>Audit Log</a>
+      <div class="pt-4 pb-2"><div class="border-t border-neutral-200"></div></div>
+      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>Settings</a>
+      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-md text-neutral-600 hover:bg-neutral-100 text-sm">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/></svg>Docs</a>
+    </nav>
+    <div class="px-3 py-3 border-t border-neutral-300 flex items-center gap-3">
+      <div class="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs font-semibold">PS</div>
+      <div class="flex-1 min-w-0"><div class="text-sm font-medium truncate">Pavel Srba</div><div class="text-xs text-neutral-500">Owner</div></div>
+      <svg class="w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 overflow-y-auto">
+    <header class="h-14 bg-white border-b border-neutral-300 flex items-center justify-between px-6">
+      <div class="flex items-center gap-4">
+        <h1 class="text-xl font-semibold">Skills</h1>
+        <span class="text-xs text-neutral-500">12 skills, 4 categories</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="relative">
+          <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" placeholder="Search skills..." class="pl-9 pr-4 py-1.5 text-sm border border-neutral-300 rounded-md w-56 focus:outline-none focus:ring-2 focus:ring-primary-500">
+        </div>
+        <select class="px-3 py-1.5 text-sm border border-neutral-300 rounded-md bg-white">
+          <option>All Sources</option><option>Bundled</option><option>Managed</option><option>Custom</option>
+        </select>
+        <select class="px-3 py-1.5 text-sm border border-neutral-300 rounded-md bg-white">
+          <option>All Categories</option><option>Data</option><option>Coding</option><option>Automation</option><option>Messaging</option>
+        </select>
+        <button class="inline-flex items-center gap-2 px-3 py-1.5 bg-primary-600 text-white text-sm font-medium rounded-md hover:bg-primary-700">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+          Create Custom Skill
+        </button>
+      </div>
+    </header>
+
+    <div class="p-6 space-y-6">
+
+      <!-- Category Pills -->
+      <div class="flex items-center gap-2">
+        <button class="px-3 py-1.5 text-xs font-medium rounded-md bg-neutral-950 text-white">All (12)</button>
+        <button class="px-3 py-1.5 text-xs font-medium rounded-md text-neutral-600 hover:bg-neutral-200">Data (3)</button>
+        <button class="px-3 py-1.5 text-xs font-medium rounded-md text-neutral-600 hover:bg-neutral-200">Coding (4)</button>
+        <button class="px-3 py-1.5 text-xs font-medium rounded-md text-neutral-600 hover:bg-neutral-200">Automation (3)</button>
+        <button class="px-3 py-1.5 text-xs font-medium rounded-md text-neutral-600 hover:bg-neutral-200">Messaging (2)</button>
+      </div>
+
+      <!-- Skills Grid -->
+      <div class="grid grid-cols-3 gap-4">
+
+        <!-- Web Researcher (BUNDLED, DATA) — Installed -->
+        <div class="bg-white border border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center text-lg">&#x1F50D;</div>
+              <div>
+                <div class="text-sm font-semibold">Web Researcher</div>
+                <div class="text-xs text-neutral-500">Search, fetch, and summarize web content</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">DATA</span>
+            <span class="px-2 py-0.5 bg-primary-100 text-primary-700 text-xs font-medium rounded">BUNDLED</span>
+            <span class="text-xs text-neutral-400 ml-auto">v1.0.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700">Tools:</span> web_search, web_fetch, summarize
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-500">Used by <span class="font-medium text-neutral-700">5 agents</span></span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-success-50 text-success-700 text-xs font-medium rounded-md">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              Installed
+            </span>
+          </div>
+        </div>
+
+        <!-- Coding Assistant (BUNDLED, CODING) — Installed -->
+        <div class="bg-white border border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-success-50 flex items-center justify-center text-lg">&#x1F4BB;</div>
+              <div>
+                <div class="text-sm font-semibold">Coding Assistant</div>
+                <div class="text-xs text-neutral-500">Read, write, execute, and debug code</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">CODING</span>
+            <span class="px-2 py-0.5 bg-primary-100 text-primary-700 text-xs font-medium rounded">BUNDLED</span>
+            <span class="text-xs text-neutral-400 ml-auto">v1.0.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700">Tools:</span> read, write, edit, exec, grep
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-500">Used by <span class="font-medium text-neutral-700">6 agents</span></span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-success-50 text-success-700 text-xs font-medium rounded-md">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              Installed
+            </span>
+          </div>
+        </div>
+
+        <!-- SEO Toolkit (MANAGED, DATA) — Installed -->
+        <div class="bg-white border border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-warning-50 flex items-center justify-center text-lg">&#x1F4CA;</div>
+              <div>
+                <div class="text-sm font-semibold">SEO Toolkit</div>
+                <div class="text-xs text-neutral-500">Keyword analysis, rank tracking, optimization</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">DATA</span>
+            <span class="px-2 py-0.5 bg-neutral-200 text-neutral-700 text-xs font-medium rounded">MANAGED</span>
+            <span class="text-xs text-neutral-400 ml-auto">v2.1.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700">Tools:</span> keyword_analyze, rank_check, content_score, meta_generate
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-500">Used by <span class="font-medium text-neutral-700">2 agents</span></span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-success-50 text-success-700 text-xs font-medium rounded-md">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              Installed
+            </span>
+          </div>
+        </div>
+
+        <!-- Git Operations (BUNDLED, CODING) — Installed -->
+        <div class="bg-white border border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-neutral-100 flex items-center justify-center text-lg">&#x1F500;</div>
+              <div>
+                <div class="text-sm font-semibold">Git Operations</div>
+                <div class="text-xs text-neutral-500">Clone, commit, push, and manage pull requests</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">CODING</span>
+            <span class="px-2 py-0.5 bg-primary-100 text-primary-700 text-xs font-medium rounded">BUNDLED</span>
+            <span class="text-xs text-neutral-400 ml-auto">v1.0.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700">Tools:</span> git_clone, git_commit, git_push, git_pr
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-500">Used by <span class="font-medium text-neutral-700">3 agents</span></span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-success-50 text-success-700 text-xs font-medium rounded-md">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              Installed
+            </span>
+          </div>
+        </div>
+
+        <!-- Docker Manager (BUNDLED, CODING) — Installed -->
+        <div class="bg-white border border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-primary-50 flex items-center justify-center text-lg">&#x1F433;</div>
+              <div>
+                <div class="text-sm font-semibold">Docker Manager</div>
+                <div class="text-xs text-neutral-500">Build, run, and manage containers</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">CODING</span>
+            <span class="px-2 py-0.5 bg-primary-100 text-primary-700 text-xs font-medium rounded">BUNDLED</span>
+            <span class="text-xs text-neutral-400 ml-auto">v1.0.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700">Tools:</span> docker_build, docker_run, docker_logs
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-500">Used by <span class="font-medium text-neutral-700">2 agents</span></span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-success-50 text-success-700 text-xs font-medium rounded-md">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              Installed
+            </span>
+          </div>
+        </div>
+
+        <!-- Database Query (BUNDLED, DATA) — Installed -->
+        <div class="bg-white border border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-team-devops/10 flex items-center justify-center text-lg">&#x1F4BE;</div>
+              <div>
+                <div class="text-sm font-semibold">Database Query</div>
+                <div class="text-xs text-neutral-500">SQL queries, migrations, and backups</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">DATA</span>
+            <span class="px-2 py-0.5 bg-primary-100 text-primary-700 text-xs font-medium rounded">BUNDLED</span>
+            <span class="text-xs text-neutral-400 ml-auto">v1.0.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700">Tools:</span> sql_query, sql_migrate, db_backup
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-500">Used by <span class="font-medium text-neutral-700">3 agents</span></span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-success-50 text-success-700 text-xs font-medium rounded-md">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              Installed
+            </span>
+          </div>
+        </div>
+
+        <!-- Slack Messenger (MANAGED, MESSAGING) — Installed -->
+        <div class="bg-white border border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-team-support/10 flex items-center justify-center text-lg">&#x1F4AC;</div>
+              <div>
+                <div class="text-sm font-semibold">Slack Messenger</div>
+                <div class="text-xs text-neutral-500">Send messages, manage channels and threads</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">MESSAGING</span>
+            <span class="px-2 py-0.5 bg-neutral-200 text-neutral-700 text-xs font-medium rounded">MANAGED</span>
+            <span class="text-xs text-neutral-400 ml-auto">v1.3.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700">Tools:</span> slack_send, slack_channel, slack_thread
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-500">Used by <span class="font-medium text-neutral-700">2 agents</span></span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-success-50 text-success-700 text-xs font-medium rounded-md">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              Installed
+            </span>
+          </div>
+        </div>
+
+        <!-- Email Sender (MANAGED, MESSAGING) — Installed -->
+        <div class="bg-white border border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-team-marketing/10 flex items-center justify-center text-lg">&#x2709;&#xFE0F;</div>
+              <div>
+                <div class="text-sm font-semibold">Email Sender</div>
+                <div class="text-xs text-neutral-500">Send emails, templates, and scheduled campaigns</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">MESSAGING</span>
+            <span class="px-2 py-0.5 bg-neutral-200 text-neutral-700 text-xs font-medium rounded">MANAGED</span>
+            <span class="text-xs text-neutral-400 ml-auto">v1.1.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700">Tools:</span> email_send, email_template, email_schedule
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-500">Used by <span class="font-medium text-neutral-700">1 agent</span></span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-success-50 text-success-700 text-xs font-medium rounded-md">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              Installed
+            </span>
+          </div>
+        </div>
+
+        <!-- CI/CD Pipeline (MANAGED, AUTOMATION) — Installed -->
+        <div class="bg-white border border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-team-content/10 flex items-center justify-center text-lg">&#x1F680;</div>
+              <div>
+                <div class="text-sm font-semibold">CI/CD Pipeline</div>
+                <div class="text-xs text-neutral-500">Trigger pipelines, check status, deploy</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">AUTOMATION</span>
+            <span class="px-2 py-0.5 bg-neutral-200 text-neutral-700 text-xs font-medium rounded">MANAGED</span>
+            <span class="text-xs text-neutral-400 ml-auto">v1.2.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700">Tools:</span> pipeline_trigger, pipeline_status, deploy
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-500">Used by <span class="font-medium text-neutral-700">2 agents</span></span>
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-success-50 text-success-700 text-xs font-medium rounded-md">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+              Installed
+            </span>
+          </div>
+        </div>
+
+        <!-- Content Publisher (CUSTOM, AUTOMATION) — Installed, Edit button -->
+        <div class="bg-white border border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-neutral-100 flex items-center justify-center text-lg">&#x1F4DD;</div>
+              <div>
+                <div class="text-sm font-semibold">Content Publisher</div>
+                <div class="text-xs text-neutral-500">Publish to WordPress, Ghost, Medium via API</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">AUTOMATION</span>
+            <span class="px-2 py-0.5 bg-team-marketing/10 text-team-marketing text-xs font-medium rounded">CUSTOM</span>
+            <span class="text-xs text-neutral-400 ml-auto">v1.0.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700">Tools:</span> wp_publish, ghost_publish, medium_draft
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-500">Used by <span class="font-medium text-neutral-700">1 agent</span></span>
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-success-50 text-success-700 text-xs font-medium rounded-md">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                Installed
+              </span>
+              <button class="px-2.5 py-1 text-xs border border-neutral-300 rounded-md hover:bg-neutral-50">Edit</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- API Tester (CUSTOM, CODING) — Installed, Edit button -->
+        <div class="bg-white border border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-error-50 flex items-center justify-center text-lg">&#x1F9EA;</div>
+              <div>
+                <div class="text-sm font-semibold">API Tester</div>
+                <div class="text-xs text-neutral-500">HTTP requests, assertions, and load testing</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">CODING</span>
+            <span class="px-2 py-0.5 bg-team-marketing/10 text-team-marketing text-xs font-medium rounded">CUSTOM</span>
+            <span class="text-xs text-neutral-400 ml-auto">v1.0.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-500">
+            <span class="font-medium text-neutral-700">Tools:</span> http_request, assert_response, load_test
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-500">Used by <span class="font-medium text-neutral-700">1 agent</span></span>
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 bg-success-50 text-success-700 text-xs font-medium rounded-md">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                Installed
+              </span>
+              <button class="px-2.5 py-1 text-xs border border-neutral-300 rounded-md hover:bg-neutral-50">Edit</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Image Generator (MANAGED, AUTOMATION) — NOT installed -->
+        <div class="bg-white border border-dashed border-neutral-300 rounded-lg p-5 hover:border-primary-300 transition-colors">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-neutral-50 flex items-center justify-center text-lg opacity-60">&#x1F3A8;</div>
+              <div>
+                <div class="text-sm font-semibold text-neutral-600">Image Generator</div>
+                <div class="text-xs text-neutral-400">Generate, edit, and upscale images with AI</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2 flex-wrap">
+            <span class="px-2 py-0.5 bg-neutral-100 text-neutral-600 text-xs font-medium rounded">AUTOMATION</span>
+            <span class="px-2 py-0.5 bg-neutral-200 text-neutral-700 text-xs font-medium rounded">MANAGED</span>
+            <span class="text-xs text-neutral-400 ml-auto">v1.0.0</span>
+          </div>
+          <div class="mt-3 text-xs text-neutral-400">
+            <span class="font-medium text-neutral-500">Tools:</span> img_generate, img_edit, img_upscale
+          </div>
+          <div class="mt-3 text-xs text-neutral-400">
+            <span class="font-medium">Requires:</span> OPENAI_API_KEY or STABILITY_API_KEY
+          </div>
+          <div class="mt-4 flex items-center justify-between">
+            <span class="text-xs text-neutral-400">Not installed</span>
+            <button class="px-3 py-1 bg-primary-600 text-white text-xs font-medium rounded-md hover:bg-primary-700">Install</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Create Custom Skill Info -->
+      <div class="bg-neutral-50 border border-neutral-300 rounded-lg px-5 py-4 flex items-start gap-3">
+        <svg class="w-5 h-5 text-neutral-500 mt-0.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.315 8.685a.98.98 0 0 1 .837-.276c.47.07.802.48.968.925a2.501 2.501 0 1 0 3.214-3.214c-.446-.166-.855-.497-.925-.968a.979.979 0 0 1 .276-.837l1.61-1.61A2.404 2.404 0 0 1 12 2c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z"/></svg>
+        <div class="text-xs text-neutral-600">
+          <span class="font-semibold text-neutral-700">Custom Skills:</span> Create your own skills as Docker images with MCP tool definitions. Each skill exposes tools that agents can use during their runs. Custom skills are stored in your organization's container registry and can be versioned independently.
+          <a href="#" class="text-primary-600 hover:underline ml-1">Read the docs</a>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+</body>
+</html>
