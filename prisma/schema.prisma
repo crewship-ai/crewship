@@ -1,0 +1,24 @@
+// Crewship -- Prisma Schema (source of truth)
+// Full schema defined in .factory/context/prd/DATABASE.md
+// This is a placeholder -- will be populated during Phase 1 scaffolding
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// TODO: Add models from DATABASE.md during Phase 1 implementation
+// - User, Account, Session (NextAuth)
+// - Organization, OrganizationMember, OrganizationInvitation
+// - Team, TeamMember
+// - Agent, AgentSkill
+// - Skill
+// - Credential
+// - ConversationSession, ConversationMessage
+// - AgentRun
+// - AuditLog
+// - Subscription, FeatureFlag, FeatureFlagOverride

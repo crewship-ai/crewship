@@ -1,0 +1,185 @@
+# Crewship -- Rate Limiting Configuration
+#
+# Defines rate limits for all API endpoints.
+# Implementation: in-memory (Next.js middleware + Go service)
+# MVP: per-process, neskaluje pres vice instanci.
+# Phase 2: distribuovany rate limiter.
+#
+# Window formats: 1s, 10s, 1m, 1h, 1d
+# Scope: ip (unauthenticated), user (authenticated), agent (webhooks)
+
+# ============================================
+# CRITICAL OPERATIONS
+# ============================================
+critical:
+  - name: DELETE_ORGANIZATION
+    requests: 1
+    window: 1d
+    scope: user
+    applies_to:
+      - DELETE /api/v1/orgs/{orgId}
+
+  - name: EXPORT_DATA
+    requests: 3
+    window: 1h
+    scope: user
+    applies_to:
+      - POST /api/v1/user/export
+
+# ============================================
+# HIGH PRIORITY OPERATIONS
+# ============================================
+high:
+  - name: CREATE_ORGANIZATION
+    requests: 3
+    window: 1h
+    scope: user
+    applies_to:
+      - POST /api/v1/orgs
+
+  - name: CREATE_TEAM
+    requests: 10
+    window: 1h
+    scope: user
+    applies_to:
+      - POST /api/v1/orgs/{orgId}/teams
+
+  - name: CREATE_AGENT
+    requests: 20
+    window: 1h
+    scope: user
+    applies_to:
+      - POST /api/v1/orgs/{orgId}/agents
+
+  - name: CREATE_CREDENTIAL
+    requests: 20
+    window: 1h
+    scope: user
+    applies_to:
+      - POST /api/v1/orgs/{orgId}/credentials
+
+  - name: INVITE_MEMBER
+    requests: 10
+    window: 1h
+    scope: user
+    applies_to:
+      - POST /api/v1/orgs/{orgId}/members/invite
+
+  - name: AGENT_START
+    requests: 30
+    window: 1m
+    scope: user
+    applies_to:
+      - POST /api/v1/orgs/{orgId}/agents/{agentId}/start
+
+# ============================================
+# MEDIUM PRIORITY OPERATIONS
+# ============================================
+medium:
+  - name: UPDATE_RESOURCE
+    requests: 30
+    window: 1m
+    scope: user
+    applies_to:
+      - PATCH /api/v1/orgs/{orgId}
+      - PATCH /api/v1/orgs/{orgId}/teams/{teamId}
+      - PATCH /api/v1/orgs/{orgId}/agents/{agentId}
+      - PATCH /api/v1/orgs/{orgId}/credentials/{credId}
+      - PATCH /api/v1/orgs/{orgId}/members/{memberId}
+
+  - name: DELETE_RESOURCE
+    requests: 20
+    window: 1m
+    scope: user
+    applies_to:
+      - DELETE /api/v1/orgs/{orgId}/teams/{teamId}
+      - DELETE /api/v1/orgs/{orgId}/agents/{agentId}
+      - DELETE /api/v1/orgs/{orgId}/credentials/{credId}
+
+# ============================================
+# LOW PRIORITY OPERATIONS (reads)
+# ============================================
+low:
+  - name: API_READ
+    requests: 200
+    window: 1m
+    scope: user
+    applies_to:
+      - GET /api/v1/orgs
+      - GET /api/v1/orgs/{orgId}
+      - GET /api/v1/orgs/{orgId}/teams
+      - GET /api/v1/orgs/{orgId}/agents
+      - GET /api/v1/orgs/{orgId}/credentials
+      - GET /api/v1/orgs/{orgId}/members
+      - GET /api/v1/orgs/{orgId}/audit-logs
+      - GET /api/v1/skills
+
+# ============================================
+# AUTHENTICATION (by IP)
+# ============================================
+auth:
+  - name: LOGIN_ATTEMPT
+    requests: 5
+    window: 1m
+    scope: ip
+    applies_to:
+      - POST /api/auth/*
+
+  - name: PASSWORD_RESET
+    requests: 3
+    window: 1h
+    scope: ip
+    applies_to:
+      - POST /api/auth/reset-password
+
+  - name: SIGNUP
+    requests: 3
+    window: 1h
+    scope: ip
+    applies_to:
+      - POST /api/v1/auth/register
+
+# ============================================
+# WEBHOOKS (by agent)
+# ============================================
+webhooks:
+  - name: WEBHOOK_TRIGGER
+    requests: 60
+    window: 1m
+    scope: agent
+    applies_to:
+      - POST /api/v1/webhooks/{teamId}/{agentId}/trigger
+
+# ============================================
+# WEBSOCKET (by connection)
+# ============================================
+websocket:
+  - name: WS_MESSAGES
+    requests: 60
+    window: 1m
+    scope: connection
+    applies_to:
+      - WebSocket send_message
+
+# ============================================
+# NOTES
+# ============================================
+#
+# Rate Limit Headers (returned in all responses):
+# - X-RateLimit-Limit: Request limit per window
+# - X-RateLimit-Remaining: Remaining requests
+# - X-RateLimit-Reset: Reset timestamp (ISO 8601)
+# - Retry-After: Seconds until reset (on 429)
+#
+# Error Response (429 Too Many Requests):
+# {
+#   "type": "https://crewship.ai/errors/rate-limit",
+#   "title": "Too Many Requests",
+#   "status": 429,
+#   "detail": "Rate limit exceeded. Try again in X seconds.",
+#   "code": "RATE_LIMIT"
+# }
+#
+# Behavior when rate limiter unavailable:
+# - Production: fail-closed (503)
+# - Development: bypass (log warning)

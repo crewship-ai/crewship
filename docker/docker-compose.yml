@@ -1,0 +1,24 @@
+# Crewship -- Local Development Services
+# Usage: docker compose -f docker/docker-compose.yml up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: crewship-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: crewship
+      POSTGRES_PASSWORD: crewship
+      POSTGRES_DB: crewship
+    volumes:
+      - crewship-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crewship"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  crewship-pgdata:
