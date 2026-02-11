@@ -45,10 +45,48 @@
 ## Core Concepts
 
 - **Organization** = company (multi-tenant root)
-- **Team** = department (isolation boundary, maps to Docker container)
+- **Team** = department (isolation boundary, maps to Docker container or K8s Pod)
 - **Agent** = virtual employee (CLI session inside container, has LLM, skills, credentials)
 - **Skill** = capability package (tools + MCP + scripts + dependency definitions)
 - **Credential** = encrypted secret (AES-256-GCM, injected as ENV var at runtime)
+
+## Provider Pattern (K8s Readiness)
+
+crewshipd NEVER accesses Docker, filesystem, or bbolt directly.
+Everything goes through provider interfaces — swap implementation, not rewrite.
+
+```
+                        ┌─────────────────────────────┐
+                        │        crewshipd             │
+                        │   (business logic only)      │
+                        └──┬──────────┬──────────┬─────┘
+                           │          │          │
+                    ┌──────┴──┐  ┌────┴────┐  ┌──┴──────┐
+                    │Container│  │ Storage │  │  State  │
+                    │Provider │  │Provider │  │Provider │
+                    └──┬───┬──┘  └──┬───┬──┘  └──┬───┬──┘
+                       │   │       │   │        │   │
+                    Docker K8s  Local  S3    bbolt  PG
+                    (MVP) (Ent) (MVP) (Ent)  (MVP) (Ent)
+```
+
+| Provider | MVP (single-node) | Enterprise (K8s) |
+|---|---|---|
+| ContainerProvider | Docker SDK (exec) | client-go (Pods/Jobs) |
+| StorageProvider | Local filesystem + fsnotify | S3/MinIO + event notifications |
+| StateProvider | bbolt (embedded WAL) | PostgreSQL table (shared) |
+| IPC transport | HTTP over Unix socket | HTTP over TCP (K8s Service) |
+| WS broadcast | In-process (single instance) | PostgreSQL LISTEN/NOTIFY |
+| Rate limiting | In-memory token bucket | PostgreSQL-backed counters |
+
+Configuration: single env var per provider.
+```bash
+CREWSHIP_CONTAINER_PROVIDER=docker    # docker | k8s
+CREWSHIP_STORAGE_PROVIDER=localfs     # localfs | s3
+CREWSHIP_STATE_PROVIDER=bbolt         # bbolt | postgres
+```
+
+Full details: `.factory/context/K8S-READINESS.md`
 
 ## Process Responsibilities
 

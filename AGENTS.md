@@ -78,11 +78,18 @@ prisma/
 cmd/
   └─ crewshipd/main.go        ✅ Go service entrypoint (signal handling placeholder)
 internal/                     📋 Go internal packages
-  ├─ docker/                  📋 Docker container management
+  ├─ provider/                📋 Provider interfaces (Container, Storage, State)
+  │   ├─ container.go         📋 ContainerProvider interface
+  │   ├─ storage.go           📋 StorageProvider interface
+  │   ├─ state.go             📋 StateProvider interface
+  │   ├─ docker/              📋 Docker implementation (MVP)
+  │   ├─ k8s/                 📋 Kubernetes implementation (Enterprise)
+  │   ├─ localfs/             📋 Local filesystem implementation (MVP)
+  │   ├─ s3/                  📋 S3/MinIO implementation (Enterprise)
+  │   ├─ bbolt/               📋 bbolt WAL implementation (MVP)
+  │   └─ pgstate/             📋 PostgreSQL state implementation (Enterprise)
   ├─ ws/                      📋 WebSocket gateway
   ├─ orchestrator/            📋 Agent job orchestration + credential pool
-  ├─ logcollector/            📋 JSONL log collection
-  ├─ fileserver/              📋 File serving + fsnotify
   ├─ webhook/                 📋 Webhook ingress handler
   └─ config/                  📋 YAML config parser
 docker/
@@ -152,6 +159,8 @@ CONVERSATIONS (host):      /var/lib/crewship/conversations/  ← JSONL per sessi
 - Error wrapping with `fmt.Errorf("context: %w", err)`
 - Context propagation on all functions
 - Structured logging (JSON to stdout)
+- **Provider pattern**: NEVER access Docker/filesystem/bbolt directly — use provider interfaces
+- Provider selection via env var: `CREWSHIP_CONTAINER_PROVIDER=docker|k8s`
 
 ### UI
 - **ONLY** shadcn/ui components (`npx shadcn@latest add [name]`)
@@ -213,7 +222,12 @@ DATABASE_URL=postgresql://crewship:crewship@localhost:5432/crewship
 NEXTAUTH_SECRET=           # openssl rand -base64 32
 NEXTAUTH_URL=http://localhost:3000
 ENCRYPTION_KEY=            # openssl rand -hex 32
-CREWSHIPD_SOCKET=/tmp/crewship.sock   # Unix socket path (prod: /run/crewship/crewship.sock)
+CREWSHIPD_URL=unix:///tmp/crewship.sock   # MVP: unix socket, K8s: http://crewshipd:8080
+
+# Provider selection (MVP defaults)
+CREWSHIP_CONTAINER_PROVIDER=docker    # docker | k8s
+CREWSHIP_STORAGE_PROVIDER=localfs     # localfs | s3
+CREWSHIP_STATE_PROVIDER=bbolt         # bbolt | postgres
 ```
 
 ## Development Environment
@@ -234,3 +248,4 @@ CREWSHIPD_SOCKET=/tmp/crewship.sock   # Unix socket path (prod: /run/crewship/cr
 | `architecture.md` | Two-process arch, data flows, container model, RBAC |
 | `business.md` | Positioning, competition (vs OpenClaw, n8n), examples |
 | `TODO.md` | Product summary, OpenClaw comparison, phased task list |
+| `K8S-READINESS.md` | Provider interfaces, K8s manifests, migration path Docker→K8s |
