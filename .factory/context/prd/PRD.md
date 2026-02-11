@@ -796,17 +796,33 @@ Crewship je pivot z **Advine** (PPC monitoring SaaS). Advine ma robustni enterpr
 | Zustand store | `lib/store.ts` | Novy state pro Paseku |
 | Prisma schema | `prisma/schema.prisma` | Reuse: Org, User, Member, AuditLog, FeatureFlag. Replace: Campaign, Metric, Alert → Agent, Skill, Conversation |
 
-### 9.3 Nepouzitelne (PPC-specific, zahazujeme)
+### 9.3 UI Shell — DashboardHeader + DashboardSidebar (Adapt)
+
+Advine ma kompletni dashboard shell ktery reusujeme s adaptaci:
+
+| Advine soubor | Crewship adaptace |
+|---|---|
+| `components/shared/navigation/dashboard-header.tsx` | Top Toolbar: odstranit AI Assistant (Sparkles), pridat agent-specific polozky. Zachovat: Search ⌘K, Docs, Bell+badge, Settings, User avatar+dropdown, Theme toggle |
+| `components/shared/navigation/dashboard-sidebar.tsx` | Sidebar: nahradit PPC nav (Dashboard/Monitoring/Campaigns/Analysis) za Agent nav (Dashboard/Teams/Agents/Skills/Credentials/Audit). Zachovat: shadcn Sidebar, Collapsible submenu, CASL `<Can>` wrapper, View mode toggle (Expanded/Collapsed/Hover) |
+| `components/entity-picker/` | Org Switcher: adaptovat Account/Project picker na Organization dropdown. Zjednodusit — nepotrebujeme project uroven, jen org prepinac |
+| `components/shared/notifications/NotificationPanel.tsx` | Notification slide-over: adaptovat alert-based notifikace na agent run/error notifikace |
+
+> **Poznamka k layoutu:** Advine pouziva 2-vrstvou strukturu (sidebar + header vedle sebe).
+> Crewship pouziva 3-vrstvou strukturu: Top Toolbar (full-width, dark) → Sidebar + Main.
+> Logo a user presunuto ze sidebaru do Top Toolbar.
+> Viz DESIGN.md sekce 5.
+
+### 9.4 Nepouzitelne (PPC-specific, zahazujeme)
 
 - Vsechny PPC sync services (google-ads, sklik, meta-ads, linkedin, amazon, microsoft)
 - Alert engine, alert rules, alert delivery, KPI baselines
 - Campaign, Metric, Connection, Integration modely
 - PPC dashboard stranky (monitoring, campaigns, analysis, quality-score)
-- PPC komponenty (alerts/, analytics/, entity-picker/)
+- PPC komponenty (alerts/, analytics/)
 - Landing page (PPC marketing copy)
 - Sentry + PostHog integrace (odlozeno na Phase 2)
 
-### 9.4 Package.json -- dependencies uz mame
+### 9.5 Package.json -- dependencies uz mame
 
 Advine `package.json` uz obsahuje VSECHNY Crewship dependencies na spravnych verzich:
 
