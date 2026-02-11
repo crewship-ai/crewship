@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Agent: Claude — SEO Writer / Logs</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['JetBrains Mono','monospace']},colors:{primary:{50:'#F0F6FF',100:'#E7F3FF',200:'#C5DCFC',600:'#1877F2',700:'#1877C2'},neutral:{50:'#F7F8FA',100:'#F0F2F5',200:'#E4E6EA',300:'#CED0D4',400:'#ADB1B5',500:'#8A8D91',600:'#65676B',700:'#4B4F54',800:'#373A3F',900:'#242628',950:'#1C1E21'},success:{50:'#E6F5EA',500:'#31A24C',700:'#1B7D36'},warning:{50:'#FFF8E6',500:'#F7B928',700:'#B06D00'},error:{50:'#FDE8E8',500:'#E34234',700:'#B32D1B'},brand:{teal:'#4ECDC4'},team:{marketing:'#E16B3A'}}}}}
+</script>
+<style>
+  body{font-size:14px}
+  @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}.pulse-dot{animation:pulse-dot 2s ease-in-out infinite}
+  .tab-active{border-bottom:2px solid #1877F2;color:#1877F2;font-weight:500}
+  .tab-inactive{border-bottom:2px solid transparent;color:#65676B}.tab-inactive:hover{color:#1C1E21;border-color:#CED0D4}
+</style>
+</head>
+<body class="bg-neutral-100 font-sans text-neutral-950 antialiased">
+<div class="flex h-screen">
+  <aside class="w-64 bg-white border-r border-neutral-300 flex flex-col flex-shrink-0">
+    <div class="px-4 h-14 flex items-center gap-2.5 border-b border-neutral-300"><svg class="w-6 h-6 text-primary-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg><span class="text-base font-semibold">Crewship</span></div>
+    <nav class="flex-1 px-2 py-3 overflow-y-auto"><a href="agents-list.html" class="flex items-center gap-3 px-3 py-2 rounded-md bg-primary-100 text-primary-600 font-medium text-sm"><svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>Agents</a></nav>
+    <div class="px-3 py-3 border-t border-neutral-300 flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs font-semibold">PS</div><div class="flex-1 min-w-0"><div class="text-sm font-medium truncate">Pavel Srba</div><div class="text-xs text-neutral-500">Owner</div></div></div>
+  </aside>
+
+  <main class="flex-1 flex flex-col overflow-hidden">
+    <header class="bg-white border-b border-neutral-300 flex-shrink-0">
+      <div class="h-14 flex items-center px-6 gap-3">
+        <a href="agents-list.html" class="p-1 hover:bg-neutral-100 rounded-md"><svg class="w-5 h-5 text-neutral-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></a>
+        <span class="w-2 h-2 rounded-full bg-team-marketing"></span>
+        <span class="text-xs text-neutral-500">Marketing /</span>
+        <h1 class="text-lg font-semibold">Claude — SEO Writer</h1>
+        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-success-50 text-success-700 ml-2"><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span>Running</span>
+      </div>
+      <div class="px-6 flex gap-6 text-sm">
+        <a href="agent-overview.html" class="pb-3 pt-1 tab-inactive">Overview</a>
+        <a href="agent-chat.html" class="pb-3 pt-1 tab-inactive">Chat</a>
+        <a href="agent-sessions.html" class="pb-3 pt-1 tab-inactive">Sessions</a>
+        <a href="agent-files.html" class="pb-3 pt-1 tab-inactive">Files</a>
+        <a href="agent-runs.html" class="pb-3 pt-1 tab-inactive">Runs</a>
+        <a href="agent-logs.html" class="pb-3 pt-1 tab-active">Logs</a>
+        <a href="agent-settings.html" class="pb-3 pt-1 tab-inactive">Settings</a>
+        <a href="agent-skills.html" class="pb-3 pt-1 tab-inactive">Skills</a>
+        <a href="agent-credentials.html" class="pb-3 pt-1 tab-inactive">Credentials</a>
+        <a href="agent-history.html" class="pb-3 pt-1 tab-inactive">History</a>
+      </div>
+    </header>
+
+    <!-- Log controls -->
+    <div class="bg-neutral-900 border-b border-neutral-700 px-6 py-2 flex items-center gap-3 flex-shrink-0">
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-neutral-400">Level:</span>
+        <button class="px-2 py-0.5 rounded text-xs bg-neutral-700 text-white font-medium">All</button>
+        <button class="px-2 py-0.5 rounded text-xs text-neutral-400 hover:text-white hover:bg-neutral-700">Info</button>
+        <button class="px-2 py-0.5 rounded text-xs text-warning-500 hover:bg-neutral-700">Warning</button>
+        <button class="px-2 py-0.5 rounded text-xs text-error-500 hover:bg-neutral-700">Error</button>
+      </div>
+      <div class="relative flex-1 max-w-xs ml-4">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" placeholder="Search logs..." class="w-full pl-8 pr-3 py-1.5 text-xs bg-neutral-800 border border-neutral-700 rounded text-white placeholder-neutral-500 focus:outline-none focus:ring-1 focus:ring-primary-500">
+      </div>
+      <div class="ml-auto flex items-center gap-3">
+        <div class="flex items-center gap-1.5 text-xs text-brand-teal">
+          <span class="w-1.5 h-1.5 rounded-full bg-brand-teal pulse-dot"></span>
+          Auto-scroll ON
+        </div>
+        <button class="px-2 py-1 rounded text-xs bg-neutral-700 text-neutral-300 hover:text-white">Pause</button>
+        <button class="px-2 py-1 rounded text-xs bg-neutral-700 text-neutral-300 hover:text-white">Download</button>
+      </div>
+    </div>
+
+    <!-- Log viewer (terminal-style) -->
+    <div class="flex-1 bg-neutral-950 overflow-y-auto px-6 py-4 font-mono text-xs leading-6">
+      <div><span class="text-neutral-600">2026-02-11 10:00:01</span> <span class="text-neutral-500">[info]</span> <span class="text-yellow-400">status</span> <span class="text-neutral-300">Agent started. CLI: claude-code, Model: claude-sonnet-4</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:00:02</span> <span class="text-neutral-500">[info]</span> <span class="text-yellow-400">status</span> <span class="text-neutral-300">Credential injected: ANTHROPIC_API_KEY (ANTHROPIC_KEY_1, priority 0)</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:00:03</span> <span class="text-neutral-500">[info]</span> <span class="text-neutral-500">thinking</span> <span class="text-neutral-400">Analyzing the user's request for an SEO-optimized blog post about AI agent orchestration platforms...</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:00:05</span> <span class="text-neutral-500">[info]</span> <span class="text-neutral-500">thinking</span> <span class="text-neutral-400">I'll research current SEO trends, then structure with proper H1/H2 tags and 1.5% keyword density...</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:00:08</span> <span class="text-neutral-500">[info]</span> <span class="text-cyan-400">tool_call</span> <span class="text-neutral-300">web-search {"query": "AI employee management platform SEO 2026"}</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:00:12</span> <span class="text-neutral-500">[info]</span> <span class="text-green-400">tool_result</span> <span class="text-neutral-300">web-search: Found 12 relevant articles (3.8s)</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:00:14</span> <span class="text-neutral-500">[info]</span> <span class="text-white">text</span> <span class="text-neutral-200">Writing blog post section 1: Introduction to AI Employee Management...</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:05:22</span> <span class="text-neutral-500">[info]</span> <span class="text-white">text</span> <span class="text-neutral-200">Writing blog post section 2: What Are AI Employees?...</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:10:45</span> <span class="text-neutral-500">[info]</span> <span class="text-cyan-400">tool_call</span> <span class="text-neutral-300">write_file {"path": "/output/reports/blog-post-ai-employees.md", "content": "# AI Employee..."}</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:10:46</span> <span class="text-neutral-500">[info]</span> <span class="text-green-400">tool_result</span> <span class="text-neutral-300">write_file: Success (4.2 KB written)</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:15:30</span> <span class="text-warning-500">[warn]</span> <span class="text-warning-400">rate_limit</span> <span class="text-warning-300">API returned 429 (rate limit exceeded). Marking ANTHROPIC_KEY_1 as cooldown (5min).</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:15:31</span> <span class="text-neutral-500">[info]</span> <span class="text-yellow-400">failover</span> <span class="text-neutral-300">Switching to ANTHROPIC_KEY_2 (priority 1). Context preserved via --resume.</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:15:33</span> <span class="text-neutral-500">[info]</span> <span class="text-yellow-400">status</span> <span class="text-neutral-300">Agent resumed with new credential. Session continuity confirmed.</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:15:35</span> <span class="text-neutral-500">[info]</span> <span class="text-white">text</span> <span class="text-neutral-200">Continuing with section 3: Key Benefits of AI Agent Orchestration...</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:20:10</span> <span class="text-neutral-500">[info]</span> <span class="text-cyan-400">tool_call</span> <span class="text-neutral-300">web-search {"query": "AI orchestration platform comparison 2026 Gartner"}</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:20:15</span> <span class="text-neutral-500">[info]</span> <span class="text-green-400">tool_result</span> <span class="text-neutral-300">web-search: Found 8 results including Gartner Magic Quadrant reference (4.2s)</span></div>
+      <div><span class="text-neutral-600">2026-02-11 10:23:14</span> <span class="text-neutral-500">[info]</span> <span class="text-white">text</span> <span class="text-neutral-200">Writing section 5 of 5: Conclusion and Call to Action...</span></div>
+      <div class="mt-2"><span class="text-brand-teal pulse-dot">&#x2588;</span></div>
+    </div>
+
+    <!-- Historical log files -->
+    <div class="bg-neutral-900 border-t border-neutral-700 px-6 py-2 flex items-center gap-4 flex-shrink-0">
+      <span class="text-xs text-neutral-500">Historical:</span>
+      <button class="text-xs text-neutral-400 hover:text-white font-mono">current.jsonl</button>
+      <button class="text-xs text-neutral-500 hover:text-neutral-300 font-mono">2026-02-11-09.jsonl.gz</button>
+      <button class="text-xs text-neutral-500 hover:text-neutral-300 font-mono">2026-02-11-08.jsonl.gz</button>
+      <button class="text-xs text-neutral-500 hover:text-neutral-300 font-mono">2026-02-10-23.jsonl.gz</button>
+      <span class="ml-auto text-xs text-neutral-600">/var/log/crewship/teams/marketing/agents/claude-seo-writer/</span>
+    </div>
+  </main>
+</div>
+</body>
+</html>

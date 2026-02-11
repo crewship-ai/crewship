@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Agent: Claude — SEO Writer / Settings</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['JetBrains Mono','monospace']},colors:{primary:{50:'#F0F6FF',100:'#E7F3FF',200:'#C5DCFC',600:'#1877F2',700:'#1877C2'},neutral:{50:'#F7F8FA',100:'#F0F2F5',200:'#E4E6EA',300:'#CED0D4',400:'#ADB1B5',500:'#8A8D91',600:'#65676B',700:'#4B4F54',800:'#373A3F',900:'#242628',950:'#1C1E21'},success:{50:'#E6F5EA',500:'#31A24C',700:'#1B7D36'},warning:{50:'#FFF8E6',500:'#F7B928',700:'#B06D00'},error:{50:'#FDE8E8',500:'#E34234',700:'#B32D1B'},brand:{teal:'#4ECDC4'},team:{marketing:'#E16B3A',devops:'#7C3AED',content:'#0891B2',support:'#D946A8'}}}}}
+</script>
+<style>
+  body{font-size:14px}
+  .tab-active{border-bottom:2px solid #1877F2;color:#1877F2;font-weight:500}
+  .tab-inactive{border-bottom:2px solid transparent;color:#65676B}.tab-inactive:hover{color:#1C1E21;border-color:#CED0D4}
+  @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}.pulse-dot{animation:pulse-dot 2s ease-in-out infinite}
+</style>
+</head>
+<body class="bg-neutral-100 font-sans text-neutral-950 antialiased">
+<div class="flex h-screen">
+  <aside class="w-64 bg-white border-r border-neutral-300 flex flex-col flex-shrink-0">
+    <div class="px-4 h-14 flex items-center gap-2.5 border-b border-neutral-300"><svg class="w-6 h-6 text-primary-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg><span class="text-base font-semibold">Crewship</span></div>
+    <nav class="flex-1 px-2 py-3 overflow-y-auto"><a href="agents-list.html" class="flex items-center gap-3 px-3 py-2 rounded-md bg-primary-100 text-primary-600 font-medium text-sm"><svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>Agents</a></nav>
+    <div class="px-3 py-3 border-t border-neutral-300 flex items-center gap-3"><div class="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs font-semibold">PS</div><div class="flex-1 min-w-0"><div class="text-sm font-medium truncate">Pavel Srba</div><div class="text-xs text-neutral-500">Owner</div></div></div>
+  </aside>
+
+  <main class="flex-1 overflow-y-auto">
+    <header class="bg-white border-b border-neutral-300">
+      <div class="h-14 flex items-center justify-between px-6">
+        <div class="flex items-center gap-3">
+          <a href="agents-list.html" class="p-1 hover:bg-neutral-100 rounded-md"><svg class="w-5 h-5 text-neutral-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg></a>
+          <span class="w-2 h-2 rounded-full bg-team-marketing"></span>
+          <span class="text-xs text-neutral-500">Marketing /</span>
+          <h1 class="text-lg font-semibold">Claude — SEO Writer</h1>
+        </div>
+        <button class="px-4 py-1.5 bg-primary-600 text-white text-sm font-medium rounded-md hover:bg-primary-700">Save Changes</button>
+      </div>
+      <div class="px-6 flex gap-6 text-sm">
+        <a href="agent-overview.html" class="pb-3 pt-1 tab-inactive">Overview</a>
+        <a href="agent-chat.html" class="pb-3 pt-1 tab-inactive">Chat</a>
+        <a href="agent-sessions.html" class="pb-3 pt-1 tab-inactive">Sessions</a>
+        <a href="agent-files.html" class="pb-3 pt-1 tab-inactive">Files</a>
+        <a href="agent-runs.html" class="pb-3 pt-1 tab-inactive">Runs</a>
+        <a href="agent-logs.html" class="pb-3 pt-1 tab-inactive">Logs</a>
+        <a href="agent-settings.html" class="pb-3 pt-1 tab-active">Settings</a>
+        <a href="agent-skills.html" class="pb-3 pt-1 tab-inactive">Skills</a>
+        <a href="agent-credentials.html" class="pb-3 pt-1 tab-inactive">Credentials</a>
+        <a href="agent-history.html" class="pb-3 pt-1 tab-inactive">History</a>
+      </div>
+    </header>
+
+    <div class="p-6 max-w-3xl space-y-8">
+
+      <!-- Basic Info -->
+      <div class="bg-white border border-neutral-300 rounded-lg p-6">
+        <h3 class="text-base font-semibold mb-4">Basic Information</h3>
+        <div class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs text-neutral-500 font-medium mb-1">Name</label>
+              <input type="text" value="Claude — SEO Writer" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500">
+            </div>
+            <div>
+              <label class="block text-xs text-neutral-500 font-medium mb-1">Slug <span class="text-neutral-400">(auto-generated)</span></label>
+              <input type="text" value="claude-seo-writer" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md font-mono focus:outline-none focus:ring-2 focus:ring-primary-500">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs text-neutral-500 font-medium mb-1">Role Title</label>
+            <input type="text" value="SEO Content Specialist" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500">
+          </div>
+          <div>
+            <label class="block text-xs text-neutral-500 font-medium mb-1">Description</label>
+            <textarea rows="3" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500">Specialized in creating SEO-optimized blog posts, meta descriptions, and content briefs. Targets long-tail keywords with 1.5% density.</textarea>
+          </div>
+          <div>
+            <label class="block text-xs text-neutral-500 font-medium mb-1">Team</label>
+            <select class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+              <option selected>Marketing</option>
+              <option>DevOps</option>
+              <option>Content</option>
+              <option>Support</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- LLM Configuration -->
+      <div class="bg-white border border-neutral-300 rounded-lg p-6">
+        <h3 class="text-base font-semibold mb-4">LLM Configuration</h3>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs text-neutral-500 font-medium mb-2">CLI Adapter</label>
+            <div class="grid grid-cols-4 gap-3">
+              <label class="flex items-center gap-2 px-3 py-2.5 border-2 border-primary-500 bg-primary-50 rounded-lg cursor-pointer">
+                <input type="radio" name="cli" checked class="text-primary-600"><span class="text-sm font-medium">Claude Code</span>
+              </label>
+              <label class="flex items-center gap-2 px-3 py-2.5 border border-neutral-300 rounded-lg cursor-pointer hover:border-neutral-400">
+                <input type="radio" name="cli"><span class="text-sm">Codex CLI</span>
+              </label>
+              <label class="flex items-center gap-2 px-3 py-2.5 border border-neutral-300 rounded-lg cursor-pointer hover:border-neutral-400">
+                <input type="radio" name="cli"><span class="text-sm">Gemini CLI</span>
+              </label>
+              <label class="flex items-center gap-2 px-3 py-2.5 border border-neutral-300 rounded-lg cursor-pointer hover:border-neutral-400">
+                <input type="radio" name="cli"><span class="text-sm">OpenCode</span>
+              </label>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs text-neutral-500 font-medium mb-1">LLM Provider</label>
+              <select class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md bg-white">
+                <option selected>Anthropic</option><option>OpenAI</option><option>Google</option><option>Ollama</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-neutral-500 font-medium mb-1">Model</label>
+              <input type="text" value="claude-sonnet-4" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md font-mono">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs text-neutral-500 font-medium mb-1">Temperature <span class="text-neutral-400">(0.0 - 2.0)</span></label>
+              <div class="flex items-center gap-3">
+                <input type="range" min="0" max="200" value="70" class="flex-1 h-2 accent-primary-600">
+                <span class="text-sm font-mono w-10 text-right">0.7</span>
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs text-neutral-500 font-medium mb-1">Max Tokens <span class="text-neutral-400">(optional)</span></label>
+              <input type="number" placeholder="Default (no limit)" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Behavior -->
+      <div class="bg-white border border-neutral-300 rounded-lg p-6">
+        <h3 class="text-base font-semibold mb-4">Behavior</h3>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs text-neutral-500 font-medium mb-1">System Prompt</label>
+            <textarea rows="6" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md font-mono focus:outline-none focus:ring-2 focus:ring-primary-500">You are an SEO Content Specialist. Your role is to create high-quality, SEO-optimized content that ranks well in search engines. Always include:
+- Proper H1/H2/H3 structure
+- Meta descriptions (150-160 chars)
+- Target keyword density of 1.0-1.5%
+- Internal linking suggestions
+- Alt text recommendations for images
+
+Write in a professional but engaging tone. Back claims with data when possible.</textarea>
+          </div>
+          <div>
+            <label class="block text-xs text-neutral-500 font-medium mb-2">Tool Profile</label>
+            <div class="space-y-2">
+              <label class="flex items-start gap-3 px-3 py-3 border border-neutral-300 rounded-lg cursor-pointer hover:border-neutral-400">
+                <input type="radio" name="profile" class="mt-0.5"><div><div class="text-sm font-medium">Minimal</div><div class="text-xs text-neutral-500">Read, Search, Grep only. Safest option.</div></div>
+              </label>
+              <label class="flex items-start gap-3 px-3 py-3 border-2 border-primary-500 bg-primary-50 rounded-lg cursor-pointer">
+                <input type="radio" name="profile" checked class="mt-0.5"><div><div class="text-sm font-medium">Coding</div><div class="text-xs text-neutral-500">Read, write, execute in workspace. Default for most agents.</div></div>
+              </label>
+              <label class="flex items-start gap-3 px-3 py-3 border border-neutral-300 rounded-lg cursor-pointer hover:border-neutral-400">
+                <input type="radio" name="profile" class="mt-0.5"><div><div class="text-sm font-medium">Messaging</div><div class="text-xs text-neutral-500">Read, web search, send messages. For communication agents.</div></div>
+              </label>
+              <label class="flex items-start gap-3 px-3 py-3 border border-neutral-300 rounded-lg cursor-pointer hover:border-neutral-400">
+                <input type="radio" name="profile" class="mt-0.5"><div><div class="text-sm font-medium text-warning-700">Full</div><div class="text-xs text-neutral-500">All tools including dangerous operations. Use with caution.</div></div>
+              </label>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs text-neutral-500 font-medium mb-1">Timeout (seconds)</label>
+              <input type="number" value="1800" class="w-full px-3 py-2 text-sm border border-neutral-300 rounded-md">
+              <span class="text-xs text-neutral-400 mt-1 block">Default: 1800 (30 min)</span>
+            </div>
+            <div>
+              <label class="block text-xs text-neutral-500 font-medium mb-1">Memory</label>
+              <div class="flex items-center gap-3 mt-2">
+                <button class="relative w-10 h-5 rounded-full bg-primary-600 transition-colors">
+                  <span class="absolute right-0.5 top-0.5 w-4 h-4 rounded-full bg-white transition-transform"></span>
+                </button>
+                <span class="text-sm">Enabled</span>
+              </div>
+              <span class="text-xs text-neutral-400 mt-1 block">Stores memory at /workspace/.memory/</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loop Mode (Phase 2 — disabled) -->
+      <div class="bg-white border border-neutral-300 rounded-lg p-6 opacity-60">
+        <div class="flex items-center gap-2 mb-4">
+          <h3 class="text-base font-semibold">Loop Mode</h3>
+          <span class="px-2 py-0.5 bg-neutral-200 text-neutral-500 text-xs font-medium rounded">Phase 2</span>
+        </div>
+        <div class="space-y-3">
+          <div class="flex items-center gap-4">
+            <label class="flex items-center gap-2"><input type="radio" name="loop" checked disabled><span class="text-sm">Once (default)</span></label>
+            <label class="flex items-center gap-2"><input type="radio" name="loop" disabled><span class="text-sm">Loop (interval)</span></label>
+            <label class="flex items-center gap-2"><input type="radio" name="loop" disabled><span class="text-sm">Until (condition)</span></label>
+          </div>
+          <div class="grid grid-cols-3 gap-4">
+            <div><label class="block text-xs text-neutral-400 mb-1">Interval (seconds)</label><input type="number" disabled placeholder="3600" class="w-full px-3 py-2 text-sm border border-neutral-200 rounded-md bg-neutral-50"></div>
+            <div><label class="block text-xs text-neutral-400 mb-1">Max Iterations</label><input type="number" disabled value="20" class="w-full px-3 py-2 text-sm border border-neutral-200 rounded-md bg-neutral-50"></div>
+            <div><label class="block text-xs text-neutral-400 mb-1">Condition</label><input type="text" disabled placeholder="file_exists:/output/report.pdf" class="w-full px-3 py-2 text-sm border border-neutral-200 rounded-md bg-neutral-50 font-mono"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Webhook -->
+      <div class="bg-white border border-neutral-300 rounded-lg p-6">
+        <h3 class="text-base font-semibold mb-4">Webhook</h3>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs text-neutral-500 font-medium mb-1">Webhook URL</label>
+            <div class="flex items-center gap-2">
+              <input type="text" readonly value="POST /api/v1/webhooks/marketing/claude-seo-writer/trigger" class="flex-1 px-3 py-2 text-sm border border-neutral-300 rounded-md bg-neutral-50 font-mono text-neutral-600">
+              <button class="px-3 py-2 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">Copy</button>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs text-neutral-500 font-medium mb-1">Webhook Secret</label>
+            <div class="flex items-center gap-2">
+              <input type="password" readonly value="whsec_a3f8c1d2b7e2d4f1c9a1b3e5d2f5a8c7" class="flex-1 px-3 py-2 text-sm border border-neutral-300 rounded-md bg-neutral-50 font-mono">
+              <button class="px-3 py-2 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">Reveal</button>
+              <button class="px-3 py-2 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">Copy</button>
+              <button class="px-3 py-2 text-sm border border-warning-300 text-warning-700 rounded-md hover:bg-warning-50">Regenerate</button>
+            </div>
+          </div>
+          <button class="px-3 py-1.5 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">Test Webhook</button>
+        </div>
+      </div>
+
+      <!-- Danger Zone -->
+      <div class="bg-white border-2 border-error-500/30 rounded-lg p-6">
+        <h3 class="text-base font-semibold text-error-700 mb-4">Danger Zone</h3>
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm font-medium">Archive this agent</div>
+              <div class="text-xs text-neutral-500">Agent will be hidden but data preserved.</div>
+            </div>
+            <button class="px-3 py-1.5 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">Archive</button>
+          </div>
+          <div class="border-t border-error-200"></div>
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm font-medium text-error-700">Delete this agent</div>
+              <div class="text-xs text-neutral-500">Permanently delete agent and all data after 30-day grace period.</div>
+            </div>
+            <button class="px-3 py-1.5 text-sm border border-error-300 text-error-700 rounded-md hover:bg-error-50">Delete Agent</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</body>
+</html>
