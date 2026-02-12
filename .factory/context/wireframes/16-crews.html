@@ -34,7 +34,15 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
         <button onclick="showView('list')" id="btn-list" class="px-3 py-1.5 text-xs font-medium rounded-md text-neutral-600 hover:bg-neutral-200">List</button>
       </div>
       <div class="flex items-center gap-2">
-        <button id="btn-add-connection" class="hidden items-center gap-2 px-3 py-1.5 border border-neutral-200 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
+        <button id="btn-export" onclick="showDialog('export')" class="hidden items-center gap-2 px-3 py-1.5 border border-neutral-200 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export JSON
+        </button>
+        <button id="btn-import" onclick="showDialog('import')" class="hidden items-center gap-2 px-3 py-1.5 border border-neutral-200 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Import JSON
+        </button>
+        <button id="btn-add-connection" onclick="showDialog('add-connection')" class="hidden items-center gap-2 px-3 py-1.5 border border-neutral-200 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
           Add Connection
         </button>
@@ -153,137 +161,125 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
       </div>
     </div>
 
-    <!-- ======== VIEW: ORCHESTRATION (relationship diagram) ======== -->
+    <!-- ======== VIEW: CONNECTIONS (relationship diagram) ======== -->
     <div id="view-orchestration" class="hidden px-6 pb-8">
-      <div class="relative canvas-bg rounded-lg border border-neutral-200 bg-white overflow-hidden" style="height: 480px;">
+      <div class="relative canvas-bg rounded-lg border border-neutral-200 bg-white overflow-auto" style="height: 520px; min-width: 960px;">
 
         <!-- SVG edges layer -->
-        <svg class="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 900 480">
+        <svg class="absolute inset-0 pointer-events-none" width="960" height="520">
           <defs>
             <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#ADB1B5"/></marker>
             <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#1877F2"/></marker>
           </defs>
 
-          <!-- Edge 1: SEO Writer → Deploy Monitor (read files) -->
-          <path d="M 290 120 C 380 120, 420 200, 530 200" stroke="#ADB1B5" stroke-width="2" fill="none" stroke-dasharray="6 3" marker-end="url(#arrow)"/>
-          <g class="edge-label" onclick="openEdgeDrawer('seo-deploy')">
-            <rect x="360" y="140" width="100" height="24" rx="6" fill="#F0F2F5" stroke="#CED0D4" stroke-width="1"/>
-            <text x="410" y="156" text-anchor="middle" class="text-[10px]" fill="#65676B" font-size="10" font-family="Inter">
-              <tspan>
-                <tspan fill="#65676B">&#128196;</tspan> read files
-              </tspan>
-            </text>
+          <!-- Edge 1: SEO Writer (right:260, y:78) → Deploy Monitor (left:380, y:78) — read files -->
+          <path d="M 260 78 C 310 78, 330 78, 378 78" stroke="#ADB1B5" stroke-width="2" fill="none" stroke-dasharray="6 3" marker-end="url(#arrow)"/>
+          <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('seo-deploy')">
+            <rect x="278" y="55" width="82" height="22" rx="6" fill="#F0F2F5" stroke="#CED0D4" stroke-width="1"/>
+            <text x="319" y="70" text-anchor="middle" fill="#65676B" font-size="10" font-family="Inter">read files</text>
           </g>
 
-          <!-- Edge 2: SEO Writer → Blog Generator (trigger) -->
-          <path d="M 290 140 C 380 160, 440 320, 530 320" stroke="#1877F2" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
-          <g class="edge-label" onclick="openEdgeDrawer('seo-blog')">
-            <rect x="370" y="225" width="80" height="24" rx="6" fill="#E7F3FF" stroke="#C5DCFC" stroke-width="1"/>
-            <text x="410" y="241" text-anchor="middle" fill="#1877F2" font-size="10" font-family="Inter">&#9889; trigger</text>
+          <!-- Edge 2: SEO Writer (right:260, y:78) → Blog Generator (left:700, y:78) — trigger -->
+          <path d="M 260 90 C 400 130, 560 78, 698 78" stroke="#1877F2" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
+          <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('seo-blog')">
+            <rect x="448" y="88" width="64" height="22" rx="6" fill="#E7F3FF" stroke="#C5DCFC" stroke-width="1"/>
+            <text x="480" y="103" text-anchor="middle" fill="#1877F2" font-size="10" font-family="Inter">trigger</text>
           </g>
 
-          <!-- Edge 3: Deploy Monitor → Ticket Resolver (trigger) -->
-          <path d="M 690 220 C 750 250, 720 380, 690 400" stroke="#1877F2" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
-          <g class="edge-label" onclick="openEdgeDrawer('deploy-ticket')">
-            <rect x="710" y="295" width="80" height="24" rx="6" fill="#E7F3FF" stroke="#C5DCFC" stroke-width="1"/>
-            <text x="750" y="311" text-anchor="middle" fill="#1877F2" font-size="10" font-family="Inter">&#9889; trigger</text>
+          <!-- Edge 3: Deploy Monitor (right:600, y:78) → Ticket Resolver (left:700, y:218) — trigger -->
+          <path d="M 600 86 C 650 110, 670 190, 698 210" stroke="#1877F2" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
+          <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('deploy-ticket')">
+            <rect x="632" y="138" width="64" height="22" rx="6" fill="#E7F3FF" stroke="#C5DCFC" stroke-width="1"/>
+            <text x="664" y="153" text-anchor="middle" fill="#1877F2" font-size="10" font-family="Inter">trigger</text>
           </g>
         </svg>
 
-        <!-- Agent nodes (absolute positioned) -->
+        <!-- Agent nodes — 3-column layout -->
 
-        <!-- Marketing crew agents -->
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-marketing/40 shadow-sm" style="left: 80px; top: 80px; width: 210px;" onclick="window.location='03-agent-overview.html'">
+        <!-- COL 1: Marketing (x=40) -->
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-marketing/40 shadow-sm" style="left:40px; top:50px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-marketing rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
             <div class="min-w-0">
               <div class="text-xs font-semibold truncate">Claude — SEO Writer</div>
-              <div class="flex items-center gap-1.5 mt-0.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>
-                <span class="text-[10px] text-neutral-400">Marketing</span>
-                <span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot ml-1"></span>
-                <span class="text-[10px] text-success-700">Running</span>
-              </div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span><span class="text-[10px] text-neutral-400">Marketing</span><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot ml-1"></span><span class="text-[10px] text-success-700">Running</span></div>
             </div>
           </div>
         </div>
 
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-marketing/40 shadow-sm" style="left: 80px; top: 240px; width: 210px;" onclick="window.location='03-agent-overview.html'">
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-marketing/40 shadow-sm" style="left:40px; top:190px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-marketing rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
             <div class="min-w-0">
               <div class="text-xs font-semibold truncate">Claude — Social Media</div>
-              <div class="flex items-center gap-1.5 mt-0.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>
-                <span class="text-[10px] text-neutral-400">Marketing</span>
-                <span class="w-1.5 h-1.5 rounded-full bg-primary-400 ml-1"></span>
-                <span class="text-[10px] text-neutral-500">Idle</span>
-              </div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span><span class="text-[10px] text-neutral-400">Marketing</span><span class="w-1.5 h-1.5 rounded-full bg-primary-400 ml-1"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
             </div>
-          </div>
-          <!-- No connections indicator -->
-          <div class="absolute -right-2 -top-2 w-5 h-5 rounded-full bg-neutral-200 flex items-center justify-center" title="No connections">
-            <svg class="w-3 h-3 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </div>
         </div>
 
-        <!-- DevOps crew agents -->
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-devops/40 shadow-sm" style="left: 530px; top: 160px; width: 210px;" onclick="window.location='03-agent-overview.html'">
+        <!-- COL 2: DevOps (x=380) -->
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-devops/40 shadow-sm" style="left:380px; top:50px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-devops rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-md bg-[#E6F4EE] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M22.28 9.82a5.99 5.99 0 0 0-.52-4.91 6.05 6.05 0 0 0-6.51-2.9A6.07 6.07 0 0 0 4.98 4.18a6 6 0 0 0-4 2.9 6.04 6.04 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.05 6.05 0 0 0 6.52 2.9A5.99 5.99 0 0 0 13.26 24a6.06 6.06 0 0 0 5.77-4.21 5.99 5.99 0 0 0 4-2.9 6.06 6.06 0 0 0-.75-7.07z" fill="#10A37F"/></svg></div>
             <div class="min-w-0">
               <div class="text-xs font-semibold truncate">Codex — Deploy Monitor</div>
-              <div class="flex items-center gap-1.5 mt-0.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span>
-                <span class="text-[10px] text-neutral-400">DevOps</span>
-                <span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot ml-1"></span>
-                <span class="text-[10px] text-success-700">Running</span>
-              </div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span><span class="text-[10px] text-neutral-400">DevOps</span><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot ml-1"></span><span class="text-[10px] text-success-700">Running</span></div>
             </div>
           </div>
         </div>
 
-        <!-- Content crew agent -->
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-content/40 shadow-sm" style="left: 530px; top: 290px; width: 210px;" onclick="window.location='03-agent-overview.html'">
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-devops/40 shadow-sm" style="left:380px; top:190px; width:220px;" onclick="window.location='03-agent-overview.html'">
+          <div class="h-1 bg-team-devops rounded-t-md"></div>
+          <div class="px-3 py-2.5 flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
+            <div class="min-w-0">
+              <div class="text-xs font-semibold truncate">Claude — Code Reviewer</div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span><span class="text-[10px] text-neutral-400">DevOps</span><span class="w-1.5 h-1.5 rounded-full bg-primary-400 ml-1"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-devops/40 shadow-sm" style="left:380px; top:320px; width:220px;" onclick="window.location='03-agent-overview.html'">
+          <div class="h-1 bg-team-devops rounded-t-md"></div>
+          <div class="px-3 py-2.5 flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-md bg-[#E6F4EE] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M22.28 9.82a5.99 5.99 0 0 0-.52-4.91 6.05 6.05 0 0 0-6.51-2.9A6.07 6.07 0 0 0 4.98 4.18z" fill="#10A37F"/></svg></div>
+            <div class="min-w-0">
+              <div class="text-xs font-semibold truncate">Codex — Data Pipeline</div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span><span class="text-[10px] text-neutral-400">DevOps</span><svg class="w-3 h-3 text-error-500 ml-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><span class="text-[10px] text-error-700">Error</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- COL 3: Content + Support (x=700) -->
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-content/40 shadow-sm" style="left:700px; top:50px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-content rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-md bg-[#EEF1FC] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" fill="url(#gmc2)"/><defs><linearGradient id="gmc2" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#1A73E8"/><stop offset=".3" stop-color="#6C47FF"/><stop offset="1" stop-color="#E8710A"/></linearGradient></defs></svg></div>
             <div class="min-w-0">
               <div class="text-xs font-semibold truncate">Gemini — Blog Generator</div>
-              <div class="flex items-center gap-1.5 mt-0.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-team-content"></span>
-                <span class="text-[10px] text-neutral-400">Content</span>
-                <span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot ml-1"></span>
-                <span class="text-[10px] text-success-700">Running</span>
-              </div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-content"></span><span class="text-[10px] text-neutral-400">Content</span><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot ml-1"></span><span class="text-[10px] text-success-700">Running</span></div>
             </div>
           </div>
         </div>
 
-        <!-- Support crew agent -->
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-support/40 shadow-sm" style="left: 530px; top: 380px; width: 210px;" onclick="window.location='03-agent-overview.html'">
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-support/40 shadow-sm" style="left:700px; top:190px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-support rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-md bg-neutral-900 flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><rect x="2" y="3" width="20" height="18" rx="3" fill="#2D2D2D"/><path d="M7 8l3 3-3 3" stroke="#4ADE80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 16h4" stroke="#4ADE80" stroke-width="2" stroke-linecap="round"/></svg></div>
             <div class="min-w-0">
               <div class="text-xs font-semibold truncate">OpenCode — Ticket Resolver</div>
-              <div class="flex items-center gap-1.5 mt-0.5">
-                <span class="w-1.5 h-1.5 rounded-full bg-team-support"></span>
-                <span class="text-[10px] text-neutral-400">Support</span>
-                <span class="w-1.5 h-1.5 rounded-full bg-primary-400 ml-1"></span>
-                <span class="text-[10px] text-neutral-500">Idle</span>
-              </div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-support"></span><span class="text-[10px] text-neutral-400">Support</span><span class="w-1.5 h-1.5 rounded-full bg-primary-400 ml-1"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
             </div>
           </div>
         </div>
 
         <!-- Legend -->
         <div class="absolute bottom-3 left-3 flex items-center gap-4 text-[10px] text-neutral-500 bg-white/90 px-3 py-2 rounded-md border border-neutral-200">
-          <span class="flex items-center gap-1.5"><svg class="w-4 h-0.5"><line x1="0" y1="1" x2="16" y2="1" stroke="#ADB1B5" stroke-width="2" stroke-dasharray="4 2"/></svg> Read files</span>
-          <span class="flex items-center gap-1.5"><svg class="w-4 h-0.5"><line x1="0" y1="1" x2="16" y2="1" stroke="#1877F2" stroke-width="2"/></svg> Trigger</span>
+          <span class="flex items-center gap-1.5"><svg width="16" height="3"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#ADB1B5" stroke-width="2" stroke-dasharray="4 2"/></svg> Read files</span>
+          <span class="flex items-center gap-1.5"><svg width="16" height="3"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#1877F2" stroke-width="2"/></svg> Trigger</span>
           <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-team-marketing"></span> Marketing</span>
           <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-team-devops"></span> DevOps</span>
           <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-team-content"></span> Content</span>
@@ -298,54 +294,25 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
             <h3 class="text-sm font-semibold">Connection Details</h3>
             <button onclick="closeEdgeDrawer()" class="p-1 text-neutral-400 hover:text-neutral-600"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
           </div>
-
-          <!-- Source → Target -->
           <div class="flex items-center gap-3 mb-4 pb-4 border-b border-neutral-100">
-            <div class="flex items-center gap-2 px-2.5 py-1.5 bg-neutral-50 rounded-md">
-              <span class="w-2 h-2 rounded-full bg-team-marketing"></span>
-              <span class="text-xs font-medium">SEO Writer</span>
-            </div>
+            <div class="flex items-center gap-2 px-2.5 py-1.5 bg-neutral-50 rounded-md"><span class="w-2 h-2 rounded-full bg-team-marketing"></span><span class="text-xs font-medium">SEO Writer</span></div>
             <svg class="w-4 h-4 text-neutral-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-            <div class="flex items-center gap-2 px-2.5 py-1.5 bg-neutral-50 rounded-md">
-              <span class="w-2 h-2 rounded-full bg-team-devops"></span>
-              <span class="text-xs font-medium">Deploy Monitor</span>
-            </div>
+            <div class="flex items-center gap-2 px-2.5 py-1.5 bg-neutral-50 rounded-md"><span class="w-2 h-2 rounded-full bg-team-devops"></span><span class="text-xs font-medium">Deploy Monitor</span></div>
           </div>
-
-          <!-- Permissions -->
           <div class="space-y-3">
             <label class="flex items-center justify-between cursor-pointer">
-              <div class="flex items-center gap-2.5">
-                <svg class="w-4 h-4 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                <div>
-                  <div class="text-xs font-medium">Read files</div>
-                  <div class="text-[10px] text-neutral-400">Can read /output of target agent</div>
-                </div>
-              </div>
+              <div class="flex items-center gap-2.5"><svg class="w-4 h-4 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><div><div class="text-xs font-medium">Read files</div><div class="text-[10px] text-neutral-400">Can read /output of target agent</div></div></div>
               <div class="relative w-9 h-5 bg-primary-600 rounded-full"><div class="absolute left-[18px] top-0.5 w-4 h-4 bg-white rounded-full shadow transition"></div></div>
             </label>
             <label class="flex items-center justify-between cursor-pointer">
-              <div class="flex items-center gap-2.5">
-                <svg class="w-4 h-4 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></svg>
-                <div>
-                  <div class="text-xs font-medium">Write files</div>
-                  <div class="text-[10px] text-neutral-400">Can write to /workspace of target agent</div>
-                </div>
-              </div>
+              <div class="flex items-center gap-2.5"><svg class="w-4 h-4 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></svg><div><div class="text-xs font-medium">Write files</div><div class="text-[10px] text-neutral-400">Can write to /workspace of target agent</div></div></div>
               <div class="relative w-9 h-5 bg-neutral-200 rounded-full"><div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition"></div></div>
             </label>
             <label class="flex items-center justify-between cursor-pointer">
-              <div class="flex items-center gap-2.5">
-                <svg class="w-4 h-4 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                <div>
-                  <div class="text-xs font-medium">Trigger</div>
-                  <div class="text-[10px] text-neutral-400">Can start target agent with a task</div>
-                </div>
-              </div>
+              <div class="flex items-center gap-2.5"><svg class="w-4 h-4 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg><div><div class="text-xs font-medium">Trigger</div><div class="text-[10px] text-neutral-400">Can start target agent with a task</div></div></div>
               <div class="relative w-9 h-5 bg-neutral-200 rounded-full"><div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow transition"></div></div>
             </label>
           </div>
-
           <div class="flex items-center justify-between mt-4 pt-4 border-t border-neutral-100">
             <button class="text-xs text-error-500 hover:text-error-700 font-medium">Remove Connection</button>
             <button class="px-3 py-1.5 bg-primary-600 text-white text-xs font-medium rounded-md hover:bg-primary-700">Save</button>
@@ -404,8 +371,150 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
   </main>
 </div>
 
+<!-- ======== DIALOG: Export JSON ======== -->
+<div id="dialog-export" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/40">
+  <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-neutral-200">
+      <h3 class="text-sm font-semibold">Export Connections</h3>
+      <button onclick="closeDialog('export')" class="p-1 text-neutral-400 hover:text-neutral-600"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+    </div>
+    <div class="px-5 py-4 space-y-4">
+      <div class="flex items-start gap-2.5 p-3 bg-primary-50 border border-primary-200 rounded-md">
+        <svg class="w-4 h-4 text-primary-600 mt-0.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        <p class="text-xs text-primary-700">Connection config will be exported as JSON. This does not include credentials or secrets.</p>
+      </div>
+      <div class="text-xs font-medium text-neutral-500 mb-1">Preview</div>
+      <pre class="bg-neutral-50 border border-neutral-200 rounded-md p-3 text-[11px] font-mono text-neutral-700 overflow-auto max-h-48">{
+  "version": "crewship/connections/v1",
+  "exportedAt": "2026-02-12T14:30:00Z",
+  "connections": [
+    {
+      "source": "claude-seo-writer",
+      "target": "codex-deploy-monitor",
+      "permissions": { "readFiles": true, "writeFiles": false, "trigger": false }
+    },
+    {
+      "source": "claude-seo-writer",
+      "target": "gemini-blog-generator",
+      "permissions": { "readFiles": false, "writeFiles": false, "trigger": true }
+    },
+    {
+      "source": "codex-deploy-monitor",
+      "target": "opencode-ticket-resolver",
+      "permissions": { "readFiles": false, "writeFiles": false, "trigger": true }
+    }
+  ]
+}</pre>
+    </div>
+    <div class="flex justify-end gap-2 px-5 py-3 border-t border-neutral-200 bg-neutral-50 rounded-b-lg">
+      <button onclick="closeDialog('export')" class="px-3 py-1.5 text-xs font-medium text-neutral-600 border border-neutral-200 rounded-md hover:bg-neutral-100">Cancel</button>
+      <button class="px-3 py-1.5 text-xs font-medium bg-primary-600 text-white rounded-md hover:bg-primary-700">Export &amp; Download</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======== DIALOG: Import JSON ======== -->
+<div id="dialog-import" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/40">
+  <div class="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-neutral-200">
+      <h3 class="text-sm font-semibold">Import Connections</h3>
+      <button onclick="closeDialog('import')" class="p-1 text-neutral-400 hover:text-neutral-600"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+    </div>
+    <div class="px-5 py-4 space-y-4">
+      <div class="border-2 border-dashed border-neutral-300 rounded-lg p-8 text-center hover:border-primary-400 transition cursor-pointer">
+        <svg class="w-8 h-8 mx-auto text-neutral-300 mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <div class="text-xs text-neutral-500">Drop <span class="font-medium">.json</span> file here or <span class="text-primary-600 font-medium">browse</span></div>
+      </div>
+      <div class="text-xs font-medium text-neutral-500 mb-1">Parsed connections</div>
+      <div class="border border-neutral-200 rounded-md overflow-hidden">
+        <table class="w-full text-xs">
+          <thead><tr class="bg-neutral-50 text-neutral-500"><th class="px-3 py-2 text-left font-medium">Source</th><th class="px-3 py-2 text-left font-medium">Target</th><th class="px-3 py-2 text-left font-medium">Permissions</th><th class="px-3 py-2 text-left font-medium">Status</th></tr></thead>
+          <tbody class="divide-y divide-neutral-100">
+            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>SEO Writer</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span>Deploy Monitor</span></td><td class="px-3 py-2 text-neutral-400">read</td><td class="px-3 py-2"><span class="text-warning-700 font-medium">Overwrite</span></td></tr>
+            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>SEO Writer</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-content"></span>Blog Generator</span></td><td class="px-3 py-2 text-neutral-400">trigger</td><td class="px-3 py-2"><span class="text-warning-700 font-medium">Overwrite</span></td></tr>
+            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span>Deploy Monitor</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-support"></span>Ticket Resolver</span></td><td class="px-3 py-2 text-neutral-400">trigger</td><td class="px-3 py-2"><span class="text-warning-700 font-medium">Overwrite</span></td></tr>
+            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>Social Media</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-content"></span>Blog Generator</span></td><td class="px-3 py-2 text-neutral-400">read, trigger</td><td class="px-3 py-2"><span class="text-success-700 font-medium">New</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 px-5 py-3 border-t border-neutral-200 bg-neutral-50 rounded-b-lg">
+      <button onclick="closeDialog('import')" class="px-3 py-1.5 text-xs font-medium text-neutral-600 border border-neutral-200 rounded-md hover:bg-neutral-100">Cancel</button>
+      <button class="px-3 py-1.5 text-xs font-medium bg-primary-600 text-white rounded-md hover:bg-primary-700">Import 4 Connections</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======== DIALOG: Add Connection ======== -->
+<div id="dialog-add-connection" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/40">
+  <div class="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-neutral-200">
+      <h3 class="text-sm font-semibold">Add Connection</h3>
+      <button onclick="closeDialog('add-connection')" class="p-1 text-neutral-400 hover:text-neutral-600"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+    </div>
+    <div class="px-5 py-4 space-y-4">
+      <div>
+        <label class="block text-[10px] font-medium text-neutral-500 uppercase tracking-wider mb-1.5">Source agent</label>
+        <select class="w-full px-3 py-2 text-xs border border-neutral-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+          <option disabled selected>Select agent...</option>
+          <optgroup label="Marketing">
+            <option>Claude — SEO Writer</option>
+            <option>Claude — Social Media</option>
+          </optgroup>
+          <optgroup label="DevOps">
+            <option>Codex — Deploy Monitor</option>
+            <option>Claude — Code Reviewer</option>
+            <option>Codex — Data Pipeline</option>
+          </optgroup>
+          <optgroup label="Content">
+            <option>Gemini — Blog Generator</option>
+          </optgroup>
+          <optgroup label="Support">
+            <option>OpenCode — Ticket Resolver</option>
+          </optgroup>
+        </select>
+      </div>
+      <div class="flex justify-center"><svg class="w-4 h-4 text-neutral-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg></div>
+      <div>
+        <label class="block text-[10px] font-medium text-neutral-500 uppercase tracking-wider mb-1.5">Target agent</label>
+        <select class="w-full px-3 py-2 text-xs border border-neutral-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary-500">
+          <option disabled selected>Select agent...</option>
+          <optgroup label="Marketing">
+            <option>Claude — SEO Writer</option>
+            <option>Claude — Social Media</option>
+          </optgroup>
+          <optgroup label="DevOps">
+            <option>Codex — Deploy Monitor</option>
+            <option>Claude — Code Reviewer</option>
+            <option>Codex — Data Pipeline</option>
+          </optgroup>
+          <optgroup label="Content">
+            <option>Gemini — Blog Generator</option>
+          </optgroup>
+          <optgroup label="Support">
+            <option>OpenCode — Ticket Resolver</option>
+          </optgroup>
+        </select>
+      </div>
+      <div>
+        <label class="block text-[10px] font-medium text-neutral-500 uppercase tracking-wider mb-2">Permissions</label>
+        <div class="space-y-2">
+          <label class="flex items-center gap-2.5 cursor-pointer"><input type="checkbox" checked class="w-4 h-4 rounded border-neutral-300 text-primary-600"><div><div class="text-xs font-medium">Read files</div><div class="text-[10px] text-neutral-400">Source can read /output of target</div></div></label>
+          <label class="flex items-center gap-2.5 cursor-pointer"><input type="checkbox" class="w-4 h-4 rounded border-neutral-300 text-primary-600"><div><div class="text-xs font-medium">Write files</div><div class="text-[10px] text-neutral-400">Source can write to /workspace of target</div></div></label>
+          <label class="flex items-center gap-2.5 cursor-pointer"><input type="checkbox" class="w-4 h-4 rounded border-neutral-300 text-primary-600"><div><div class="text-xs font-medium">Trigger</div><div class="text-[10px] text-neutral-400">Source can start target with a task</div></div></label>
+        </div>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 px-5 py-3 border-t border-neutral-200 bg-neutral-50 rounded-b-lg">
+      <button onclick="closeDialog('add-connection')" class="px-3 py-1.5 text-xs font-medium text-neutral-600 border border-neutral-200 rounded-md hover:bg-neutral-100">Cancel</button>
+      <button class="px-3 py-1.5 text-xs font-medium bg-primary-600 text-white rounded-md hover:bg-primary-700">Create Connection</button>
+    </div>
+  </div>
+</div>
+
 <script>
 var views = ['chart', 'orchestration', 'list'];
+var connButtons = ['btn-export', 'btn-import', 'btn-add-connection'];
 
 function showView(name) {
   views.forEach(function(v) {
@@ -417,22 +526,18 @@ function showView(name) {
       btn.className = 'px-3 py-1.5 text-xs font-medium rounded-md text-neutral-600 hover:bg-neutral-200';
     }
   });
-  var addConn = document.getElementById('btn-add-connection');
-  if (name === 'orchestration') {
-    addConn.classList.remove('hidden');
-    addConn.classList.add('inline-flex');
-  } else {
-    addConn.classList.add('hidden');
-    addConn.classList.remove('inline-flex');
-  }
+  connButtons.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (name === 'orchestration') { el.classList.remove('hidden'); el.classList.add('inline-flex'); }
+    else { el.classList.add('hidden'); el.classList.remove('inline-flex'); }
+  });
 }
 
-function openEdgeDrawer(id) {
-  document.getElementById('edge-drawer').classList.remove('hidden');
-}
-function closeEdgeDrawer() {
-  document.getElementById('edge-drawer').classList.add('hidden');
-}
+function showDialog(id) { document.getElementById('dialog-' + id).classList.remove('hidden'); }
+function closeDialog(id) { document.getElementById('dialog-' + id).classList.add('hidden'); }
+
+function openEdgeDrawer(id) { document.getElementById('edge-drawer').classList.remove('hidden'); }
+function closeEdgeDrawer() { document.getElementById('edge-drawer').classList.add('hidden'); }
 </script>
 <script src="_shared.js"></script>
 </body>
