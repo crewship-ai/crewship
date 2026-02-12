@@ -142,14 +142,16 @@
     style.setAttribute('data-shared', '1');
     style.textContent =
       '@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}.pulse-dot{animation:pulse-dot 2s ease-in-out infinite}' +
-      '@keyframes ai-glow{0%,100%{box-shadow:0 0 8px 2px rgba(78,205,196,.25)}50%{box-shadow:0 0 20px 6px rgba(78,205,196,.4)}}' +
+      '@keyframes ai-glow{0%,100%{box-shadow:0 0 12px 4px rgba(78,205,196,.3)}50%{box-shadow:0 0 28px 8px rgba(78,205,196,.45)}}' +
       '@keyframes ai-entrance{0%{opacity:0;transform:scale(.6)}100%{opacity:1;transform:scale(1)}}' +
       '@keyframes ai-panel-in{0%{opacity:0;transform:translateY(16px) scale(.95)}100%{opacity:1;transform:translateY(0) scale(1)}}' +
+      '@keyframes ship-wave{0%,100%{transform:translateY(0) rotate(0deg)}20%{transform:translateY(-3px) rotate(2deg)}40%{transform:translateY(1px) rotate(-1deg)}60%{transform:translateY(-2px) rotate(1.5deg)}80%{transform:translateY(1px) rotate(-0.5deg)}}' +
       '.ai-btn-glow{animation:ai-glow 3s ease-in-out infinite}' +
       '.ai-btn-entrance{animation:ai-entrance .4s cubic-bezier(.34,1.56,.64,1) both}' +
       '.ai-panel-entrance{animation:ai-panel-in .25s ease-out both}' +
       '.ai-btn-pill{transition:width .25s cubic-bezier(.4,0,.2,1),padding .25s cubic-bezier(.4,0,.2,1)}' +
-      '.ai-btn-label{transition:opacity .15s ease,max-width .25s ease;overflow:hidden;white-space:nowrap}';
+      '.ai-btn-label{transition:opacity .15s ease,max-width .25s ease;overflow:hidden;white-space:nowrap}' +
+      '.ship-wave{animation:ship-wave 4s ease-in-out infinite}';
     document.head.appendChild(style);
   }
 
@@ -404,31 +406,33 @@
     // ======== CREWSHIP AI FLOATING BUTTON ========
     var aiOpen = false;
 
+    // Crewship logo SVG (cropped, white fill, no background)
+    var shipSvg = '<svg class="ship-wave" style="width:36px;height:24px" viewBox="62 88 185 120" xmlns="http://www.w3.org/2000/svg"><g fill="white" fill-rule="nonzero"><path d="M80.49302,160.9043c19.04106,-0.63867 38.56128,1.70508 57.52178,3.33105c22.81187,1.98633 45.64146,3.7749 68.48423,5.36572c11.27197,0.78809 23.95166,1.91602 35.18994,2.23242l0.00146,12.5625c0,7.68311 1.00342,16.11475 -6.81006,20.52832c-2.56494,1.4502 -4.82959,1.45752 -7.67725,1.46924l-132.00088,0.01758c-1.37109,-1.00928 -4.05396,-3.87451 -5.22305,-5.22217c-9.83247,-11.34375 -17.83081,-25.69043 -24.554,-39.12012c5.29438,-0.65479 9.75776,-0.94336 15.06782,-1.16455z"/><path d="M79.33345,143.18101c3.42158,-0.12788 6.95186,-0.03823 10.37549,0.01846c23.16064,0.3835 45.99814,4.23413 68.89849,7.51538c26.93994,3.94482 53.93701,7.47803 80.98535,10.59814c0.43652,1.35352 0.84668,2.76123 1.26416,4.12646c-1.89697,-0.30908 -4.96729,-0.50098 -6.95801,-0.68701l-13.2583,-1.22754c-24.26514,-2.3042 -48.51562,-4.771 -72.74854,-7.39893c-28.43335,-3.04834 -58.20586,-6.79687 -86.79185,-3.41748c-0.83701,-2.12695 -1.91279,-4.48975 -2.81426,-6.61245c6.6145,-2.26084 14.11143,-2.65151 21.04746,-2.91504z"/><path d="M183.02197,105.7519l12.83496,-0.01011c-0.05127,7.02935 -0.48779,14.0729 -0.61377,21.10415c6.30762,1.4499 13.31543,3.42495 19.64355,5.05591c0.66943,1.78931 1.30811,3.56953 2.09473,5.31064c-7.50879,-1.99775 -16.11035,-3.81577 -23.75244,-5.65049l-14.62207,-3.5373c-2.51807,-0.61333 -5.4917,-1.41973 -8.02588,-1.83267c-1.42236,-0.23174 -4.16748,-0.15586 -5.6748,-0.14824c-10.78418,-0.10371 -22.31733,-0.20493 -33.08408,-0.00249c1.30635,-1.98428 2.70293,-3.90776 4.18535,-5.76416c6.79937,0.13521 13.75371,-0.02461 20.596,0.07046c-0.67822,-0.75088 -1.229,-1.5145 -1.43115,-2.52305c-0.21094,-1.00576 0.01025,-2.05342 0.60938,-2.88853c0.6709,-0.92725 1.70215,-1.52842 2.84033,-1.65557c2.31738,-0.25796 4.07959,1.47993 4.22168,3.77681c0.08936,1.4439 -0.73535,2.34814 -1.66992,3.32109c2.9458,0.01113 7.37549,-0.27056 10.14697,0.03398c1.95996,0.21548 6.1582,1.5186 8.40088,2.05547c1.0166,-5.57783 2.30859,-11.13647 3.30029,-16.71592z"/><path d="M123.98877,133.72485c1.93945,-0.07061 4.36699,0.01553 6.33662,0.02959l12.93354,0.06548l10.77964,-0.05552c2.06689,-0.00776 5.29248,-0.09844 7.27588,0.16699c2.57959,0.34512 5.63232,0.99199 8.20605,1.4918l14.82275,2.91563l47.84619,9.38921c0.70898,1.69629 1.38135,3.47461 2.05371,5.19287l-3.35742,-0.59912c-15.52734,-2.60449 -31.04297,-5.28516 -46.54395,-8.04448l-15.83057,-2.85132c-1.95264,-0.35215 -6.94336,-1.39248 -8.71289,-1.4562c-4.28906,-0.15425 -9.14355,-0.0731 -13.48022,-0.07427l-26.45215,0.01655c1.06538,-1.86006 2.85337,-4.4354 4.1228,-6.18721z"/><path d="M204.39697,99.91509c0.31641,0.05845 2.58838,0.91948 2.9751,1.06187l6.67822,2.47075c-2.96484,1.06641 -7.03564,2.2875 -10.06934,3.07866c-2.69824,-0.68584 -6.02197,-2.52773 -8.59717,-2.73794c-3.8877,-0.00601 -8.08594,-0.08101 -11.94434,0.05801l0.40283,-2.0543c4.52783,-0.09697 9.29297,0.19438 13.75928,-0.23979c2.02002,-0.19658 4.80908,-1.04692 6.79541,-1.63726z"/><path d="M195.78076,93.61919c0.78809,-0.11206 8.24854,2.91357 9.36768,3.51445c-3.82471,1.0812 -7.24072,2.34404 -11.21191,2.33438l-9.60498,-0.00103l0.59619,-2.88853c3.48047,-1.05293 7.32861,-2.02632 10.85303,-2.95928z"/></g></svg>';
+
+    var shipSvgClose = '<svg style="width:28px;height:28px" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+
     // --- Floating button ---
     var aiBtn = document.createElement('button');
-    aiBtn.className = 'fixed bottom-6 right-6 z-50 ai-btn-entrance ai-btn-glow ai-btn-pill flex items-center gap-0 rounded-full shadow-lg cursor-pointer border-0 outline-none';
-    aiBtn.style.cssText = 'background:linear-gradient(135deg,#4ECDC4 0%,#1877F2 100%);width:48px;height:48px;padding:0;';
-    aiBtn.title = 'Crewship AI';
+    aiBtn.className = 'fixed z-50 ai-btn-entrance ai-btn-glow ai-btn-pill flex items-center gap-0 rounded-full shadow-xl cursor-pointer border-0 outline-none';
+    aiBtn.style.cssText = 'background:linear-gradient(135deg,#4ECDC4 0%,#1877F2 100%);width:64px;height:64px;padding:0;bottom:32px;right:32px;';
+    aiBtn.title = 'Crewship AI (⌘J)';
     aiBtn.innerHTML =
-      '<span class="flex items-center justify-center flex-shrink-0" style="width:48px;height:48px">' +
-        '<svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>' +
-      '</span>' +
-      '<span class="ai-btn-label text-white text-xs font-semibold" style="max-width:0;opacity:0">Crewship AI</span>';
+      '<span class="flex items-center justify-center flex-shrink-0" style="width:64px;height:64px">' + shipSvg + '</span>' +
+      '<span class="ai-btn-label text-white text-sm font-semibold" style="max-width:0;opacity:0">Crewship AI</span>';
 
     // Hover: expand to pill
     aiBtn.addEventListener('mouseenter', function () {
       if (!aiOpen) {
-        aiBtn.style.width = '152px';
-        aiBtn.style.paddingRight = '16px';
+        aiBtn.style.width = '180px';
+        aiBtn.style.paddingRight = '20px';
         var label = aiBtn.querySelector('.ai-btn-label');
-        label.style.maxWidth = '100px';
+        label.style.maxWidth = '110px';
         label.style.opacity = '1';
-        label.style.marginLeft = '0px';
       }
     });
     aiBtn.addEventListener('mouseleave', function () {
       if (!aiOpen) {
-        aiBtn.style.width = '48px';
+        aiBtn.style.width = '64px';
         aiBtn.style.paddingRight = '0';
         var label = aiBtn.querySelector('.ai-btn-label');
         label.style.maxWidth = '0';
@@ -438,14 +442,14 @@
 
     // --- Chat panel ---
     var aiPanel = document.createElement('div');
-    aiPanel.className = 'fixed bottom-20 right-6 z-50 hidden';
-    aiPanel.style.width = '384px';
+    aiPanel.className = 'fixed z-50 hidden';
+    aiPanel.style.cssText = 'width:400px;bottom:108px;right:32px;';
     aiPanel.innerHTML =
       '<div class="ai-panel-entrance bg-white rounded-2xl shadow-2xl border border-neutral-200 overflow-hidden flex flex-col" style="max-height:600px">' +
         // Header
         '<div class="px-4 py-3 flex items-center justify-between flex-shrink-0" style="background:linear-gradient(135deg,#4ECDC4 0%,#1877F2 100%)">' +
-          '<div class="flex items-center gap-2">' +
-            '<svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>' +
+          '<div class="flex items-center gap-2.5">' +
+            '<svg style="width:24px;height:16px" viewBox="62 88 185 120" xmlns="http://www.w3.org/2000/svg"><g fill="white" fill-rule="nonzero"><path d="M80.49302,160.9043c19.04106,-0.63867 38.56128,1.70508 57.52178,3.33105c22.81187,1.98633 45.64146,3.7749 68.48423,5.36572c11.27197,0.78809 23.95166,1.91602 35.18994,2.23242l0.00146,12.5625c0,7.68311 1.00342,16.11475 -6.81006,20.52832c-2.56494,1.4502 -4.82959,1.45752 -7.67725,1.46924l-132.00088,0.01758c-1.37109,-1.00928 -4.05396,-3.87451 -5.22305,-5.22217c-9.83247,-11.34375 -17.83081,-25.69043 -24.554,-39.12012c5.29438,-0.65479 9.75776,-0.94336 15.06782,-1.16455z"/><path d="M79.33345,143.18101c3.42158,-0.12788 6.95186,-0.03823 10.37549,0.01846c23.16064,0.3835 45.99814,4.23413 68.89849,7.51538c26.93994,3.94482 53.93701,7.47803 80.98535,10.59814c0.43652,1.35352 0.84668,2.76123 1.26416,4.12646c-1.89697,-0.30908 -4.96729,-0.50098 -6.95801,-0.68701l-13.2583,-1.22754c-24.26514,-2.3042 -48.51562,-4.771 -72.74854,-7.39893c-28.43335,-3.04834 -58.20586,-6.79687 -86.79185,-3.41748c-0.83701,-2.12695 -1.91279,-4.48975 -2.81426,-6.61245c6.6145,-2.26084 14.11143,-2.65151 21.04746,-2.91504z"/><path d="M183.02197,105.7519l12.83496,-0.01011c-0.05127,7.02935 -0.48779,14.0729 -0.61377,21.10415c6.30762,1.4499 13.31543,3.42495 19.64355,5.05591c0.66943,1.78931 1.30811,3.56953 2.09473,5.31064c-7.50879,-1.99775 -16.11035,-3.81577 -23.75244,-5.65049l-14.62207,-3.5373c-2.51807,-0.61333 -5.4917,-1.41973 -8.02588,-1.83267c-1.42236,-0.23174 -4.16748,-0.15586 -5.6748,-0.14824c-10.78418,-0.10371 -22.31733,-0.20493 -33.08408,-0.00249c1.30635,-1.98428 2.70293,-3.90776 4.18535,-5.76416c6.79937,0.13521 13.75371,-0.02461 20.596,0.07046c-0.67822,-0.75088 -1.229,-1.5145 -1.43115,-2.52305c-0.21094,-1.00576 0.01025,-2.05342 0.60938,-2.88853c0.6709,-0.92725 1.70215,-1.52842 2.84033,-1.65557c2.31738,-0.25796 4.07959,1.47993 4.22168,3.77681c0.08936,1.4439 -0.73535,2.34814 -1.66992,3.32109c2.9458,0.01113 7.37549,-0.27056 10.14697,0.03398c1.95996,0.21548 6.1582,1.5186 8.40088,2.05547c1.0166,-5.57783 2.30859,-11.13647 3.30029,-16.71592z"/></g></svg>' +
             '<span class="text-sm font-semibold text-white">Crewship AI</span>' +
             '<span class="text-[9px] px-1.5 py-0.5 rounded bg-white/20 text-white font-medium">BETA</span>' +
           '</div>' +
@@ -462,8 +466,8 @@
         '<div class="flex-1 overflow-y-auto px-4 py-4 space-y-4" style="min-height:260px">' +
           // AI welcome message
           '<div class="flex gap-2.5">' +
-            '<div class="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center" style="background:linear-gradient(135deg,#4ECDC4,#1877F2)">' +
-              '<svg class="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>' +
+            '<div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center" style="background:linear-gradient(135deg,#4ECDC4,#1877F2)">' +
+              '<svg style="width:18px;height:12px" viewBox="62 88 185 120" xmlns="http://www.w3.org/2000/svg"><g fill="white" fill-rule="nonzero"><path d="M80.49302,160.9043c19.04106,-0.63867 38.56128,1.70508 57.52178,3.33105c22.81187,1.98633 45.64146,3.7749 68.48423,5.36572c11.27197,0.78809 23.95166,1.91602 35.18994,2.23242l0.00146,12.5625c0,7.68311 1.00342,16.11475 -6.81006,20.52832c-2.56494,1.4502 -4.82959,1.45752 -7.67725,1.46924l-132.00088,0.01758c-1.37109,-1.00928 -4.05396,-3.87451 -5.22305,-5.22217c-9.83247,-11.34375 -17.83081,-25.69043 -24.554,-39.12012c5.29438,-0.65479 9.75776,-0.94336 15.06782,-1.16455z"/><path d="M79.33345,143.18101c3.42158,-0.12788 6.95186,-0.03823 10.37549,0.01846c23.16064,0.3835 45.99814,4.23413 68.89849,7.51538c26.93994,3.94482 53.93701,7.47803 80.98535,10.59814c0.43652,1.35352 0.84668,2.76123 1.26416,4.12646c-1.89697,-0.30908 -4.96729,-0.50098 -6.95801,-0.68701l-13.2583,-1.22754c-24.26514,-2.3042 -48.51562,-4.771 -72.74854,-7.39893c-28.43335,-3.04834 -58.20586,-6.79687 -86.79185,-3.41748c-0.83701,-2.12695 -1.91279,-4.48975 -2.81426,-6.61245c6.6145,-2.26084 14.11143,-2.65151 21.04746,-2.91504z"/></g></svg>' +
             '</div>' +
             '<div class="flex-1">' +
               '<div class="text-[10px] text-neutral-400 font-medium mb-1">Crewship AI</div>' +
@@ -511,32 +515,27 @@
       '</div>';
 
     // Toggle logic
-    aiBtn.addEventListener('click', function () {
-      aiOpen = !aiOpen;
-      if (aiOpen) {
-        aiPanel.classList.remove('hidden');
-        aiBtn.style.width = '48px';
-        aiBtn.style.paddingRight = '0';
-        var label = aiBtn.querySelector('.ai-btn-label');
-        label.style.maxWidth = '0';
-        label.style.opacity = '0';
-        // Change button icon to X
-        aiBtn.querySelector('span:first-child').innerHTML =
-          '<svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
-      } else {
-        aiPanel.classList.add('hidden');
-        aiBtn.querySelector('span:first-child').innerHTML =
-          '<svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>';
-      }
-    });
-
-    // Close button inside panel
-    aiPanel.querySelector('#ai-close').addEventListener('click', function () {
+    function openAiPanel() {
+      aiOpen = true;
+      aiPanel.classList.remove('hidden');
+      aiBtn.style.width = '64px';
+      aiBtn.style.paddingRight = '0';
+      var label = aiBtn.querySelector('.ai-btn-label');
+      label.style.maxWidth = '0';
+      label.style.opacity = '0';
+      aiBtn.querySelector('span:first-child').innerHTML = shipSvgClose;
+      aiBtn.classList.remove('ai-btn-glow');
+    }
+    function closeAiPanel() {
       aiOpen = false;
       aiPanel.classList.add('hidden');
-      aiBtn.querySelector('span:first-child').innerHTML =
-        '<svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>';
+      aiBtn.querySelector('span:first-child').innerHTML = shipSvg;
+      aiBtn.classList.add('ai-btn-glow');
+    }
+    aiBtn.addEventListener('click', function () {
+      if (aiOpen) { closeAiPanel(); } else { openAiPanel(); }
     });
+    aiPanel.querySelector('#ai-close').addEventListener('click', closeAiPanel);
 
     // Keyboard shortcut: Cmd+J
     document.addEventListener('keydown', function (e) {
