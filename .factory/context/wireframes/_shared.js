@@ -218,7 +218,6 @@
           icons.bell +
           '<span class="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-error-500 text-[9px] font-bold text-white ring-2 ring-white">3</span>' +
         '</button>' +
-        '<a href="20-settings.html" class="p-2 text-neutral-400 hover:text-neutral-600 rounded-md hover:bg-neutral-50" title="Settings">' + icons.settings + '</a>' +
         '<button class="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-neutral-50">' +
           '<div class="w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-white text-[10px] font-semibold">PS</div>' +
           '<span class="text-xs text-neutral-700 font-medium">Pavel</span>' +
