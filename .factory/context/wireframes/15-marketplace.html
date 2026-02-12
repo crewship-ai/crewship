@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Marketplace</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['JetBrains Mono','monospace']},colors:{primary:{50:'#F0F6FF',100:'#E7F3FF',200:'#C5DCFC',300:'#9DC5FA',400:'#6BAAF7',500:'#4293F5',600:'#1877F2',700:'#1877C2',800:'#1565A8',900:'#0D4F8B',950:'#003366'},neutral:{50:'#F7F8FA',100:'#F0F2F5',200:'#E4E6EA',300:'#CED0D4',400:'#ADB1B5',500:'#8A8D91',600:'#65676B',700:'#4B4F54',800:'#373A3F',900:'#242628',950:'#1C1E21'},success:{50:'#E6F5EA',500:'#31A24C',700:'#1B7D36'},warning:{50:'#FFF8E6',500:'#F7B928',700:'#B06D00'},error:{50:'#FDE8E8',500:'#E34234',700:'#B32D1B'},brand:{gold:'#D4A853',teal:'#4ECDC4',navy:'#1A3C5E'},team:{marketing:'#E16B3A',devops:'#7C3AED',content:'#0891B2',support:'#D946A8'}}}}}
+</script>
+<style>
+  body { font-size: 14px; }
+  .mp-row { cursor: pointer; }
+  .mp-row:hover { background-color: #F7F8FA; }
+  .mp-row.active { background-color: #F0F6FF; border-color: #C5DCFC; }
+  .cat-btn.active { background-color: #1C1E21; color: #fff; }
+  .source-radio:checked + span { color: #1877F2; font-weight: 500; }
+  .trust-badge-verified { color: #1B7D36; }
+  .trust-badge-partner { color: #1877F2; }
+  .trust-badge-community { color: #8A8D91; }
+  .trust-badge-private { color: #4B4F54; }
+</style>
+</head>
+<body class="bg-neutral-100 font-sans text-neutral-950 antialiased">
+<div class="flex h-screen">
+
+  <main class="flex-1 overflow-hidden flex flex-col">
+    <!-- Action bar -->
+    <div class="flex items-center justify-between px-6 py-3 flex-shrink-0">
+      <div class="flex items-center gap-2">
+        <span class="text-sm text-neutral-500">39 skills available from 3 sources</span>
+      </div>
+      <button onclick="document.getElementById('sources-dialog').classList.remove('hidden')" class="inline-flex items-center gap-2 px-3 py-1.5 border border-neutral-300 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        Manage Sources
+      </button>
+    </div>
+
+    <!-- Split View -->
+    <div class="flex flex-1 overflow-hidden px-6 pb-6 gap-4">
+
+      <!-- LEFT PANEL: Filters + Skill List -->
+      <div class="w-[45%] flex flex-col bg-white border border-neutral-200 rounded-lg overflow-hidden">
+        <!-- Search -->
+        <div class="px-4 py-3 border-b border-neutral-100">
+          <div class="flex items-center gap-2 h-8 px-3 rounded-md border border-neutral-200 bg-neutral-50 text-neutral-500">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <span class="text-xs">Search marketplace...</span>
+          </div>
+          <!-- Category pills -->
+          <div class="flex items-center gap-1 mt-2 flex-wrap">
+            <button class="cat-btn active px-2 py-0.5 text-[11px] font-medium rounded" onclick="filterCat(this)">All (39)</button>
+            <button class="cat-btn px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100" onclick="filterCat(this)">&#x1F4BB; Development (8)</button>
+            <button class="cat-btn px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100" onclick="filterCat(this)">&#x1F4CA; Research (5)</button>
+            <button class="cat-btn px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100" onclick="filterCat(this)">&#x1F4AC; Communication (6)</button>
+            <button class="cat-btn px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100" onclick="filterCat(this)">&#x1F4C4; Content (4)</button>
+            <button class="cat-btn px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100" onclick="filterCat(this)">&#x26A1; Automation (3)</button>
+            <button class="cat-btn px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100" onclick="filterCat(this)">&#x1F9E0; AI &amp; ML (4)</button>
+            <button class="cat-btn px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100" onclick="filterCat(this)">&#x2601; Cloud (3)</button>
+            <button class="cat-btn px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100" onclick="filterCat(this)">&#x1F4BC; Business (3)</button>
+            <button class="cat-btn px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100" onclick="filterCat(this)">&#x1F6E1; Security (2)</button>
+            <button class="cat-btn px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100" onclick="filterCat(this)">&#x1F4C5; Productivity (5)</button>
+          </div>
+        </div>
+
+        <!-- Filters row: Source + Trust -->
+        <div class="px-4 py-2 border-b border-neutral-100 flex items-center gap-4">
+          <div class="flex items-center gap-3 text-[11px]">
+            <span class="text-neutral-400 font-medium uppercase tracking-wider">Source:</span>
+            <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="source" class="source-radio w-3 h-3 accent-primary-600" checked><span class="text-neutral-600">All</span></label>
+            <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="source" class="source-radio w-3 h-3 accent-primary-600"><span class="text-neutral-600">Official (12)</span></label>
+            <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="source" class="source-radio w-3 h-3 accent-primary-600"><span class="text-neutral-600">Community (24)</span></label>
+            <label class="flex items-center gap-1 cursor-pointer"><input type="radio" name="source" class="source-radio w-3 h-3 accent-primary-600"><span class="text-neutral-600">Custom (3)</span></label>
+          </div>
+        </div>
+        <div class="px-4 py-2 border-b border-neutral-100 flex items-center gap-3 text-[11px]">
+          <span class="text-neutral-400 font-medium uppercase tracking-wider">Trust:</span>
+          <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked class="w-3 h-3 accent-primary-600 rounded"><span class="trust-badge-verified">&#x1F6E1; Verified</span></label>
+          <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked class="w-3 h-3 accent-primary-600 rounded"><span class="trust-badge-partner">&#x1F91D; Partner</span></label>
+          <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked class="w-3 h-3 accent-primary-600 rounded"><span class="trust-badge-community">&#x1F465; Community</span></label>
+          <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" checked class="w-3 h-3 accent-primary-600 rounded"><span class="trust-badge-private">&#x1F512; Private</span></label>
+        </div>
+
+        <!-- Scrollable skill list -->
+        <div class="flex-1 overflow-y-auto">
+
+          <!-- OFFICIAL -->
+          <div class="px-4 pt-3 pb-1">
+            <div class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Official (12)</div>
+          </div>
+
+          <!-- 1. Web Researcher — active -->
+          <div class="mp-row active border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-primary-100 flex items-center justify-center text-sm flex-shrink-0">&#x1F50D;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">Web Researcher</span>
+                  <span class="trust-badge-verified text-[11px]" title="Verified by Crewship">&#x1F6E1;&#xFE0F;</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v1.0.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Search, fetch, summarize web content</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">research-data</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">web-scraping</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">search</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">847 installs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. Code Assistant -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-success-50 flex items-center justify-center text-sm flex-shrink-0">&#x1F4BB;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">Code Assistant</span>
+                  <span class="trust-badge-verified text-[11px]" title="Verified">&#x1F6E1;&#xFE0F;</span>
+                  <span class="inline-flex items-center gap-0.5 px-1.5 py-0 bg-success-50 text-success-700 text-[9px] font-medium rounded">&#x2713; Installed</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v1.2.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Read, write, execute, debug code</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">development</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">testing</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">debugging</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">1.2k installs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. Git Operations -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center text-sm flex-shrink-0">&#x1F500;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">Git Operations</span>
+                  <span class="trust-badge-verified text-[11px]" title="Verified">&#x1F6E1;&#xFE0F;</span>
+                  <span class="inline-flex items-center gap-0.5 px-1.5 py-0 bg-success-50 text-success-700 text-[9px] font-medium rounded">&#x2713; Installed</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v1.0.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Clone, commit, push, manage PRs</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">development</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">version-control</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">github</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">567 installs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. SEO Toolkit -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-warning-50 flex items-center justify-center text-sm flex-shrink-0">&#x1F4CA;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">SEO Toolkit</span>
+                  <span class="trust-badge-partner text-[11px]" title="Partner">&#x1F91D;</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v2.1.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Keywords, rank tracking, optimization</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">research-data</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">seo</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">analytics</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">234 installs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5. Email Sender -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-team-marketing/10 flex items-center justify-center text-sm flex-shrink-0">&#x2709;&#xFE0F;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">Email Sender</span>
+                  <span class="trust-badge-verified text-[11px]" title="Verified">&#x1F6E1;&#xFE0F;</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v1.1.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Send emails, templates, campaigns</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">communication</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">email</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">smtp</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">189 installs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 6. Slack Connector -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-team-support/10 flex items-center justify-center text-sm flex-shrink-0">&#x1F4AC;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">Slack Connector</span>
+                  <span class="trust-badge-partner text-[11px]" title="Partner">&#x1F91D;</span>
+                  <span class="inline-flex items-center gap-0.5 px-1.5 py-0 bg-success-50 text-success-700 text-[9px] font-medium rounded">&#x2713; Installed</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v1.3.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Messages, channels, threads, reactions</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">communication</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">slack</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">chat</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">456 installs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- COMMUNITY -->
+          <div class="px-4 pt-4 pb-1">
+            <div class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Community (24)</div>
+          </div>
+
+          <!-- C1. Image Generator -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-brand-gold/10 flex items-center justify-center text-sm flex-shrink-0">&#x1F3A8;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">Image Generator</span>
+                  <span class="trust-badge-community text-[11px]" title="Community">&#x1F465;</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v0.9.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Generate, edit, upscale images with AI</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">content-media</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">image-processing</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">computer-vision</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">92 installs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- C2. PDF Processor -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-error-50 flex items-center justify-center text-sm flex-shrink-0">&#x1F4C4;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">PDF Processor</span>
+                  <span class="trust-badge-community text-[11px]" title="Community">&#x1F465;</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v1.0.2</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Extract, merge, convert PDF documents</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">content-media</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">pdf</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">ocr</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">78 installs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- C3. Calendar Sync -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-primary-50 flex items-center justify-center text-sm flex-shrink-0">&#x1F4C5;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">Calendar Sync</span>
+                  <span class="trust-badge-community text-[11px]" title="Community">&#x1F465;</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v1.1.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Google Calendar, Outlook events</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">productivity</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">scheduling</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">oauth</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">145 installs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- C4. HubSpot CRM -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-warning-50 flex items-center justify-center text-sm flex-shrink-0">&#x1F4BC;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">HubSpot CRM</span>
+                  <span class="trust-badge-partner text-[11px]" title="Partner">&#x1F91D;</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v2.0.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Contacts, deals, tasks, pipeline</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">business-crm</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">hubspot</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">crm</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">312 installs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- C5. LLM Gateway -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-brand-teal/10 flex items-center justify-center text-sm flex-shrink-0">&#x1F9E0;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">LLM Gateway</span>
+                  <span class="trust-badge-community text-[11px]" title="Community">&#x1F465;</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v0.8.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Multi-provider LLM access, fallback routing</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">ai-ml</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">text-generation</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">api-integration</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">203 installs</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CUSTOM REGISTRY -->
+          <div class="px-4 pt-4 pb-1">
+            <div class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Custom — Unify Internal (3)</div>
+          </div>
+
+          <!-- P1. Jira Connector -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-primary-50 flex items-center justify-center text-sm flex-shrink-0">&#x1F3AF;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">Jira Connector</span>
+                  <span class="trust-badge-private text-[11px]" title="Private">&#x1F512;</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v1.2.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Create issues, sync tasks, manage sprints</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">business-crm</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">jira</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">project-management</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-brand-teal/10 text-brand-teal text-[9px]">unify-specific</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- P2. Internal API -->
+          <div class="mp-row border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showMpDetail(this)">
+            <div class="flex items-center gap-3">
+              <div class="w-7 h-7 rounded-md bg-neutral-100 flex items-center justify-center text-sm flex-shrink-0">&#x1F517;</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium truncate">Internal API Bridge</span>
+                  <span class="trust-badge-private text-[11px]" title="Private">&#x1F512;</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">v0.5.0</span>
+                </div>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] text-neutral-400 truncate">Connect to internal REST/GraphQL services</span>
+                </div>
+                <div class="flex items-center gap-1 mt-1">
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">development</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">rest-api</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-neutral-100 text-neutral-500">graphql</span>
+                  <span class="px-1.5 py-0 text-[9px] font-medium rounded bg-brand-teal/10 text-brand-teal text-[9px]">internal-api</span>
+                  <span class="text-[10px] text-neutral-300 ml-auto">—</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="h-4"></div>
+        </div>
+      </div>
+
+      <!-- RIGHT PANEL: Detail Preview -->
+      <div class="w-[55%] bg-white border border-neutral-200 rounded-lg overflow-hidden flex flex-col">
+
+        <!-- Skill Header -->
+        <div class="px-5 pt-5 pb-0 flex-shrink-0">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center text-lg flex-shrink-0">&#x1F50D;</div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <h2 class="text-base font-semibold">Web Researcher</h2>
+                <span class="trust-badge-verified text-sm" title="Verified by Crewship">&#x1F6E1;&#xFE0F;</span>
+                <span class="text-[10px] text-neutral-400">v1.0.0</span>
+              </div>
+              <div class="flex items-center gap-2 mt-0.5">
+                <span class="text-xs text-neutral-500">by <span class="text-primary-600 font-medium">Crewship</span></span>
+                <span class="text-neutral-300">&#x2022;</span>
+                <span class="text-xs text-neutral-400">Updated 2 days ago</span>
+                <span class="text-neutral-300">&#x2022;</span>
+                <span class="text-xs text-neutral-400">MIT License</span>
+              </div>
+            </div>
+          </div>
+          <!-- Tags -->
+          <div class="flex items-center gap-1.5 mt-3">
+            <span class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-primary-50 text-primary-700 cursor-pointer hover:bg-primary-100">research-data</span>
+            <span class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-neutral-100 text-neutral-600 cursor-pointer hover:bg-neutral-200">web-scraping</span>
+            <span class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-neutral-100 text-neutral-600 cursor-pointer hover:bg-neutral-200">search</span>
+            <span class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-neutral-100 text-neutral-600 cursor-pointer hover:bg-neutral-200">api-integration</span>
+          </div>
+        </div>
+
+        <!-- Divider -->
+        <div class="border-b border-neutral-100 mt-4"></div>
+
+        <!-- Detail content (scrollable) -->
+        <div class="flex-1 overflow-y-auto p-5 space-y-5">
+
+          <!-- Description -->
+          <div>
+            <p class="text-sm text-neutral-600 leading-relaxed">Search, fetch, and summarize web content using multiple search engines (Google, Bing, DuckDuckGo). Includes intelligent content extraction, automatic summarization, and structured data output. Perfect for research agents, SEO analysis, and content curation workflows.</p>
+          </div>
+
+          <!-- Stats -->
+          <div class="grid grid-cols-4 gap-3">
+            <div class="text-center">
+              <div class="text-sm font-semibold text-neutral-900">847</div>
+              <div class="text-[10px] text-neutral-400">Installs</div>
+            </div>
+            <div class="text-center">
+              <div class="text-sm font-semibold text-neutral-900">24 MB</div>
+              <div class="text-[10px] text-neutral-400">Image size</div>
+            </div>
+            <div class="text-center">
+              <div class="text-sm font-semibold text-neutral-900">3</div>
+              <div class="text-[10px] text-neutral-400">Tools</div>
+            </div>
+            <div class="text-center">
+              <div class="flex items-center justify-center gap-0.5 text-sm font-semibold text-warning-700">&#x2605; 4.2</div>
+              <div class="text-[10px] text-neutral-400">23 reviews</div>
+            </div>
+          </div>
+
+          <!-- Trust -->
+          <div class="flex items-center gap-2 px-3 py-2 bg-success-50 rounded-md">
+            <svg class="w-4 h-4 text-success-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg>
+            <div>
+              <span class="text-xs font-medium text-success-700">Verified by Crewship</span>
+              <span class="text-[11px] text-success-700/70 ml-1">&#x2022; Code audited, security reviewed, no malicious behavior</span>
+            </div>
+          </div>
+
+          <!-- Tools -->
+          <div>
+            <h3 class="text-xs font-semibold text-neutral-700 uppercase tracking-wider mb-2">Tools (3)</h3>
+            <div class="space-y-1.5">
+              <div class="flex items-start gap-3 px-3 py-2 bg-neutral-50 rounded-md">
+                <code class="text-xs font-mono text-primary-700 bg-primary-50 px-1.5 py-0.5 rounded">web_search</code>
+                <span class="text-xs text-neutral-500">Search the web using Google, Bing, or DuckDuckGo</span>
+              </div>
+              <div class="flex items-start gap-3 px-3 py-2 bg-neutral-50 rounded-md">
+                <code class="text-xs font-mono text-primary-700 bg-primary-50 px-1.5 py-0.5 rounded">web_fetch</code>
+                <span class="text-xs text-neutral-500">Fetch and parse content from any URL</span>
+              </div>
+              <div class="flex items-start gap-3 px-3 py-2 bg-neutral-50 rounded-md">
+                <code class="text-xs font-mono text-primary-700 bg-primary-50 px-1.5 py-0.5 rounded">summarize</code>
+                <span class="text-xs text-neutral-500">Summarize long content into key points</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Required Credentials -->
+          <div>
+            <h3 class="text-xs font-semibold text-neutral-700 uppercase tracking-wider mb-2">Required Credentials</h3>
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between px-3 py-2 bg-neutral-50 rounded-md">
+                <code class="text-xs font-mono text-neutral-700">SERP_API_KEY</code>
+                <span class="text-[11px] text-neutral-400">Search API access</span>
+              </div>
+              <div class="flex items-center justify-between px-3 py-2 bg-neutral-50 rounded-md">
+                <code class="text-xs font-mono text-neutral-700">OPENAI_API_KEY</code>
+                <span class="text-[11px] text-neutral-400">Optional — for summarization</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex items-center gap-2 pt-1">
+            <button class="px-4 py-2 bg-primary-600 text-white text-sm font-medium rounded-md hover:bg-primary-700">Install Skill</button>
+            <a href="#" class="flex items-center gap-1 px-3 py-2 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 text-neutral-700">
+              View source
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </a>
+          </div>
+
+          <!-- Publisher -->
+          <div>
+            <h3 class="text-xs font-semibold text-neutral-700 uppercase tracking-wider mb-2">Publisher</h3>
+            <div class="flex items-center gap-3 px-3 py-2 bg-neutral-50 rounded-md">
+              <div class="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">C</div>
+              <div>
+                <div class="text-xs font-medium text-neutral-700">Crewship</div>
+                <div class="text-[11px] text-neutral-400">crewship.ai &#x2022; 12 skills &#x2022; Verified publisher</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Reviews -->
+          <div>
+            <h3 class="text-xs font-semibold text-neutral-700 uppercase tracking-wider mb-2">Reviews</h3>
+            <div class="space-y-2">
+              <div class="px-3 py-2 bg-neutral-50 rounded-md">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-warning-500 text-[11px]">&#x2605;&#x2605;&#x2605;&#x2605;&#x2605;</span>
+                  <span class="text-xs font-medium text-neutral-700">Jan K.</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">3 days ago</span>
+                </div>
+                <p class="text-xs text-neutral-500">"Great for SEO research workflows. Fast and reliable search results."</p>
+              </div>
+              <div class="px-3 py-2 bg-neutral-50 rounded-md">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="text-warning-500 text-[11px]">&#x2605;&#x2605;&#x2605;&#x2605;&#x2606;</span>
+                  <span class="text-xs font-medium text-neutral-700">Maria L.</span>
+                  <span class="text-[10px] text-neutral-400 ml-auto">1 week ago</span>
+                </div>
+                <p class="text-xs text-neutral-500">"Works well but the summarize tool could be better with longer articles."</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Changelog -->
+          <div>
+            <h3 class="text-xs font-semibold text-neutral-700 uppercase tracking-wider mb-2">Changelog</h3>
+            <div class="space-y-1.5 text-xs">
+              <div class="flex items-start gap-2">
+                <span class="font-mono text-neutral-500 flex-shrink-0">v1.0.0</span>
+                <span class="text-neutral-300">&#x2022;</span>
+                <span class="text-neutral-400 flex-shrink-0">2 days ago</span>
+                <span class="text-neutral-600">Initial release</span>
+              </div>
+              <div class="flex items-start gap-2">
+                <span class="font-mono text-neutral-500 flex-shrink-0">v0.9.2</span>
+                <span class="text-neutral-300">&#x2022;</span>
+                <span class="text-neutral-400 flex-shrink-0">1 week ago</span>
+                <span class="text-neutral-600">Bug fixes, improved parsing</span>
+              </div>
+              <div class="flex items-start gap-2">
+                <span class="font-mono text-neutral-500 flex-shrink-0">v0.9.0</span>
+                <span class="text-neutral-300">&#x2022;</span>
+                <span class="text-neutral-400 flex-shrink-0">2 weeks ago</span>
+                <span class="text-neutral-600">Beta release</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Marketplace Sources Dialog -->
+    <div id="sources-dialog" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-neutral-950/40">
+      <div class="bg-white rounded-xl shadow-xl w-[500px] p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-base font-semibold">Marketplace Sources</h2>
+          <button onclick="document.getElementById('sources-dialog').classList.add('hidden')" class="p-1 hover:bg-neutral-100 rounded-md">
+            <svg class="w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+        </div>
+
+        <!-- Connected registries -->
+        <div class="space-y-2">
+          <div class="flex items-center gap-3 px-3 py-3 bg-neutral-50 rounded-lg">
+            <svg class="w-4 h-4 text-success-500 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            <div class="flex-1 min-w-0">
+              <div class="text-xs font-semibold text-neutral-900">Crewship Official</div>
+              <div class="text-[11px] text-neutral-400">crewship.ai/registry &#x2022; 36 skills &#x2022; Updated 2h ago</div>
+            </div>
+            <span class="px-2 py-0.5 text-[10px] font-medium rounded bg-success-50 text-success-700">Default</span>
+          </div>
+          <div class="flex items-center gap-3 px-3 py-3 bg-neutral-50 rounded-lg">
+            <svg class="w-4 h-4 text-success-500 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+            <div class="flex-1 min-w-0">
+              <div class="text-xs font-semibold text-neutral-900">Unify Internal</div>
+              <div class="text-[11px] text-neutral-400">registry.unifylab.cz &#x2022; 3 skills &#x2022; Updated 1d ago</div>
+            </div>
+            <button class="text-[11px] text-error-500 hover:underline">Remove</button>
+          </div>
+        </div>
+
+        <!-- Add custom -->
+        <div class="border-t border-neutral-100 pt-4">
+          <h3 class="text-xs font-semibold text-neutral-700 mb-3">Add Custom Registry</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="text-xs text-neutral-500 mb-1 block">Registry URL</label>
+              <input type="url" placeholder="https://registry.example.com/crewship" class="w-full h-8 px-3 text-xs border border-neutral-200 rounded-md bg-white placeholder:text-neutral-300">
+            </div>
+            <div>
+              <label class="text-xs text-neutral-500 mb-1 block">Auth token <span class="text-neutral-300">(optional)</span></label>
+              <input type="password" placeholder="Bearer token or API key" class="w-full h-8 px-3 text-xs border border-neutral-200 rounded-md bg-white placeholder:text-neutral-300">
+            </div>
+            <div class="flex items-center gap-2">
+              <button class="px-4 py-1.5 bg-primary-600 text-white text-sm font-medium rounded-md hover:bg-primary-700">Validate &amp; Connect</button>
+              <span class="text-[11px] text-neutral-400">Format: Crewship Marketplace Manifest v1</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+function showMpDetail(el) {
+  document.querySelectorAll('.mp-row').forEach(function(r) { r.classList.remove('active'); });
+  el.classList.add('active');
+}
+function filterCat(el) {
+  document.querySelectorAll('.cat-btn').forEach(function(b) {
+    b.classList.remove('active');
+    b.classList.add('text-neutral-500');
+  });
+  el.classList.add('active');
+  el.classList.remove('text-neutral-500');
+}
+</script>
+<script src="_shared.js"></script>
+</body>
+</html>
