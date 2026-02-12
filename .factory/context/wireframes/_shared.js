@@ -136,11 +136,20 @@
     try { localStorage.setItem(STORAGE_KEY, m); } catch (e) {}
   }
 
-  // Inject pulse-dot animation if not already present
+  // Inject animations
   if (!document.querySelector('style[data-shared]')) {
     var style = document.createElement('style');
     style.setAttribute('data-shared', '1');
-    style.textContent = '@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}.pulse-dot{animation:pulse-dot 2s ease-in-out infinite}';
+    style.textContent =
+      '@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}.pulse-dot{animation:pulse-dot 2s ease-in-out infinite}' +
+      '@keyframes ai-glow{0%,100%{box-shadow:0 0 8px 2px rgba(78,205,196,.25)}50%{box-shadow:0 0 20px 6px rgba(78,205,196,.4)}}' +
+      '@keyframes ai-entrance{0%{opacity:0;transform:scale(.6)}100%{opacity:1;transform:scale(1)}}' +
+      '@keyframes ai-panel-in{0%{opacity:0;transform:translateY(16px) scale(.95)}100%{opacity:1;transform:translateY(0) scale(1)}}' +
+      '.ai-btn-glow{animation:ai-glow 3s ease-in-out infinite}' +
+      '.ai-btn-entrance{animation:ai-entrance .4s cubic-bezier(.34,1.56,.64,1) both}' +
+      '.ai-panel-entrance{animation:ai-panel-in .25s ease-out both}' +
+      '.ai-btn-pill{transition:width .25s cubic-bezier(.4,0,.2,1),padding .25s cubic-bezier(.4,0,.2,1)}' +
+      '.ai-btn-label{transition:opacity .15s ease,max-width .25s ease;overflow:hidden;white-space:nowrap}';
     document.head.appendChild(style);
   }
 
@@ -391,5 +400,153 @@
 
     // Initial render
     applySidebarMode(currentMode, false);
+
+    // ======== CREWSHIP AI FLOATING BUTTON ========
+    var aiOpen = false;
+
+    // --- Floating button ---
+    var aiBtn = document.createElement('button');
+    aiBtn.className = 'fixed bottom-6 right-6 z-50 ai-btn-entrance ai-btn-glow ai-btn-pill flex items-center gap-0 rounded-full shadow-lg cursor-pointer border-0 outline-none';
+    aiBtn.style.cssText = 'background:linear-gradient(135deg,#4ECDC4 0%,#1877F2 100%);width:48px;height:48px;padding:0;';
+    aiBtn.title = 'Crewship AI';
+    aiBtn.innerHTML =
+      '<span class="flex items-center justify-center flex-shrink-0" style="width:48px;height:48px">' +
+        '<svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>' +
+      '</span>' +
+      '<span class="ai-btn-label text-white text-xs font-semibold" style="max-width:0;opacity:0">Crewship AI</span>';
+
+    // Hover: expand to pill
+    aiBtn.addEventListener('mouseenter', function () {
+      if (!aiOpen) {
+        aiBtn.style.width = '152px';
+        aiBtn.style.paddingRight = '16px';
+        var label = aiBtn.querySelector('.ai-btn-label');
+        label.style.maxWidth = '100px';
+        label.style.opacity = '1';
+        label.style.marginLeft = '0px';
+      }
+    });
+    aiBtn.addEventListener('mouseleave', function () {
+      if (!aiOpen) {
+        aiBtn.style.width = '48px';
+        aiBtn.style.paddingRight = '0';
+        var label = aiBtn.querySelector('.ai-btn-label');
+        label.style.maxWidth = '0';
+        label.style.opacity = '0';
+      }
+    });
+
+    // --- Chat panel ---
+    var aiPanel = document.createElement('div');
+    aiPanel.className = 'fixed bottom-20 right-6 z-50 hidden';
+    aiPanel.style.width = '384px';
+    aiPanel.innerHTML =
+      '<div class="ai-panel-entrance bg-white rounded-2xl shadow-2xl border border-neutral-200 overflow-hidden flex flex-col" style="max-height:600px">' +
+        // Header
+        '<div class="px-4 py-3 flex items-center justify-between flex-shrink-0" style="background:linear-gradient(135deg,#4ECDC4 0%,#1877F2 100%)">' +
+          '<div class="flex items-center gap-2">' +
+            '<svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>' +
+            '<span class="text-sm font-semibold text-white">Crewship AI</span>' +
+            '<span class="text-[9px] px-1.5 py-0.5 rounded bg-white/20 text-white font-medium">BETA</span>' +
+          '</div>' +
+          '<button id="ai-close" class="p-1 rounded-md text-white/70 hover:text-white hover:bg-white/10">' +
+            '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>' +
+          '</button>' +
+        '</div>' +
+        // TODO Banner
+        '<div class="px-4 py-2 bg-warning-50 border-b border-warning-500/20 flex items-center gap-2">' +
+          '<svg class="w-3.5 h-3.5 text-warning-700 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>' +
+          '<span class="text-[10px] text-warning-700 font-medium">Phase 2 — wireframe preview. RAG + streaming in development.</span>' +
+        '</div>' +
+        // Messages area
+        '<div class="flex-1 overflow-y-auto px-4 py-4 space-y-4" style="min-height:260px">' +
+          // AI welcome message
+          '<div class="flex gap-2.5">' +
+            '<div class="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center" style="background:linear-gradient(135deg,#4ECDC4,#1877F2)">' +
+              '<svg class="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>' +
+            '</div>' +
+            '<div class="flex-1">' +
+              '<div class="text-[10px] text-neutral-400 font-medium mb-1">Crewship AI</div>' +
+              '<div class="bg-neutral-50 rounded-xl rounded-tl-sm px-3.5 py-2.5 text-sm text-neutral-800 leading-relaxed">' +
+                'Ahoj! Jsem <strong>Crewship AI</strong> — vas asistent pro celou platformu. Pomahu s:' +
+                '<ul class="mt-2 space-y-1 text-xs text-neutral-600">' +
+                  '<li class="flex items-center gap-1.5"><svg class="w-3 h-3 text-brand-teal flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Setup a konfigurace agentu</li>' +
+                  '<li class="flex items-center gap-1.5"><svg class="w-3 h-3 text-brand-teal flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Debugging a reseni chyb</li>' +
+                  '<li class="flex items-center gap-1.5"><svg class="w-3 h-3 text-brand-teal flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Tvorba custom skills</li>' +
+                  '<li class="flex items-center gap-1.5"><svg class="w-3 h-3 text-brand-teal flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Otazky k platforme a API</li>' +
+                '</ul>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+          // Suggested prompts
+          '<div class="space-y-1.5">' +
+            '<div class="text-[10px] text-neutral-400 font-medium uppercase tracking-wider px-1">Rychle otazky</div>' +
+            '<button class="w-full text-left px-3 py-2 text-xs bg-white border border-neutral-200 rounded-lg hover:border-primary-300 hover:bg-primary-50/50 transition-colors text-neutral-700">' +
+              '<span class="text-primary-600 mr-1.5">→</span>Jak vytvorim noveho agenta?' +
+            '</button>' +
+            '<button class="w-full text-left px-3 py-2 text-xs bg-white border border-neutral-200 rounded-lg hover:border-primary-300 hover:bg-primary-50/50 transition-colors text-neutral-700">' +
+              '<span class="text-primary-600 mr-1.5">→</span>Muj agent hlasi error — pomoz mi debugovat' +
+            '</button>' +
+            '<button class="w-full text-left px-3 py-2 text-xs bg-white border border-neutral-200 rounded-lg hover:border-primary-300 hover:bg-primary-50/50 transition-colors text-neutral-700">' +
+              '<span class="text-primary-600 mr-1.5">→</span>Vygeneruj skill pro web scraping' +
+            '</button>' +
+            '<button class="w-full text-left px-3 py-2 text-xs bg-white border border-neutral-200 rounded-lg hover:border-primary-300 hover:bg-primary-50/50 transition-colors text-neutral-700">' +
+              '<span class="text-primary-600 mr-1.5">→</span>Jak nastavim webhook trigger?' +
+            '</button>' +
+          '</div>' +
+        '</div>' +
+        // Input area
+        '<div class="px-4 py-3 border-t border-neutral-200 bg-white flex-shrink-0">' +
+          '<div class="flex items-center gap-2">' +
+            '<input type="text" placeholder="Napiste zpravu..." class="flex-1 px-3 py-2 text-sm border border-neutral-200 rounded-lg bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 focus:bg-white">' +
+            '<button class="p-2 rounded-lg text-white flex-shrink-0" style="background:linear-gradient(135deg,#4ECDC4,#1877F2)">' +
+              '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.498.498 0 0 0 .682.627l18.168-8.215a.5.5 0 0 0 0-.904z"/><path d="M6 12h16"/></svg>' +
+            '</button>' +
+          '</div>' +
+          '<div class="flex items-center justify-between mt-2">' +
+            '<span class="text-[10px] text-neutral-400">Powered by Anthropic Claude</span>' +
+            '<span class="text-[10px] text-neutral-400">⌘ + J</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    // Toggle logic
+    aiBtn.addEventListener('click', function () {
+      aiOpen = !aiOpen;
+      if (aiOpen) {
+        aiPanel.classList.remove('hidden');
+        aiBtn.style.width = '48px';
+        aiBtn.style.paddingRight = '0';
+        var label = aiBtn.querySelector('.ai-btn-label');
+        label.style.maxWidth = '0';
+        label.style.opacity = '0';
+        // Change button icon to X
+        aiBtn.querySelector('span:first-child').innerHTML =
+          '<svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+      } else {
+        aiPanel.classList.add('hidden');
+        aiBtn.querySelector('span:first-child').innerHTML =
+          '<svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>';
+      }
+    });
+
+    // Close button inside panel
+    aiPanel.querySelector('#ai-close').addEventListener('click', function () {
+      aiOpen = false;
+      aiPanel.classList.add('hidden');
+      aiBtn.querySelector('span:first-child').innerHTML =
+        '<svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>';
+    });
+
+    // Keyboard shortcut: Cmd+J
+    document.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'j') {
+        e.preventDefault();
+        aiBtn.click();
+      }
+    });
+
+    document.body.appendChild(aiBtn);
+    document.body.appendChild(aiPanel);
   });
 })();
