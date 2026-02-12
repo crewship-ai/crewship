@@ -29,20 +29,20 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
     <!-- Action bar -->
     <div class="flex items-center justify-between px-6 py-3">
       <div class="flex items-center gap-2">
-        <button onclick="showView('chart')" id="btn-chart" class="px-3 py-1.5 text-xs font-medium rounded-md bg-neutral-950 text-white">Chart</button>
-        <button onclick="showView('orchestration')" id="btn-orchestration" class="px-3 py-1.5 text-xs font-medium rounded-md text-neutral-600 hover:bg-neutral-200">Connections</button>
+        <button onclick="showView('orchestration')" id="btn-orchestration" class="px-3 py-1.5 text-xs font-medium rounded-md bg-neutral-950 text-white">Connections</button>
+        <button onclick="showView('chart')" id="btn-chart" class="px-3 py-1.5 text-xs font-medium rounded-md text-neutral-600 hover:bg-neutral-200">Chart</button>
         <button onclick="showView('list')" id="btn-list" class="px-3 py-1.5 text-xs font-medium rounded-md text-neutral-600 hover:bg-neutral-200">List</button>
       </div>
       <div class="flex items-center gap-2">
-        <button id="btn-export" onclick="showDialog('export')" class="hidden items-center gap-2 px-3 py-1.5 border border-neutral-200 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
+        <button id="btn-export" onclick="showDialog('export')" class="inline-flex items-center gap-2 px-3 py-1.5 border border-neutral-200 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Export JSON
         </button>
-        <button id="btn-import" onclick="showDialog('import')" class="hidden items-center gap-2 px-3 py-1.5 border border-neutral-200 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
+        <button id="btn-import" onclick="showDialog('import')" class="inline-flex items-center gap-2 px-3 py-1.5 border border-neutral-200 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           Import JSON
         </button>
-        <button id="btn-add-connection" onclick="showDialog('add-connection')" class="hidden items-center gap-2 px-3 py-1.5 border border-neutral-200 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
+        <button id="btn-add-connection" onclick="showDialog('add-connection')" class="inline-flex items-center gap-2 px-3 py-1.5 border border-neutral-200 text-neutral-700 text-sm font-medium rounded-md hover:bg-neutral-50">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
           Add Connection
         </button>
@@ -54,7 +54,7 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
     </div>
 
     <!-- ======== VIEW: CHART (org chart — default) ======== -->
-    <div id="view-chart" class="px-6 pb-8">
+    <div id="view-chart" class="hidden px-6 pb-8">
       <div class="flex flex-col items-center">
         <div class="px-5 py-3 bg-neutral-900 text-white rounded-lg text-sm font-semibold mb-0">
           <div class="flex items-center gap-2">
@@ -162,7 +162,7 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
     </div>
 
     <!-- ======== VIEW: CONNECTIONS (relationship diagram) ======== -->
-    <div id="view-orchestration" class="hidden px-6 pb-8">
+    <div id="view-orchestration" class="px-6 pb-8">
       <div class="relative canvas-bg rounded-lg border border-neutral-200 bg-white overflow-auto" style="height: 520px; min-width: 960px;">
 
         <!-- SVG edges layer -->
