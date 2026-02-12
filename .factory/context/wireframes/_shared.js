@@ -86,6 +86,13 @@
         { label: '7 agents', color: 'bg-primary-100 text-primary-700' },
         { label: '3 connections', color: 'bg-primary-100 text-primary-700' }
       ]
+    },
+    '19-': {
+      title: 'Audit Log',
+      pills: [
+        { label: '248 events', color: 'bg-neutral-100 text-neutral-600' },
+        { label: 'Last 30 days', color: 'bg-neutral-100 text-neutral-600' }
+      ]
     }
   };
 
@@ -104,7 +111,7 @@
     { label: 'Skills',        icon: 'skills',        href: '14-skills.html',     match: ['14-'], badge: '12' },
     { label: 'Marketplace',   icon: 'marketplace',   href: '15-marketplace.html', match: ['15-'], badge: '39' },
     { label: 'Credentials',   icon: 'credentials',   href: '13-credentials.html', match: ['13-'], badge: '6' },
-    { label: 'Audit Log',     icon: 'auditlog',      href: '#',                  match: [] }
+    { label: 'Audit Log',     icon: 'auditlog',      href: '19-audit-log.html',  match: ['19-'] }
   ];
 
   // --- Helpers ---
