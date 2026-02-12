@@ -49,7 +49,7 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
           </div>
           <!-- Category pills -->
           <div class="flex items-center gap-1.5 mt-2">
-            <button class="px-2 py-0.5 text-[11px] font-medium rounded bg-neutral-900 text-white">All (15)</button>
+            <button class="px-2 py-0.5 text-[11px] font-medium rounded bg-neutral-900 text-white">All (11)</button>
             <button class="px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100">Data (3)</button>
             <button class="px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100">Coding (4)</button>
             <button class="px-2 py-0.5 text-[11px] font-medium rounded text-neutral-500 hover:bg-neutral-100">Automation (4)</button>
@@ -266,79 +266,6 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
                 <div class="flex items-center gap-3 mt-0.5">
                   <span class="text-[11px] text-neutral-400 truncate">HTTP, assertions, load test</span>
                   <span class="flex items-center gap-1 text-[11px] ml-auto flex-shrink-0"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span>DevOps(1)</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- MARKETPLACE section -->
-          <div class="px-4 pt-4 pb-1">
-            <div class="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Marketplace (4)</div>
-          </div>
-
-          <!-- M1. Image Generator -->
-          <div class="skill-row marketplace border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showDetail(this, 'img-gen')">
-            <div class="flex items-center gap-3">
-              <div class="w-7 h-7 rounded-md bg-neutral-50 border border-dashed border-neutral-300 flex items-center justify-center text-sm flex-shrink-0">&#x1F3A8;</div>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-medium text-neutral-500 truncate">Image Generator</span>
-                  <span class="px-1.5 py-0 text-[10px] font-medium rounded bg-neutral-200 text-neutral-700">MANAGED</span>
-                  <button class="ml-auto px-2 py-0.5 bg-primary-600 text-white text-[10px] font-medium rounded hover:bg-primary-700 flex-shrink-0">Install</button>
-                </div>
-                <div class="flex items-center gap-2 mt-0.5">
-                  <span class="text-[11px] text-neutral-400 truncate">Generate, edit, upscale images with AI</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- M2. PDF Processor -->
-          <div class="skill-row marketplace border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showDetail(this, 'pdf-proc')">
-            <div class="flex items-center gap-3">
-              <div class="w-7 h-7 rounded-md bg-neutral-50 border border-dashed border-neutral-300 flex items-center justify-center text-sm flex-shrink-0">&#x1F4C4;</div>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-medium text-neutral-500 truncate">PDF Processor</span>
-                  <span class="px-1.5 py-0 text-[10px] font-medium rounded bg-neutral-200 text-neutral-700">MANAGED</span>
-                  <button class="ml-auto px-2 py-0.5 bg-primary-600 text-white text-[10px] font-medium rounded hover:bg-primary-700 flex-shrink-0">Install</button>
-                </div>
-                <div class="flex items-center gap-2 mt-0.5">
-                  <span class="text-[11px] text-neutral-400 truncate">Extract, merge, convert PDF documents</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- M3. Calendar Sync -->
-          <div class="skill-row marketplace border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showDetail(this, 'calendar')">
-            <div class="flex items-center gap-3">
-              <div class="w-7 h-7 rounded-md bg-neutral-50 border border-dashed border-neutral-300 flex items-center justify-center text-sm flex-shrink-0">&#x1F4C5;</div>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-medium text-neutral-500 truncate">Calendar Sync</span>
-                  <span class="px-1.5 py-0 text-[10px] font-medium rounded bg-neutral-200 text-neutral-700">MANAGED</span>
-                  <button class="ml-auto px-2 py-0.5 bg-primary-600 text-white text-[10px] font-medium rounded hover:bg-primary-700 flex-shrink-0">Install</button>
-                </div>
-                <div class="flex items-center gap-2 mt-0.5">
-                  <span class="text-[11px] text-neutral-400 truncate">Google Calendar, Outlook events</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- M4. Monitoring Alerts -->
-          <div class="skill-row marketplace border-l-2 border-transparent mx-2 px-3 py-2.5 rounded-md" onclick="showDetail(this, 'monitoring')">
-            <div class="flex items-center gap-3">
-              <div class="w-7 h-7 rounded-md bg-neutral-50 border border-dashed border-neutral-300 flex items-center justify-center text-sm flex-shrink-0">&#x1F6A8;</div>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-medium text-neutral-500 truncate">Monitoring Alerts</span>
-                  <span class="px-1.5 py-0 text-[10px] font-medium rounded bg-neutral-200 text-neutral-700">MANAGED</span>
-                  <button class="ml-auto px-2 py-0.5 bg-primary-600 text-white text-[10px] font-medium rounded hover:bg-primary-700 flex-shrink-0">Install</button>
-                </div>
-                <div class="flex items-center gap-2 mt-0.5">
-                  <span class="text-[11px] text-neutral-400 truncate">PagerDuty, Datadog, uptime checks</span>
                 </div>
               </div>
             </div>
@@ -786,14 +713,14 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
           </button>
         </div>
         <div class="space-y-2">
-          <!-- Marketplace -->
-          <button class="w-full flex items-start gap-3 p-4 border border-neutral-200 rounded-lg hover:border-primary-300 hover:bg-primary-50/30 text-left transition-colors">
+          <!-- Marketplace link -->
+          <a href="15-marketplace.html" class="w-full flex items-start gap-3 p-4 border border-neutral-200 rounded-lg hover:border-primary-300 hover:bg-primary-50/30 text-left transition-colors">
             <div class="w-9 h-9 rounded-md bg-primary-100 flex items-center justify-center text-base flex-shrink-0">&#x1F4E6;</div>
             <div>
-              <div class="text-sm font-semibold">Install from Marketplace</div>
-              <div class="text-xs text-neutral-500 mt-0.5">Browse official integrations and community skills</div>
+              <div class="text-sm font-semibold">Browse Marketplace</div>
+              <div class="text-xs text-neutral-500 mt-0.5">Discover official, community, and custom skills</div>
             </div>
-          </button>
+          </a>
           <!-- Custom -->
           <button class="w-full flex items-start gap-3 p-4 border border-neutral-200 rounded-lg hover:border-primary-300 hover:bg-primary-50/30 text-left transition-colors">
             <div class="w-9 h-9 rounded-md bg-neutral-100 flex items-center justify-center text-base flex-shrink-0">&#x1F527;</div>
