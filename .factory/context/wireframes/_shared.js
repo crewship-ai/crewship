@@ -25,7 +25,9 @@
     chevronSm: '<svg class="w-3 h-3 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>',
     panelLeft: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>',
     chevronsLeft: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg>',
-    chevronsRight: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/></svg>'
+    chevronsRight: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/></svg>',
+    activity: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>',
+    health: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>'
   };
 
   // --- Page config: title, status pills, CTA per page ---
@@ -87,6 +89,14 @@
         { label: '3 connections', color: 'bg-primary-100 text-primary-700' }
       ]
     },
+    '17-': {
+      title: 'Runs',
+      pills: [
+        { label: '4 running', color: 'bg-success-50 text-success-700', dot: 'bg-success-500 pulse-dot' },
+        { label: '18 today', color: 'bg-neutral-100 text-neutral-600' },
+        { label: '2 failed', color: 'bg-error-50 text-error-700' }
+      ]
+    },
     '19-': {
       title: 'Audit Log',
       pills: [
@@ -105,12 +115,16 @@
 
   // --- Nav items ---
   var navItems = [
+    { type: 'section', label: 'Work' },
     { label: 'Dashboard',     icon: 'dashboard',    href: '01-dashboard.html',   match: ['01-'] },
+    { label: 'Agents',        icon: 'agents',        href: '02-agents-list.html', match: ['02-','03-','04-','05-','06-','07-','08-','09-','10-','11-','12-'], badge: '7', errorDot: true },
     { label: 'Crews',         icon: 'crews',         href: '16-crews.html',      match: ['16-'], badge: '4' },
-    { label: 'Agents',        icon: 'agents',        href: '02-agents-list.html', match: ['02-','03-','04-','05-','06-','07-','08-','09-','10-','11-','12-'], badge: '7' },
+    { type: 'section', label: 'Configure' },
     { label: 'Skills',        icon: 'skills',        href: '14-skills.html',     match: ['14-'], badge: '12' },
-    { label: 'Marketplace',   icon: 'marketplace',   href: '15-marketplace.html', match: ['15-'], badge: '39' },
+    { label: 'Marketplace',   icon: 'marketplace',   href: '15-marketplace.html', match: ['15-'], badge: '39', future: true },
     { label: 'Credentials',   icon: 'credentials',   href: '13-credentials.html', match: ['13-'], badge: '6' },
+    { type: 'section', label: 'Monitor' },
+    { label: 'Runs',          icon: 'activity',      href: '17-runs.html',       match: ['17-'], todo: true },
     { label: 'Audit Log',     icon: 'auditlog',      href: '19-audit-log.html',  match: ['19-'] }
   ];
 
@@ -172,6 +186,10 @@
     toolbar.innerHTML =
       '<div class="flex items-center gap-3">' + titleHtml + pillsHtml + '</div>' +
       '<div class="flex items-center gap-1.5">' +
+        '<div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-success-50 border border-success-500/20 mr-1" title="Backend service status">' +
+          '<span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span>' +
+          '<span class="text-[10px] font-medium text-success-700">crewshipd</span>' +
+        '</div>' +
         '<button class="flex items-center gap-2 h-8 px-3 rounded-full border border-neutral-200 bg-transparent text-neutral-500 hover:border-neutral-300 hover:text-neutral-700 transition-colors">' +
           icons.search +
           '<span class="text-xs">Search...</span>' +
@@ -236,6 +254,16 @@
       // --- Nav items ---
       var navHtml = '<nav class="flex-1 px-2 py-1 space-y-0.5 overflow-y-auto">';
       navItems.forEach(function (item) {
+        // Section separator
+        if (item.type === 'section') {
+          if (isWide) {
+            navHtml += '<div class="pt-4 pb-1 px-3 text-[10px] font-medium text-neutral-400 uppercase tracking-wider">' + item.label + '</div>';
+          } else {
+            navHtml += '<div class="pt-3 pb-1 px-2"><div class="border-t border-neutral-200"></div></div>';
+          }
+          return;
+        }
+
         var isActive = item.match.some(function (prefix) { return filename.indexOf(prefix) === 0; });
         var baseCls = isActive
           ? 'flex items-center gap-3 rounded-md bg-primary-100 text-primary-600 font-medium text-sm'
@@ -244,26 +272,34 @@
         if (isWide) {
           baseCls += ' px-3 py-2';
           var badgeHtml = '';
-          if (item.badge) {
-            if (item.badgeType === 'new') {
-              badgeHtml = '<span class="ml-auto text-[10px] bg-primary-600 text-white px-1.5 py-0.5 rounded font-medium">' + item.badge + '</span>';
-            } else {
-              var bgCls = isActive ? 'bg-primary-200 text-primary-700' : 'bg-neutral-200 text-neutral-600';
-              badgeHtml = '<span class="ml-auto text-xs ' + bgCls + ' px-1.5 py-0.5 rounded-full">' + item.badge + '</span>';
-            }
+          if (item.todo) {
+            badgeHtml = '<span class="ml-auto text-[9px] bg-warning-50 text-warning-700 border border-warning-500/30 px-1.5 py-0.5 rounded font-medium">TODO</span>';
+          } else if (item.future) {
+            badgeHtml = '<span class="ml-auto text-[9px] bg-neutral-100 text-neutral-400 px-1.5 py-0.5 rounded font-medium">FUTURE</span>';
+          } else if (item.badge) {
+            var bgCls = isActive ? 'bg-primary-200 text-primary-700' : 'bg-neutral-200 text-neutral-600';
+            badgeHtml = '<span class="ml-auto text-xs ' + bgCls + ' px-1.5 py-0.5 rounded-full">' + item.badge + '</span>';
+          }
+          // Error dot for agents (shows when there's an agent in error state)
+          var errorDotHtml = '';
+          if (item.errorDot) {
+            errorDotHtml = '<span class="w-1.5 h-1.5 rounded-full bg-error-500 flex-shrink-0"></span>';
           }
           navHtml += '<a href="' + item.href + '" class="' + baseCls + '">' +
             '<span class="flex-shrink-0">' + icons[item.icon] + '</span>' +
             '<span class="truncate">' + item.label + '</span>' +
+            errorDotHtml +
             badgeHtml +
           '</a>';
         } else {
           baseCls += ' px-0 py-2 justify-center relative';
           var dotHtml = '';
-          if (item.badgeType === 'new') {
-            dotHtml = '<span class="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-primary-600"></span>';
+          if (item.errorDot) {
+            dotHtml = '<span class="absolute top-1 right-0.5 w-1.5 h-1.5 rounded-full bg-error-500"></span>';
+          } else if (item.todo) {
+            dotHtml = '<span class="absolute top-1 right-0.5 w-1.5 h-1.5 rounded-full bg-warning-500"></span>';
           }
-          navHtml += '<a href="' + item.href + '" class="' + baseCls + '" title="' + item.label + '">' +
+          navHtml += '<a href="' + item.href + '" class="' + baseCls + '" title="' + item.label + (item.todo ? ' (TODO)' : item.future ? ' (Future)' : '') + '">' +
             '<span class="flex-shrink-0">' + icons[item.icon] + '</span>' +
             dotHtml +
           '</a>';
