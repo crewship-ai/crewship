@@ -992,20 +992,35 @@ var CrewshipSettings = (function () {
     };
 
     var userTabs = [
+      { type: 'section', label: 'ACCOUNT' },
       { key: 'profile', label: 'Profile', icon: 'user' },
-      { key: 'password', label: 'Password & Auth', icon: 'lock' },
+      { key: 'auth', label: 'Authentication', icon: 'lock' },
+      { key: 'sessions', label: 'Sessions', icon: 'shield' },
+      { type: 'section', label: 'PREFERENCES' },
       { key: 'appearance', label: 'Appearance', icon: 'palette' },
-      { key: 'notifications', label: 'Notifications', icon: 'bellSm' }
+      { key: 'notifications', label: 'Notifications', icon: 'bellSm' },
+      { key: 'shortcuts', label: 'Keyboard Shortcuts', icon: 'toggleRight' },
+      { type: 'section', label: 'DEVELOPER' },
+      { key: 'tokens', label: 'API Tokens', icon: 'key' }
     ];
     var orgTabs = [
+      { type: 'section', label: 'GENERAL' },
       { key: 'general', label: 'General', icon: 'building' },
       { key: 'members', label: 'Members', icon: 'users' },
       { key: 'roles', label: 'Roles & Permissions', icon: 'shield' },
-      { key: 'billing', label: 'Billing', icon: 'creditCard' },
-      { key: 'apikeys', label: 'API Keys', icon: 'key', phase2: true },
-      { key: 'webhooks', label: 'Webhooks', icon: 'webhook', phase2: true },
-      { key: 'flags', label: 'Feature Flags', icon: 'toggleRight', ownerOnly: true },
-      { key: 'danger', label: 'Danger Zone', icon: 'alertTriangle', ownerOnly: true }
+      { type: 'section', label: 'AGENTS & RUNTIME' },
+      { key: 'agentDefaults', label: 'Agent Defaults', icon: 'webhook' },
+      { key: 'credPolicy', label: 'Credential Policy', icon: 'lock' },
+      { type: 'section', label: 'INTEGRATIONS' },
+      { key: 'apikeys', label: 'API Keys', icon: 'key', badge: 'P2' },
+      { key: 'webhooks', label: 'Webhooks', icon: 'webhook', badge: 'P2' },
+      { key: 'integrations', label: 'Integrations', icon: 'toggleRight', badge: 'P2' },
+      { type: 'section', label: 'BILLING' },
+      { key: 'billing', label: 'Billing & Usage', icon: 'creditCard' },
+      { type: 'section', label: 'ADVANCED' },
+      { key: 'flags', label: 'Feature Flags', icon: 'toggleRight', badge: 'OWNER' },
+      { key: 'auditlog', label: 'Audit Log', icon: 'shield' },
+      { key: 'danger', label: 'Danger Zone', icon: 'alertTriangle', badge: 'OWNER' }
     ];
 
     // --- Toggle switch helper ---
@@ -1060,10 +1075,11 @@ var CrewshipSettings = (function () {
           fieldHtml('Full Name', 'Pavel Srba') +
           fieldHtml('Email', 'pavel@unifylab.cz', { readonly: true }) +
           fieldHtml('Timezone', 'Europe/Prague (UTC+1)', { type: 'select', options: ['Europe/Prague (UTC+1)', 'Europe/London (UTC+0)', 'America/New_York (UTC-5)', 'America/Los_Angeles (UTC-8)', 'Asia/Tokyo (UTC+9)'] }) +
+          fieldHtml('Default Organization', 'Unify Technology', { type: 'select', options: ['Unify Technology', 'Acme Corp', 'DevHouse s.r.o.'] }) +
           '<button class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">Save Changes</button>' +
         '</div>';
       },
-      password: function () {
+      auth: function () {
         return '<div class="space-y-5">' +
           '<div class="pb-4 border-b border-neutral-100">' +
             '<div class="text-sm font-medium text-neutral-900 mb-1">Change Password</div>' +
@@ -1141,16 +1157,12 @@ var CrewshipSettings = (function () {
         return '<div class="space-y-5">' +
           '<div class="flex items-center gap-4 pb-4 border-b border-neutral-100">' +
             '<div class="w-14 h-14 rounded-xl bg-primary-600 flex items-center justify-center text-white text-lg font-bold">U</div>' +
-            '<div>' +
-              '<div class="text-sm font-medium text-neutral-900">Unify Technology</div>' +
-              '<div class="text-xs text-neutral-400 mb-2">Created Dec 2025</div>' +
-              '<button class="flex items-center gap-1.5 text-xs text-primary-600 hover:text-primary-700 font-medium">' + sIcons.upload + ' Change logo</button>' +
-            '</div>' +
+            '<button class="flex items-center gap-1.5 text-xs text-primary-600 hover:text-primary-700 font-medium">' + sIcons.upload + ' Change logo</button>' +
           '</div>' +
           fieldHtml('Organization Name', 'Unify Technology') +
           fieldHtml('Slug', 'unify-technology', { readonly: true }) +
           fieldHtml('Description', 'AI agent orchestration for our internal workflows.', { type: 'textarea' }) +
-          fieldHtml('Default Container TTL', '24 hours', { type: 'select', options: ['1 hour', '4 hours', '12 hours', '24 hours', '48 hours', '7 days', 'Never'] }) +
+          fieldHtml('Website', 'https://unifylab.cz') +
           '<button class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">Save Changes</button>' +
         '</div>';
       },
@@ -1383,6 +1395,139 @@ var CrewshipSettings = (function () {
           '</div>' +
         '</div>';
       }
+    };
+
+    // === NEW USER TABS ===
+    tabContent.sessions = function () {
+      var sessions = [
+        { device: 'Chrome 131 · macOS', ip: '178.23.44.12', location: 'Prague, CZ', last: 'Now', current: true },
+        { device: 'Safari 18 · iPhone', ip: '178.23.44.12', location: 'Prague, CZ', last: '2h ago', current: false },
+        { device: 'Firefox 134 · Ubuntu', ip: '89.177.2.55', location: 'Brno, CZ', last: '3d ago', current: false }
+      ];
+      var rows = '';
+      sessions.forEach(function (s) {
+        rows += '<div class="flex items-center justify-between py-3 border-b border-neutral-50">' +
+          '<div class="flex items-center gap-3">' +
+            '<div class="w-8 h-8 rounded-lg bg-neutral-100 flex items-center justify-center">' + sIcons.shield + '</div>' +
+            '<div><div class="text-sm text-neutral-800">' + s.device + (s.current ? ' <span class="text-[9px] bg-success-50 text-success-700 px-1.5 py-0.5 rounded font-medium ml-1">This device</span>' : '') + '</div><div class="text-[10px] text-neutral-400">' + s.ip + ' · ' + s.location + '</div></div>' +
+          '</div>' +
+          '<div class="flex items-center gap-3">' +
+            '<span class="text-[10px] text-neutral-400">' + s.last + '</span>' +
+            (s.current ? '' : '<button class="text-xs text-error-600 hover:text-error-700 font-medium">Revoke</button>') +
+          '</div></div>';
+      });
+      return '<div class="space-y-4">' +
+        '<div class="flex items-center justify-between"><div><div class="text-sm font-medium text-neutral-900">Active Sessions</div><div class="text-xs text-neutral-400">Devices currently signed in to your account.</div></div>' +
+        '<button class="text-xs text-error-600 hover:text-error-700 font-medium px-3 py-1.5 border border-error-200 rounded-lg">Revoke All Others</button></div>' +
+        '<div class="border border-neutral-200 rounded-lg overflow-hidden"><div class="px-3">' + rows + '</div></div>' +
+        '<div class="p-3 bg-neutral-50 border border-neutral-200 rounded-lg"><div class="text-xs text-neutral-500">Sessions expire after 30 days of inactivity. You can change this in Admin Console → Auth & SSO.</div></div></div>';
+    };
+    tabContent.shortcuts = function () {
+      var shortcuts = [
+        { keys: '⌘ K', desc: 'Open command palette' },
+        { keys: '⌘ J', desc: 'Open Crewship AI chat' },
+        { keys: 'Esc', desc: 'Close modal / panel' },
+        { keys: '⌘ B', desc: 'Toggle sidebar' },
+        { keys: '⌘ /', desc: 'Focus search' },
+        { keys: 'G then D', desc: 'Go to Dashboard' },
+        { keys: 'G then A', desc: 'Go to Agents' },
+        { keys: 'G then C', desc: 'Go to Crews' },
+        { keys: 'G then S', desc: 'Go to Settings' },
+        { keys: '↑ ↓', desc: 'Navigate lists / command palette' },
+        { keys: 'Enter', desc: 'Open selected item' }
+      ];
+      var rows = '';
+      shortcuts.forEach(function (s) {
+        rows += '<div class="flex items-center justify-between py-2.5 border-b border-neutral-50">' +
+          '<span class="text-sm text-neutral-700">' + s.desc + '</span>' +
+          '<kbd class="flex items-center gap-1 px-2 py-1 bg-neutral-50 border border-neutral-200 rounded text-[11px] font-mono text-neutral-500">' + s.keys + '</kbd></div>';
+      });
+      return '<div class="space-y-4">' +
+        '<div><div class="text-sm font-medium text-neutral-900">Keyboard Shortcuts</div><div class="text-xs text-neutral-400">Speed up your workflow with these shortcuts.</div></div>' +
+        '<div class="border border-neutral-200 rounded-lg overflow-hidden"><div class="px-4">' + rows + '</div></div></div>';
+    };
+    tabContent.tokens = function () {
+      return '<div class="space-y-4">' +
+        '<div class="flex items-center justify-between">' +
+          '<div><div class="text-sm font-medium text-neutral-900">Personal API Tokens</div><div class="text-xs text-neutral-400">Access the Crewship API from CLI or scripts. Tokens inherit your permissions.</div></div>' +
+          '<button class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">' + sIcons.key + ' New Token</button></div>' +
+        '<div class="border border-neutral-200 rounded-lg overflow-hidden"><div class="px-3">' +
+          '<div class="flex items-center justify-between py-3 border-b border-neutral-50">' +
+            '<div class="flex items-center gap-3"><div class="w-8 h-8 rounded-lg bg-neutral-100 flex items-center justify-center">' + sIcons.key + '</div>' +
+            '<div><div class="text-sm text-neutral-800">dev-machine</div><div class="text-[10px] text-neutral-400 font-mono">csk_ps_a1b2...x9z0</div></div></div>' +
+            '<div class="flex items-center gap-3"><span class="text-[10px] text-neutral-400">Created Jan 15 · Last used 2h ago</span><button class="text-xs text-error-600 hover:text-error-700 font-medium">Revoke</button></div></div>' +
+          '<div class="flex items-center justify-between py-3">' +
+            '<div class="flex items-center gap-3"><div class="w-8 h-8 rounded-lg bg-neutral-100 flex items-center justify-center">' + sIcons.key + '</div>' +
+            '<div><div class="text-sm text-neutral-800">ci-pipeline</div><div class="text-[10px] text-neutral-400 font-mono">csk_ps_c3d4...w7v8</div></div></div>' +
+            '<div class="flex items-center gap-3"><span class="text-[10px] text-neutral-400">Created Feb 1 · Last used 5d ago</span><button class="text-xs text-error-600 hover:text-error-700 font-medium">Revoke</button></div></div>' +
+        '</div></div>' +
+        '<div class="p-3 bg-neutral-50 border border-neutral-200 rounded-lg"><div class="text-xs text-neutral-500">Tokens are shown only once at creation. They inherit your current role in the selected organization.</div></div></div>';
+    };
+
+    // === NEW ORG TABS ===
+    tabContent.agentDefaults = function () {
+      return '<div class="space-y-5">' +
+        '<div><div class="text-sm font-medium text-neutral-900">Agent Defaults</div><div class="text-xs text-neutral-400">Default settings for newly created agents in this organization.</div></div>' +
+        fieldHtml('Default Model', 'claude-sonnet-4', { type: 'select', options: ['claude-sonnet-4', 'claude-haiku-3.5', 'gpt-4o', 'gpt-4o-mini', 'gemini-2.5-pro', 'llama-3.3-70b (Ollama)'] }) +
+        fieldHtml('Default Container TTL', '24 hours', { type: 'select', options: ['1 hour', '4 hours', '12 hours', '24 hours', '48 hours', '7 days', 'Never'] }) +
+        fieldHtml('Default Tool Profile', 'STANDARD', { type: 'select', options: ['MINIMAL — read-only, no tools', 'STANDARD — file ops, web search', 'CODING — git, terminal, package managers', 'FULL — browser, all tools'] }) +
+        fieldHtml('Max Concurrent Runs per Agent', '3', { type: 'select', options: ['1', '2', '3', '5', '10', 'Unlimited'] }) +
+        fieldHtml('Auto-restart on Failure', 'Off', { type: 'select', options: ['Off', 'Once (1 retry)', 'Twice (2 retries)', 'Three times'] }) +
+        fieldHtml('Default Agent Timeout', '30 minutes', { type: 'select', options: ['5 minutes', '15 minutes', '30 minutes', '1 hour', '2 hours', '4 hours', 'No timeout'] }) +
+        '<button class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">Save Defaults</button></div>';
+    };
+    tabContent.credPolicy = function () {
+      return '<div class="space-y-5">' +
+        '<div><div class="text-sm font-medium text-neutral-900">Credential Policy</div><div class="text-xs text-neutral-400">Organization-wide rules for API key management and rotation.</div></div>' +
+        fieldHtml('Rotation Reminder', '90 days', { type: 'select', options: ['30 days', '60 days', '90 days', '180 days', 'Never'] }) +
+        fieldHtml('Max Keys per Env Variable', '5', { type: 'select', options: ['1', '2', '3', '5', '10', 'Unlimited'] }) +
+        fieldHtml('Auto-cooldown Duration on 429', '5 minutes', { type: 'select', options: ['1 minute', '2 minutes', '5 minutes', '10 minutes', '30 minutes'] }) +
+        fieldHtml('Cross-provider Fallback', 'Enabled', { type: 'select', options: ['Enabled', 'Disabled'] }) +
+        toggleHtml('ce1', 'Require encryption for all credentials', true, 'All credentials must use AES-256-GCM encryption. Cannot be disabled.') +
+        '<div class="border-t border-neutral-50"></div>' +
+        toggleHtml('ce2', 'Notify on credential expiration warning', true, 'Send email when a credential approaches rotation date.') +
+        '<div class="border-t border-neutral-50"></div>' +
+        toggleHtml('ce3', 'Auto-disable exhausted keys', false, 'Automatically disable keys that hit rate limits 3+ times in 1 hour.') +
+        '<div class="pt-3"><button class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">Save Policy</button></div></div>';
+    };
+    tabContent.integrations = function () {
+      var integs = [
+        { name: 'Slack', desc: 'Send agent notifications, errors, and crew completions to Slack channels.', icon: '#', connected: false },
+        { name: 'GitHub', desc: 'Link repositories, trigger agents on PR events, commit agent output.', icon: 'G', connected: false },
+        { name: 'Grafana', desc: 'Receive alerts as webhook triggers for SRE agents.', icon: 'Gr', connected: false },
+        { name: 'n8n', desc: 'Trigger agents from n8n workflows via webhooks.', icon: 'n8', connected: false }
+      ];
+      var cards = '';
+      integs.forEach(function (i) {
+        cards += '<div class="flex items-center justify-between p-4 border border-neutral-200 rounded-lg">' +
+          '<div class="flex items-center gap-3"><div class="w-10 h-10 rounded-lg bg-neutral-100 flex items-center justify-center text-xs font-bold text-neutral-500">' + i.icon + '</div>' +
+          '<div><div class="text-sm font-medium text-neutral-800">' + i.name + '</div><div class="text-xs text-neutral-400">' + i.desc + '</div></div></div>' +
+          '<button class="px-3 py-1.5 text-xs font-medium text-neutral-600 border border-neutral-200 rounded-lg hover:bg-neutral-50">Connect</button></div>';
+      });
+      return '<div class="space-y-4">' +
+        '<div class="flex items-center gap-2"><div class="text-sm font-medium text-neutral-900">Integrations</div><span class="text-[9px] bg-neutral-100 text-neutral-400 px-1.5 py-0.5 rounded font-medium">Phase 2</span></div>' +
+        '<div class="text-xs text-neutral-400">Connect external services to receive notifications and trigger agents.</div>' +
+        '<div class="space-y-2.5">' + cards + '</div></div>';
+    };
+    tabContent.auditlog = function () {
+      return '<div class="space-y-5">' +
+        '<div><div class="text-sm font-medium text-neutral-900">Audit Log Settings</div><div class="text-xs text-neutral-400">Configure what gets logged and how long audit records are retained.</div></div>' +
+        fieldHtml('Retention Period', 'Indefinite', { type: 'select', options: ['30 days', '90 days', '1 year', 'Indefinite'] }) +
+        fieldHtml('Export Format', 'JSONL', { type: 'select', options: ['JSONL', 'CSV', 'JSON'] }) +
+        '<div class="pt-2 pb-3 border-b border-neutral-100"><div class="text-xs font-medium text-neutral-600 mb-2">Events to Audit</div></div>' +
+        toggleHtml('al1', 'Authentication events', true, 'Login, logout, failed attempts, password changes') +
+        '<div class="border-t border-neutral-50"></div>' +
+        toggleHtml('al2', 'Member changes', true, 'Invite, remove, role change') +
+        '<div class="border-t border-neutral-50"></div>' +
+        toggleHtml('al3', 'Agent lifecycle', true, 'Create, update, delete, start, stop') +
+        '<div class="border-t border-neutral-50"></div>' +
+        toggleHtml('al4', 'Credential access', true, 'Create, update, delete, inject, failover') +
+        '<div class="border-t border-neutral-50"></div>' +
+        toggleHtml('al5', 'Settings changes', true, 'Any org or admin settings modification') +
+        '<div class="border-t border-neutral-50"></div>' +
+        toggleHtml('al6', 'API access', false, 'Log every API call (high volume)') +
+        '<div class="pt-3 flex gap-2"><button class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">Save Settings</button>' +
+        '<button class="px-4 py-2 text-sm font-medium text-neutral-700 border border-neutral-200 rounded-lg hover:bg-neutral-50 flex items-center gap-1.5">' + sIcons.download + ' Export Audit Log</button></div></div>';
     };
 
     return { sIcons: sIcons, userTabs: userTabs, orgTabs: orgTabs, tabContent: tabContent };
