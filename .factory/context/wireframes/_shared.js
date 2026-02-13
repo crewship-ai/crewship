@@ -404,6 +404,9 @@
 
     // ======== ASSEMBLE ========
     // Layout: flex-row h-screen → sidebar (full height) | flex-col (toolbar + main)
+    // Apply Meta-style background (#F0F2F5) to main content area
+    main.style.backgroundColor = '#F0F2F5';
+
     var rightCol = document.createElement('div');
     rightCol.className = 'flex flex-col flex-1 overflow-hidden';
     rightCol.appendChild(toolbar);
