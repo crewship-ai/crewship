@@ -404,8 +404,14 @@
 
     // ======== ASSEMBLE ========
     // Layout: flex-row h-screen → sidebar (full height) | flex-col (toolbar + main)
-    // Apply Meta-style background (#F0F2F5) to main content area
-    main.style.backgroundColor = '#F0F2F5';
+    // Apply Meta Business Suite style mesh gradient background
+    main.style.cssText = (main.style.cssText || '') +
+      'background-color:#F0F2F5;' +
+      'background-image:' +
+        'radial-gradient(ellipse at 10% 20%, rgba(173,216,255,0.35) 0%, transparent 50%),' +
+        'radial-gradient(ellipse at 80% 10%, rgba(200,180,255,0.25) 0%, transparent 50%),' +
+        'radial-gradient(ellipse at 60% 80%, rgba(180,240,200,0.2) 0%, transparent 50%),' +
+        'radial-gradient(ellipse at 20% 70%, rgba(255,200,210,0.2) 0%, transparent 45%);';
 
     var rightCol = document.createElement('div');
     rightCol.className = 'flex flex-col flex-1 overflow-hidden';
