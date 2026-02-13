@@ -1467,14 +1467,30 @@ var CrewshipSettings = (function () {
     // === NEW ORG TABS ===
     tabContent.agentDefaults = function () {
       return '<div class="space-y-5">' +
-        '<div><div class="text-sm font-medium text-neutral-900">Agent Defaults</div><div class="text-xs text-neutral-400">Default settings for newly created agents in this organization.</div></div>' +
-        fieldHtml('Default Model', 'claude-sonnet-4', { type: 'select', options: ['claude-sonnet-4', 'claude-haiku-3.5', 'gpt-4o', 'gpt-4o-mini', 'gemini-2.5-pro', 'llama-3.3-70b (Ollama)'] }) +
-        fieldHtml('Default Container TTL', '24 hours', { type: 'select', options: ['1 hour', '4 hours', '12 hours', '24 hours', '48 hours', '7 days', 'Never'] }) +
-        fieldHtml('Default Tool Profile', 'STANDARD', { type: 'select', options: ['MINIMAL — read-only, no tools', 'STANDARD — file ops, web search', 'CODING — git, terminal, package managers', 'FULL — browser, all tools'] }) +
-        fieldHtml('Max Concurrent Runs per Agent', '3', { type: 'select', options: ['1', '2', '3', '5', '10', 'Unlimited'] }) +
+        '<div class="pb-4 border-b border-neutral-100">' +
+          '<div class="text-sm font-medium text-neutral-900 mb-1">Organization Agent Defaults</div>' +
+          '<div class="text-xs text-neutral-400">These defaults are inherited when creating new agents. Each team and agent can override them individually.</div>' +
+          '<div class="mt-2 flex items-center gap-2 text-[10px] text-neutral-400">' +
+            '<span class="px-1.5 py-0.5 bg-neutral-100 rounded font-medium">Org defaults</span>' +
+            '<span>→</span>' +
+            '<span class="px-1.5 py-0.5 bg-neutral-100 rounded font-medium">Team overrides</span>' +
+            '<span>→</span>' +
+            '<span class="px-1.5 py-0.5 bg-neutral-100 rounded font-medium">Agent overrides</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="text-xs font-medium text-neutral-500 uppercase tracking-wider">CLI & Runtime</div>' +
+        fieldHtml('Default CLI Adapter', 'Claude Code', { type: 'select', options: ['Claude Code', 'Codex CLI', 'Gemini CLI', 'OpenCode'] }) +
+        fieldHtml('Default Tool Profile', 'CODING', { type: 'select', options: ['MINIMAL — read, search, grep only', 'CODING — file ops, git, terminal (default)', 'MESSAGING — read, search, web access', 'FULL — all tools, skip permissions'] }) +
+        fieldHtml('Default Temperature', '0.7', { type: 'select', options: ['0.0 — deterministic', '0.3 — focused', '0.5 — balanced', '0.7 — creative (default)', '1.0 — maximum variance'] }) +
+        '<div class="text-xs font-medium text-neutral-500 uppercase tracking-wider pt-3">Containers & Lifecycle</div>' +
+        fieldHtml('Default Container TTL', 'Never (run forever)', { type: 'select', options: ['Never (run forever)', '7 days', '14 days', '30 days', '90 days'] }) +
+        fieldHtml('Default Agent Run Timeout', '30 minutes', { type: 'select', options: ['15 minutes', '30 minutes (default)', '1 hour', '2 hours', '4 hours', '8 hours', 'No timeout'] }) +
         fieldHtml('Auto-restart on Failure', 'Off', { type: 'select', options: ['Off', 'Once (1 retry)', 'Twice (2 retries)', 'Three times'] }) +
-        fieldHtml('Default Agent Timeout', '30 minutes', { type: 'select', options: ['5 minutes', '15 minutes', '30 minutes', '1 hour', '2 hours', '4 hours', 'No timeout'] }) +
-        '<button class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">Save Defaults</button></div>';
+        '<div class="text-xs font-medium text-neutral-500 uppercase tracking-wider pt-3">Agent Behavior</div>' +
+        toggleHtml('ad-mem', 'Memory enabled by default', false, 'Agents persist memory across sessions in /workspace/.memory/. Teams and agents can override.') +
+        '<div class="border-t border-neutral-50"></div>' +
+        toggleHtml('ad-wh', 'Generate webhook secret on creation', true, 'Each new agent gets a unique webhook_secret for external triggers.') +
+        '<div class="pt-4"><button class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">Save Defaults</button></div></div>';
     };
     tabContent.credPolicy = function () {
       return '<div class="space-y-5">' +
