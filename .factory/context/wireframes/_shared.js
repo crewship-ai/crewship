@@ -158,7 +158,13 @@
       '.ai-panel-entrance{animation:ai-panel-in .25s ease-out both}' +
       '.ai-btn-pill{transition:width .25s cubic-bezier(.4,0,.2,1),padding .25s cubic-bezier(.4,0,.2,1)}' +
       '.ai-btn-label{transition:opacity .15s ease,max-width .25s ease;overflow:hidden;white-space:nowrap}' +
-      '.ship-wave{animation:ship-wave 4s ease-in-out infinite}';
+      '.ship-wave{animation:ship-wave 4s ease-in-out infinite}' +
+      '@keyframes dropdown-in{0%{opacity:0;transform:translateY(-4px) scale(.97)}100%{opacity:1;transform:translateY(0) scale(1)}}' +
+      '.dropdown-enter{animation:dropdown-in .15s ease-out both}' +
+      '@keyframes cmdk-in{0%{opacity:0;transform:scale(.96)}100%{opacity:1;transform:scale(1)}}' +
+      '.cmdk-enter{animation:cmdk-in .15s ease-out both}' +
+      '.cmdk-item{transition:background .08s}.cmdk-item:hover,.cmdk-item-active{background:#F0F2F5}' +
+      '.cmdk-item-active{background:#E7F3FF!important}';
     document.head.appendChild(style);
   }
 
@@ -208,21 +214,21 @@
           '<span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span>' +
           '<span class="text-[10px] font-medium text-success-700">crewshipd</span>' +
         '</div>' +
-        '<button class="flex items-center gap-2 h-8 px-3 rounded-full border border-neutral-200 bg-transparent text-neutral-500 hover:border-neutral-300 hover:text-neutral-700 transition-colors">' +
+        '<button id="cmdk-trigger" class="flex items-center gap-2 h-8 px-3 rounded-full border border-neutral-200 bg-transparent text-neutral-500 hover:border-neutral-300 hover:text-neutral-700 transition-colors">' +
           icons.search +
           '<span class="text-xs">Search...</span>' +
           '<kbd class="ml-1 flex items-center gap-0.5 h-5 px-1.5 rounded border border-neutral-200 bg-neutral-50 text-[10px] font-medium text-neutral-400"><span>&#8984;</span>K</kbd>' +
         '</button>' +
         '<a href="#" class="p-2 text-neutral-400 hover:text-neutral-600 rounded-md hover:bg-neutral-50" title="Help &amp; Documentation">' + icons.book + '</a>' +
-        '<button class="p-2 text-neutral-400 hover:text-neutral-600 rounded-md hover:bg-neutral-50 relative" title="Notifications">' +
+        '<div class="relative"><button id="notif-trigger" class="p-2 text-neutral-400 hover:text-neutral-600 rounded-md hover:bg-neutral-50 relative" title="Notifications">' +
           icons.bell +
           '<span class="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-error-500 text-[9px] font-bold text-white ring-2 ring-white">3</span>' +
-        '</button>' +
-        '<button class="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-neutral-50">' +
+        '</button><div id="notif-dropdown" class="hidden absolute right-0 top-full mt-1.5 z-50"></div></div>' +
+        '<div class="relative"><button id="user-trigger" class="flex items-center gap-2 px-1.5 py-1 rounded-md hover:bg-neutral-50">' +
           '<div class="w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-white text-[10px] font-semibold">PS</div>' +
           '<span class="text-xs text-neutral-700 font-medium">Pavel</span>' +
           icons.chevronSm +
-        '</button>' +
+        '</button><div id="user-dropdown" class="hidden absolute right-0 top-full mt-1.5 z-50"></div></div>' +
       '</div>';
 
     // ======== SIDEBAR ========
@@ -553,6 +559,356 @@
 
     document.body.appendChild(aiBtn);
     document.body.appendChild(aiPanel);
+
+    // ======== NOTIFICATIONS DROPDOWN ========
+    var notifData = [
+      { type: 'error', title: 'Agent "Codex — Deploy Monitor" failed', desc: 'Exit code 1 — rate limit exceeded on OPENAI_KEY_1', time: '12 min ago', unread: true },
+      { type: 'invite', title: 'You were invited to "Acme Corp"', desc: 'Invited by tomas@acme.cz as Manager', time: '2 hours ago', unread: true },
+      { type: 'success', title: 'Crew "Content Pipeline" completed', desc: '3 agents finished — 12 files generated in /output/', time: '3 hours ago', unread: true },
+      { type: 'warning', title: 'Credential "ANTHROPIC_KEY_2" expiring', desc: 'Expires in 5 days. Rotate in Settings → Credentials.', time: '1 day ago', unread: false },
+      { type: 'info', title: 'New skill available: "PDF Generator"', desc: 'Bundled skill added in v0.4.2 update.', time: '2 days ago', unread: false },
+      { type: 'success', title: 'Agent "Gemini — Blog Generator" completed run', desc: 'Generated 3 blog posts, runtime 8m 31s.', time: '3 days ago', unread: false }
+    ];
+    var notifIcons = {
+      error: '<div class="w-8 h-8 rounded-full bg-error-50 flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4 text-error-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg></div>',
+      invite: '<div class="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4 text-primary-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></svg></div>',
+      success: '<div class="w-8 h-8 rounded-full bg-success-50 flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4 text-success-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></div>',
+      warning: '<div class="w-8 h-8 rounded-full bg-warning-50 flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4 text-warning-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></div>',
+      info: '<div class="w-8 h-8 rounded-full bg-primary-50 flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4 text-primary-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></div>'
+    };
+
+    var notifDropdown = document.getElementById('notif-dropdown');
+    if (notifDropdown) {
+      var nItems = '';
+      notifData.forEach(function (n) {
+        nItems += '<div class="flex gap-3 px-4 py-3 hover:bg-neutral-50 cursor-pointer ' + (n.unread ? 'bg-primary-50/30' : '') + '">' +
+          notifIcons[n.type] +
+          '<div class="flex-1 min-w-0">' +
+            '<div class="flex items-center gap-2">' +
+              '<div class="text-xs font-medium text-neutral-900 truncate">' + n.title + '</div>' +
+              (n.unread ? '<span class="w-1.5 h-1.5 rounded-full bg-primary-600 flex-shrink-0"></span>' : '') +
+            '</div>' +
+            '<div class="text-[11px] text-neutral-500 mt-0.5 line-clamp-1">' + n.desc + '</div>' +
+            '<div class="text-[10px] text-neutral-400 mt-1">' + n.time + '</div>' +
+          '</div>' +
+        '</div>';
+      });
+
+      notifDropdown.innerHTML =
+        '<div class="dropdown-enter w-96 bg-white rounded-xl shadow-xl border border-neutral-200 overflow-hidden">' +
+          '<div class="px-4 py-3 border-b border-neutral-100 flex items-center justify-between">' +
+            '<div class="text-sm font-semibold text-neutral-900">Notifications</div>' +
+            '<div class="flex items-center gap-3">' +
+              '<button class="text-[11px] text-primary-600 hover:text-primary-700 font-medium">Mark all read</button>' +
+              '<a href="20-settings.html" class="text-[11px] text-neutral-400 hover:text-neutral-600">Settings</a>' +
+            '</div>' +
+          '</div>' +
+          '<div class="max-h-[400px] overflow-y-auto divide-y divide-neutral-50">' + nItems + '</div>' +
+          '<div class="px-4 py-2.5 border-t border-neutral-100 bg-neutral-50 text-center">' +
+            '<button class="text-xs text-primary-600 hover:text-primary-700 font-medium">View all notifications</button>' +
+          '</div>' +
+        '</div>';
+    }
+
+    // ======== USER PROFILE DROPDOWN ========
+    var userDropdown = document.getElementById('user-dropdown');
+    if (userDropdown) {
+      userDropdown.innerHTML =
+        '<div class="dropdown-enter w-64 bg-white rounded-xl shadow-xl border border-neutral-200 overflow-hidden">' +
+          '<div class="px-4 py-3 border-b border-neutral-100">' +
+            '<div class="flex items-center gap-3">' +
+              '<div class="w-10 h-10 rounded-full bg-primary-600 flex items-center justify-center text-white text-sm font-semibold">PS</div>' +
+              '<div>' +
+                '<div class="text-sm font-medium text-neutral-900">Pavel Srba</div>' +
+                '<div class="text-xs text-neutral-400">pavel@example.com</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="flex items-center gap-1.5 mt-2">' +
+              '<span class="text-[10px] bg-warning-50 text-warning-700 px-1.5 py-0.5 rounded font-medium">Owner</span>' +
+              '<span class="text-[10px] text-neutral-400">Unify Technology</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="py-1.5">' +
+            '<a href="20-settings.html" class="flex items-center gap-3 px-4 py-2 text-xs text-neutral-700 hover:bg-neutral-50">' +
+              '<svg class="w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' +
+              'Profile & Settings' +
+            '</a>' +
+            '<a href="#" class="flex items-center gap-3 px-4 py-2 text-xs text-neutral-700 hover:bg-neutral-50">' +
+              '<svg class="w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>' +
+              'Help & Support' +
+            '</a>' +
+            '<a href="#" class="flex items-center gap-3 px-4 py-2 text-xs text-neutral-700 hover:bg-neutral-50">' +
+              '<svg class="w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/></svg>' +
+              'Documentation' +
+            '</a>' +
+            '<a href="#" class="flex items-center gap-3 px-4 py-2 text-xs text-neutral-700 hover:bg-neutral-50">' +
+              '<svg class="w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65S8.93 17.38 9 18v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></svg>' +
+              'GitHub' +
+            '</a>' +
+          '</div>' +
+          '<div class="border-t border-neutral-100 py-1.5">' +
+            '<button class="flex items-center gap-3 w-full px-4 py-2 text-xs text-error-600 hover:bg-error-50">' +
+              '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>' +
+              'Log out' +
+            '</button>' +
+          '</div>' +
+        '</div>';
+    }
+
+    // ======== DROPDOWN TOGGLE LOGIC ========
+    var activeDropdown = null;
+
+    function toggleDropdown(triggerId, dropdownId) {
+      var dd = document.getElementById(dropdownId);
+      if (!dd) return;
+      if (activeDropdown && activeDropdown !== dropdownId) {
+        var prev = document.getElementById(activeDropdown);
+        if (prev) prev.classList.add('hidden');
+      }
+      if (dd.classList.contains('hidden')) {
+        dd.classList.remove('hidden');
+        activeDropdown = dropdownId;
+      } else {
+        dd.classList.add('hidden');
+        activeDropdown = null;
+      }
+    }
+
+    var notifTrigger = document.getElementById('notif-trigger');
+    if (notifTrigger) {
+      notifTrigger.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleDropdown('notif-trigger', 'notif-dropdown');
+      });
+    }
+    var userTrigger = document.getElementById('user-trigger');
+    if (userTrigger) {
+      userTrigger.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleDropdown('user-trigger', 'user-dropdown');
+      });
+    }
+
+    // Close on outside click
+    document.addEventListener('click', function () {
+      if (activeDropdown) {
+        var dd = document.getElementById(activeDropdown);
+        if (dd) dd.classList.add('hidden');
+        activeDropdown = null;
+      }
+    });
+    // Prevent dropdown clicks from closing
+    if (notifDropdown) notifDropdown.addEventListener('click', function (e) { e.stopPropagation(); });
+    if (userDropdown) userDropdown.addEventListener('click', function (e) { e.stopPropagation(); });
+
+    // ======== COMMAND PALETTE (⌘K) ========
+    var cmdkOpen = false;
+    var cmdkQuery = '';
+    var cmdkActiveIdx = 0;
+
+    var cmdkSections = [
+      { label: 'Nedavne', items: [
+        { icon: 'agent', label: 'Claude — SEO Writer', desc: 'Agent · Marketing · Running', href: '03-agent-overview.html' },
+        { icon: 'agent', label: 'Codex — Deploy Monitor', desc: 'Agent · DevOps · Running', href: '03-agent-overview.html' },
+        { icon: 'page', label: 'Crews', desc: 'Page', href: '16-crews.html' }
+      ]},
+      { label: 'Agenti', items: [
+        { icon: 'agent', label: 'Claude — SEO Writer', desc: 'Running · Marketing', href: '03-agent-overview.html', status: 'running' },
+        { icon: 'agent', label: 'Codex — Deploy Monitor', desc: 'Running · DevOps', href: '03-agent-overview.html', status: 'running' },
+        { icon: 'agent', label: 'Gemini — Blog Generator', desc: 'Running · Content', href: '03-agent-overview.html', status: 'running' },
+        { icon: 'agent', label: 'Claude — Code Reviewer', desc: 'Idle · DevOps', href: '03-agent-overview.html', status: 'idle' },
+        { icon: 'agent', label: 'OpenCode — Resolver', desc: 'Idle · Support', href: '03-agent-overview.html', status: 'idle' },
+        { icon: 'agent', label: 'GPT-4 — Email Handler', desc: 'Error · Support', href: '03-agent-overview.html', status: 'error' }
+      ]},
+      { label: 'Stranky', items: [
+        { icon: 'page', label: 'Dashboard', desc: 'Prehled platformy', href: '01-dashboard.html' },
+        { icon: 'page', label: 'Agents', desc: 'Seznam agentu', href: '02-agents-list.html' },
+        { icon: 'page', label: 'Crews', desc: 'Tymy a propojeni', href: '16-crews.html' },
+        { icon: 'page', label: 'Skills', desc: 'Dovednosti agentu', href: '14-skills.html' },
+        { icon: 'page', label: 'Credentials', desc: 'API klice a tokeny', href: '13-credentials.html' },
+        { icon: 'page', label: 'Runs', desc: 'Historie behu', href: '17-runs.html' },
+        { icon: 'page', label: 'Audit Log', desc: 'Bezpecnostni zaznamy', href: '19-audit-log.html' },
+        { icon: 'page', label: 'Settings', desc: 'Nastaveni uzivatele a organizace', href: '20-settings.html' }
+      ]},
+      { label: 'Akce', items: [
+        { icon: 'action', label: 'Vytvorit noveho agenta', desc: 'Pridat AI zamestnance', action: true },
+        { icon: 'action', label: 'Pridat credential', desc: 'Novy API klic nebo token', action: true },
+        { icon: 'action', label: 'Pozvat clena', desc: 'Pridat uzivatele do organizace', action: true },
+        { icon: 'action', label: 'Prepnout organizaci', desc: 'Zmenit aktivni firmu', action: true },
+        { icon: 'action', label: 'Prepnout dark mode', desc: 'Zmenit barevne schema', action: true }
+      ]}
+    ];
+
+    var cmdkIcons = {
+      agent: '<div class="w-7 h-7 rounded-lg bg-primary-100 flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5 text-primary-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></div>',
+      page: '<div class="w-7 h-7 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg></div>',
+      action: '<div class="w-7 h-7 rounded-lg bg-brand-teal/10 flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5 text-teal-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg></div>'
+    };
+
+    var statusDots = {
+      running: '<span class="w-1.5 h-1.5 rounded-full bg-success-500 flex-shrink-0"></span>',
+      idle: '<span class="w-1.5 h-1.5 rounded-full bg-primary-400 flex-shrink-0"></span>',
+      error: '<span class="w-1.5 h-1.5 rounded-full bg-error-500 flex-shrink-0"></span>'
+    };
+
+    // Build palette DOM
+    var cmdkBackdrop = document.createElement('div');
+    cmdkBackdrop.className = 'fixed inset-0 z-[60] bg-black/30 hidden';
+    cmdkBackdrop.id = 'cmdk-backdrop';
+
+    var cmdkPanel = document.createElement('div');
+    cmdkPanel.className = 'fixed inset-0 z-[60] hidden flex items-start justify-center pt-[15vh]';
+    cmdkPanel.id = 'cmdk-panel';
+
+    function getFilteredSections() {
+      if (!cmdkQuery) return cmdkSections;
+      var q = cmdkQuery.toLowerCase();
+      var result = [];
+      cmdkSections.forEach(function (sec) {
+        var filtered = sec.items.filter(function (it) {
+          return it.label.toLowerCase().indexOf(q) !== -1 || (it.desc && it.desc.toLowerCase().indexOf(q) !== -1);
+        });
+        if (filtered.length) result.push({ label: sec.label, items: filtered });
+      });
+      return result;
+    }
+
+    function getAllItems(sections) {
+      var all = [];
+      sections.forEach(function (s) { s.items.forEach(function (i) { all.push(i); }); });
+      return all;
+    }
+
+    function renderCmdk() {
+      var sections = getFilteredSections();
+      var allItems = getAllItems(sections);
+      if (cmdkActiveIdx >= allItems.length) cmdkActiveIdx = 0;
+
+      var bodyHtml = '';
+      var globalIdx = 0;
+      if (sections.length === 0) {
+        bodyHtml = '<div class="px-4 py-8 text-center"><div class="text-sm text-neutral-400">Zadne vysledky pro &quot;' + cmdkQuery + '&quot;</div><div class="text-xs text-neutral-300 mt-1">Zkuste jiny dotaz</div></div>';
+      } else {
+        sections.forEach(function (sec) {
+          bodyHtml += '<div class="px-3 pt-3 pb-1"><div class="text-[10px] font-medium text-neutral-400 uppercase tracking-wider">' + sec.label + '</div></div>';
+          sec.items.forEach(function (item) {
+            var isActive = globalIdx === cmdkActiveIdx;
+            var dot = item.status ? statusDots[item.status] : '';
+            bodyHtml += '<div class="cmdk-item ' + (isActive ? 'cmdk-item-active' : '') + ' flex items-center gap-3 px-3 py-2 mx-1 rounded-lg cursor-pointer" data-cmdk-idx="' + globalIdx + '">' +
+              cmdkIcons[item.icon] +
+              '<div class="flex-1 min-w-0">' +
+                '<div class="flex items-center gap-2"><span class="text-sm text-neutral-900">' + item.label + '</span>' + dot + '</div>' +
+                '<div class="text-[11px] text-neutral-400 truncate">' + (item.desc || '') + '</div>' +
+              '</div>' +
+              (item.action ? '<kbd class="text-[10px] text-neutral-300 border border-neutral-200 rounded px-1.5 py-0.5">&#9166;</kbd>' : '') +
+              (item.href ? '<span class="text-[10px] text-neutral-300">&#8594;</span>' : '') +
+            '</div>';
+            globalIdx++;
+          });
+        });
+      }
+
+      var footerHints = '<span class="flex items-center gap-1"><kbd class="text-[10px] border border-neutral-200 rounded px-1 py-0.5">&#8593;</kbd><kbd class="text-[10px] border border-neutral-200 rounded px-1 py-0.5">&#8595;</kbd><span class="text-[10px] text-neutral-400 ml-0.5">navigace</span></span>' +
+        '<span class="flex items-center gap-1"><kbd class="text-[10px] border border-neutral-200 rounded px-1 py-0.5">&#9166;</kbd><span class="text-[10px] text-neutral-400 ml-0.5">otevrit</span></span>' +
+        '<span class="flex items-center gap-1"><kbd class="text-[10px] border border-neutral-200 rounded px-1 py-0.5">esc</kbd><span class="text-[10px] text-neutral-400 ml-0.5">zavrit</span></span>';
+
+      cmdkPanel.innerHTML =
+        '<div class="cmdk-enter w-[560px] bg-white rounded-2xl shadow-2xl border border-neutral-200 overflow-hidden" id="cmdk-inner">' +
+          '<div class="flex items-center gap-3 px-4 h-12 border-b border-neutral-200">' +
+            '<svg class="w-4 h-4 text-neutral-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>' +
+            '<input id="cmdk-input" type="text" placeholder="Hledat agenty, stranky, akce..." class="flex-1 text-sm bg-transparent outline-none text-neutral-900 placeholder:text-neutral-400" autofocus value="' + cmdkQuery + '">' +
+            '<kbd class="flex items-center gap-0.5 h-5 px-1.5 rounded border border-neutral-200 bg-neutral-50 text-[10px] font-medium text-neutral-400">esc</kbd>' +
+          '</div>' +
+          '<div class="max-h-[400px] overflow-y-auto py-1">' + bodyHtml + '</div>' +
+          '<div class="px-4 py-2 border-t border-neutral-100 bg-neutral-50 flex items-center gap-4">' + footerHints + '</div>' +
+        '</div>';
+
+      // Bind input
+      var input = document.getElementById('cmdk-input');
+      if (input) {
+        input.addEventListener('input', function () {
+          cmdkQuery = input.value;
+          cmdkActiveIdx = 0;
+          renderCmdk();
+          var newInput = document.getElementById('cmdk-input');
+          if (newInput) { newInput.focus(); newInput.selectionStart = newInput.selectionEnd = newInput.value.length; }
+        });
+      }
+      // Bind item clicks
+      cmdkPanel.querySelectorAll('[data-cmdk-idx]').forEach(function (el) {
+        el.addEventListener('click', function () {
+          var idx = parseInt(el.getAttribute('data-cmdk-idx'), 10);
+          var item = allItems[idx];
+          if (item && item.href) { closeCmdk(); window.location.href = item.href; }
+        });
+        el.addEventListener('mouseenter', function () {
+          cmdkActiveIdx = parseInt(el.getAttribute('data-cmdk-idx'), 10);
+          cmdkPanel.querySelectorAll('.cmdk-item').forEach(function (it, i) {
+            it.classList.toggle('cmdk-item-active', i === cmdkActiveIdx);
+          });
+        });
+      });
+      // Prevent inner clicks from closing
+      var inner = document.getElementById('cmdk-inner');
+      if (inner) inner.addEventListener('click', function (e) { e.stopPropagation(); });
+    }
+
+    function openCmdk() {
+      if (cmdkOpen) return;
+      cmdkOpen = true;
+      cmdkQuery = '';
+      cmdkActiveIdx = 0;
+      cmdkBackdrop.classList.remove('hidden');
+      cmdkPanel.classList.remove('hidden');
+      renderCmdk();
+      setTimeout(function () { var inp = document.getElementById('cmdk-input'); if (inp) inp.focus(); }, 50);
+    }
+
+    function closeCmdk() {
+      if (!cmdkOpen) return;
+      cmdkOpen = false;
+      cmdkBackdrop.classList.add('hidden');
+      cmdkPanel.classList.add('hidden');
+    }
+
+    // Trigger: search button
+    var cmdkTrigger = document.getElementById('cmdk-trigger');
+    if (cmdkTrigger) cmdkTrigger.addEventListener('click', function () { openCmdk(); });
+
+    // Trigger: ⌘K
+    document.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        if (cmdkOpen) closeCmdk(); else openCmdk();
+      }
+      if (e.key === 'Escape' && cmdkOpen) { e.preventDefault(); closeCmdk(); }
+      if (cmdkOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter')) {
+        e.preventDefault();
+        var sections = getFilteredSections();
+        var allItems = getAllItems(sections);
+        if (!allItems.length) return;
+        if (e.key === 'ArrowDown') cmdkActiveIdx = (cmdkActiveIdx + 1) % allItems.length;
+        if (e.key === 'ArrowUp') cmdkActiveIdx = (cmdkActiveIdx - 1 + allItems.length) % allItems.length;
+        if (e.key === 'Enter') {
+          var item = allItems[cmdkActiveIdx];
+          if (item && item.href) { closeCmdk(); window.location.href = item.href; }
+          return;
+        }
+        cmdkPanel.querySelectorAll('.cmdk-item').forEach(function (it, i) {
+          it.classList.toggle('cmdk-item-active', i === cmdkActiveIdx);
+        });
+        var activeEl = cmdkPanel.querySelector('.cmdk-item-active');
+        if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+      }
+    });
+
+    // Close on backdrop click
+    cmdkBackdrop.addEventListener('click', closeCmdk);
+    cmdkPanel.addEventListener('click', closeCmdk);
+
+    document.body.appendChild(cmdkBackdrop);
+    document.body.appendChild(cmdkPanel);
+
   });
 })();
 
