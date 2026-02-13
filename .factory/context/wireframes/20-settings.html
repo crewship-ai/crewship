@@ -58,22 +58,8 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
   var scope = 'user';
   var tab = 'profile';
 
-  var userTabs = [
-    { key: 'profile', label: 'Profile', icon: 'user' },
-    { key: 'password', label: 'Password & Auth', icon: 'lock' },
-    { key: 'appearance', label: 'Appearance', icon: 'palette' },
-    { key: 'notifications', label: 'Notifications', icon: 'bellSm' }
-  ];
-  var orgTabs = [
-    { key: 'general', label: 'General', icon: 'building' },
-    { key: 'members', label: 'Members', icon: 'users' },
-    { key: 'roles', label: 'Roles & Permissions', icon: 'shield' },
-    { key: 'billing', label: 'Billing', icon: 'creditCard' },
-    { key: 'apikeys', label: 'API Keys', icon: 'key', badge: 'P2' },
-    { key: 'webhooks', label: 'Webhooks', icon: 'webhook', badge: 'P2' },
-    { key: 'flags', label: 'Feature Flags', icon: 'toggleRight', badge: 'OWNER' },
-    { key: 'danger', label: 'Danger Zone', icon: 'alertTriangle', badge: 'OWNER' }
-  ];
+  var userTabs = S.userTabs;
+  var orgTabs = S.orgTabs;
 
   function render() {
     var tabs = scope === 'user' ? userTabs : orgTabs;
@@ -84,10 +70,14 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
     so.className = 'scope-btn flex-1 text-xs py-1.5 rounded-md font-medium ' + (scope === 'org' ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500 hover:text-neutral-700');
     document.getElementById('org-badge').className = scope === 'org' ? 'flex items-center gap-2 mt-2 px-1' : 'hidden';
 
-    // Tabs
+    // Tabs with section headers
     var tabNav = document.getElementById('settings-tabs');
     var html = '';
     tabs.forEach(function (t) {
+      if (t.type === 'section') {
+        html += '<div class="text-[9px] font-semibold text-neutral-400 uppercase tracking-wider px-3 pt-3 pb-1">' + t.label + '</div>';
+        return;
+      }
       var isActive = t.key === tab;
       var badgeHtml = '';
       if (t.badge === 'P2') badgeHtml = '<span class="ml-auto text-[8px] bg-neutral-100 text-neutral-400 px-1.5 py-0.5 rounded font-medium">Phase 2</span>';
