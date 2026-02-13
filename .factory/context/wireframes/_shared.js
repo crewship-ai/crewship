@@ -28,7 +28,8 @@
     chevronsRight: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/></svg>',
     activity: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>',
     health: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>',
-    settingsNav: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>'
+    settingsNav: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
+    admin: '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>'
   };
 
   // --- Page config: title, status pills, CTA per page ---
@@ -108,6 +109,13 @@
     '20-': {
       title: 'Settings',
       pills: []
+    },
+    '21-': {
+      title: 'Admin',
+      pills: [
+        { label: '3 organizations', color: 'bg-neutral-100 text-neutral-600' },
+        { label: '7 users', color: 'bg-neutral-100 text-neutral-600' }
+      ]
     }
   };
 
@@ -132,7 +140,8 @@
     { label: 'Runs',          icon: 'activity',      href: '17-runs.html',       match: ['17-'], todo: true },
     { label: 'Audit Log',     icon: 'auditlog',      href: '19-audit-log.html',  match: ['19-'] },
     { type: 'section', label: 'System' },
-    { label: 'Settings',      icon: 'settingsNav',   href: '20-settings.html',   match: ['20-'] }
+    { label: 'Settings',      icon: 'settingsNav',   href: '20-settings.html',   match: ['20-'] },
+    { label: 'Admin',         icon: 'admin',          href: '21-admin.html',      match: ['21-'], ownerOnly: true }
   ];
 
   // --- Helpers ---
@@ -185,19 +194,28 @@
     // ======== TOOLBAR ========
     var pg = getPageConfig(filename);
 
-    // Build left side: page title + breadcrumb + status pills
-    var titleHtml = '<h1 class="text-base font-semibold text-neutral-950">' + pg.title + '</h1>';
+    // Build breadcrumb: Org ▼ / PageTitle (/ Detail) + Pills
+    var breadcrumbHtml =
+      '<div class="relative"><button id="org-trigger" class="flex items-center gap-1.5 hover:bg-neutral-50 rounded-md px-1.5 py-1 transition-colors">' +
+        '<div class="w-5 h-5 rounded bg-primary-600 flex items-center justify-center text-white text-[8px] font-bold">U</div>' +
+        '<span class="text-sm font-medium text-neutral-700">Unify Technology</span>' +
+        icons.chevronSm +
+      '</button><div id="org-dropdown" class="hidden absolute left-0 top-full mt-1.5 z-50"></div></div>' +
+      '<span class="text-neutral-300 text-sm">/</span>';
+
     if (pg.breadcrumb) {
-      titleHtml =
-        '<div class="flex items-center gap-1.5 text-sm">' +
-          '<a href="02-agents-list.html" class="text-neutral-400 hover:text-neutral-600">' + pg.title + '</a>' +
-          '<span class="text-neutral-300">/</span>' +
-          '<span class="font-semibold text-neutral-950">' + pg.breadcrumb + '</span>' +
-        '</div>';
+      breadcrumbHtml +=
+        '<a href="02-agents-list.html" class="text-sm text-neutral-400 hover:text-neutral-600">' + pg.title + '</a>' +
+        '<span class="text-neutral-300 text-sm">/</span>' +
+        '<span class="text-sm font-semibold text-neutral-950">' + pg.breadcrumb + '</span>';
+    } else {
+      breadcrumbHtml +=
+        '<span class="text-sm font-semibold text-neutral-950">' + pg.title + '</span>';
     }
+
     var pillsHtml = '';
     if (pg.pills && pg.pills.length) {
-      pillsHtml = '<div class="flex items-center gap-2">';
+      pillsHtml = '<div class="flex items-center gap-2 ml-1">';
       pg.pills.forEach(function (p) {
         var dotStr = p.dot ? '<span class="w-1.5 h-1.5 rounded-full ' + p.dot + '"></span>' : '';
         pillsHtml += '<span class="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ' + p.color + '">' + dotStr + p.label + '</span>';
@@ -208,7 +226,7 @@
     var toolbar = document.createElement('header');
     toolbar.className = 'h-12 bg-white flex items-center justify-between px-4 flex-shrink-0';
     toolbar.innerHTML =
-      '<div class="flex items-center gap-3">' + titleHtml + pillsHtml + '</div>' +
+      '<div class="flex items-center gap-2">' + breadcrumbHtml + pillsHtml + '</div>' +
       '<div class="flex items-center gap-1.5">' +
         '<div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-success-50 border border-success-500/20 mr-1" title="Backend service status">' +
           '<span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span>' +
@@ -253,26 +271,7 @@
           '</div>';
       }
 
-      // --- Org switcher header ---
-      var orgHtml;
-      if (isWide) {
-        orgHtml =
-          '<div class="px-2 pb-2">' +
-            '<button class="flex items-center gap-2.5 w-full px-2.5 py-2 rounded-md hover:bg-neutral-100 transition-colors">' +
-              '<div class="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">U</div>' +
-              '<div class="flex-1 min-w-0 text-left">' +
-                '<div class="text-xs font-semibold text-neutral-900 truncate">Unify Technology</div>' +
-                '<div class="text-[10px] text-neutral-400 truncate">3 members</div>' +
-              '</div>' +
-              icons.chevron +
-            '</button>' +
-          '</div>';
-      } else {
-        orgHtml =
-          '<div class="px-2 pb-2 flex justify-center">' +
-            '<button class="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center text-white text-[10px] font-bold hover:opacity-90 transition-opacity" title="Unify Technology">U</button>' +
-          '</div>';
-      }
+      // Org switcher moved to toolbar (B3 pattern)
 
       // --- Nav items ---
       var navHtml = '<nav class="flex-1 px-2 py-1 space-y-0.5 overflow-y-auto">';
@@ -299,6 +298,8 @@
             badgeHtml = '<span class="ml-auto text-[9px] bg-warning-50 text-warning-700 border border-warning-500/30 px-1.5 py-0.5 rounded font-medium">TODO</span>';
           } else if (item.future) {
             badgeHtml = '<span class="ml-auto text-[9px] bg-neutral-100 text-neutral-400 px-1.5 py-0.5 rounded font-medium">FUTURE</span>';
+          } else if (item.ownerOnly) {
+            badgeHtml = '<span class="ml-auto text-[9px] bg-warning-50 text-warning-700 border border-warning-500/30 px-1.5 py-0.5 rounded font-medium">OWNER</span>';
           } else if (item.badge) {
             var bgCls = isActive ? 'bg-primary-200 text-primary-700' : 'bg-neutral-200 text-neutral-600';
             badgeHtml = '<span class="ml-auto text-xs ' + bgCls + ' px-1.5 py-0.5 rounded-full">' + item.badge + '</span>';
@@ -357,7 +358,7 @@
           '</div>';
       }
 
-      sidebar.innerHTML = logoHtml + orgHtml + navHtml + controlHtml;
+      sidebar.innerHTML = logoHtml + navHtml + controlHtml;
     }
 
     function applySidebarMode(mode, isHoverExpanded) {
@@ -655,6 +656,53 @@
         '</div>';
     }
 
+    // ======== ORG SWITCHER DROPDOWN ========
+    var orgDropdown = document.getElementById('org-dropdown');
+    if (orgDropdown) {
+      orgDropdown.innerHTML =
+        '<div class="dropdown-enter w-72 bg-white rounded-xl shadow-xl border border-neutral-200 overflow-hidden">' +
+          '<div class="px-3 py-2.5 border-b border-neutral-100">' +
+            '<div class="text-[10px] font-medium text-neutral-400 uppercase tracking-wider">Organizations</div>' +
+          '</div>' +
+          '<div class="py-1.5">' +
+            '<div class="flex items-center gap-3 px-3 py-2 bg-primary-50 cursor-pointer">' +
+              '<div class="w-7 h-7 rounded-lg bg-primary-600 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">U</div>' +
+              '<div class="flex-1 min-w-0">' +
+                '<div class="text-xs font-medium text-neutral-900">Unify Technology</div>' +
+                '<div class="text-[10px] text-neutral-400">3 members · 7 agents</div>' +
+              '</div>' +
+              '<svg class="w-4 h-4 text-primary-600 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>' +
+            '</div>' +
+            '<div class="flex items-center gap-3 px-3 py-2 hover:bg-neutral-50 cursor-pointer">' +
+              '<div class="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">A</div>' +
+              '<div class="flex-1 min-w-0">' +
+                '<div class="text-xs font-medium text-neutral-900">Acme Corp</div>' +
+                '<div class="text-[10px] text-neutral-400">12 members · 24 agents</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="flex items-center gap-3 px-3 py-2 hover:bg-neutral-50 cursor-pointer">' +
+              '<div class="w-7 h-7 rounded-lg bg-violet-500 flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">D</div>' +
+              '<div class="flex-1 min-w-0">' +
+                '<div class="text-xs font-medium text-neutral-900">DevHouse s.r.o.</div>' +
+                '<div class="text-[10px] text-neutral-400">5 members · 3 agents</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="border-t border-neutral-100 py-1.5">' +
+            '<a href="#" class="flex items-center gap-3 px-3 py-2 text-xs text-neutral-600 hover:bg-neutral-50">' +
+              '<svg class="w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>' +
+              'Create organization' +
+            '</a>' +
+            '<a href="21-admin.html" class="flex items-center gap-3 px-3 py-2 text-xs text-neutral-600 hover:bg-neutral-50">' +
+              '<svg class="w-4 h-4 text-warning-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>' +
+              '<span class="font-medium">Admin Console</span>' +
+              '<span class="ml-auto text-[9px] bg-warning-50 text-warning-700 border border-warning-500/30 px-1.5 py-0.5 rounded font-medium">OWNER</span>' +
+            '</a>' +
+          '</div>' +
+        '</div>';
+      orgDropdown.addEventListener('click', function (e) { e.stopPropagation(); });
+    }
+
     // ======== DROPDOWN TOGGLE LOGIC ========
     var activeDropdown = null;
 
@@ -674,6 +722,13 @@
       }
     }
 
+    var orgTrigger = document.getElementById('org-trigger');
+    if (orgTrigger) {
+      orgTrigger.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleDropdown('org-trigger', 'org-dropdown');
+      });
+    }
     var notifTrigger = document.getElementById('notif-trigger');
     if (notifTrigger) {
       notifTrigger.addEventListener('click', function (e) {

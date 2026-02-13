@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Admin Console</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['JetBrains Mono','monospace']},colors:{primary:{50:'#F0F6FF',100:'#E7F3FF',200:'#C5DCFC',300:'#9DC5FA',400:'#6BAAF7',500:'#4293F5',600:'#1877F2',700:'#1877C2',800:'#1565A8',900:'#0D4F8B',950:'#003366'},neutral:{50:'#F7F8FA',100:'#F0F2F5',200:'#E4E6EA',300:'#CED0D4',400:'#ADB1B5',500:'#8A8D91',600:'#65676B',700:'#4B4F54',800:'#373A3F',900:'#242628',950:'#1C1E21'},success:{50:'#E6F5EA',500:'#31A24C',700:'#1B7D36'},warning:{50:'#FFF8E6',500:'#F7B928',700:'#B06D00'},error:{50:'#FDE8E8',500:'#E34234',700:'#B32D1B'},'brand-teal':{'DEFAULT':'#4ECDC4'}}}}}
+</script>
+<style>
+  body { font-size: 14px; }
+  .atab { transition: background .1s, color .1s; cursor: pointer; }
+  .atab:hover { background: #F0F2F5; }
+  .atab-active { background: #E7F3FF !important; color: #1877F2 !important; font-weight: 500; }
+</style>
+</head>
+<body class="bg-neutral-100 font-sans text-neutral-950 antialiased">
+<div class="flex h-screen">
+
+  <main class="flex-1 overflow-y-auto">
+    <div class="h-full flex">
+
+      <!-- Admin left nav -->
+      <div class="w-52 bg-white border-r border-neutral-200 flex flex-col flex-shrink-0 overflow-y-auto">
+        <div class="p-3 border-b border-neutral-100">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-warning-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+            <span class="text-xs font-semibold text-neutral-900">Admin Console</span>
+            <span class="text-[9px] bg-warning-50 text-warning-700 border border-warning-500/30 px-1.5 py-0.5 rounded font-medium ml-auto">OWNER</span>
+          </div>
+        </div>
+        <nav id="admin-tabs" class="flex-1 p-2 space-y-0.5"></nav>
+      </div>
+
+      <!-- Admin content -->
+      <div class="flex-1 overflow-y-auto">
+        <div id="admin-content" class="max-w-3xl mx-auto px-8 py-6"></div>
+      </div>
+
+    </div>
+  </main>
+
+</div>
+<script src="_shared.js"></script>
+<script>
+(function () {
+  var tab = 'overview';
+
+  var tabs = [
+    { key: 'overview', label: 'Overview', icon: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>' },
+    { key: 'organizations', label: 'Organizations', icon: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/></svg>' },
+    { key: 'users', label: 'All Users', icon: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>' },
+    { key: 'providers', label: 'Providers', icon: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>' },
+    { key: 'flags', label: 'Feature Flags', icon: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="12" x="2" y="6" rx="6" ry="6"/><circle cx="16" cy="12" r="2"/></svg>' },
+    { key: 'ratelimits', label: 'Rate Limits', icon: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>' },
+    { key: 'security', label: 'Security', icon: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' },
+    { key: 'logs', label: 'System Logs', icon: '<svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4v16"/><path d="M17 4v16"/><path d="M19 4H9.5a4.5 4.5 0 0 0 0 9H13"/></svg>' }
+  ];
+
+  var tabContent = {
+    overview: function () {
+      return '<div class="space-y-6">' +
+        '<div class="grid grid-cols-4 gap-4">' +
+          '<div class="bg-white border border-neutral-200 rounded-lg p-4"><div class="text-[10px] text-neutral-400 uppercase font-medium">Organizations</div><div class="text-2xl font-bold mt-1">3</div><div class="text-xs text-neutral-500 mt-0.5">2 active</div></div>' +
+          '<div class="bg-white border border-neutral-200 rounded-lg p-4"><div class="text-[10px] text-neutral-400 uppercase font-medium">Total Users</div><div class="text-2xl font-bold mt-1">7</div><div class="text-xs text-neutral-500 mt-0.5">5 active this week</div></div>' +
+          '<div class="bg-white border border-neutral-200 rounded-lg p-4"><div class="text-[10px] text-neutral-400 uppercase font-medium">Total Agents</div><div class="text-2xl font-bold mt-1">34</div><div class="text-xs text-success-700 mt-0.5">8 running</div></div>' +
+          '<div class="bg-white border border-neutral-200 rounded-lg p-4"><div class="text-[10px] text-neutral-400 uppercase font-medium">Uptime</div><div class="text-2xl font-bold mt-1">14d</div><div class="text-xs text-success-700 mt-0.5">crewshipd healthy</div></div>' +
+        '</div>' +
+        '<div class="bg-white border border-neutral-200 rounded-lg p-5">' +
+          '<div class="text-sm font-medium text-neutral-900 mb-3">System Status</div>' +
+          '<div class="space-y-3">' +
+            '<div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-success-500"></span><span class="text-xs text-neutral-700">crewshipd</span></div><span class="text-xs text-neutral-400">v0.4.2 · PID 8421</span></div>' +
+            '<div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-success-500"></span><span class="text-xs text-neutral-700">PostgreSQL</span></div><span class="text-xs text-neutral-400">16.2 · localhost:5432</span></div>' +
+            '<div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-success-500"></span><span class="text-xs text-neutral-700">Docker Engine</span></div><span class="text-xs text-neutral-400">27.4.1 · 8 containers</span></div>' +
+            '<div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-success-500"></span><span class="text-xs text-neutral-700">bbolt WAL</span></div><span class="text-xs text-neutral-400">2.1MB · /var/lib/crewship/state.db</span></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="bg-white border border-neutral-200 rounded-lg p-5">' +
+          '<div class="text-sm font-medium text-neutral-900 mb-3">Recent Platform Events</div>' +
+          '<div class="space-y-2">' +
+            '<div class="flex items-center gap-3 text-xs"><span class="text-neutral-400 font-mono w-28 flex-shrink-0">2 min ago</span><span class="text-neutral-700">Agent <strong>Codex</strong> restarted (credential failover)</span></div>' +
+            '<div class="flex items-center gap-3 text-xs"><span class="text-neutral-400 font-mono w-28 flex-shrink-0">15 min ago</span><span class="text-neutral-700">User <strong>marie@example.com</strong> joined Unify Technology</span></div>' +
+            '<div class="flex items-center gap-3 text-xs"><span class="text-neutral-400 font-mono w-28 flex-shrink-0">1 hour ago</span><span class="text-neutral-700">Org <strong>DevHouse</strong> created by tomas@devhouse.cz</span></div>' +
+            '<div class="flex items-center gap-3 text-xs"><span class="text-neutral-400 font-mono w-28 flex-shrink-0">3 hours ago</span><span class="text-neutral-700">Rate limit triggered for <strong>OPENAI_KEY_1</strong> (429)</span></div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    },
+    organizations: function () {
+      var orgs = [
+        { name: 'Unify Technology', slug: 'unify-technology', initials: 'U', color: 'bg-primary-600', members: 3, agents: 7, plan: 'FREE', created: 'Dec 2025' },
+        { name: 'Acme Corp', slug: 'acme-corp', initials: 'A', color: 'bg-orange-500', members: 12, agents: 24, plan: 'TEAM', created: 'Jan 2026' },
+        { name: 'DevHouse s.r.o.', slug: 'devhouse', initials: 'D', color: 'bg-violet-500', members: 5, agents: 3, plan: 'PRO', created: 'Feb 2026' }
+      ];
+      var planCls = { FREE: 'bg-neutral-100 text-neutral-600', PRO: 'bg-primary-100 text-primary-700', TEAM: 'bg-brand-teal/10 text-teal-700', ENTERPRISE: 'bg-warning-50 text-warning-700' };
+      var rows = '';
+      orgs.forEach(function (o) {
+        rows += '<div class="flex items-center justify-between py-3 border-b border-neutral-50">' +
+          '<div class="flex items-center gap-3">' +
+            '<div class="w-9 h-9 rounded-lg ' + o.color + ' flex items-center justify-center text-white text-xs font-bold">' + o.initials + '</div>' +
+            '<div><div class="text-sm font-medium text-neutral-900">' + o.name + '</div><div class="text-[10px] text-neutral-400 font-mono">' + o.slug + '</div></div>' +
+          '</div>' +
+          '<div class="flex items-center gap-4">' +
+            '<span class="text-xs text-neutral-500">' + o.members + ' members</span>' +
+            '<span class="text-xs text-neutral-500">' + o.agents + ' agents</span>' +
+            '<span class="text-[10px] px-2 py-0.5 rounded-full font-medium ' + (planCls[o.plan] || '') + '">' + o.plan + '</span>' +
+            '<span class="text-[10px] text-neutral-400">' + o.created + '</span>' +
+          '</div>' +
+        '</div>';
+      });
+      return '<div class="space-y-4">' +
+        '<div class="flex items-center justify-between">' +
+          '<div><div class="text-sm font-medium text-neutral-900">All Organizations</div><div class="text-xs text-neutral-400">3 organizations on this instance</div></div>' +
+          '<button class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="M12 8v8"/></svg> Create Org</button>' +
+        '</div>' +
+        '<div class="bg-white border border-neutral-200 rounded-lg overflow-hidden"><div class="px-4">' + rows + '</div></div>' +
+      '</div>';
+    },
+    users: function () {
+      var users = [
+        { name: 'Pavel Srba', email: 'pavel@example.com', initials: 'PS', orgs: 'Unify Technology', role: 'Owner', last: '2 min ago' },
+        { name: 'Jan Novak', email: 'jan@example.com', initials: 'JN', orgs: 'Unify Technology', role: 'Admin', last: '1h ago' },
+        { name: 'Marie Kralova', email: 'marie@example.com', initials: 'MK', orgs: 'Unify Technology', role: 'Member', last: '3h ago' },
+        { name: 'Tomas Horak', email: 'tomas@acme.cz', initials: 'TH', orgs: 'Acme Corp', role: 'Owner', last: '5h ago' },
+        { name: 'Eva Dvorakova', email: 'eva@acme.cz', initials: 'ED', orgs: 'Acme Corp', role: 'Admin', last: '1d ago' },
+        { name: 'Petr Svoboda', email: 'petr@devhouse.cz', initials: 'PS', orgs: 'DevHouse', role: 'Owner', last: '2d ago' },
+        { name: 'Anna Nemcova', email: 'anna@acme.cz', initials: 'AN', orgs: 'Acme Corp', role: 'Member', last: '3d ago' }
+      ];
+      var rows = '';
+      users.forEach(function (u) {
+        rows += '<div class="flex items-center justify-between py-2.5 border-b border-neutral-50">' +
+          '<div class="flex items-center gap-3">' +
+            '<div class="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center text-white text-[10px] font-semibold">' + u.initials + '</div>' +
+            '<div><div class="text-sm text-neutral-800">' + u.name + '</div><div class="text-[10px] text-neutral-400">' + u.email + '</div></div>' +
+          '</div>' +
+          '<div class="flex items-center gap-4">' +
+            '<span class="text-xs text-neutral-500">' + u.orgs + '</span>' +
+            '<span class="text-[10px] px-2 py-0.5 rounded-full font-medium bg-neutral-100 text-neutral-600">' + u.role + '</span>' +
+            '<span class="text-[10px] text-neutral-400 w-16 text-right">' + u.last + '</span>' +
+          '</div>' +
+        '</div>';
+      });
+      return '<div class="space-y-4">' +
+        '<div><div class="text-sm font-medium text-neutral-900">All Users</div><div class="text-xs text-neutral-400">7 users across all organizations</div></div>' +
+        '<div class="bg-white border border-neutral-200 rounded-lg overflow-hidden"><div class="px-4">' + rows + '</div></div>' +
+      '</div>';
+    },
+    providers: function () {
+      function providerCard(label, desc, options, active) {
+        var opts = '';
+        options.forEach(function (o) {
+          var isActive = o === active;
+          opts += '<div class="flex items-center gap-3 p-3 border rounded-lg cursor-pointer ' + (isActive ? 'border-primary-500 bg-primary-50/50' : 'border-neutral-200 hover:border-neutral-300') + '">' +
+            '<div class="w-4 h-4 rounded-full border-2 flex items-center justify-center ' + (isActive ? 'border-primary-600' : 'border-neutral-300') + '">' +
+              (isActive ? '<div class="w-2 h-2 rounded-full bg-primary-600"></div>' : '') +
+            '</div>' +
+            '<div><div class="text-sm ' + (isActive ? 'text-primary-700 font-medium' : 'text-neutral-700') + '">' + o + '</div></div>' +
+          '</div>';
+        });
+        return '<div class="bg-white border border-neutral-200 rounded-lg p-5 space-y-3">' +
+          '<div><div class="text-sm font-medium text-neutral-900">' + label + '</div><div class="text-xs text-neutral-400">' + desc + '</div></div>' +
+          '<div class="grid grid-cols-2 gap-2.5">' + opts + '</div>' +
+        '</div>';
+      }
+      return '<div class="space-y-5">' +
+        '<div><div class="text-sm font-medium text-neutral-900">Infrastructure Providers</div><div class="text-xs text-neutral-400">Configure how Crewship runs agent containers, stores files, and manages state.</div></div>' +
+        providerCard('Container Provider', 'CREWSHIP_CONTAINER_PROVIDER', ['Docker (MVP)', 'Kubernetes (Enterprise)'], 'Docker (MVP)') +
+        providerCard('Storage Provider', 'CREWSHIP_STORAGE_PROVIDER', ['Local Filesystem (MVP)', 'S3 / MinIO (Enterprise)'], 'Local Filesystem (MVP)') +
+        providerCard('State Provider', 'CREWSHIP_STATE_PROVIDER', ['bbolt (MVP)', 'PostgreSQL (Enterprise)'], 'bbolt (MVP)') +
+        '<button class="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">Save Configuration</button>' +
+      '</div>';
+    },
+    flags: function () {
+      var flags = [
+        { key: 'billing_enabled', desc: 'Enable Stripe billing (enterprise only)', on: false },
+        { key: 'marketplace_enabled', desc: 'Enable skills marketplace', on: false },
+        { key: 'orchestration', desc: 'Enable multi-agent orchestration', on: true },
+        { key: 'task_mode', desc: 'Enable async task mode', on: false },
+        { key: 'config_history', desc: 'Enable agent config versioning', on: true },
+        { key: 'advanced_audit', desc: 'Enable advanced audit log UI + export', on: false }
+      ];
+      var html = '';
+      flags.forEach(function (f) {
+        html += '<div class="flex items-center justify-between py-3 border-b border-neutral-50">' +
+          '<div class="flex-1"><div class="text-sm font-mono text-neutral-800">' + f.key + '</div><div class="text-xs text-neutral-400 mt-0.5">' + f.desc + '</div></div>' +
+          '<div class="flex items-center gap-2 ml-3"><span class="text-[10px] ' + (f.on ? 'text-success-600' : 'text-neutral-400') + '">' + (f.on ? 'ON' : 'OFF') + '</span>' +
+          '<div class="w-9 h-5 rounded-full ' + (f.on ? 'bg-primary-600' : 'bg-neutral-300') + ' cursor-pointer relative"><div class="absolute top-0.5 ' + (f.on ? 'left-4' : 'left-0.5') + ' w-4 h-4 rounded-full bg-white shadow-sm"></div></div></div>' +
+        '</div>';
+      });
+      return '<div class="space-y-3">' +
+        '<div><div class="text-sm font-medium text-neutral-900">Global Feature Flags</div><div class="text-xs text-neutral-400">Flags apply platform-wide. Per-org overrides available in Organization Settings.</div></div>' +
+        '<div class="bg-white border border-neutral-200 rounded-lg px-4">' + html + '</div>' +
+      '</div>';
+    },
+    ratelimits: function () {
+      var limits = [
+        { name: 'LOGIN_ATTEMPT', rule: '5 req / 1m', scope: 'ip', target: 'POST /api/auth/*' },
+        { name: 'CREATE_ORGANIZATION', rule: '3 req / 1h', scope: 'user', target: 'POST /api/v1/orgs' },
+        { name: 'DELETE_ORGANIZATION', rule: '1 req / 1d', scope: 'user', target: 'DELETE /api/v1/orgs/{id}' },
+        { name: 'AGENT_START', rule: '30 req / 1m', scope: 'user', target: 'POST /api/v1/.../start' },
+        { name: 'API_READ', rule: '200 req / 1m', scope: 'user', target: 'GET /api/v1/*' },
+        { name: 'WEBHOOK_TRIGGER', rule: '60 req / 1m', scope: 'agent', target: 'POST /api/v1/webhooks/...' },
+        { name: 'WS_MESSAGES', rule: '60 req / 1m', scope: 'conn', target: 'WebSocket send' }
+      ];
+      var rows = '';
+      limits.forEach(function (l) {
+        rows += '<tr class="border-b border-neutral-50"><td class="py-2.5 text-xs font-mono text-neutral-800">' + l.name + '</td><td class="py-2.5 text-xs text-neutral-600">' + l.rule + '</td><td class="py-2.5"><span class="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">' + l.scope + '</span></td><td class="py-2.5 text-[10px] text-neutral-400 font-mono">' + l.target + '</td></tr>';
+      });
+      return '<div class="space-y-4">' +
+        '<div><div class="text-sm font-medium text-neutral-900">Rate Limits</div><div class="text-xs text-neutral-400">Configured in config/rate-limits.yml. In-memory, per-process (MVP).</div></div>' +
+        '<div class="bg-white border border-neutral-200 rounded-lg overflow-hidden">' +
+          '<table class="w-full"><thead><tr class="border-b border-neutral-200 bg-neutral-50"><th class="text-left text-[10px] font-medium text-neutral-400 px-4 py-2">Name</th><th class="text-left text-[10px] font-medium text-neutral-400 px-4 py-2">Limit</th><th class="text-left text-[10px] font-medium text-neutral-400 px-4 py-2">Scope</th><th class="text-left text-[10px] font-medium text-neutral-400 px-4 py-2">Target</th></tr></thead><tbody class="px-4">' + rows + '</tbody></table>' +
+        '</div>' +
+      '</div>';
+    },
+    security: function () {
+      return '<div class="space-y-5">' +
+        '<div><div class="text-sm font-medium text-neutral-900">Security Configuration</div><div class="text-xs text-neutral-400">Encryption, authentication, and container isolation settings.</div></div>' +
+        '<div class="bg-white border border-neutral-200 rounded-lg p-5 space-y-4">' +
+          '<div class="text-xs font-medium text-neutral-700">Encryption</div>' +
+          '<div class="flex items-center justify-between py-2"><div><div class="text-sm text-neutral-800">Credentials Vault</div><div class="text-xs text-neutral-400">AES-256-GCM with key versioning (v1:)</div></div><span class="text-[10px] px-2 py-0.5 rounded-full bg-success-50 text-success-700 font-medium">Active</span></div>' +
+          '<div class="flex items-center justify-between py-2"><div><div class="text-sm text-neutral-800">Encryption Key</div><div class="text-xs text-neutral-400 font-mono">v1:••••••••••••••••</div></div><button class="text-xs text-primary-600 hover:text-primary-700 font-medium">Rotate Key</button></div>' +
+        '</div>' +
+        '<div class="bg-white border border-neutral-200 rounded-lg p-5 space-y-4">' +
+          '<div class="text-xs font-medium text-neutral-700">Container Isolation</div>' +
+          '<div class="space-y-2 text-xs text-neutral-600">' +
+            '<div class="flex items-center gap-2"><svg class="w-3.5 h-3.5 text-success-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Non-root UID 1001</div>' +
+            '<div class="flex items-center gap-2"><svg class="w-3.5 h-3.5 text-success-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>--internal network (no internet except LLM allowlist)</div>' +
+            '<div class="flex items-center gap-2"><svg class="w-3.5 h-3.5 text-success-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Read-only root, cap-drop ALL, no-new-privileges</div>' +
+            '<div class="flex items-center gap-2"><svg class="w-3.5 h-3.5 text-success-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Audit log: append-only (chattr +a)</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="bg-white border border-neutral-200 rounded-lg p-5 space-y-4">' +
+          '<div class="text-xs font-medium text-neutral-700">Authentication</div>' +
+          '<div class="flex items-center justify-between py-2"><div class="text-sm text-neutral-800">NextAuth.js (Auth.js v5)</div><span class="text-[10px] px-2 py-0.5 rounded-full bg-success-50 text-success-700 font-medium">Active</span></div>' +
+          '<div class="flex items-center justify-between py-2"><div class="text-sm text-neutral-800">Google OAuth</div><span class="text-[10px] px-2 py-0.5 rounded-full bg-success-50 text-success-700 font-medium">Enabled</span></div>' +
+          '<div class="flex items-center justify-between py-2"><div class="text-sm text-neutral-800">GitHub OAuth</div><span class="text-[10px] px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-500 font-medium">Disabled</span></div>' +
+        '</div>' +
+      '</div>';
+    },
+    logs: function () {
+      var logs = [
+        { ts: '14:32:01.234', level: 'INFO', msg: 'Agent claude-seo-writer started (container crewship-agent-7f3a)' },
+        { ts: '14:31:58.891', level: 'INFO', msg: 'Credential pool: selected ANTHROPIC_KEY_1 (priority=0) for claude-seo-writer' },
+        { ts: '14:31:45.102', level: 'WARN', msg: 'Rate limit 429 on OPENAI_KEY_1 — cooldown 5m, switching to OPENAI_KEY_2' },
+        { ts: '14:31:30.445', level: 'INFO', msg: 'WebSocket connection established: user=pavel session=ws-8f2a' },
+        { ts: '14:30:12.667', level: 'INFO', msg: 'Docker exec: container crewship-agent-3b1c exited code=0 runtime=8m31s' },
+        { ts: '14:28:55.112', level: 'ERROR', msg: 'Agent codex-deploy-monitor: exit code 1 — stderr: "rate limit exceeded"' },
+        { ts: '14:28:54.998', level: 'INFO', msg: 'Initiating credential failover for codex-deploy-monitor' },
+        { ts: '14:25:01.001', level: 'INFO', msg: 'bbolt WAL checkpoint: 2.1MB, 847 entries' },
+        { ts: '14:20:00.000', level: 'INFO', msg: 'Health check: all systems nominal' }
+      ];
+      var levelCls = { INFO: 'text-primary-600', WARN: 'text-warning-700', ERROR: 'text-error-600' };
+      var rows = '';
+      logs.forEach(function (l) {
+        rows += '<div class="flex gap-3 py-1 font-mono text-[11px] hover:bg-neutral-50">' +
+          '<span class="text-neutral-400 flex-shrink-0">' + l.ts + '</span>' +
+          '<span class="w-12 flex-shrink-0 font-medium ' + (levelCls[l.level] || '') + '">' + l.level + '</span>' +
+          '<span class="text-neutral-700">' + l.msg + '</span>' +
+        '</div>';
+      });
+      return '<div class="space-y-4">' +
+        '<div class="flex items-center justify-between">' +
+          '<div><div class="text-sm font-medium text-neutral-900">System Logs</div><div class="text-xs text-neutral-400">crewshipd JSONL output — last 50 entries</div></div>' +
+          '<div class="flex items-center gap-2">' +
+            '<button class="text-xs text-neutral-500 border border-neutral-200 rounded-lg px-3 py-1.5 hover:bg-neutral-50">Refresh</button>' +
+            '<button class="text-xs text-neutral-500 border border-neutral-200 rounded-lg px-3 py-1.5 hover:bg-neutral-50">Download Full Log</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="bg-neutral-950 rounded-lg p-4 overflow-x-auto">' +
+          '<div class="space-y-0.5 text-[11px] font-mono">' +
+            logs.map(function (l) {
+              return '<div class="flex gap-3"><span class="text-neutral-500 flex-shrink-0">' + l.ts + '</span><span class="w-12 flex-shrink-0 font-medium ' +
+                (l.level === 'ERROR' ? 'text-red-400' : l.level === 'WARN' ? 'text-yellow-400' : 'text-blue-400') + '">' + l.level + '</span><span class="text-neutral-300">' + l.msg + '</span></div>';
+            }).join('') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
+  };
+
+  function render() {
+    var tabNav = document.getElementById('admin-tabs');
+    var html = '';
+    tabs.forEach(function (t) {
+      var isActive = t.key === tab;
+      html += '<button data-tab="' + t.key + '" class="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-xs atab ' +
+        (isActive ? 'atab-active' : 'text-neutral-600') + '">' +
+        '<span class="flex-shrink-0">' + t.icon + '</span>' +
+        '<span class="truncate">' + t.label + '</span>' +
+      '</button>';
+    });
+    tabNav.innerHTML = html;
+
+    var content = document.getElementById('admin-content');
+    content.innerHTML = tabContent[tab] ? tabContent[tab]() : '';
+
+    tabNav.querySelectorAll('[data-tab]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        tab = btn.getAttribute('data-tab');
+        render();
+      });
+    });
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
