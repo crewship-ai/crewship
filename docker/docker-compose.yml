@@ -14,6 +14,8 @@ services:
       POSTGRES_DB: crewship
     volumes:
       - crewship-pgdata:/var/lib/postgresql/data
+    networks:
+      - crewship-internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U crewship"]
       interval: 5s
@@ -22,3 +24,10 @@ services:
 
 volumes:
   crewship-pgdata:
+
+networks:
+  crewship-internal:
+    name: crewship-internal
+  crewship-agents:
+    name: crewship-agents
+    internal: true
