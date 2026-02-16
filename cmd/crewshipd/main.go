@@ -11,6 +11,9 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/provider/bbolt"
+	"github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/server"
 )
 
@@ -54,11 +57,56 @@ func main() {
 		cancel()
 	}()
 
-	srv := server.New(cfg, logger)
+	deps, err := initProviders(cfg, logger)
+	if err != nil {
+		logger.Error("failed to initialize providers", "error", err)
+		os.Exit(1)
+	}
+
+	srv := server.New(cfg, logger, deps)
 	if err := srv.Start(ctx); err != nil {
 		logger.Error("server error", "error", err)
 		os.Exit(1)
 	}
 
 	logger.Info("crewshipd stopped")
+}
+
+func initProviders(cfg *config.Config, logger *slog.Logger) (*server.Deps, error) {
+	deps := &server.Deps{}
+
+	switch cfg.Container.Provider {
+	case "docker":
+		d, err := docker.New(docker.Config{
+			RuntimeImage:   cfg.Container.RuntimeImage,
+			DefaultRuntime: cfg.Container.DefaultRuntime,
+			Network:        cfg.Container.Network,
+			OutputBasePath: cfg.Storage.BasePath,
+		}, logger)
+		if err != nil {
+			logger.Warn("docker provider unavailable, running without containers", "error", err)
+		} else {
+			deps.Container = d
+		}
+	}
+
+	switch cfg.Storage.Provider {
+	case "localfs":
+		fs, err := localfs.New(cfg.Storage.BasePath)
+		if err != nil {
+			return nil, err
+		}
+		deps.Storage = fs
+	}
+
+	switch cfg.State.Provider {
+	case "bbolt":
+		b, err := bbolt.New(cfg.State.BoltPath)
+		if err != nil {
+			return nil, err
+		}
+		deps.State = b
+	}
+
+	return deps, nil
 }
