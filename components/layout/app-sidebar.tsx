@@ -13,7 +13,9 @@ import {
   Activity,
   Shield,
   Store,
+  ShieldCheck,
 } from "lucide-react"
+import { useAbilities } from "@/hooks/use-abilities"
 import {
   Sidebar,
   SidebarContent,
@@ -48,7 +50,7 @@ const navSections = [
   {
     label: "Monitor",
     items: [
-      { title: "Runs", href: "/runs", icon: Activity, badge: "TODO" },
+      { title: "Runs", href: "/runs", icon: Activity },
       { title: "Audit Log", href: "/audit", icon: Shield },
     ],
   },
@@ -56,6 +58,7 @@ const navSections = [
     label: "System",
     items: [
       { title: "Settings", href: "/settings", icon: Settings },
+      { title: "Admin", href: "/admin", icon: ShieldCheck, badge: "OWNER" },
     ],
   },
 ]
@@ -63,6 +66,7 @@ const navSections = [
 export function AppSidebar() {
   const pathname = usePathname()
   const { data: session } = useSession()
+  const { role } = useAbilities()
 
   const userName = session?.user?.name ?? "User"
   const userInitials = userName
@@ -102,9 +106,14 @@ export function AppSidebar() {
             <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {section.items.map((item) => (
+                {section.items
+                  .filter((item) => {
+                    if (item.badge === "OWNER" && role !== "OWNER") return false
+                    return true
+                  })
+                  .map((item) => (
                   <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton asChild isActive={pathname === item.href}>
+                    <SidebarMenuButton asChild isActive={pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))}>
                       <Link href={item.href}>
                         <item.icon />
                         <span>{item.title}</span>
@@ -112,9 +121,6 @@ export function AppSidebar() {
                     </SidebarMenuButton>
                     {item.badge === "FUTURE" && (
                       <SidebarMenuBadge className="text-[9px] bg-muted text-muted-foreground px-1.5">FUTURE</SidebarMenuBadge>
-                    )}
-                    {item.badge === "TODO" && (
-                      <SidebarMenuBadge className="text-[9px] bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400 border border-amber-200 dark:border-amber-800 px-1.5">TODO</SidebarMenuBadge>
                     )}
                   </SidebarMenuItem>
                 ))}
