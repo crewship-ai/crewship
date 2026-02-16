@@ -2,6 +2,8 @@ package chatbridge
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"time"
@@ -53,9 +55,15 @@ func New(
 	}
 }
 
+func generateMsgID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return fmt.Sprintf("msg_%d_%s", time.Now().UnixNano(), hex.EncodeToString(b))
+}
+
 func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, content string, streamFn func(ws.ChatEvent)) error {
 	if err := b.convStore.Append(ctx, sessionID, conversation.Message{
-		ID:        fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+		ID:        generateMsgID(),
 		Role:      conversation.RoleUser,
 		Content:   content,
 		Timestamp: time.Now().UTC(),
@@ -113,12 +121,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, conte
 	}
 
 	if err := b.convStore.Append(ctx, sessionID, conversation.Message{
-		ID:        fmt.Sprintf("msg_%d", time.Now().UnixNano()),
+		ID:        generateMsgID(),
 		Role:      conversation.RoleAssistant,
 		Content:   fullResponse,
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
-		b.logger.Error("failed to persist assistant message", "error", err)
+		b.logger.Error("failed to persist assistant message", "error", err, "session_id", sessionID)
+		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save response"})
+		return fmt.Errorf("persist assistant message: %w", err)
 	}
 
 	streamFn(ws.ChatEvent{Type: "done", Content: ""})

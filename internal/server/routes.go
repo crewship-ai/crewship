@@ -140,7 +140,8 @@ func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 
 	status, err := s.container.ContainerStatus(r.Context(), id)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": id, "status": "unknown", "error": err.Error()})
+		s.logger.Error("container status failed", "team_id", id, "error", err)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": id, "status": "unknown"})
 		return
 	}
 
@@ -167,7 +168,7 @@ func (s *Server) handleContainerStart(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		s.logger.Error("container start failed", "team_id", id, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container start failed"})
 		return
 	}
 
@@ -189,7 +190,7 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.container.StopTeamRuntime(r.Context(), id); err != nil {
 		s.logger.Error("container stop failed", "team_id", id, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container stop failed"})
 		return
 	}
 

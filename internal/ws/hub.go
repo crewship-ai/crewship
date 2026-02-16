@@ -145,6 +145,27 @@ func (h *Hub) Broadcast(channel string, msg ServerMessage) {
 	h.broadcast <- ChannelMessage{Channel: channel, Data: data}
 }
 
+func (h *Hub) BroadcastExcept(channel string, exclude *Client, msg ServerMessage) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("broadcast marshal error", "error", err)
+		return
+	}
+	h.mu.RLock()
+	if subs, ok := h.channels[channel]; ok {
+		for client := range subs {
+			if client == exclude {
+				continue
+			}
+			select {
+			case client.send <- data:
+			default:
+			}
+		}
+	}
+	h.mu.RUnlock()
+}
+
 func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
@@ -333,18 +354,15 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		channel := "session:" + payload.SessionID
 
 		streamFn := func(event ChatEvent) {
-			resp, _ := json.Marshal(ServerMessage{
+			msg := ServerMessage{
 				Type:    "chat_event",
 				Channel: channel,
 				Payload: event,
-			})
+			}
+			resp, _ := json.Marshal(msg)
 			c.safeSend(resp)
 
-			c.hub.Broadcast(channel, ServerMessage{
-				Type:    "chat_event",
-				Channel: channel,
-				Payload: event,
-			})
+			c.hub.BroadcastExcept(channel, c, msg)
 		}
 
 		err := c.hub.chatHandler.HandleChatMessage(
@@ -359,7 +377,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			errResp, _ := json.Marshal(ServerMessage{
 				Type:    "chat_event",
 				Channel: channel,
-				Payload: ChatEvent{Type: "error", Content: err.Error()},
+				Payload: ChatEvent{Type: "error", Content: "an error occurred processing your message"},
 			})
 			c.safeSend(errResp)
 		}
