@@ -48,10 +48,10 @@ export default async function FilesPage({ params }: { params: Promise<{ agentId:
                 <td className="px-4 sm:px-6 py-3 text-xs text-muted-foreground hidden sm:table-cell">{f.modified}</td>
                 <td className="px-4 sm:px-6 py-3 text-right">
                   <div className="flex items-center justify-end gap-1">
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`View ${f.name}`}>
                       <Eye className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Download ${f.name}`}>
                       <Download className="h-4 w-4" />
                     </Button>
                   </div>

@@ -40,16 +40,7 @@
     "zod": "^4.3.6",
     "zustand": "^5.0.11"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@prisma/client",
-      "@prisma/engines",
-      "prisma",
-      "esbuild"
-    ]
-  },
   "devDependencies": {
-    "@eslint/compat": "^2.0.2",
     "@tailwindcss/postcss": "^4.1.18",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -62,7 +53,6 @@
     "@vitejs/plugin-react": "^5.1.4",
     "dotenv-cli": "^11.0.0",
     "eslint": "^9.39.2",
-    "eslint-config-next": "^16.1.6",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^17.3.0",

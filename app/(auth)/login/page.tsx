@@ -90,7 +90,8 @@ export default function LoginPage() {
               type="button"
               variant="outline"
               className="w-full"
-              onClick={() => signIn("google", { callbackUrl: "/" })}
+              disabled
+              title="Google sign-in coming in Phase 2"
             >
               Sign in with Google
             </Button>

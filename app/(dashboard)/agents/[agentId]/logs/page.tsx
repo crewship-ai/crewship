@@ -10,15 +10,15 @@ export default async function LogsPage({ params }: { params: Promise<{ agentId: 
   const logLines = [
     { time: "10:22:58", level: "INFO", msg: "Session #4 started (mode=CHAT, trigger=user)" },
     { time: "10:22:59", level: "INFO", msg: "Container crewship-agent-claude-seo-writer started (image: crewship/agent-runtime:latest)" },
-    { time: "10:23:00", level: "INFO", msg: "Credential injected: ANTHROPIC_API_KEY (priority=1, key=ANTHROPIC_KEY_1)" },
+    { time: "10:23:00", level: "INFO", msg: "Credential injected: LLM_API_KEY (priority=1, key=••••1)" },
     { time: "10:23:01", level: "INFO", msg: "Agent thinking: Analyzing SEO trends for Q1 2026..." },
     { time: "10:23:05", level: "INFO", msg: 'Tool call: web-search {"query": "AI management platforms SEO 2026"}' },
     { time: "10:23:12", level: "INFO", msg: "Tool result: Found 12 relevant articles (latency=6.8s)" },
     { time: "10:23:13", level: "WARN", msg: "Token usage approaching 80% of context window (148k/200k)" },
     { time: "10:23:14", level: "INFO", msg: "Writing blog post section 3 of 5..." },
     { time: "10:23:18", level: "INFO", msg: "File written: /output/blog-post.md (14.2 KB)" },
-    { time: "10:23:19", level: "ERROR", msg: "Rate limit hit on ANTHROPIC_KEY_1, failing over to ANTHROPIC_KEY_2" },
-    { time: "10:23:20", level: "INFO", msg: "Credential rotated: ANTHROPIC_API_KEY (priority=2, key=ANTHROPIC_KEY_2)" },
+    { time: "10:23:19", level: "ERROR", msg: "Rate limit hit on key ••••1, failing over to key ••••2" },
+    { time: "10:23:20", level: "INFO", msg: "Credential rotated: LLM_API_KEY (priority=2, key=••••2)" },
     { time: "10:23:22", level: "INFO", msg: "Resumed generation with fallback key" },
   ]
 

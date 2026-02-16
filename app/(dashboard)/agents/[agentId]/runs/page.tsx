@@ -5,11 +5,11 @@ export default async function RunsPage({ params }: { params: Promise<{ agentId: 
   const { agentId } = await params
 
   const runs = [
-    { id: "a3f8c1d2", status: "Running", statusClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400", pulse: true, duration: "23m 14s", trigger: "User", apiKey: "ANTHROPIC_KEY_1", files: 1, started: "23 min ago" },
-    { id: "b7e2f9a1", status: "Completed", statusClass: "bg-emerald-50 text-emerald-700", pulse: false, duration: "18m 42s", trigger: "User", apiKey: "ANTHROPIC_KEY_1", files: 3, started: "1h ago" },
-    { id: "c4d1e8b3", status: "Completed", statusClass: "bg-emerald-50 text-emerald-700", pulse: false, duration: "6m 15s", trigger: "Webhook", apiKey: "ANTHROPIC_KEY_2", files: 1, started: "3h ago" },
-    { id: "d9a7b2c4", status: "Failed", statusClass: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400", pulse: false, duration: "0m 42s", trigger: "Schedule", apiKey: "ANTHROPIC_KEY_1", files: 0, started: "6h ago" },
-    { id: "e1f3d5a8", status: "Completed", statusClass: "bg-emerald-50 text-emerald-700", pulse: false, duration: "12m 08s", trigger: "User", apiKey: "ANTHROPIC_KEY_1", files: 2, started: "Yesterday" },
+    { id: "a3f8c1d2", status: "Running", statusClass: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400", pulse: true, duration: "23m 14s", trigger: "User", apiKey: "LLM ••••1", files: 1, started: "23 min ago" },
+    { id: "b7e2f9a1", status: "Completed", statusClass: "bg-emerald-50 text-emerald-700", pulse: false, duration: "18m 42s", trigger: "User", apiKey: "LLM ••••1", files: 3, started: "1h ago" },
+    { id: "c4d1e8b3", status: "Completed", statusClass: "bg-emerald-50 text-emerald-700", pulse: false, duration: "6m 15s", trigger: "Webhook", apiKey: "LLM ••••2", files: 1, started: "3h ago" },
+    { id: "d9a7b2c4", status: "Failed", statusClass: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400", pulse: false, duration: "0m 42s", trigger: "Schedule", apiKey: "LLM ••••1", files: 0, started: "6h ago" },
+    { id: "e1f3d5a8", status: "Completed", statusClass: "bg-emerald-50 text-emerald-700", pulse: false, duration: "12m 08s", trigger: "User", apiKey: "LLM ••••1", files: 2, started: "Yesterday" },
   ]
 
   return (

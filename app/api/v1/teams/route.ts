@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { createTeamSchema } from "@/lib/validations"
 import { requireAuth, isAuthError } from "@/lib/api-auth"
+import { defineAbilitiesFor } from "@/lib/permissions/abilities"
+import type { OrgRole } from "@/lib/generated/prisma/client"
 
 export async function GET(req: NextRequest) {
   const orgId = req.nextUrl.searchParams.get("org_id")
@@ -26,7 +28,8 @@ export async function POST(req: NextRequest) {
   const authResult = await requireAuth(orgId)
   if (isAuthError(authResult)) return authResult
 
-  if (!["OWNER", "ADMIN"].includes(authResult.role)) {
+  const abilities = defineAbilitiesFor(authResult.role as OrgRole)
+  if (!abilities.can("create", "Team")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
