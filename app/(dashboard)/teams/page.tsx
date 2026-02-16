@@ -27,7 +27,10 @@ export default function TeamsPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!orgId) return
+    if (!orgId) {
+      if (!orgLoading) setLoading(false)
+      return
+    }
 
     let cancelled = false
 
@@ -53,7 +56,7 @@ export default function TeamsPage() {
     return () => {
       cancelled = true
     }
-  }, [orgId])
+  }, [orgId, orgLoading])
 
   const isLoading = orgLoading || loading
 

@@ -36,6 +36,11 @@ export async function GET(
   const authResult = await requireAuth(orgId)
   if (isAuthError(authResult)) return authResult
 
+  const abilities = defineAbilitiesFor(authResult.role as OrgRole)
+  if (!abilities.can("read", "Credential")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
   const credential = await prisma.credential.findFirst({
     where: { id: credentialId, org_id: authResult.orgId, deleted_at: null },
     select: CREDENTIAL_SAFE_SELECT,

@@ -40,7 +40,10 @@ export default function AgentsPage() {
   const [activeFilter, setActiveFilter] = useState("All")
 
   useEffect(() => {
-    if (!orgId) return
+    if (!orgId) {
+      if (!orgLoading) setLoading(false)
+      return
+    }
 
     let cancelled = false
 
@@ -66,7 +69,7 @@ export default function AgentsPage() {
     return () => {
       cancelled = true
     }
-  }, [orgId])
+  }, [orgId, orgLoading])
 
   const isLoading = orgLoading || loading
 

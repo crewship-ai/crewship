@@ -40,6 +40,11 @@ export async function GET(
   const authResult = await requireAuth(orgId)
   if (isAuthError(authResult)) return authResult
 
+  const abilities = defineAbilitiesFor(authResult.role as OrgRole)
+  if (!abilities.can("read", "Agent")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
   const agent = await prisma.agent.findFirst({
     where: { id: agentId, org_id: authResult.orgId, deleted_at: null },
     select: AGENT_SAFE_SELECT,
