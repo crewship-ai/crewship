@@ -298,7 +298,7 @@
 
 ## EPIC 8: Testy ✅ ~80%
 
-> Unit testy, integracni testy. Celkem: 148 testu (73 TS + 75 Go).
+> Unit testy, integracni testy. Celkem: 149 testu (73 TS + 76 Go).
 
 - [x] 8.1 Vitest unit testy pro encryption.ts (10 testu)
 - [x] 8.2 Vitest unit testy pro validations.ts (23 testu)
@@ -307,7 +307,7 @@
 - [x] 8.5 Vitest unit testy pro cn.ts (9 testu)
 - [ ] 8.6 Vitest unit testy pro api-auth.ts
 - [ ] 8.7 API route integration testy (agents, teams, credentials)
-- [x] 8.8 Go unit testy (75 testu: config, logging, server, ws, bbolt, localfs, fileserver, logcollector, failover, webhook, auth, conversation) — PR #17 + #19 + #21
+- [x] 8.8 Go unit testy (76 testu: config, logging, server, ws, bbolt, localfs, fileserver, logcollector, failover, webhook, auth, conversation) — PR #17 + #19 + #21
 - [ ] 8.9 E2E testy (Playwright -- Phase 2)
 
 ---
@@ -430,47 +430,46 @@
 | 5 | REST API | ✅ | ~95% |
 | 6 | Go backend | 🟡 | ~75% |
 | 7 | Create/Edit forms | ✅ | 100% |
-| 8 | Testy | ✅ | ~80% (148 testu) |
+| 8 | Testy | ✅ | ~80% (149 testu) |
 | 9 | Seed data | ✅ | ~80% |
 | 10 | Nasazeni | 🟡 | ~40% |
 
-### Co zbyva pro kompletni MVP
+### Co zbyva pro spusteni MVP
 
-**Frontend (male):**
-1. **Google OAuth** -- Phase 2 (zatim disabled button)
-2. **Team-scoped permissions** -- MANAGER vidi jen prirazene tymy
-3. **Org switcher funkcionalita** -- zmena org, reload dat
-4. **Command palette** -- ⌘K funkcni vyhledavani
-5. **Notifikacni system** -- bell icon + logika
-6. **Advanced filtry na audit page** -- date range, user picker
-7. **Skill detail stranka** -- /skills/[skillId]
-8. **Billing/subscription tab** -- v Settings
+#### P0: MUST HAVE (bez toho to nejede) -- dalsi PR
 
-**Go backend (stredni):**
-9. ~~**WebSocket JWT validace**~~ ✅ PR #21
-10. ~~**Chat message routing**~~ ✅ PR #21
-11. **Real-time streaming** -- agent status broadcasting + log streaming
-12. **Container TTL management** -- auto-stop po neaktivite
-13. **Container resource limits** -- memory, CPU per team
-14. **Logrotate integrace** -- hodinova rotace, gzip
-15. ~~**Conversation session**~~ ✅ PR #21 (writer + reader hotovy, metadata sync zbyva)
-16. **Webhook → orchestrator** -- napojeni trigger handleru na spusteni agenta
+- [ ] **Production Dockerfile: Next.js** (multi-stage, standalone output)
+- [ ] **Production Dockerfile: crewshipd** (multi-stage, static binary)
+- [ ] **docker-compose.prod.yml** (PostgreSQL + Next.js + crewshipd + agent-runtime sit)
+- [ ] **Session metadata sync** (Go → IPC → Next.js → Prisma)
+- [ ] **Prisma migrace** (schema existuje, db:push/db:migrate jeste nebyl spusten)
 
-**DevOps:**
-17. **Next.js production Dockerfile**
-18. **crewshipd production Dockerfile**
-19. **docker-compose.prod.yml** (full stack)
-20. **Coolify deployment konfigurace**
+#### P1: SHOULD HAVE (pro rozumne demo)
 
-**Testy:**
-21. **API route integration testy** (agents, teams, credentials)
-22. **E2E testy** (Playwright -- Phase 2)
+- [ ] **Container TTL** -- auto-stop po neaktivite
+- [ ] **Container resource limits** -- memory, CPU per team
+- [ ] **Webhook → orchestrator** -- napojeni trigger handleru na RunAgent
+- [ ] **Real-time log streaming** pres WebSocket
+- [ ] **Coolify deployment config** (staging Proxmox)
+
+#### P2: NICE TO HAVE (ne blokuje spusteni)
+
+- [ ] Org switcher funkcionalita
+- [ ] Command palette (⌘K)
+- [ ] Notifikacni system (bell icon + logika)
+- [ ] Team-scoped permissions (MANAGER)
+- [ ] Logrotate integrace
+- [ ] Advanced audit filtry (date range, user picker)
+- [ ] Skill detail stranka
+- [ ] API route integration testy
+- [ ] Google OAuth (Phase 2, disabled button uz existuje)
+- [ ] Billing/subscription tab
 
 ### Dalsi kroky (Phase 2 -- Orchestrace + Crew Execution)
 
-23. **Phase 2A** -- Crew Leader delegace (sidecar, DelegationLog) + zakladni Crew Execution (Board UI, JSONL progress)
-24. **Phase 2B** -- Workflow sablony (dev-test loop), Auto-hiring (supervised/semi-auto), Director routing
-25. **Phase 3** -- Full auto hiring + marketplace, Git worktree, cross-team execution, analytics
+- **Phase 2A** -- Crew Leader delegace (sidecar, DelegationLog) + zakladni Crew Execution (Board UI, JSONL progress)
+- **Phase 2B** -- Workflow sablony (dev-test loop), Auto-hiring (supervised/semi-auto), Director routing
+- **Phase 3** -- Full auto hiring + marketplace, Git worktree, cross-team execution, analytics
 
 ### Merge historie
 
