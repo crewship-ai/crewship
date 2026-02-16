@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"golang.org/x/net/websocket"
 )
 
@@ -22,9 +23,10 @@ type ChatEvent struct {
 }
 
 type Hub struct {
-	logger      *slog.Logger
-	chatHandler ChatHandler
-	clients     map[*Client]bool
+	logger       *slog.Logger
+	chatHandler  ChatHandler
+	jwtValidator *auth.JWTValidator
+	clients      map[*Client]bool
 	channels    map[string]map[*Client]bool
 	register    chan *Client
 	unregister  chan *Client
@@ -60,7 +62,7 @@ type ChannelMessage struct {
 }
 
 func NewHub(logger *slog.Logger, chatHandler ChatHandler, deps ...interface{}) *Hub {
-	return &Hub{
+	h := &Hub{
 		logger:      logger,
 		chatHandler: chatHandler,
 		clients:     make(map[*Client]bool),
@@ -69,6 +71,12 @@ func NewHub(logger *slog.Logger, chatHandler ChatHandler, deps ...interface{}) *
 		unregister:  make(chan *Client),
 		broadcast:   make(chan ChannelMessage, 256),
 	}
+	for _, d := range deps {
+		if v, ok := d.(*auth.JWTValidator); ok {
+			h.jwtValidator = v
+		}
+	}
+	return h
 }
 
 func (h *Hub) Run(ctx context.Context) {
@@ -142,10 +150,19 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: validate JWT signature and expiry, extract user ID from claims.
-	// For now, accept any non-empty token. Real JWT validation will be
-	// implemented when auth.JWTSecret is wired in from config.
-	userID := "anonymous"
+	var userID string
+	if h.jwtValidator != nil {
+		claims, err := h.jwtValidator.Validate(token)
+		if err != nil {
+			h.logger.Warn("ws auth failed", "error", err)
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		userID = claims.ID
+	} else {
+		h.logger.Warn("jwt validator not configured, accepting any token")
+		userID = "anonymous"
+	}
 
 	wsServer := websocket.Server{
 		Handler: func(conn *websocket.Conn) {

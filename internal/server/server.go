@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/logcollector"
@@ -56,7 +57,21 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	orch := orchestrator.New(ctr, sta, logger)
 	logW := logcollector.NewWriter(cfg.Storage.LogPath, logger)
 	convStore := conversation.NewStore(cfg.Storage.BasePath, logger)
-	wsHub := ws.NewHub(logger, nil)
+
+	var jwtValidator *auth.JWTValidator
+	if cfg.Auth.JWTSecret != "" {
+		var err error
+		jwtValidator, err = auth.NewJWTValidator(cfg.Auth.JWTSecret, "authjs.session-token")
+		if err != nil {
+			logger.Error("failed to create JWT validator", "error", err)
+		} else {
+			logger.Info("JWT validator configured for WebSocket auth")
+		}
+	} else {
+		logger.Warn("NEXTAUTH_SECRET not set, WebSocket auth disabled")
+	}
+
+	wsHub := ws.NewHub(logger, nil, jwtValidator)
 
 	s := &Server{
 		mux:          mux,
