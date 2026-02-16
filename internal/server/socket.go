@@ -1,13 +1,17 @@
 package server
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
 
 func removeSocketFile(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
+		return fmt.Errorf("create socket directory: %w", err)
 	}
-	return os.Remove(path)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove socket file: %w", err)
+	}
+	return nil
 }

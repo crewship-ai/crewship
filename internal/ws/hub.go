@@ -13,14 +13,14 @@ import (
 )
 
 type Hub struct {
-	logger      *slog.Logger
-	clients     map[*Client]bool
-	channels    map[string]map[*Client]bool
-	register    chan *Client
-	unregister  chan *Client
-	broadcast   chan ChannelMessage
-	mu          sync.RWMutex
-	connCount   atomic.Int64
+	logger    *slog.Logger
+	clients   map[*Client]bool
+	channels  map[string]map[*Client]bool
+	register  chan *Client
+	unregister chan *Client
+	broadcast chan ChannelMessage
+	mu        sync.RWMutex
+	connCount atomic.Int64
 }
 
 type Client struct {
@@ -29,6 +29,7 @@ type Client struct {
 	userID   string
 	channels map[string]bool
 	send     chan []byte
+	mu       sync.Mutex // protects channels map
 }
 
 type ClientMessage struct {
@@ -76,6 +77,7 @@ func (h *Hub) Run(ctx context.Context) {
 			h.mu.Lock()
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
+				client.mu.Lock()
 				for ch := range client.channels {
 					if subs, ok := h.channels[ch]; ok {
 						delete(subs, client)
@@ -84,11 +86,12 @@ func (h *Hub) Run(ctx context.Context) {
 						}
 					}
 				}
+				client.mu.Unlock()
 				close(client.send)
+				h.connCount.Add(-1)
+				h.logger.Debug("client disconnected", "user_id", client.userID)
 			}
 			h.mu.Unlock()
-			h.connCount.Add(-1)
-			h.logger.Debug("client disconnected", "user_id", client.userID)
 		case msg := <-h.broadcast:
 			h.mu.RLock()
 			if subs, ok := h.channels[msg.Channel]; ok {
@@ -96,7 +99,6 @@ func (h *Hub) Run(ctx context.Context) {
 					select {
 					case client.send <- msg.Data:
 					default:
-						// client buffer full, skip
 					}
 				}
 			}
@@ -125,7 +127,9 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: validate JWT token and extract user ID
+	// TODO: validate JWT signature and expiry, extract user ID from claims.
+	// For now, accept any non-empty token. Real JWT validation will be
+	// implemented when auth.JWTSecret is wired in from config.
 	userID := "anonymous"
 
 	wsServer := websocket.Server{
@@ -209,7 +213,10 @@ func (c *Client) subscribe(channel string) {
 		return
 	}
 	// TODO: validate channel access (team membership check via IPC)
+	c.mu.Lock()
 	c.channels[channel] = true
+	c.mu.Unlock()
+
 	c.hub.mu.Lock()
 	if _, ok := c.hub.channels[channel]; !ok {
 		c.hub.channels[channel] = make(map[*Client]bool)
@@ -224,7 +231,10 @@ func (c *Client) unsubscribe(channel string) {
 	if channel == "" {
 		return
 	}
+	c.mu.Lock()
 	delete(c.channels, channel)
+	c.mu.Unlock()
+
 	c.hub.mu.Lock()
 	if subs, ok := c.hub.channels[channel]; ok {
 		delete(subs, c)

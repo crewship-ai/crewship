@@ -15,6 +15,10 @@ import (
 )
 
 func main() {
+	// Bootstrap JSON logger before config load so early errors are structured
+	bootstrapLogger := logging.New("info", "json", os.Stdout)
+	slog.SetDefault(bootstrapLogger)
+
 	configPath := flag.String("config", "", "path to config file (YAML)")
 	flag.Parse()
 
@@ -24,7 +28,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := logging.New(cfg.Logging.Level, cfg.Logging.Format, os.Stdout)
+	logger := logging.New(cfg.Logging.Level, "json", os.Stdout)
 	slog.SetDefault(logger)
 
 	logger.Info("crewshipd starting",
