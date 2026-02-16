@@ -21,6 +21,6 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     "/(dashboard)(.*)",
-    "/api/v1/((?!health|webhooks).*)",
+    "/api/v1/((?!health|webhooks|internal).*)",
   ],
 }

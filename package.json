@@ -14,6 +14,8 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "db:generate": "dotenv -- prisma generate",
+    "db:migrate": "dotenv -- prisma migrate deploy",
+    "db:migrate:dev": "dotenv -- prisma migrate dev",
     "db:push": "dotenv -- prisma db push",
     "db:studio": "dotenv -- prisma studio",
     "db:seed": "tsx prisma/seed.ts"

@@ -58,6 +58,8 @@ type LoggingConfig struct {
 type AuthConfig struct {
 	JWTSecret     string        `yaml:"jwt_secret"`
 	WSTokenExpiry time.Duration `yaml:"ws_token_expiry"`
+	NextjsURL     string        `yaml:"nextjs_url"`
+	InternalToken string        `yaml:"internal_token"`
 }
 
 func Default() *Config {
@@ -93,6 +95,7 @@ func Default() *Config {
 		},
 		Auth: AuthConfig{
 			WSTokenExpiry: 5 * time.Minute,
+			NextjsURL:     "http://localhost:3000",
 		},
 	}
 }
@@ -136,6 +139,9 @@ func (c *Config) Validate() error {
 	}
 	if !validStateProviders[c.State.Provider] {
 		return fmt.Errorf("state.provider must be 'bbolt' or 'postgres', got %q", c.State.Provider)
+	}
+	if c.Auth.NextjsURL == "" {
+		return fmt.Errorf("auth.nextjs_url is required (set CREWSHIP_NEXTJS_URL)")
 	}
 	return nil
 }
@@ -194,5 +200,11 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_RUNTIME_IMAGE"); v != "" {
 		cfg.Container.RuntimeImage = v
+	}
+	if v := os.Getenv("CREWSHIP_NEXTJS_URL"); v != "" {
+		cfg.Auth.NextjsURL = v
+	}
+	if v := os.Getenv("CREWSHIP_INTERNAL_TOKEN"); v != "" {
+		cfg.Auth.InternalToken = v
 	}
 }

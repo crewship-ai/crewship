@@ -158,6 +158,20 @@ export async function getSessionMessages(
   );
 }
 
+/** Create a conversation session in Prisma via crewshipd relay. */
+export async function createSession(params: {
+  session_id: string;
+  agent_id: string;
+  org_id: string;
+  user_id?: string;
+  title?: string;
+}) {
+  return crewshipdRequest<{ id: string; status: string }>("/sessions", {
+    method: "POST",
+    body: params,
+  });
+}
+
 /** Check if crewshipd is running and healthy. */
 export async function healthCheck() {
   return crewshipdRequest<{ status: string }>("/health");
