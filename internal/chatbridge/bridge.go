@@ -57,7 +57,9 @@ func New(
 
 func generateMsgID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("msg_%d", time.Now().UnixNano())
+	}
 	return fmt.Sprintf("msg_%d_%s", time.Now().UnixNano(), hex.EncodeToString(b))
 }
 
@@ -75,6 +77,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, conte
 
 	info, err := b.resolver.ResolveSession(ctx, sessionID)
 	if err != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: "failed to resolve session"})
 		return fmt.Errorf("resolve session: %w", err)
 	}
 
