@@ -1,15 +1,17 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { z } from "zod"
 
 export type WSStatus = "connecting" | "connected" | "disconnected" | "error"
 
-interface WSMessage {
-  type: string
-  channel?: string
-  payload?: string
-  [key: string]: unknown
-}
+const wsMessageSchema = z.object({
+  type: z.string(),
+  channel: z.string().optional(),
+  payload: z.string().optional(),
+}).passthrough()
+
+export type WSMessage = z.infer<typeof wsMessageSchema>
 
 interface UseWebSocketOptions {
   url: string
@@ -64,9 +66,10 @@ export function useWebSocket({
 
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data) as WSMessage
-        if (typeof msg.type !== "string") return
-        onMessageRef.current?.(msg)
+        const parsed = JSON.parse(event.data)
+        const result = wsMessageSchema.safeParse(parsed)
+        if (!result.success) return
+        onMessageRef.current?.(result.data)
       } catch {
         // non-JSON message, ignore
       }
