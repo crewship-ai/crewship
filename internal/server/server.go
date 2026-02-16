@@ -95,14 +95,19 @@ func (s *Server) Shutdown() error {
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Server.ShutdownTimeout)
 	defer cancel()
 
+	var firstErr error
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		s.logger.Error("http server shutdown error", "error", err)
+		firstErr = err
 	}
 	if err := s.ipcServer.Shutdown(ctx); err != nil {
 		s.logger.Error("ipc server shutdown error", "error", err)
+		if firstErr == nil {
+			firstErr = err
+		}
 	}
 
-	return nil
+	return firstErr
 }
 
 func (s *Server) startIPC() error {

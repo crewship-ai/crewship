@@ -200,7 +200,7 @@ func (c *Client) writePump() {
 				return
 			}
 		case <-ticker.C:
-			ping, _ := json.Marshal(ServerMessage{Type: "pong", Payload: nil})
+			ping, _ := json.Marshal(ServerMessage{Type: "ping", Payload: nil})
 			if _, err := c.conn.Write(ping); err != nil {
 				return
 			}
