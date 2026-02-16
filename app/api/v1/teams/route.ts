@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { createTeamSchema } from "@/lib/validations"
+import { requireAuth, isAuthError } from "@/lib/api-auth"
 
 export async function GET(req: NextRequest) {
   const orgId = req.nextUrl.searchParams.get("org_id")
 
-  if (!orgId) {
-    return NextResponse.json({ error: "org_id is required" }, { status: 400 })
-  }
+  const authResult = await requireAuth(orgId)
+  if (isAuthError(authResult)) return authResult
 
   const teams = await prisma.team.findMany({
-    where: { org_id: orgId, deleted_at: null },
+    where: { org_id: authResult.orgId, deleted_at: null },
     include: {
       _count: { select: { agents: true, members: true } },
     },
@@ -21,13 +21,16 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json()
   const orgId = req.nextUrl.searchParams.get("org_id")
 
-  if (!orgId) {
-    return NextResponse.json({ error: "org_id is required" }, { status: 400 })
+  const authResult = await requireAuth(orgId)
+  if (isAuthError(authResult)) return authResult
+
+  if (!["OWNER", "ADMIN"].includes(authResult.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
+  const body = await req.json()
   const parsed = createTeamSchema.safeParse(body)
 
   if (!parsed.success) {
@@ -35,7 +38,7 @@ export async function POST(req: NextRequest) {
   }
 
   const existing = await prisma.team.findUnique({
-    where: { uq_team_slug: { org_id: orgId, slug: parsed.data.slug } },
+    where: { uq_team_slug: { org_id: authResult.orgId, slug: parsed.data.slug } },
   })
 
   if (existing) {
@@ -44,7 +47,7 @@ export async function POST(req: NextRequest) {
 
   const team = await prisma.team.create({
     data: {
-      org_id: orgId,
+      org_id: authResult.orgId,
       name: parsed.data.name,
       slug: parsed.data.slug,
       description: parsed.data.description,

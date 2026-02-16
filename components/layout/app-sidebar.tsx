@@ -2,10 +2,10 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useSession } from "next-auth/react"
 import {
   LayoutDashboard,
   Bot,
-  Users,
   Key,
   Zap,
   Settings,
@@ -62,6 +62,15 @@ const navSections = [
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const { data: session } = useSession()
+
+  const userName = session?.user?.name ?? "User"
+  const userInitials = userName
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase()
 
   return (
     <Sidebar variant="inset">
@@ -119,11 +128,13 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg">
               <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-muted">
-                <span className="text-xs font-medium">PS</span>
+                <span className="text-xs font-medium">{userInitials}</span>
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold text-xs">Pavel Srba</span>
-                <span className="truncate text-xs text-muted-foreground">Owner</span>
+                <span className="truncate font-semibold text-xs">{userName}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {session?.user?.email ?? ""}
+                </span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
