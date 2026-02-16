@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -36,7 +37,21 @@ func NewWriter(basePath string, logger *slog.Logger) *Writer {
 	}
 }
 
+func validateID(s string) error {
+	if s == "" || strings.ContainsAny(s, "/\\") || strings.Contains(s, "..") {
+		return fmt.Errorf("invalid ID: %q", s)
+	}
+	return nil
+}
+
 func (w *Writer) Append(teamID, agentID string, entry LogEntry) error {
+	if err := validateID(teamID); err != nil {
+		return fmt.Errorf("invalid team ID: %w", err)
+	}
+	if err := validateID(agentID); err != nil {
+		return fmt.Errorf("invalid agent ID: %w", err)
+	}
+
 	if entry.Timestamp.IsZero() {
 		entry.Timestamp = time.Now().UTC()
 	}

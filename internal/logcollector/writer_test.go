@@ -43,10 +43,12 @@ func TestWriterMultipleEntries(t *testing.T) {
 	defer w.Close()
 
 	for i := 0; i < 5; i++ {
-		_ = w.Append("team-1", "agent-1", LogEntry{
+		if err := w.Append("team-1", "agent-1", LogEntry{
 			Event:   "text",
 			Content: "line",
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	w.Flush()
 
@@ -66,10 +68,12 @@ func TestReaderWithOffset(t *testing.T) {
 	defer w.Close()
 
 	for i := 0; i < 10; i++ {
-		_ = w.Append("team-1", "agent-1", LogEntry{
+		if err := w.Append("team-1", "agent-1", LogEntry{
 			Event:   "text",
 			Content: "line",
-		})
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	w.Flush()
 
@@ -99,14 +103,19 @@ func TestWriterDefaultTimestamp(t *testing.T) {
 	w := NewWriter(dir, slog.Default())
 	defer w.Close()
 
-	_ = w.Append("team-1", "agent-1", LogEntry{
+	if err := w.Append("team-1", "agent-1", LogEntry{
 		Event:   "text",
 		Content: "no timestamp",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	w.Flush()
 
 	reader := NewReader(dir)
-	entries, _ := reader.ReadAgentLogs("team-1", "agent-1", 0, 0)
+	entries, err := reader.ReadAgentLogs("team-1", "agent-1", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(entries) != 1 {
 		t.Fatal("expected 1 entry")
 	}

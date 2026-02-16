@@ -60,9 +60,15 @@ func TestList(t *testing.T) {
 	p := tempProvider(t)
 	ctx := context.Background()
 
-	_ = p.Write(ctx, "a.txt", bytes.NewReader([]byte("a")))
-	_ = p.Write(ctx, "b.txt", bytes.NewReader([]byte("b")))
-	_ = p.EnsureDir(ctx, "subdir")
+	if err := p.Write(ctx, "a.txt", bytes.NewReader([]byte("a"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Write(ctx, "b.txt", bytes.NewReader([]byte("b"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.EnsureDir(ctx, "subdir"); err != nil {
+		t.Fatal(err)
+	}
 
 	files, err := p.List(ctx, ".")
 	if err != nil {
@@ -88,7 +94,9 @@ func TestDelete(t *testing.T) {
 	p := tempProvider(t)
 	ctx := context.Background()
 
-	_ = p.Write(ctx, "del.txt", bytes.NewReader([]byte("delete me")))
+	if err := p.Write(ctx, "del.txt", bytes.NewReader([]byte("delete me"))); err != nil {
+		t.Fatal(err)
+	}
 	if err := p.Delete(ctx, "del.txt"); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +147,9 @@ func TestExists(t *testing.T) {
 		t.Fatal("expected false for missing file")
 	}
 
-	_ = p.Write(ctx, "yes.txt", bytes.NewReader([]byte("y")))
+	if err := p.Write(ctx, "yes.txt", bytes.NewReader([]byte("y"))); err != nil {
+		t.Fatal(err)
+	}
 	exists, _ = p.Exists(ctx, "yes.txt")
 	if !exists {
 		t.Fatal("expected true for existing file")

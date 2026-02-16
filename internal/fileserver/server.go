@@ -31,12 +31,14 @@ func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
 	teamID := r.PathValue("id")
 	subPath := r.URL.Query().Get("path")
 
-	dir := filepath.Join(s.basePath, teamID)
+	base := filepath.Join(s.basePath, teamID)
+	dir := base
 	if subPath != "" {
-		dir = filepath.Join(dir, filepath.Clean(subPath))
+		dir = filepath.Join(base, filepath.Clean(subPath))
 	}
 
-	if !strings.HasPrefix(dir, filepath.Join(s.basePath, teamID)) {
+	rel, err := filepath.Rel(base, dir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -80,8 +82,10 @@ func (s *Server) HandleFileDownload(w http.ResponseWriter, r *http.Request) {
 	teamID := r.PathValue("id")
 	filePath := r.PathValue("path")
 
-	full := filepath.Join(s.basePath, teamID, filepath.Clean(filePath))
-	if !strings.HasPrefix(full, filepath.Join(s.basePath, teamID)) {
+	base := filepath.Join(s.basePath, teamID)
+	full := filepath.Join(base, filepath.Clean(filePath))
+	rel, err := filepath.Rel(base, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -97,7 +101,11 @@ func (s *Server) HandleFileDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
-	info, _ := f.Stat()
+	info, err := f.Stat()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", detectMIME(filePath))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(filePath)))

@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -15,9 +16,9 @@ type WebhookPayload struct {
 	RecvAt time.Time `json:"received_at"`
 }
 
-type SecretLookup func(teamID, agentID string) (string, error)
+type SecretLookup func(ctx context.Context, teamID, agentID string) (string, error)
 
-type TriggerFunc func(teamID, agentID string, payload WebhookPayload) error
+type TriggerFunc func(ctx context.Context, teamID, agentID string, payload WebhookPayload) error
 
 type Handler struct {
 	logger       *slog.Logger
@@ -53,7 +54,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expectedSecret, err := h.lookupSecret(teamID, agentID)
+	expectedSecret, err := h.lookupSecret(r.Context(), teamID, agentID)
 	if err != nil {
 		h.logger.Error("webhook secret lookup failed", "error", err, "team_id", teamID, "agent_id", agentID)
 		http.Error(w, "not found", http.StatusNotFound)
@@ -81,7 +82,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	payload.RecvAt = time.Now().UTC()
 
-	if err := h.trigger(teamID, agentID, payload); err != nil {
+	if err := h.trigger(r.Context(), teamID, agentID, payload); err != nil {
 		h.logger.Error("webhook trigger failed", "error", err, "team_id", teamID, "agent_id", agentID)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

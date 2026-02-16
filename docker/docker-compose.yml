@@ -28,6 +28,7 @@ volumes:
 networks:
   crewship-internal:
     name: crewship-internal
+    internal: true
   crewship-agents:
     name: crewship-agents
     internal: true
