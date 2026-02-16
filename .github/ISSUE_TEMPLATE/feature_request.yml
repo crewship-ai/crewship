@@ -1,0 +1,36 @@
+name: Feature Request
+description: Suggest a new feature for Crewship
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the feature you'd like.
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: Why is this feature needed? What problem does it solve?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or features you've considered.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - UI (Next.js)
+        - API
+        - Go Backend (crewshipd)
+        - Agent Runtime
+        - Orchestration
+        - Other
+    validations:
+      required: true

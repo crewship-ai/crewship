@@ -1,0 +1,78 @@
+# PR Labeler Configuration
+# Used with actions/labeler workflow
+
+frontend:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'app/**'
+          - 'components/**'
+          - 'hooks/**'
+          - '*.css'
+
+backend:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'app/api/**'
+          - 'lib/services/**'
+
+go:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'cmd/**'
+          - 'internal/**'
+          - 'go.mod'
+          - 'go.sum'
+
+database:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'prisma/**'
+
+docker:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docker/**'
+          - 'Dockerfile*'
+
+ci/cd:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - '.factory/context/**'
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'package.json'
+          - 'pnpm-lock.yaml'
+          - 'go.mod'
+          - 'go.sum'
+
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'lib/permissions/**'
+          - 'lib/encryption.ts'
+          - 'middleware.ts'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.test.ts'
+          - '**/*.test.tsx'
+          - '**/*_test.go'
+          - 'vitest.config.ts'
+
+config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'tsconfig.json'
+          - 'next.config.ts'
+          - 'eslint.config.mjs'
+          - '.env.example'
+          - 'config/**'
