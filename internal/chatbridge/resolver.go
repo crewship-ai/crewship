@@ -8,20 +8,23 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
 type IPCResolver struct {
-	baseURL    string
-	httpClient *http.Client
-	logger     *slog.Logger
+	baseURL       string
+	internalToken string
+	httpClient    *http.Client
+	logger        *slog.Logger
 }
 
-func NewIPCResolver(nextjsURL string, logger *slog.Logger) *IPCResolver {
+func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCResolver {
 	return &IPCResolver{
-		baseURL: nextjsURL,
+		baseURL:       nextjsURL,
+		internalToken: internalToken,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -70,7 +73,7 @@ func (r *IPCResolver) CreateSession(ctx context.Context, req CreateSessionReques
 		return fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-Internal-Token", "crewshipd")
+	httpReq.Header.Set("X-Internal-Token", r.internalToken)
 
 	resp, err := r.httpClient.Do(httpReq)
 	if err != nil {
@@ -79,8 +82,7 @@ func (r *IPCResolver) CreateSession(ctx context.Context, req CreateSessionReques
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
-		r.logger.Error("session create failed", "session_id", req.SessionID, "status", resp.StatusCode, "body", string(respBody))
+		r.logger.Error("session create failed", "session_id", req.SessionID, "status", resp.StatusCode)
 		return fmt.Errorf("session create returned %d", resp.StatusCode)
 	}
 
@@ -88,13 +90,13 @@ func (r *IPCResolver) CreateSession(ctx context.Context, req CreateSessionReques
 }
 
 func (r *IPCResolver) ResolveSession(ctx context.Context, sessionID string) (*SessionInfo, error) {
-	url := fmt.Sprintf("%s/api/v1/internal/sessions/%s/resolve", r.baseURL, sessionID)
+	resolveURL := fmt.Sprintf("%s/api/v1/internal/sessions/%s/resolve", r.baseURL, url.PathEscape(sessionID))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resolveURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("X-Internal-Token", "crewshipd")
+	req.Header.Set("X-Internal-Token", r.internalToken)
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
@@ -108,7 +110,7 @@ func (r *IPCResolver) ResolveSession(ctx context.Context, sessionID string) (*Se
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		r.logger.Error("session resolve failed", "session_id", sessionID, "status", resp.StatusCode, "body", string(body))
+		r.logger.Error("session resolve failed", "session_id", sessionID, "status", resp.StatusCode)
 		return nil, fmt.Errorf("session resolve returned %d", resp.StatusCode)
 	}
 

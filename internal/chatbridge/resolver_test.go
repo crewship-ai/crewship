@@ -37,7 +37,7 @@ func TestIPCResolverResolveSession(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	resolver := NewIPCResolver(ts.URL, slog.Default())
+	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
 
 	info, err := resolver.ResolveSession(context.Background(), "session-123")
 	if err != nil {
@@ -77,7 +77,7 @@ func TestIPCResolverResolveSessionNotFound(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	resolver := NewIPCResolver(ts.URL, slog.Default())
+	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
 
 	_, err := resolver.ResolveSession(context.Background(), "nonexistent")
 	if err == nil {
@@ -116,7 +116,7 @@ func TestIPCResolverCreateSession(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	resolver := NewIPCResolver(ts.URL, slog.Default())
+	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
 
 	err := resolver.CreateSession(context.Background(), CreateSessionRequest{
 		SessionID: "sess-001",
@@ -136,7 +136,7 @@ func TestIPCResolverCreateSessionError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	resolver := NewIPCResolver(ts.URL, slog.Default())
+	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
 
 	err := resolver.CreateSession(context.Background(), CreateSessionRequest{
 		SessionID: "sess-001",

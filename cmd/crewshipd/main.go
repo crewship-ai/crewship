@@ -68,7 +68,7 @@ func main() {
 
 	srv := server.New(cfg, logger, deps)
 
-	resolver := chatbridge.NewIPCResolver(cfg.Auth.NextjsURL, logger)
+	resolver := chatbridge.NewIPCResolver(cfg.Auth.NextjsURL, cfg.Auth.InternalToken, logger)
 	bridge := chatbridge.New(
 		srv.Orchestrator(),
 		srv.ConversationStore(),
