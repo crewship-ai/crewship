@@ -97,7 +97,7 @@ export function InviteMemberDialog({ orgId, onInvited }: InviteMemberDialogProps
           <div className="space-y-2">
             <Label htmlFor="invite-role">Role</Label>
             <Select value={role} onValueChange={setRole}>
-              <SelectTrigger>
+              <SelectTrigger id="invite-role">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
