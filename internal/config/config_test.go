@@ -128,3 +128,83 @@ func TestLoadEmptyPath(t *testing.T) {
 		t.Errorf("expected default port, got %d", cfg.Server.Port)
 	}
 }
+
+func TestValidationInvalidPort(t *testing.T) {
+	cfg := Default()
+	cfg.Server.Port = 0
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for port 0")
+	}
+}
+
+func TestValidationInvalidPortHigh(t *testing.T) {
+	cfg := Default()
+	cfg.Server.Port = 99999
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for port 99999")
+	}
+}
+
+func TestValidationInvalidContainerProvider(t *testing.T) {
+	cfg := Default()
+	cfg.Container.Provider = "invalid"
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for invalid container provider")
+	}
+}
+
+func TestValidationInvalidStorageProvider(t *testing.T) {
+	cfg := Default()
+	cfg.Storage.Provider = "invalid"
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for invalid storage provider")
+	}
+}
+
+func TestValidationInvalidStateProvider(t *testing.T) {
+	cfg := Default()
+	cfg.State.Provider = "invalid"
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for invalid state provider")
+	}
+}
+
+func TestValidationEmptySocketPath(t *testing.T) {
+	cfg := Default()
+	cfg.IPC.SocketPath = ""
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("expected error for empty socket path")
+	}
+}
+
+func TestDefaultNextjsURL(t *testing.T) {
+	cfg := Default()
+	if cfg.Auth.NextjsURL != "http://localhost:3000" {
+		t.Errorf("expected default NextjsURL, got %q", cfg.Auth.NextjsURL)
+	}
+}
+
+func TestInvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.yml")
+	if err := os.WriteFile(path, []byte("{{invalid yaml"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Error("expected error for invalid YAML")
+	}
+}

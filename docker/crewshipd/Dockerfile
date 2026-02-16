@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /crewshipd ./cmd/crews
 # -- Runner --
 FROM alpine:3.21
 
-RUN apk --no-cache add ca-certificates && \
+RUN apk --no-cache add ca-certificates wget && \
     addgroup -S crewship && adduser -S crewship -G crewship
 
 RUN mkdir -p /var/lib/crewship /var/log/crewship /tmp && \

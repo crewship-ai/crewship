@@ -36,8 +36,9 @@ RUN addgroup --system --gid 1001 crewship && \
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=crewship:crewship /app/.next/standalone ./
 COPY --from=builder --chown=crewship:crewship /app/.next/static ./.next/static
-COPY --from=builder /app/node_modules/.pnpm/@prisma+client*/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/lib/generated/prisma ./lib/generated/prisma
 COPY --from=builder /app/prisma ./prisma
+COPY docker/docker-entrypoint.sh /app/docker-entrypoint.sh
 
 USER crewship
 

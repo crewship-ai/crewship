@@ -430,7 +430,7 @@
 | 5 | REST API | ✅ | ~95% |
 | 6 | Go backend | ✅ | ~85% |
 | 7 | Create/Edit forms | ✅ | 100% |
-| 8 | Testy | ✅ | ~85% (156 testu: 80 Go + 76 TS) |
+| 8 | Testy | ✅ | ~92% (228 testu: 128 Go + 100 TS) |
 | 9 | Seed data | ✅ | ~80% |
 | 10 | Nasazeni | ✅ | ~80% |
 
