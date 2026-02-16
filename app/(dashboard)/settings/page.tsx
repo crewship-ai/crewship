@@ -2,14 +2,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
+import { PageHeader } from "@/components/layout/page-header"
 
 export default function SettingsPage() {
   return (
     <div className="p-6 space-y-6 max-w-2xl">
-      <div>
-        <h1 className="text-lg font-semibold">Settings</h1>
-        <p className="text-sm text-muted-foreground">Manage your organization settings</p>
-      </div>
+      <PageHeader title="Settings" description="Manage your organization settings" />
 
       <Card>
         <CardHeader>
