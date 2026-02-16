@@ -1,0 +1,335 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CodeRabbit AI Code Review Configuration
+# Project: Crewship - AI Agent Orchestration Platform
+# Stack: Next.js 15 + Prisma + Go (crewshipd) + TypeScript
+# Documentation: https://docs.coderabbit.ai/reference/configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+language: "en-US"
+
+tone_instructions: "Concise, constructive. Focus on security, performance, TypeScript/Go best practices. Two-language project (TS + Go) -- check conventions for each. Avoid nitpicks."
+
+early_access: true
+enable_free_tier: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# REVIEWS
+# ═══════════════════════════════════════════════════════════════════════════════
+reviews:
+  profile: chill
+  request_changes_workflow: true
+
+  high_level_summary: true
+  high_level_summary_placeholder: "@coderabbitai summary"
+  high_level_summary_instructions: |
+    Create concise release notes as a bullet-point list.
+    Group changes by: Features, Bug Fixes, Breaking Changes, Refactoring.
+    Highlight security and performance improvements.
+    Keep it brief -- max 10 bullet points.
+  high_level_summary_in_walkthrough: false
+
+  review_status: true
+  review_details: true
+  commit_status: true
+  fail_commit_status: false
+
+  collapse_walkthrough: true
+  changed_files_summary: true
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+
+  suggested_labels: true
+  auto_apply_labels: false
+  labeling_instructions:
+    - label: "frontend"
+      instructions: "Apply when PR contains changes to React components, hooks, or UI files in components/ or app/ (excluding app/api/)"
+    - label: "backend"
+      instructions: "Apply when PR contains changes to API routes (app/api/), Go code (cmd/, internal/), or service files (lib/services/)"
+    - label: "database"
+      instructions: "Apply when PR contains changes to prisma/schema.prisma or migration files"
+    - label: "go"
+      instructions: "Apply when PR contains changes to Go files (*.go) in cmd/ or internal/"
+    - label: "security"
+      instructions: "Apply when PR contains changes to authentication, authorization, permissions, encryption, or container isolation (lib/permissions/, lib/encryption.ts, middleware.ts, internal/)"
+    - label: "tests"
+      instructions: "Apply when PR primarily adds or modifies test files (**/*.test.ts, **/*.test.tsx, **/*_test.go)"
+    - label: "breaking-change"
+      instructions: "Apply when PR contains breaking API changes, database migrations that require data migration, or removes public interfaces"
+    - label: "docker"
+      instructions: "Apply when PR contains changes to Dockerfiles, docker-compose, or container runtime code"
+
+  suggested_reviewers: true
+  auto_assign_reviewers: false
+
+  in_progress_fortune: false
+  poem: false
+  enable_prompt_for_ai_agents: true
+  abort_on_close: true
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # AUTO REVIEW
+  # ─────────────────────────────────────────────────────────────────────────────
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 5
+
+    base_branches:
+      - main
+      - develop
+
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "[DRAFT]"
+      - "[WIP]"
+      - "[SKIP CI]"
+
+    drafts: true
+
+    ignore_usernames:
+      - "dependabot[bot]"
+      - "renovate[bot]"
+      - "github-actions[bot]"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PATH FILTERS
+  # ─────────────────────────────────────────────────────────────────────────────
+  path_filters:
+    - "!pnpm-lock.yaml"
+    - "!package-lock.json"
+    - "!.next/**"
+    - "!dist/**"
+    - "!coverage/**"
+    - "!*.log"
+    - "!public/fonts/**"
+    - "!public/images/**"
+    - "!node_modules/**"
+    - "!.factory/artifacts/**"
+    - "!.factory/context/**"
+    - "!**/*.min.js"
+    - "!**/*.min.css"
+    - "!tsconfig.tsbuildinfo"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PATH INSTRUCTIONS
+  # ─────────────────────────────────────────────────────────────────────────────
+  path_instructions:
+    - path: "app/api/**"
+      instructions: |
+        Review API routes with security focus:
+        - Authentication: Must check user session via NextAuth
+        - Authorization: Must verify RBAC permissions (use lib/permissions/)
+        - Input validation: Use Zod schemas
+        - Error handling: Return appropriate HTTP status codes
+        - No secrets in responses or logs
+        - RBAC check on EVERY endpoint
+
+    - path: "lib/services/**"
+      instructions: |
+        Review service files for:
+        - Business logic correctness and edge cases
+        - Proper error handling
+        - Database transactions for multi-step operations
+        - N+1 query prevention (use includes/joins)
+        - Type safety with Prisma generated types
+
+    - path: "components/**/*.tsx"
+      instructions: |
+        Review React components for:
+        - ONLY shadcn/ui components (components/ui/) -- no external UI libraries
+        - ONLY lucide-react for icons
+        - Tailwind CSS only (no inline styles)
+        - Proper TypeScript interfaces for props
+        - Accessibility: aria labels, keyboard navigation
+        - No unnecessary re-renders
+
+    - path: "prisma/schema.prisma"
+      instructions: |
+        Review Prisma schema for:
+        - Proper relations (@relation) and cascading deletes
+        - Indexes for frequently queried fields (@@index)
+        - Enum naming: UPPER_SNAKE_CASE
+        - Field naming: camelCase
+        - Required vs optional fields
+        - Default values where appropriate
+
+    - path: "cmd/**/*.go"
+      instructions: |
+        Review Go entrypoints for:
+        - Signal handling (SIGINT, SIGTERM)
+        - Graceful shutdown
+        - Configuration loading
+        - Structured logging (JSON to stdout)
+
+    - path: "internal/**/*.go"
+      instructions: |
+        Review Go internal packages for:
+        - Provider pattern: NEVER access Docker/filesystem/bbolt directly
+        - Context propagation on all functions
+        - Error wrapping with fmt.Errorf("context: %w", err)
+        - No frameworks -- stdlib + minimal dependencies
+        - Security: container isolation, non-root UID 1001
+
+    - path: "lib/encryption.ts"
+      instructions: |
+        CRITICAL: Review encryption code for:
+        - AES-256-GCM only
+        - Key versioning (v1:base64data format)
+        - No plaintext credential logging
+        - Proper IV/nonce generation
+
+    - path: "lib/permissions/**"
+      instructions: |
+        Review RBAC code for:
+        - CASL-based abilities
+        - 5 roles: Owner, Admin, Manager, Member, Viewer
+        - Correct permission matrix per AGENTS.md
+
+    - path: "docker/**"
+      instructions: |
+        Review Docker files for:
+        - Non-root containers (UID 1001)
+        - --internal network (no internet except LLM allowlist)
+        - Minimal base images
+        - No secrets in Dockerfiles
+
+    - path: "**/*.test.{ts,tsx}"
+      instructions: |
+        Review tests for:
+        - Descriptive test names
+        - Edge case coverage
+        - Proper mocking
+        - Test isolation
+        - Vitest best practices
+
+    - path: "**/*_test.go"
+      instructions: |
+        Review Go tests for:
+        - Table-driven tests
+        - Subtests with t.Run
+        - Proper test helpers
+        - No test pollution (parallel-safe)
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # FINISHING TOUCHES
+  # ─────────────────────────────────────────────────────────────────────────────
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PRE-MERGE CHECKS
+  # ─────────────────────────────────────────────────────────────────────────────
+  pre_merge_checks:
+    docstrings:
+      mode: "warning"
+      threshold: 60
+    title:
+      mode: "warning"
+      requirements: "Use conventional commit format: type(scope): description (e.g., feat(agents): add agent detail page)"
+    description:
+      mode: "warning"
+    issue_assessment:
+      mode: "warning"
+    custom_checks:
+      - name: "Credential Security"
+        mode: "warning"
+        instructions: "Verify no plaintext credentials, API keys, or secrets in code, logs, or responses. Encryption must use AES-256-GCM with key versioning. Check lib/encryption.ts usage for any credential storage."
+      - name: "RBAC Enforcement"
+        mode: "warning"
+        instructions: "Verify all API routes in app/api/ check RBAC permissions using CASL abilities from lib/permissions/. No endpoint should be accessible without proper role verification."
+      - name: "No Console Logs"
+        mode: "warning"
+        instructions: "Check for console.log/debug/warn in production code. Allowed in tests and development scripts. Not allowed in components, services, API routes."
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # TOOLS
+  # ─────────────────────────────────────────────────────────────────────────────
+  tools:
+    biome:
+      enabled: true
+    shellcheck:
+      enabled: true
+    ruff:
+      enabled: true
+    hadolint:
+      enabled: true
+    markdownlint:
+      enabled: true
+    languagetool:
+      enabled: true
+      level: "default"
+      disabled_rules:
+        - "MORFOLOGIK_RULE_EN_US"
+    github-checks:
+      enabled: true
+      timeout_ms: 120000
+    golangci-lint:
+      enabled: true
+    prisma-lint:
+      enabled: true
+    yamllint:
+      enabled: true
+    ast-grep:
+      essential_rules: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CHAT
+# ═══════════════════════════════════════════════════════════════════════════════
+chat:
+  auto_reply: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# KNOWLEDGE BASE
+# ═══════════════════════════════════════════════════════════════════════════════
+knowledge_base:
+  learnings:
+    scope: "auto"
+  issues:
+    scope: "auto"
+  pull_requests:
+    scope: "auto"
+  opt_out: false
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CODE GENERATION
+# ═══════════════════════════════════════════════════════════════════════════════
+code_generation:
+  docstrings:
+    path_instructions:
+      - path: "lib/services/**"
+        instructions: "Use JSDoc format with @param and @returns. Include @throws for error cases."
+      - path: "components/**"
+        instructions: "Brief component description. Document complex props only."
+      - path: "app/api/**"
+        instructions: "Document endpoint purpose, request/response format, and auth requirements."
+      - path: "internal/**/*.go"
+        instructions: "Use Go doc comments. Document exported functions with full sentences starting with function name."
+  unit_tests:
+    path_instructions:
+      - path: "lib/services/**"
+        instructions: "Use Vitest. Mock Prisma client. Test happy path and error cases."
+      - path: "app/api/**"
+        instructions: "Use Next.js test helpers. Mock NextAuth session. Test auth and validation."
+      - path: "components/**"
+        instructions: "Use @testing-library/react. Test user interactions and a11y."
+      - path: "internal/**/*.go"
+        instructions: "Use table-driven tests. Mock provider interfaces. Test error paths."
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ISSUE ENRICHMENT
+# ═══════════════════════════════════════════════════════════════════════════════
+issue_enrichment:
+  auto_enrich:
+    enabled: false
+  planning:
+    enabled: true
