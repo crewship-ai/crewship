@@ -47,7 +47,12 @@ export async function PUT(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  const body = await req.json()
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+  }
   const parsed = updateOrgSchema.safeParse(body)
 
   if (!parsed.success) {
