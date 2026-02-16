@@ -1,0 +1,236 @@
+package ws
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"golang.org/x/net/websocket"
+)
+
+type Hub struct {
+	logger      *slog.Logger
+	clients     map[*Client]bool
+	channels    map[string]map[*Client]bool
+	register    chan *Client
+	unregister  chan *Client
+	broadcast   chan ChannelMessage
+	mu          sync.RWMutex
+	connCount   atomic.Int64
+}
+
+type Client struct {
+	conn     *websocket.Conn
+	hub      *Hub
+	userID   string
+	channels map[string]bool
+	send     chan []byte
+}
+
+type ClientMessage struct {
+	Type    string          `json:"type"`
+	Channel string          `json:"channel,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+type ServerMessage struct {
+	Type    string      `json:"type"`
+	Channel string      `json:"channel,omitempty"`
+	Payload interface{} `json:"payload"`
+}
+
+type ChannelMessage struct {
+	Channel string
+	Data    []byte
+}
+
+func NewHub(logger *slog.Logger) *Hub {
+	return &Hub{
+		logger:     logger,
+		clients:    make(map[*Client]bool),
+		channels:   make(map[string]map[*Client]bool),
+		register:   make(chan *Client),
+		unregister: make(chan *Client),
+		broadcast:  make(chan ChannelMessage, 256),
+	}
+}
+
+func (h *Hub) Run(ctx context.Context) {
+	h.logger.Info("websocket hub started")
+	for {
+		select {
+		case <-ctx.Done():
+			h.logger.Info("websocket hub stopping")
+			return
+		case client := <-h.register:
+			h.mu.Lock()
+			h.clients[client] = true
+			h.mu.Unlock()
+			h.connCount.Add(1)
+			h.logger.Debug("client connected", "user_id", client.userID)
+		case client := <-h.unregister:
+			h.mu.Lock()
+			if _, ok := h.clients[client]; ok {
+				delete(h.clients, client)
+				for ch := range client.channels {
+					if subs, ok := h.channels[ch]; ok {
+						delete(subs, client)
+						if len(subs) == 0 {
+							delete(h.channels, ch)
+						}
+					}
+				}
+				close(client.send)
+			}
+			h.mu.Unlock()
+			h.connCount.Add(-1)
+			h.logger.Debug("client disconnected", "user_id", client.userID)
+		case msg := <-h.broadcast:
+			h.mu.RLock()
+			if subs, ok := h.channels[msg.Channel]; ok {
+				for client := range subs {
+					select {
+					case client.send <- msg.Data:
+					default:
+						// client buffer full, skip
+					}
+				}
+			}
+			h.mu.RUnlock()
+		}
+	}
+}
+
+func (h *Hub) ConnectionCount() int {
+	return int(h.connCount.Load())
+}
+
+func (h *Hub) Broadcast(channel string, msg ServerMessage) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("broadcast marshal error", "error", err)
+		return
+	}
+	h.broadcast <- ChannelMessage{Channel: channel, Data: data}
+}
+
+func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		http.Error(w, "missing token", http.StatusUnauthorized)
+		return
+	}
+
+	// TODO: validate JWT token and extract user ID
+	userID := "anonymous"
+
+	wsServer := websocket.Server{
+		Handler: func(conn *websocket.Conn) {
+			client := &Client{
+				conn:     conn,
+				hub:      h,
+				userID:   userID,
+				channels: make(map[string]bool),
+				send:     make(chan []byte, 64),
+			}
+
+			h.register <- client
+
+			go client.writePump()
+			client.readPump()
+		},
+	}
+	wsServer.ServeHTTP(w, r)
+}
+
+func (c *Client) readPump() {
+	defer func() {
+		c.hub.unregister <- c
+		c.conn.Close()
+	}()
+
+	for {
+		var raw []byte
+		if err := websocket.Message.Receive(c.conn, &raw); err != nil {
+			break
+		}
+
+		var msg ClientMessage
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+
+		switch msg.Type {
+		case "subscribe":
+			c.subscribe(msg.Channel)
+		case "unsubscribe":
+			c.unsubscribe(msg.Channel)
+		case "ping":
+			resp, _ := json.Marshal(ServerMessage{Type: "pong", Payload: nil})
+			c.send <- resp
+		case "send_message":
+			c.hub.logger.Debug("message received", "user_id", c.userID, "channel", msg.Channel)
+			// TODO: route message to agent via orchestrator
+		}
+	}
+}
+
+func (c *Client) writePump() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
+
+	for {
+		select {
+		case msg, ok := <-c.send:
+			if !ok {
+				return
+			}
+			if _, err := c.conn.Write(msg); err != nil {
+				return
+			}
+		case <-ticker.C:
+			ping, _ := json.Marshal(ServerMessage{Type: "pong", Payload: nil})
+			if _, err := c.conn.Write(ping); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (c *Client) subscribe(channel string) {
+	if channel == "" {
+		return
+	}
+	// TODO: validate channel access (team membership check via IPC)
+	c.channels[channel] = true
+	c.hub.mu.Lock()
+	if _, ok := c.hub.channels[channel]; !ok {
+		c.hub.channels[channel] = make(map[*Client]bool)
+	}
+	c.hub.channels[channel][c] = true
+	c.hub.mu.Unlock()
+
+	c.hub.logger.Debug("client subscribed", "user_id", c.userID, "channel", channel)
+}
+
+func (c *Client) unsubscribe(channel string) {
+	if channel == "" {
+		return
+	}
+	delete(c.channels, channel)
+	c.hub.mu.Lock()
+	if subs, ok := c.hub.channels[channel]; ok {
+		delete(subs, c)
+		if len(subs) == 0 {
+			delete(c.hub.channels, channel)
+		}
+	}
+	c.hub.mu.Unlock()
+}
