@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, type FormEvent } from "react"
+import { inviteMemberSchema } from "@/lib/validations"
 import { UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -38,11 +39,18 @@ export function InviteMemberDialog({ orgId, onInvited }: InviteMemberDialogProps
     setStatus("saving")
     setError(null)
 
+    const parsed = inviteMemberSchema.safeParse({ email, role })
+    if (!parsed.success) {
+      setStatus("error")
+      setError(parsed.error.issues[0]?.message ?? "Invalid input")
+      return
+    }
+
     try {
       const res = await fetch(`/api/v1/orgs/${orgId}/invitations?org_id=${orgId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, role }),
+        body: JSON.stringify(parsed.data),
       })
 
       if (!res.ok) {
