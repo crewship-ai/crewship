@@ -1,5 +1,5 @@
 import { AbilityBuilder, PureAbility } from "@casl/ability"
-import type { OrgRole } from "@prisma/client"
+import type { OrgRole } from "@/lib/generated/prisma/client"
 
 type Actions = "create" | "read" | "update" | "delete" | "manage"
 type Subjects =
