@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/layout/page-header"
 
 export default function SettingsPage() {
   return (
-    <div className="p-6 space-y-6 max-w-2xl">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-2xl">
       <PageHeader title="Settings" description="Manage your organization settings" />
 
       <Card>

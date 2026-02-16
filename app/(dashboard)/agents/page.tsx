@@ -7,7 +7,7 @@ import Link from "next/link"
 
 export default function AgentsPage() {
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       <PageHeader title="Agents" description="Manage your AI virtual employees">
         <Button variant="outline" size="sm">
           <Filter className="mr-2 h-4 w-4" />

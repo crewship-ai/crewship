@@ -11,14 +11,14 @@ const bundledSkills = [
 
 export default function SkillsPage() {
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       <PageHeader title="Skills" description="Browse and manage agent skills" />
       <FilterBar filters={["All", "Bundled", "Custom"]} />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {bundledSkills.map((skill) => (
           <Card key={skill.name} className="hover:border-primary/50 transition-colors cursor-pointer">
-            <CardContent className="p-5">
+            <CardContent className="p-4 sm:p-5">
               <div className="flex items-start gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-lg">
                   {skill.icon}
