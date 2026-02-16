@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { createOrgSchema } from "@/lib/validations"
+import { auth } from "@/auth"
 
 export async function GET() {
-  // TODO: Get current user from session and filter by membership
+  const session = await auth()
+
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
   const orgs = await prisma.organization.findMany({
-    where: { deleted_at: null },
+    where: {
+      deleted_at: null,
+      members: { some: { user_id: session.user.id } },
+    },
     include: {
       _count: { select: { teams: true, agents: true, members: true } },
     },
@@ -16,6 +25,12 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await auth()
+
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
   const body = await req.json()
   const parsed = createOrgSchema.safeParse(body)
 
@@ -35,11 +50,14 @@ export async function POST(req: NextRequest) {
     data: {
       name: parsed.data.name,
       slug: parsed.data.slug,
+      members: {
+        create: {
+          user_id: session.user.id,
+          role: "OWNER",
+        },
+      },
     },
   })
-
-  // TODO: Create membership for current user as OWNER
-  // TODO: Create default FREE subscription
 
   return NextResponse.json(org, { status: 201 })
 }

@@ -316,6 +316,7 @@ model Team {
   organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
   members      TeamMember[]
   agents       Agent[]
+  credentials  Credential[]
 
   @@unique([org_id, slug], name: "uq_team_slug")
   @@index([org_id], name: "idx_team_org")
@@ -383,7 +384,7 @@ model Agent {
   delegations_sent DelegationLog[]       @relation("DelegatedBy")
   delegations_recv DelegationLog[]       @relation("DelegatedTo")
 
-  @@unique([team_id, slug], name: "uq_agent_slug")
+  @@unique([org_id, slug], name: "uq_agent_slug")
   @@index([org_id], name: "idx_agent_org")
   @@index([team_id], name: "idx_agent_team")
   @@index([status], name: "idx_agent_status")
@@ -540,6 +541,7 @@ model Credential {
   deleted_at      DateTime?       @db.Timestamptz
 
   organization      Organization      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  team              Team?             @relation(fields: [team_id], references: [id], onDelete: SetNull)
   creator           User              @relation("CreatedBy", fields: [created_by], references: [id])
   agent_credentials AgentCredential[]
 

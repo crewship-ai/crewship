@@ -10,8 +10,8 @@
 
 ## Status
 
-**Phase:** Pre-scaffolding (no `package.json` yet, no `node_modules`).
-`pnpm dev` will NOT work until Phase 1 scaffolding is done.
+**Phase:** MVP UI (scaffolding done, pages implemented, awaiting backend).
+`pnpm dev` runs Next.js on localhost:3000. Go backend (`crewshipd`) not yet implemented.
 
 ## Two-Language Project
 
@@ -206,6 +206,15 @@ CONVERSATIONS (host):      /var/lib/crewship/conversations/  ← JSONL per sessi
 | MANAGER | Assigned only | In assigned teams | Team-level | Team |
 | MEMBER | Assigned only | No | No | Own actions |
 | VIEWER | Assigned only | No | No | None |
+
+## CLI Tools & Workflows
+
+- **Always use `gh` CLI** for GitHub operations (PRs, issues, reviews, comments)
+- **Always use `git` CLI** for version control (never edit `.git/` directly)
+- Prefer CLI tools over web UI when possible (faster, scriptable, auditable)
+- Use `gh pr view`, `gh pr checks`, `gh api` to inspect PR status and reviews
+- Use `gh pr comment` to respond to CodeRabbit or reviewers
+- Use `pnpm` (not npm/yarn) for all Node.js package management
 
 ## What NOT To Do
 

@@ -2,16 +2,16 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/db"
 import { createCredentialSchema } from "@/lib/validations"
 import { encrypt } from "@/lib/encryption"
+import { requireAuth, isAuthError } from "@/lib/api-auth"
 
 export async function GET(req: NextRequest) {
   const orgId = req.nextUrl.searchParams.get("org_id")
 
-  if (!orgId) {
-    return NextResponse.json({ error: "org_id is required" }, { status: 400 })
-  }
+  const authResult = await requireAuth(orgId)
+  if (isAuthError(authResult)) return authResult
 
   const credentials = await prisma.credential.findMany({
-    where: { org_id: orgId, deleted_at: null },
+    where: { org_id: authResult.orgId, deleted_at: null },
     select: {
       id: true,
       name: true,
@@ -29,13 +29,16 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json()
   const orgId = req.nextUrl.searchParams.get("org_id")
 
-  if (!orgId) {
-    return NextResponse.json({ error: "org_id is required" }, { status: 400 })
+  const authResult = await requireAuth(orgId)
+  if (isAuthError(authResult)) return authResult
+
+  if (!["OWNER", "ADMIN"].includes(authResult.role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
+  const body = await req.json()
   const parsed = createCredentialSchema.safeParse(body)
 
   if (!parsed.success) {
@@ -44,16 +47,15 @@ export async function POST(req: NextRequest) {
 
   const encryptedValue = encrypt(parsed.data.value)
 
-  // TODO: Get current user ID from session
   const credential = await prisma.credential.create({
     data: {
-      org_id: orgId,
+      org_id: authResult.orgId,
       name: parsed.data.name,
       description: parsed.data.description,
       encrypted_value: encryptedValue,
       scope: parsed.data.scope,
       team_id: parsed.data.team_id,
-      created_by: "00000000-0000-0000-0000-000000000000", // TODO: real user ID
+      created_by: authResult.userId,
     },
     select: {
       id: true,
