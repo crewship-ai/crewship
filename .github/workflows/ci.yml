@@ -20,13 +20,13 @@ jobs:
     name: Lint & Typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -49,13 +49,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-and-typecheck
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -78,18 +78,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-and-typecheck
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - run: pnpm install --frozen-lockfile
-
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
 
       - name: Generate Prisma Client
         run: pnpm db:generate
@@ -97,22 +97,21 @@ jobs:
           DATABASE_URL: "postgresql://x:x@localhost:5432/x"
 
       - name: Test
-        run: pnpm test --run
+        run: pnpm test
         env:
           DATABASE_URL: "postgresql://x:x@localhost:5432/x"
 
   go-check:
     name: Go Check
     runs-on: ubuntu-latest
-    # Only run when Go files change
     if: >-
       github.event_name == 'push' ||
       contains(github.event.pull_request.labels.*.name, 'go') ||
       true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
 
