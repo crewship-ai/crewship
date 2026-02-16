@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -89,24 +90,36 @@ func initProviders(cfg *config.Config, logger *slog.Logger) (*server.Deps, error
 		} else {
 			deps.Container = d
 		}
+	default:
+		if cfg.Container.Provider != "" {
+			logger.Warn("unknown container provider", "provider", cfg.Container.Provider)
+		}
 	}
 
 	switch cfg.Storage.Provider {
 	case "localfs":
 		fs, err := localfs.New(cfg.Storage.BasePath)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("init localfs provider: %w", err)
 		}
 		deps.Storage = fs
+	default:
+		if cfg.Storage.Provider != "" {
+			logger.Warn("unknown storage provider", "provider", cfg.Storage.Provider)
+		}
 	}
 
 	switch cfg.State.Provider {
 	case "bbolt":
 		b, err := bbolt.New(cfg.State.BoltPath)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("init bbolt provider: %w", err)
 		}
 		deps.State = b
+	default:
+		if cfg.State.Provider != "" {
+			logger.Warn("unknown state provider", "provider", cfg.State.Provider)
+		}
 	}
 
 	return deps, nil

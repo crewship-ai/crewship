@@ -65,6 +65,7 @@ export function useWebSocket({
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data) as WSMessage
+        if (typeof msg.type !== "string") return
         onMessageRef.current?.(msg)
       } catch {
         // non-JSON message, ignore
