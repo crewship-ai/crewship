@@ -41,7 +41,10 @@ export default function SkillsPage() {
   const [activeFilter, setActiveFilter] = useState("All")
 
   useEffect(() => {
-    if (!orgId) return
+    if (!orgId) {
+      if (!orgLoading) setLoading(false)
+      return
+    }
 
     let cancelled = false
 
@@ -49,7 +52,7 @@ export default function SkillsPage() {
       setLoading(true)
       setError(null)
       try {
-        const res = await fetch("/api/v1/skills")
+        const res = await fetch(`/api/v1/skills?org_id=${orgId}`)
         if (!res.ok) {
           setError("Failed to load skills")
           return
@@ -67,7 +70,7 @@ export default function SkillsPage() {
     return () => {
       cancelled = true
     }
-  }, [orgId])
+  }, [orgId, orgLoading])
 
   const isLoading = orgLoading || loading
 

@@ -14,6 +14,11 @@ export async function GET(
   const authResult = await requireAuth(orgId)
   if (isAuthError(authResult)) return authResult
 
+  const abilities = defineAbilitiesFor(authResult.role as OrgRole)
+  if (!abilities.can("read", "Organization")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
   const org = await prisma.organization.findFirst({
     where: { id: authResult.orgId, deleted_at: null },
     include: {
