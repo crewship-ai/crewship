@@ -40,6 +40,15 @@ type Deps struct {
 	State     provider.StateProvider
 }
 
+func (d *Deps) Close() {
+	if d == nil {
+		return
+	}
+	if c, ok := d.State.(interface{ Close() error }); ok {
+		c.Close()
+	}
+}
+
 func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	mux := http.NewServeMux()
 	ipcMux := http.NewServeMux()

@@ -41,6 +41,8 @@ type Client struct {
 	userID   string
 	channels map[string]bool
 	send     chan []byte
+	ctx      context.Context
+	cancel   context.CancelFunc
 	mu       sync.Mutex // protects channels map
 }
 
@@ -150,28 +152,31 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var userID string
-	if h.jwtValidator != nil {
-		claims, err := h.jwtValidator.Validate(token)
-		if err != nil {
-			h.logger.Warn("ws auth failed", "error", err)
-			http.Error(w, "invalid token", http.StatusUnauthorized)
-			return
-		}
-		userID = claims.ID
-	} else {
-		h.logger.Warn("jwt validator not configured, accepting any token")
-		userID = "anonymous"
+	if h.jwtValidator == nil {
+		h.logger.Error("ws auth not configured")
+		http.Error(w, "ws auth not configured", http.StatusServiceUnavailable)
+		return
 	}
+
+	claims, err := h.jwtValidator.Validate(token)
+	if err != nil {
+		h.logger.Warn("ws auth failed", "error", err)
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+	userID := claims.ID
 
 	wsServer := websocket.Server{
 		Handler: func(conn *websocket.Conn) {
+			ctx, cancel := context.WithCancel(context.Background())
 			client := &Client{
 				conn:     conn,
 				hub:      h,
 				userID:   userID,
 				channels: make(map[string]bool),
 				send:     make(chan []byte, 64),
+				ctx:      ctx,
+				cancel:   cancel,
 			}
 
 			h.register <- client
@@ -185,6 +190,7 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 
 func (c *Client) readPump() {
 	defer func() {
+		c.cancel()
 		c.hub.unregister <- c
 		c.conn.Close()
 	}()
@@ -277,6 +283,15 @@ func (c *Client) unsubscribe(channel string) {
 	c.hub.mu.Unlock()
 }
 
+func (c *Client) safeSend(data []byte) bool {
+	select {
+	case c.send <- data:
+		return true
+	case <-c.ctx.Done():
+		return false
+	}
+}
+
 type sendMessagePayload struct {
 	SessionID string `json:"session_id"`
 	Content   string `json:"content"`
@@ -289,7 +304,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			Channel: msg.Channel,
 			Payload: map[string]string{"error": "chat not available"},
 		})
-		c.send <- resp
+		c.safeSend(resp)
 		return
 	}
 
@@ -300,7 +315,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			Channel: msg.Channel,
 			Payload: map[string]string{"error": "invalid payload"},
 		})
-		c.send <- resp
+		c.safeSend(resp)
 		return
 	}
 
@@ -310,28 +325,30 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			Channel: msg.Channel,
 			Payload: map[string]string{"error": "session_id and content required"},
 		})
-		c.send <- resp
+		c.safeSend(resp)
 		return
 	}
 
 	go func() {
+		channel := "session:" + payload.SessionID
+
 		streamFn := func(event ChatEvent) {
 			resp, _ := json.Marshal(ServerMessage{
 				Type:    "chat_event",
-				Channel: "session:" + payload.SessionID,
+				Channel: channel,
 				Payload: event,
 			})
-			c.send <- resp
+			c.safeSend(resp)
 
-			c.hub.Broadcast("session:"+payload.SessionID, ServerMessage{
+			c.hub.Broadcast(channel, ServerMessage{
 				Type:    "chat_event",
-				Channel: "session:" + payload.SessionID,
+				Channel: channel,
 				Payload: event,
 			})
 		}
 
 		err := c.hub.chatHandler.HandleChatMessage(
-			context.Background(),
+			c.ctx,
 			c.userID,
 			payload.SessionID,
 			payload.Content,
@@ -341,10 +358,10 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			c.hub.logger.Error("chat message error", "error", err, "session_id", payload.SessionID)
 			errResp, _ := json.Marshal(ServerMessage{
 				Type:    "chat_event",
-				Channel: "session:" + payload.SessionID,
+				Channel: channel,
 				Payload: ChatEvent{Type: "error", Content: err.Error()},
 			})
-			c.send <- errResp
+			c.safeSend(errResp)
 		}
 	}()
 }

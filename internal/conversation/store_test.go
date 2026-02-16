@@ -1,6 +1,7 @@
 package conversation
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/logging"
 )
+
+var ctx = context.Background()
 
 func TestStoreAppendAndRead(t *testing.T) {
 	dir := t.TempDir()
@@ -28,14 +31,14 @@ func TestStoreAppendAndRead(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 	}
 
-	if err := store.Append("session-1", msg1); err != nil {
+	if err := store.Append(ctx, "session-1", msg1); err != nil {
 		t.Fatalf("append msg1: %v", err)
 	}
-	if err := store.Append("session-1", msg2); err != nil {
+	if err := store.Append(ctx, "session-1", msg2); err != nil {
 		t.Fatalf("append msg2: %v", err)
 	}
 
-	messages, err := store.Read("session-1", 0, 0)
+	messages, err := store.Read(ctx, "session-1", 0, 0)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -58,14 +61,16 @@ func TestStoreReadOffset(t *testing.T) {
 	defer store.Close()
 
 	for i := 0; i < 5; i++ {
-		store.Append("session-2", Message{
+		if err := store.Append(ctx, "session-2", Message{
 			ID:      "msg",
 			Role:    RoleUser,
 			Content: "message",
-		})
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
 	}
 
-	messages, err := store.Read("session-2", 3, 0)
+	messages, err := store.Read(ctx, "session-2", 3, 0)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -81,10 +86,12 @@ func TestStoreReadLimit(t *testing.T) {
 	defer store.Close()
 
 	for i := 0; i < 10; i++ {
-		store.Append("session-3", Message{ID: "m", Role: RoleUser, Content: "x"})
+		if err := store.Append(ctx, "session-3", Message{ID: "m", Role: RoleUser, Content: "x"}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
 	}
 
-	messages, err := store.Read("session-3", 0, 3)
+	messages, err := store.Read(ctx, "session-3", 0, 3)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -99,7 +106,7 @@ func TestStoreReadNonExistent(t *testing.T) {
 	store := NewStore(dir, logger)
 	defer store.Close()
 
-	messages, err := store.Read("nonexistent", 0, 0)
+	messages, err := store.Read(ctx, "nonexistent", 0, 0)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -114,12 +121,12 @@ func TestStoreInvalidID(t *testing.T) {
 	store := NewStore(dir, logger)
 	defer store.Close()
 
-	err := store.Append("../escape", Message{ID: "m", Role: RoleUser, Content: "x"})
+	err := store.Append(ctx, "../escape", Message{ID: "m", Role: RoleUser, Content: "x"})
 	if err == nil {
 		t.Error("expected error for path traversal ID")
 	}
 
-	_, err = store.Read("foo/bar", 0, 0)
+	_, err = store.Read(ctx, "foo/bar", 0, 0)
 	if err == nil {
 		t.Error("expected error for slash in ID")
 	}
@@ -130,11 +137,33 @@ func TestStoreFileCreated(t *testing.T) {
 	logger := logging.New("error", "json", nil)
 	store := NewStore(dir, logger)
 
-	store.Append("test-session", Message{ID: "m", Role: RoleUser, Content: "hi"})
+	if err := store.Append(ctx, "test-session", Message{ID: "m", Role: RoleUser, Content: "hi"}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
 	store.Close()
 
 	path := filepath.Join(dir, "conversations", "test-session.jsonl")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Error("expected conversation file to exist")
+	}
+}
+
+func TestStoreCancelledContext(t *testing.T) {
+	dir := t.TempDir()
+	logger := logging.New("error", "json", nil)
+	store := NewStore(dir, logger)
+	defer store.Close()
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := store.Append(cancelled, "session-x", Message{ID: "m", Role: RoleUser, Content: "x"})
+	if err == nil {
+		t.Error("expected error for cancelled context")
+	}
+
+	_, err = store.Read(cancelled, "session-x", 0, 0)
+	if err == nil {
+		t.Error("expected error for cancelled context on read")
 	}
 }

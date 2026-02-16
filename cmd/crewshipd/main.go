@@ -62,6 +62,7 @@ func main() {
 		logger.Error("failed to initialize providers", "error", err)
 		os.Exit(1)
 	}
+	defer deps.Close()
 
 	srv := server.New(cfg, logger, deps)
 	if err := srv.Start(ctx); err != nil {
