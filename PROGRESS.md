@@ -58,7 +58,7 @@
 
 ---
 
-## EPIC 2: Infrastruktura a auth ✅ ~75%
+## EPIC 2: Infrastruktura a auth ✅ ~80%
 
 > Auth, session, onboarding, zakladni user flow.
 
@@ -76,7 +76,7 @@
 ### 2.2 RBAC (CASL)
 - [x] 2.2.1 defineAbilitiesFor() s 5 rolemi
 - [x] 2.2.2 CASL check na API routes (agents, credentials, teams)
-- [ ] 2.2.3 RBAC check na frontend (skryvani tlacitek dle role)
+- [x] 2.2.3 RBAC check na frontend (useAbilities hook, skryvani dle role) — PR #18
 - [ ] 2.2.4 Team-scoped permissions (MANAGER vidi jen prirazene tymy)
 
 ### 2.3 Zustand store
@@ -102,7 +102,7 @@
 
 ---
 
-## EPIC 4: Frontend -- Stranky ✅ ~90%
+## EPIC 4: Frontend -- Stranky ✅ ~97%
 
 > Vsechny stranky napojene na API s real daty.
 
@@ -132,8 +132,8 @@
 ### 4.4 Teams (/teams)
 - [x] 4.4.1 Team list napojeny na API (TeamCard grid)
 - [x] 4.4.2 TeamCard komponenta (barva, ikona, pocty)
-- [ ] 4.4.3 Team detail stranka (/teams/[teamId])
-- [ ] 4.4.4 Team members management
+- [x] 4.4.3 Team detail stranka (/teams/[teamId]) — PR #18
+- [x] 4.4.4 Team members management — PR #18 (soucasti team detail)
 
 ### 4.5 Credentials (/credentials)
 - [x] 4.5.1 Credential list napojeny na API (tabulka)
@@ -156,12 +156,22 @@
 - [x] 4.8.1 Audit log tabulka napojeny na API
 - [ ] 4.8.2 Pokrocile filtry (date range, user picker)
 
-### 4.9 Crews (/crews)
-- [x] 4.9.1 Phase 2 placeholder (Coming Soon badge)
+### 4.9 Runs (/runs)
+- [x] 4.9.1 Globalni runs page (across all agents, filterable) — PR #18
+- [x] 4.9.2 GET /api/v1/runs endpoint — PR #18
+
+### 4.10 Admin (/admin)
+- [x] 4.10.1 Admin console (org management, user management, system stats) — PR #18
+- [x] 4.10.2 GET /api/v1/admin/stats endpoint — PR #18
+- [x] 4.10.3 GET /api/v1/admin/users endpoint — PR #18
+- [x] 4.10.4 GET /api/v1/admin/organizations endpoint — PR #18
+
+### 4.11 Crews (/crews)
+- [x] 4.11.1 Phase 2 placeholder (Coming Soon badge)
 
 ---
 
-## EPIC 5: REST API (Next.js) ✅ ~85%
+## EPIC 5: REST API (Next.js) ✅ ~95%
 
 > CRUD endpointy pro vsechny entity.
 
@@ -189,7 +199,9 @@
 - [x] 5.3.7 GET /api/v1/agents/[agentId]/runs
 - [x] 5.3.8 GET /api/v1/skills (list + search, filterable)
 - [x] 5.3.9 GET /api/v1/audit (paginated, filterable)
-- [ ] 5.3.10 POST/GET /api/v1/orgs/[orgId]/invitations
+- [x] 5.3.10 POST/GET /api/v1/orgs/[orgId]/invitations — PR #18
+- [x] 5.3.11 GET /api/v1/runs (globalni runs across agents) — PR #18
+- [x] 5.3.12 GET /api/v1/admin/stats + /admin/users + /admin/organizations — PR #18
 
 ### 5.4 Middleware a utility
 - [x] 5.4.1 requireAuth() helper (session + org membership check)
@@ -201,60 +213,60 @@
 
 ---
 
-## EPIC 6: Go backend (crewshipd) ❌ ~2%
+## EPIC 6: Go backend (crewshipd) 🟡 ~65%
 
 > WebSocket gateway, Docker orchestrace, logy, soubory, webhooky.
 
 ### 6.1 Zaklady
-- [x] 6.1.1 cmd/crewshipd/main.go (signal handling placeholder)
-- [x] 6.1.2 go.mod (module definice, go 1.25)
-- [ ] 6.1.3 Konfiguracni system (YAML config parser, env vars)
-- [ ] 6.1.4 Structured logging (JSON stdout)
-- [ ] 6.1.5 Health endpoint (HTTP /healthz, /readyz)
-- [ ] 6.1.6 Metrics endpoint (Prometheus /metrics)
+- [x] 6.1.1 cmd/crewshipd/main.go (signal handling, bootstrap logger, config load) — PR #17
+- [x] 6.1.2 go.mod (module definice, go 1.25, docker/bbolt/fsnotify/yaml deps)
+- [x] 6.1.3 Konfiguracni system (YAML config parser + CREWSHIP_* env overrides, validace) — PR #17
+- [x] 6.1.4 Structured logging (slog JSON stdout, context propagation) — PR #17
+- [x] 6.1.5 Health endpoint (HTTP /healthz, /readyz) — PR #17
+- [x] 6.1.6 Metrics endpoint (Prometheus /metrics) — PR #17
 
 ### 6.2 Provider interfaces
-- [ ] 6.2.1 ContainerProvider interface (Create, Start, Stop, Exec, Logs)
-- [ ] 6.2.2 StorageProvider interface (Read, Write, List, Watch)
-- [ ] 6.2.3 StateProvider interface (Get, Set, Delete, List)
-- [ ] 6.2.4 Docker provider implementace (MVP)
-- [ ] 6.2.5 LocalFS provider implementace (MVP)
-- [ ] 6.2.6 bbolt provider implementace (MVP)
+- [x] 6.2.1 ContainerProvider interface (EnsureTeamRuntime, Stop, Remove, Exec, Status) — PR #19
+- [x] 6.2.2 StorageProvider interface (Read, Write, List, Delete, Exists, Watch) — PR #19
+- [x] 6.2.3 StateProvider interface (Get, Set, Delete, List, ListByPrefix) — PR #19
+- [x] 6.2.4 Docker provider implementace (MVP) — PR #19
+- [x] 6.2.5 LocalFS provider implementace (MVP) — PR #19
+- [x] 6.2.6 bbolt provider implementace (MVP) — PR #19
 
 ### 6.3 IPC (Next.js <-> Go)
-- [ ] 6.3.1 Unix socket server
-- [ ] 6.3.2 IPC protokol (JSON-RPC nebo gRPC)
-- [ ] 6.3.3 Next.js IPC klient (lib/ipc.ts)
+- [x] 6.3.1 Unix socket server — PR #17
+- [x] 6.3.2 IPC protokol (HTTP JSON over Unix socket) — PR #17
+- [x] 6.3.3 Next.js IPC klient (lib/crewshipd-client.ts, typed wrappers) — PR #17
 
 ### 6.4 WebSocket gateway
-- [ ] 6.4.1 WebSocket server (goroutines, upgrade handler)
-- [ ] 6.4.2 Auth (JWT validace na WebSocket handshake)
+- [x] 6.4.1 WebSocket server (goroutines, hub pattern, channel pub/sub, ping/pong) — PR #17
+- [ ] 6.4.2 Auth (JWT validace na WebSocket handshake -- placeholder, prijima jakykoli token)
 - [ ] 6.4.3 Chat message routing (user -> agent, agent -> user)
 - [ ] 6.4.4 Real-time agent status broadcasting
 - [ ] 6.4.5 Real-time log streaming
 
 ### 6.5 Docker orchestrace
-- [ ] 6.5.1 Container lifecycle (create per team, start/stop)
-- [ ] 6.5.2 Docker exec (spusteni CLI session v kontejneru)
-- [ ] 6.5.3 Agent runtime Dockerfile (non-root, UID 1001, --internal network)
-- [ ] 6.5.4 Credential ENV injection (z sifrovanych dat)
+- [x] 6.5.1 Container lifecycle (create per team, start/stop) — PR #19
+- [x] 6.5.2 Docker exec (spusteni CLI session v kontejneru) — PR #19
+- [x] 6.5.3 Agent runtime Dockerfile (non-root, UID 1001, --internal network) — PR #19
+- [x] 6.5.4 Credential ENV injection (priority-based failover) — PR #19
 - [ ] 6.5.5 Container TTL management (auto-stop po neaktivite)
 - [ ] 6.5.6 Container resource limits (memory, CPU per team)
 
 ### 6.6 Log collector
-- [ ] 6.6.1 JSONL log writer (stdout capture -> soubory)
+- [x] 6.6.1 JSONL log writer (stdout capture -> soubory) — PR #19
 - [ ] 6.6.2 Logrotate integrace (hodinova rotace, gzip)
 - [ ] 6.6.3 Log streaming pres WebSocket
 
 ### 6.7 File server
-- [ ] 6.7.1 /output/ bind mount management
-- [ ] 6.7.2 fsnotify real-time file watching
-- [ ] 6.7.3 File list/download API
+- [x] 6.7.1 /output/ bind mount management — PR #19
+- [x] 6.7.2 fsnotify real-time file watching — PR #19
+- [x] 6.7.3 File list/download API — PR #19
 
 ### 6.8 Webhook ingress
-- [ ] 6.8.1 Webhook receiver (POST /webhooks/{team}/{agent}/trigger)
-- [ ] 6.8.2 HMAC validace (per-agent webhook_secret)
-- [ ] 6.8.3 Agent trigger z webhooku
+- [x] 6.8.1 Webhook receiver (POST /webhooks/{team}/{agent}/trigger) — PR #19
+- [x] 6.8.2 HMAC validace (per-agent webhook_secret) — PR #19
+- [ ] 6.8.3 Agent trigger z webhooku (handler existuje, neni napojen na orchestrator)
 
 ### 6.9 Conversation session
 - [ ] 6.9.1 JSONL writer (zpravy do souboru)
@@ -263,24 +275,24 @@
 
 ---
 
-## EPIC 7: Create/Edit forms (frontend) ✅ ~85%
+## EPIC 7: Create/Edit forms (frontend) ✅ 100%
 
 > Formulare pro vytvareni a editaci entit. Napojeni na API.
 
 - [x] 7.1 Create Agent form (/agents/new -- vsechna pole, team dropdown, slug auto-gen)
 - [x] 7.2 Edit Agent form (/agents/[id]/settings -- napojeno na API, save + delete)
 - [x] 7.3 Create Team form (/teams/new -- vsechna pole, color picker, slug auto-gen)
-- [ ] 7.4 Edit Team form (chybi /teams/[id] detail stranka)
+- [x] 7.4 Edit Team form (/teams/[teamId] detail stranka s edit + delete) — PR #18
 - [x] 7.5 Add Credential dialog (form s show/hide hesla, scope, team select)
 - [x] 7.6 Edit Credential dialog (pre-fill, optional value change)
-- [ ] 7.7 Invite Member dialog
+- [x] 7.7 Invite Member dialog — PR #18
 - [x] 7.8 Org settings form (napojeno na API, save + members list)
 
 ---
 
-## EPIC 8: Testy ✅ ~60%
+## EPIC 8: Testy ✅ ~75%
 
-> Unit testy, integracni testy.
+> Unit testy, integracni testy. Celkem: 133 testu (73 TS + 60 Go).
 
 - [x] 8.1 Vitest unit testy pro encryption.ts (10 testu)
 - [x] 8.2 Vitest unit testy pro validations.ts (23 testu)
@@ -289,7 +301,7 @@
 - [x] 8.5 Vitest unit testy pro cn.ts (9 testu)
 - [ ] 8.6 Vitest unit testy pro api-auth.ts
 - [ ] 8.7 API route integration testy (agents, teams, credentials)
-- [ ] 8.8 Go unit testy (providers, IPC, webhook)
+- [x] 8.8 Go unit testy (60 testu: config, logging, server, ws, bbolt, localfs, fileserver, logcollector, failover, webhook) — PR #17 + #19
 - [ ] 8.9 E2E testy (Playwright -- Phase 2)
 
 ---
@@ -305,7 +317,7 @@
 
 ---
 
-## EPIC 10: Nasazeni a DevOps 🟡 ~30%
+## EPIC 10: Nasazeni a DevOps 🟡 ~40%
 
 > Docker images, Coolify deployment, CI/CD.
 
@@ -314,7 +326,7 @@
 - [x] 10.3 Dependabot (npm weekly, Go weekly, GHA monthly)
 - [ ] 10.4 Next.js production Dockerfile
 - [ ] 10.5 crewshipd production Dockerfile
-- [ ] 10.6 Agent runtime Dockerfile
+- [x] 10.6 Agent runtime Dockerfile — PR #19
 - [ ] 10.7 docker-compose.prod.yml (full stack)
 - [ ] 10.8 Coolify deployment konfigurace
 - [ ] 10.9 Environment variables management (secrets)
@@ -406,32 +418,61 @@
 |------|-------|------|--------|
 | 0 | Dokumentace | ✅ | 100% |
 | 1 | Scaffolding | ✅ | ~95% |
-| 2 | Auth a infra | ✅ | ~75% |
+| 2 | Auth a infra | ✅ | ~80% |
 | 3 | Layout a navigace | ✅ | ~90% |
-| 4 | Frontend stranky | ✅ | ~90% |
-| 5 | REST API | ✅ | ~85% |
-| 6 | Go backend | ❌ | ~2% |
-| 7 | Create/Edit forms | ✅ | ~85% |
-| 8 | Testy | ✅ | ~60% (73 testu) |
+| 4 | Frontend stranky | ✅ | ~97% |
+| 5 | REST API | ✅ | ~95% |
+| 6 | Go backend | 🟡 | ~65% |
+| 7 | Create/Edit forms | ✅ | 100% |
+| 8 | Testy | ✅ | ~75% (133 testu) |
 | 9 | Seed data | ✅ | ~80% |
-| 10 | Nasazeni | 🟡 | ~30% |
+| 10 | Nasazeni | 🟡 | ~40% |
 
-### Co zbyva pro kompletni MVP frontend
+### Co zbyva pro kompletni MVP
 
-1. **Team detail stranka** (/teams/[teamId]) -- zobrazeni detailu tymu + clenove
-2. **Edit team form** -- PUT endpoint existuje, chybi UI
-3. **Invite member dialog** -- backend endpoint existuje
-4. **Google OAuth** -- Phase 2 (zatim disabled button)
-5. **Frontend RBAC** -- skryvani tlacitek dle role uzivatele
+**Frontend (male):**
+1. **Google OAuth** -- Phase 2 (zatim disabled button)
+2. **Team-scoped permissions** -- MANAGER vidi jen prirazene tymy
+3. **Org switcher funkcionalita** -- zmena org, reload dat
+4. **Command palette** -- ⌘K funkcni vyhledavani
+5. **Notifikacni system** -- bell icon + logika
 6. **Advanced filtry na audit page** -- date range, user picker
+7. **Skill detail stranka** -- /skills/[skillId]
+8. **Billing/subscription tab** -- v Settings
 
-### Dalsi kroky (Go backend)
+**Go backend (stredni):**
+9. **WebSocket JWT validace** -- realna auth misto placeholder
+10. **Chat message routing** -- user → agent, agent → user pres WebSocket
+11. **Real-time streaming** -- agent status broadcasting + log streaming
+12. **Container TTL management** -- auto-stop po neaktivite
+13. **Container resource limits** -- memory, CPU per team
+14. **Logrotate integrace** -- hodinova rotace, gzip
+15. **Conversation session** -- JSONL per session (writer + reader + metadata sync)
+16. **Webhook → orchestrator** -- napojeni trigger handleru na spusteni agenta
 
-7. **EPIC 6** (Go backend) -- WebSocket gateway, Docker orchestrace, logy, soubory
-8. **EPIC 10** (Nasazeni) -- Production Docker images, Coolify deployment
+**DevOps:**
+17. **Next.js production Dockerfile**
+18. **crewshipd production Dockerfile**
+19. **docker-compose.prod.yml** (full stack)
+20. **Coolify deployment konfigurace**
+
+**Testy:**
+21. **API route integration testy** (agents, teams, credentials)
+22. **E2E testy** (Playwright -- Phase 2)
 
 ### Dalsi kroky (Phase 2 -- Orchestrace + Crew Execution)
 
-9. **Phase 2A** -- Crew Leader delegace (sidecar, DelegationLog) + zakladni Crew Execution (Board UI, JSONL progress)
-10. **Phase 2B** -- Workflow sablony (dev-test loop), Auto-hiring (supervised/semi-auto), Director routing
-11. **Phase 3** -- Full auto hiring + marketplace, Git worktree, cross-team execution, analytics
+23. **Phase 2A** -- Crew Leader delegace (sidecar, DelegationLog) + zakladni Crew Execution (Board UI, JSONL progress)
+24. **Phase 2B** -- Workflow sablony (dev-test loop), Auto-hiring (supervised/semi-auto), Director routing
+25. **Phase 3** -- Full auto hiring + marketplace, Git worktree, cross-team execution, analytics
+
+### Merge historie
+
+| PR | Nazev | Datum |
+|----|-------|-------|
+| #19 | Docker runtime (providers, orchestrator, log collector, file server, webhook) | 2026-02-16 |
+| #18 | Frontend polish (team detail, runs, admin console, RBAC, invite dialog) | 2026-02-16 |
+| #17 | Go backend foundation (config, logging, HTTP, IPC, WebSocket, providers) | 2026-02-16 |
+| #16 | Complete MVP frontend (auth, API, forms, tests, seed) | 2026-02-16 |
+| #15 | README.md | 2026-02-16 |
+| #9 | MVP UI (scaffolding, dashboard, agent detail pages) | 2026-02-15 |
