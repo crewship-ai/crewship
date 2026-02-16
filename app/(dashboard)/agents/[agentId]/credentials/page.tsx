@@ -6,9 +6,9 @@ export default async function CredentialsPage({ params }: { params: Promise<{ ag
   await params
 
   const credentials = [
-    { envVar: "ANTHROPIC_API_KEY", type: "LLM", typeClass: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400", priority: 1, status: "Active", key: "ANTHROPIC_KEY_1" },
-    { envVar: "ANTHROPIC_API_KEY", type: "LLM", typeClass: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400", priority: 2, status: "Standby", key: "ANTHROPIC_KEY_2" },
-    { envVar: "BRAVE_API_KEY", type: "Tool", typeClass: "bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-400", priority: 1, status: "Active", key: "BRAVE_KEY_1" },
+    { envVar: "LLM_API_KEY", type: "LLM", typeClass: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400", priority: 1, status: "Active", key: "key-••••1" },
+    { envVar: "LLM_API_KEY", type: "LLM", typeClass: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400", priority: 2, status: "Standby", key: "key-••••2" },
+    { envVar: "TOOL_API_KEY", type: "Tool", typeClass: "bg-cyan-50 text-cyan-700 dark:bg-cyan-950 dark:text-cyan-400", priority: 1, status: "Active", key: "key-••••3" },
   ]
 
   return (

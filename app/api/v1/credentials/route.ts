@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db"
 import { createCredentialSchema } from "@/lib/validations"
 import { encrypt } from "@/lib/encryption"
 import { requireAuth, isAuthError } from "@/lib/api-auth"
+import { defineAbilitiesFor } from "@/lib/permissions/abilities"
+import type { OrgRole } from "@/lib/generated/prisma/client"
 
 export async function GET(req: NextRequest) {
   const orgId = req.nextUrl.searchParams.get("org_id")
@@ -34,7 +36,8 @@ export async function POST(req: NextRequest) {
   const authResult = await requireAuth(orgId)
   if (isAuthError(authResult)) return authResult
 
-  if (!["OWNER", "ADMIN"].includes(authResult.role)) {
+  const abilities = defineAbilitiesFor(authResult.role as OrgRole)
+  if (!abilities.can("create", "Credential")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
@@ -43,6 +46,16 @@ export async function POST(req: NextRequest) {
 
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
+  }
+
+  if (parsed.data.team_id) {
+    const team = await prisma.team.findFirst({
+      where: { id: parsed.data.team_id, org_id: authResult.orgId, deleted_at: null },
+      select: { id: true },
+    })
+    if (!team) {
+      return NextResponse.json({ error: "Invalid team_id" }, { status: 400 })
+    }
   }
 
   const encryptedValue = encrypt(parsed.data.value)

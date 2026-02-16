@@ -14,8 +14,10 @@ export const authConfig = {
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        // TODO: Implement proper password verification in Phase 2
+        // TODO(phase-2): Implement password verification with bcrypt + rate limiting
+        // TODO(phase-2): Add Google OAuth provider for signIn("google")
         if (!credentials?.email || !credentials?.password) return null
+        // Placeholder: credentials auth not yet functional
         return null
       },
     }),
@@ -35,7 +37,7 @@ export const authConfig = {
       return token
     },
     async session({ session, token }) {
-      if (token?.id) {
+      if (token?.id && session.user) {
         session.user.id = token.id as string
       }
       return session

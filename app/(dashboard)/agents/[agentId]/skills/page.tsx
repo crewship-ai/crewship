@@ -59,10 +59,10 @@ export default async function SkillsPage({ params }: { params: Promise<{ agentId
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Open ${skill.name} docs`}>
                     <ExternalLink className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`${skill.name} settings`}>
                     <Settings className="h-4 w-4" />
                   </Button>
                 </div>

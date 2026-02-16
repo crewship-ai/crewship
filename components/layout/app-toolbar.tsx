@@ -89,7 +89,7 @@ export function AppToolbar() {
         </div>
 
         {/* Search */}
-        <Button variant="outline" size="sm" className="h-8 gap-2 rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground px-3">
+        <Button variant="outline" size="sm" className="h-8 gap-2 rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground px-3" aria-label="Search">
           <Search className="h-3.5 w-3.5" />
           <span className="text-xs hidden sm:inline">Search...</span>
           <kbd className="pointer-events-none hidden h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium sm:flex">
@@ -98,16 +98,16 @@ export function AppToolbar() {
         </Button>
 
         {/* Help */}
-        <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:inline-flex">
+        <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:inline-flex" aria-label="Help">
           <BookOpen className="h-4 w-4" />
         </Button>
 
         {/* Notifications */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 relative">
+            <Button variant="ghost" size="icon" className="h-8 w-8 relative" aria-label="Notifications">
               <Bell className="h-4 w-4" />
-              <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground ring-2 ring-background">
+              <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground ring-2 ring-background" aria-hidden="true">
                 3
               </span>
             </Button>
@@ -128,7 +128,7 @@ export function AppToolbar() {
         {/* User */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent transition-colors">
+            <button className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent transition-colors" aria-label="User menu">
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">PS</div>
               <span className="text-xs font-medium hidden sm:inline">Pavel</span>
               <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
