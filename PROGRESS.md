@@ -119,7 +119,7 @@
 
 ### 4.3 Agent detail (/agents/[agentId])
 - [x] 4.3.1 Overview tab (API data -- LLM config, system prompt, stats z _count)
-- [x] 4.3.2 Chat tab (mock UI + "requires crewshipd" banner)
+- [x] 4.3.2 Chat tab (real-time WS chat, streaming messages, connection status) — PR #21
 - [x] 4.3.3 Sessions tab (API data -- tabulka)
 - [x] 4.3.4 Files tab (mock + "requires crewshipd" banner)
 - [x] 4.3.5 Runs tab (API data -- tabulka se status/trigger/duration)
@@ -213,7 +213,7 @@
 
 ---
 
-## EPIC 6: Go backend (crewshipd) 🟡 ~65%
+## EPIC 6: Go backend (crewshipd) 🟡 ~75%
 
 > WebSocket gateway, Docker orchestrace, logy, soubory, webhooky.
 
@@ -240,8 +240,8 @@
 
 ### 6.4 WebSocket gateway
 - [x] 6.4.1 WebSocket server (goroutines, hub pattern, channel pub/sub, ping/pong) — PR #17
-- [ ] 6.4.2 Auth (JWT validace na WebSocket handshake -- placeholder, prijima jakykoli token)
-- [ ] 6.4.3 Chat message routing (user -> agent, agent -> user)
+- [x] 6.4.2 Auth (JWT validace -- NextAuth JWE dekrypce, HKDF + go-jose/v4) — PR #21
+- [x] 6.4.3 Chat message routing (user → ChatBridge → orchestrator → Docker exec → WS stream) — PR #21
 - [ ] 6.4.4 Real-time agent status broadcasting
 - [ ] 6.4.5 Real-time log streaming
 
@@ -269,9 +269,15 @@
 - [ ] 6.8.3 Agent trigger z webhooku (handler existuje, neni napojen na orchestrator)
 
 ### 6.9 Conversation session
-- [ ] 6.9.1 JSONL writer (zpravy do souboru)
-- [ ] 6.9.2 JSONL reader (nacitani session)
+- [x] 6.9.1 JSONL writer (zpravy do souboru) — PR #21
+- [x] 6.9.2 JSONL reader (nacitani session, offset/limit) — PR #21
 - [ ] 6.9.3 Session metadata sync (Go -> PostgreSQL pres IPC)
+
+### 6.10 Chat flow wiring
+- [x] 6.10.1 Provider injection do serveru (Docker, LocalFS, bbolt z configu) — PR #21
+- [x] 6.10.2 IPC handlers s realnymi providery (container status/start/stop, file list, session messages) — PR #21
+- [x] 6.10.3 ChatBridge (WS → conversation store → orchestrator → stream → WS) — PR #21
+- [x] 6.10.4 WS token API endpoint (/api/v1/ws-token) — PR #21
 
 ---
 
@@ -290,9 +296,9 @@
 
 ---
 
-## EPIC 8: Testy ✅ ~75%
+## EPIC 8: Testy ✅ ~80%
 
-> Unit testy, integracni testy. Celkem: 133 testu (73 TS + 60 Go).
+> Unit testy, integracni testy. Celkem: 149 testu (73 TS + 76 Go).
 
 - [x] 8.1 Vitest unit testy pro encryption.ts (10 testu)
 - [x] 8.2 Vitest unit testy pro validations.ts (23 testu)
@@ -301,7 +307,7 @@
 - [x] 8.5 Vitest unit testy pro cn.ts (9 testu)
 - [ ] 8.6 Vitest unit testy pro api-auth.ts
 - [ ] 8.7 API route integration testy (agents, teams, credentials)
-- [x] 8.8 Go unit testy (60 testu: config, logging, server, ws, bbolt, localfs, fileserver, logcollector, failover, webhook) — PR #17 + #19
+- [x] 8.8 Go unit testy (76 testu: config, logging, server, ws, bbolt, localfs, fileserver, logcollector, failover, webhook, auth, conversation) — PR #17 + #19 + #21
 - [ ] 8.9 E2E testy (Playwright -- Phase 2)
 
 ---
@@ -422,54 +428,54 @@
 | 3 | Layout a navigace | ✅ | ~90% |
 | 4 | Frontend stranky | ✅ | ~97% |
 | 5 | REST API | ✅ | ~95% |
-| 6 | Go backend | 🟡 | ~65% |
+| 6 | Go backend | 🟡 | ~75% |
 | 7 | Create/Edit forms | ✅ | 100% |
-| 8 | Testy | ✅ | ~75% (133 testu) |
+| 8 | Testy | ✅ | ~80% (149 testu) |
 | 9 | Seed data | ✅ | ~80% |
 | 10 | Nasazeni | 🟡 | ~40% |
 
-### Co zbyva pro kompletni MVP
+### Co zbyva pro spusteni MVP
 
-**Frontend (male):**
-1. **Google OAuth** -- Phase 2 (zatim disabled button)
-2. **Team-scoped permissions** -- MANAGER vidi jen prirazene tymy
-3. **Org switcher funkcionalita** -- zmena org, reload dat
-4. **Command palette** -- ⌘K funkcni vyhledavani
-5. **Notifikacni system** -- bell icon + logika
-6. **Advanced filtry na audit page** -- date range, user picker
-7. **Skill detail stranka** -- /skills/[skillId]
-8. **Billing/subscription tab** -- v Settings
+#### P0: MUST HAVE (bez toho to nejede) -- dalsi PR
 
-**Go backend (stredni):**
-9. **WebSocket JWT validace** -- realna auth misto placeholder
-10. **Chat message routing** -- user → agent, agent → user pres WebSocket
-11. **Real-time streaming** -- agent status broadcasting + log streaming
-12. **Container TTL management** -- auto-stop po neaktivite
-13. **Container resource limits** -- memory, CPU per team
-14. **Logrotate integrace** -- hodinova rotace, gzip
-15. **Conversation session** -- JSONL per session (writer + reader + metadata sync)
-16. **Webhook → orchestrator** -- napojeni trigger handleru na spusteni agenta
+- [ ] **Production Dockerfile: Next.js** (multi-stage, standalone output)
+- [ ] **Production Dockerfile: crewshipd** (multi-stage, static binary)
+- [ ] **docker-compose.prod.yml** (PostgreSQL + Next.js + crewshipd + agent-runtime sit)
+- [ ] **Session metadata sync** (Go → IPC → Next.js → Prisma)
+- [ ] **Prisma migrace** (schema existuje, db:push/db:migrate jeste nebyl spusten)
 
-**DevOps:**
-17. **Next.js production Dockerfile**
-18. **crewshipd production Dockerfile**
-19. **docker-compose.prod.yml** (full stack)
-20. **Coolify deployment konfigurace**
+#### P1: SHOULD HAVE (pro rozumne demo)
 
-**Testy:**
-21. **API route integration testy** (agents, teams, credentials)
-22. **E2E testy** (Playwright -- Phase 2)
+- [ ] **Container TTL** -- auto-stop po neaktivite
+- [ ] **Container resource limits** -- memory, CPU per team
+- [ ] **Webhook → orchestrator** -- napojeni trigger handleru na RunAgent
+- [ ] **Real-time log streaming** pres WebSocket
+- [ ] **Coolify deployment config** (staging Proxmox)
+
+#### P2: NICE TO HAVE (ne blokuje spusteni)
+
+- [ ] Org switcher funkcionalita
+- [ ] Command palette (⌘K)
+- [ ] Notifikacni system (bell icon + logika)
+- [ ] Team-scoped permissions (MANAGER)
+- [ ] Logrotate integrace
+- [ ] Advanced audit filtry (date range, user picker)
+- [ ] Skill detail stranka
+- [ ] API route integration testy
+- [ ] Google OAuth (Phase 2, disabled button uz existuje)
+- [ ] Billing/subscription tab
 
 ### Dalsi kroky (Phase 2 -- Orchestrace + Crew Execution)
 
-23. **Phase 2A** -- Crew Leader delegace (sidecar, DelegationLog) + zakladni Crew Execution (Board UI, JSONL progress)
-24. **Phase 2B** -- Workflow sablony (dev-test loop), Auto-hiring (supervised/semi-auto), Director routing
-25. **Phase 3** -- Full auto hiring + marketplace, Git worktree, cross-team execution, analytics
+- **Phase 2A** -- Crew Leader delegace (sidecar, DelegationLog) + zakladni Crew Execution (Board UI, JSONL progress)
+- **Phase 2B** -- Workflow sablony (dev-test loop), Auto-hiring (supervised/semi-auto), Director routing
+- **Phase 3** -- Full auto hiring + marketplace, Git worktree, cross-team execution, analytics
 
 ### Merge historie
 
 | PR | Nazev | Datum |
 |----|-------|-------|
+| #21 | E2E chat flow (providers wiring, JWT auth, conversation store, ChatBridge, Chat UI) | 2026-02-16 |
 | #19 | Docker runtime (providers, orchestrator, log collector, file server, webhook) | 2026-02-16 |
 | #18 | Frontend polish (team detail, runs, admin console, RBAC, invite dialog) | 2026-02-16 |
 | #17 | Go backend foundation (config, logging, HTTP, IPC, WebSocket, providers) | 2026-02-16 |

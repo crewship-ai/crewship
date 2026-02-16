@@ -1,116 +1,97 @@
-import { Send, PanelRightOpen, Bot, User, Wrench, Brain, Plus, ChevronDown, Info } from "lucide-react"
+import { Plus, ChevronDown, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Textarea } from "@/components/ui/textarea"
+import { ChatPanel } from "@/components/features/chat/chat-panel"
+import { prisma } from "@/lib/db"
+import { auth } from "@/auth"
+import { redirect } from "next/navigation"
 
-export default async function ChatPage({ params }: { params: Promise<{ agentId: string }> }) {
+export default async function ChatPage({ params, searchParams }: {
+  params: Promise<{ agentId: string }>
+  searchParams: Promise<{ session?: string; org_id?: string }>
+}) {
   const { agentId } = await params
+  const { session: sessionId, org_id: orgId } = await searchParams
+
+  const authSession = await auth()
+  if (!authSession?.user?.id) redirect("/login")
+
+  let agent: { id: string; name: string; cli_adapter: string } | null = null
+  let sessions: { id: string; title: string | null; status: string }[] = []
+  let activeSessionId = sessionId
+
+  try {
+    const found = await prisma.agent.findFirst({
+      where: { id: agentId, deleted_at: null },
+      select: { id: true, name: true, cli_adapter: true },
+    })
+    if (found) {
+      agent = { id: found.id, name: found.name, cli_adapter: String(found.cli_adapter) }
+    }
+
+    if (agent && orgId) {
+      sessions = await prisma.conversationSession.findMany({
+        where: { agent_id: agentId, org_id: orgId },
+        select: { id: true, title: true, status: true },
+        orderBy: { started_at: "desc" },
+        take: 20,
+      })
+    }
+  } catch {
+    // DB not available -- render without data
+  }
+
+  if (!activeSessionId && sessions.length > 0) {
+    activeSessionId = sessions[0].id
+  }
+
+  if (!activeSessionId) {
+    activeSessionId = crypto.randomUUID()
+  }
+
+  const currentSession = sessions.find((s) => s.id === activeSessionId)
 
   return (
     <div className="flex flex-col h-full">
-      {/* Backend requirement banner */}
-      <div className="mx-4 sm:mx-6 mt-4 flex items-center gap-2 rounded-md bg-muted/10 border border-border px-3 py-2">
-        <Info className="h-4 w-4 text-muted-foreground shrink-0" />
-        <p className="text-xs text-muted-foreground">Requires <strong>crewshipd</strong> (Go service) to be running for live chat functionality.</p>
-      </div>
       {/* Session selector bar */}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 sm:px-6 py-2 bg-muted/30">
-        <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-          Session #4 <ChevronDown className="h-3 w-3" />
-        </Button>
-        <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-          <Plus className="h-3 w-3" /> New Session
+        {currentSession ? (
+          <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+            {currentSession.title ?? `Session ${currentSession.id.slice(0, 8)}`}
+            <ChevronDown className="h-3 w-3" />
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+            New Session <ChevronDown className="h-3 w-3" />
+          </Button>
+        )}
+        <Button variant="outline" size="sm" className="gap-1.5 text-xs" asChild>
+          <a href={`/agents/${agentId}/chat?org_id=${orgId ?? ""}`}>
+            <Plus className="h-3 w-3" /> New Session
+          </a>
         </Button>
         <div className="hidden sm:flex items-center gap-3 ml-auto text-xs text-muted-foreground">
-          <span>CLI: <strong className="text-foreground">Claude Code</strong></span>
-          <span>Model: <code className="text-[11px]">claude-sonnet-4</code></span>
-          <span>Key: <code className="text-[11px]">ANTHROPIC_KEY_1</code></span>
+          {agent && (
+            <>
+              <span>Agent: <strong className="text-foreground">{agent.name}</strong></span>
+              <span>CLI: <code className="text-[11px]">{agent.cli_adapter}</code></span>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Chat area */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-          {/* User message */}
-          <div className="flex gap-3 max-w-2xl">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-              <User className="h-4 w-4 text-primary" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">You · 10:22 AM</p>
-              <p className="text-sm">Write an SEO-optimized blog post about AI agent management platforms for Q1 2026.</p>
-            </div>
-          </div>
-
-          {/* Agent thinking */}
-          <div className="flex gap-3 max-w-2xl">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-950">
-              <Brain className="h-4 w-4 text-amber-600" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Agent · Thinking</p>
-              <p className="text-sm text-muted-foreground italic">Analyzing SEO trends for Q1 2026 and identifying target keywords...</p>
-            </div>
-          </div>
-
-          {/* Tool call */}
-          <div className="flex gap-3 max-w-2xl">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-100 dark:bg-cyan-950">
-              <Wrench className="h-4 w-4 text-cyan-600" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Tool Call · web-search</p>
-              <Card className="py-2">
-                <CardContent className="p-3 font-mono text-xs">
-                  {`{"query": "AI management platforms SEO 2026", "results": 12}`}
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-
-          {/* Agent response */}
-          <div className="flex gap-3 max-w-2xl">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950">
-              <Bot className="h-4 w-4 text-emerald-600" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">Agent · 10:23 AM</p>
-              <div className="text-sm space-y-2">
-                <p>I&apos;ve drafted the blog post. Here&apos;s a summary:</p>
-                <p><strong>Title:</strong> &quot;Top 10 AI Agent Management Platforms in 2026&quot;</p>
-                <p>The post targets long-tail keywords with 1.5% density and includes 5 sections...</p>
-                <Badge variant="secondary" className="text-xs">blog-post.md saved to /output/</Badge>
-              </div>
-            </div>
-          </div>
+      {/* Backend info banner */}
+      {!process.env.CREWSHIPD_URL && (
+        <div className="mx-4 sm:mx-6 mt-2 flex items-center gap-2 rounded-md bg-muted/10 border border-border px-3 py-2">
+          <Info className="h-4 w-4 text-muted-foreground shrink-0" />
+          <p className="text-xs text-muted-foreground">
+            Set <code>CREWSHIPD_URL</code> and run <strong>crewshipd</strong> for live chat.
+          </p>
         </div>
+      )}
 
-        {/* File preview panel (hint) */}
-        <div className="hidden lg:flex w-80 border-l flex-col">
-          <div className="flex items-center justify-between px-4 py-2 border-b">
-            <span className="text-xs font-medium">File Preview</span>
-            <PanelRightOpen className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground p-4">
-            Select a file to preview
-          </div>
-        </div>
-      </div>
-
-      {/* Input area */}
-      <div className="border-t bg-background p-4 sm:px-6">
-        <div className="flex items-end gap-2 max-w-2xl">
-          <Textarea
-            placeholder={`Message agent ${agentId}...`}
-            className="min-h-[44px] max-h-32 resize-none"
-            rows={1}
-          />
-          <Button size="icon" className="shrink-0 h-10 w-10">
-            <Send className="h-4 w-4" />
-          </Button>
-        </div>
+      {/* Chat panel (client component) */}
+      <div className="flex-1 overflow-hidden">
+        <ChatPanel agentId={agentId} sessionId={activeSessionId} />
       </div>
     </div>
   )

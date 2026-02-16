@@ -1,0 +1,117 @@
+"use client"
+
+import { useCallback, useEffect, useRef, useState } from "react"
+import { z } from "zod"
+
+export type WSStatus = "connecting" | "connected" | "disconnected" | "error"
+
+const wsMessageSchema = z.object({
+  type: z.string(),
+  channel: z.string().optional(),
+  payload: z.string().optional(),
+}).passthrough()
+
+export type WSMessage = z.infer<typeof wsMessageSchema>
+
+interface UseWebSocketOptions {
+  url: string
+  token: string | null
+  onMessage?: (msg: WSMessage) => void
+  onStatusChange?: (status: WSStatus) => void
+  reconnectInterval?: number
+  maxReconnectAttempts?: number
+}
+
+export function useWebSocket({
+  url,
+  token,
+  onMessage,
+  onStatusChange,
+  reconnectInterval = 3000,
+  maxReconnectAttempts = 10,
+}: UseWebSocketOptions) {
+  const [status, setStatus] = useState<WSStatus>("disconnected")
+  const wsRef = useRef<WebSocket | null>(null)
+  const reconnectAttemptsRef = useRef(0)
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  // Use refs for callbacks to prevent reconnection loops when consumers
+  // pass non-memoized functions.
+  const onMessageRef = useRef(onMessage)
+  const onStatusChangeRef = useRef(onStatusChange)
+  useEffect(() => { onMessageRef.current = onMessage }, [onMessage])
+  useEffect(() => { onStatusChangeRef.current = onStatusChange }, [onStatusChange])
+
+  const updateStatus = useCallback((s: WSStatus) => {
+    setStatus(s)
+    onStatusChangeRef.current?.(s)
+  }, [])
+
+  const connect = useCallback(() => {
+    if (!token || !url) return
+
+    // Note: token is passed as query parameter because browser WebSocket API
+    // does not support custom headers. The token is a short-lived JWE and the
+    // connection uses WSS in production, mitigating URL-based leakage risks.
+    const wsUrl = `${url}?token=${encodeURIComponent(token)}`
+    const ws = new WebSocket(wsUrl)
+    wsRef.current = ws
+
+    updateStatus("connecting")
+
+    ws.onopen = () => {
+      reconnectAttemptsRef.current = 0
+      updateStatus("connected")
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const parsed = JSON.parse(event.data)
+        const result = wsMessageSchema.safeParse(parsed)
+        if (!result.success) return
+        onMessageRef.current?.(result.data)
+      } catch {
+        // non-JSON message, ignore
+      }
+    }
+
+    ws.onerror = () => {
+      updateStatus("error")
+    }
+
+    ws.onclose = () => {
+      wsRef.current = null
+      updateStatus("disconnected")
+
+      if (reconnectAttemptsRef.current < maxReconnectAttempts) {
+        reconnectAttemptsRef.current++
+        reconnectTimerRef.current = setTimeout(connect, reconnectInterval)
+      }
+    }
+  }, [url, token, updateStatus, reconnectInterval, maxReconnectAttempts])
+
+  const disconnect = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+    }
+    reconnectAttemptsRef.current = maxReconnectAttempts
+    wsRef.current?.close()
+    wsRef.current = null
+  }, [maxReconnectAttempts])
+
+  const send = useCallback(
+    (msg: WSMessage) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify(msg))
+      }
+    },
+    [],
+  )
+
+  useEffect(() => {
+    connect()
+    return () => disconnect()
+  }, [connect, disconnect])
+
+  return { status, send, disconnect, reconnect: connect }
+}
