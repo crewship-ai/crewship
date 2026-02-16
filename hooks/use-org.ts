@@ -6,21 +6,24 @@ interface OrgData {
   id: string
   name: string
   slug: string
+  currentUserRole: string | null
 }
 
 interface UseOrgReturn {
   orgId: string | null
+  role: string | null
   loading: boolean
 }
 
 /**
- * Fetch the current user's organizations and return the first org ID.
+ * Fetch the current user's organizations and return the first org ID + role.
  *
  * MVP: single-org assumption — always uses the first organization.
  * Will be replaced by the org switcher once wired.
  */
 export function useOrg(): UseOrgReturn {
   const [orgId, setOrgId] = useState<string | null>(null)
+  const [role, setRole] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -36,6 +39,7 @@ export function useOrg(): UseOrgReturn {
         const orgs: OrgData[] = await res.json()
         if (!cancelled && orgs.length > 0) {
           setOrgId(orgs[0].id)
+          setRole(orgs[0].currentUserRole)
         }
       } catch {
         // Silently fail — orgId stays null
@@ -50,5 +54,5 @@ export function useOrg(): UseOrgReturn {
     }
   }, [])
 
-  return { orgId, loading }
+  return { orgId, role, loading }
 }

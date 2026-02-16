@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TeamCard } from "@/components/features/teams/team-card"
 import { useOrg } from "@/hooks/use-org"
+import { useAbilities } from "@/hooks/use-abilities"
 import Link from "next/link"
 
 interface Team {
@@ -22,6 +23,7 @@ interface Team {
 
 export default function TeamsPage() {
   const { orgId, loading: orgLoading } = useOrg()
+  const { abilities } = useAbilities()
   const [teams, setTeams] = useState<Team[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,12 +65,14 @@ export default function TeamsPage() {
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       <PageHeader title="Teams" description="Organize agents into departments">
-        <Button asChild>
-          <Link href="/teams/new">
-            <Plus className="mr-2 h-4 w-4" />
-            New Team
-          </Link>
-        </Button>
+        {abilities.can("create", "Team") && (
+          <Button asChild>
+            <Link href="/teams/new">
+              <Plus className="mr-2 h-4 w-4" />
+              New Team
+            </Link>
+          </Button>
+        )}
       </PageHeader>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
@@ -85,12 +89,14 @@ export default function TeamsPage() {
           title="No teams yet"
           description="Create a team to group your agents by department or function."
         >
-          <Button className="mt-4" asChild>
-            <Link href="/teams/new">
-              <Plus className="mr-2 h-4 w-4" />
-              Create Team
-            </Link>
-          </Button>
+          {abilities.can("create", "Team") && (
+            <Button className="mt-4" asChild>
+              <Link href="/teams/new">
+                <Plus className="mr-2 h-4 w-4" />
+                Create Team
+              </Link>
+            </Button>
+          )}
         </EmptyState>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
