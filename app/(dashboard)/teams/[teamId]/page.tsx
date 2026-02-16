@@ -183,6 +183,8 @@ export default function TeamDetailPage() {
       })
       if (res.ok) {
         router.push("/teams")
+      } else {
+        setSaveError("Failed to delete team")
       }
     } catch {
       setSaveError("Failed to delete team")

@@ -416,6 +416,15 @@ export default function SettingsPage() {
     }
 
     if (tab === "danger") {
+      if (role !== "OWNER") {
+        return (
+          <Card>
+            <CardContent className="p-6 text-center">
+              <p className="text-sm text-muted-foreground">Only organization owners can access this section.</p>
+            </CardContent>
+          </Card>
+        )
+      }
       return (
         <Card className="border-destructive/30">
           <CardHeader>

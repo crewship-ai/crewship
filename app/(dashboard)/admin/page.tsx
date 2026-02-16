@@ -141,7 +141,7 @@ export default function AdminPage() {
     if (tab === "overview") {
       return (
         <div className="space-y-6">
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               { label: "Organizations", value: stats?.organizations ?? 0 },
               { label: "Total Users", value: stats?.users ?? 0 },

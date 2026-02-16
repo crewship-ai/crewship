@@ -89,12 +89,14 @@ export default function TeamsPage() {
           title="No teams yet"
           description="Create a team to group your agents by department or function."
         >
-          <Button className="mt-4" asChild>
-            <Link href="/teams/new">
-              <Plus className="mr-2 h-4 w-4" />
-              Create Team
-            </Link>
-          </Button>
+          {abilities.can("create", "Team") && (
+            <Button className="mt-4" asChild>
+              <Link href="/teams/new">
+                <Plus className="mr-2 h-4 w-4" />
+                Create Team
+              </Link>
+            </Button>
+          )}
         </EmptyState>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">

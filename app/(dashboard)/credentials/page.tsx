@@ -169,10 +169,12 @@ export default function CredentialsPage() {
           title="No credentials yet"
           description="Add API keys and secrets that your agents will use. All credentials are encrypted with AES-256-GCM."
         >
-          <Button className="mt-4" onClick={() => setAddOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add First Credential
-          </Button>
+          {canManage && (
+            <Button className="mt-4" onClick={() => setAddOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add First Credential
+            </Button>
+          )}
         </EmptyState>
       ) : (
         <div className="rounded-md border">

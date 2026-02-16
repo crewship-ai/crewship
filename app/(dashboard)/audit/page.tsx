@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { Shield, ChevronRight, Download, Search } from "lucide-react"
 import { PageHeader } from "@/components/layout/page-header"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -245,9 +245,8 @@ export default function AuditPage() {
                 {filteredLogs.map((log) => {
                   const isExpanded = expandedId === log.id
                   return (
-                    <>
+                    <Fragment key={log.id}>
                       <TableRow
-                        key={log.id}
                         className={cn("cursor-pointer", isExpanded && "bg-primary/5")}
                         onClick={() => setExpandedId(isExpanded ? null : log.id)}
                       >
@@ -316,7 +315,7 @@ export default function AuditPage() {
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                    </Fragment>
                   )
                 })}
               </TableBody>
