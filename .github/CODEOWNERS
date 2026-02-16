@@ -1,0 +1,32 @@
+# Code Owners -- Crewship
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default
+* @crewship-ai
+
+# GitHub workflows and CI/CD
+/.github/ @crewship-ai
+
+# Database schema
+/prisma/ @crewship-ai
+
+# API routes
+/app/api/ @crewship-ai
+
+# Security and permissions
+/lib/permissions/ @crewship-ai
+/lib/encryption.ts @crewship-ai
+/middleware.ts @crewship-ai
+
+# Go backend (critical)
+/cmd/ @crewship-ai
+/internal/ @crewship-ai
+
+# Docker / container runtime
+/docker/ @crewship-ai
+
+# Configuration
+/package.json @crewship-ai
+/tsconfig.json @crewship-ai
+/go.mod @crewship-ai
+/.env.example @crewship-ai
