@@ -199,7 +199,7 @@ CONVERSATIONS (host):      /var/lib/crewship/conversations/  ← JSONL per sessi
 - **Releases:** Tagged from main (`v0.1.0`, `v0.2.0`, etc.)
 - **CI runs on every PR:** lint, typecheck, build, test, Go check
 - **Conventional commits:** `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`
-- **Remote:** `github` -> `https://github.com/crewship-ai/crewship.git`
+- **Remote:** `GitHub` -> `https://github.com/crewship-ai/crewship.git`
 - **Working branch:** Always work on feature branch, never on main
 
 ## Roles (RBAC)
