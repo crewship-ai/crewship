@@ -1,74 +1,152 @@
-import { Puzzle, Plus, Settings, ExternalLink } from "lucide-react"
-import { Button } from "@/components/ui/button"
+"use client"
+
+import { use, useState, useEffect } from "react"
+import { Puzzle, AlertCircle, Inbox } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useOrg } from "@/hooks/use-org"
 
-export default async function SkillsPage({ params }: { params: Promise<{ agentId: string }> }) {
-  await params
+interface SkillData {
+  id: string
+  name: string
+  slug: string
+  display_name: string | null
+  description: string | null
+  category: string | null
+  source: string
+  icon: string | null
+  version: string | null
+}
 
-  const skills = [
-    {
-      name: "Web Search",
-      description: "Search the web for relevant articles, data, and research. Uses Brave Search API.",
-      category: "Research",
-      status: "Active",
-    },
-    {
-      name: "File Writer",
-      description: "Create and modify files in the /output/ directory. Supports Markdown, CSV, JSON, and plain text.",
-      category: "Output",
-      status: "Active",
-    },
-    {
-      name: "SEO Analyzer",
-      description: "Analyze keyword density, meta tags, and content structure for SEO optimization scores.",
-      category: "Analysis",
-      status: "Active",
-    },
-  ]
+interface AgentSkill {
+  id: string
+  agent_id: string
+  skill_id: string
+  enabled: boolean
+  config: Record<string, unknown> | null
+  skill: SkillData
+}
+
+const SOURCE_STYLES: Record<string, string> = {
+  BUILTIN: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400",
+  CUSTOM: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
+  MARKETPLACE: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400",
+}
+
+export default function SkillsPage({ params }: { params: Promise<{ agentId: string }> }) {
+  const { agentId } = use(params)
+  const { orgId, loading: orgLoading } = useOrg()
+  const [skills, setSkills] = useState<AgentSkill[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!orgId) return
+
+    let cancelled = false
+
+    async function fetchSkills() {
+      try {
+        const res = await fetch(`/api/v1/agents/${agentId}/skills?org_id=${orgId}`)
+        if (!res.ok) {
+          if (!cancelled) setError("Failed to load skills")
+          return
+        }
+        const data: AgentSkill[] = await res.json()
+        if (!cancelled) setSkills(data)
+      } catch {
+        if (!cancelled) setError("Network error. Please try again.")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    fetchSkills()
+    return () => { cancelled = true }
+  }, [agentId, orgId])
+
+  if (orgLoading || loading) {
+    return <SkillsSkeleton />
+  }
+
+  if (error) {
+    return (
+      <div className="p-4 sm:p-6">
+        <div className="flex items-center gap-2 text-destructive">
+          <AlertCircle className="h-5 w-5" />
+          <p className="text-sm">{error}</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">3 skills assigned</p>
-        <Button size="sm" className="gap-1.5">
-          <Plus className="h-3.5 w-3.5" /> Assign Skill
-        </Button>
+        <p className="text-sm text-muted-foreground">
+          {skills.length} skill{skills.length !== 1 ? "s" : ""} assigned
+        </p>
       </div>
 
-      {/* Skills list */}
-      <div className="grid gap-3">
-        {skills.map((skill) => (
-          <Card key={skill.name} className="py-0">
-            <CardContent className="p-4 sm:p-5">
-              <div className="flex items-start justify-between gap-4">
+      {skills.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
+          <p className="text-sm font-medium text-muted-foreground">No skills assigned</p>
+          <p className="text-xs text-muted-foreground mt-1">Assign skills to enable agent capabilities.</p>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {skills.map((agentSkill) => (
+            <Card key={agentSkill.id} className="py-0">
+              <CardContent className="p-4 sm:p-5">
                 <div className="flex items-start gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                     <Puzzle className="h-5 w-5 text-primary" />
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm font-medium">{skill.name}</h3>
-                      <Badge variant="outline" className="text-xs">{skill.category}</Badge>
-                      <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 text-xs">
-                        {skill.status}
+                      <h3 className="text-sm font-medium">
+                        {agentSkill.skill.display_name ?? agentSkill.skill.name}
+                      </h3>
+                      {agentSkill.skill.category && (
+                        <Badge variant="outline" className="text-xs">{agentSkill.skill.category}</Badge>
+                      )}
+                      <Badge
+                        variant="secondary"
+                        className={`text-xs ${SOURCE_STYLES[agentSkill.skill.source] ?? ""}`}
+                      >
+                        {agentSkill.skill.source}
                       </Badge>
+                      {!agentSkill.enabled && (
+                        <Badge variant="secondary" className="text-xs">Disabled</Badge>
+                      )}
+                      {agentSkill.skill.version && (
+                        <span className="text-xs text-muted-foreground font-mono">v{agentSkill.skill.version}</span>
+                      )}
                     </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">{skill.description}</p>
+                    {agentSkill.skill.description && (
+                      <p className="text-xs text-muted-foreground leading-relaxed">{agentSkill.skill.description}</p>
+                    )}
                   </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Open ${skill.name} docs`}>
-                    <ExternalLink className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`${skill.name} settings`}>
-                    <Settings className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SkillsSkeleton() {
+  return (
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+      <Skeleton className="h-5 w-32" />
+      <div className="grid gap-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-20 rounded-lg" />
         ))}
       </div>
     </div>
