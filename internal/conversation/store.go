@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -46,7 +47,11 @@ func NewStore(basePath string, logger *slog.Logger) *Store {
 	}
 }
 
-func (s *Store) Append(sessionID string, msg Message) error {
+func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	if err := validateID(sessionID); err != nil {
 		return fmt.Errorf("invalid session ID: %w", err)
 	}
@@ -85,7 +90,11 @@ func (s *Store) Append(sessionID string, msg Message) error {
 	return nil
 }
 
-func (s *Store) Read(sessionID string, offset, limit int) ([]Message, error) {
+func (s *Store) Read(ctx context.Context, sessionID string, offset, limit int) ([]Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if err := validateID(sessionID); err != nil {
 		return nil, fmt.Errorf("invalid session ID: %w", err)
 	}

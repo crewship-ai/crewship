@@ -54,13 +54,15 @@ func New(
 }
 
 func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, content string, streamFn func(ws.ChatEvent)) error {
-	if err := b.convStore.Append(sessionID, conversation.Message{
+	if err := b.convStore.Append(ctx, sessionID, conversation.Message{
 		ID:        fmt.Sprintf("msg_%d", time.Now().UnixNano()),
 		Role:      conversation.RoleUser,
 		Content:   content,
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		b.logger.Error("failed to persist user message", "error", err)
+		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
+		return fmt.Errorf("persist user message: %w", err)
 	}
 
 	info, err := b.resolver.ResolveSession(ctx, sessionID)
@@ -92,7 +94,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, conte
 			Type:    event.Type,
 			Content: event.Content,
 		})
-		fullResponse += event.Content + "\n"
+		fullResponse += event.Content
 
 		if err := b.logWriter.Append(info.TeamID, info.AgentSlug, logcollector.LogEntry{
 			Timestamp: event.Timestamp,
@@ -106,10 +108,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, conte
 	}
 
 	if err := b.orch.RunAgent(ctx, req, handler); err != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: err.Error()})
 		return fmt.Errorf("run agent: %w", err)
 	}
 
-	if err := b.convStore.Append(sessionID, conversation.Message{
+	if err := b.convStore.Append(ctx, sessionID, conversation.Message{
 		ID:        fmt.Sprintf("msg_%d", time.Now().UnixNano()),
 		Role:      conversation.RoleAssistant,
 		Content:   fullResponse,

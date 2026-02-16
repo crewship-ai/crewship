@@ -33,17 +33,24 @@ export function useWebSocket({
   const reconnectAttemptsRef = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  const updateStatus = useCallback(
-    (s: WSStatus) => {
-      setStatus(s)
-      onStatusChange?.(s)
-    },
-    [onStatusChange],
-  )
+  // Use refs for callbacks to prevent reconnection loops when consumers
+  // pass non-memoized functions.
+  const onMessageRef = useRef(onMessage)
+  const onStatusChangeRef = useRef(onStatusChange)
+  useEffect(() => { onMessageRef.current = onMessage }, [onMessage])
+  useEffect(() => { onStatusChangeRef.current = onStatusChange }, [onStatusChange])
+
+  const updateStatus = useCallback((s: WSStatus) => {
+    setStatus(s)
+    onStatusChangeRef.current?.(s)
+  }, [])
 
   const connect = useCallback(() => {
     if (!token || !url) return
 
+    // Note: token is passed as query parameter because browser WebSocket API
+    // does not support custom headers. The token is a short-lived JWE and the
+    // connection uses WSS in production, mitigating URL-based leakage risks.
     const wsUrl = `${url}?token=${encodeURIComponent(token)}`
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
@@ -58,7 +65,7 @@ export function useWebSocket({
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data) as WSMessage
-        onMessage?.(msg)
+        onMessageRef.current?.(msg)
       } catch {
         // non-JSON message, ignore
       }
@@ -77,7 +84,7 @@ export function useWebSocket({
         reconnectTimerRef.current = setTimeout(connect, reconnectInterval)
       }
     }
-  }, [url, token, onMessage, updateStatus, reconnectInterval, maxReconnectAttempts])
+  }, [url, token, updateStatus, reconnectInterval, maxReconnectAttempts])
 
   const disconnect = useCallback(() => {
     if (reconnectTimerRef.current) {

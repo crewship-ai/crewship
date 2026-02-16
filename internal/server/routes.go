@@ -103,9 +103,13 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !json.Valid(data) {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"agent_id": id, "status": "idle"})
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +217,12 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	messages, err := s.convStore.Read(id, 0, 0)
+	if s.convStore == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"session_id": id, "messages": []interface{}{}})
+		return
+	}
+
+	messages, err := s.convStore.Read(r.Context(), id, 0, 0)
 	if err != nil {
 		s.logger.Error("read session messages failed", "session_id", id, "error", err)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"session_id": id, "messages": []interface{}{}})
