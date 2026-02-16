@@ -205,6 +205,9 @@ export default function SettingsPage() {
       const res = await fetch(`/api/v1/orgs/${orgId}?org_id=${orgId}`, { method: "DELETE" })
       if (res.ok) {
         window.location.href = "/"
+      } else {
+        const body = await res.json().catch(() => null)
+        setSaveError(typeof body?.error === "string" ? body.error : "Failed to delete organization")
       }
     } catch {
       setSaveError("Failed to delete organization")
