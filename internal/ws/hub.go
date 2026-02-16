@@ -12,15 +12,25 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+type ChatHandler interface {
+	HandleChatMessage(ctx context.Context, userID, sessionID, content string, streamFn func(event ChatEvent)) error
+}
+
+type ChatEvent struct {
+	Type    string `json:"type"` // "text", "tool_call", "thinking", "done", "error"
+	Content string `json:"content"`
+}
+
 type Hub struct {
-	logger    *slog.Logger
-	clients   map[*Client]bool
-	channels  map[string]map[*Client]bool
-	register  chan *Client
-	unregister chan *Client
-	broadcast chan ChannelMessage
-	mu        sync.RWMutex
-	connCount atomic.Int64
+	logger      *slog.Logger
+	chatHandler ChatHandler
+	clients     map[*Client]bool
+	channels    map[string]map[*Client]bool
+	register    chan *Client
+	unregister  chan *Client
+	broadcast   chan ChannelMessage
+	mu          sync.RWMutex
+	connCount   atomic.Int64
 }
 
 type Client struct {
@@ -49,14 +59,15 @@ type ChannelMessage struct {
 	Data    []byte
 }
 
-func NewHub(logger *slog.Logger) *Hub {
+func NewHub(logger *slog.Logger, chatHandler ChatHandler, deps ...interface{}) *Hub {
 	return &Hub{
-		logger:     logger,
-		clients:    make(map[*Client]bool),
-		channels:   make(map[string]map[*Client]bool),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		broadcast:  make(chan ChannelMessage, 256),
+		logger:      logger,
+		chatHandler: chatHandler,
+		clients:     make(map[*Client]bool),
+		channels:    make(map[string]map[*Client]bool),
+		register:    make(chan *Client),
+		unregister:  make(chan *Client),
+		broadcast:   make(chan ChannelMessage, 256),
 	}
 }
 
@@ -109,6 +120,10 @@ func (h *Hub) Run(ctx context.Context) {
 
 func (h *Hub) ConnectionCount() int {
 	return int(h.connCount.Load())
+}
+
+func (h *Hub) SetChatHandler(handler ChatHandler) {
+	h.chatHandler = handler
 }
 
 func (h *Hub) Broadcast(channel string, msg ServerMessage) {
@@ -178,7 +193,7 @@ func (c *Client) readPump() {
 			c.send <- resp
 		case "send_message":
 			c.hub.logger.Debug("message received", "user_id", c.userID, "channel", msg.Channel)
-			// TODO: route message to agent via orchestrator
+			c.handleSendMessage(msg)
 		}
 	}
 }
@@ -243,4 +258,76 @@ func (c *Client) unsubscribe(channel string) {
 		}
 	}
 	c.hub.mu.Unlock()
+}
+
+type sendMessagePayload struct {
+	SessionID string `json:"session_id"`
+	Content   string `json:"content"`
+}
+
+func (c *Client) handleSendMessage(msg ClientMessage) {
+	if c.hub.chatHandler == nil {
+		resp, _ := json.Marshal(ServerMessage{
+			Type:    "error",
+			Channel: msg.Channel,
+			Payload: map[string]string{"error": "chat not available"},
+		})
+		c.send <- resp
+		return
+	}
+
+	var payload sendMessagePayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		resp, _ := json.Marshal(ServerMessage{
+			Type:    "error",
+			Channel: msg.Channel,
+			Payload: map[string]string{"error": "invalid payload"},
+		})
+		c.send <- resp
+		return
+	}
+
+	if payload.SessionID == "" || payload.Content == "" {
+		resp, _ := json.Marshal(ServerMessage{
+			Type:    "error",
+			Channel: msg.Channel,
+			Payload: map[string]string{"error": "session_id and content required"},
+		})
+		c.send <- resp
+		return
+	}
+
+	go func() {
+		streamFn := func(event ChatEvent) {
+			resp, _ := json.Marshal(ServerMessage{
+				Type:    "chat_event",
+				Channel: "session:" + payload.SessionID,
+				Payload: event,
+			})
+			c.send <- resp
+
+			c.hub.Broadcast("session:"+payload.SessionID, ServerMessage{
+				Type:    "chat_event",
+				Channel: "session:" + payload.SessionID,
+				Payload: event,
+			})
+		}
+
+		err := c.hub.chatHandler.HandleChatMessage(
+			context.Background(),
+			c.userID,
+			payload.SessionID,
+			payload.Content,
+			streamFn,
+		)
+		if err != nil {
+			c.hub.logger.Error("chat message error", "error", err, "session_id", payload.SessionID)
+			errResp, _ := json.Marshal(ServerMessage{
+				Type:    "chat_event",
+				Channel: "session:" + payload.SessionID,
+				Payload: ChatEvent{Type: "error", Content: err.Error()},
+			})
+			c.send <- errResp
+		}
+	}()
 }
