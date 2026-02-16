@@ -59,6 +59,9 @@ func New(cfg *config.Config, logger *slog.Logger) *Server {
 func (s *Server) Start(ctx context.Context) error {
 	s.startedAt = time.Now()
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	errCh := make(chan error, 2)
 
 	go func() {
@@ -78,6 +81,8 @@ func (s *Server) Start(ctx context.Context) error {
 
 	select {
 	case err := <-errCh:
+		cancel()
+		_ = s.Shutdown()
 		return err
 	case <-ctx.Done():
 		return s.Shutdown()

@@ -32,5 +32,9 @@ logging:
   format: "json"               # "json" | "text"
 
 auth:
-  # jwt_secret: loaded from NEXTAUTH_SECRET env var
+  # jwt_secret is loaded from NEXTAUTH_SECRET env var (intentional exception
+  # to CREWSHIP_* prefix -- shared with Next.js auth).
+  # This value is REQUIRED for WebSocket JWT validation.
+  # Generate with: openssl rand -base64 32
+  # jwt_secret: ""
   ws_token_expiry: 5m

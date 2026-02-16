@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -106,7 +107,22 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(cfg)
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("config validation: %w", err)
+	}
+
 	return cfg, nil
+}
+
+func (c *Config) Validate() error {
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.Server.Port)
+	}
+	if c.IPC.SocketPath == "" {
+		return fmt.Errorf("ipc.socket_path is required")
+	}
+	return nil
 }
 
 func loadFromFile(cfg *Config, path string) error {
@@ -127,6 +143,8 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CREWSHIP_PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
 			cfg.Server.Port = port
+		} else {
+			slog.Warn("ignoring invalid CREWSHIP_PORT", "value", v, "error", err)
 		}
 	}
 	if v := os.Getenv("CREWSHIP_SOCKET_PATH"); v != "" {

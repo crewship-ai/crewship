@@ -20,6 +20,15 @@ func newTestServer() *Server {
 	return s
 }
 
+func parseJSON(t *testing.T, data []byte) map[string]interface{} {
+	t.Helper()
+	var body map[string]interface{}
+	if err := json.Unmarshal(data, &body); err != nil {
+		t.Fatalf("invalid JSON response: %v, body: %s", err, string(data))
+	}
+	return body
+}
+
 func TestHealthz(t *testing.T) {
 	s := newTestServer()
 	req := httptest.NewRequest("GET", "/healthz", nil)
@@ -31,10 +40,7 @@ func TestHealthz(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 
-	var body map[string]interface{}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
+	body := parseJSON(t, w.Body.Bytes())
 	if body["status"] != "ok" {
 		t.Errorf("expected status ok, got %v", body["status"])
 	}
@@ -54,8 +60,7 @@ func TestReadyz(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 
-	var body map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &body)
+	body := parseJSON(t, w.Body.Bytes())
 	if body["status"] != "ready" {
 		t.Errorf("expected status ready, got %v", body["status"])
 	}
@@ -77,7 +82,7 @@ func TestMetrics(t *testing.T) {
 		t.Errorf("expected text/plain content type, got %s", ct)
 	}
 
-	body := w.Body.String()
+	output := w.Body.String()
 	expectedMetrics := []string{
 		"crewshipd_uptime_seconds",
 		"crewshipd_goroutines",
@@ -85,7 +90,7 @@ func TestMetrics(t *testing.T) {
 		"crewshipd_ws_connections",
 	}
 	for _, m := range expectedMetrics {
-		if !strings.Contains(body, m) {
+		if !strings.Contains(output, m) {
 			t.Errorf("expected metric %s in output", m)
 		}
 	}
@@ -103,86 +108,43 @@ func TestWebSocketMissingToken(t *testing.T) {
 	}
 }
 
-func TestIPCHealth(t *testing.T) {
+func TestIPCEndpoints(t *testing.T) {
 	s := newTestServer()
-	req := httptest.NewRequest("GET", "/health", nil)
-	w := httptest.NewRecorder()
 
-	s.ipcMux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-}
-
-func TestIPCAgentStatus(t *testing.T) {
-	s := newTestServer()
-	req := httptest.NewRequest("GET", "/agents/test-uuid/status", nil)
-	w := httptest.NewRecorder()
-
-	s.ipcMux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-
-	var body map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &body)
-	if body["agent_id"] != "test-uuid" {
-		t.Errorf("expected agent_id test-uuid, got %v", body["agent_id"])
-	}
-}
-
-func TestIPCAgentStart(t *testing.T) {
-	s := newTestServer()
-	req := httptest.NewRequest("POST", "/agents/test-uuid/start", nil)
-	w := httptest.NewRecorder()
-
-	s.ipcMux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusAccepted {
-		t.Errorf("expected 202, got %d", w.Code)
-	}
-}
-
-func TestIPCContainerStatus(t *testing.T) {
-	s := newTestServer()
-	req := httptest.NewRequest("GET", "/teams/team-uuid/container/status", nil)
-	w := httptest.NewRecorder()
-
-	s.ipcMux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-}
-
-func TestIPCFileList(t *testing.T) {
-	s := newTestServer()
-	req := httptest.NewRequest("GET", "/teams/team-uuid/files", nil)
-	w := httptest.NewRecorder()
-
-	s.ipcMux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		wantStatus int
+		wantField  string
+		wantValue  string
+	}{
+		{"health", "GET", "/health", http.StatusOK, "status", "ok"},
+		{"agent status", "GET", "/agents/test-uuid/status", http.StatusOK, "agent_id", "test-uuid"},
+		{"agent start", "POST", "/agents/test-uuid/start", http.StatusAccepted, "agent_id", "test-uuid"},
+		{"agent stop", "POST", "/agents/test-uuid/stop", http.StatusOK, "agent_id", "test-uuid"},
+		{"container status", "GET", "/teams/team-uuid/container/status", http.StatusOK, "team_id", "team-uuid"},
+		{"container start", "POST", "/teams/team-uuid/container/start", http.StatusAccepted, "team_id", "team-uuid"},
+		{"container stop", "POST", "/teams/team-uuid/container/stop", http.StatusOK, "team_id", "team-uuid"},
+		{"file list", "GET", "/teams/team-uuid/files", http.StatusOK, "team_id", "team-uuid"},
+		{"session messages", "GET", "/sessions/session-uuid/messages", http.StatusOK, "session_id", "session-uuid"},
 	}
 
-	var body map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &body)
-	if body["team_id"] != "team-uuid" {
-		t.Errorf("expected team_id team-uuid, got %v", body["team_id"])
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			w := httptest.NewRecorder()
 
-func TestIPCSessionMessages(t *testing.T) {
-	s := newTestServer()
-	req := httptest.NewRequest("GET", "/sessions/session-uuid/messages", nil)
-	w := httptest.NewRecorder()
+			s.ipcMux.ServeHTTP(w, req)
 
-	s.ipcMux.ServeHTTP(w, req)
+			if w.Code != tt.wantStatus {
+				t.Errorf("expected status %d, got %d", tt.wantStatus, w.Code)
+			}
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+			body := parseJSON(t, w.Body.Bytes())
+			if body[tt.wantField] != tt.wantValue {
+				t.Errorf("expected %s=%q, got %v", tt.wantField, tt.wantValue, body[tt.wantField])
+			}
+		})
 	}
 }
