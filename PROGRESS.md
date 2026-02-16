@@ -29,6 +29,7 @@
 - [x] 0.12 Opravit socket path v .env.example
 - [x] 0.13 Pridat key versioning do encryption.ts
 - [x] 0.14 Vytvorit ORCHESTRATION.md (v1.0)
+- [x] 0.15 Vytvorit CREW-EXECUTION.md (v1.0) — Crew Execution, Workflow sablony, Auto-hiring, Progress tracking
 
 ---
 
@@ -320,13 +321,82 @@
 
 ---
 
-## Faze 2A/2B: Orchestrace (po MVP) ❌ 0%
+## Faze 2A/2B/3: Orchestrace + Crew Execution (po MVP) ❌ 0%
 
-> Crew Leader + Virtual Director. Nezacinat pred dokoncenim MVP.
+> Crew Leader + Virtual Director + Crew Execution. Nezacinat pred dokoncenim MVP.
+> Specifikace: ORCHESTRATION.md (delegace, sidecar) + CREW-EXECUTION.md (execution, workflow, hiring)
 
-- [ ] 2A.1 AgentRole enum v schema (uz existuje v Prisma)
-- [ ] 2A.2-2A.11 Crew Leader orchestrace (11 tasku -- viz TODO.md)
-- [ ] 2B.1-2B.6 Virtual Director (6 tasku -- viz TODO.md)
+### Phase 2A: Crew Leader + zakladni Crew Execution
+
+**Orchestrace (ORCHESTRATION.md):**
+- [ ] ORCH-01 AgentRole enum + DB migrace
+- [ ] ORCH-02 Leader designation UI
+- [ ] ORCH-03 Auto-generated leader system prompt
+- [ ] ORCH-04 crewship-sidecar (loopback HTTP v kontejneru)
+- [ ] ORCH-05 Delegacni protokol (HTTP REST na sidecar)
+- [ ] ORCH-06 Leader → Worker delegace (Docker exec orchestrace)
+- [ ] ORCH-07 Delegacni timeline v UI
+- [ ] ORCH-08 DelegationLog tabulka (audit vsech delegaci)
+- [ ] ORCH-09 Leader auto-routing (user → team → leader rozhodne)
+- [ ] ORCH-10 Paralelni delegace (wait_group pattern)
+- [ ] ORCH-11 Error handling + circuit breaker (3x retry → eskalace)
+- [ ] ORCH-12 Leader summary/agregace
+
+**Crew Execution (CREW-EXECUTION.md):**
+- [ ] EXEC-01 CrewExecution + CrewExecutionTask Prisma modely + migrace
+- [ ] EXEC-02 Sidecar endpointy pro execution (/execution/create, /plan, /task/:id)
+- [ ] EXEC-03 ExecutionEngine v crewshipd (vytvareni, plan, dependency resolution)
+- [ ] EXEC-04 JSONL progress writer (mirror do /output/, append-only)
+- [ ] EXEC-05 Execution Board UI -- tabulkovy spreadsheet view
+- [ ] EXEC-06 WebSocket real-time updaty (execution.* a task.* eventy)
+- [ ] EXEC-07 Execution historie (seznam dokoncenych execution per tym)
+- [ ] EXEC-08 Dashboard widget "Running Executions"
+
+### Phase 2B: Workflow sablony + Auto-hiring + Director
+
+**Orchestrace (ORCHESTRATION.md):**
+- [ ] ORCH-13 Director agent role (specialni agent na urovni organizace)
+- [ ] ORCH-14 Director lightweight execution (LLM call bez Docker kontejneru)
+- [ ] ORCH-15 Director → Leader delegace (cross-team)
+- [ ] ORCH-16 Director auto-routing
+- [ ] ORCH-17 Cross-team agregace
+- [ ] ORCH-18 Director UI (dashboard card + chat)
+- [ ] ORCH-19 Leader modes (active/passive)
+- [ ] ORCH-20 Worker output compression (auto-sumarizace)
+- [ ] ORCH-21 Cost estimation per crew operation
+- [ ] ORCH-22 Per-crew budget limits
+- [ ] ORCH-23 crewship-agent binary (API-direct runtime)
+- [ ] ORCH-24 Trace ID across delegaci
+- [ ] ORCH-25 Meilisearch conversation search
+
+**Crew Execution (CREW-EXECUTION.md):**
+- [ ] EXEC-09 Workflow sablony (JSON format, vestavene: dev-test-loop, sequential, parallel)
+- [ ] EXEC-10 Loop controller v crewshipd (condition check, iterace)
+- [ ] EXEC-11 Dev-test loop integrace (Developer → Tester → zpet)
+- [ ] EXEC-12 Auto-hiring: SUPERVISED mode (UI notifikace, schvaleni)
+- [ ] EXEC-13 Auto-hiring: SEMI_AUTO mode (automaticke prirazeni existujicich)
+- [ ] EXEC-14 Team hiring_autonomy nastaveni v UI
+- [ ] EXEC-15 Docasni agenti (is_temporary, lifecycle: hired → working → expired)
+- [ ] EXEC-16 Director routing mode (passive router, dual model, full reasoning, budget)
+- [ ] EXEC-17 Inline metriky v Execution Board (duration, token count, cost per task)
+
+### Phase 3: Pokrocila orchestrace
+
+- [ ] EXEC-18 Auto-hiring: FULL_AUTO mode (plne autonomni + marketplace)
+- [ ] EXEC-19 Git worktree integrace (per-worker branch, leader merge)
+- [ ] EXEC-20 Cross-team execution (director koordinuje vice tymu)
+- [ ] EXEC-21 Execution replay/debug
+- [ ] EXEC-22 Primo lidr-lidr komunikace (bez directora, s RBAC)
+- [ ] EXEC-23 Execution analytics (grafy, trendy, srovnani efektivity)
+- [ ] EXEC-24 Custom workflow sablony (uzivatel tvori v UI)
+- [ ] EXEC-25 Director full reasoning + budget limit
+- [ ] ORCH-26 Orchestracni vizualizace (graf delegaci v realtime)
+- [ ] ORCH-27 Auto-leader election
+- [ ] ORCH-29 NATS JetStream integrace
+- [ ] ORCH-30 gVisor runtime
+- [ ] ORCH-31 Delegation replay/debug
+- [ ] ORCH-32 Landlock per-agent izolace
+- [ ] ORCH-33 API-direct jako default
 
 ---
 
@@ -359,3 +429,9 @@
 
 7. **EPIC 6** (Go backend) -- WebSocket gateway, Docker orchestrace, logy, soubory
 8. **EPIC 10** (Nasazeni) -- Production Docker images, Coolify deployment
+
+### Dalsi kroky (Phase 2 -- Orchestrace + Crew Execution)
+
+9. **Phase 2A** -- Crew Leader delegace (sidecar, DelegationLog) + zakladni Crew Execution (Board UI, JSONL progress)
+10. **Phase 2B** -- Workflow sablony (dev-test loop), Auto-hiring (supervised/semi-auto), Director routing
+11. **Phase 3** -- Full auto hiring + marketplace, Git worktree, cross-team execution, analytics
