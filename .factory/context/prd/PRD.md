@@ -85,8 +85,11 @@ Crewship prebira tyto vzory a PRIDAVA multi-tenancy, RBAC, enterprise security a
 | Virtual Employee | Virtualni zamestnanec | Agent | CLI session s LLM, skilly, credentials |
 | Skill | Dovednost | Skill | Balicek nastroju + MCP + skripty |
 | Permission / Credential | Opravneni | Credential | Sifrovany API klic v trezoru |
-| Department Head | Sef oddeleni | OrchestratorAgent | Deleguje praci na worker agenty |
+| Department Head / Team Leader | Sef oddeleni | Agent (role=LEADER) | 1 per team, primarni kontakt pro uzivatel, deleguje na workery |
+| Director | Reditel | Agent (role=DIRECTOR) | 1 per org, koordinuje cross-team, deleguje na leadery |
+| Employee | Zamestnanec | Agent (role=WORKER) | Default role, specializovany na konkretni ukoly |
 | Task | Ukol | AgentRun | Jednotlivy beh agenta |
+| Delegation | Delegace | DelegationLog | Leader/Director deleguje ukol na podrizeneho |
 | Conversation | Konverzace | ConversationSession | Chat session s agentem |
 
 ---
@@ -299,20 +302,54 @@ Crewship prebira tyto vzory a PRIDAVA multi-tenancy, RBAC, enterprise security a
 | COLLAB-02 | Identifikace uzivatelu | P1 | Agent vi kdo mu pise |
 | COLLAB-03 | Real-time sync | P1 | Vsichni vidi zpravy ostatnich okamzite |
 
-#### 4.16 Orchestrace (Sef → Pracovnici) [P1]
+#### 4.16 Orchestrace: Crew Leader + Virtual Director [P1]
 
-> **Implementace:** Pouzijeme OpenClaw pattern `sessions_send` / `sessions_spawn`.
-> Orchestrator agent posle zpravu worker agentovi pres session messaging.
-> Worker zpracuje a vrati vysledek. Ping-pong komunikace s max turns limitem.
+> **Architektura:** 3-urovnova hierarchie (Director → Leader → Worker) inspirovana
+> realnymi firemnimi strukturami. Uzivatel si primarne povida s Crew Leaderem tymu.
+> Pro cross-team otazky existuje Virtual Director na urovni organizace.
+> Plna specifikace: **`prd/ORCHESTRATION.md`**
+>
+> **Industry kontext (2026):** Hub-and-Spoke (Azure), Hierarchical Crew (CrewAI 0.30+),
+> Supervisor Pattern (LangGraph/Semantic Kernel), OrchVis (Georgia Tech).
+> 80 % enterprise firem planuje multi-agent systemy do 2 let.
+
+**Phase 2A: Crew Leader (in-team orchestrace)**
 
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| ORCH-01 | Orchestrator agent role | P1 | Agent oznaceny jako "sef" muze delegovat |
-| ORCH-02 | sessions_send | P1 | Sef posle zpravu worker agentovi pres session |
-| ORCH-03 | sessions_spawn | P1 | Sef spusti sub-agenta pro konkretni task |
-| ORCH-04 | Vysledky zpet | P1 | Worker vrati vysledek sefovi (announce pattern) |
-| ORCH-05 | Error handling + timeout | P1 | Co kdyz worker selze, max turns, timeout |
-| ORCH-06 | agents_list | P1 | Orchestrator vidi seznam agentu ktere muze targetnout |
+| ORCH-01 | AgentRole enum (WORKER/LEADER/DIRECTOR) | P1 | Novy enum + DB migrace, `agent_role` v Agent modelu |
+| ORCH-02 | Leader designation UI | P1 | Oznaceni agenta jako leadera v team settings (max 1 per team) |
+| ORCH-03 | Auto-generated leader system prompt | P1 | System prompt s informacemi o tymu (agenty, role, popisy) |
+| ORCH-04 | Delegacni protokol (stdout parsing) | P1 | Parsovani @delegate/@ask prikazu ze stdout leadera v crewshipd |
+| ORCH-05 | Leader → Worker delegace | P1 | Docker exec orchestrace: leader deleguje na workera ve stejnem kontejneru |
+| ORCH-06 | agents_list | P1 | Leader vidi seznam agentu ktere muze targetnout |
+| ORCH-07 | DelegationLog tabulka | P1 | Auditovani vsech delegaci (source, target, task, status, vysledek) |
+| ORCH-08 | Leader auto-routing | P1 | Uzivatel pise do tymu → leader rozhodne komu delegovat |
+| ORCH-09 | Paralelni delegace | P1 | wait_group pattern pro vice workeru soucasne |
+| ORCH-10 | Error handling + fallback | P1 | Leader reaguje na selhani workera (retry, alternativni worker, sam) |
+| ORCH-11 | Leader summary/agregace | P1 | Leader shrnuje vysledky pred odeslani uzivatel |
+
+**Phase 2B: Virtual Director (cross-team orchestrace)**
+
+| ID | Feature | Priorita | Popis |
+|---|---|---|---|
+| ORCH-12 | Director agent role | P1 | Specialni agent na urovni org (team_id = null, max 1 per org) |
+| ORCH-13 | Director lightweight execution | P1 | LLM call bez Docker kontejneru (jen reasoning + delegace) |
+| ORCH-14 | Director → Leader delegace | P1 | Cross-team orchestrace pres leadery |
+| ORCH-15 | Director auto-routing | P1 | Director rozhodne ktery tym oslovit dle dotazu |
+| ORCH-16 | Cross-team agregace | P1 | Director sbira odpovedi od vice tymu, agreguje |
+| ORCH-17 | Director UI (dashboard card + chat) | P1 | Karta directora na dashboardu, dedicovany chat |
+
+**Phase 3: Pokrocila orchestrace**
+
+| ID | Feature | Priorita | Popis |
+|---|---|---|---|
+| ORCH-18 | Leader ↔ Leader primo | P2 | Cross-team komunikace bez directora |
+| ORCH-19 | Director s tools + kontejnerem | P2 | Director dostane vlastni kontejner a nastroje |
+| ORCH-20 | Director long-term memory | P2 | Strategicke cile, KPIs, trendy organizace |
+| ORCH-21 | Orchestracni vizualizace (OrchVis) | P2 | Real-time graf delegaci |
+| ORCH-22 | Auto-leader election | P2 | AI doporuci ktery agent by mel byt leader |
+| ORCH-23 | Director → Director (multi-org) | P3 | Spoluprace mezi organizacemi pres webhooky |
 
 #### 4.17 Cron Joby [P1]
 | ID | Feature | Priorita | Popis |

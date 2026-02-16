@@ -245,12 +245,13 @@ CREWSHIP_STATE_PROVIDER=bbolt         # bbolt | postgres
 
 | Document | What's in it |
 |---|---|
-| `prd/DATABASE.md` | Full Prisma schema (19 tables), credential pool pattern, JSONL format |
+| `prd/DATABASE.md` | Full Prisma schema (20 tables), credential pool pattern, JSONL format |
 | `prd/SECURITY.md` | Threat model, isolation layers, OWASP, credential encryption |
-| `prd/AGENT-RUNTIME.md` | Container lifecycle, Docker exec, key failover, loop modes |
+| `prd/AGENT-RUNTIME.md` | Container lifecycle, Docker exec, key failover, loop modes, orchestration runtime |
+| `prd/ORCHESTRATION.md` | **Crew Leader + Virtual Director**: 3-level hierarchy, delegation protocol, industry context |
 | `prd/API.md` | REST API, IPC protocol, WebSocket, webhook API |
 | `prd/DEPLOYMENT.md` | Coolify deployment, Docker images, networking |
-| `architecture.md` | Two-process arch, data flows, container model, RBAC |
-| `business.md` | Positioning, competition (vs OpenClaw, n8n), examples |
+| `architecture.md` | Two-process arch, data flows, container model, RBAC, agent hierarchy |
+| `business.md` | Positioning, competition (vs OpenClaw, n8n, CrewAI), orchestration differentiator |
 | `TODO.md` | Product summary, OpenClaw comparison, phased task list |
 | `K8S-READINESS.md` | Provider interfaces, K8s manifests, migration path Docker→K8s |

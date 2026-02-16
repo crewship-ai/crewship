@@ -56,12 +56,22 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
     <!-- ======== VIEW: CHART (org chart — default) ======== -->
     <div id="view-chart" class="hidden px-6 pb-8">
       <div class="flex flex-col items-center">
+        <!-- Virtual Director -->
+        <div class="px-5 py-3 bg-primary-600 text-white rounded-lg text-sm font-semibold mb-0 cursor-pointer hover:bg-primary-700 transition-colors" onclick="window.location='03-agent-overview.html'">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>
+            Max — Virtual Director
+          </div>
+          <div class="text-[10px] text-white/60 font-normal mt-0.5">Organization Director &middot; Idle</div>
+        </div>
+        <div class="connector-v h-4" style="border-left: 2px dashed #CED0D4; width: 0;"></div>
+        <!-- Organization node -->
         <div class="px-5 py-3 bg-neutral-900 text-white rounded-lg text-sm font-semibold mb-0">
           <div class="flex items-center gap-2">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></svg>
             Unify Technology
           </div>
-          <div class="text-[10px] text-neutral-400 font-normal mt-0.5">4 crews &middot; 7 agents</div>
+          <div class="text-[10px] text-neutral-400 font-normal mt-0.5">4 crews &middot; 13 agents (1 director, 4 leaders, 8 workers)</div>
         </div>
         <div class="connector-v h-8"></div>
         <div class="relative w-full max-w-4xl">
@@ -76,18 +86,22 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
               <div class="h-1.5 bg-team-marketing"></div>
               <div class="px-4 py-3">
                 <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-team-marketing"></span><span class="font-semibold text-sm">Marketing</span></div>
-                <div class="flex items-center gap-3 mt-2 text-xs text-neutral-500"><span>2 agents</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-success-500"></span>1 running</span></div>
+                <div class="flex items-center gap-3 mt-2 text-xs text-neutral-500"><span>3 agents</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-success-500"></span>1 running</span></div>
               </div>
             </div>
             <div class="connector-v h-4"></div>
             <div class="space-y-2 w-full">
-              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-md hover:border-team-marketing/50 transition">
+              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-brand-gold/40 border-l-2 border-l-brand-gold rounded-md hover:border-brand-gold/70 transition">
                 <div class="w-7 h-7 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194a3.7 3.7 0 0 1-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg></div>
-                <div class="min-w-0"><div class="text-xs font-medium truncate">Claude — SEO Writer</div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span><span class="text-[10px] text-success-700">Running</span></div></div>
+                <div class="min-w-0"><div class="text-xs font-semibold truncate flex items-center gap-1">Claude — SEO Writer <svg class="w-3 h-3 text-brand-gold flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg></div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span><span class="text-[10px] text-success-700">Running</span><span class="text-[10px] text-brand-gold ml-1">Leader</span></div></div>
               </a>
               <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-md hover:border-team-marketing/50 transition">
                 <div class="w-7 h-7 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
                 <div class="min-w-0"><div class="text-xs font-medium truncate">Claude — Social Media</div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div></div>
+              </a>
+              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-md hover:border-team-marketing/50 transition">
+                <div class="w-7 h-7 rounded-md bg-[#EEF1FC] flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" fill="url(#gm-ar3)"/><defs><linearGradient id="gm-ar3" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#1A73E8"/><stop offset=".3" stop-color="#6C47FF"/><stop offset="1" stop-color="#E8710A"/></linearGradient></defs></svg></div>
+                <div class="min-w-0"><div class="text-xs font-medium truncate">Gemini — Analytics Reporter</div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div></div>
               </a>
             </div>
           </div>
@@ -104,9 +118,9 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
             </div>
             <div class="connector-v h-4"></div>
             <div class="space-y-2 w-full">
-              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-md hover:border-team-devops/50 transition">
+              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-brand-gold/40 border-l-2 border-l-brand-gold rounded-md hover:border-brand-gold/70 transition">
                 <div class="w-7 h-7 rounded-md bg-[#E6F4EE] flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"><path d="M22.28 9.82a5.99 5.99 0 0 0-.52-4.91 6.05 6.05 0 0 0-6.51-2.9A6.07 6.07 0 0 0 4.98 4.18a6 6 0 0 0-4 2.9 6.04 6.04 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.05 6.05 0 0 0 6.52 2.9A5.99 5.99 0 0 0 13.26 24a6.06 6.06 0 0 0 5.77-4.21 5.99 5.99 0 0 0 4-2.9 6.06 6.06 0 0 0-.75-7.07z" fill="#10A37F"/></svg></div>
-                <div class="min-w-0"><div class="text-xs font-medium truncate">Codex — Deploy Monitor</div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span><span class="text-[10px] text-success-700">Running</span></div></div>
+                <div class="min-w-0"><div class="text-xs font-semibold truncate flex items-center gap-1">Codex — Deploy Monitor <svg class="w-3 h-3 text-brand-gold flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg></div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span><span class="text-[10px] text-success-700">Running</span><span class="text-[10px] text-brand-gold ml-1">Leader</span></div></div>
               </a>
               <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-md hover:border-team-devops/50 transition">
                 <div class="w-7 h-7 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
@@ -126,14 +140,22 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
               <div class="h-1.5 bg-team-content"></div>
               <div class="px-4 py-3">
                 <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-team-content"></span><span class="font-semibold text-sm">Content</span></div>
-                <div class="flex items-center gap-3 mt-2 text-xs text-neutral-500"><span>1 agent</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-success-500"></span>1 running</span></div>
+                <div class="flex items-center gap-3 mt-2 text-xs text-neutral-500"><span>3 agents</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-success-500"></span>1 running</span></div>
               </div>
             </div>
             <div class="connector-v h-4"></div>
             <div class="space-y-2 w-full">
-              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-md hover:border-team-content/50 transition">
+              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-brand-gold/40 border-l-2 border-l-brand-gold rounded-md hover:border-brand-gold/70 transition">
                 <div class="w-7 h-7 rounded-md bg-[#EEF1FC] flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" fill="url(#gmc)"/><defs><linearGradient id="gmc" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#1A73E8"/><stop offset=".3" stop-color="#6C47FF"/><stop offset="1" stop-color="#E8710A"/></linearGradient></defs></svg></div>
-                <div class="min-w-0"><div class="text-xs font-medium truncate">Gemini — Blog Generator</div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span><span class="text-[10px] text-success-700">Running</span></div></div>
+                <div class="min-w-0"><div class="text-xs font-semibold truncate flex items-center gap-1">Gemini — Blog Generator <svg class="w-3 h-3 text-brand-gold flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg></div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span><span class="text-[10px] text-success-700">Running</span><span class="text-[10px] text-brand-gold ml-1">Leader</span></div></div>
+              </a>
+              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-md hover:border-team-content/50 transition">
+                <div class="w-7 h-7 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
+                <div class="min-w-0"><div class="text-xs font-medium truncate">Claude — Docs Writer</div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div></div>
+              </a>
+              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-md hover:border-team-content/50 transition">
+                <div class="w-7 h-7 rounded-md bg-[#E6F4EE] flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"><path d="M22.28 9.82a5.99 5.99 0 0 0-.52-4.91 6.05 6.05 0 0 0-6.51-2.9A6.07 6.07 0 0 0 4.98 4.18z" fill="#10A37F"/></svg></div>
+                <div class="min-w-0"><div class="text-xs font-medium truncate">Codex — Translation Bot</div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div></div>
               </a>
             </div>
           </div>
@@ -145,14 +167,22 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
               <div class="h-1.5 bg-team-support"></div>
               <div class="px-4 py-3">
                 <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-team-support"></span><span class="font-semibold text-sm">Support</span></div>
-                <div class="flex items-center gap-3 mt-2 text-xs text-neutral-500"><span>1 agent</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span>1 idle</span></div>
+                <div class="flex items-center gap-3 mt-2 text-xs text-neutral-500"><span>3 agents</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span>3 idle</span></div>
               </div>
             </div>
             <div class="connector-v h-4"></div>
             <div class="space-y-2 w-full">
-              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-md hover:border-team-support/50 transition">
+              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-brand-gold/40 border-l-2 border-l-brand-gold rounded-md hover:border-brand-gold/70 transition">
                 <div class="w-7 h-7 rounded-md bg-neutral-900 flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"><rect x="2" y="3" width="20" height="18" rx="3" fill="#2D2D2D"/><path d="M7 8l3 3-3 3" stroke="#4ADE80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 16h4" stroke="#4ADE80" stroke-width="2" stroke-linecap="round"/></svg></div>
-                <div class="min-w-0"><div class="text-xs font-medium truncate">OpenCode — Ticket Resolver</div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div></div>
+                <div class="min-w-0"><div class="text-xs font-semibold truncate flex items-center gap-1">OpenCode — Ticket Resolver <svg class="w-3 h-3 text-brand-gold flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg></div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span><span class="text-[10px] text-brand-gold ml-1">Leader</span></div></div>
+              </a>
+              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-md hover:border-team-support/50 transition">
+                <div class="w-7 h-7 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
+                <div class="min-w-0"><div class="text-xs font-medium truncate">Claude — Knowledge Base</div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div></div>
+              </a>
+              <a href="03-agent-overview.html" class="flex items-center gap-2.5 px-3 py-2 bg-white border border-neutral-200 rounded-md hover:border-team-support/50 transition">
+                <div class="w-7 h-7 rounded-md bg-[#EEF1FC] flex items-center justify-center flex-shrink-0"><svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" fill="url(#gm-cs3)"/><defs><linearGradient id="gm-cs3" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#1A73E8"/><stop offset=".3" stop-color="#6C47FF"/><stop offset="1" stop-color="#E8710A"/></linearGradient></defs></svg></div>
+                <div class="min-w-0"><div class="text-xs font-medium truncate">Gemini — Chat Support</div><div class="flex items-center gap-1 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div></div>
               </a>
             </div>
           </div>
@@ -163,115 +193,239 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
 
     <!-- ======== VIEW: CONNECTIONS (relationship diagram) ======== -->
     <div id="view-orchestration" class="px-6 pb-8">
-      <div class="relative canvas-bg rounded-lg border border-neutral-200 bg-white overflow-auto" style="height: 520px; min-width: 960px;">
+      <div class="relative canvas-bg rounded-lg border border-neutral-200 bg-white overflow-auto" style="height: 560px; min-width: 1100px;">
+
+        <!-- Team column headers -->
+        <div class="absolute flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-team-marketing/10 border border-team-marketing/20" style="left:48px; top:12px;">
+          <span class="w-2.5 h-2.5 rounded-full bg-team-marketing"></span><span class="text-[11px] font-semibold text-team-marketing">Marketing</span>
+        </div>
+        <div class="absolute flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-team-devops/10 border border-team-devops/20" style="left:310px; top:12px;">
+          <span class="w-2.5 h-2.5 rounded-full bg-team-devops"></span><span class="text-[11px] font-semibold text-team-devops">DevOps</span>
+        </div>
+        <div class="absolute flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-team-content/10 border border-team-content/20" style="left:572px; top:12px;">
+          <span class="w-2.5 h-2.5 rounded-full bg-team-content"></span><span class="text-[11px] font-semibold text-team-content">Content</span>
+        </div>
+        <div class="absolute flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-team-support/10 border border-team-support/20" style="left:840px; top:12px;">
+          <span class="w-2.5 h-2.5 rounded-full bg-team-support"></span><span class="text-[11px] font-semibold text-team-support">Support</span>
+        </div>
 
         <!-- SVG edges layer -->
-        <svg class="absolute inset-0 pointer-events-none" width="960" height="520">
+        <svg class="absolute inset-0 pointer-events-none" width="1100" height="560">
           <defs>
             <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#ADB1B5"/></marker>
             <marker id="arrow-blue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#1877F2"/></marker>
           </defs>
 
-          <!-- Edge 1: SEO Writer (right:260, y:78) → Deploy Monitor (left:380, y:78) — read files -->
-          <path d="M 260 78 C 310 78, 330 78, 378 78" stroke="#ADB1B5" stroke-width="2" fill="none" stroke-dasharray="6 3" marker-end="url(#arrow)"/>
+          <!-- Cross-team connections -->
+
+          <!-- 1. SEO Writer (row1-col1 right:240) → Deploy Monitor (row1-col2 left:280) — read files -->
+          <path d="M 240 80 L 278 80" stroke="#ADB1B5" stroke-width="2" fill="none" stroke-dasharray="6 3" marker-end="url(#arrow)"/>
           <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('seo-deploy')">
-            <rect x="278" y="55" width="82" height="22" rx="6" fill="#F0F2F5" stroke="#CED0D4" stroke-width="1"/>
-            <text x="319" y="70" text-anchor="middle" fill="#65676B" font-size="10" font-family="Inter">read files</text>
+            <rect x="218" y="57" width="82" height="20" rx="6" fill="#F0F2F5" stroke="#CED0D4" stroke-width="1"/>
+            <text x="259" y="71" text-anchor="middle" fill="#65676B" font-size="10" font-family="Inter">read files</text>
           </g>
 
-          <!-- Edge 2: SEO Writer (right:260, y:78) → Blog Generator (left:700, y:78) — trigger -->
-          <path d="M 260 90 C 400 130, 560 78, 698 78" stroke="#1877F2" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
+          <!-- 2. SEO Writer (row1-col1) → Blog Generator (row1-col3) — trigger -->
+          <path d="M 240 90 C 380 135, 430 90, 540 80" stroke="#1877F2" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
           <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('seo-blog')">
-            <rect x="448" y="88" width="64" height="22" rx="6" fill="#E7F3FF" stroke="#C5DCFC" stroke-width="1"/>
-            <text x="480" y="103" text-anchor="middle" fill="#1877F2" font-size="10" font-family="Inter">trigger</text>
+            <rect x="370" y="106" width="58" height="20" rx="6" fill="#E7F3FF" stroke="#C5DCFC" stroke-width="1"/>
+            <text x="399" y="120" text-anchor="middle" fill="#1877F2" font-size="10" font-family="Inter">trigger</text>
           </g>
 
-          <!-- Edge 3: Deploy Monitor (right:600, y:78) → Ticket Resolver (left:700, y:218) — trigger -->
-          <path d="M 600 86 C 650 110, 670 190, 698 210" stroke="#1877F2" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
+          <!-- 3. Deploy Monitor (row1-col2) → Ticket Resolver (row1-col4) — trigger -->
+          <path d="M 500 80 C 620 120, 700 80, 800 80" stroke="#1877F2" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
           <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('deploy-ticket')">
-            <rect x="632" y="138" width="64" height="22" rx="6" fill="#E7F3FF" stroke="#C5DCFC" stroke-width="1"/>
-            <text x="664" y="153" text-anchor="middle" fill="#1877F2" font-size="10" font-family="Inter">trigger</text>
+            <rect x="620" y="96" width="58" height="20" rx="6" fill="#E7F3FF" stroke="#C5DCFC" stroke-width="1"/>
+            <text x="649" y="110" text-anchor="middle" fill="#1877F2" font-size="10" font-family="Inter">trigger</text>
+          </g>
+
+          <!-- 4. Social Media (row2-col1) → Blog Generator (row1-col3) — read files -->
+          <path d="M 240 210 C 350 200, 460 130, 540 90" stroke="#ADB1B5" stroke-width="2" fill="none" stroke-dasharray="6 3" marker-end="url(#arrow)"/>
+          <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('social-blog')">
+            <rect x="370" y="154" width="82" height="20" rx="6" fill="#F0F2F5" stroke="#CED0D4" stroke-width="1"/>
+            <text x="411" y="168" text-anchor="middle" fill="#65676B" font-size="10" font-family="Inter">read files</text>
+          </g>
+
+          <!-- 5. Blog Generator (row1-col3) → SEO Writer (row1-col1) — read files (feedback) -->
+          <path d="M 540 68 C 400 30, 280 30, 240 68" stroke="#ADB1B5" stroke-width="2" fill="none" stroke-dasharray="6 3" marker-end="url(#arrow)"/>
+          <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('blog-seo')">
+            <rect x="350" y="24" width="82" height="20" rx="6" fill="#F0F2F5" stroke="#CED0D4" stroke-width="1"/>
+            <text x="391" y="38" text-anchor="middle" fill="#65676B" font-size="10" font-family="Inter">read files</text>
+          </g>
+
+          <!-- 6. Data Pipeline (row3-col2) → Analytics Reporter (row3-col1) — read files -->
+          <path d="M 280 340 L 242 340" stroke="#ADB1B5" stroke-width="2" fill="none" stroke-dasharray="6 3" marker-end="url(#arrow)"/>
+          <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('pipeline-analytics')">
+            <rect x="218" y="316" width="82" height="20" rx="6" fill="#F0F2F5" stroke="#CED0D4" stroke-width="1"/>
+            <text x="259" y="330" text-anchor="middle" fill="#65676B" font-size="10" font-family="Inter">read files</text>
+          </g>
+
+          <!-- Intra-team connections -->
+
+          <!-- 7. Analytics Reporter (row3-col1) → Social Media (row2-col1) — trigger -->
+          <path d="M 20 318 C 4 280, 4 250, 20 218" stroke="#1877F2" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
+          <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('analytics-social')">
+            <rect x="-44" y="256" width="58" height="20" rx="6" fill="#E7F3FF" stroke="#C5DCFC" stroke-width="1"/>
+            <text x="-15" y="270" text-anchor="middle" fill="#1877F2" font-size="10" font-family="Inter">trigger</text>
+          </g>
+
+          <!-- 8. Code Reviewer (row2-col2) → Deploy Monitor (row1-col2) — trigger -->
+          <path d="M 280 198 C 262 160, 262 130, 280 98" stroke="#1877F2" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
+          <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('reviewer-deploy')">
+            <rect x="230" y="136" width="58" height="20" rx="6" fill="#E7F3FF" stroke="#C5DCFC" stroke-width="1"/>
+            <text x="259" y="150" text-anchor="middle" fill="#1877F2" font-size="10" font-family="Inter">trigger</text>
+          </g>
+
+          <!-- 9. Docs Writer (row2-col3) → Translation Bot (row3-col3) — read files -->
+          <path d="M 760 218 C 778 260, 778 290, 760 318" stroke="#ADB1B5" stroke-width="2" fill="none" stroke-dasharray="6 3" marker-end="url(#arrow)"/>
+          <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('docs-translation')">
+            <rect x="782" y="256" width="82" height="20" rx="6" fill="#F0F2F5" stroke="#CED0D4" stroke-width="1"/>
+            <text x="823" y="270" text-anchor="middle" fill="#65676B" font-size="10" font-family="Inter">read files</text>
+          </g>
+
+          <!-- 10. Knowledge Base (row2-col4) → Chat Support (row3-col4) — trigger -->
+          <path d="M 1020 218 C 1038 260, 1038 290, 1020 318" stroke="#1877F2" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
+          <g class="edge-label pointer-events-auto cursor-pointer" onclick="openEdgeDrawer('kb-chat')">
+            <rect x="1042" y="256" width="58" height="20" rx="6" fill="#E7F3FF" stroke="#C5DCFC" stroke-width="1"/>
+            <text x="1071" y="270" text-anchor="middle" fill="#1877F2" font-size="10" font-family="Inter">trigger</text>
           </g>
         </svg>
 
-        <!-- Agent nodes — 3-column layout -->
+        <!-- Agent nodes — 4-column layout, wider spacing -->
+        <!-- Node width: 220px. Columns at x: 20, 280, 540, 800. Rows at y: 55, 185, 315 -->
 
-        <!-- COL 1: Marketing (x=40) -->
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-marketing/40 shadow-sm" style="left:40px; top:50px; width:220px;" onclick="window.location='03-agent-overview.html'">
+        <!-- COL 1: Marketing (x=20) -->
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-marketing/40 shadow-sm" style="left:20px; top:55px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-marketing rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
             <div class="min-w-0">
-              <div class="text-xs font-semibold truncate">Claude — SEO Writer</div>
-              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span><span class="text-[10px] text-neutral-400">Marketing</span><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot ml-1"></span><span class="text-[10px] text-success-700">Running</span></div>
+              <div class="text-xs font-semibold truncate flex items-center gap-1">Claude — SEO Writer <svg class="w-3 h-3 text-brand-gold flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg></div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span><span class="text-[10px] text-success-700">Running</span><span class="text-[10px] text-brand-gold ml-1">Leader</span></div>
             </div>
           </div>
         </div>
 
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-marketing/40 shadow-sm" style="left:40px; top:190px; width:220px;" onclick="window.location='03-agent-overview.html'">
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-marketing/40 shadow-sm" style="left:20px; top:185px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-marketing rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
             <div class="min-w-0">
               <div class="text-xs font-semibold truncate">Claude — Social Media</div>
-              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span><span class="text-[10px] text-neutral-400">Marketing</span><span class="w-1.5 h-1.5 rounded-full bg-primary-400 ml-1"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
             </div>
           </div>
         </div>
 
-        <!-- COL 2: DevOps (x=380) -->
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-devops/40 shadow-sm" style="left:380px; top:50px; width:220px;" onclick="window.location='03-agent-overview.html'">
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-marketing/40 shadow-sm" style="left:20px; top:315px; width:220px;" onclick="window.location='03-agent-overview.html'">
+          <div class="h-1 bg-team-marketing rounded-t-md"></div>
+          <div class="px-3 py-2.5 flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-md bg-[#EEF1FC] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" fill="url(#gmc-conn-ar)"/><defs><linearGradient id="gmc-conn-ar" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#1A73E8"/><stop offset=".3" stop-color="#6C47FF"/><stop offset="1" stop-color="#E8710A"/></linearGradient></defs></svg></div>
+            <div class="min-w-0">
+              <div class="text-xs font-semibold truncate">Gemini — Analytics Reporter</div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- COL 2: DevOps (x=280) -->
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-devops/40 shadow-sm" style="left:280px; top:55px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-devops rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-md bg-[#E6F4EE] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M22.28 9.82a5.99 5.99 0 0 0-.52-4.91 6.05 6.05 0 0 0-6.51-2.9A6.07 6.07 0 0 0 4.98 4.18a6 6 0 0 0-4 2.9 6.04 6.04 0 0 0 .74 7.1 5.98 5.98 0 0 0 .51 4.91 6.05 6.05 0 0 0 6.52 2.9A5.99 5.99 0 0 0 13.26 24a6.06 6.06 0 0 0 5.77-4.21 5.99 5.99 0 0 0 4-2.9 6.06 6.06 0 0 0-.75-7.07z" fill="#10A37F"/></svg></div>
             <div class="min-w-0">
-              <div class="text-xs font-semibold truncate">Codex — Deploy Monitor</div>
-              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span><span class="text-[10px] text-neutral-400">DevOps</span><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot ml-1"></span><span class="text-[10px] text-success-700">Running</span></div>
+              <div class="text-xs font-semibold truncate flex items-center gap-1">Codex — Deploy Monitor <svg class="w-3 h-3 text-brand-gold flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg></div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span><span class="text-[10px] text-success-700">Running</span><span class="text-[10px] text-brand-gold ml-1">Leader</span></div>
             </div>
           </div>
         </div>
 
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-devops/40 shadow-sm" style="left:380px; top:190px; width:220px;" onclick="window.location='03-agent-overview.html'">
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-devops/40 shadow-sm" style="left:280px; top:185px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-devops rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
             <div class="min-w-0">
               <div class="text-xs font-semibold truncate">Claude — Code Reviewer</div>
-              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span><span class="text-[10px] text-neutral-400">DevOps</span><span class="w-1.5 h-1.5 rounded-full bg-primary-400 ml-1"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
             </div>
           </div>
         </div>
 
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-devops/40 shadow-sm" style="left:380px; top:320px; width:220px;" onclick="window.location='03-agent-overview.html'">
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-devops/40 shadow-sm" style="left:280px; top:315px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-devops rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-md bg-[#E6F4EE] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M22.28 9.82a5.99 5.99 0 0 0-.52-4.91 6.05 6.05 0 0 0-6.51-2.9A6.07 6.07 0 0 0 4.98 4.18z" fill="#10A37F"/></svg></div>
             <div class="min-w-0">
               <div class="text-xs font-semibold truncate">Codex — Data Pipeline</div>
-              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span><span class="text-[10px] text-neutral-400">DevOps</span><svg class="w-3 h-3 text-error-500 ml-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><span class="text-[10px] text-error-700">Error</span></div>
+              <div class="flex items-center gap-1.5 mt-0.5"><svg class="w-3 h-3 text-error-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><span class="text-[10px] text-error-700">Error</span></div>
             </div>
           </div>
         </div>
 
-        <!-- COL 3: Content + Support (x=700) -->
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-content/40 shadow-sm" style="left:700px; top:50px; width:220px;" onclick="window.location='03-agent-overview.html'">
+        <!-- COL 3: Content (x=540) -->
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-content/40 shadow-sm" style="left:540px; top:55px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-content rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
-            <div class="w-8 h-8 rounded-md bg-[#EEF1FC] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" fill="url(#gmc2)"/><defs><linearGradient id="gmc2" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#1A73E8"/><stop offset=".3" stop-color="#6C47FF"/><stop offset="1" stop-color="#E8710A"/></linearGradient></defs></svg></div>
+            <div class="w-8 h-8 rounded-md bg-[#EEF1FC] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" fill="url(#gmc-conn)"/><defs><linearGradient id="gmc-conn" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#1A73E8"/><stop offset=".3" stop-color="#6C47FF"/><stop offset="1" stop-color="#E8710A"/></linearGradient></defs></svg></div>
             <div class="min-w-0">
-              <div class="text-xs font-semibold truncate">Gemini — Blog Generator</div>
-              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-content"></span><span class="text-[10px] text-neutral-400">Content</span><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot ml-1"></span><span class="text-[10px] text-success-700">Running</span></div>
+              <div class="text-xs font-semibold truncate flex items-center gap-1">Gemini — Blog Generator <svg class="w-3 h-3 text-brand-gold flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg></div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span><span class="text-[10px] text-success-700">Running</span><span class="text-[10px] text-brand-gold ml-1">Leader</span></div>
             </div>
           </div>
         </div>
 
-        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-support/40 shadow-sm" style="left:700px; top:190px; width:220px;" onclick="window.location='03-agent-overview.html'">
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-content/40 shadow-sm" style="left:540px; top:185px; width:220px;" onclick="window.location='03-agent-overview.html'">
+          <div class="h-1 bg-team-content rounded-t-md"></div>
+          <div class="px-3 py-2.5 flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
+            <div class="min-w-0">
+              <div class="text-xs font-semibold truncate">Claude — Docs Writer</div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-content/40 shadow-sm" style="left:540px; top:315px; width:220px;" onclick="window.location='03-agent-overview.html'">
+          <div class="h-1 bg-team-content rounded-t-md"></div>
+          <div class="px-3 py-2.5 flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-md bg-[#E6F4EE] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M22.28 9.82a5.99 5.99 0 0 0-.52-4.91 6.05 6.05 0 0 0-6.51-2.9A6.07 6.07 0 0 0 4.98 4.18z" fill="#10A37F"/></svg></div>
+            <div class="min-w-0">
+              <div class="text-xs font-semibold truncate">Codex — Translation Bot</div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- COL 4: Support (x=800) -->
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-support/40 shadow-sm" style="left:800px; top:55px; width:220px;" onclick="window.location='03-agent-overview.html'">
           <div class="h-1 bg-team-support rounded-t-md"></div>
           <div class="px-3 py-2.5 flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-md bg-neutral-900 flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><rect x="2" y="3" width="20" height="18" rx="3" fill="#2D2D2D"/><path d="M7 8l3 3-3 3" stroke="#4ADE80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M13 16h4" stroke="#4ADE80" stroke-width="2" stroke-linecap="round"/></svg></div>
             <div class="min-w-0">
-              <div class="text-xs font-semibold truncate">OpenCode — Ticket Resolver</div>
-              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-team-support"></span><span class="text-[10px] text-neutral-400">Support</span><span class="w-1.5 h-1.5 rounded-full bg-primary-400 ml-1"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
+              <div class="text-xs font-semibold truncate flex items-center gap-1">OpenCode — Ticket Resolver <svg class="w-3 h-3 text-brand-gold flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg></div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span><span class="text-[10px] text-brand-gold ml-1">Leader</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-support/40 shadow-sm" style="left:800px; top:185px; width:220px;" onclick="window.location='03-agent-overview.html'">
+          <div class="h-1 bg-team-support rounded-t-md"></div>
+          <div class="px-3 py-2.5 flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-md bg-[#FDF0EB] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="#D97757"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307Z"/></svg></div>
+            <div class="min-w-0">
+              <div class="text-xs font-semibold truncate">Claude — Knowledge Base</div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="orch-node absolute bg-white rounded-lg border-2 border-team-support/40 shadow-sm" style="left:800px; top:315px; width:220px;" onclick="window.location='03-agent-overview.html'">
+          <div class="h-1 bg-team-support rounded-t-md"></div>
+          <div class="px-3 py-2.5 flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-md bg-[#EEF1FC] flex items-center justify-center flex-shrink-0"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none"><path d="M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81" fill="url(#gmc-conn-cs)"/><defs><linearGradient id="gmc-conn-cs" x1="0" y1="24" x2="24" y2="0" gradientUnits="userSpaceOnUse"><stop stop-color="#1A73E8"/><stop offset=".3" stop-color="#6C47FF"/><stop offset="1" stop-color="#E8710A"/></linearGradient></defs></svg></div>
+            <div class="min-w-0">
+              <div class="text-xs font-semibold truncate">Gemini — Chat Support</div>
+              <div class="flex items-center gap-1.5 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span><span class="text-[10px] text-neutral-500">Idle</span></div>
             </div>
           </div>
         </div>
@@ -280,6 +434,7 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
         <div class="absolute bottom-3 left-3 flex items-center gap-4 text-[10px] text-neutral-500 bg-white/90 px-3 py-2 rounded-md border border-neutral-200">
           <span class="flex items-center gap-1.5"><svg width="16" height="3"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#ADB1B5" stroke-width="2" stroke-dasharray="4 2"/></svg> Read files</span>
           <span class="flex items-center gap-1.5"><svg width="16" height="3"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#1877F2" stroke-width="2"/></svg> Trigger</span>
+          <span class="flex items-center gap-1.5"><svg class="w-3 h-3 text-brand-gold" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg> Leader</span>
           <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-team-marketing"></span> Marketing</span>
           <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-team-devops"></span> DevOps</span>
           <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-team-content"></span> Content</span>
@@ -328,6 +483,7 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
           <thead>
             <tr class="text-xs text-neutral-500 uppercase tracking-wider border-b border-neutral-200">
               <th class="px-4 py-3 font-medium">Crew</th>
+              <th class="px-4 py-3 font-medium">Leader</th>
               <th class="px-4 py-3 font-medium">Agents</th>
               <th class="px-4 py-3 font-medium">Status</th>
               <th class="px-4 py-3 font-medium">Connections</th>
@@ -335,32 +491,45 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
+            <!-- Director row (org-level) -->
+            <tr class="hover:bg-primary-50/30 bg-primary-50/20">
+              <td class="px-4 py-3"><div class="flex items-center gap-2"><svg class="w-4 h-4 text-primary-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/></svg><span class="font-medium text-primary-700">Organization (Director)</span></div></td>
+              <td class="px-4 py-3"><span class="text-xs font-medium text-primary-700">Max — Virtual Director</span></td>
+              <td class="px-4 py-3 text-neutral-600">1 agent</td>
+              <td class="px-4 py-3"><span class="inline-flex items-center gap-1.5 text-xs"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span>Idle</span></td>
+              <td class="px-4 py-3 text-xs text-neutral-500">Delegates to all teams</td>
+              <td class="px-4 py-3"></td>
+            </tr>
             <tr class="hover:bg-neutral-50">
               <td class="px-4 py-3"><div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-team-marketing"></span><span class="font-medium">Marketing</span></div></td>
-              <td class="px-4 py-3 text-neutral-600">2 agents</td>
-              <td class="px-4 py-3"><span class="inline-flex items-center gap-1.5 text-xs"><span class="w-1.5 h-1.5 rounded-full bg-success-500"></span>1 running, 1 idle</span></td>
-              <td class="px-4 py-3 text-xs text-neutral-500">2 outbound</td>
+              <td class="px-4 py-3"><span class="inline-flex items-center gap-1 text-xs"><svg class="w-3 h-3 text-brand-gold" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg><span class="font-medium">SEO Writer</span></span></td>
+              <td class="px-4 py-3 text-neutral-600">3 agents</td>
+              <td class="px-4 py-3"><span class="inline-flex items-center gap-1.5 text-xs"><span class="w-1.5 h-1.5 rounded-full bg-success-500"></span>1 running, 2 idle</span></td>
+              <td class="px-4 py-3 text-xs text-neutral-500">4 outbound, 2 inbound, 1 internal</td>
               <td class="px-4 py-3"><button class="p-1 text-neutral-400 hover:text-neutral-600"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></td>
             </tr>
             <tr class="hover:bg-neutral-50">
               <td class="px-4 py-3"><div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-team-devops"></span><span class="font-medium">DevOps</span></div></td>
+              <td class="px-4 py-3"><span class="inline-flex items-center gap-1 text-xs"><svg class="w-3 h-3 text-brand-gold" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg><span class="font-medium">Deploy Monitor</span></span></td>
               <td class="px-4 py-3 text-neutral-600">3 agents</td>
               <td class="px-4 py-3"><span class="inline-flex items-center gap-1.5 text-xs"><span class="w-1.5 h-1.5 rounded-full bg-success-500"></span>1 running<span class="w-1.5 h-1.5 rounded-full bg-error-500 ml-1"></span>1 error</span></td>
-              <td class="px-4 py-3 text-xs text-neutral-500">1 inbound, 1 outbound</td>
+              <td class="px-4 py-3 text-xs text-neutral-500">2 outbound, 1 inbound, 1 internal</td>
               <td class="px-4 py-3"><button class="p-1 text-neutral-400 hover:text-neutral-600"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></td>
             </tr>
             <tr class="hover:bg-neutral-50">
               <td class="px-4 py-3"><div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-team-content"></span><span class="font-medium">Content</span></div></td>
-              <td class="px-4 py-3 text-neutral-600">1 agent</td>
-              <td class="px-4 py-3"><span class="inline-flex items-center gap-1.5 text-xs"><span class="w-1.5 h-1.5 rounded-full bg-success-500"></span>1 running</span></td>
-              <td class="px-4 py-3 text-xs text-neutral-500">1 inbound</td>
+              <td class="px-4 py-3"><span class="inline-flex items-center gap-1 text-xs"><svg class="w-3 h-3 text-brand-gold" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg><span class="font-medium">Blog Generator</span></span></td>
+              <td class="px-4 py-3 text-neutral-600">3 agents</td>
+              <td class="px-4 py-3"><span class="inline-flex items-center gap-1.5 text-xs"><span class="w-1.5 h-1.5 rounded-full bg-success-500"></span>1 running, 2 idle</span></td>
+              <td class="px-4 py-3 text-xs text-neutral-500">1 outbound, 2 inbound, 1 internal</td>
               <td class="px-4 py-3"><button class="p-1 text-neutral-400 hover:text-neutral-600"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></td>
             </tr>
             <tr class="hover:bg-neutral-50">
               <td class="px-4 py-3"><div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-team-support"></span><span class="font-medium">Support</span></div></td>
-              <td class="px-4 py-3 text-neutral-600">1 agent</td>
-              <td class="px-4 py-3"><span class="inline-flex items-center gap-1.5 text-xs"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span>1 idle</span></td>
-              <td class="px-4 py-3 text-xs text-neutral-500">1 inbound</td>
+              <td class="px-4 py-3"><span class="inline-flex items-center gap-1 text-xs"><svg class="w-3 h-3 text-brand-gold" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg><span class="font-medium">Ticket Resolver</span></span></td>
+              <td class="px-4 py-3 text-neutral-600">3 agents</td>
+              <td class="px-4 py-3"><span class="inline-flex items-center gap-1.5 text-xs"><span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span>3 idle</span></td>
+              <td class="px-4 py-3 text-xs text-neutral-500">1 inbound, 1 internal</td>
               <td class="px-4 py-3"><button class="p-1 text-neutral-400 hover:text-neutral-600"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></td>
             </tr>
           </tbody>
@@ -386,23 +555,18 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
       <div class="text-xs font-medium text-neutral-500 mb-1">Preview</div>
       <pre class="bg-neutral-50 border border-neutral-200 rounded-md p-3 text-[11px] font-mono text-neutral-700 overflow-auto max-h-48">{
   "version": "crewship/connections/v1",
-  "exportedAt": "2026-02-12T14:30:00Z",
+  "exportedAt": "2026-02-13T10:15:00Z",
   "connections": [
-    {
-      "source": "claude-seo-writer",
-      "target": "codex-deploy-monitor",
-      "permissions": { "readFiles": true, "writeFiles": false, "trigger": false }
-    },
-    {
-      "source": "claude-seo-writer",
-      "target": "gemini-blog-generator",
-      "permissions": { "readFiles": false, "writeFiles": false, "trigger": true }
-    },
-    {
-      "source": "codex-deploy-monitor",
-      "target": "opencode-ticket-resolver",
-      "permissions": { "readFiles": false, "writeFiles": false, "trigger": true }
-    }
+    { "source": "claude-seo-writer", "target": "codex-deploy-monitor", "type": "read_files" },
+    { "source": "claude-seo-writer", "target": "gemini-blog-generator", "type": "trigger" },
+    { "source": "codex-deploy-monitor", "target": "opencode-ticket-resolver", "type": "trigger" },
+    { "source": "claude-social-media", "target": "gemini-blog-generator", "type": "read_files" },
+    { "source": "gemini-blog-generator", "target": "claude-seo-writer", "type": "read_files" },
+    { "source": "codex-data-pipeline", "target": "gemini-analytics-reporter", "type": "read_files" },
+    { "source": "gemini-analytics-reporter", "target": "claude-social-media", "type": "trigger" },
+    { "source": "claude-code-reviewer", "target": "codex-deploy-monitor", "type": "trigger" },
+    { "source": "claude-docs-writer", "target": "codex-translation-bot", "type": "read_files" },
+    { "source": "claude-knowledge-base", "target": "gemini-chat-support", "type": "trigger" }
   ]
 }</pre>
     </div>
@@ -433,14 +597,20 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
             <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>SEO Writer</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span>Deploy Monitor</span></td><td class="px-3 py-2 text-neutral-400">read</td><td class="px-3 py-2"><span class="text-warning-700 font-medium">Overwrite</span></td></tr>
             <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>SEO Writer</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-content"></span>Blog Generator</span></td><td class="px-3 py-2 text-neutral-400">trigger</td><td class="px-3 py-2"><span class="text-warning-700 font-medium">Overwrite</span></td></tr>
             <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span>Deploy Monitor</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-support"></span>Ticket Resolver</span></td><td class="px-3 py-2 text-neutral-400">trigger</td><td class="px-3 py-2"><span class="text-warning-700 font-medium">Overwrite</span></td></tr>
-            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>Social Media</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-content"></span>Blog Generator</span></td><td class="px-3 py-2 text-neutral-400">read, trigger</td><td class="px-3 py-2"><span class="text-success-700 font-medium">New</span></td></tr>
+            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>Social Media</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-content"></span>Blog Generator</span></td><td class="px-3 py-2 text-neutral-400">read</td><td class="px-3 py-2"><span class="text-success-700 font-medium">New</span></td></tr>
+            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-content"></span>Blog Generator</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>SEO Writer</span></td><td class="px-3 py-2 text-neutral-400">read</td><td class="px-3 py-2"><span class="text-success-700 font-medium">New</span></td></tr>
+            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span>Data Pipeline</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>Analytics Reporter</span></td><td class="px-3 py-2 text-neutral-400">read</td><td class="px-3 py-2"><span class="text-success-700 font-medium">New</span></td></tr>
+            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>Analytics Reporter</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-marketing"></span>Social Media</span></td><td class="px-3 py-2 text-neutral-400">trigger</td><td class="px-3 py-2"><span class="text-success-700 font-medium">New</span></td></tr>
+            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span>Code Reviewer</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-devops"></span>Deploy Monitor</span></td><td class="px-3 py-2 text-neutral-400">trigger</td><td class="px-3 py-2"><span class="text-success-700 font-medium">New</span></td></tr>
+            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-content"></span>Docs Writer</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-content"></span>Translation Bot</span></td><td class="px-3 py-2 text-neutral-400">read</td><td class="px-3 py-2"><span class="text-success-700 font-medium">New</span></td></tr>
+            <tr><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-support"></span>Knowledge Base</span></td><td class="px-3 py-2"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-team-support"></span>Chat Support</span></td><td class="px-3 py-2 text-neutral-400">trigger</td><td class="px-3 py-2"><span class="text-success-700 font-medium">New</span></td></tr>
           </tbody>
         </table>
       </div>
     </div>
     <div class="flex justify-end gap-2 px-5 py-3 border-t border-neutral-200 bg-neutral-50 rounded-b-lg">
       <button onclick="closeDialog('import')" class="px-3 py-1.5 text-xs font-medium text-neutral-600 border border-neutral-200 rounded-md hover:bg-neutral-100">Cancel</button>
-      <button class="px-3 py-1.5 text-xs font-medium bg-primary-600 text-white rounded-md hover:bg-primary-700">Import 4 Connections</button>
+      <button class="px-3 py-1.5 text-xs font-medium bg-primary-600 text-white rounded-md hover:bg-primary-700">Import 10 Connections</button>
     </div>
   </div>
 </div>
@@ -460,6 +630,7 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
           <optgroup label="Marketing">
             <option>Claude — SEO Writer</option>
             <option>Claude — Social Media</option>
+            <option>Gemini — Analytics Reporter</option>
           </optgroup>
           <optgroup label="DevOps">
             <option>Codex — Deploy Monitor</option>
@@ -468,9 +639,13 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
           </optgroup>
           <optgroup label="Content">
             <option>Gemini — Blog Generator</option>
+            <option>Claude — Docs Writer</option>
+            <option>Codex — Translation Bot</option>
           </optgroup>
           <optgroup label="Support">
             <option>OpenCode — Ticket Resolver</option>
+            <option>Claude — Knowledge Base</option>
+            <option>Gemini — Chat Support</option>
           </optgroup>
         </select>
       </div>
@@ -482,6 +657,7 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
           <optgroup label="Marketing">
             <option>Claude — SEO Writer</option>
             <option>Claude — Social Media</option>
+            <option>Gemini — Analytics Reporter</option>
           </optgroup>
           <optgroup label="DevOps">
             <option>Codex — Deploy Monitor</option>
@@ -490,9 +666,13 @@ tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['J
           </optgroup>
           <optgroup label="Content">
             <option>Gemini — Blog Generator</option>
+            <option>Claude — Docs Writer</option>
+            <option>Codex — Translation Bot</option>
           </optgroup>
           <optgroup label="Support">
             <option>OpenCode — Ticket Resolver</option>
+            <option>Claude — Knowledge Base</option>
+            <option>Gemini — Chat Support</option>
           </optgroup>
         </select>
       </div>

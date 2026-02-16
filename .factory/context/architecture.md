@@ -47,8 +47,43 @@
 - **Organization** = company (multi-tenant root)
 - **Team** = department (isolation boundary, maps to Docker container or K8s Pod)
 - **Agent** = virtual employee (CLI session inside container, has LLM, skills, credentials)
-- **Skill** = capability package (tools + MCP + scripts + dependency definitions)
-- **Credential** = encrypted secret (AES-256-GCM, injected as ENV var at runtime)
+- **Skill** = MCP Server wrapper (tools + resources + system prompt + credential requirements)
+- **Credential** = encrypted secret (AES-256-GCM, injected by sidecar into MCP servers at runtime)
+- **Delegation** = leader/director deleguje ukol na podrizeneho agenta (auditovano)
+- **Sidecar** = crewship-sidecar Go binary running inside team container (localhost:9119)
+- **Runtime** = CLI mode (Claude Code, OpenCode) or API-direct mode (crewship-agent binary)
+
+### Agent Hierarchy (3-level orchestration, Phase 2)
+
+```
+VIRTUAL DIRECTOR (1 per org, optional)
+  │  - Koordinuje cross-team ukoly
+  │  - Deleguje na Crew Leadery (nikdy primo na workery)
+  │  - Bezi jako lightweight LLM call (bez Docker kontejneru)
+  │
+  ├── CREW LEADER (1 per team)
+  │     │  - Primarni kontaktni bod pro uzivatel ↔ team komunikaci
+  │     │  - Rozdeluje prace, agreguje vysledky, kontroluje kvalitu
+  │     │  - Bezi v kontejneru sveho tymu (Docker exec)
+  │     │
+  │     ├── WORKER (default role)
+  │     │     - Specializovany na konkretni ukoly
+  │     │     - Komunikuje primarne se svym leaderem
+  │     │     - Bezi v kontejneru sveho tymu (Docker exec)
+  │     ├── WORKER ...
+  │     └── WORKER ...
+  │
+  ├── CREW LEADER (jiny tym)
+  │     ├── WORKER ...
+  │     └── WORKER ...
+  └── ...
+```
+
+Uzivatel chatuje primarne s Crew Leaderem (90 % interakci).
+Pro cross-team otazky chatuje s Virtual Directorem.
+Muze take chatovat primo s worker agentem (bypass leadera).
+
+> Plna specifikace: `.factory/context/prd/ORCHESTRATION.md`
 
 ## Provider Pattern (K8s Readiness)
 
@@ -149,11 +184,14 @@ Remote (K8s, multi-node):
 1. User types in chat UI (React)
 2. Next.js sends to Go service via Unix socket
 3. Go service delivers to agent container via Docker exec
-4. Agent (CLI session) processes with LLM
-5. Agent writes response to stdout
-6. Go service captures stdout, writes JSONL log
-7. Go service sends response to user via WebSocket
-8. User sees response in real-time
+   (crewship-sidecar already running in container on localhost:9119)
+4. Agent process starts (CLI tool OR crewship-agent API-direct)
+5. Agent writes response to stdout (user-facing, clean)
+6. Agent delegates via HTTP to sidecar: POST localhost:9119/delegate
+   (CLI mode: curl; API-direct: native HTTP call)
+7. Sidecar validates (RBAC, circuit breaker) → forwards to crewshipd
+8. Go service reads stdout → WebSocket + JSONL log
+9. User sees response in real-time
 ```
 
 ### External webhook triggers agent
@@ -267,13 +305,20 @@ Zero custom code -- Linux has done this for 30 years.
 
 ```
 Every team gets ONE Docker container:
-  - Base image: ghcr.io/crewship-ai/agent-runtime:latest (Debian bookworm slim)
+  - Base image: ghcr.io/crewship-ai/agent-runtime:latest (Ubuntu 24.04)
+  - Runtime: runc (default) or runsc/gVisor (optional, ADR-003)
   - Non-root user: agent (UID 1001) -- NEVER root
   - Network: crewship-agents (--internal, no internet by default)
   - Explicit allowlist for LLM API endpoints only
+  - Contains:
+    - crewship-sidecar (Go binary, localhost:9119, MCP Gateway + delegation proxy)
+    - crewship-agent (Go binary, API-direct runtime, Phase 2)
+    - CLI tools (Claude Code, OpenCode, Codex -- for CLI mode)
+    - landrun (Landlock wrapper, per-agent filesystem isolation, Phase 2)
+    - MCP servers (stdio processes, started by sidecar, 1 per skill)
   - Mounts:
     - /workspace (ephemeral Docker volume)
-    - /output (persistent bind mount to host)
+    - /output (persistent bind mount to host, includes .memory/ and .skills/)
   - Resource limits: configurable per team (default 1GB RAM, 0.5 CPU)
   - Always-on by default, configurable TTL for auto-shutdown
 ```
@@ -284,6 +329,7 @@ Container = jail. Agent cannot:
 - Escalate to root (no sudo, no setuid)
 - Access internet (except allowlisted LLM endpoints)
 - See other teams' data
+- Access other agents' workspace (Landlock per-agent isolation, Phase 2)
 
 ## Security Layers
 
@@ -295,6 +341,178 @@ Container = jail. Agent cannot:
 6. **Network allowlist**: only LLM API endpoints reachable from containers
 7. **Audit trail**: append-only JSONL (chattr +a), immutable
 8. **Webhook auth**: per-agent secret token for external triggers
+9. **Control channel**: loopback HTTP sidecar (localhost:9119, session token auth)
+10. **Per-agent isolation**: Landlock LSM (filesystem isolation within shared container)
+11. **Credential isolation**: Agent has NO tool credentials; sidecar injects into MCP servers
+12. **MCP RBAC**: Sidecar validates per-tool permissions before proxying MCP calls
+13. **Tool call audit**: Every MCP tool call logged with agent, tool, credential_id, timestamp
+14. **srt sandbox per-MCP-server**: Each MCP server wrapped in Anthropic Sandbox Runtime — FS deny + network allowlist per-skill (ADR-017)
+15. **Skill security pipeline**: 6-step automated audit before VERIFIED status — source verification, static analysis, CVE scan, sandbox test (ADR-020)
+16. **OCI digest verification**: Marketplace skill images verified by SHA256 digest at pull time (ADR-021)
+17. **Runtime (optional)**: gVisor/runsc for syscall interception (multi-tenant SaaS)
+
+## Messaging Architecture (ADR-002)
+
+**MVP (single-node):** Go channels + goroutines (in-process messaging)
+- Delegation commands: named pipe → goroutine reads → Go channel → DelegationEngine
+- WebSocket broadcast: in-process (single crewshipd instance)
+- No external message broker dependency
+
+**Phase 3 (multi-node cluster):** NATS JetStream
+- When crewshipd needs to scale horizontally (multiple instances)
+- NATS JetStream for exactly-once delivery, persistence, replay
+- External NATS service (docker-compose for staging, Helm chart for K8s)
+
+**Decision:** No NATS for MVP. Go channels are sufficient for single-node deployment
+with dozens of agents. NATS adds complexity (extra service, failure modes, latency)
+that is not justified until multi-node scaling is needed.
+
+## Skills + MCP Architecture (ADR-014, ADR-015, ADR-016)
+
+Skill = MCP Server wrapper. crewship-sidecar = MCP Gateway inside container.
+
+```
+Skill Definition (DB):
+  ├── MCP Server command (e.g. "npx @modelcontextprotocol/server-github")
+  ├── MCP transport (stdio | sse | streamable-http)
+  ├── System prompt fragment (instructions for LLM)
+  ├── Credential requirements (e.g. GITHUB_TOKEN)
+  ├── Dependencies (apt/pip/npm packages)
+  └── defer_loading (true = on-demand via tool search)
+
+Runtime Flow:
+  1. Container starts → sidecar reads skill list from crewshipd
+  2. Sidecar starts MCP servers (stdio) with injected credentials
+  3. Agent starts → gets only search_tools meta-tool + critical tools
+  4. Agent needs a tool → calls search_tools("create github issue")
+  5. Sidecar returns matching tool definitions on-demand
+  6. Agent calls tool → sidecar proxies to MCP server (with RBAC + audit)
+  7. Agent NEVER sees credentials — sidecar injects into MCP servers
+```
+
+Credential flow comparison:
+```
+OLD: Agent gets GITHUB_TOKEN as env var → calls API directly
+     Risk: prompt injection can extract token
+
+NEW: Agent has NO tool credentials
+     Agent → MCP tool call → sidecar (RBAC + credential inject) → MCP server → API
+     Agent sees only tool result, never the credential
+```
+
+Full specification: `AGENT-RUNTIME.md` section 6A.
+
+## Skill Hub — MCP Marketplace (ADR-019, ADR-020, ADR-021)
+
+Curated marketplace of verified MCP servers with security audit pipeline.
+Addresses the MCP ecosystem trust problem (20,000+ unaudited servers, OWASP
+MCP Top 10, 53% plaintext credential storage in community servers).
+
+### 3-tier model
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    CREWSHIP SKILL HUB                        │
+│                                                              │
+│  Official Skills        Community Skills     Private Skills  │
+│  (Crewship-maintained)  (anyone + review)    (org-internal)  │
+│  Badge: ✓ Official      Badge: ✓ Verified    Badge: Private  │
+│                                                              │
+│                    ┌──────────────────┐                      │
+│                    │ Security Pipeline│                      │
+│                    │ (6 steps)        │                      │
+│                    │ → security_score │                      │
+│                    │ → VERIFIED/      │                      │
+│                    │   REJECTED       │                      │
+│                    └────────┬─────────┘                      │
+│                             ▼                                │
+│                    Skill Registry (DB + OCI images)           │
+│                    ghcr.io/crewship-ai/skills/{name}:{ver}   │
+└──────────────────────────────────────────────────────────────┘
+                             │
+                             ▼  install to agent
+┌──────────────────────────────────────────────────────────────┐
+│ Team Container                                               │
+│ Agent ◄─MCP─► Sidecar ──srt sandbox──► MCP Server (OCI)     │
+│                 ↑ credentials injected, RBAC, audit          │
+│                 ↑ network: only Skill.allowed_domains        │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Security Pipeline (ADR-020)
+
+6 steps before VERIFIED status:
+1. **Source verification** — Sigstore / GitHub Attestations
+2. **Static analysis** — tool definition scan for dangerous operations
+3. **Dependency scan** — SBOM + CVE scan (Trivy/Grype) + license check
+4. **Sandbox test run** — MCP server in srt isolation, network/FS audit
+5. **Manual review** — mandatory for community submissions
+6. **Continuous monitoring** — re-scan on version updates
+
+Result: `security_score` (0-100) + `verification` status.
+
+### MCP Server Sandboxing (ADR-017)
+
+Each MCP server runs inside Anthropic Sandbox Runtime (`srt`) within the
+team container. Double sandboxing: Docker (container) + srt (process).
+
+```
+Sidecar generates per-skill srt-settings.json from Skill.allowed_domains:
+  GitHub MCP → network: only api.github.com, *.github.com
+  Slack MCP  → network: only slack.com, *.slack.com
+  Both       → filesystem: deny /output, deny /workspace writes
+```
+
+### Distribution (ADR-021)
+
+Marketplace skills as OCI images: `ghcr.io/crewship-ai/skills/{name}:{version}`
+Digest-verified (SHA256). Pre-pulled at install time. Cached in container.
+Fallback: `mcp_server_command` for Phase 1 / custom skills.
+
+### Docker MCP Catalog as upstream source
+
+Docker MCP Catalog (270+ servers) used as **import source** — re-scanned
+through Crewship security pipeline before publishing to Skill Hub.
+
+### Monetization
+
+Free + Premium tiers. Premium skills: revenue share with author (default 70%).
+Gated by Plan tier (FREE plan: limited premium skills).
+
+Full specification: `AGENT-RUNTIME.md` section 6A.10.
+
+## Dual Runtime Architecture (ADR-009)
+
+Agents can run in two modes -- CLI-first or API-direct:
+
+```
+CLI mode (Phase 1):       Docker exec → CLI tool (Claude Code, OpenCode, Codex)
+                          CLI tool calls LLM API, has own tool use
+                          Delegation via curl to sidecar
+
+API-direct mode (Phase 2): Docker exec → crewship-agent (Go binary, ~5MB)
+                          Calls LLM API directly (Anthropic/OpenAI/Google SDK)
+                          Native tool use, native delegation via HTTP
+                          Precise token tracking from API response
+```
+
+Both modes communicate with crewshipd through the same crewship-sidecar
+(localhost:9119). The sidecar provides a unified delegation API regardless
+of agent runtime type. See ORCHESTRATION.md section 5.9.
+
+## Conversation Search (Phase 2, ADR-011)
+
+```
+JSONL append (real-time) → crewshipd → async indexer → Meilisearch
+                                                          ↓
+                                              UI search: instant results
+                                              across all conversations,
+                                              teams, agents
+```
+
+- Meilisearch: Rust-based, <10ms latency, JSONL import, typo tolerance
+- Runs as separate service (docker-compose for dev, K8s Deployment for prod)
+- Trace ID in every indexed document for cross-agent correlation
 
 ## Monitoring (built-in from day 1)
 
