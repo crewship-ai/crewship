@@ -1,4 +1,4 @@
-import { Send, PanelRightOpen, Bot, User, Wrench, Brain, Plus, ChevronDown } from "lucide-react"
+import { Send, PanelRightOpen, Bot, User, Wrench, Brain, Plus, ChevronDown, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -9,6 +9,11 @@ export default async function ChatPage({ params }: { params: Promise<{ agentId: 
 
   return (
     <div className="flex flex-col h-full">
+      {/* Backend requirement banner */}
+      <div className="mx-4 sm:mx-6 mt-4 flex items-center gap-2 rounded-md bg-muted/10 border border-border px-3 py-2">
+        <Info className="h-4 w-4 text-muted-foreground shrink-0" />
+        <p className="text-xs text-muted-foreground">Requires <strong>crewshipd</strong> (Go service) to be running for live chat functionality.</p>
+      </div>
       {/* Session selector bar */}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 sm:px-6 py-2 bg-muted/30">
         <Button variant="outline" size="sm" className="gap-1.5 text-xs">
