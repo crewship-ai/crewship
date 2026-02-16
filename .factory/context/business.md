@@ -37,6 +37,26 @@ TBD -- will be determined based on market feedback and MVP validation.
 5. **Terminal-first** -- CLI agents, structured logs, real file output
 6. **Webhook-driven** -- agents react to external events (alerts, triggers, other systems)
 7. **Two-language architecture** -- TypeScript UI + Go backend = efficient, K8s-native
+8. **3-level AI hierarchy** -- Virtual Director → Crew Leader → Workers. User talks to the
+   team leader, not individual agents. Natural for business users ("talk to department head").
+
+## Orchestration Differentiator (vs CrewAI, LangGraph, AutoGen)
+
+```
+CrewAI / LangGraph / AutoGen  = FRAMEWORKS for DEVELOPERS (Python code-first)
+Crewship                      = PLATFORM for BUSINESS USERS (UI-first, human terminology)
+```
+
+| Aspect | CrewAI | LangGraph | AutoGen | **Crewship** |
+|---|---|---|---|---|
+| Pattern | Hierarchical Crew | Graph/DAG | Conversation | **3-level hierarchy** |
+| Target | Developers | Developers | Developers | **Business users** |
+| Leader concept | Manager Agent (code) | Supervisor node (code) | GroupChat manager | **Crew Leader (UI, auto-prompt)** |
+| Cross-team | Nested crews | Sub-graphs | Nested groups | **Virtual Director** |
+| Configuration | Python code | Python code | Python code | **Web UI + auto-generated prompts** |
+| Security | No isolation | No isolation | No isolation | **Container + RBAC + audit** |
+
+> Full spec: `.factory/context/prd/ORCHESTRATION.md`
 
 ## Market Positioning: Crewship vs n8n/Make/Zapier
 
@@ -100,6 +120,7 @@ analyze WHY, decide WHAT to do, and write a report.
 | CrewAI | Python framework | Developer-only, no UI for business users |
 | Relevance AI | Closed SaaS | Expensive, no self-hosting, vendor lock-in |
 | Zapier Agents | SaaS agents | Limited autonomy, no container isolation |
+| Docker cagent | Agent runtime (open-source, 2026) | Framework, no UI, no RBAC, no teams |
 
 ### OpenClaw vs Crewship — detailni porovnani
 
@@ -142,6 +163,37 @@ A jeho firma muze pouzivat Crewship pro teamove agenty.
 - Always-on daemon koncept → agent loop mode
 - Messaging-first UX → Phase 2 messaging integrace
 - Community growth (README, examples, quick start) → marketing strategie
+
+### Docker cagent vs Crewship
+
+> Docker cagent (open-source, 2026) je agent builder/runtime od Dockeru.
+> YAML-driven agenti, multi-agent orchestrace, Docker sandbox, MCP tool server.
+> Zaměření: vývojáři staví agenty, ne firemní platforma.
+
+**Positioning:**
+```
+Docker cagent = FRAMEWORK (developer tool, YAML agents, runtime)
+Crewship      = PLATFORM (business UI, RBAC, audit, teams, credentials vault)
+```
+
+| Oblast | Docker cagent | Crewship | Výhoda |
+|---|---|---|---|
+| Cílový uživatel | Vývojář (YAML definice) | Firma (web UI) | Crewship: širší trh |
+| Agent definice | YAML (deklarativní) | UI + API (konfigurovatelné) | Crewship: ne-dev friendly |
+| Multi-agent | Ano (agent→agent handoff) | Leader/Worker/Director hierarchie | Crewship: strukturovanější |
+| RBAC | Žádné | 5 rolí, per-team izolace | Crewship: enterprise |
+| Audit trail | Žádný | Immutable, append-only | Crewship: compliance |
+| Credentials | Config/env vars | AES-256-GCM, credential pool, failover | Crewship: bezpečnější |
+| UI | CLI/SDK only | Full web UI (chat, files, logs, settings) | Crewship: UX |
+| Container isolation | Docker sandbox (vlastní) | Docker + Landlock + optional gVisor | Crewship: hlubší izolace |
+| MCP tools | Ano (tool server) | Skill system (MCP-kompatibilní, Phase 2) | Srovnatelné |
+| Webhooks | Omezené | Native webhook triggers | Crewship: silnější |
+
+**Co se můžeme naučit od Docker cagent:**
+- Agent builder UX — YAML definice jako inspirace pro "agent templates"
+- MCP tool server — standardní tool interface
+- Container orchestrace patterny — sidecar, multi-agent routing
+- Docker sandbox approach — bezpečnostní patterny
 
 ## MVP Phases
 

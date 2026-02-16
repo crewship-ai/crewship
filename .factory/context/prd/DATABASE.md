@@ -35,14 +35,14 @@
 
 ## 2. PREHLED ENTIT
 
-**19 tabulek** rozdelenychdo 6 domen:
+**20 tabulek** rozdelenychdo 6 domen:
 
 | Domena | Tabulky | Popis |
 |---|---|---|
 | **Uzivatele & Org** | User, Organization, OrganizationMember, OrganizationInvitation | Multi-tenant zaklad |
 | **Tymy** | Team, TeamMember | Izolacni boundary (1 kontejner = 1 tym) |
-| **Agenti** | Agent, AgentSkill, AgentCredential, AgentConfigHistory | Virtualni zamestnanci |
-| **Skills & Credentials** | Skill, Credential | Dovednosti a opravneni |
+| **Agenti** | Agent, AgentSkill, AgentCredential, AgentConfigHistory, DelegationLog | Virtualni zamestnanci + orchestrace |
+| **Skills & Credentials** | Skill, SkillReview, Credential | Dovednosti, marketplace recenze, opravneni |
 | **Konverzace & Behy** | ConversationSession (metadata only), AgentRun | Session metadata, behy |
 | **System** | AuditLog, Subscription, Plan, FeatureFlag, FeatureFlagOverride | Billing, audit, flags |
 
@@ -56,12 +56,13 @@ Organization (1) ──── (*) OrganizationMember (*) ──── (1) User
      │
      ├── (*) Team (1) ──── (*) TeamMember (*) ──── (1) User
      │        │
-     │        ├── (*) Agent
-     │        │       ├── (*) AgentSkill (*) ──── (1) Skill
+     │        ├── (*) Agent (agent_role: WORKER | LEADER | DIRECTOR)
+     │        │       ├── (*) AgentSkill (*) ──── (1) Skill ──── (*) SkillReview (*) ──── (1) User
      │        │       ├── (*) AgentCredential (*) ──── (1) Credential
      │        │       ├── (*) AgentConfigHistory
      │        │       ├── (*) ConversationSession (metadata only, zpravy v JSONL)
-     │        │       └── (*) AgentRun
+     │        │       ├── (*) AgentRun
+     │        │       └── (*) DelegationLog (source/target — leader↔worker, director↔leader)
      │        │
      │
      ├── (*) Credential
@@ -154,6 +155,21 @@ enum ToolProfile {
   FULL
 }
 
+enum AgentRole {
+  WORKER       // default — radovy agent, specializovany na konkretni ukoly
+  LEADER       // 1 per team — sef tymu, orchestruje workery, primarni kontakt pro uzivatele
+  DIRECTOR     // 1 per org — reditel, orchestruje cross-team, deleguje na leadery
+}
+
+enum DelegationStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  TIMEOUT
+  CANCELLED
+}
+
 enum SkillSource {
   BUNDLED
   MANAGED
@@ -170,6 +186,19 @@ enum SkillCategory {
   SUPPORT
   SALES
   CUSTOM
+}
+
+enum VerificationStatus {
+  UNVERIFIED       // cerstve submitnuty, neprosel pipeline
+  PENDING_REVIEW   // v security pipeline / manual review
+  VERIFIED         // prosel 6-krokovym auditem (ADR-020)
+  REJECTED         // zamitnut (security issue)
+  DEPRECATED       // starsi verze, existuje novejsi
+}
+
+enum SkillPricing {
+  FREE             // zdarma pro vsechny plan tiers
+  PREMIUM          // placeny, revenue share s autorem (ADR-019)
 }
 
 enum SessionMode {
@@ -245,6 +274,8 @@ model User {
   triggered_runs      AgentRun[]               @relation("TriggeredBy")
   config_changes      AgentConfigHistory[]     @relation("ChangedBy")
   audit_logs          AuditLog[]
+  authored_skills     Skill[]                  @relation("SkillAuthor")
+  skill_reviews       SkillReview[]
 
   @@map("users")
 }
@@ -274,6 +305,7 @@ model Organization {
   audit_logs   AuditLog[]
   subscription Subscription?
   flag_overrides FeatureFlagOverride[]
+  delegation_logs DelegationLog[]
 
   @@map("organizations")
 }
@@ -377,12 +409,13 @@ model TeamMember {
 
 model Agent {
   id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  team_id         String          @db.Uuid
+  team_id         String?         @db.Uuid  // NULLABLE: Director nema team (patri org)
   org_id          String          @db.Uuid
   name            String
   slug            String
   description     String?
   role_title      String?          // "DevOps Engineer", "Sales Rep"
+  agent_role      AgentRole       @default(WORKER)  // WORKER | LEADER | DIRECTOR
   status          AgentStatus     @default(IDLE)
   cli_adapter     CLIAdapter      @default(CLAUDE_CODE)
   llm_provider    LLMProvider?
@@ -398,19 +431,61 @@ model Agent {
   updated_at      DateTime        @default(now()) @updatedAt @db.Timestamptz
   deleted_at      DateTime?       @db.Timestamptz
 
-  team             Team                  @relation(fields: [team_id], references: [id], onDelete: Cascade)
+  // Orchestrace — leader/director specificke
+  delegation_timeout_s   Int?     // override timeout pro delegace (default: 2x agent timeout)
+  max_delegation_depth   Int?     @default(3)   // max hloubka delegace (director→leader→worker)
+  max_parallel_delegates Int?     @default(5)   // max paralelne bezicich delegaci
+
+  team             Team?                 @relation(fields: [team_id], references: [id], onDelete: Cascade)
   organization     Organization          @relation(fields: [org_id], references: [id], onDelete: Cascade)
   skills           AgentSkill[]
   credentials      AgentCredential[]
   sessions         ConversationSession[]
   runs             AgentRun[]
   config_history   AgentConfigHistory[]
+  delegations_sent DelegationLog[]       @relation("DelegatedBy")
+  delegations_recv DelegationLog[]       @relation("DelegatedTo")
 
   @@unique([team_id, slug], name: "uq_agent_slug")
   @@index([org_id], name: "idx_agent_org")
   @@index([team_id], name: "idx_agent_team")
   @@index([status], name: "idx_agent_status")
+  @@index([agent_role], name: "idx_agent_role")
   @@map("agents")
+}
+
+// ============================================================
+// 7b. DELEGATION LOG (Phase 2 — orchestracni audit)
+// ============================================================
+// Zaznamenava vsechny delegace mezi agenty (leader→worker, director→leader).
+// Umoznuje vizualizaci delegacniho stromu a audit kdo komu co delegoval.
+// Viz prd/ORCHESTRATION.md pro kompletni specifikaci.
+
+model DelegationLog {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String           @db.Uuid
+  session_id      String           @db.Uuid
+  source_agent_id String           @db.Uuid  // kdo delegoval (leader/director)
+  target_agent_id String           @db.Uuid  // komu (worker/leader)
+  task            String           @db.Text  // co bylo delegovano
+  status          DelegationStatus @default(PENDING)
+  started_at      DateTime?        @db.Timestamptz
+  finished_at     DateTime?        @db.Timestamptz
+  result_summary  String?          @db.Text  // shrnuti vysledku od target agenta
+  error_message   String?          @db.Text
+  group_id        String?          // pro paralelni delegace (wait_group)
+  created_at      DateTime         @default(now()) @db.Timestamptz
+
+  organization Organization        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  session      ConversationSession @relation(fields: [session_id], references: [id])
+  source_agent Agent               @relation("DelegatedBy", fields: [source_agent_id], references: [id])
+  target_agent Agent               @relation("DelegatedTo", fields: [target_agent_id], references: [id])
+
+  @@index([session_id], name: "idx_delegation_session")
+  @@index([source_agent_id], name: "idx_delegation_source")
+  @@index([target_agent_id], name: "idx_delegation_target")
+  @@index([group_id], name: "idx_delegation_group")
+  @@map("delegation_logs")
 }
 
 // ============================================================
@@ -429,15 +504,73 @@ model Skill {
   category      SkillCategory @default(CUSTOM)
   source        SkillSource   @default(CUSTOM)
   config_schema Json?
-  tool_definitions Json?
-  content       String?       @db.Text
+  tool_definitions Json?       // cached MCP tool schemas (for UI display)
+  content       String?       @db.Text  // system prompt fragment
   icon          String?       @db.VarChar(10)
   created_at    DateTime      @default(now()) @db.Timestamptz
   updated_at    DateTime      @default(now()) @updatedAt @db.Timestamptz
 
-  agent_skills AgentSkill[]
+  // MCP Server definice (Phase 2, viz AGENT-RUNTIME.md 6A)
+  mcp_server_command  String?           // command pro spusteni MCP serveru ("npx @modelcontextprotocol/server-github")
+  mcp_server_image    String?           // Docker image MCP serveru (pro marketplace skills)
+  mcp_transport       String? @default("stdio")  // "stdio" | "sse" | "streamable-http"
+  credential_requirements Json?         // [{"env_var": "GITHUB_TOKEN", "description": "GitHub PAT", "required": true}]
+  dependencies        Json?             // {"apt": ["git"], "pip": [], "npm": ["@octokit/rest"]}
+  tool_count          Int?              // pocet toolu v MCP serveru (pro UI display)
+  defer_loading       Boolean @default(false)  // true = on-demand via tool search (ADR-016)
 
+  // === MARKETPLACE / SKILL HUB (Phase 3, viz ADR-019, ADR-020, ADR-021) ===
+  verification      VerificationStatus @default(UNVERIFIED) // status v security pipeline
+  security_score    Int?               // 0-100, vysledek automated pipeline (ADR-020)
+  security_report   Json?              // vysledky security scanu {steps: [...], score: N, scanned_at: "..."}
+  downloads         Int                @default(0)           // pocet instalaci
+  rating_avg        Float?             // 1.0-5.0 prumerne hodnoceni
+  rating_count      Int                @default(0)           // pocet hodnoceni
+  tags              String[]           // ["github", "devops", "ci-cd", "code-review"]
+  featured          Boolean            @default(false)       // featured na marketplace homepage
+  oci_image         String?            // "ghcr.io/crewship-ai/skills/github:1.2.0" (ADR-021)
+  oci_digest        String?            // SHA256 digest pro integritu (ADR-021)
+  sbom_url          String?            // link na SBOM (CycloneDX format)
+  allowed_domains   String[]           // ["api.github.com", "*.github.com"] pro srt sandbox (ADR-017)
+  pricing_tier      SkillPricing       @default(FREE)        // FREE | PREMIUM
+  price_monthly     Int?               // cena v centech (pro premium, revenue share)
+  author_id         String?            @db.Uuid              // autor skillu (pro revenue share)
+  revenue_share_pct Int?               @default(70)          // % z price_monthly pro autora
+  changelog         Json?              // [{"version": "1.2.0", "date": "...", "changes": "..."}]
+
+  agent_skills AgentSkill[]
+  reviews      SkillReview[]
+  author_user  User?         @relation("SkillAuthor", fields: [author_id], references: [id])
+
+  @@index([category], name: "idx_skill_category")
+  @@index([source], name: "idx_skill_source")
+  @@index([verification], name: "idx_skill_verification")
+  @@index([featured], name: "idx_skill_featured")
   @@map("skills")
+}
+
+// ============================================================
+// 8B. SKILL REVIEW (marketplace recenze, ADR-019)
+// ============================================================
+// Uzivatel muze ohodnotit skill 1-5 a napsat recenzi.
+// Jeden uzivatel = maximalne jedna recenze na skill.
+
+model SkillReview {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  skill_id   String   @db.Uuid
+  user_id    String   @db.Uuid
+  rating     Int                      // 1-5
+  title      String?
+  body       String?  @db.Text
+  created_at DateTime @default(now()) @db.Timestamptz
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  skill Skill @relation(fields: [skill_id], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [id])
+
+  @@unique([skill_id, user_id], name: "uq_skill_review_user")
+  @@index([skill_id], name: "idx_skill_review_skill")
+  @@map("skill_reviews")
 }
 
 // ============================================================
@@ -448,7 +581,8 @@ model AgentSkill {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   agent_id   String   @db.Uuid
   skill_id   String   @db.Uuid
-  config     Json?
+  config     Json?              // per-agent skill configuration
+  enabled    Boolean  @default(true)  // lze deaktivovat bez odebrani
   created_at DateTime @default(now()) @db.Timestamptz
 
   agent Agent @relation(fields: [agent_id], references: [id], onDelete: Cascade)
@@ -539,6 +673,7 @@ model ConversationSession {
   organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
   creator      User?        @relation("CreatedBy", fields: [created_by], references: [id])
   runs         AgentRun[]
+  delegations  DelegationLog[]
 
   @@index([agent_id], name: "idx_session_agent")
   @@index([org_id], name: "idx_session_org")

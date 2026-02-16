@@ -316,6 +316,29 @@ Kooperace: n8n posle webhook → Crewship agent analyzuje a jedna.
 - [ ] **2.11** Audit log (append-only)
 - [ ] **2.12** Dashboard (team overview, agent status, resource usage)
 
+### FAZE 2A: Crew Leader orchestrace (po MVP)
+
+- [ ] **2A.1** AgentRole enum (WORKER/LEADER/DIRECTOR) + DB migrace
+- [ ] **2A.2** Leader designation UI (oznaceni agenta jako leadera, max 1 per team)
+- [ ] **2A.3** Auto-generated leader system prompt (kontext tymu, agenty, role)
+- [ ] **2A.4** Delegacni protokol — parsovani @delegate/@ask prikazu ze stdout v crewshipd
+- [ ] **2A.5** Leader → Worker delegace (Docker exec orchestrace v ramci kontejneru tymu)
+- [ ] **2A.6** DelegationLog tabulka + audit delegaci
+- [ ] **2A.7** Leader auto-routing (uzivatel pise do tymu → leader rozhodne komu delegovat)
+- [ ] **2A.8** Paralelni delegace (wait_group pattern pro vice workeru soucasne)
+- [ ] **2A.9** Error handling + fallback (leader reaguje na selhani workera)
+- [ ] **2A.10** Leader summary/agregace (leader shrnuje vysledky pred odeslani)
+- [ ] **2A.11** Delegacni timeline v chat UI (vizualizace delegaci)
+
+### FAZE 2B: Virtual Director (po validaci leaderu)
+
+- [ ] **2B.1** Director agent role (specialni agent na urovni org, team_id = null)
+- [ ] **2B.2** Director lightweight execution (LLM call bez Docker kontejneru)
+- [ ] **2B.3** Director → Leader delegace (cross-team orchestrace)
+- [ ] **2B.4** Director auto-routing (director rozhodne ktery tym oslovit)
+- [ ] **2B.5** Cross-team agregace (director sbira odpovedi od vice tymu)
+- [ ] **2B.6** Director UI (dashboard card + dedicovany chat)
+
 ---
 
 ## 6. AKTUALNI STAV DOKUMENTU
@@ -334,6 +357,7 @@ Kooperace: n8n posle webhook → Crewship agent analyzuje a jedna.
 | `prd/SECURITY.md` | ✅ Aktualni (v2.0) | Prepsano 2026-02-11: Go architektura, Unix socket security, webhook auth, in-memory rate limiting |
 | `prd/API.md` | ✅ Aktualni (v2.0) | Prepsano 2026-02-11: 2 procesy, IPC protokol, webhook API, file API |
 | `prd/DEPLOYMENT.md` | ✅ Aktualni (v2.0) | Prepsano 2026-02-11: smazany Redis/Vercel/Railway, Coolify deployment, 2 services |
-| `prd/AGENT-RUNTIME.md` | ✅ Aktualni (v2.0) | Prepsano 2026-02-11: Go orchestrator, Docker exec, JSONL logy, bbolt WAL, fsnotify |
+| `prd/AGENT-RUNTIME.md` | ✅ Aktualni (v2.0) | Prepsano 2026-02-11: Go orchestrator, Docker exec, JSONL logy, bbolt WAL, fsnotify. Aktualizovano 2026-02-13: orchestracni runtime (leader/director) |
+| `prd/ORCHESTRATION.md` | ✅ **Novy (v1.0)** | 2026-02-13: Crew Leader + Virtual Director, 3-urovnova hierarchie, delegacni protokol, industry kontext |
 
 **Vsechny dokumenty jsou ted pouzitelne pro kodovani.** PRD.md a DEPENDENCIES.md maji drobne stale reference, ale klicove sekce jsou spravne.
