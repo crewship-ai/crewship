@@ -6,7 +6,7 @@ import Link from "next/link"
 
 export default function TeamsPage() {
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       <PageHeader title="Teams" description="Organize agents into departments">
         <Button asChild>
           <Link href="/teams/new">
