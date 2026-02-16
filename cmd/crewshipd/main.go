@@ -71,9 +71,14 @@ func main() {
 	resolver := chatbridge.NewIPCResolver(cfg.Auth.NextjsURL, cfg.Auth.InternalToken, logger)
 	bridge := chatbridge.New(
 		srv.Orchestrator(),
+		deps.Container,
 		srv.ConversationStore(),
 		srv.LogWriter(),
 		resolver,
+		chatbridge.BridgeConfig{
+			DefaultMemoryMB: cfg.Container.DefaultMemoryMB,
+			DefaultCPUs:     cfg.Container.DefaultCPUs,
+		},
 		logger,
 	)
 	srv.SetChatHandler(bridge)

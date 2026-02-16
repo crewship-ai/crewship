@@ -30,6 +30,7 @@ type Server struct {
 	storage      provider.StorageProvider
 	state        provider.StateProvider
 	logWriter    *logcollector.Writer
+	logReader    *logcollector.Reader
 	convStore    *conversation.Store
 	startedAt    time.Time
 }
@@ -65,6 +66,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 	orch := orchestrator.New(ctr, sta, logger)
 	logW := logcollector.NewWriter(cfg.Storage.LogPath, logger)
+	logR := logcollector.NewReader(cfg.Storage.LogPath)
 	convStore := conversation.NewStore(cfg.Storage.BasePath, logger)
 
 	var jwtValidator *auth.JWTValidator
@@ -93,6 +95,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		storage:      sto,
 		state:        sta,
 		logWriter:    logW,
+		logReader:    logR,
 		convStore:    convStore,
 	}
 
