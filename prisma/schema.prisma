@@ -1,24 +1,763 @@
 // Crewship -- Prisma Schema (source of truth)
-// Full schema defined in .factory/context/prd/DATABASE.md
-// This is a placeholder -- will be populated during Phase 1 scaffolding
+// Full spec: .factory/context/prd/DATABASE.md
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
-// TODO: Add models from DATABASE.md during Phase 1 implementation
-// - User, Account, Session (NextAuth)
-// - Organization, OrganizationMember, OrganizationInvitation
-// - Team, TeamMember
-// - Agent, AgentSkill
-// - Skill
-// - Credential
-// - ConversationSession, ConversationMessage
-// - AgentRun
-// - AuditLog
-// - Subscription, FeatureFlag, FeatureFlagOverride
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MANAGER
+  MEMBER
+  VIEWER
+}
+
+enum AgentStatus {
+  IDLE
+  RUNNING
+  ERROR
+  STOPPED
+}
+
+enum LLMProvider {
+  OPENAI
+  ANTHROPIC
+  GOOGLE
+  OLLAMA
+}
+
+enum CLIAdapter {
+  CLAUDE_CODE
+  OPENCODE
+  CODEX_CLI
+  GEMINI_CLI
+}
+
+enum ToolProfile {
+  MINIMAL
+  CODING
+  MESSAGING
+  FULL
+}
+
+enum AgentRole {
+  WORKER
+  LEADER
+  DIRECTOR
+}
+
+enum DelegationStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  TIMEOUT
+  CANCELLED
+}
+
+enum SkillSource {
+  BUNDLED
+  MANAGED
+  MARKETPLACE
+  CUSTOM
+}
+
+enum SkillCategory {
+  CODING
+  MESSAGING
+  AUTOMATION
+  DATA
+  DEVOPS
+  SUPPORT
+  SALES
+  CUSTOM
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING_REVIEW
+  VERIFIED
+  REJECTED
+  DEPRECATED
+}
+
+enum SkillPricing {
+  FREE
+  PREMIUM
+}
+
+enum SessionMode {
+  CHAT
+  TASK
+}
+
+enum SessionStatus {
+  ACTIVE
+  COMPLETED
+  ERROR
+}
+
+enum RunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+  TIMEOUT
+}
+
+enum RunTrigger {
+  USER
+  WEBHOOK
+  CRON
+  AGENT
+  SYSTEM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  TRIALING
+  INCOMPLETE
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  TEAM
+  ENTERPRISE
+}
+
+enum CredentialScope {
+  ORGANIZATION
+  TEAM
+}
+
+// ============================================================
+// 1. USER (NextAuth.js Prisma adapter compatible)
+// ============================================================
+
+model User {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String    @unique
+  full_name       String?
+  avatar_url      String?
+  hashed_password String?
+  email_verified  DateTime? @db.Timestamptz
+  created_at      DateTime  @default(now()) @db.Timestamptz
+  updated_at      DateTime  @default(now()) @updatedAt @db.Timestamptz
+
+  accounts            Account[]
+  sessions            Session[]
+  org_memberships     OrganizationMember[]
+  team_memberships    TeamMember[]
+  sent_invitations    OrganizationInvitation[] @relation("InvitedBy")
+  created_credentials Credential[]             @relation("CreatedBy")
+  created_sessions    ConversationSession[]    @relation("CreatedBy")
+  triggered_runs      AgentRun[]               @relation("TriggeredBy")
+  config_changes      AgentConfigHistory[]     @relation("ChangedBy")
+  audit_logs          AuditLog[]
+  authored_skills     Skill[]                  @relation("SkillAuthor")
+  skill_reviews       SkillReview[]
+
+  @@map("users")
+}
+
+// ============================================================
+// NextAuth.js required models
+// ============================================================
+
+model Account {
+  id                String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String  @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionToken String   @unique
+  userId       String   @db.Uuid
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================
+// 2. ORGANIZATION
+// ============================================================
+
+model Organization {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String
+  slug       String    @unique
+  logo_url   String?
+  created_at DateTime  @default(now()) @db.Timestamptz
+  updated_at DateTime  @default(now()) @updatedAt @db.Timestamptz
+  deleted_at DateTime? @db.Timestamptz
+
+  default_container_ttl_hours Int?
+
+  members         OrganizationMember[]
+  invitations     OrganizationInvitation[]
+  teams           Team[]
+  agents          Agent[]
+  credentials     Credential[]
+  sessions        ConversationSession[]
+  runs            AgentRun[]
+  audit_logs      AuditLog[]
+  subscription    Subscription?
+  flag_overrides  FeatureFlagOverride[]
+  delegation_logs DelegationLog[]
+
+  @@map("organizations")
+}
+
+// ============================================================
+// 3. ORGANIZATION MEMBER
+// ============================================================
+
+model OrganizationMember {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id     String   @db.Uuid
+  user_id    String   @db.Uuid
+  role       OrgRole  @default(MEMBER)
+  created_at DateTime @default(now()) @db.Timestamptz
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([org_id, user_id], name: "uq_org_member")
+  @@index([org_id], name: "idx_org_member_org")
+  @@index([user_id], name: "idx_org_member_user")
+  @@map("organization_members")
+}
+
+// ============================================================
+// 4. ORGANIZATION INVITATION
+// ============================================================
+
+model OrganizationInvitation {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String    @db.Uuid
+  email       String
+  role        OrgRole   @default(MEMBER)
+  invited_by  String    @db.Uuid
+  token       String    @unique @default(dbgenerated("gen_random_uuid()"))
+  expires_at  DateTime  @db.Timestamptz
+  accepted_at DateTime? @db.Timestamptz
+  created_at  DateTime  @default(now()) @db.Timestamptz
+
+  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  inviter      User         @relation("InvitedBy", fields: [invited_by], references: [id])
+
+  @@index([org_id], name: "idx_invitation_org")
+  @@index([token], name: "idx_invitation_token")
+  @@index([email, org_id], name: "idx_invitation_email_org")
+  @@map("organization_invitations")
+}
+
+// ============================================================
+// 5. TEAM
+// ============================================================
+
+model Team {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String    @db.Uuid
+  name        String
+  slug        String
+  description String?
+  color       String?   @db.VarChar(7)
+  icon        String?   @db.VarChar(10)
+  created_at  DateTime  @default(now()) @db.Timestamptz
+  updated_at  DateTime  @default(now()) @updatedAt @db.Timestamptz
+  deleted_at  DateTime? @db.Timestamptz
+
+  container_ttl_hours Int?
+  container_memory_mb Int   @default(4096)
+  container_cpus      Float @default(2.0)
+
+  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  members      TeamMember[]
+  agents       Agent[]
+  credentials  Credential[]
+
+  @@unique([org_id, slug], name: "uq_team_slug")
+  @@index([org_id], name: "idx_team_org")
+  @@map("teams")
+}
+
+// ============================================================
+// 6. TEAM MEMBER
+// ============================================================
+
+model TeamMember {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  team_id    String   @db.Uuid
+  user_id    String   @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz
+
+  team Team @relation(fields: [team_id], references: [id], onDelete: Cascade)
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([team_id, user_id], name: "uq_team_member")
+  @@index([team_id], name: "idx_team_member_team")
+  @@index([user_id], name: "idx_team_member_user")
+  @@map("team_members")
+}
+
+// ============================================================
+// 7. AGENT
+// ============================================================
+
+model Agent {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  team_id         String?     @db.Uuid
+  org_id          String      @db.Uuid
+  name            String
+  slug            String
+  description     String?
+  role_title      String?
+  agent_role      AgentRole   @default(WORKER)
+  status          AgentStatus @default(IDLE)
+  cli_adapter     CLIAdapter  @default(CLAUDE_CODE)
+  llm_provider    LLMProvider?
+  llm_model       String?
+  system_prompt   String?     @db.Text
+  temperature     Float       @default(0.7)
+  max_tokens      Int?
+  timeout_seconds Int         @default(1800)
+  tool_profile    ToolProfile @default(CODING)
+  memory_enabled  Boolean     @default(false)
+  webhook_secret  String?
+  created_at      DateTime    @default(now()) @db.Timestamptz
+  updated_at      DateTime    @default(now()) @updatedAt @db.Timestamptz
+  deleted_at      DateTime?   @db.Timestamptz
+
+  delegation_timeout_s   Int? 
+  max_delegation_depth   Int? @default(3)
+  max_parallel_delegates Int? @default(5)
+
+  team             Team?                 @relation(fields: [team_id], references: [id], onDelete: Cascade)
+  organization     Organization          @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  skills           AgentSkill[]
+  credentials      AgentCredential[]
+  sessions         ConversationSession[]
+  runs             AgentRun[]
+  config_history   AgentConfigHistory[]
+  delegations_sent DelegationLog[]       @relation("DelegatedBy")
+  delegations_recv DelegationLog[]       @relation("DelegatedTo")
+
+  @@unique([org_id, slug], name: "uq_agent_slug")
+  @@index([org_id], name: "idx_agent_org")
+  @@index([team_id], name: "idx_agent_team")
+  @@index([status], name: "idx_agent_status")
+  @@index([agent_role], name: "idx_agent_role")
+  @@map("agents")
+}
+
+// ============================================================
+// 7b. DELEGATION LOG (Phase 2)
+// ============================================================
+
+model DelegationLog {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String           @db.Uuid
+  session_id      String           @db.Uuid
+  source_agent_id String           @db.Uuid
+  target_agent_id String           @db.Uuid
+  task            String           @db.Text
+  status          DelegationStatus @default(PENDING)
+  started_at      DateTime?        @db.Timestamptz
+  finished_at     DateTime?        @db.Timestamptz
+  result_summary  String?          @db.Text
+  error_message   String?          @db.Text
+  group_id        String?
+  created_at      DateTime         @default(now()) @db.Timestamptz
+
+  organization Organization        @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  session      ConversationSession @relation(fields: [session_id], references: [id])
+  source_agent Agent               @relation("DelegatedBy", fields: [source_agent_id], references: [id])
+  target_agent Agent               @relation("DelegatedTo", fields: [target_agent_id], references: [id])
+
+  @@index([session_id], name: "idx_delegation_session")
+  @@index([source_agent_id], name: "idx_delegation_source")
+  @@index([target_agent_id], name: "idx_delegation_target")
+  @@index([group_id], name: "idx_delegation_group")
+  @@map("delegation_logs")
+}
+
+// ============================================================
+// 8. SKILL
+// ============================================================
+
+model Skill {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String        @unique
+  slug          String        @unique
+  display_name  String
+  description   String?       @db.Text
+  version       String        @default("1.0.0")
+  author        String?
+  license       String?       @default("MIT")
+  category      SkillCategory @default(CUSTOM)
+  source        SkillSource   @default(CUSTOM)
+  config_schema Json?
+  tool_definitions Json?
+  content       String?       @db.Text
+  icon          String?       @db.VarChar(10)
+  created_at    DateTime      @default(now()) @db.Timestamptz
+  updated_at    DateTime      @default(now()) @updatedAt @db.Timestamptz
+
+  mcp_server_command    String?
+  mcp_server_image      String?
+  mcp_transport         String?            @default("stdio")
+  credential_requirements Json?
+  dependencies          Json?
+  tool_count            Int?
+  defer_loading         Boolean            @default(false)
+
+  verification      VerificationStatus @default(UNVERIFIED)
+  security_score    Int?
+  security_report   Json?
+  downloads         Int                @default(0)
+  rating_avg        Float?
+  rating_count      Int                @default(0)
+  tags              String[]
+  featured          Boolean            @default(false)
+  oci_image         String?
+  oci_digest        String?
+  sbom_url          String?
+  allowed_domains   String[]
+  pricing_tier      SkillPricing       @default(FREE)
+  price_monthly     Int?
+  author_id         String?            @db.Uuid
+  revenue_share_pct Int?               @default(70)
+  changelog         Json?
+
+  agent_skills AgentSkill[]
+  reviews      SkillReview[]
+  author_user  User?         @relation("SkillAuthor", fields: [author_id], references: [id])
+
+  @@index([category], name: "idx_skill_category")
+  @@index([source], name: "idx_skill_source")
+  @@index([verification], name: "idx_skill_verification")
+  @@index([featured], name: "idx_skill_featured")
+  @@map("skills")
+}
+
+// ============================================================
+// 8b. SKILL REVIEW
+// ============================================================
+
+model SkillReview {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  skill_id   String   @db.Uuid
+  user_id    String   @db.Uuid
+  rating     Int
+  title      String?
+  body       String?  @db.Text
+  created_at DateTime @default(now()) @db.Timestamptz
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  skill Skill @relation(fields: [skill_id], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [id])
+
+  @@unique([skill_id, user_id], name: "uq_skill_review_user")
+  @@index([skill_id], name: "idx_skill_review_skill")
+  @@map("skill_reviews")
+}
+
+// ============================================================
+// 9. AGENT SKILL (M:N)
+// ============================================================
+
+model AgentSkill {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id   String   @db.Uuid
+  skill_id   String   @db.Uuid
+  config     Json?
+  enabled    Boolean  @default(true)
+  created_at DateTime @default(now()) @db.Timestamptz
+
+  agent Agent @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skill_id], references: [id], onDelete: Cascade)
+
+  @@unique([agent_id, skill_id], name: "uq_agent_skill")
+  @@map("agent_skills")
+}
+
+// ============================================================
+// 10. CREDENTIAL
+// ============================================================
+
+model Credential {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String          @db.Uuid
+  team_id         String?         @db.Uuid
+  name            String
+  description     String?
+  encrypted_value String          @db.Text
+  scope           CredentialScope @default(ORGANIZATION)
+  created_by      String          @db.Uuid
+  created_at      DateTime        @default(now()) @db.Timestamptz
+  updated_at      DateTime        @default(now()) @updatedAt @db.Timestamptz
+  deleted_at      DateTime?       @db.Timestamptz
+
+  organization      Organization      @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  team              Team?             @relation(fields: [team_id], references: [id], onDelete: SetNull)
+  creator           User              @relation("CreatedBy", fields: [created_by], references: [id])
+  agent_credentials AgentCredential[]
+
+  @@unique([org_id, name], name: "uq_credential_name")
+  @@index([org_id], name: "idx_credential_org")
+  @@index([team_id], name: "idx_credential_team")
+  @@map("credentials")
+}
+
+// ============================================================
+// 11. AGENT CREDENTIAL (M:N, supports credential pool)
+// ============================================================
+
+model AgentCredential {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id      String   @db.Uuid
+  credential_id String   @db.Uuid
+  env_var_name  String
+  priority      Int      @default(0)
+  created_at    DateTime @default(now()) @db.Timestamptz
+
+  agent      Agent      @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  credential Credential @relation(fields: [credential_id], references: [id], onDelete: Cascade)
+
+  @@unique([agent_id, credential_id], name: "uq_agent_credential")
+  @@index([agent_id, env_var_name], name: "idx_agent_credential_env")
+  @@map("agent_credentials")
+}
+
+// ============================================================
+// 12. CONVERSATION SESSION (metadata only, messages in JSONL)
+// ============================================================
+
+model ConversationSession {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id      String        @db.Uuid
+  org_id        String        @db.Uuid
+  created_by    String?       @db.Uuid
+  title         String?
+  mode          SessionMode   @default(CHAT)
+  status        SessionStatus @default(ACTIVE)
+  message_count Int           @default(0)
+  jsonl_path    String?
+  started_at    DateTime      @default(now()) @db.Timestamptz
+  ended_at      DateTime?     @db.Timestamptz
+  created_at    DateTime      @default(now()) @db.Timestamptz
+  updated_at    DateTime      @default(now()) @updatedAt @db.Timestamptz
+
+  agent        Agent         @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  organization Organization  @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  creator      User?         @relation("CreatedBy", fields: [created_by], references: [id])
+  runs         AgentRun[]
+  delegations  DelegationLog[]
+
+  @@index([agent_id], name: "idx_session_agent")
+  @@index([org_id], name: "idx_session_org")
+  @@index([created_at], name: "idx_session_created")
+  @@map("conversation_sessions")
+}
+
+// ============================================================
+// 13. AGENT RUN
+// ============================================================
+
+model AgentRun {
+  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id      String     @db.Uuid
+  session_id    String?    @db.Uuid
+  org_id        String     @db.Uuid
+  triggered_by  String?    @db.Uuid
+  trigger_type  RunTrigger @default(USER)
+  status        RunStatus  @default(PENDING)
+  started_at    DateTime?  @db.Timestamptz
+  finished_at   DateTime?  @db.Timestamptz
+  error_message String?    @db.Text
+  exit_code     Int?
+  metadata      Json?
+  created_at    DateTime   @default(now()) @db.Timestamptz
+
+  agent        Agent                @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  session      ConversationSession? @relation(fields: [session_id], references: [id])
+  organization Organization         @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  triggerer    User?                @relation("TriggeredBy", fields: [triggered_by], references: [id])
+
+  @@index([agent_id, created_at], name: "idx_run_agent_time")
+  @@index([org_id], name: "idx_run_org")
+  @@index([status], name: "idx_run_status")
+  @@map("agent_runs")
+}
+
+// ============================================================
+// 14. AUDIT LOG (immutable, append-only)
+// ============================================================
+
+model AuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id      String   @db.Uuid
+  user_id     String?  @db.Uuid
+  action      String
+  entity_type String
+  entity_id   String?  @db.Uuid
+  metadata    Json?
+  ip_address  String?  @db.VarChar(45)
+  user_agent  String?
+  created_at  DateTime @default(now()) @db.Timestamptz
+
+  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [user_id], references: [id])
+
+  @@index([org_id, created_at], name: "idx_audit_org_time")
+  @@index([entity_type, entity_id], name: "idx_audit_entity")
+  @@index([user_id], name: "idx_audit_user")
+  @@index([action], name: "idx_audit_action")
+  @@map("audit_logs")
+}
+
+// ============================================================
+// 15. SUBSCRIPTION
+// ============================================================
+
+model Subscription {
+  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String             @unique @db.Uuid
+  plan_id                String             @db.Uuid
+  stripe_customer_id     String?            @unique
+  stripe_subscription_id String?            @unique
+  status                 SubscriptionStatus @default(ACTIVE)
+  current_period_start   DateTime?          @db.Timestamptz
+  current_period_end     DateTime?          @db.Timestamptz
+  cancel_at              DateTime?          @db.Timestamptz
+  created_at             DateTime           @default(now()) @db.Timestamptz
+  updated_at             DateTime           @default(now()) @updatedAt @db.Timestamptz
+
+  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  plan         Plan         @relation(fields: [plan_id], references: [id])
+
+  @@map("subscriptions")
+}
+
+// ============================================================
+// 16. PLAN
+// ============================================================
+
+model Plan {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tier            PlanTier @unique
+  display_name    String
+  stripe_price_id String?  @unique
+  max_agents      Int
+  max_teams       Int
+  max_skills      Int
+  max_credentials Int
+  max_members     Int
+  features        Json?
+  price_monthly   Int      @default(0)
+  created_at      DateTime @default(now()) @db.Timestamptz
+  updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+// ============================================================
+// 17. FEATURE FLAG
+// ============================================================
+
+model FeatureFlag {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String   @unique
+  description String?
+  enabled     Boolean  @default(false)
+  percentage  Int      @default(0)
+  created_at  DateTime @default(now()) @db.Timestamptz
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  overrides FeatureFlagOverride[]
+
+  @@map("feature_flags")
+}
+
+// ============================================================
+// 18. FEATURE FLAG OVERRIDE
+// ============================================================
+
+model FeatureFlagOverride {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  flag_id    String   @db.Uuid
+  org_id     String   @db.Uuid
+  enabled    Boolean
+  created_at DateTime @default(now()) @db.Timestamptz
+
+  flag         FeatureFlag  @relation(fields: [flag_id], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@unique([flag_id, org_id], name: "uq_flag_override")
+  @@map("feature_flag_overrides")
+}
+
+// ============================================================
+// 19. AGENT CONFIG HISTORY (Phase 2)
+// ============================================================
+
+model AgentConfigHistory {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id   String   @db.Uuid
+  changed_by String   @db.Uuid
+  version    Int
+  changes    Json
+  snapshot   Json
+  created_at DateTime @default(now()) @db.Timestamptz
+
+  agent   Agent @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  changer User  @relation("ChangedBy", fields: [changed_by], references: [id])
+
+  @@unique([agent_id, version], name: "uq_config_version")
+  @@index([agent_id, created_at], name: "idx_config_history_agent_time")
+  @@map("agent_config_history")
+}

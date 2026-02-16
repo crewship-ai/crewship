@@ -10,8 +10,8 @@
 
 ## Status
 
-**Phase:** Pre-scaffolding (no `package.json` yet, no `node_modules`).
-`pnpm dev` will NOT work until Phase 1 scaffolding is done.
+**Phase:** MVP UI (scaffolding done, pages implemented, awaiting backend).
+`pnpm dev` runs Next.js on localhost:3000. Go backend (`crewshipd`) not yet implemented.
 
 ## Two-Language Project
 
@@ -108,7 +108,7 @@ config/
 |---|---|
 | Frontend | Next.js, React, Tailwind CSS 4, shadcn/ui (new-york) |
 | Icons | lucide-react (ONLY allowed icon library) |
-| Auth | NextAuth.js (Auth.js v5) with Prisma adapter |
+| Auth | NextAuth.js v5 beta.30 (Auth.js) with Prisma adapter. **Note:** Auth.js project merged into Better Auth -- evaluate migration in Phase 2. |
 | ORM | Prisma (ONLY DB access, from Next.js only) |
 | Database | PostgreSQL 16 (local Docker, structured data only) |
 | Backend | Go (`crewshipd` binary) |
@@ -123,6 +123,7 @@ config/
 | Validation | Zod |
 | RBAC | CASL |
 | Design tokens | `app/globals.css` (oklch, tweakcn.com) |
+| Linting | ESLint 9 (pinned -- v10 awaiting @typescript-eslint support) |
 
 ## Architecture
 
@@ -191,11 +192,15 @@ CONVERSATIONS (host):      /var/lib/crewship/conversations/  ← JSONL per sessi
 - Audit log: append-only (chattr +a in production)
 - Never log plaintext credentials, API keys, or secrets
 
-### Git Workflow
-- Main branch: `main` (direct push for now, PRs later)
-- Feature branches: `feature/description` or `fix/issue-name`
-- Conventional commits: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`
-- Remote: `origin` → `ssh://git@gitlab.example.com:2222/development/crewship.git`
+### Git Workflow (GitHub Flow)
+- **`main` branch:** Production-ready, protected. NEVER push directly.
+- **Feature branches:** `feature/description` or `fix/issue-name`, always from `main`
+- **All changes via PR:** feature branch -> PR -> CodeRabbit review -> merge to main
+- **Releases:** Tagged from main (`v0.1.0`, `v0.2.0`, etc.)
+- **CI runs on every PR:** lint, typecheck, build, test, Go check
+- **Conventional commits:** `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`
+- **Remote:** `GitHub` -> `https://github.com/crewship-ai/crewship.git`
+- **Working branch:** Always work on feature branch, never on main
 
 ## Roles (RBAC)
 
@@ -206,6 +211,15 @@ CONVERSATIONS (host):      /var/lib/crewship/conversations/  ← JSONL per sessi
 | MANAGER | Assigned only | In assigned teams | Team-level | Team |
 | MEMBER | Assigned only | No | No | Own actions |
 | VIEWER | Assigned only | No | No | None |
+
+## CLI Tools & Workflows
+
+- **Always use `gh` CLI** for GitHub operations (PRs, issues, reviews, comments)
+- **Always use `git` CLI** for version control (never edit `.git/` directly)
+- Prefer CLI tools over web UI when possible (faster, scriptable, auditable)
+- Use `gh pr view`, `gh pr checks`, `gh api` to inspect PR status and reviews
+- Use `gh pr comment` to respond to CodeRabbit or reviewers
+- Use `pnpm` (not npm/yarn) for all Node.js package management
 
 ## What NOT To Do
 
