@@ -17,11 +17,21 @@ export async function GET() {
     },
     include: {
       _count: { select: { teams: true, agents: true, members: true } },
+      members: {
+        where: { user_id: session.user.id },
+        select: { role: true },
+        take: 1,
+      },
     },
     orderBy: { created_at: "desc" },
   })
 
-  return NextResponse.json(orgs)
+  const result = orgs.map(({ members, ...org }) => ({
+    ...org,
+    currentUserRole: members[0]?.role ?? null,
+  }))
+
+  return NextResponse.json(result)
 }
 
 export async function POST(req: NextRequest) {

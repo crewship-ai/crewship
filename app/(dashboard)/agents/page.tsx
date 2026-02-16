@@ -9,6 +9,7 @@ import { FilterBar } from "@/components/layout/filter-bar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentCard } from "@/components/features/agents/agent-card"
 import { useOrg } from "@/hooks/use-org"
+import { useAbilities } from "@/hooks/use-abilities"
 import Link from "next/link"
 
 interface AgentTeam {
@@ -34,6 +35,7 @@ interface Agent {
 
 export default function AgentsPage() {
   const { orgId, loading: orgLoading } = useOrg()
+  const { abilities } = useAbilities()
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -81,12 +83,14 @@ export default function AgentsPage() {
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       <PageHeader title="Agents" description="Manage your AI virtual employees">
-        <Button asChild>
-          <Link href="/agents/new">
-            <Plus className="mr-2 h-4 w-4" />
-            New Agent
-          </Link>
-        </Button>
+        {abilities.can("create", "Agent") && (
+          <Button asChild>
+            <Link href="/agents/new">
+              <Plus className="mr-2 h-4 w-4" />
+              New Agent
+            </Link>
+          </Button>
+        )}
       </PageHeader>
 
       <FilterBar

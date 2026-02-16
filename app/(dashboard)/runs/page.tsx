@@ -1,0 +1,278 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import { Activity, Clock, AlertTriangle, CheckCircle, XCircle, Play, ExternalLink } from "lucide-react"
+import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { PageHeader } from "@/components/layout/page-header"
+import { EmptyState } from "@/components/layout/empty-state"
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { useOrg } from "@/hooks/use-org"
+import Link from "next/link"
+
+interface RunAgent {
+  id: string
+  name: string
+  slug: string
+  cli_adapter: string
+  llm_provider: string | null
+  team: { id: string; name: string; color: string | null } | null
+}
+
+interface Run {
+  id: string
+  agent_id: string
+  status: string
+  trigger_type: string
+  started_at: string | null
+  finished_at: string | null
+  error_message: string | null
+  exit_code: number | null
+  created_at: string
+  agent: RunAgent
+  triggerer: { id: string; email: string; full_name: string | null } | null
+}
+
+interface RunsResponse {
+  data: Run[]
+  stats: { running: number; today: number; failed: number }
+  pagination: { page: number; limit: number; total: number; total_pages: number }
+}
+
+const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ElementType }> = {
+  PENDING: { label: "Pending", variant: "outline", icon: Clock },
+  RUNNING: { label: "Running", variant: "default", icon: Play },
+  COMPLETED: { label: "Completed", variant: "secondary", icon: CheckCircle },
+  FAILED: { label: "Failed", variant: "destructive", icon: XCircle },
+  CANCELLED: { label: "Cancelled", variant: "outline", icon: XCircle },
+  TIMEOUT: { label: "Timeout", variant: "destructive", icon: AlertTriangle },
+}
+
+function formatDuration(start: string | null, end: string | null): string {
+  if (!start) return "—"
+  const startDate = new Date(start)
+  const endDate = end ? new Date(end) : new Date()
+  const seconds = Math.floor((endDate.getTime() - startDate.getTime()) / 1000)
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+}
+
+export default function RunsPage() {
+  const { orgId, loading: orgLoading } = useOrg()
+  const [data, setData] = useState<RunsResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [triggerFilter, setTriggerFilter] = useState("all")
+
+  useEffect(() => {
+    if (!orgId) {
+      if (!orgLoading) setLoading(false)
+      return
+    }
+
+    let cancelled = false
+
+    async function fetchRuns() {
+      setLoading(true)
+      setError(null)
+      try {
+        const params = new URLSearchParams({ org_id: orgId as string })
+        if (statusFilter !== "all") params.set("status", statusFilter)
+        if (triggerFilter !== "all") params.set("trigger", triggerFilter)
+
+        const res = await fetch(`/api/v1/runs?${params}`)
+        if (!res.ok) {
+          setError("Failed to load runs")
+          return
+        }
+        const result = (await res.json()) as RunsResponse
+        if (!cancelled) setData(result)
+      } catch {
+        if (!cancelled) setError("Failed to load runs")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    fetchRuns()
+    return () => { cancelled = true }
+  }, [orgId, orgLoading, statusFilter, triggerFilter])
+
+  const isLoading = orgLoading || loading
+
+  return (
+    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+      <PageHeader title="Runs" description="Cross-agent run activity across your organization" />
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {/* Stats */}
+      {data && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Running Now</div>
+              <div className="text-2xl font-bold mt-1 text-emerald-600">{data.stats.running}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Today&apos;s Runs</div>
+              <div className="text-2xl font-bold mt-1">{data.stats.today}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Failed</div>
+              <div className="text-2xl font-bold mt-1 text-destructive">{data.stats.failed}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Total</div>
+              <div className="text-2xl font-bold mt-1">{data.pagination.total}</div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[140px]">
+            <SelectValue placeholder="All Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="RUNNING">Running</SelectItem>
+            <SelectItem value="COMPLETED">Completed</SelectItem>
+            <SelectItem value="FAILED">Failed</SelectItem>
+            <SelectItem value="CANCELLED">Cancelled</SelectItem>
+            <SelectItem value="TIMEOUT">Timeout</SelectItem>
+            <SelectItem value="PENDING">Pending</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={triggerFilter} onValueChange={setTriggerFilter}>
+          <SelectTrigger className="w-[140px]">
+            <SelectValue placeholder="All Triggers" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Triggers</SelectItem>
+            <SelectItem value="USER">User</SelectItem>
+            <SelectItem value="WEBHOOK">Webhook</SelectItem>
+            <SelectItem value="CRON">Schedule</SelectItem>
+            <SelectItem value="AGENT">Agent</SelectItem>
+            <SelectItem value="SYSTEM">System</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 rounded-md" />
+          ))}
+        </div>
+      ) : !data || data.data.length === 0 ? (
+        <EmptyState
+          icon={Activity}
+          title="No runs yet"
+          description="Agent runs will appear here once agents start executing tasks."
+        />
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Run</TableHead>
+                  <TableHead>Agent</TableHead>
+                  <TableHead>Team</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Trigger</TableHead>
+                  <TableHead>Duration</TableHead>
+                  <TableHead>Started</TableHead>
+                  <TableHead className="w-10" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.data.map((run) => {
+                  const config = statusConfig[run.status] ?? statusConfig.PENDING
+                  const StatusIcon = config.icon
+
+                  return (
+                    <TableRow key={run.id}>
+                      <TableCell className="font-mono text-xs text-muted-foreground">
+                        #{run.id.slice(0, 8)}
+                      </TableCell>
+                      <TableCell className="text-sm font-medium">
+                        <Link href={`/agents/${run.agent_id}`} className="hover:underline">
+                          {run.agent.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        {run.agent.team ? (
+                          <span className="flex items-center gap-1.5 text-sm">
+                            <span
+                              className="h-2 w-2 rounded-full"
+                              style={{ backgroundColor: run.agent.team.color ?? "#6b7280" }}
+                            />
+                            {run.agent.team.name}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={config.variant} className="gap-1 text-[10px]">
+                          <StatusIcon className="h-3 w-3" />
+                          {config.label}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {run.trigger_type}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {formatDuration(run.started_at, run.finished_at)}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {run.started_at
+                          ? new Date(run.started_at).toLocaleString()
+                          : new Date(run.created_at).toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          href={`/agents/${run.agent_id}`}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </Link>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
+}

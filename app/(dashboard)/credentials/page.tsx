@@ -18,6 +18,7 @@ import {
 import { AddCredentialDialog } from "@/components/features/credentials/add-credential-dialog"
 import { EditCredentialDialog } from "@/components/features/credentials/edit-credential-dialog"
 import type { CredentialData } from "@/components/features/credentials/edit-credential-dialog"
+import { useAbilities } from "@/hooks/use-abilities"
 
 interface Credential {
   id: string
@@ -36,12 +37,14 @@ interface Org {
 }
 
 export default function CredentialsPage() {
+  const { abilities } = useAbilities()
   const [credentials, setCredentials] = React.useState<Credential[]>([])
   const [orgId, setOrgId] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [addOpen, setAddOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [editCredential, setEditCredential] = React.useState<CredentialData | null>(null)
+  const canManage = abilities.can("create", "Credential")
 
   const fetchOrg = React.useCallback(async () => {
     try {
@@ -152,10 +155,12 @@ export default function CredentialsPage() {
           <Upload className="mr-2 h-4 w-4" />
           Import JSON
         </Button>
-        <Button onClick={() => setAddOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Credential
-        </Button>
+        {canManage && (
+          <Button onClick={() => setAddOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Credential
+          </Button>
+        )}
       </PageHeader>
 
       {credentials.length === 0 ? (
@@ -164,10 +169,12 @@ export default function CredentialsPage() {
           title="No credentials yet"
           description="Add API keys and secrets that your agents will use. All credentials are encrypted with AES-256-GCM."
         >
-          <Button className="mt-4" onClick={() => setAddOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add First Credential
-          </Button>
+          {canManage && (
+            <Button className="mt-4" onClick={() => setAddOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add First Credential
+            </Button>
+          )}
         </EmptyState>
       ) : (
         <div className="rounded-md border">
