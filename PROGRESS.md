@@ -428,21 +428,22 @@
 | 3 | Layout a navigace | ✅ | ~90% |
 | 4 | Frontend stranky | ✅ | ~97% |
 | 5 | REST API | ✅ | ~95% |
-| 6 | Go backend | 🟡 | ~75% |
+| 6 | Go backend | ✅ | ~85% |
 | 7 | Create/Edit forms | ✅ | 100% |
-| 8 | Testy | ✅ | ~80% (149 testu) |
+| 8 | Testy | ✅ | ~85% (156 testu: 80 Go + 76 TS) |
 | 9 | Seed data | ✅ | ~80% |
-| 10 | Nasazeni | 🟡 | ~40% |
+| 10 | Nasazeni | ✅ | ~80% |
 
 ### Co zbyva pro spusteni MVP
 
-#### P0: MUST HAVE (bez toho to nejede) -- dalsi PR
+#### P0: MUST HAVE (bez toho to nejede) -- PR #22 ✅
 
-- [ ] **Production Dockerfile: Next.js** (multi-stage, standalone output)
-- [ ] **Production Dockerfile: crewshipd** (multi-stage, static binary)
-- [ ] **docker-compose.prod.yml** (PostgreSQL + Next.js + crewshipd + agent-runtime sit)
-- [ ] **Session metadata sync** (Go → IPC → Next.js → Prisma)
-- [ ] **Prisma migrace** (schema existuje, db:push/db:migrate jeste nebyl spusten)
+- [x] **Production Dockerfile: Next.js** (multi-stage, standalone output)
+- [x] **Production Dockerfile: crewshipd** (multi-stage, static binary)
+- [x] **docker-compose.prod.yml** (PostgreSQL + Next.js + crewshipd + agent-runtime sit)
+- [x] **Session metadata sync** (Go → IPC → Next.js → Prisma)
+- [x] **SessionResolver** (IPCResolver: crewshipd → Next.js, dekrypce credentials)
+- [x] **Prisma migrace** (init migrace, 20 tabulek, migration_lock.toml)
 
 #### P1: SHOULD HAVE (pro rozumne demo)
 
@@ -475,6 +476,7 @@
 
 | PR | Nazev | Datum |
 |----|-------|-------|
+| #22 | Production deployment (Dockerfiles, compose, Prisma migration, SessionResolver) | 2026-02-16 |
 | #21 | E2E chat flow (providers wiring, JWT auth, conversation store, ChatBridge, Chat UI) | 2026-02-16 |
 | #19 | Docker runtime (providers, orchestrator, log collector, file server, webhook) | 2026-02-16 |
 | #18 | Frontend polish (team detail, runs, admin console, RBAC, invite dialog) | 2026-02-16 |

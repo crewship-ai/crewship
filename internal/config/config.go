@@ -58,6 +58,7 @@ type LoggingConfig struct {
 type AuthConfig struct {
 	JWTSecret     string        `yaml:"jwt_secret"`
 	WSTokenExpiry time.Duration `yaml:"ws_token_expiry"`
+	NextjsURL     string        `yaml:"nextjs_url"`
 }
 
 func Default() *Config {
@@ -93,6 +94,7 @@ func Default() *Config {
 		},
 		Auth: AuthConfig{
 			WSTokenExpiry: 5 * time.Minute,
+			NextjsURL:     "http://localhost:3000",
 		},
 	}
 }
@@ -194,5 +196,8 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_RUNTIME_IMAGE"); v != "" {
 		cfg.Container.RuntimeImage = v
+	}
+	if v := os.Getenv("CREWSHIP_NEXTJS_URL"); v != "" {
+		cfg.Auth.NextjsURL = v
 	}
 }

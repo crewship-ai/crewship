@@ -27,7 +27,6 @@ Thumbs.db
 coverage/
 
 # Prisma
-prisma/migrations/
 lib/generated/
 
 # Go

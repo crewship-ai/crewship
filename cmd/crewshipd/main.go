@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
@@ -66,6 +67,17 @@ func main() {
 	defer deps.Close()
 
 	srv := server.New(cfg, logger, deps)
+
+	resolver := chatbridge.NewIPCResolver(cfg.Auth.NextjsURL, logger)
+	bridge := chatbridge.New(
+		srv.Orchestrator(),
+		srv.ConversationStore(),
+		srv.LogWriter(),
+		resolver,
+		logger,
+	)
+	srv.SetChatHandler(bridge)
+
 	if err := srv.Start(ctx); err != nil {
 		logger.Error("server error", "error", err)
 		os.Exit(1)

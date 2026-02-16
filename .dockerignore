@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.factory
+*.md
+!README.md
+.env*
+docker
+crewship_*

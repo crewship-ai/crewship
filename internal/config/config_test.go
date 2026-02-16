@@ -67,6 +67,7 @@ func TestEnvOverrides(t *testing.T) {
 	t.Setenv("CREWSHIP_PORT", "7777")
 	t.Setenv("CREWSHIP_CONTAINER_PROVIDER", "k8s")
 	t.Setenv("CREWSHIP_LOG_LEVEL", "warn")
+	t.Setenv("CREWSHIP_NEXTJS_URL", "http://nextjs:3000")
 
 	cfg, err := Load("")
 	if err != nil {
@@ -81,6 +82,9 @@ func TestEnvOverrides(t *testing.T) {
 	}
 	if cfg.Logging.Level != "warn" {
 		t.Errorf("expected warn, got %s", cfg.Logging.Level)
+	}
+	if cfg.Auth.NextjsURL != "http://nextjs:3000" {
+		t.Errorf("expected nextjs url, got %s", cfg.Auth.NextjsURL)
 	}
 }
 
