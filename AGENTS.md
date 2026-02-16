@@ -108,7 +108,7 @@ config/
 |---|---|
 | Frontend | Next.js, React, Tailwind CSS 4, shadcn/ui (new-york) |
 | Icons | lucide-react (ONLY allowed icon library) |
-| Auth | NextAuth.js (Auth.js v5) with Prisma adapter |
+| Auth | NextAuth.js v5 beta.30 (Auth.js) with Prisma adapter. **Note:** Auth.js project merged into Better Auth -- evaluate migration in Phase 2. |
 | ORM | Prisma (ONLY DB access, from Next.js only) |
 | Database | PostgreSQL 16 (local Docker, structured data only) |
 | Backend | Go (`crewshipd` binary) |
@@ -123,6 +123,7 @@ config/
 | Validation | Zod |
 | RBAC | CASL |
 | Design tokens | `app/globals.css` (oklch, tweakcn.com) |
+| Linting | ESLint 9 (pinned -- v10 awaiting @typescript-eslint support) |
 
 ## Architecture
 
