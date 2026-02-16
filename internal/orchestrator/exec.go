@@ -12,7 +12,7 @@ import (
 func BuildCLICommand(req AgentRunRequest) []string {
 	switch req.CLIAdapter {
 	case "CLAUDE_CODE":
-		cmd := []string{"claude", "--print"}
+		cmd := []string{"claude", "--print", "--no-session-persistence", "--verbose"}
 		if req.SystemPrompt != "" {
 			cmd = append(cmd, "--system-prompt", req.SystemPrompt)
 		}

@@ -88,17 +88,17 @@ func TestBuildCLICommand(t *testing.T) {
 		{
 			"claude code default",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", UserMessage: "hello"},
-			[]string{"claude", "--print", "hello"},
+			[]string{"claude", "--print", "--no-session-persistence", "--verbose", "hello"},
 		},
 		{
 			"claude code with system prompt",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", SystemPrompt: "be helpful", UserMessage: "hello"},
-			[]string{"claude", "--print", "--system-prompt", "be helpful", "hello"},
+			[]string{"claude", "--print", "--no-session-persistence", "--verbose", "--system-prompt", "be helpful", "hello"},
 		},
 		{
 			"claude code minimal profile",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", ToolProfile: "MINIMAL", UserMessage: "hello"},
-			[]string{"claude", "--print", "--tools", "Read,Search,Grep", "hello"},
+			[]string{"claude", "--print", "--no-session-persistence", "--verbose", "--tools", "Read,Search,Grep", "hello"},
 		},
 		{
 			"codex cli",

@@ -98,7 +98,7 @@ func (p *Provider) EnsureTeamRuntime(ctx context.Context, team provider.TeamConf
 				"CREWSHIP_TEAM_ID=" + team.ID,
 			},
 			Healthcheck: &container.HealthConfig{
-				Test:     []string{"CMD-SHELL", "echo alive"},
+				Test:     []string{"CMD-SHELL", "test -f /workspace/.ready"},
 				Interval: 30_000_000_000,
 				Timeout:  5_000_000_000,
 				Retries:  3,
@@ -119,7 +119,10 @@ func (p *Provider) EnsureTeamRuntime(ctx context.Context, team provider.TeamConf
 				{Type: mount.TypeVolume, Source: "workspace-" + team.ID, Target: "/workspace"},
 				{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
 			},
-			Tmpfs:       map[string]string{"/tmp": "rw,size=500m"},
+			Tmpfs: map[string]string{
+				"/tmp":        "rw,size=500m",
+				"/home/agent": "rw,size=100m,uid=1001,gid=1001",
+			},
 			NetworkMode: container.NetworkMode(p.cfg.Network),
 		},
 		&network.NetworkingConfig{},

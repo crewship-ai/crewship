@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -27,10 +28,10 @@ type AgentRunRequest struct {
 }
 
 type Credential struct {
-	ID          string
-	EnvVarName  string
-	PlainValue  string
-	Priority    int
+	ID         string `json:"id,omitempty"`
+	EnvVarName string `json:"env_var"`
+	PlainValue string `json:"value"`
+	Priority   int    `json:"priority"`
 }
 
 type RunState struct {
@@ -107,11 +108,26 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	env := BuildEnvVars(req, cred)
 	cmd := BuildCLICommand(req)
 
+	workDir := "/workspace/" + req.AgentSlug
+	mkdirCfg := provider.ExecConfig{
+		ContainerID: req.ContainerID,
+		Cmd:         []string{"mkdir", "-p", workDir},
+		User:        "1001:1001",
+	}
+	mkResult, err := o.container.Exec(ctx, mkdirCfg)
+	if err != nil {
+		o.logger.Warn("failed to create agent workspace dir", "error", err)
+	} else {
+		// drain and wait for mkdir to finish
+		io.Copy(io.Discard, mkResult.Reader)
+		mkResult.Reader.Close()
+	}
+
 	execCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,
 		Cmd:         cmd,
 		Env:         env,
-		WorkingDir:  "/workspace/" + req.AgentSlug,
+		WorkingDir:  workDir,
 		User:        "1001:1001",
 	}
 

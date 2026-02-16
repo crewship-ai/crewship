@@ -54,8 +54,9 @@ func (m *memState) Close() error { return nil }
 
 // mock container provider
 type mockContainer struct {
-	execResult    *provider.ExecResult
+	execResults   []*provider.ExecResult
 	execErr       error
+	execCallIdx   int
 	inspectResult struct {
 		running  bool
 		exitCode int
@@ -75,7 +76,13 @@ func (m *mockContainer) Exec(_ context.Context, _ provider.ExecConfig) (*provide
 	if m.execErr != nil {
 		return nil, m.execErr
 	}
-	return m.execResult, nil
+	idx := m.execCallIdx
+	m.execCallIdx++
+	if idx < len(m.execResults) {
+		return m.execResults[idx], nil
+	}
+	// fallback: return a no-op result for mkdir etc.
+	return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 }
 func (m *mockContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return m.inspectResult.running, m.inspectResult.exitCode, m.inspectErr
@@ -143,7 +150,10 @@ func TestRunAgentSuccess(t *testing.T) {
 	}()
 
 	mc := &mockContainer{
-		execResult: &provider.ExecResult{ExecID: "exec-1", Reader: r},
+		execResults: []*provider.ExecResult{
+			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
+			{ExecID: "exec-1", Reader: r},
+		},
 		inspectResult: struct {
 			running  bool
 			exitCode int
@@ -193,7 +203,10 @@ func TestRunAgentExitCodeError(t *testing.T) {
 	}()
 
 	mc := &mockContainer{
-		execResult: &provider.ExecResult{ExecID: "exec-1", Reader: r},
+		execResults: []*provider.ExecResult{
+			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
+			{ExecID: "exec-1", Reader: r},
+		},
 		inspectResult: struct {
 			running  bool
 			exitCode int

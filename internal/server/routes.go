@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -173,6 +174,13 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
+		timeout := time.Duration(req.TimeoutSecs) * time.Second
+		if timeout <= 0 {
+			timeout = 30 * time.Minute
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
 		handler := func(event orchestrator.AgentEvent) {
 			if s.logWriter != nil {
 				_ = s.logWriter.Append(req.TeamID, req.AgentSlug, logcollector.LogEntry{
@@ -184,7 +192,7 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
-		if err := s.orchestrator.RunAgent(r.Context(), runReq, handler); err != nil {
+		if err := s.orchestrator.RunAgent(ctx, runReq, handler); err != nil {
 			s.logger.Error("agent run failed", "agent_id", agentID, "error", err)
 		}
 	}()

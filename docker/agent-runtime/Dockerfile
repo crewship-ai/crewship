@@ -22,10 +22,12 @@ RUN groupadd -g 1001 agent && useradd -u 1001 -g agent -m agent
 RUN mkdir -p /workspace /output && \
     chown agent:agent /workspace /output
 
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+
 USER agent
 WORKDIR /workspace
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD echo "alive" || exit 1
+    CMD test -f /workspace/.ready || exit 1
 
-CMD ["sleep", "infinity"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
