@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -11,13 +12,13 @@ import (
 )
 
 func testHandler(secret string) *Handler {
-	lookup := func(teamID, agentID string) (string, error) {
+	lookup := func(_ context.Context, teamID, agentID string) (string, error) {
 		if teamID == "team-1" && agentID == "agent-1" {
 			return secret, nil
 		}
 		return "", fmt.Errorf("not found")
 	}
-	trigger := func(teamID, agentID string, payload WebhookPayload) error {
+	trigger := func(_ context.Context, teamID, agentID string, payload WebhookPayload) error {
 		return nil
 	}
 	return NewHandler(slog.Default(), lookup, trigger)

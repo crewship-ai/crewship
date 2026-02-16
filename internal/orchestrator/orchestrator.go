@@ -195,15 +195,27 @@ func (o *Orchestrator) selectCredential(creds []Credential) *Credential {
 
 func (o *Orchestrator) updateRunStatus(ctx context.Context, runID, status string) {
 	data, err := o.state.Get(ctx, "agent_runs", runID)
-	if err != nil || data == nil {
+	if err != nil {
+		o.logger.Error("updateRunStatus: get failed", "run_id", runID, "error", err)
+		return
+	}
+	if data == nil {
+		o.logger.Warn("updateRunStatus: run not found", "run_id", runID)
 		return
 	}
 	var run RunState
 	if err := json.Unmarshal(data, &run); err != nil {
+		o.logger.Error("updateRunStatus: unmarshal failed", "run_id", runID, "error", err)
 		return
 	}
 	run.Status = status
 	run.LastActivity = time.Now()
-	updated, _ := json.Marshal(run)
-	_ = o.state.Set(ctx, "agent_runs", runID, updated)
+	updated, err := json.Marshal(run)
+	if err != nil {
+		o.logger.Error("updateRunStatus: marshal failed", "run_id", runID, "error", err)
+		return
+	}
+	if err := o.state.Set(ctx, "agent_runs", runID, updated); err != nil {
+		o.logger.Error("updateRunStatus: set failed", "run_id", runID, "error", err)
+	}
 }

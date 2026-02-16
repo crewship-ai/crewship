@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bufio"
 	"context"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -73,18 +74,23 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 }
 
 func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecResult, req AgentRunRequest, handler EventHandler) {
-	defer result.Reader.Close()
+	var closeOnce sync.Once
+	closeReader := func() {
+		closeOnce.Do(func() {
+			result.Reader.Close()
+		})
+	}
+	defer closeReader()
+
+	go func() {
+		<-ctx.Done()
+		closeReader()
+	}()
 
 	scanner := bufio.NewScanner(result.Reader)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 
 	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
 		line := scanner.Text()
 		if line == "" {
 			continue
@@ -101,7 +107,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && ctx.Err() == nil {
 		o.logger.Debug("scanner error", "error", err, "agent_id", req.AgentID)
 	}
 }

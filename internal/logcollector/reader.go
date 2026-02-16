@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Reader struct {
@@ -17,8 +18,21 @@ func NewReader(basePath string) *Reader {
 }
 
 func (r *Reader) ReadAgentLogs(teamID, agentID string, offset, limit int) ([]LogEntry, error) {
+	if err := validatePathSegment(teamID); err != nil {
+		return nil, fmt.Errorf("invalid team ID: %w", err)
+	}
+	if err := validatePathSegment(agentID); err != nil {
+		return nil, fmt.Errorf("invalid agent ID: %w", err)
+	}
 	path := filepath.Join(r.basePath, "teams", teamID, "agents", agentID, "current.jsonl")
 	return readJSONL(path, offset, limit)
+}
+
+func validatePathSegment(s string) error {
+	if s == "" || strings.ContainsAny(s, "/\\") || strings.Contains(s, "..") {
+		return fmt.Errorf("invalid path segment: %q", s)
+	}
+	return nil
 }
 
 func (r *Reader) ReadSessionMessages(basePath, sessionID string) ([]LogEntry, error) {

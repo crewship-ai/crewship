@@ -2,6 +2,7 @@ package fileserver
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -36,19 +37,23 @@ func NewWatcher(basePath string, logger *slog.Logger, handler EventHandler) *Wat
 }
 
 func (w *Watcher) Watch(ctx context.Context, teamID string) error {
-	outputDir := filepath.Join(w.basePath, teamID)
+	if teamID == "" || filepath.IsAbs(teamID) || strings.Contains(teamID, "..") {
+		return fmt.Errorf("invalid team ID: %q", teamID)
+	}
+
+	outputDir := filepath.Join(w.basePath, filepath.Clean(teamID))
 	if err := os.MkdirAll(outputDir, 0750); err != nil {
-		return err
+		return fmt.Errorf("create output dir: %w", err)
 	}
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		return err
+		return fmt.Errorf("new fsnotify watcher: %w", err)
 	}
 
 	if err := addAllDirs(watcher, outputDir); err != nil {
 		watcher.Close()
-		return err
+		return fmt.Errorf("watch output dir: %w", err)
 	}
 
 	go func() {

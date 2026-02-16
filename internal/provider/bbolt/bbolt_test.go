@@ -49,7 +49,9 @@ func TestGetMissingBucket(t *testing.T) {
 func TestGetMissingKey(t *testing.T) {
 	p := tempDB(t)
 	ctx := context.Background()
-	_ = p.Set(ctx, "runs", "exists", []byte("data"))
+	if err := p.Set(ctx, "runs", "exists", []byte("data")); err != nil {
+		t.Fatal(err)
+	}
 
 	val, err := p.Get(ctx, "runs", "missing")
 	if err != nil {
@@ -63,7 +65,9 @@ func TestGetMissingKey(t *testing.T) {
 func TestDelete(t *testing.T) {
 	p := tempDB(t)
 	ctx := context.Background()
-	_ = p.Set(ctx, "runs", "run-1", []byte("data"))
+	if err := p.Set(ctx, "runs", "run-1", []byte("data")); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := p.Delete(ctx, "runs", "run-1"); err != nil {
 		t.Fatal(err)
@@ -88,9 +92,11 @@ func TestDeleteMissingBucket(t *testing.T) {
 func TestList(t *testing.T) {
 	p := tempDB(t)
 	ctx := context.Background()
-	_ = p.Set(ctx, "runs", "a", []byte("1"))
-	_ = p.Set(ctx, "runs", "b", []byte("2"))
-	_ = p.Set(ctx, "runs", "c", []byte("3"))
+	for _, kv := range []struct{ k, v string }{{"a", "1"}, {"b", "2"}, {"c", "3"}} {
+		if err := p.Set(ctx, "runs", kv.k, []byte(kv.v)); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	result, err := p.List(ctx, "runs")
 	if err != nil {
@@ -107,9 +113,11 @@ func TestList(t *testing.T) {
 func TestListByPrefix(t *testing.T) {
 	p := tempDB(t)
 	ctx := context.Background()
-	_ = p.Set(ctx, "runs", "team-a:run-1", []byte("1"))
-	_ = p.Set(ctx, "runs", "team-a:run-2", []byte("2"))
-	_ = p.Set(ctx, "runs", "team-b:run-1", []byte("3"))
+	for _, kv := range []struct{ k, v string }{{"team-a:run-1", "1"}, {"team-a:run-2", "2"}, {"team-b:run-1", "3"}} {
+		if err := p.Set(ctx, "runs", kv.k, []byte(kv.v)); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	result, err := p.ListByPrefix(ctx, "runs", "team-a:")
 	if err != nil {

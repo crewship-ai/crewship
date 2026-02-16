@@ -27,7 +27,8 @@ func New(basePath string) (*Provider, error) {
 
 func (p *Provider) resolve(path string) (string, error) {
 	full := filepath.Join(p.basePath, filepath.Clean(path))
-	if !strings.HasPrefix(full, p.basePath) {
+	rel, err := filepath.Rel(p.basePath, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("path traversal detected: %s", path)
 	}
 	return full, nil
@@ -163,6 +164,10 @@ func (p *Provider) Watch(ctx context.Context, dir string, events chan<- provider
 					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 						_ = watcher.Add(event.Name)
 					}
+				}
+			case _, ok := <-watcher.Errors:
+				if !ok {
+					return
 				}
 			case <-ctx.Done():
 				return
