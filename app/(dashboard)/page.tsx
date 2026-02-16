@@ -1,12 +1,111 @@
+"use client"
+
+import { useEffect, useState } from "react"
 import { Bot, Hourglass, Key, Activity, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
 import { EmptyState } from "@/components/layout/empty-state"
 import { StatCard } from "@/components/layout/stat-card"
 import { FilterBar } from "@/components/layout/filter-bar"
+import { Skeleton } from "@/components/ui/skeleton"
+import { AgentCard } from "@/components/features/agents/agent-card"
+import { useOrg } from "@/hooks/use-org"
 import Link from "next/link"
 
+interface AgentTeam {
+  name: string
+  slug: string
+  color: string | null
+}
+
+interface Agent {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  role_title: string | null
+  agent_role: string
+  status: string
+  cli_adapter: string
+  llm_provider: string
+  llm_model: string
+  team: AgentTeam | null
+  _count: { skills: number; credentials: number; sessions: number }
+}
+
+interface Credential {
+  id: string
+}
+
 export default function DashboardPage() {
+  const { orgId, loading: orgLoading } = useOrg()
+  const [agents, setAgents] = useState<Agent[]>([])
+  const [credentials, setCredentials] = useState<Credential[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [activeFilter, setActiveFilter] = useState("All")
+
+  useEffect(() => {
+    if (!orgId) return
+
+    let cancelled = false
+
+    async function fetchData() {
+      setLoading(true)
+      setError(null)
+      try {
+        const [agentsRes, credsRes] = await Promise.all([
+          fetch(`/api/v1/agents?org_id=${orgId}`),
+          fetch(`/api/v1/credentials?org_id=${orgId}`),
+        ])
+
+        if (!agentsRes.ok || !credsRes.ok) {
+          setError("Failed to load dashboard data")
+          return
+        }
+
+        const [agentsData, credsData] = await Promise.all([
+          agentsRes.json() as Promise<Agent[]>,
+          credsRes.json() as Promise<Credential[]>,
+        ])
+
+        if (!cancelled) {
+          setAgents(agentsData)
+          setCredentials(credsData)
+        }
+      } catch {
+        if (!cancelled) setError("Failed to load dashboard data")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    fetchData()
+    return () => {
+      cancelled = true
+    }
+  }, [orgId])
+
+  const isLoading = orgLoading || loading
+
+  const totalAgents = agents.length
+  const runningNow = agents.filter((a) => a.status === "RUNNING").length
+  const apiKeysActive = credentials.length
+
+  const filteredAgents =
+    activeFilter === "All"
+      ? agents
+      : agents.filter((a) => a.status === activeFilter.toUpperCase())
+
+  if (error) {
+    return (
+      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+        <PageHeader title="Dashboard" description="Overview of your AI workforce" />
+        <p className="text-sm text-destructive">{error}</p>
+      </div>
+    )
+  }
+
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       <PageHeader title="Dashboard" description="Overview of your AI workforce">
@@ -19,30 +118,86 @@ export default function DashboardPage() {
       </PageHeader>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <StatCard title="Total Agents" value={0} subtitle="No agents yet" icon={Bot} iconClassName="bg-primary/10 text-primary" />
-        <StatCard title="Running Now" value={0} subtitle="of 0 agents" icon={Activity} iconClassName="bg-emerald-500/10 text-emerald-600" />
-        <StatCard title="Today's Runs" value={0} subtitle="No runs today" icon={Hourglass} />
-        <StatCard title="API Keys Active" value={0} subtitle="Add credentials to get started" icon={Key} />
+        {isLoading ? (
+          <>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-[104px] rounded-xl" />
+            ))}
+          </>
+        ) : (
+          <>
+            <StatCard
+              title="Total Agents"
+              value={totalAgents}
+              subtitle={totalAgents === 0 ? "No agents yet" : `${totalAgents} agent${totalAgents === 1 ? "" : "s"}`}
+              icon={Bot}
+              iconClassName="bg-primary/10 text-primary"
+            />
+            <StatCard
+              title="Running Now"
+              value={runningNow}
+              subtitle={`of ${totalAgents} agents`}
+              icon={Activity}
+              iconClassName="bg-emerald-500/10 text-emerald-600"
+            />
+            <StatCard
+              title="Today's Runs"
+              value={0}
+              subtitle="No runs today"
+              icon={Hourglass}
+            />
+            <StatCard
+              title="API Keys Active"
+              value={apiKeysActive}
+              subtitle={apiKeysActive === 0 ? "Add credentials to get started" : `${apiKeysActive} key${apiKeysActive === 1 ? "" : "s"} configured`}
+              icon={Key}
+            />
+          </>
+        )}
       </div>
 
       <div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
           <h2 className="text-base font-semibold">All Agents</h2>
-          <FilterBar filters={["All", "Running", "Idle", "Error"]} />
+          <FilterBar
+            filters={["All", "Running", "Idle", "Error"]}
+            active={activeFilter}
+            onFilter={setActiveFilter}
+          />
         </div>
 
-        <EmptyState
-          icon={Bot}
-          title="No agents yet"
-          description="Create your first AI agent to start automating tasks. Agents work in teams and can chat, run tasks, and produce files."
-        >
-          <Button className="mt-4" asChild>
-            <Link href="/agents/new">
-              <Plus className="mr-2 h-4 w-4" />
-              Create First Agent
-            </Link>
-          </Button>
-        </EmptyState>
+        {isLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-[160px] rounded-xl" />
+            ))}
+          </div>
+        ) : filteredAgents.length === 0 ? (
+          <EmptyState
+            icon={Bot}
+            title={agents.length === 0 ? "No agents yet" : "No matching agents"}
+            description={
+              agents.length === 0
+                ? "Create your first AI agent to start automating tasks. Agents work in teams and can chat, run tasks, and produce files."
+                : "No agents match the current filter. Try changing the filter."
+            }
+          >
+            {agents.length === 0 && (
+              <Button className="mt-4" asChild>
+                <Link href="/agents/new">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create First Agent
+                </Link>
+              </Button>
+            )}
+          </EmptyState>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+            {filteredAgents.map((agent) => (
+              <AgentCard key={agent.id} agent={agent} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

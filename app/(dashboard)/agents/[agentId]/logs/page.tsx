@@ -1,4 +1,4 @@
-import { Download, Trash2, ArrowDownToLine } from "lucide-react"
+import { Download, Trash2, ArrowDownToLine, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 
@@ -24,6 +24,12 @@ export default async function LogsPage({ params }: { params: Promise<{ agentId: 
 
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+      {/* Backend requirement banner */}
+      <div className="flex items-center gap-2 rounded-md bg-muted/10 border border-border px-3 py-2">
+        <Info className="h-4 w-4 text-muted-foreground shrink-0" />
+        <p className="text-xs text-muted-foreground">Log streaming requires <strong>crewshipd</strong> (Go service) to be running.</p>
+      </div>
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1">

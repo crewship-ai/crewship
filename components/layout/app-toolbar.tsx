@@ -1,6 +1,7 @@
 "use client"
 
 import { usePathname } from "next/navigation"
+import { signOut } from "next-auth/react"
 import { Search, Bell, BookOpen, ChevronDown, User, HelpCircle, Github, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -166,7 +167,7 @@ export function AppToolbar() {
               GitHub
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="gap-3 text-xs text-destructive">
+            <DropdownMenuItem className="gap-3 text-xs text-destructive" onClick={() => signOut({ callbackUrl: "/login" })}>
               <LogOut className="h-4 w-4" />
               Log out
             </DropdownMenuItem>
