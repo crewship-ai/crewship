@@ -15,7 +15,7 @@ import (
 func newTestServer() *Server {
 	cfg := config.Default()
 	logger := logging.New("error", "json", nil)
-	s := New(cfg, logger)
+	s := New(cfg, logger, nil)
 	s.startedAt = time.Now()
 	return s
 }
@@ -124,8 +124,8 @@ func TestIPCEndpoints(t *testing.T) {
 		{"agent start", "POST", "/agents/test-uuid/start", http.StatusAccepted, "agent_id", "test-uuid"},
 		{"agent stop", "POST", "/agents/test-uuid/stop", http.StatusOK, "agent_id", "test-uuid"},
 		{"container status", "GET", "/teams/team-uuid/container/status", http.StatusOK, "team_id", "team-uuid"},
-		{"container start", "POST", "/teams/team-uuid/container/start", http.StatusAccepted, "team_id", "team-uuid"},
-		{"container stop", "POST", "/teams/team-uuid/container/stop", http.StatusOK, "team_id", "team-uuid"},
+		{"container start", "POST", "/teams/team-uuid/container/start", http.StatusServiceUnavailable, "error", "container provider not configured"},
+		{"container stop", "POST", "/teams/team-uuid/container/stop", http.StatusServiceUnavailable, "error", "container provider not configured"},
 		{"file list", "GET", "/teams/team-uuid/files", http.StatusOK, "team_id", "team-uuid"},
 		{"session messages", "GET", "/sessions/session-uuid/messages", http.StatusOK, "session_id", "session-uuid"},
 	}
