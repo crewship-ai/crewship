@@ -3,7 +3,6 @@
 import { usePathname } from "next/navigation"
 import { Search, Bell, BookOpen, ChevronDown, User, HelpCircle, Github, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 import {
   DropdownMenu,
   DropdownMenuContent,

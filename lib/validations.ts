@@ -42,7 +42,17 @@ export const createCredentialSchema = z.object({
   value: z.string().min(1),
   scope: z.enum(["ORGANIZATION", "TEAM"]).default("ORGANIZATION"),
   team_id: z.string().uuid().optional(),
-})
+}).refine(
+  (data) => {
+    if (data.scope === "TEAM" && !data.team_id) return false
+    if (data.scope === "ORGANIZATION" && data.team_id) return false
+    return true
+  },
+  {
+    message: "team_id is required for TEAM scope and must be absent for ORGANIZATION scope",
+    path: ["team_id"],
+  }
+)
 
 export const inviteMemberSchema = z.object({
   email: z.string().email(),
