@@ -28,6 +28,7 @@ coverage/
 
 # Prisma
 prisma/migrations/
+lib/generated/
 
 # Go
 /crewshipd

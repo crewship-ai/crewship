@@ -1,4 +1,3 @@
-import { fixupConfigRules } from "@eslint/compat";
 import globals from "globals";
 import typescriptEslint from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
@@ -53,6 +52,8 @@ export default [
       "coverage/**",
       "*.config.{js,ts}",
       "public/**",
+      "lib/generated/**",
+      ".factory/**",
     ],
   },
 ];
