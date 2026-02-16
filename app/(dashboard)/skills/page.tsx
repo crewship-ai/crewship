@@ -1,40 +1,19 @@
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { PageHeader } from "@/components/layout/page-header"
+import { FilterBar } from "@/components/layout/filter-bar"
 
 const bundledSkills = [
-  {
-    name: "Coding Assistant",
-    description: "Code review, refactoring, debugging, test writing",
-    category: "CODING",
-    icon: "💻",
-  },
-  {
-    name: "Web Researcher",
-    description: "Web search, data extraction, competitive analysis",
-    category: "DATA",
-    icon: "🔍",
-  },
-  {
-    name: "DevOps Helper",
-    description: "Infrastructure monitoring, deployment, CI/CD",
-    category: "DEVOPS",
-    icon: "🔧",
-  },
+  { name: "Coding Assistant", description: "Code review, refactoring, debugging, test writing", category: "CODING", icon: "💻" },
+  { name: "Web Researcher", description: "Web search, data extraction, competitive analysis", category: "DATA", icon: "🔍" },
+  { name: "DevOps Helper", description: "Infrastructure monitoring, deployment, CI/CD", category: "DEVOPS", icon: "🔧" },
 ]
 
 export default function SkillsPage() {
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold">Skills</h1>
-        <p className="text-sm text-muted-foreground">Browse and manage agent skills</p>
-      </div>
-
-      <div className="flex items-center gap-2">
-        <Badge variant="secondary" className="cursor-pointer">All</Badge>
-        <Badge variant="outline" className="cursor-pointer">Bundled</Badge>
-        <Badge variant="outline" className="cursor-pointer">Custom</Badge>
-      </div>
+      <PageHeader title="Skills" description="Browse and manage agent skills" />
+      <FilterBar filters={["All", "Bundled", "Custom"]} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {bundledSkills.map((skill) => (
