@@ -115,12 +115,27 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+var (
+	validContainerProviders = map[string]bool{"docker": true, "k8s": true}
+	validStorageProviders   = map[string]bool{"localfs": true, "s3": true}
+	validStateProviders     = map[string]bool{"bbolt": true, "postgres": true}
+)
+
 func (c *Config) Validate() error {
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.Server.Port)
 	}
 	if c.IPC.SocketPath == "" {
 		return fmt.Errorf("ipc.socket_path is required")
+	}
+	if !validContainerProviders[c.Container.Provider] {
+		return fmt.Errorf("container.provider must be 'docker' or 'k8s', got %q", c.Container.Provider)
+	}
+	if !validStorageProviders[c.Storage.Provider] {
+		return fmt.Errorf("storage.provider must be 'localfs' or 's3', got %q", c.Storage.Provider)
+	}
+	if !validStateProviders[c.State.Provider] {
+		return fmt.Errorf("state.provider must be 'bbolt' or 'postgres', got %q", c.State.Provider)
 	}
 	return nil
 }

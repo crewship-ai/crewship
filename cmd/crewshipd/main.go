@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/crewship-ai/crewship/internal/config"
@@ -36,7 +36,7 @@ func main() {
 		"container_provider", cfg.Container.Provider,
 		"storage_provider", cfg.Storage.Provider,
 		"state_provider", cfg.State.Provider,
-		"http_addr", cfg.Server.Host+":"+itoa(cfg.Server.Port),
+		"http_addr", cfg.Server.Host+":"+strconv.Itoa(cfg.Server.Port),
 		"ipc_socket", cfg.IPC.SocketPath,
 	)
 
@@ -61,8 +61,4 @@ func main() {
 	}
 
 	logger.Info("crewshipd stopped")
-}
-
-func itoa(i int) string {
-	return fmt.Sprintf("%d", i)
 }
