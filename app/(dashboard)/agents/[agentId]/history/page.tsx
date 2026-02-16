@@ -1,4 +1,4 @@
-import { Plus, Settings, Puzzle } from "lucide-react"
+import { Plus, Settings, Puzzle, Info } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 export default async function HistoryPage({ params }: { params: Promise<{ agentId: string }> }) {
@@ -36,6 +36,12 @@ export default async function HistoryPage({ params }: { params: Promise<{ agentI
 
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+      {/* Backend requirement banner */}
+      <div className="flex items-center gap-2 rounded-md bg-muted/10 border border-border px-3 py-2">
+        <Info className="h-4 w-4 text-muted-foreground shrink-0" />
+        <p className="text-xs text-muted-foreground">Configuration history will be populated by the audit log system (coming soon).</p>
+      </div>
+
       <p className="text-sm text-muted-foreground">Configuration change history</p>
 
       {/* Timeline */}
