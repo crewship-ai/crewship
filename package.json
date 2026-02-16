@@ -22,7 +22,7 @@
     "@auth/prisma-adapter": "^2.9.0",
     "@casl/ability": "^6.8.0",
     "@casl/prisma": "^1.5.0",
-    "@prisma/client": "^6.5.0",
+    "@prisma/client": "^7.4.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
