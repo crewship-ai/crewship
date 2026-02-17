@@ -121,11 +121,18 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get("Authorization")
-	if token == "" {
+	user := UserFromContext(r.Context())
+	if user == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
-	token = strings.TrimPrefix(token, "Bearer ")
-	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+	// Return the session cookie value as the ws token.
+	// The WebSocket hub validates it using the same JWTValidator.
+	for _, name := range []string{"authjs.session-token", "__Secure-authjs.session-token"} {
+		if c, err := r.Cookie(name); err == nil && c.Value != "" {
+			writeJSON(w, http.StatusOK, map[string]string{"token": c.Value})
+			return
+		}
+	}
+	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 }
