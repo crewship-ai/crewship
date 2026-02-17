@@ -355,12 +355,18 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 // StopCrewRuntime gracefully stops a crew container with a 30-second timeout.
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
 	timeout := 30
-	return p.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout})
+	if err := p.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
+		return fmt.Errorf("stop crew runtime %s: %w", containerID[:12], err)
+	}
+	return nil
 }
 
 // RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
-	return p.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+	if err := p.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
+		return fmt.Errorf("remove crew runtime %s: %w", containerID[:12], err)
+	}
+	return nil
 }
 
 // ContainerStatus inspects a container and returns its current state (running/stopped/error).
@@ -415,6 +421,7 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 	pr, pw := io.Pipe()
 	go func() {
 		defer pw.Close()
+		defer resp.Close()
 		_, _ = stdcopy.StdCopy(pw, pw, resp.Reader)
 	}()
 

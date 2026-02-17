@@ -139,27 +139,9 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Guard against duplicate onboarding
-	var alreadyCompleted bool
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT onboarding_completed FROM users WHERE id = ?", user.ID).Scan(&alreadyCompleted)
-	if errors.Is(err, sql.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
-		return
-	}
-	if err != nil {
-		h.logger.Error("query onboarding status", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	if alreadyCompleted {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Onboarding already completed"})
-		return
-	}
-
 	// Get user's first workspace
 	var workspaceID string
-	err = h.db.QueryRowContext(r.Context(), `
+	err := h.db.QueryRowContext(r.Context(), `
 		SELECT wm.workspace_id FROM workspace_members wm
 		WHERE wm.user_id = ? ORDER BY wm.created_at ASC LIMIT 1
 	`, user.ID).Scan(&workspaceID)
@@ -182,6 +164,26 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	// Atomic guard: claim onboarding (prevents TOCTOU race)
+	guardRes, err := tx.ExecContext(r.Context(),
+		"UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ? AND onboarding_completed = 0",
+		now, user.ID)
+	if err != nil {
+		h.logger.Error("lock onboarding", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	guardRows, err := guardRes.RowsAffected()
+	if err != nil {
+		h.logger.Error("lock onboarding rows affected", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if guardRows == 0 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Onboarding already completed"})
+		return
+	}
 
 	// Update workspace name if provided
 	if req.WorkspaceName != "" {
@@ -277,16 +279,6 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to assign credential"})
 			return
 		}
-	}
-
-	// Mark onboarding complete
-	_, err = tx.ExecContext(r.Context(),
-		"UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ?",
-		now, user.ID)
-	if err != nil {
-		h.logger.Error("mark onboarding complete", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
 	}
 
 	if err := tx.Commit(); err != nil {
