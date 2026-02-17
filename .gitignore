@@ -36,6 +36,7 @@ lib/generated/
 *.db
 
 # Go
+/crewship
 /crewshipd
 *.exe
 *.dll
