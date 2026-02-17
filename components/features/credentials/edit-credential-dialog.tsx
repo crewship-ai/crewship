@@ -31,12 +31,12 @@ interface CredentialData {
   id: string
   name: string
   description: string | null
-  scope: "ORGANIZATION" | "TEAM"
-  team_id: string | null
+  scope: "WORKSPACE" | "CREW"
+  crew_id: string | null
 }
 
 interface EditCredentialDialogProps {
-  orgId: string
+  workspaceId: string
   credential: CredentialData
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -46,7 +46,7 @@ interface EditCredentialDialogProps {
 export type { CredentialData }
 
 export function EditCredentialDialog({
-  orgId,
+  workspaceId,
   credential,
   open,
   onOpenChange,
@@ -55,10 +55,10 @@ export function EditCredentialDialog({
   const [name, setName] = React.useState(credential.name)
   const [description, setDescription] = React.useState(credential.description ?? "")
   const [value, setValue] = React.useState("")
-  const [scope, setScope] = React.useState<"ORGANIZATION" | "TEAM">(credential.scope)
-  const [teamId, setTeamId] = React.useState(credential.team_id ?? "")
+  const [scope, setScope] = React.useState<"WORKSPACE" | "CREW">(credential.scope)
+  const [crewId, setTeamId] = React.useState(credential.crew_id ?? "")
   const [showValue, setShowValue] = React.useState(false)
-  const [teams, setTeams] = React.useState<Team[]>([])
+  const [crews, setTeams] = React.useState<Team[]>([])
   const [teamsLoading, setTeamsLoading] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState("")
@@ -67,22 +67,22 @@ export function EditCredentialDialog({
     setName(credential.name)
     setDescription(credential.description ?? "")
     setScope(credential.scope)
-    setTeamId(credential.team_id ?? "")
+    setTeamId(credential.crew_id ?? "")
     setValue("")
     setShowValue(false)
     setError("")
   }, [credential])
 
   React.useEffect(() => {
-    if (scope === "TEAM" && teams.length === 0) {
+    if (scope === "CREW" && crews.length === 0) {
       setTeamsLoading(true)
-      fetch(`/api/v1/teams?org_id=${orgId}`)
+      fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
         .then((res) => res.json())
         .then((data: Team[]) => setTeams(data))
         .catch(() => setTeams([]))
         .finally(() => setTeamsLoading(false))
     }
-  }, [scope, orgId, teams.length])
+  }, [scope, workspaceId, crews.length])
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
@@ -101,8 +101,8 @@ export function EditCredentialDialog({
       setError("Name is required")
       return
     }
-    if (scope === "TEAM" && !teamId) {
-      setError("Team is required for team-scoped credentials")
+    if (scope === "CREW" && !crewId) {
+      setError("Crew is required for crew-scoped credentials")
       return
     }
 
@@ -116,10 +116,10 @@ export function EditCredentialDialog({
       if (description.trim()) body.description = description.trim()
       else body.description = ""
       if (value) body.value = value
-      if (scope === "TEAM") body.team_id = teamId
-      else body.team_id = null
+      if (scope === "CREW") body.crew_id = crewId
+      else body.crew_id = null
 
-      const res = await fetch(`/api/v1/credentials/${credential.id}?org_id=${orgId}`, {
+      const res = await fetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -199,34 +199,34 @@ export function EditCredentialDialog({
 
           <div className="space-y-2">
             <Label htmlFor="edit-cred-scope">Scope</Label>
-            <Select value={scope} onValueChange={(v) => { setScope(v as "ORGANIZATION" | "TEAM"); if (v === "ORGANIZATION") setTeamId(""); }}>
+            <Select value={scope} onValueChange={(v) => { setScope(v as "WORKSPACE" | "CREW"); if (v === "WORKSPACE") setTeamId(""); }}>
               <SelectTrigger id="edit-cred-scope" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ORGANIZATION">Organization</SelectItem>
-                <SelectItem value="TEAM">Team</SelectItem>
+                <SelectItem value="WORKSPACE">Workspace</SelectItem>
+                <SelectItem value="CREW">Crew</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {scope === "TEAM" && (
+          {scope === "CREW" && (
             <div className="space-y-2">
-              <Label htmlFor="edit-cred-team">Team</Label>
+              <Label htmlFor="edit-cred-team">Crew</Label>
               {teamsLoading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading teams...
+                  Loading crews...
                 </div>
               ) : (
-                <Select value={teamId} onValueChange={setTeamId}>
+                <Select value={crewId} onValueChange={setTeamId}>
                   <SelectTrigger id="edit-cred-team" className="w-full">
-                    <SelectValue placeholder="Select a team" />
+                    <SelectValue placeholder="Select a crew" />
                   </SelectTrigger>
                   <SelectContent>
-                    {teams.map((team) => (
-                      <SelectItem key={team.id} value={team.id}>
-                        {team.name}
+                    {crews.map((crew) => (
+                      <SelectItem key={crew.id} value={crew.id}>
+                        {crew.name}
                       </SelectItem>
                     ))}
                   </SelectContent>

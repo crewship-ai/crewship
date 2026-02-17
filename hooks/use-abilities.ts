@@ -4,7 +4,7 @@ import { useMemo } from "react"
 import { defineAbilitiesFor } from "@/lib/permissions/abilities"
 import type { AppAbility } from "@/lib/permissions/abilities"
 import type { OrgRole } from "@/lib/generated/prisma/client"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 interface UseAbilitiesReturn {
   abilities: AppAbility
@@ -13,11 +13,11 @@ interface UseAbilitiesReturn {
 }
 
 /**
- * Returns CASL abilities for the current user's org role.
+ * Returns CASL abilities for the current user's workspace role.
  * Use `abilities.can("create", "Agent")` to conditionally render UI.
  */
 export function useAbilities(): UseAbilitiesReturn {
-  const { role, loading } = useOrg()
+  const { role, loading } = useWorkspace()
 
   const abilities = useMemo(() => {
     if (!role) return defineAbilitiesFor("VIEWER" as OrgRole)

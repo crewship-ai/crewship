@@ -56,7 +56,7 @@ describe("middleware", () => {
       "/api/v1/health",
       "/api/v1/webhooks",
       "/api/v1/webhooks/github",
-      "/api/v1/internal/sessions",
+      "/api/v1/internal/chats",
       "/api/v1/internal/credentials",
     ])("allows %s without cookie", (path) => {
       const req = createRequest(path, { hasCookie: false })
@@ -71,7 +71,7 @@ describe("middleware", () => {
       "/",
       "/agents",
       "/agents/123/chat",
-      "/teams",
+      "/crews",
       "/credentials",
       "/settings",
       "/api/v1/agents",
@@ -91,7 +91,7 @@ describe("middleware", () => {
       "/",
       "/agents",
       "/agents/123/chat",
-      "/teams",
+      "/crews",
       "/credentials",
       "/api/v1/agents",
       "/api/v1/ws-token",
@@ -142,17 +142,17 @@ describe("middleware", () => {
     })
 
     it("preserves deep nested paths", () => {
-      const req = createRequest("/teams/t1/agents/a1/settings", { hasCookie: false })
+      const req = createRequest("/crews/t1/agents/a1/settings", { hasCookie: false })
       middleware(req)
       const redirectUrl = mockRedirect.mock.calls[0][0] as URL
-      expect(redirectUrl.searchParams.get("callbackUrl")).toBe("/teams/t1/agents/a1/settings")
+      expect(redirectUrl.searchParams.get("callbackUrl")).toBe("/crews/t1/agents/a1/settings")
     })
 
     it("preserves query parameters in callbackUrl", () => {
-      const req = createRequest("/agents?tab=chat&org=123", { hasCookie: false })
+      const req = createRequest("/agents?tab=chat&workspace=123", { hasCookie: false })
       middleware(req)
       const redirectUrl = mockRedirect.mock.calls[0][0] as URL
-      expect(redirectUrl.searchParams.get("callbackUrl")).toBe("/agents?tab=chat&org=123")
+      expect(redirectUrl.searchParams.get("callbackUrl")).toBe("/agents?tab=chat&workspace=123")
     })
   })
 

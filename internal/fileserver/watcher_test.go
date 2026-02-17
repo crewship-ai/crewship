@@ -6,12 +6,12 @@ import (
 	"testing"
 )
 
-func TestWatchInvalidTeamID(t *testing.T) {
+func TestWatchInvalidCrewID(t *testing.T) {
 	w := NewWatcher(t.TempDir(), slog.Default(), nil)
 
 	tests := []struct {
 		name   string
-		teamID string
+		crewID string
 	}{
 		{"empty", ""},
 		{"absolute path", "/etc/passwd"},
@@ -21,9 +21,9 @@ func TestWatchInvalidTeamID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := w.Watch(context.Background(), tt.teamID)
+			err := w.Watch(context.Background(), tt.crewID)
 			if err == nil {
-				t.Error("expected error for invalid team ID")
+				t.Error("expected error for invalid crew ID")
 			}
 		})
 	}

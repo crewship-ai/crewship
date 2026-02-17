@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 import Link from "next/link"
 
 interface RunAgent {
@@ -31,7 +31,7 @@ interface RunAgent {
   slug: string
   cli_adapter: string
   llm_provider: string | null
-  team: { id: string; name: string; color: string | null } | null
+  crew: { id: string; name: string; color: string | null } | null
 }
 
 interface Run {
@@ -74,7 +74,7 @@ function formatDuration(start: string | null, end: string | null): string {
 }
 
 export default function RunsPage() {
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [data, setData] = useState<RunsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -82,8 +82,8 @@ export default function RunsPage() {
   const [triggerFilter, setTriggerFilter] = useState("all")
 
   useEffect(() => {
-    if (!orgId) {
-      if (!orgLoading) setLoading(false)
+    if (!workspaceId) {
+      if (!wsLoading) setLoading(false)
       return
     }
 
@@ -93,7 +93,7 @@ export default function RunsPage() {
       setLoading(true)
       setError(null)
       try {
-        const params = new URLSearchParams({ org_id: orgId as string })
+        const params = new URLSearchParams({ workspace_id: workspaceId as string })
         if (statusFilter !== "all") params.set("status", statusFilter)
         if (triggerFilter !== "all") params.set("trigger", triggerFilter)
 
@@ -113,13 +113,13 @@ export default function RunsPage() {
 
     fetchRuns()
     return () => { cancelled = true }
-  }, [orgId, orgLoading, statusFilter, triggerFilter])
+  }, [workspaceId, wsLoading, statusFilter, triggerFilter])
 
-  const isLoading = orgLoading || loading
+  const isLoading = wsLoading || loading
 
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <PageHeader title="Runs" description="Cross-agent run activity across your organization" />
+      <PageHeader title="Runs" description="Cross-agent run activity across your workspace" />
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -228,13 +228,13 @@ export default function RunsPage() {
                         </Link>
                       </TableCell>
                       <TableCell>
-                        {run.agent.team ? (
+                        {run.agent.crew ? (
                           <span className="flex items-center gap-1.5 text-sm">
                             <span
                               className="h-2 w-2 rounded-full"
-                              style={{ backgroundColor: run.agent.team.color ?? "#6b7280" }}
+                              style={{ backgroundColor: run.agent.crew.color ?? "#6b7280" }}
                             />
-                            {run.agent.team.name}
+                            {run.agent.crew.name}
                           </span>
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>

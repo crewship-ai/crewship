@@ -14,7 +14,7 @@ const CREDENTIAL_SAFE_SELECT = {
   provider: true,
   status: true,
   scope: true,
-  team_id: true,
+  crew_id: true,
   account_label: true,
   account_email: true,
   token_expires_at: true,
@@ -30,8 +30,8 @@ const updateCredentialSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).optional(),
   value: z.string().min(1).optional(),
-  scope: z.enum(["ORGANIZATION", "TEAM"]).optional(),
-  team_id: z.string().uuid().optional().nullable(),
+  scope: z.enum(["WORKSPACE", "CREW"]).optional(),
+  crew_id: z.string().uuid().optional().nullable(),
   account_label: z.string().max(100).optional().nullable(),
   account_email: z.string().email().optional().nullable(),
 })
@@ -41,9 +41,9 @@ export async function GET(
   { params }: { params: Promise<{ credentialId: string }> }
 ) {
   const { credentialId } = await params
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -52,7 +52,7 @@ export async function GET(
   }
 
   const credential = await prisma.credential.findFirst({
-    where: { id: credentialId, org_id: authResult.orgId, deleted_at: null },
+    where: { id: credentialId, workspace_id: authResult.workspaceId, deleted_at: null },
     select: CREDENTIAL_SAFE_SELECT,
   })
 
@@ -68,9 +68,9 @@ export async function PUT(
   { params }: { params: Promise<{ credentialId: string }> }
 ) {
   const { credentialId } = await params
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -79,7 +79,7 @@ export async function PUT(
   }
 
   const existing = await prisma.credential.findFirst({
-    where: { id: credentialId, org_id: authResult.orgId, deleted_at: null },
+    where: { id: credentialId, workspace_id: authResult.workspaceId, deleted_at: null },
     select: { id: true },
   })
 
@@ -99,13 +99,13 @@ export async function PUT(
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
   }
 
-  if (parsed.data.team_id) {
-    const team = await prisma.team.findFirst({
-      where: { id: parsed.data.team_id, org_id: authResult.orgId, deleted_at: null },
+  if (parsed.data.crew_id) {
+    const team = await prisma.crew.findFirst({
+      where: { id: parsed.data.crew_id, workspace_id: authResult.workspaceId, deleted_at: null },
       select: { id: true },
     })
     if (!team) {
-      return NextResponse.json({ error: "Invalid team_id" }, { status: 400 })
+      return NextResponse.json({ error: "Invalid crew_id" }, { status: 400 })
     }
   }
 
@@ -113,7 +113,7 @@ export async function PUT(
   if (parsed.data.name !== undefined) data.name = parsed.data.name
   if (parsed.data.description !== undefined) data.description = parsed.data.description
   if (parsed.data.scope !== undefined) data.scope = parsed.data.scope
-  if (parsed.data.team_id !== undefined) data.team_id = parsed.data.team_id
+  if (parsed.data.crew_id !== undefined) data.crew_id = parsed.data.crew_id
   if (parsed.data.value) data.encrypted_value = encrypt(parsed.data.value)
 
   const credential = await prisma.credential.update({
@@ -130,9 +130,9 @@ export async function DELETE(
   { params }: { params: Promise<{ credentialId: string }> }
 ) {
   const { credentialId } = await params
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -141,7 +141,7 @@ export async function DELETE(
   }
 
   const existing = await prisma.credential.findFirst({
-    where: { id: credentialId, org_id: authResult.orgId, deleted_at: null },
+    where: { id: credentialId, workspace_id: authResult.workspaceId, deleted_at: null },
     select: { id: true },
   })
 

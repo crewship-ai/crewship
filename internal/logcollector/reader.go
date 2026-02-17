@@ -17,14 +17,14 @@ func NewReader(basePath string) *Reader {
 	return &Reader{basePath: basePath}
 }
 
-func (r *Reader) ReadAgentLogs(teamID, agentID string, offset, limit int) ([]LogEntry, error) {
-	if err := validatePathSegment(teamID); err != nil {
-		return nil, fmt.Errorf("invalid team ID: %w", err)
+func (r *Reader) ReadAgentLogs(crewID, agentID string, offset, limit int) ([]LogEntry, error) {
+	if err := validatePathSegment(crewID); err != nil {
+		return nil, fmt.Errorf("invalid crew ID: %w", err)
 	}
 	if err := validatePathSegment(agentID); err != nil {
 		return nil, fmt.Errorf("invalid agent ID: %w", err)
 	}
-	path := filepath.Join(r.basePath, "teams", teamID, "agents", agentID, "current.jsonl")
+	path := filepath.Join(r.basePath, "crews", crewID, "agents", agentID, "current.jsonl")
 	return readJSONL(path, offset, limit)
 }
 

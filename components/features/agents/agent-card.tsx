@@ -5,7 +5,7 @@ import { Bot, Cpu, Key, MessageSquare } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 
-interface AgentTeam {
+interface AgentCrew {
   name: string
   slug: string
   color: string | null
@@ -14,7 +14,7 @@ interface AgentTeam {
 interface AgentCount {
   skills: number
   credentials: number
-  sessions: number
+  chats: number
 }
 
 interface AgentData {
@@ -28,7 +28,7 @@ interface AgentData {
   cli_adapter: string
   llm_provider: string
   llm_model: string
-  team: AgentTeam | null
+  crew: AgentCrew | null
   _count: AgentCount
 }
 
@@ -76,13 +76,13 @@ export function AgentCard({ agent }: { agent: AgentData }) {
           </div>
 
           <div className="mt-3 flex items-center gap-2 flex-wrap">
-            {agent.team && (
+            {agent.crew && (
               <Badge variant="outline" className="text-[10px] gap-1">
                 <span
                   className="h-2 w-2 rounded-full shrink-0"
-                  style={{ backgroundColor: agent.team.color ?? "#6b7280" }}
+                  style={{ backgroundColor: agent.crew.color ?? "#6b7280" }}
                 />
-                {agent.team.name}
+                {agent.crew.name}
               </Badge>
             )}
             <span className="text-[10px] text-muted-foreground">
@@ -101,7 +101,7 @@ export function AgentCard({ agent }: { agent: AgentData }) {
             </span>
             <span className="flex items-center gap-1">
               <MessageSquare className="h-3 w-3" />
-              {agent._count.sessions} sessions
+              {agent._count.chats} sessions
             </span>
           </div>
         </CardContent>

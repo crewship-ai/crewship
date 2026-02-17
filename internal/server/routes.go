@@ -32,15 +32,15 @@ func (s *Server) registerIPCRoutes() {
 	s.ipcMux.HandleFunc("GET /agents/{id}/status", s.handleAgentStatus)
 	s.ipcMux.HandleFunc("POST /agents/{id}/start", s.handleAgentStart)
 	s.ipcMux.HandleFunc("POST /agents/{id}/stop", s.handleAgentStop)
-	s.ipcMux.HandleFunc("GET /teams/{id}/container/status", s.handleContainerStatus)
-	s.ipcMux.HandleFunc("POST /teams/{id}/container/start", s.handleContainerStart)
-	s.ipcMux.HandleFunc("POST /teams/{id}/container/stop", s.handleContainerStop)
+	s.ipcMux.HandleFunc("GET /crews/{id}/container/status", s.handleContainerStatus)
+	s.ipcMux.HandleFunc("POST /crews/{id}/container/start", s.handleContainerStart)
+	s.ipcMux.HandleFunc("POST /crews/{id}/container/stop", s.handleContainerStop)
 	s.ipcMux.HandleFunc("GET /agents/{id}/logs", s.handleAgentLogs)
-	s.ipcMux.HandleFunc("GET /teams/{id}/files", s.handleFileList)
-	s.ipcMux.HandleFunc("GET /teams/{id}/files/download", s.handleFileDownload)
-	s.ipcMux.HandleFunc("GET /sessions/{id}/messages", s.handleSessionMessages)
+	s.ipcMux.HandleFunc("GET /crews/{id}/files", s.handleFileList)
+	s.ipcMux.HandleFunc("GET /crews/{id}/files/download", s.handleFileDownload)
+	s.ipcMux.HandleFunc("GET /chats/{id}/messages", s.handleChatMessages)
 	s.ipcMux.HandleFunc("POST /credentials/sync", s.handleCredentialSync)
-	s.ipcMux.HandleFunc("GET /credentials/{orgId}/token", s.handleCredentialToken)
+	s.ipcMux.HandleFunc("GET /credentials/{workspaceId}/token", s.handleCredentialToken)
 	s.ipcMux.HandleFunc("GET /debug/logs", s.handleDebugLogs)
 	s.ipcMux.HandleFunc("GET /debug/info", s.handleDebugInfo)
 }
@@ -128,10 +128,10 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 type agentStartRequest struct {
-	TeamID       string                    `json:"team_id"`
-	TeamSlug     string                    `json:"team_slug"`
+	CrewID       string                    `json:"crew_id"`
+	CrewSlug     string                    `json:"team_slug"`
 	AgentSlug    string                    `json:"agent_slug"`
-	SessionID    string                    `json:"session_id"`
+	ChatID    string                    `json:"session_id"`
 	CLIAdapter   string                    `json:"cli_adapter"`
 	SystemPrompt string                    `json:"system_prompt"`
 	UserMessage  string                    `json:"user_message"`
@@ -155,14 +155,14 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	containerID, err := s.container.EnsureTeamRuntime(r.Context(), provider.TeamConfig{
-		ID:       req.TeamID,
-		Slug:     req.TeamSlug,
+	containerID, err := s.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
+		ID:       req.CrewID,
+		Slug:     req.CrewSlug,
 		MemoryMB: s.cfg.Container.DefaultMemoryMB,
 		CPUs:     s.cfg.Container.DefaultCPUs,
 	})
 	if err != nil {
-		s.logger.Error("failed to ensure team runtime", "team_id", req.TeamID, "error", err)
+		s.logger.Error("failed to ensure team runtime", "crew_id", req.CrewID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to start container"})
 		return
 	}
@@ -170,9 +170,9 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	runReq := orchestrator.AgentRunRequest{
 		AgentID:      agentID,
 		AgentSlug:    req.AgentSlug,
-		TeamID:       req.TeamID,
-		TeamSlug:     req.TeamSlug,
-		SessionID:    req.SessionID,
+		CrewID:       req.CrewID,
+		CrewSlug:     req.CrewSlug,
+		ChatID:    req.ChatID,
 		ContainerID:  containerID,
 		CLIAdapter:   req.CLIAdapter,
 		SystemPrompt: req.SystemPrompt,
@@ -192,7 +192,7 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 
 		handler := func(event orchestrator.AgentEvent) {
 			if s.logWriter != nil {
-				_ = s.logWriter.Append(req.TeamID, req.AgentSlug, logcollector.LogEntry{
+				_ = s.logWriter.Append(req.CrewID, req.AgentSlug, logcollector.LogEntry{
 					Timestamp: event.Timestamp,
 					Level:     "info",
 					Agent:     req.AgentSlug,
@@ -241,19 +241,19 @@ func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if s.container == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": id, "status": "not_configured"})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": id, "status": "not_configured"})
 		return
 	}
 
 	status, err := s.container.ContainerStatus(r.Context(), id)
 	if err != nil {
-		s.logger.Error("container status failed", "team_id", id, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": id, "status": "unknown"})
+		s.logger.Error("container status failed", "crew_id", id, "error", err)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": id, "status": "unknown"})
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"team_id": id,
+		"crew_id": id,
 		"status":  status.State,
 		"uptime":  status.Uptime,
 	})
@@ -261,26 +261,26 @@ func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleContainerStart(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	s.logger.Info("container start request", "team_id", id)
+	s.logger.Info("container start request", "crew_id", id)
 
 	if s.container == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "container provider not configured"})
 		return
 	}
 
-	containerID, err := s.container.EnsureTeamRuntime(r.Context(), provider.TeamConfig{
+	containerID, err := s.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
 		ID:       id,
 		MemoryMB: s.cfg.Container.DefaultMemoryMB,
 		CPUs:     s.cfg.Container.DefaultCPUs,
 	})
 	if err != nil {
-		s.logger.Error("container start failed", "team_id", id, "error", err)
+		s.logger.Error("container start failed", "crew_id", id, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container start failed"})
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"team_id":      id,
+		"crew_id":      id,
 		"container_id": containerID,
 		"status":       "running",
 	})
@@ -288,54 +288,54 @@ func (s *Server) handleContainerStart(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	s.logger.Info("container stop request", "team_id", id)
+	s.logger.Info("container stop request", "crew_id", id)
 
 	if s.container == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "container provider not configured"})
 		return
 	}
 
-	if err := s.container.StopTeamRuntime(r.Context(), id); err != nil {
-		s.logger.Error("container stop failed", "team_id", id, "error", err)
+	if err := s.container.StopCrewRuntime(r.Context(), id); err != nil {
+		s.logger.Error("container stop failed", "crew_id", id, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container stop failed"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": id, "status": "stopped"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": id, "status": "stopped"})
 }
 
 func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
-	teamID := r.PathValue("id")
+	crewID := r.PathValue("id")
 	agentSlug := r.URL.Query().Get("agent_slug")
 
 	if s.storage == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": teamID, "files": []interface{}{}})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": []interface{}{}})
 		return
 	}
 
 	// If agent_slug is provided, list only that agent's output namespace
-	dir := teamID
+	dir := crewID
 	if agentSlug != "" {
 		clean := filepath.Base(agentSlug)
 		if clean == "." || clean == ".." || strings.ContainsAny(clean, `/\`) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent_slug"})
 			return
 		}
-		dir = filepath.Join(teamID, clean)
+		dir = filepath.Join(crewID, clean)
 	}
 
 	files, err := s.storage.List(r.Context(), dir)
 	if err != nil {
-		s.logger.Error("file list failed", "team_id", teamID, "agent_slug", agentSlug, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": teamID, "files": []interface{}{}})
+		s.logger.Error("file list failed", "crew_id", crewID, "agent_slug", agentSlug, "error", err)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": []interface{}{}})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": teamID, "files": files})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": files})
 }
 
 func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
-	teamID := r.PathValue("id")
+	crewID := r.PathValue("id")
 	filePath := r.URL.Query().Get("path")
 
 	if filePath == "" {
@@ -355,7 +355,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullPath := filepath.Join(teamID, cleanPath)
+	fullPath := filepath.Join(crewID, cleanPath)
 	reader, err := s.storage.Read(r.Context(), fullPath)
 	if err != nil {
 		http.Error(w, "file not found", http.StatusNotFound)
@@ -373,10 +373,10 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("id")
-	teamID := r.URL.Query().Get("team_id")
+	crewID := r.URL.Query().Get("crew_id")
 
-	if teamID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "team_id query parameter required"})
+	if crewID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id query parameter required"})
 		return
 	}
 
@@ -391,7 +391,7 @@ func (s *Server) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries, err := s.logReader.ReadAgentLogs(teamID, agentID, offset, limit)
+	entries, err := s.logReader.ReadAgentLogs(crewID, agentID, offset, limit)
 	if err != nil {
 		s.logger.Error("read agent logs failed", "agent_id", agentID, "error", err)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"agent_id": agentID, "logs": []interface{}{}})
@@ -404,22 +404,22 @@ func (s *Server) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"agent_id": agentID, "logs": entries})
 }
 
-func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleChatMessages(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
 	if s.convStore == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"session_id": id, "messages": []interface{}{}})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"chat_id": id, "messages": []interface{}{}})
 		return
 	}
 
 	messages, err := s.convStore.Read(r.Context(), id, 0, 0)
 	if err != nil {
-		s.logger.Error("read session messages failed", "session_id", id, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"session_id": id, "messages": []interface{}{}})
+		s.logger.Error("read chat messages failed", "chat_id", id, "error", err)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"chat_id": id, "messages": []interface{}{}})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"session_id": id, "messages": messages})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"chat_id": id, "messages": messages})
 }
 
 func (s *Server) handleCredentialSync(w http.ResponseWriter, _ *http.Request) {
@@ -438,7 +438,7 @@ func (s *Server) handleCredentialSync(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleCredentialToken(w http.ResponseWriter, r *http.Request) {
-	orgID := r.PathValue("orgId")
+	workspaceID := r.PathValue("workspaceId")
 	provider := r.URL.Query().Get("provider")
 
 	if provider == "" {
@@ -450,7 +450,7 @@ func (s *Server) handleCredentialToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn := s.tokenPool.SelectToken(orgID, llmproxy.ProviderType(provider))
+	conn := s.tokenPool.SelectToken(workspaceID, llmproxy.ProviderType(provider))
 	if conn == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no active credential for provider"})
 		return

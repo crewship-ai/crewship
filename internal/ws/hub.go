@@ -314,7 +314,7 @@ func (c *Client) safeSend(data []byte) bool {
 }
 
 type sendMessagePayload struct {
-	SessionID string `json:"session_id"`
+	ChatID string `json:"session_id"`
 	Content   string `json:"content"`
 }
 
@@ -349,7 +349,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		return
 	}
 
-	if payload.SessionID == "" || payload.Content == "" {
+	if payload.ChatID == "" || payload.Content == "" {
 		resp, _ := json.Marshal(ServerMessage{
 			Type:    "error",
 			Channel: msg.Channel,
@@ -360,7 +360,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 	}
 
 	go func() {
-		channel := "session:" + payload.SessionID
+		channel := "session:" + payload.ChatID
 
 		streamFn := func(event ChatEvent) {
 			msg := ServerMessage{
@@ -377,12 +377,12 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		err := c.hub.chatHandler.HandleChatMessage(
 			c.ctx,
 			c.userID,
-			payload.SessionID,
+			payload.ChatID,
 			payload.Content,
 			streamFn,
 		)
 		if err != nil {
-			c.hub.logger.Error("chat message error", "error", err, "session_id", payload.SessionID)
+			c.hub.logger.Error("chat message error", "error", err, "session_id", payload.ChatID)
 			errResp, _ := json.Marshal(ServerMessage{
 				Type:    "chat_event",
 				Channel: channel,

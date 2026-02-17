@@ -142,8 +142,8 @@ func TestBuildCLICommand(t *testing.T) {
 func TestBuildEnvVars(t *testing.T) {
 	req := AgentRunRequest{
 		AgentID:   "agent-1",
-		TeamID:    "team-1",
-		SessionID: "sess-1",
+		CrewID:    "crew-1",
+		ChatID: "chat-1",
 	}
 
 	cred := &Credential{
@@ -156,8 +156,8 @@ func TestBuildEnvVars(t *testing.T) {
 
 	expected := map[string]bool{
 		"CREWSHIP_AGENT_ID=agent-1":      false,
-		"CREWSHIP_TEAM_ID=team-1":        false,
-		"CREWSHIP_SESSION_ID=sess-1":     false,
+		"CREWSHIP_CREW_ID=crew-1":        false,
+		"CREWSHIP_CHAT_ID=chat-1":     false,
 		"ANTHROPIC_API_KEY=sk-test":       false,
 	}
 
@@ -177,8 +177,8 @@ func TestBuildEnvVars(t *testing.T) {
 func TestBuildEnvVarsOAuthToken(t *testing.T) {
 	req := AgentRunRequest{
 		AgentID:   "agent-1",
-		TeamID:    "team-1",
-		SessionID: "sess-1",
+		CrewID:    "crew-1",
+		ChatID: "chat-1",
 	}
 
 	cred := &Credential{

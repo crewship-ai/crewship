@@ -1,10 +1,10 @@
 # Crewship -- Agent Runtime (AGENT-RUNTIME.md)
 
-**Verze:** 4.0
-**Datum:** 2026-02-16
+**Verze:** 4.1
+**Datum:** 2026-02-17
 **Zmeny v4.0:** Loopback HTTP sidecar (nahrazuje named pipe), dual runtime
 (CLI + API-direct crewship-agent), Landlock per-agent filesystem izolace,
-optional gVisor runtime, leader modes (active/passive).
+optional gVisor runtime, lead modes (active/passive).
 **Zmeny v5.0:** Sidecar = MCP Gateway uvnitr kontejneru (ADR-014).
 Skill = MCP Server wrapper (tools + resources + credential requirements).
 Credential-less agent pattern: agent NEMA API klice, sidecar injektuje
@@ -21,7 +21,7 @@ Viz `ADR.md` pro zduvodneni rozhodnuti.
 ## 1. PREHLED
 
 Agent runtime je system ktery spravuje zivotni cyklus AI agentu v Docker kontejnerech.
-Klicovy princip: **1 kontejner = 1 tym. Agenti v tymu sdili kontejner.**
+Klicovy princip: **1 kontejner = 1 crew. Agenti v tymu sdili kontejner.**
 
 ### Vrstvy
 
@@ -50,11 +50,11 @@ Klicovy princip: **1 kontejner = 1 tym. Agenti v tymu sdili kontejner.**
    docker exec -e ANTHROPIC_API_KEY=... \
      -e CREWSHIP_SESSION_ID={session-id} \
      -e CREWSHIP_SIDECAR=http://localhost:9119 \
-     -w /workspace/anna team-container \
+     -w /workspace/anna crew-container \
      {agent_command}  # CLI tool NEBO crewship-agent (dle runtime mode)
 5. crewshipd cte stdout/stderr (Docker attach API) → WebSocket + JSONL log
 6. Agent komunikuje s crewship-sidecar pres localhost:9119 (HTTP):
-   - Delegace: POST /delegate
+   - Delegace: POST /assign
    - Vysledky: GET /results/{group}
 7. Agent pise soubory do /output/ → fsnotify → WebSocket → Browser
 8. Kazdy radek stdout → append do JSONL log souboru
@@ -74,9 +74,9 @@ API_DIRECT      → crewship-agent --session={id} --model=claude-opus-4.6 "Vytvo
 ### Flow: webhook trigger
 
 ```
-1. Grafana posle POST /api/v1/webhooks/{team}/{agent}/trigger
+1. Grafana posle POST /api/v1/webhooks/{crew}/{agent}/trigger
 2. crewshipd validuje X-Webhook-Secret
-3. crewshipd vytvori ConversationSession + AgentRun (trigger_type=WEBHOOK)
+3. crewshipd vytvori Chat + AgentRun (trigger_type=WEBHOOK)
 4. crewshipd spusti Docker exec s webhook payload jako vstup
 5. Stejny flow jako vyse (stdout → JSONL, /output/ → fsnotify)
 ```
@@ -89,11 +89,11 @@ API_DIRECT      → crewship-agent --session={id} --model=claude-opus-4.6 "Vytvo
 
 > **Poznamka:** Nasledujici kod ukazuje Docker implementaci ContainerProvider.
 > K8s implementace pouziva client-go (Deployment + Pod misto Container).
-> Orchestrator vola `provider.EnsureTeamRuntime()` — nevidi implementaci.
+> Orchestrator vola `provider.EnsureCrewRuntime()` — nevidi implementaci.
 
 ```go
 // internal/provider/docker/docker.go (Docker implementace ContainerProvider)
-func (m *DockerProvider) EnsureTeamRuntime(ctx context.Context, team TeamConfig) error {
+func (m *DockerProvider) EnsureCrewRuntime(ctx context.Context, crew CrewConfig) error {
     // Runtime: runc (default) nebo runsc (gVisor, viz ADR-003)
     runtime := os.Getenv("CREWSHIP_RUNTIME") // "runc" | "runsc"
     if runtime == "" {
@@ -104,7 +104,7 @@ func (m *DockerProvider) EnsureTeamRuntime(ctx context.Context, team TeamConfig)
         Image: "ghcr.io/crewship-ai/agent-runtime:latest",
         User:  "1001:1001",  // non-root
         Env: []string{
-            "CREWSHIP_TEAM_ID=" + team.ID,
+            "CREWSHIP_CREW_ID=" + crew.ID,
         },
     }, &container.HostConfig{
         Runtime:        runtime,  // "runc" (default) nebo "runsc" (gVisor)
@@ -113,17 +113,17 @@ func (m *DockerProvider) EnsureTeamRuntime(ctx context.Context, team TeamConfig)
         CapDrop:        []string{"ALL"},
         CapAdd:         []string{"NET_RAW"},
         Resources: container.Resources{
-            Memory:   int64(team.MemoryMB) * 1024 * 1024,
-            NanoCPUs: int64(team.CPUs * 1e9),
+            Memory:   int64(crew.MemoryMB) * 1024 * 1024,
+            NanoCPUs: int64(crew.CPUs * 1e9),
             PidsLimit: ptr(int64(200)),
         },
         Mounts: []mount.Mount{
-            {Type: mount.TypeVolume, Source: "workspace-" + team.ID, Target: "/workspace"},
-            {Type: mount.TypeBind, Source: outputPath(team), Target: "/output"},
+            {Type: mount.TypeVolume, Source: "workspace-" + crew.ID, Target: "/workspace"},
+            {Type: mount.TypeBind, Source: outputPath(crew), Target: "/output"},
         },
         Tmpfs: map[string]string{"/tmp": "rw,size=500m"},
         NetworkMode: "crewship-agents",
-    }, nil, nil, "crewship-team-"+team.Slug)
+    }, nil, nil, "crewship-crew-"+crew.Slug)
 
     if err := m.client.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
         return fmt.Errorf("container start: %w", err)
@@ -131,7 +131,7 @@ func (m *DockerProvider) EnsureTeamRuntime(ctx context.Context, team TeamConfig)
 
     // Start crewship-sidecar inside container (long-running background process)
     sidecarExec, _ := m.client.ContainerExecCreate(ctx, resp.ID, container.ExecOptions{
-        Cmd:  []string{"/usr/local/bin/crewship-sidecar", "--team-id=" + team.ID},
+        Cmd:  []string{"/usr/local/bin/crewship-sidecar", "--crew-id=" + crew.ID},
         User: "1001:1001",
     })
     return m.client.ContainerExecStart(ctx, sidecarExec.ID, container.ExecStartOptions{Detach: true})
@@ -253,8 +253,8 @@ func (o *Orchestrator) buildCLICommand(req AgentRunRequest) []string {
 func (o *Orchestrator) buildEnvVars(req AgentRunRequest) []string {
     env := []string{
         "CREWSHIP_AGENT_ID=" + req.AgentID,
-        "CREWSHIP_TEAM_ID=" + req.TeamID,
-        "CREWSHIP_SESSION_ID=" + req.SessionID,
+        "CREWSHIP_CREW_ID=" + req.CrewID,
+        "CREWSHIP_SESSION_ID=" + req.ChatID,
         "CREWSHIP_SIDECAR=http://localhost:9119",
     }
 
@@ -336,10 +336,10 @@ func (o *Orchestrator) streamOutput(ctx context.Context, reader io.Reader, req A
         o.ws.Broadcast(channel, event)
 
         // 2. JSONL log (append)
-        o.logCollector.Append(req.TeamID, req.AgentID, event)
+        o.logCollector.Append(req.CrewID, req.AgentID, event)
 
         // 3. JSONL conversation (append)
-        o.conversationWriter.Append(req.SessionID, event)
+        o.conversationWriter.Append(req.ChatID, event)
     }
 }
 ```
@@ -361,7 +361,7 @@ Kazdy radek = jeden JSON objekt:
 ### 5.2 Soubory
 
 ```
-/var/log/crewship/teams/{team-id}/agents/{agent-id}/current.jsonl
+/var/log/crewship/crews/{crew-id}/agents/{agent-id}/current.jsonl
 ```
 
 Rotace: logrotate (hodinova, gzip, 30 dni retence).
@@ -405,7 +405,7 @@ Kazda session = jeden soubor. Obsah viz DATABASE.md sekce 5.
 
 ```go
 // internal/fileserver/watcher.go
-func (w *Watcher) Watch(ctx context.Context, teamID string, outputDir string) {
+func (w *Watcher) Watch(ctx context.Context, crewID string, outputDir string) {
     watcher, _ := fsnotify.NewWatcher()
     defer watcher.Close()
     watcher.Add(outputDir)
@@ -413,7 +413,7 @@ func (w *Watcher) Watch(ctx context.Context, teamID string, outputDir string) {
     for {
         select {
         case event := <-watcher.Events:
-            w.ws.Broadcast("files:"+teamID, FileEvent{
+            w.ws.Broadcast("files:"+crewID, FileEvent{
                 Event:     event.Op.String(),
                 Path:      relativePath(event.Name, outputDir),
                 Agent:     extractAgentSlug(event.Name),
@@ -432,9 +432,9 @@ func (w *Watcher) Watch(ctx context.Context, teamID string, outputDir string) {
 Next.js posila requesty na crewshipd pres Unix socket:
 
 ```
-GET /teams/{id}/files                    → seznam souboru (tree)
-GET /teams/{id}/files/{path}             → stahnout soubor
-GET /teams/{id}/files/{path}?preview=1   → preview (PDF/MD/image)
+GET /crews/{id}/files                    → seznam souboru (tree)
+GET /crews/{id}/files/{path}             → stahnout soubor
+GET /crews/{id}/files/{path}?preview=1   → preview (PDF/MD/image)
 ```
 
 ### 6.4 Agent memory persistence
@@ -488,7 +488,7 @@ Skill = {
 ### 6A.2 MCP architektura v kontejneru
 
 ```
-┌──────────── Team Container ────────────────────────────────┐
+┌──────────── Crew Container ────────────────────────────────┐
 │                                                             │
 │  ┌─────────────┐        ┌────────────────────────────────┐ │
 │  │ Agent        │        │ crewship-sidecar               │ │
@@ -564,7 +564,7 @@ S 10+ skills context window exploduje.
 ```
 1. Agent se spusti → dostane JEN 2 tool definice:
    - search_tools (meta-tool, vzdy)
-   - delegate (delegacni tool, pokud leader)
+   - delegate (delegacni tool, pokud lead)
    + tools ze skills s defer_loading=false (vzdy nactene)
 
 2. LLM chce vytvorit GitHub issue → zavola search_tools("create github issue")
@@ -717,7 +717,7 @@ credentials — agent nema env vars s klici. Per-request credential injection.
 Security pipeline pro marketplace skills (ADR-020).
 
 **Phase 3:** Externi MCP servery (Streamable HTTP). Sdilene MCP servery
-across tymu (napr. org-wide PostgreSQL). MCP Gateway pattern jako Docker.
+across crews (napr. org-wide PostgreSQL). MCP Gateway pattern jako Docker.
 **Skill Hub (Marketplace)** — browse, search, install, rate, review (ADR-019).
 
 **Phase 3B:** Premium skills, revenue share, author portal, private skill
@@ -831,6 +831,18 @@ Double sandboxing: Docker (kontejner) + srt (MCP server proces).
 RUN npm install -g @anthropic-ai/sandbox-runtime
 ```
 
+#### 6A.10.4a Skill sandbox enforcement (planovane)
+
+Kazdy skill deklaruje permissions v `skill.yaml`:
+- filesystem: read/write paths
+- network: enabled/disabled + whitelist
+- secrets: required env vars
+- shell: allowed/denied commands
+
+Docker vynucuje permissions. Skill bez deklarace se nespusti.
+Tiers: OFFICIAL (reviewed), VERIFIED (scanned), COMMUNITY (sandbox-only).
+Detail: ADR-025, SECURITY.md sekce 13
+
 #### 6A.10.5 End-to-end flow
 
 ```
@@ -850,7 +862,7 @@ RUN npm install -g @anthropic-ai/sandbox-runtime
    Uzivatel klikne "Add to Agent"
    → AgentSkill relace
    → UI zobrazi credential requirements (pokud nesplnene)
-   → OCI image se pre-pullne do team kontejneru
+   → OCI image se pre-pullne do crew kontejneru
 
 4. RUN
    Agent pouzije skill
@@ -872,9 +884,9 @@ importujeme verified Docker MCP images a re-scanujeme nasim pipeline.
 
 | Aspect | Docker MCP Gateway | Crewship Skill Hub |
 |---|---|---|
-| Kde bezi | Externi kontejner na hostu | Sidecar UVNITR team kontejneru |
+| Kde bezi | Externi kontejner na hostu | Sidecar UVNITR crew kontejneru |
 | Credentials | Docker secrets (host-level) | Sidecar inject (ADR-015) |
-| Multi-tenant | Ne | Ano (per-team izolace) |
+| Multi-tenant | Ne | Ano (per-crew izolace) |
 | RBAC | Per-server | Per-tool, per-agent |
 | Audit | Basic logging | Per-call s credential_id, trace_id |
 | Security | Publisher verification, SBOM | 6-krokovy pipeline + sandbox test |
@@ -902,7 +914,7 @@ importujeme verified Docker MCP images a re-scanujeme nasim pipeline.
 type RunState struct {
     ID          string    `json:"id"`
     AgentID     string    `json:"agent_id"`
-    SessionID   string    `json:"session_id"`
+    ChatID   string    `json:"chat_id"`
     Status      string    `json:"status"`
     StartedAt   time.Time `json:"started_at"`
     ContainerID string    `json:"container_id"`
@@ -1009,7 +1021,7 @@ COPY --from=builder /landrun /usr/local/bin/landrun
 # Non-root user
 RUN groupadd -g 1001 agent && useradd -u 1001 -g agent -m agent
 
-# Directories
+# Coordinatories
 RUN mkdir -p /workspace /output && \
     chown agent:agent /workspace /output
 
@@ -1053,8 +1065,8 @@ USER 1001:1001                       Non-root
 | Limit | Hodnota | Konfigurovatelne |
 |---|---|---|
 | Agent run timeout | 30 min (default) | Ano (per agent, `timeout_seconds`) |
-| Container TTL | neomezene (default) | Ano (per team/org) |
-| Max concurrent agents per team | 5 | Ano (per plan) |
+| Container TTL | neomezene (default) | Ano (per crew/org) |
+| Max concurrent agents per crew | 5 | Ano (per plan) |
 | Max message length | 50,000 chars | Ne |
 | Docker exec timeout | = agent timeout | Ne |
 | WebSocket idle timeout | 60s (heartbeat) | Ne |
@@ -1135,8 +1147,8 @@ kompletni historii a `--resume` flag ji nacte automaticky.
 **Pro ostatni CLI:** JSONL konverzacni historie slouzi jako backup:
 
 ```go
-func (o *Orchestrator) buildCatchUpPrompt(sessionID string) string {
-    history := o.readConversationJSONL(sessionID)
+func (o *Orchestrator) buildCatchUpPrompt(chatID string) string {
+    history := o.readConversationJSONL(chatID)
     lastMessages := history[max(0, len(history)-10):] // poslednich 10 zprav
 
     var summary strings.Builder
@@ -1270,52 +1282,52 @@ func (o *Orchestrator) runLoopIteration(agent Agent, iteration int) {
 ## 15. ORCHESTRACNI RUNTIME (Phase 2)
 
 > Plna specifikace: `prd/ORCHESTRATION.md`
-> Tato sekce popisuje runtime aspekty — jak crewshipd technicky provadi delegace.
+> Tato sekce popisuje runtime aspekty — jak crewshipd technicky provadi assignments.
 
-### 15.1 Crew Leader execution
+### 15.1 Crew Lead execution
 
-Leader bezi jako normalni agent (Docker exec) se specialnim system promptem.
-Rozdil je v **delegacich pres crewship-sidecar** (localhost:9119 HTTP API).
+Lead bezi jako normalni agent (Docker exec) se specialnim system promptem.
+Rozdil je v **assignmentsch pres crewship-sidecar** (localhost:9119 HTTP API).
 Viz ADR-001 v2.
 
 ```
-Leader execution flow:
-  1. crewshipd spusti Docker exec pro leadera (sidecar uz bezi v kontejneru)
+Lead execution flow:
+  1. crewshipd spusti Docker exec pro leada (sidecar uz bezi v kontejneru)
   2. crewshipd cte stdout → streaming k uzivatel pres WebSocket + JSONL log
-  3. Leader deleguje pres HTTP na sidecar:
-     - CLI mode: `curl -X POST localhost:9119/delegate -d '...'`
-     - API-direct mode: nativni HTTP call (DelegateTool)
+  3. Lead prirazuje pres HTTP na sidecar:
+     - CLI mode: `curl -X POST localhost:9119/assign -d '...'`
+     - API-direct mode: nativni HTTP call (AssignTool)
   4. Sidecar validuje (RBAC, circuit breaker) a posila do crewshipd
-  5. crewshipd spusti worker Docker exec ve STEJNEM kontejneru
-  6. Worker dokonci → crewshipd posle vysledek do sidecar
-  7. Leader polluje GET localhost:9119/results/{group}
-  8. Leader agreguje a odpovida uzivatel (stdout → WebSocket)
+  5. crewshipd spusti agent Docker exec ve STEJNEM kontejneru
+  6. Agent dokonci → crewshipd posle vysledek do sidecar
+  7. Lead polluje GET localhost:9119/results/{group}
+  8. Lead agreguje a odpovida uzivatel (stdout → WebSocket)
 ```
 
-**Leader modes (ADR-004):**
-- **active** (default): Leader bezi celou dobu, rozhoduje v real-time
-- **passive**: Leader se spusti 2x (init task plan + finalize agregace)
+**Lead modes (ADR-004):**
+- **active** (default): Lead bezi celou dobu, rozhoduje v real-time
+- **passive**: Lead se spusti 2x (init task plan + finalize agregace)
 - Viz ORCHESTRATION.md sekce 5.6 pro detaily
 
-**Paralelni delegace pres sidecar:**
+**Paralelni assignments pres sidecar:**
 ```bash
-# Leader posle 2 delegace:
-curl -X POST localhost:9119/delegate -d '{"target":"bob","task":"Data z Twitteru","group":"data"}'
-curl -X POST localhost:9119/delegate -d '{"target":"eve","task":"Data z LinkedInu","group":"data"}'
+# Lead posle 2 assignments:
+curl -X POST localhost:9119/assign -d '{"target":"bob","task":"Data z Twitteru","group":"data"}'
+curl -X POST localhost:9119/assign -d '{"target":"eve","task":"Data z LinkedInu","group":"data"}'
 # Ceka na vysledky:
 curl localhost:9119/results/data  # → {"status":"completed","results":[...]}
 ```
 crewshipd spusti oba Docker exec paralelne, ceka az oba skonci.
 
-### 15.2 Virtual Director execution (lightweight)
+### 15.2 Virtual Coordinator execution (lightweight)
 
-Director **nepouziva Docker kontejner**. Bezi jako cisty LLM API call v crewshipd:
+Coordinator **nepouziva Docker kontejner**. Bezi jako cisty LLM API call v crewshipd:
 
 ```go
-// internal/orchestrator/director.go
-func (o *Orchestrator) RunDirector(ctx context.Context, req DirectorRequest) error {
+// internal/orchestrator/coordinator.go
+func (o *Orchestrator) RunCoordinator(ctx context.Context, req CoordinatorRequest) error {
     // 1. Sestav system prompt s informacemi o tymech
-    systemPrompt := o.buildDirectorSystemPrompt(req.OrgID)
+    systemPrompt := o.buildCoordinatorSystemPrompt(req.WorkspaceID)
     
     // 2. LLM API call primo (ne Docker exec)
     response, err := o.llmClient.Chat(ctx, LLMRequest{
@@ -1325,12 +1337,12 @@ func (o *Orchestrator) RunDirector(ctx context.Context, req DirectorRequest) err
     })
     
     // 3. Parsuj delegacni prikazy
-    commands, text := ParseDelegationCommands(response.Content)
+    commands, text := ParseAssignmentCommands(response.Content)
     
-    // 4. Stream text k uzivatel, proved delegace na leadery
-    o.ws.Send(req.SessionID, AgentEvent{Type: "text", Content: text})
+    // 4. Stream text k uzivatel, proved assignments na leady
+    o.ws.Send(req.ChatID, AgentEvent{Type: "text", Content: text})
     for _, cmd := range commands {
-        go o.executeDelegation(ctx, cmd, req.SessionID)
+        go o.executeAssignment(ctx, cmd, req.ChatID)
     }
     
     return nil
@@ -1338,23 +1350,23 @@ func (o *Orchestrator) RunDirector(ctx context.Context, req DirectorRequest) err
 ```
 
 **Proc bez kontejneru:**
-- Director jen premysli a deleguje — nepise kod, nepouziva tools
+- Coordinator jen premysli a prirazuje — nepise kod, nepouziva tools
 - Mensi latence (zadny Docker exec overhead)
 - Jednodussi credentials (pouziva org-level LLM key)
-- Phase 3: Director muze dostat vlastni kontejner pokud bude potrebovat tools
+- Phase 3: Coordinator muze dostat vlastni kontejner pokud bude potrebovat tools
 
 ### 15.3 Delegacni protokol (Sidecar HTTP API)
 
 > Plna specifikace: ORCHESTRATION.md sekce 5.3
 
-Agenti (leader/director) posilaji delegace na crewship-sidecar (localhost:9119):
+Agenti (lead/coordinator) posilaji assignments na crewship-sidecar (localhost:9119):
 
 ```
-POST /delegate    — delegovat ukol na workera
+POST /assign    — prirazovat ukol na agenta
 POST /ask         — polozit otazku
 POST /broadcast   — fire-and-forget zprava
 GET  /results/:id — vyzvednout vysledky (polling)
-GET  /status      — stav aktivnich delegaci
+GET  /status      — stav aktivnich assignments
 ```
 
 Stdout zustava cisty pro user-facing output. Agent vi o sidecar
@@ -1366,28 +1378,28 @@ Viz ORCHESTRATION.md sekce 5.3 pro kompletni API specifikaci.
 
 | Scenario | Timeout |
 |---|---|
-| Worker vykonava delegovany ukol | worker.timeout_seconds (default 1800s) |
-| Leader ceka na workera | delegation_timeout_s NEBO 2x worker timeout |
-| Director ceka na leadera | 2x leader delegation timeout |
-| Max delegacni hloubka | max_delegation_depth (default 3) |
-| Max paralelni delegace | max_parallel_delegates (default 5) |
-| Max turns per delegace | 10 (hardcoded safety limit) |
+| Agent vykonava delegovany ukol | agent.timeout_seconds (default 1800s) |
+| Lead ceka na agenta | assignment_timeout_s NEBO 2x agent timeout |
+| Coordinator ceka na leada | 2x lead assignment timeout |
+| Max delegacni hloubka | max_assignment_depth (default 3) |
+| Max paralelni assignments | max_parallel_delegates (default 5) |
+| Max turns per assignments | 10 (hardcoded safety limit) |
 
 ### 15.5 Error handling
 
 ```
-Worker selze → leader dostane error zpravu, muze:
-  a) Zkusit jineho workera v tymu
+Agent selze → lead dostane error zpravu, muze:
+  a) Zkusit jineho agenta v tymu
   b) Zkusit sam
   c) Reportovat uzivatel
 
-Leader selze → director dostane error, muze:
+Lead selze → coordinator dostane error, muze:
   a) Zkusit jiny tym
   b) Informovat uzivatel a navrhnout alternativu
 
 Deadlock prevence:
-  - Agent nemuze delegovat sam na sebe
-  - Circular delegace detekovana (A→B→A = error)
+  - Agent nemuze prirazovat sam na sebe
+  - Circular assignments detekovana (A→B→A = error)
   - Max depth limit (default 3)
 ```
 
@@ -1416,14 +1428,14 @@ CREWSHIP_RUNTIME=runsc   # optional — gVisor (syscall filtering)
 
 ### 16.2 Landlock per-agent filesystem izolace (ADR-010)
 
-**Problem:** 1 kontejner = 1 tym. Agenti sdili filesystem. Agent A muze
+**Problem:** 1 kontejner = 1 crew. Agenti sdili filesystem. Agent A muze
 cist/mazat soubory agenta B v /workspace/. Prompt injection = sabotaz.
 
 **Reseni:** Landlock LSM (Linux kernel >=5.13) — per-process filesystem izolace.
 
 ```bash
 # Kazdy Docker exec pro agenta "bob" se spusti s Landlock:
-docker exec team-container \
+docker exec crew-container \
   landrun \
     --ro /workspace/bob \         # read-only: vlastni workspace
     --rw /workspace/bob/scratch \ # read-write: scratch prostor
@@ -1476,13 +1488,22 @@ Layer 6: Filesystem (per-agent) Landlock LSM — agent vidi jen svuj workspace (
 Layer 7: Network              --network=crewship-agents (--internal)
 Layer 8: Network allowlist    nftables: jen LLM API IPs (api.anthropic.com, etc.)
 Layer 9: PID limit            --pids-limit=200 (fork bomb protection)
-Layer 10: Resource limits      --memory, --cpus (per team konfigurovatelne)
+Layer 10: Resource limits      --memory, --cpus (per crew konfigurovatelne)
 Layer 11: RBAC                sidecar + crewshipd validuji kazdy prikaz
 Layer 12: Sidecar auth        localhost-only (127.0.0.1:9119), session token
 Layer 13: Credential isolation Go service desifruje (ne Next.js), ENV var per-exec
 ```
 
-### 16.3 gVisor instalace (pro ty co to potrebuji)
+### 16.3a Per-agent network control (planovane)
+
+Kazdy agent/tym bude mit individualne nastavitelny sitovy pristup:
+- Internet ON/OFF per agent
+- Domain whitelist per agent
+- Local network access (CIDR rozsah) per agent
+- Konfigurace pres UI, enforcement pres Docker network policies
+- Detail: ADR-024, API.md sekce 13
+
+### 16.3b gVisor instalace (pro ty co to potrebuji)
 
 ```bash
 # Na hostu (Linux only — gVisor na macOS nepodporovan):
@@ -1520,7 +1541,7 @@ Pro Phase 3+ zvazit Firecracker pro scenare kde gVisor nestaci
 
 2. ~~**Agent-to-agent komunikace:**~~ → Loopback HTTP sidecar (ADR-001 v2). Viz ORCHESTRATION.md 5.1.
 8. ~~**Delegacni format:**~~ → HTTP JSON API na sidecar (ADR-001 v2).
-9. ~~**Context window:**~~ → Worker output compression (ADR-005). Viz ORCHESTRATION.md 5.7.
+9. ~~**Context window:**~~ → Agent output compression (ADR-005). Viz ORCHESTRATION.md 5.7.
 6. ~~**Memory across sessions:**~~ → /output/{agent}/.memory/ (persistent). Viz 6.4.
 15. ~~**Skill architektura:**~~ → Skill = MCP Server wrapper (ADR-014). Viz 6A.
 16. ~~**Tool credentials:**~~ → Sidecar drzi, agent nevidi (ADR-015). Viz 6A.6.
@@ -1532,12 +1553,13 @@ Pro Phase 3+ zvazit Firecracker pro scenare kde gVisor nestaci
 3. **GPU podpora** — Phase 3: `--gpus` flag pro ML agenty?
 4. **Custom agent images** — uzivatel si muze prinest vlastni Docker image? Bezpecnostni implikace?
 5. **Streaming format** — Claude Code ma jiny stdout format nez Codex. Univerzalni parser?
-7. **Director kontejner** — Phase 3: kdyz director dostane tools, jaky kontejner? Dedicovany "org kontejner"?
-10. **Leader volba** — Muze uzivatel zmenit leadera za behu? Co s probihajicimi delegacemi?
+7. **Coordinator kontejner** — Phase 3: kdyz coordinator dostane tools, jaky kontejner? Dedicovany "org kontejner"?
+10. **Lead volba** — Muze uzivatel zmenit leada za behu? Co s probihajicimi assignmentsmi?
 11. **Landlock na macOS** — Landlock je Linux-only. Pro macOS dev: feature flag `CREWSHIP_LANDLOCK=false`.
 12. **Sidecar healthcheck** — Jak crewshipd detekuje ze sidecar spadl a restartuje ho?
 13. **crewship-agent tool coverage** — Pokryva crewship-agent vsechny use cases co Claude Code? LSP integrace?
 14. **Image size** — S CLI tools + crewship binaries + MCP servery: ~700MB. Zvazit lazy install.
 18. **MCP server crash** — Co kdyz MCP server spadne? Sidecar restart? Agent retry?
-19. **Externi MCP servery** — Phase 3: sdilene MCP servery across tymu. Streamable HTTP transport.
+19. **Externi MCP servery** — Phase 3: sdilene MCP servery across crews. Streamable HTTP transport.
 20. **MCP server resource limits** — Max MCP serveru per kontejner? Memory/CPU limity per server?
+21. **Per-agent cost tracking** — Sledovani nakladu per agent/crew/workspace (LLM tokeny, compute time). ADR planovane.

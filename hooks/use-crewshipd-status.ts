@@ -6,13 +6,13 @@ export type DaemonStatus = "connected" | "disconnected" | "checking"
 
 const POLL_INTERVAL = 10_000
 
-export function useCrewshipdStatus(orgId: string | null) {
+export function useCrewshipdStatus(workspaceId: string | null) {
   const [status, setStatus] = useState<DaemonStatus>("checking")
   const [uptime, setUptime] = useState<string | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
 
     let timer: ReturnType<typeof setInterval> | undefined
 
@@ -22,7 +22,7 @@ export function useCrewshipdStatus(orgId: string | null) {
       controllerRef.current = controller
 
       try {
-        const res = await fetch(`/api/v1/crewshipd?org_id=${encodeURIComponent(orgId!)}`, {
+        const res = await fetch(`/api/v1/crewshipd?workspace_id=${encodeURIComponent(workspaceId!)}`, {
           signal: controller.signal,
           cache: "no-store",
         })
@@ -49,7 +49,7 @@ export function useCrewshipdStatus(orgId: string | null) {
       clearInterval(timer)
       controllerRef.current?.abort()
     }
-  }, [orgId])
+  }, [workspaceId])
 
   return { status, uptime }
 }

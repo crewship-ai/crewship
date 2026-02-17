@@ -11,15 +11,15 @@ import (
 
 func TestHandleFileList(t *testing.T) {
 	dir := t.TempDir()
-	teamDir := filepath.Join(dir, "team-1")
+	teamDir := filepath.Join(dir, "crew-1")
 	_ = os.MkdirAll(teamDir, 0750)
 	_ = os.WriteFile(filepath.Join(teamDir, "report.txt"), []byte("data"), 0640)
 	_ = os.MkdirAll(filepath.Join(teamDir, "subdir"), 0750)
 
 	s := NewServer(dir)
 
-	req := httptest.NewRequest("GET", "/teams/team-1/files", nil)
-	req.SetPathValue("id", "team-1")
+	req := httptest.NewRequest("GET", "/crews/team-1/files", nil)
+	req.SetPathValue("id", "crew-1")
 	w := httptest.NewRecorder()
 
 	s.HandleFileList(w, req)
@@ -40,7 +40,7 @@ func TestHandleFileListEmpty(t *testing.T) {
 	dir := t.TempDir()
 	s := NewServer(dir)
 
-	req := httptest.NewRequest("GET", "/teams/nonexistent/files", nil)
+	req := httptest.NewRequest("GET", "/crews/nonexistent/files", nil)
 	req.SetPathValue("id", "nonexistent")
 	w := httptest.NewRecorder()
 
@@ -53,14 +53,14 @@ func TestHandleFileListEmpty(t *testing.T) {
 
 func TestHandleFileDownload(t *testing.T) {
 	dir := t.TempDir()
-	teamDir := filepath.Join(dir, "team-1")
+	teamDir := filepath.Join(dir, "crew-1")
 	_ = os.MkdirAll(teamDir, 0750)
 	_ = os.WriteFile(filepath.Join(teamDir, "report.pdf"), []byte("pdf-data"), 0640)
 
 	s := NewServer(dir)
 
-	req := httptest.NewRequest("GET", "/teams/team-1/files/report.pdf", nil)
-	req.SetPathValue("id", "team-1")
+	req := httptest.NewRequest("GET", "/crews/team-1/files/report.pdf", nil)
+	req.SetPathValue("id", "crew-1")
 	req.SetPathValue("path", "report.pdf")
 	w := httptest.NewRecorder()
 
@@ -79,12 +79,12 @@ func TestHandleFileDownload(t *testing.T) {
 
 func TestHandleFileDownloadNotFound(t *testing.T) {
 	dir := t.TempDir()
-	_ = os.MkdirAll(filepath.Join(dir, "team-1"), 0750)
+	_ = os.MkdirAll(filepath.Join(dir, "crew-1"), 0750)
 
 	s := NewServer(dir)
 
-	req := httptest.NewRequest("GET", "/teams/team-1/files/missing.txt", nil)
-	req.SetPathValue("id", "team-1")
+	req := httptest.NewRequest("GET", "/crews/team-1/files/missing.txt", nil)
+	req.SetPathValue("id", "crew-1")
 	req.SetPathValue("path", "missing.txt")
 	w := httptest.NewRecorder()
 
@@ -97,12 +97,12 @@ func TestHandleFileDownloadNotFound(t *testing.T) {
 
 func TestHandleFileListPathTraversal(t *testing.T) {
 	dir := t.TempDir()
-	_ = os.MkdirAll(filepath.Join(dir, "team-1"), 0750)
+	_ = os.MkdirAll(filepath.Join(dir, "crew-1"), 0750)
 
 	s := NewServer(dir)
 
-	req := httptest.NewRequest("GET", "/teams/team-1/files?path=../../etc", nil)
-	req.SetPathValue("id", "team-1")
+	req := httptest.NewRequest("GET", "/crews/team-1/files?path=../../etc", nil)
+	req.SetPathValue("id", "crew-1")
 	w := httptest.NewRecorder()
 
 	s.HandleFileList(w, req)

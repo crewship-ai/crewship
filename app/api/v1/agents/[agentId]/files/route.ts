@@ -3,7 +3,7 @@ import { z } from "zod"
 import { prisma } from "@/lib/db"
 import { requireAuth, isAuthError } from "@/lib/api-auth"
 import { defineAbilitiesFor } from "@/lib/permissions/abilities"
-import { getTeamFiles } from "@/lib/crewshipd-client"
+import { getCrewFiles } from "@/lib/crewshipd-client"
 import type { OrgRole } from "@/lib/generated/prisma/client"
 
 export async function GET(
@@ -14,12 +14,12 @@ export async function GET(
   if (!z.string().uuid().safeParse(agentId).success) {
     return NextResponse.json({ error: "Invalid agent ID" }, { status: 400 })
   }
-  const orgId = req.nextUrl.searchParams.get("org_id")
-  if (orgId && !z.string().uuid().safeParse(orgId).success) {
-    return NextResponse.json({ error: "Invalid org_id" }, { status: 400 })
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
+  if (workspaceId && !z.string().uuid().safeParse(workspaceId).success) {
+    return NextResponse.json({ error: "Invalid workspace_id" }, { status: 400 })
   }
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -28,20 +28,20 @@ export async function GET(
   }
 
   const agent = await prisma.agent.findFirst({
-    where: { id: agentId, org_id: authResult.orgId, deleted_at: null },
-    select: { id: true, slug: true, team_id: true },
+    where: { id: agentId, workspace_id: authResult.workspaceId, deleted_at: null },
+    select: { id: true, slug: true, crew_id: true },
   })
 
   if (!agent) {
     return NextResponse.json({ error: "Agent not found" }, { status: 404 })
   }
 
-  if (!agent.team_id) {
+  if (!agent.crew_id) {
     return NextResponse.json([])
   }
 
   try {
-    const res = await getTeamFiles(agent.team_id, agent.slug)
+    const res = await getCrewFiles(agent.crew_id, agent.slug)
     if (!res.ok) {
       return NextResponse.json({ error: "Failed to fetch files" }, { status: 502 })
     }

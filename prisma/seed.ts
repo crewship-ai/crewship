@@ -42,9 +42,9 @@ async function main() {
   })
   console.log(`  ✓ User: ${user.email} (${user.id})`)
 
-  // Step 2: Organization
-  console.log("🏢 Seeding organization...")
-  const org = await prisma.organization.upsert({
+  // Step 2: Workspace
+  console.log("🏢 Seeding workspace...")
+  const org = await prisma.workspace.upsert({
     where: { slug: "acme-corp" },
     update: { name: "Acme Corp" },
     create: {
@@ -52,17 +52,17 @@ async function main() {
       slug: "acme-corp",
     },
   })
-  console.log(`  ✓ Organization: ${org.name} (${org.id})`)
+  console.log(`  ✓ Workspace: ${org.name} (${org.id})`)
 
   // Step 3: OrgMember (link user to org as OWNER)
-  console.log("🔗 Linking user to organization...")
-  await prisma.organizationMember.upsert({
+  console.log("🔗 Linking user to workspace...")
+  await prisma.workspaceMember.upsert({
     where: {
-      uq_org_member: { org_id: org.id, user_id: user.id },
+      uq_workspace_member: { workspace_id: org.id, user_id: user.id },
     },
     update: { role: "OWNER" },
     create: {
-      org_id: org.id,
+      workspace_id: org.id,
       user_id: user.id,
       role: "OWNER",
     },
@@ -70,58 +70,58 @@ async function main() {
   console.log(`  ✓ ${user.email} → ${org.name} (OWNER)`)
 
   // Step 4: Teams
-  console.log("👥 Seeding teams...")
-  const engineering = await prisma.team.upsert({
-    where: { uq_team_slug: { org_id: org.id, slug: "engineering" } },
+  console.log("👥 Seeding crews...")
+  const engineering = await prisma.crew.upsert({
+    where: { uq_crew_slug: { workspace_id: org.id, slug: "engineering" } },
     update: { name: "Engineering", color: "#3B82F6", icon: "💻" },
     create: {
-      org_id: org.id,
+      workspace_id: org.id,
       name: "Engineering",
       slug: "engineering",
       color: "#3B82F6",
       icon: "💻",
     },
   })
-  const marketing = await prisma.team.upsert({
-    where: { uq_team_slug: { org_id: org.id, slug: "marketing" } },
+  const marketing = await prisma.crew.upsert({
+    where: { uq_crew_slug: { workspace_id: org.id, slug: "marketing" } },
     update: { name: "Marketing", color: "#10B981", icon: "📈" },
     create: {
-      org_id: org.id,
+      workspace_id: org.id,
       name: "Marketing",
       slug: "marketing",
       color: "#10B981",
       icon: "📈",
     },
   })
-  console.log(`  ✓ Team: ${engineering.name} (${engineering.id})`)
-  console.log(`  ✓ Team: ${marketing.name} (${marketing.id})`)
+  console.log(`  ✓ Crew: ${engineering.name} (${engineering.id})`)
+  console.log(`  ✓ Crew: ${marketing.name} (${marketing.id})`)
 
-  // Step 5: TeamMembers
-  console.log("🔗 Linking user to teams...")
-  await prisma.teamMember.upsert({
-    where: { uq_team_member: { team_id: engineering.id, user_id: user.id } },
+  // Step 5: CrewMembers
+  console.log("🔗 Linking user to crews...")
+  await prisma.crewMember.upsert({
+    where: { uq_crew_member: { crew_id: engineering.id, user_id: user.id } },
     update: {},
-    create: { team_id: engineering.id, user_id: user.id },
+    create: { crew_id: engineering.id, user_id: user.id },
   })
-  await prisma.teamMember.upsert({
-    where: { uq_team_member: { team_id: marketing.id, user_id: user.id } },
+  await prisma.crewMember.upsert({
+    where: { uq_crew_member: { crew_id: marketing.id, user_id: user.id } },
     update: {},
-    create: { team_id: marketing.id, user_id: user.id },
+    create: { crew_id: marketing.id, user_id: user.id },
   })
   console.log(`  ✓ ${user.email} → Engineering, Marketing`)
 
   // Step 6: Agents
   console.log("🤖 Seeding agents...")
   const claudeDev = await prisma.agent.upsert({
-    where: { uq_agent_slug: { org_id: org.id, slug: "claude-dev" } },
+    where: { uq_agent_slug: { workspace_id: org.id, slug: "claude-dev" } },
     update: {},
     create: {
-      org_id: org.id,
-      team_id: engineering.id,
+      workspace_id: org.id,
+      crew_id: engineering.id,
       name: "Claude Dev",
       slug: "claude-dev",
       role_title: "Senior Developer",
-      agent_role: "WORKER",
+      agent_role: "AGENT",
       cli_adapter: "CLAUDE_CODE",
       llm_provider: "ANTHROPIC",
       llm_model: "claude-sonnet-4-20250514",
@@ -132,15 +132,15 @@ async function main() {
     },
   })
   const codeReviewer = await prisma.agent.upsert({
-    where: { uq_agent_slug: { org_id: org.id, slug: "code-reviewer" } },
+    where: { uq_agent_slug: { workspace_id: org.id, slug: "code-reviewer" } },
     update: {},
     create: {
-      org_id: org.id,
-      team_id: engineering.id,
+      workspace_id: org.id,
+      crew_id: engineering.id,
       name: "Code Reviewer",
       slug: "code-reviewer",
       role_title: "Code Reviewer",
-      agent_role: "WORKER",
+      agent_role: "AGENT",
       cli_adapter: "CLAUDE_CODE",
       llm_provider: "ANTHROPIC",
       llm_model: "claude-sonnet-4-20250514",
@@ -149,15 +149,15 @@ async function main() {
     },
   })
   const contentWriter = await prisma.agent.upsert({
-    where: { uq_agent_slug: { org_id: org.id, slug: "content-writer" } },
+    where: { uq_agent_slug: { workspace_id: org.id, slug: "content-writer" } },
     update: {},
     create: {
-      org_id: org.id,
-      team_id: marketing.id,
+      workspace_id: org.id,
+      crew_id: marketing.id,
       name: "Content Writer",
       slug: "content-writer",
       role_title: "Content Specialist",
-      agent_role: "WORKER",
+      agent_role: "AGENT",
       cli_adapter: "CLAUDE_CODE",
       llm_provider: "ANTHROPIC",
       llm_model: "claude-sonnet-4-20250514",
@@ -166,15 +166,15 @@ async function main() {
     },
   })
   const seoAnalyst = await prisma.agent.upsert({
-    where: { uq_agent_slug: { org_id: org.id, slug: "seo-analyst" } },
+    where: { uq_agent_slug: { workspace_id: org.id, slug: "seo-analyst" } },
     update: {},
     create: {
-      org_id: org.id,
-      team_id: marketing.id,
+      workspace_id: org.id,
+      crew_id: marketing.id,
       name: "SEO Analyst",
       slug: "seo-analyst",
       role_title: "SEO Specialist",
-      agent_role: "WORKER",
+      agent_role: "AGENT",
       cli_adapter: "CLAUDE_CODE",
       llm_provider: "OPENAI",
       llm_model: "gpt-4o",
@@ -262,33 +262,33 @@ async function main() {
   console.log("🔑 Seeding credentials...")
   const anthropicCred = await prisma.credential.upsert({
     where: {
-      uq_credential_name: { org_id: org.id, name: "ANTHROPIC_API_KEY" },
+      uq_credential_name: { workspace_id: org.id, name: "ANTHROPIC_API_KEY" },
     },
     update: {},
     create: {
-      org_id: org.id,
+      workspace_id: org.id,
       name: "ANTHROPIC_API_KEY",
       description: "Anthropic API key (demo placeholder)",
       encrypted_value: encrypt("sk-ant-demo-key-placeholder"),
       type: "API_KEY",
       provider: "ANTHROPIC",
-      scope: "ORGANIZATION",
+      scope: "WORKSPACE",
       created_by: user.id,
     },
   })
   const openaiCred = await prisma.credential.upsert({
     where: {
-      uq_credential_name: { org_id: org.id, name: "OPENAI_API_KEY" },
+      uq_credential_name: { workspace_id: org.id, name: "OPENAI_API_KEY" },
     },
     update: {},
     create: {
-      org_id: org.id,
+      workspace_id: org.id,
       name: "OPENAI_API_KEY",
       description: "OpenAI API key (demo placeholder)",
       encrypted_value: encrypt("sk-demo-key-placeholder"),
       type: "API_KEY",
       provider: "OPENAI",
-      scope: "ORGANIZATION",
+      scope: "WORKSPACE",
       created_by: user.id,
     },
   })
@@ -347,7 +347,7 @@ async function main() {
       tier: "FREE",
       display_name: "Community",
       max_agents: 5,
-      max_teams: 2,
+      max_crews: 2,
       max_skills: 10,
       max_credentials: 10,
       max_members: 3,
@@ -359,10 +359,10 @@ async function main() {
   // Step 12: Subscription
   console.log("💳 Seeding subscription...")
   await prisma.subscription.upsert({
-    where: { org_id: org.id },
+    where: { workspace_id: org.id },
     update: { plan_id: freePlan.id },
     create: {
-      org_id: org.id,
+      workspace_id: org.id,
       plan_id: freePlan.id,
       status: "ACTIVE",
     },
@@ -374,7 +374,7 @@ async function main() {
   await prisma.auditLog.createMany({
     data: [
       {
-        org_id: org.id,
+        workspace_id: org.id,
         user_id: user.id,
         action: "user.login",
         entity_type: "user",
@@ -382,7 +382,7 @@ async function main() {
         metadata: { method: "password" },
       },
       {
-        org_id: org.id,
+        workspace_id: org.id,
         user_id: user.id,
         action: "agent.create",
         entity_type: "agent",
@@ -390,12 +390,12 @@ async function main() {
         metadata: { agent_name: claudeDev.name },
       },
       {
-        org_id: org.id,
+        workspace_id: org.id,
         user_id: user.id,
-        action: "team.create",
-        entity_type: "team",
+        action: "crew.create",
+        entity_type: "crew",
         entity_id: engineering.id,
-        metadata: { team_name: engineering.name },
+        metadata: { crew_name: engineering.name },
       },
     ],
   })

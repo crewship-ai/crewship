@@ -8,8 +8,8 @@ import type { OrgRole } from "@/lib/generated/prisma/client"
 
 const AGENT_SAFE_SELECT = {
   id: true,
-  org_id: true,
-  team_id: true,
+  workspace_id: true,
+  crew_id: true,
   name: true,
   slug: true,
   description: true,
@@ -27,19 +27,19 @@ const AGENT_SAFE_SELECT = {
   memory_enabled: true,
   created_at: true,
   updated_at: true,
-  team: { select: { name: true, slug: true, color: true } },
-  _count: { select: { skills: true, credentials: true, sessions: true } },
+  crew: { select: { name: true, slug: true, color: true } },
+  _count: { select: { skills: true, credentials: true, chats: true } },
 } as const
 
 export async function GET(req: NextRequest) {
-  const orgId = req.nextUrl.searchParams.get("org_id")
-  const teamId = req.nextUrl.searchParams.get("team_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
+  const crewId = req.nextUrl.searchParams.get("crew_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
-  const where: Record<string, unknown> = { org_id: authResult.orgId, deleted_at: null }
-  if (teamId) where.team_id = teamId
+  const where: Record<string, unknown> = { workspace_id: authResult.workspaceId, deleted_at: null }
+  if (crewId) where.crew_id = crewId
 
   const agents = await prisma.agent.findMany({
     where,
@@ -51,9 +51,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -73,13 +73,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
   }
 
-  if (parsed.data.team_id) {
-    const team = await prisma.team.findFirst({
-      where: { id: parsed.data.team_id, org_id: authResult.orgId, deleted_at: null },
+  if (parsed.data.crew_id) {
+    const team = await prisma.crew.findFirst({
+      where: { id: parsed.data.crew_id, workspace_id: authResult.workspaceId, deleted_at: null },
       select: { id: true },
     })
     if (!team) {
-      return NextResponse.json({ error: "Invalid team_id" }, { status: 400 })
+      return NextResponse.json({ error: "Invalid crew_id" }, { status: 400 })
     }
   }
 
@@ -87,8 +87,8 @@ export async function POST(req: NextRequest) {
 
   const agent = await prisma.agent.create({
     data: {
-      org_id: authResult.orgId,
-      team_id: parsed.data.team_id,
+      workspace_id: authResult.workspaceId,
+      crew_id: parsed.data.crew_id,
       name: parsed.data.name,
       slug: parsed.data.slug,
       description: parsed.data.description,

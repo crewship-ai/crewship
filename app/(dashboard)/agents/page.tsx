@@ -8,11 +8,11 @@ import { EmptyState } from "@/components/layout/empty-state"
 import { FilterBar } from "@/components/layout/filter-bar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentCard } from "@/components/features/agents/agent-card"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import Link from "next/link"
 
-interface AgentTeam {
+interface AgentCrew {
   name: string
   slug: string
   color: string | null
@@ -29,12 +29,12 @@ interface Agent {
   cli_adapter: string
   llm_provider: string
   llm_model: string
-  team: AgentTeam | null
-  _count: { skills: number; credentials: number; sessions: number }
+  crew: AgentCrew | null
+  _count: { skills: number; credentials: number; chats: number }
 }
 
 export default function AgentsPage() {
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const { abilities } = useAbilities()
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(true)
@@ -42,8 +42,8 @@ export default function AgentsPage() {
   const [activeFilter, setActiveFilter] = useState("All")
 
   useEffect(() => {
-    if (!orgId) {
-      if (!orgLoading) setLoading(false)
+    if (!workspaceId) {
+      if (!wsLoading) setLoading(false)
       return
     }
 
@@ -53,7 +53,7 @@ export default function AgentsPage() {
       setLoading(true)
       setError(null)
       try {
-        const res = await fetch(`/api/v1/agents?org_id=${orgId}`)
+        const res = await fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
         if (!res.ok) {
           setError("Failed to load agents")
           return
@@ -71,9 +71,9 @@ export default function AgentsPage() {
     return () => {
       cancelled = true
     }
-  }, [orgId, orgLoading])
+  }, [workspaceId, wsLoading])
 
-  const isLoading = orgLoading || loading
+  const isLoading = wsLoading || loading
 
   const filteredAgents =
     activeFilter === "All"

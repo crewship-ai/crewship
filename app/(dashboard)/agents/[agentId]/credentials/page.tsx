@@ -5,7 +5,7 @@ import { ShieldCheck, AlertCircle, Inbox, Plus, Trash2, Loader2 } from "lucide-r
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 import { AssignCredentialDialog } from "@/components/features/credentials/assign-credential-dialog"
 
 interface CredentialData {
@@ -25,13 +25,13 @@ interface AgentCredential {
 }
 
 const SCOPE_STYLES: Record<string, string> = {
-  ORGANIZATION: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400",
+  WORKSPACE: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400",
   TEAM: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
 }
 
 export default function CredentialsPage({ params }: { params: Promise<{ agentId: string }> }) {
   const { agentId } = use(params)
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [credentials, setCredentials] = useState<AgentCredential[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -39,9 +39,9 @@ export default function CredentialsPage({ params }: { params: Promise<{ agentId:
   const [removingId, setRemovingId] = useState<string | null>(null)
 
   const fetchCredentials = useCallback(async () => {
-    if (!orgId) return
+    if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/credentials?org_id=${orgId}`)
+      const res = await fetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`)
       if (!res.ok) {
         setError("Failed to load credentials")
         return
@@ -53,18 +53,18 @@ export default function CredentialsPage({ params }: { params: Promise<{ agentId:
     } finally {
       setLoading(false)
     }
-  }, [agentId, orgId])
+  }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
     fetchCredentials()
-  }, [orgId, fetchCredentials])
+  }, [workspaceId, fetchCredentials])
 
   const handleRemove = useCallback(async (assignmentId: string) => {
-    if (!orgId) return
+    if (!workspaceId) return
     setRemovingId(assignmentId)
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}?org_id=${orgId}`, {
+      const res = await fetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
       if (res.ok) {
@@ -75,9 +75,9 @@ export default function CredentialsPage({ params }: { params: Promise<{ agentId:
     } finally {
       setRemovingId(null)
     }
-  }, [agentId, orgId])
+  }, [agentId, workspaceId])
 
-  if (orgLoading || loading) {
+  if (wsLoading || loading) {
     return <CredentialsSkeleton />
   }
 
@@ -171,12 +171,12 @@ export default function CredentialsPage({ params }: { params: Promise<{ agentId:
         Credentials are injected at container start. Priority-based failover rotates keys automatically on rate limit errors.
       </p>
 
-      {orgId && (
+      {workspaceId && (
         <AssignCredentialDialog
           open={assignOpen}
           onOpenChange={setAssignOpen}
           agentId={agentId}
-          orgId={orgId}
+          workspaceId={workspaceId}
           onAssigned={fetchCredentials}
         />
       )}

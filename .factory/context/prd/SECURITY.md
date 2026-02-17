@@ -1,7 +1,7 @@
 # Crewship -- Security (SECURITY.md)
 
-**Verze:** 2.0
-**Datum:** 2026-02-11
+**Verze:** 3.0
+**Datum:** 2026-02-17
 
 ---
 
@@ -12,7 +12,7 @@
 | Aktivum | Kriticnost | Popis |
 |---|---|---|
 | Credentials vault | KRITICKA | API klice uzivatelu (BYOK) — sifrovane AES-256-GCM |
-| User data | VYSOKA | Organizace, tymy, konfigurace agentu |
+| User data | VYSOKA | Workspaces, crews, konfigurace agentu |
 | Konverzace | VYSOKA | JSONL soubory — mohou obsahovat firemni data |
 | Agent output | VYSOKA | /output/ — reporty, kod, firemni dokumenty |
 | Session tokeny | VYSOKA | JWT tokeny (NextAuth) |
@@ -132,7 +132,7 @@ crewship-agents (agent kontejnery, --internal) ← bez internetu!
 
 ```typescript
 // lib/permissions/abilities.ts
-export function defineAbilityFor(role: OrgRole, orgId: string) {
+export function defineAbilityFor(role: OrgRole, workspaceId: string) {
   return defineAbility((can, cannot) => {
     switch (role) {
       case "OWNER":
@@ -140,37 +140,37 @@ export function defineAbilityFor(role: OrgRole, orgId: string) {
         break;
       case "ADMIN":
         can("manage", "all");
-        cannot("delete", "Organization");
+        cannot("delete", "Workspace");
         cannot("manage", "Subscription");
         break;
       case "MANAGER":
-        can("read", "Team", { org_id: orgId });
-        can("create", "Team", { org_id: orgId });
-        can("update", "Team", { org_id: orgId });
-        can("manage", "Agent", { org_id: orgId });
-        can("manage", "AgentSkill", { org_id: orgId });
-        can("manage", "AgentCredential", { org_id: orgId });
-        can("create", "Credential", { org_id: orgId });
-        can("read", "Credential", { org_id: orgId });
-        can("update", "Credential", { org_id: orgId });
-        can("read", "ConversationSession", { org_id: orgId });
-        can("read", "AgentRun", { org_id: orgId });
-        can("read", "AuditLog", { org_id: orgId });
+        can("read", "Crew", { workspace_id: workspaceId });
+        can("create", "Crew", { workspace_id: workspaceId });
+        can("update", "Crew", { workspace_id: workspaceId });
+        can("manage", "Agent", { workspace_id: workspaceId });
+        can("manage", "AgentSkill", { workspace_id: workspaceId });
+        can("manage", "AgentCredential", { workspace_id: workspaceId });
+        can("create", "Credential", { workspace_id: workspaceId });
+        can("read", "Credential", { workspace_id: workspaceId });
+        can("update", "Credential", { workspace_id: workspaceId });
+        can("read", "Chat", { workspace_id: workspaceId });
+        can("read", "AgentRun", { workspace_id: workspaceId });
+        can("read", "AuditLog", { workspace_id: workspaceId });
         break;
       case "MEMBER":
-        can("read", "Team", { org_id: orgId });
-        can("read", "Agent", { org_id: orgId });
-        can("start", "Agent", { org_id: orgId });
-        can("create", "ConversationSession", { org_id: orgId });
-        can("read", "ConversationSession", { org_id: orgId });
-        can("read", "AgentRun", { org_id: orgId });
+        can("read", "Crew", { workspace_id: workspaceId });
+        can("read", "Agent", { workspace_id: workspaceId });
+        can("start", "Agent", { workspace_id: workspaceId });
+        can("create", "Chat", { workspace_id: workspaceId });
+        can("read", "Chat", { workspace_id: workspaceId });
+        can("read", "AgentRun", { workspace_id: workspaceId });
         can("read", "Skill");
         break;
       case "VIEWER":
-        can("read", "Team", { org_id: orgId });
-        can("read", "Agent", { org_id: orgId });
-        can("read", "ConversationSession", { org_id: orgId });
-        can("read", "AgentRun", { org_id: orgId });
+        can("read", "Crew", { workspace_id: workspaceId });
+        can("read", "Agent", { workspace_id: workspaceId });
+        can("read", "Chat", { workspace_id: workspaceId });
+        can("read", "AgentRun", { workspace_id: workspaceId });
         can("read", "Skill");
         break;
     }
@@ -181,7 +181,7 @@ export function defineAbilityFor(role: OrgRole, orgId: string) {
 #### Kde se CASL kontroluje
 1. API middleware (`withRBAC`) — pred kazdym handlerem
 2. Prisma middleware (Phase 2) — `@casl/prisma` filtruje dotazy
-3. Go service — pri WebSocket subscribe overuje team membership (IPC dotaz na Next.js)
+3. Go service — pri WebSocket subscribe overuje crew membership (IPC dotaz na Next.js)
 4. UI — client-side ability pro schovani UI prvku (NE bezpecnostni vrstva!)
 
 ### 2.4 Vrstva 4: RLS (Phase 2 — defense-in-depth)
@@ -297,12 +297,12 @@ Redakovane patterns: password, token, secret, key, apiKey, api_key,
 - Short-lived JWT (5 minut) ziskany z REST API
 - Prenaseny v query parametru (WebSocket API omezeni)
 - Go service (`crewshipd`) validuje JWT pri WebSocket handshake
-- Po pripojeni: Go service overuje team membership pres IPC dotaz na Next.js
+- Po pripojeni: Go service overuje crew membership pres IPC dotaz na Next.js
 
 ### 4.3 Webhook autentizace
 
 ```
-POST /api/v1/webhooks/{team-id}/{agent-id}/trigger
+POST /api/v1/webhooks/{crew-id}/{agent-id}/trigger
 Headers: X-Webhook-Secret: {per-agent-secret}
 ```
 
@@ -430,7 +430,7 @@ const MAX_LENGTHS = {
 function sanitizeFilename(name: string): string {
   return name
     .replace(/\.\./g, "")          // path traversal
-    .replace(/[\/\\]/g, "")        // directory separators
+    .replace(/[\/\\]/g, "")        // coordinatory separators
     .replace(/[\x00-\x1f]/g, "")   // control characters
     .slice(0, 255);
 }
@@ -603,8 +603,8 @@ NextAuth ma vestaveny CSRF token (double-submit cookie).
 
 ```
 - 401 bez auth tokenu
-- 403 cross-org pristup
-- 403 cross-team pristup (MEMBER)
+- 403 cross-workspace pristup
+- 403 cross-crew pristup (MEMBER)
 - Rate limiting
 - Audit log completeness
 - Credential masking v response
@@ -648,9 +648,49 @@ CORS_ORIGIN=https://your-domain.com  # explicitni, zadny wildcard
 
 ---
 
-## 12. OTEVRENE OTAZKY
+## 12. Pouceni z OpenClaw bezpecnostnich incidentu (unor 2026)
 
-1. **Workspace quota** — jak limitovat disk usage per team? Docker `--storage-opt size=10G`?
+OpenClaw prosla masivni bezpecnostni krizi (viz STRATEGY-2026.md):
+- CVE-2026-25253 (CVSS 8.8): one-click RCE
+- 42,900 exposed instanci, 15,200 zranitelnych
+- 341+ malicious skills na ClawHub (20% vsech skills)
+- 36% skills ma prompt injection zranitelnosti
+- Credentials v plaintext
+
+### Jak Crewship predchazi kazdemu problemu:
+| OpenClaw problem | Crewship reseni |
+|---|---|
+| Zadna container isolation | Docker kontejnery, non-root UID 1001, --internal network |
+| Credentials v plaintext | AES-256-GCM + key versioning |
+| Malicious skills (zadny sandbox) | Skill permissions model + Docker enforcement |
+| Zadny audit trail | Append-only audit log |
+| Prompt injection → full access | Agent v kontejneru = bounded blast radius |
+| Exposed control panels | localhost default, auth required, RBAC |
+| Supply-chain attacks | Official/Verified/Community tiers, automated scanning |
+
+---
+
+## 13. Skill sandbox enforcement
+
+### Permissions model
+Kazdy skill deklaruje v `skill.yaml`:
+- `filesystem`: read/write paths (whitelist)
+- `network`: enabled/disabled + domain whitelist
+- `secrets`: required/optional env var names
+- `shell`: allowed/denied commands
+
+### Enforcement
+- Docker vynucuje filesystem a network permissions
+- Skill bez permissions deklarace se NESPUSTI
+- OFFICIAL skills: rucne reviewed Crewship tymem
+- VERIFIED skills: automated VirusTotal + sandbox test
+- COMMUNITY skills: sandbox-only (omezena prava)
+
+---
+
+## 14. OTEVRENE OTAZKY
+
+1. **Workspace quota** — jak limitovat disk usage per crew? Docker `--storage-opt size=10G`?
 2. **DNS exfiltrace** — CoreDNS s logovanim v kontejneru? (Phase 2)
 3. **Skill security review** — jak validovat community skills? Sandbox + review?
 4. **WAF** — Cloudflare/AWS WAF pred API?

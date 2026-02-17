@@ -4,9 +4,9 @@ import { requireAuth, isAuthError } from "@/lib/api-auth"
 import type { OrgRole } from "@/lib/generated/prisma/client"
 
 export async function GET(req: NextRequest) {
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   if ((authResult.role as OrgRole) !== "OWNER") {
@@ -15,9 +15,9 @@ export async function GET(req: NextRequest) {
 
   const users = await prisma.user.findMany({
     include: {
-      org_memberships: {
+      workspace_memberships: {
         include: {
-          organization: { select: { id: true, name: true, slug: true } },
+          workspace: { select: { id: true, name: true, slug: true } },
         },
         take: 1,
       },
@@ -31,8 +31,8 @@ export async function GET(req: NextRequest) {
     full_name: user.full_name,
     avatar_url: user.avatar_url,
     created_at: user.created_at,
-    organization: user.org_memberships[0]?.organization ?? null,
-    role: user.org_memberships[0]?.role ?? null,
+    workspace: user.workspace_memberships[0]?.workspace ?? null,
+    role: user.workspace_memberships[0]?.role ?? null,
   }))
 
   return NextResponse.json(result)

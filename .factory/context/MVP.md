@@ -9,7 +9,7 @@
 ## Strategicka rozhodnuti
 
 ### MVP scope (co uzivatel MUSI umet)
-1. Prihlasit se, vytvorit organizaci + tym
+1. Prihlasit se, vytvorit workspace + crew
 2. Vytvorit agenta, pridat mu credentials
 3. Chatovat s agentem v realnem case (WebSocket)
 4. Videt soubory co agent vytvoril
@@ -17,7 +17,7 @@
 
 ### Vedome odlozeno z MVP
 - Skills marketplace (MVP: 3 bundled skills)
-- Crew Leader/Director orchestrace (Phase 2A/2B)
+- Lead/Coordinator orchestrace (Phase 2A/2B)
 - Messaging kanaly (Discord, Telegram)
 - Stripe billing
 - Cron joby, loop mode
@@ -28,7 +28,7 @@
 
 ### Technicke omezeni MVP
 - Agent runtime: pouze Claude Code (`claude --print`)
-- Container model: 1 kontejner = 1 tym
+- Container model: 1 kontejner = 1 crew
 - Storage: LocalFS provider
 - State: bbolt provider
 - No Landlock (per-agent FS izolace az Phase 2)
@@ -49,13 +49,13 @@
 - [x] `pnpm build` projde bez chyb
 - [x] `go run ./cmd/crewshipd` startuje
 
-### Faze 2: Auth + Org + Team CRUD [PRISTI]
+### Faze 2: Auth + Workspace + Crew CRUD [PRISTI]
 - [ ] NextAuth.js login/signup stranky
 - [ ] Dashboard layout (sidebar + hlavni obsah)
-- [ ] Organization CRUD + API routes
-- [ ] Team CRUD + API routes
+- [ ] Workspace CRUD + API routes
+- [ ] Crew CRUD + API routes
 - [ ] RBAC zaklad (CASL abilities)
-- [ ] Zustand store (currentOrg, currentUser)
+- [ ] Zustand store (currentWorkspace, currentUser)
 
 ### Faze 3: Agent + Credentials
 - [ ] Agent CRUD + detail stranky (tabs)
@@ -70,7 +70,7 @@
 - [ ] Docker container lifecycle (ContainerProvider)
 - [ ] Agent execution (Docker exec + CLI adapter)
 - [ ] Stdout streaming (Docker → WS → Browser)
-- [ ] Chat UI (zpravy, streaming, markdown)
+- [ ] Chat UI (messages, streaming, markdown)
 - [ ] JSONL logging
 - [ ] bbolt WAL (StateProvider)
 

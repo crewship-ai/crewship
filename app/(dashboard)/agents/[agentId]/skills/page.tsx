@@ -5,7 +5,7 @@ import { Puzzle, AlertCircle, Inbox } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 interface SkillData {
   id: string
@@ -36,19 +36,19 @@ const SOURCE_STYLES: Record<string, string> = {
 
 export default function SkillsPage({ params }: { params: Promise<{ agentId: string }> }) {
   const { agentId } = use(params)
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [skills, setSkills] = useState<AgentSkill[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
 
     let cancelled = false
 
     async function fetchSkills() {
       try {
-        const res = await fetch(`/api/v1/agents/${agentId}/skills?org_id=${orgId}`)
+        const res = await fetch(`/api/v1/agents/${agentId}/skills?workspace_id=${workspaceId}`)
         if (!res.ok) {
           if (!cancelled) setError("Failed to load skills")
           return
@@ -64,9 +64,9 @@ export default function SkillsPage({ params }: { params: Promise<{ agentId: stri
 
     fetchSkills()
     return () => { cancelled = true }
-  }, [agentId, orgId])
+  }, [agentId, workspaceId])
 
-  if (orgLoading || loading) {
+  if (wsLoading || loading) {
     return <SkillsSkeleton />
   }
 

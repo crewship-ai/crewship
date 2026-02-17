@@ -12,13 +12,13 @@ import (
 )
 
 func testHandler(secret string) *Handler {
-	lookup := func(_ context.Context, teamID, agentID string) (string, error) {
-		if teamID == "team-1" && agentID == "agent-1" {
+	lookup := func(_ context.Context, crewID, agentID string) (string, error) {
+		if crewID == "crew-1" && agentID == "agent-1" {
 			return secret, nil
 		}
 		return "", fmt.Errorf("not found")
 	}
-	trigger := func(_ context.Context, teamID, agentID string, payload WebhookPayload) error {
+	trigger := func(_ context.Context, crewID, agentID string, payload WebhookPayload) error {
 		return nil
 	}
 	return NewHandler(slog.Default(), lookup, trigger)
@@ -29,7 +29,7 @@ func TestWebhookSuccess(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"event": "alert", "source": "grafana"})
 	req := httptest.NewRequest("POST", "/api/v1/webhooks/team-1/agent-1/trigger", bytes.NewReader(body))
-	req.SetPathValue("teamId", "team-1")
+	req.SetPathValue("crewId", "crew-1")
 	req.SetPathValue("agentId", "agent-1")
 	req.Header.Set("X-Webhook-Secret", "secret-123")
 	req.Header.Set("Content-Type", "application/json")
@@ -46,7 +46,7 @@ func TestWebhookMissingSecret(t *testing.T) {
 	h := testHandler("secret-123")
 
 	req := httptest.NewRequest("POST", "/api/v1/webhooks/team-1/agent-1/trigger", nil)
-	req.SetPathValue("teamId", "team-1")
+	req.SetPathValue("crewId", "crew-1")
 	req.SetPathValue("agentId", "agent-1")
 
 	w := httptest.NewRecorder()
@@ -61,7 +61,7 @@ func TestWebhookInvalidSecret(t *testing.T) {
 	h := testHandler("secret-123")
 
 	req := httptest.NewRequest("POST", "/api/v1/webhooks/team-1/agent-1/trigger", nil)
-	req.SetPathValue("teamId", "team-1")
+	req.SetPathValue("crewId", "crew-1")
 	req.SetPathValue("agentId", "agent-1")
 	req.Header.Set("X-Webhook-Secret", "wrong-secret")
 
@@ -77,7 +77,7 @@ func TestWebhookAgentNotFound(t *testing.T) {
 	h := testHandler("secret-123")
 
 	req := httptest.NewRequest("POST", "/api/v1/webhooks/team-2/agent-2/trigger", nil)
-	req.SetPathValue("teamId", "team-2")
+	req.SetPathValue("crewId", "crew-2")
 	req.SetPathValue("agentId", "agent-2")
 	req.Header.Set("X-Webhook-Secret", "secret-123")
 
@@ -93,7 +93,7 @@ func TestWebhookMethodNotAllowed(t *testing.T) {
 	h := testHandler("secret-123")
 
 	req := httptest.NewRequest("GET", "/api/v1/webhooks/team-1/agent-1/trigger", nil)
-	req.SetPathValue("teamId", "team-1")
+	req.SetPathValue("crewId", "crew-1")
 	req.SetPathValue("agentId", "agent-1")
 
 	w := httptest.NewRecorder()

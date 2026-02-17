@@ -8,7 +8,7 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    organizationMember: {
+    workspaceMember: {
       findUnique: vi.fn(),
     },
   },
@@ -30,12 +30,12 @@ describe("api-auth", () => {
     const { auth, requireAuth, isAuthError } = await loadModules()
     auth.mockResolvedValue(null)
 
-    const result = await requireAuth("org-1")
+    const result = await requireAuth("workspace-1")
     expect(isAuthError(result)).toBe(true)
     expect((result as NextResponse).status).toBe(401)
   })
 
-  it("returns 400 when orgId is null", async () => {
+  it("returns 400 when workspaceId is null", async () => {
     const { auth, requireAuth, isAuthError } = await loadModules()
     auth.mockResolvedValue({ user: { id: "user-1" }, expires: "" } as never)
 
@@ -47,9 +47,9 @@ describe("api-auth", () => {
   it("returns 403 when user not a member", async () => {
     const { auth, prisma, requireAuth, isAuthError } = await loadModules()
     auth.mockResolvedValue({ user: { id: "user-1" }, expires: "" } as never)
-    vi.mocked(prisma.organizationMember.findUnique).mockResolvedValue(null)
+    vi.mocked(prisma.workspaceMember.findUnique).mockResolvedValue(null)
 
-    const result = await requireAuth("org-1")
+    const result = await requireAuth("workspace-1")
     expect(isAuthError(result)).toBe(true)
     expect((result as NextResponse).status).toBe(403)
   })
@@ -57,15 +57,15 @@ describe("api-auth", () => {
   it("returns AuthResult on success", async () => {
     const { auth, prisma, requireAuth, isAuthError } = await loadModules()
     auth.mockResolvedValue({ user: { id: "user-1" }, expires: "" } as never)
-    vi.mocked(prisma.organizationMember.findUnique).mockResolvedValue({
+    vi.mocked(prisma.workspaceMember.findUnique).mockResolvedValue({
       role: "ADMIN",
     } as never)
 
-    const result = await requireAuth("org-1")
+    const result = await requireAuth("workspace-1")
     expect(isAuthError(result)).toBe(false)
     if (!isAuthError(result)) {
       expect(result.userId).toBe("user-1")
-      expect(result.orgId).toBe("org-1")
+      expect(result.workspaceId).toBe("workspace-1")
       expect(result.role).toBe("ADMIN")
     }
   })
@@ -73,6 +73,6 @@ describe("api-auth", () => {
   it("isAuthError distinguishes NextResponse from AuthResult", async () => {
     const { isAuthError } = await loadModules()
     expect(isAuthError(NextResponse.json({}, { status: 401 }))).toBe(true)
-    expect(isAuthError({ userId: "u1", orgId: "o1", role: "ADMIN" })).toBe(false)
+    expect(isAuthError({ userId: "u1", workspaceId: "o1", role: "ADMIN" })).toBe(false)
   })
 })

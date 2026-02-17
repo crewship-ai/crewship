@@ -44,9 +44,9 @@ func validateID(s string) error {
 	return nil
 }
 
-func (w *Writer) Append(teamID, agentID string, entry LogEntry) error {
-	if err := validateID(teamID); err != nil {
-		return fmt.Errorf("invalid team ID: %w", err)
+func (w *Writer) Append(crewID, agentID string, entry LogEntry) error {
+	if err := validateID(crewID); err != nil {
+		return fmt.Errorf("invalid crew ID: %w", err)
 	}
 	if err := validateID(agentID); err != nil {
 		return fmt.Errorf("invalid agent ID: %w", err)
@@ -68,10 +68,10 @@ func (w *Writer) Append(teamID, agentID string, entry LogEntry) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	key := teamID + "/" + agentID
+	key := crewID + "/" + agentID
 	f, ok := w.files[key]
 	if !ok {
-		dir := filepath.Join(w.basePath, "teams", teamID, "agents", agentID)
+		dir := filepath.Join(w.basePath, "crews", crewID, "agents", agentID)
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("create log dir: %w", err)
 		}

@@ -1,15 +1,15 @@
 import { create } from "zustand"
 
 interface AppState {
-  currentOrgId: string | null
+  currentWorkspaceId: string | null
   sidebarOpen: boolean
-  setCurrentOrgId: (id: string | null) => void
+  setCurrentWorkspaceId: (id: string | null) => void
   setSidebarOpen: (open: boolean) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  currentOrgId: null,
+  currentWorkspaceId: null,
   sidebarOpen: true,
-  setCurrentOrgId: (id) => set({ currentOrgId: id }),
+  setCurrentWorkspaceId: (id) => set({ currentWorkspaceId: id }),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
 }))
