@@ -79,12 +79,17 @@ func cmdDoctor() {
 
 	allOK := true
 
+	fmt.Printf("  Version:       %s (%s)\n", version, commit)
 	fmt.Printf("  Go runtime:    %s\n", runtime.Version())
+	fmt.Printf("  OS/Arch:       %s/%s\n", runtime.GOOS, runtime.GOARCH)
 
 	if checkDocker() {
 		fmt.Println("  Docker:        OK")
 	} else {
-		fmt.Println("  Docker:        NOT FOUND (agent containers will not work)")
+		fmt.Println("  Docker:        NOT FOUND")
+		fmt.Println()
+		fmt.Println("  Docker is required to run AI agents.")
+		fmt.Println("  Install Docker Desktop: https://docs.docker.com/get-docker/")
 		allOK = false
 	}
 
@@ -104,9 +109,9 @@ func cmdDoctor() {
 
 	fmt.Println()
 	if allOK {
-		fmt.Println("All checks passed.")
+		fmt.Println("All checks passed. Ready to go!")
 	} else {
-		fmt.Println("Some checks failed. Crewship may work with reduced functionality.")
+		fmt.Println("Some checks failed. Run 'crewship doctor' after fixing to verify.")
 	}
 }
 
@@ -119,7 +124,21 @@ func cmdStart(args []string) {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	configPath := fs.String("config", "", "path to config file (YAML)")
 	dbURL := fs.String("db", "", "database URL (default: ~/.crewship/crewship.db)")
+	noDocker := fs.Bool("no-docker", false, "start without Docker (dashboard only, agents cannot run)")
 	fs.Parse(args)
+
+	if !*noDocker && !checkDocker() {
+		fmt.Fprintln(os.Stderr, "Error: Docker is not available.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Crewship requires Docker to run AI agents.")
+		fmt.Fprintln(os.Stderr, "Install Docker Desktop: https://docs.docker.com/get-docker/")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "To start without Docker (dashboard only, no agents):")
+		fmt.Fprintln(os.Stderr, "  crewship start --no-docker")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Run 'crewship doctor' for full diagnostics.")
+		os.Exit(1)
+	}
 
 	bootstrapLogger := logging.New("info", "json", os.Stdout)
 	slog.SetDefault(bootstrapLogger)
@@ -189,7 +208,7 @@ func cmdStart(args []string) {
 		cancel()
 	}()
 
-	deps, err := initProviders(cfg, logger)
+	deps, err := initProviders(cfg, logger, *noDocker)
 	if err != nil {
 		logger.Error("failed to initialize providers", "error", err)
 		os.Exit(1)
@@ -231,11 +250,15 @@ func cmdStart(args []string) {
 	logger.Info("crewship stopped")
 }
 
-func initProviders(cfg *config.Config, logger *slog.Logger) (*server.Deps, error) {
+func initProviders(cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {
 	deps := &server.Deps{}
 
 	switch cfg.Container.Provider {
 	case "docker":
+		if skipDocker {
+			logger.Info("docker provider disabled via --no-docker")
+			break
+		}
 		d, err := docker.New(docker.Config{
 			RuntimeImage:   cfg.Container.RuntimeImage,
 			DefaultRuntime: cfg.Container.DefaultRuntime,
