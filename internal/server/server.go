@@ -160,6 +160,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		if deps.WebFS != nil {
 			opts = append(opts, goapi.WithStaticFS(deps.WebFS))
 		}
+		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
 		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 		if err != nil {
 			logger.Error("failed to create API router", "error", err)

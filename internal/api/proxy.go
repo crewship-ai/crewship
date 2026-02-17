@@ -1,0 +1,330 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"strconv"
+	"time"
+)
+
+type ProxyHandler struct {
+	db         *sql.DB
+	logger     *slog.Logger
+	socketPath string
+}
+
+func NewProxyHandler(db *sql.DB, logger *slog.Logger, socketPath string) *ProxyHandler {
+	return &ProxyHandler{db: db, logger: logger, socketPath: socketPath}
+}
+
+func (h *ProxyHandler) ipcClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", h.socketPath)
+			},
+		},
+	}
+}
+
+func (h *ProxyHandler) ipcGet(ctx context.Context, path string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://crewshipd"+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	return h.ipcClient().Do(req)
+}
+
+func (h *ProxyHandler) ipcPost(ctx context.Context, path string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://crewshipd"+path, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return h.ipcClient().Do(req)
+}
+
+func (h *ProxyHandler) proxyJSON(w http.ResponseWriter, resp *http.Response) {
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func (h *ProxyHandler) CrewshipdHealth(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.ipcGet(r.Context(), "/health")
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unreachable"})
+		return
+	}
+	h.proxyJSON(w, resp)
+}
+
+func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	var agentName, cliAdapter, status, crewID sql.NullString
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT name, cli_adapter, status, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&agentName, &cliAdapter, &status, &crewID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+
+	debug := map[string]interface{}{
+		"agent": map[string]interface{}{
+			"id": agentID, "name": agentName.String,
+			"cli_adapter": cliAdapter.String, "db_status": status.String,
+		},
+		"crewshipd_reachable": false,
+	}
+
+	if resp, err := h.ipcGet(r.Context(), "/debug/info"); err == nil {
+		defer resp.Body.Close()
+		var data map[string]interface{}
+		if json.NewDecoder(resp.Body).Decode(&data) == nil {
+			debug["crewshipd"] = data
+			debug["crewshipd_reachable"] = true
+		}
+	}
+
+	if resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/agents/%s/status", agentID)); err == nil {
+		defer resp.Body.Close()
+		var data interface{}
+		if json.NewDecoder(resp.Body).Decode(&data) == nil {
+			debug["runtime"] = data
+		}
+	} else {
+		debug["runtime"] = map[string]string{"status": "unreachable"}
+	}
+
+	if resp, err := h.ipcGet(r.Context(), fmt.Sprintf("/debug/logs?limit=200&agent_id=%s", agentID)); err == nil {
+		defer resp.Body.Close()
+		var data map[string]interface{}
+		if json.NewDecoder(resp.Body).Decode(&data) == nil {
+			debug["service_logs"] = data["logs"]
+		}
+	} else {
+		debug["service_logs"] = []interface{}{}
+	}
+
+	if crewID.Valid {
+		path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=0&limit=50", agentID, crewID.String)
+		if resp, err := h.ipcGet(r.Context(), path); err == nil {
+			defer resp.Body.Close()
+			var data map[string]interface{}
+			if json.NewDecoder(resp.Body).Decode(&data) == nil {
+				debug["agent_logs"] = data["logs"]
+			}
+		}
+	} else {
+		debug["agent_logs"] = []interface{}{}
+	}
+
+	writeJSON(w, http.StatusOK, debug)
+}
+
+func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	var slug, crewID sql.NullString
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&slug, &crewID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+	if !crewID.Valid {
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+
+	path := fmt.Sprintf("/crews/%s/files?agent_slug=%s", crewID.String, slug.String)
+	resp, err := h.ipcGet(r.Context(), path)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to fetch files"})
+		return
+	}
+	defer resp.Body.Close()
+
+	var data map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&data) == nil {
+		if files, ok := data["files"]; ok {
+			writeJSON(w, http.StatusOK, files)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, []interface{}{})
+}
+
+func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	filePath := r.URL.Query().Get("path")
+
+	if filePath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path parameter required"})
+		return
+	}
+
+	var slug, crewID sql.NullString
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&slug, &crewID)
+	if err != nil || !crewID.Valid {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+
+	agentFilePath := fmt.Sprintf("%s/%s", slug.String, filePath)
+	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID.String, agentFilePath)
+
+	resp, err := h.ipcGet(r.Context(), ipcPath)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "File not found"})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "File not found"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", resp.Header.Get("Content-Disposition"))
+	if cl := resp.Header.Get("Content-Length"); cl != "" {
+		w.Header().Set("Content-Length", cl)
+	}
+	io.Copy(w, resp.Body)
+}
+
+func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	offset := r.URL.Query().Get("offset")
+	if offset == "" {
+		offset = "0"
+	}
+	limit := r.URL.Query().Get("limit")
+	if limit == "" {
+		limit = "100"
+	}
+
+	var crewID sql.NullString
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&crewID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+	if !crewID.Valid {
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+
+	path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=%s&limit=%s", agentID, crewID.String, offset, limit)
+	resp, err := h.ipcGet(r.Context(), path)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+	defer resp.Body.Close()
+
+	var data map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&data) == nil {
+		if logs, ok := data["logs"]; ok {
+			writeJSON(w, http.StatusOK, logs)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, []interface{}{})
+}
+
+func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+
+	if !canRole(role, "create") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	var exists string
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&exists)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+
+	// Try to stop via crewshipd (best effort)
+	h.ipcPost(r.Context(), fmt.Sprintf("/agents/%s/stop", agentID), nil)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	h.db.ExecContext(r.Context(),
+		"UPDATE agents SET status = 'STOPPED', updated_at = ? WHERE id = ? AND workspace_id = ?",
+		now, agentID, workspaceID)
+
+	writeJSON(w, http.StatusOK, map[string]string{"id": agentID, "status": "STOPPED"})
+}
+
+func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
+	chatID := r.PathValue("chatId")
+	user := UserFromContext(r.Context())
+
+	var chatWSID string
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT workspace_id FROM chats WHERE id = ?", chatID).Scan(&chatWSID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
+		return
+	}
+
+	var memberRole string
+	err = h.db.QueryRowContext(r.Context(),
+		"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
+		chatWSID, user.ID).Scan(&memberRole)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	path := fmt.Sprintf("/chats/%s/messages?offset=%d&limit=%d", chatID, offset, limit)
+	resp, err := h.ipcGet(r.Context(), path)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to fetch messages"})
+		return
+	}
+	h.proxyJSON(w, resp)
+}

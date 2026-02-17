@@ -10,10 +10,11 @@ import (
 )
 
 type Router struct {
-	mux    *http.ServeMux
-	db     *sql.DB
-	logger *slog.Logger
-	authMw *AuthMiddleware
+	mux        *http.ServeMux
+	db         *sql.DB
+	logger     *slog.Logger
+	authMw     *AuthMiddleware
+	socketPath string
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -46,6 +47,12 @@ func WithStaticFS(webFS fs.FS) RouterOption {
 	return func(r *Router) {
 		r.mux.Handle("GET /", StaticFileHandler(webFS))
 		r.logger.Info("serving embedded static UI")
+	}
+}
+
+func WithSocketPath(path string) RouterOption {
+	return func(r *Router) {
+		r.socketPath = path
 	}
 }
 
@@ -134,4 +141,37 @@ func (r *Router) registerRoutes() {
 
 	// Audit logs (require workspace context + manage role)
 	r.mux.Handle("GET /api/v1/audit", authed(wsCtx(http.HandlerFunc(audit.List))))
+
+	// Auth (no auth required)
+	authH := NewAuthHandler(r.db, r.logger)
+	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
+	r.mux.Handle("GET /api/v1/ws-token", authed(http.HandlerFunc(authH.WsToken)))
+
+	// Admin (require workspace context + OWNER)
+	admin := NewAdminHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/admin/stats", authed(wsCtx(http.HandlerFunc(admin.Stats))))
+	r.mux.Handle("GET /api/v1/admin/users", authed(wsCtx(http.HandlerFunc(admin.ListUsers))))
+	r.mux.Handle("GET /api/v1/admin/workspaces", authed(wsCtx(http.HandlerFunc(admin.ListWorkspaces))))
+
+	// Crewshipd proxy + agent runtime routes (require IPC socket)
+	socketPath := r.socketPath
+	if socketPath == "" {
+		socketPath = "/tmp/crewship.sock"
+	}
+	proxy := NewProxyHandler(r.db, r.logger, socketPath)
+	r.mux.Handle("GET /api/v1/crewshipd", authed(wsCtx(http.HandlerFunc(proxy.CrewshipdHealth))))
+	r.mux.Handle("GET /api/v1/agents/{agentId}/debug", authed(wsCtx(http.HandlerFunc(proxy.AgentDebug))))
+	r.mux.Handle("GET /api/v1/agents/{agentId}/files", authed(wsCtx(http.HandlerFunc(proxy.AgentFiles))))
+	r.mux.Handle("GET /api/v1/agents/{agentId}/files/download", authed(wsCtx(http.HandlerFunc(proxy.AgentFileDownload))))
+	r.mux.Handle("GET /api/v1/agents/{agentId}/logs", authed(wsCtx(http.HandlerFunc(proxy.AgentLogs))))
+	r.mux.Handle("POST /api/v1/agents/{agentId}/stop", authed(wsCtx(http.HandlerFunc(proxy.AgentStop))))
+	r.mux.Handle("GET /api/v1/chats/{chatId}/messages", authed(http.HandlerFunc(proxy.ChatMessages)))
+
+	// Internal routes (for crewshipd IPC, X-Internal-Token auth)
+	internal := NewInternalHandler(r.db, r.logger)
+	internalAuth := internal.requireInternal
+	r.mux.Handle("GET /api/v1/internal/credentials", internalAuth(http.HandlerFunc(internal.ListCredentials)))
+	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
+	r.mux.Handle("POST /api/v1/internal/chats", internalAuth(http.HandlerFunc(internal.CreateChat)))
+	r.mux.Handle("GET /api/v1/internal/chats/{chatId}/resolve", internalAuth(http.HandlerFunc(internal.ResolveChat)))
 }
