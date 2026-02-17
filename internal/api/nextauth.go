@@ -87,23 +87,27 @@ func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 
 // CallbackCredentials handles login (POST /api/auth/callback/credentials)
 func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
+	isJSON := strings.Contains(r.Header.Get("Content-Type"), "json")
+
+	var email, password string
+	if isJSON {
 		var body struct {
 			Email    string `json:"email"`
 			Password string `json:"password"`
+			Redirect string `json:"redirect"`
 		}
 		if err := readJSON(r, &body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 			return
 		}
-		r.Form = make(map[string][]string)
-		r.Form.Set("email", body.Email)
-		r.Form.Set("password", body.Password)
+		email = body.Email
+		password = body.Password
+	} else {
+		r.ParseForm()
+		email = r.FormValue("email")
+		password = r.FormValue("password")
+		isJSON = r.FormValue("json") == "true"
 	}
-
-	email := r.FormValue("email")
-	password := r.FormValue("password")
-	isJSON := strings.Contains(r.Header.Get("Content-Type"), "json") || r.FormValue("json") == "true"
 
 	if email == "" || password == "" {
 		if isJSON {
