@@ -21,11 +21,11 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 ### 8 klicovych diferentiatoru (co uzivatelum chybi na OpenClaw)
 1. **Container isolation** -- kazdy agent v Docker sandboxu (OpenClaw bezi na hostu)
 2. **Cost control** -- per-agent budgety, limity, alerting (OpenClaw: $750/mesic bez kontroly)
-3. **Team/org support** -- multi-user, RBAC, sdileni agentu (OpenClaw: single-user)
+3. **Crew/workspace support** -- multi-user, RBAC, sdileni agentu (OpenClaw: single-user)
 4. **Jednoduchy setup** -- single binary, 2 prikazy (OpenClaw: npm + config + messaging)
 5. **Audit trail** -- append-only, immutable (OpenClaw: zadny)
 6. **Vetted skills** -- curated marketplace, sandbox enforcement (OpenClaw ClawHub: 20% malware)
-7. **Visual orchestration** -- dashboard + CEO→Lidr→Worker hierarchie (OpenClaw: zadna)
+7. **Visual orchestration** -- dashboard + Coordinator→Lead→Agent hierarchie (OpenClaw: zadna)
 8. **Full UI** -- web dashboard s chat, files, logs, settings (OpenClaw: messaging-only)
 
 ### Skill Marketplace
@@ -72,7 +72,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 0.12 Opravit socket path v .env.example
 - [x] 0.13 Pridat key versioning do encryption.ts
 - [x] 0.14 Vytvorit ORCHESTRATION.md (v1.0)
-- [x] 0.15 Vytvorit CREW-EXECUTION.md (v1.0) — Crew Execution, Workflow sablony, Auto-hiring, Progress tracking
+- [x] 0.15 Vytvorit CREW-EXECUTION.md (v1.0) — Mission, Workflow sablony, Auto-hiring, Progress tracking
 
 ---
 
@@ -113,19 +113,19 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 2.1.5 Registrace noveho uzivatele (signup stranka + API)
 - [x] 2.1.6 Hesla (bcrypt hash + verify via bcryptjs)
 - [ ] 2.1.7 Google OAuth provider (Phase 2)
-- [~] 2.1.8 Onboarding flow (signup auto-creates org, no dedicated /onboarding page yet)
+- [~] 2.1.8 Onboarding flow (signup auto-creates workspace, no dedicated /onboarding page yet)
 - [x] 2.1.9 Logout funkcionalita (signOut v toolbar)
 
 ### 2.2 RBAC (CASL)
 - [x] 2.2.1 defineAbilitiesFor() s 5 rolemi
-- [x] 2.2.2 CASL check na API routes (agents, credentials, teams)
+- [x] 2.2.2 CASL check na API routes (agents, credentials, crews)
 - [x] 2.2.3 RBAC check na frontend (useAbilities hook, skryvani dle role) — PR #18
-- [ ] 2.2.4 Team-scoped permissions (MANAGER vidi jen prirazene tymy)
+- [ ] 2.2.4 Crew-scoped permissions (MANAGER vidi jen prirazene crews)
 
 ### 2.3 Zustand store
-- [x] 2.3.1 Zakladni store (currentOrgId, sidebarOpen)
-- [~] 2.3.2 useOrg() hook (fetches first org from API, MVP single-org)
-- [ ] 2.3.3 Org switcher funkcionalita (zmena org, reload dat)
+- [x] 2.3.1 Zakladni store (currentWorkspaceId, sidebarOpen)
+- [~] 2.3.2 useWorkspace() hook (fetches first workspace from API, MVP single-workspace)
+- [ ] 2.3.3 Workspace switcher funkcionalita (zmena workspace, reload dat)
 
 ---
 
@@ -135,13 +135,13 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 - [x] 3.1 Root layout (Inter + JetBrains Mono, providers)
 - [x] 3.2 Dashboard layout (sidebar + toolbar + main area)
-- [x] 3.3 Top toolbar (logo, org switcher placeholder, search ⌘K, notifikace, settings, avatar)
-- [x] 3.4 Sidebar navigace (Dashboard, Agents, Teams, Crews, Credentials, Skills, Audit, Settings)
+- [x] 3.3 Top toolbar (logo, workspace switcher placeholder, search ⌘K, notifikace, settings, avatar)
+- [x] 3.4 Sidebar navigace (Dashboard, Agents, Crews, Credentials, Skills, Audit, Settings)
 - [x] 3.5 Mobile responsivita (sheet sidebar, sm: breakpoints)
 - [x] 3.6 Sdilene komponenty (PageHeader, EmptyState, StatCard, FilterBar, AgentTabs)
 - [~] 3.7 Command palette (⌘K -- komponenta existuje, ale neni funkcni)
 - [ ] 3.8 Notifikacni system (bell icon existuje, ale zadna logika)
-- [ ] 3.9 Org switcher dropdown (UI existuje, ale neni napojeny)
+- [ ] 3.9 Workspace switcher dropdown (UI existuje, ale neni napojeny)
 
 ---
 
@@ -152,7 +152,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 ### 4.1 Dashboard (/)
 - [x] 4.1.1 Stat karty napojene na API (Total Agents, Running, API Keys)
 - [x] 4.1.2 Agent list s FilterBar (filtr dle statusu funguje)
-- [x] 4.1.3 AgentCard komponenta (status badge, team, LLM, skills/creds/sessions counts)
+- [x] 4.1.3 AgentCard komponenta (status badge, crew, LLM, skills/creds/sessions counts)
 - [x] 4.1.4 Loading skeletons + empty state
 
 ### 4.2 Agents list (/agents)
@@ -172,11 +172,11 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 4.3.9 Credentials tab (API data -- tabulka)
 - [x] 4.3.10 History tab (mock + "audit system" banner)
 
-### 4.4 Teams (/teams)
-- [x] 4.4.1 Team list napojeny na API (TeamCard grid)
-- [x] 4.4.2 TeamCard komponenta (barva, ikona, pocty)
-- [x] 4.4.3 Team detail stranka (/teams/[teamId]) — PR #18
-- [x] 4.4.4 Team members management — PR #18 (soucasti team detail)
+### 4.4 Crews (/crews)
+- [x] 4.4.1 Crew list napojeny na API (CrewCard grid)
+- [x] 4.4.2 CrewCard komponenta (barva, ikona, pocty)
+- [x] 4.4.3 Crew detail stranka (/crews/[crewId]) — PR #18
+- [x] 4.4.4 Crew members management — PR #18 (soucasti crew detail)
 
 ### 4.5 Credentials (/credentials)
 - [x] 4.5.1 Credential list napojeny na API (tabulka)
@@ -184,7 +184,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 4.5.3 Edit credential dialog
 - [x] 4.5.4 Delete credential (s potvrzenim)
 - [x] 4.5.5 Typovany credentials (AI_CLI_TOKEN / API_KEY / SECRET) -- enum CredentialType, CredentialProvider, CredentialStatus
-- [x] 4.5.6 Add dialog s 3 taby (AI CLI Token / API Key / Secret) -- auto-fill env var name dle providera
+- [x] 4.5.6 Add dialog s 3 taby (AI CLI Token / API Key / Secret) -- auto-fill env var name dle provider
 - [x] 4.5.7 Tabulka s ikony (Bot/Key/Lock), status badges, provider labels
 - [x] 4.5.8 Smazana /providers stranka + OAuth flow (nefunkcni server-side, nahrazeno setup-token)
 - [ ] 4.5.9 TODO: User docs pro setup-token flow (claude setup-token -> paste do UI)
@@ -196,7 +196,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [ ] 4.6.3 Skill detail stranka
 
 ### 4.7 Settings (/settings)
-- [x] 4.7.1 Org name/slug form napojeny na API (PUT)
+- [x] 4.7.1 Workspace name/slug form napojeny na API (PUT)
 - [x] 4.7.2 Members tabulka (fetch z API)
 - [x] 4.7.3 Danger zone s potvrzenim
 - [ ] 4.7.4 Billing/subscription tab
@@ -210,10 +210,10 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 4.9.2 GET /api/v1/runs endpoint — PR #18
 
 ### 4.10 Admin (/admin)
-- [x] 4.10.1 Admin console (org management, user management, system stats) — PR #18
+- [x] 4.10.1 Admin console (workspace management, user management, system stats) — PR #18
 - [x] 4.10.2 GET /api/v1/admin/stats endpoint — PR #18
 - [x] 4.10.3 GET /api/v1/admin/users endpoint — PR #18
-- [x] 4.10.4 GET /api/v1/admin/organizations endpoint — PR #18
+- [x] 4.10.4 GET /api/v1/admin/workspaces endpoint — PR #18
 
 ### 4.11 Crews (/crews)
 - [x] 4.11.1 Phase 2 placeholder (Coming Soon badge)
@@ -225,36 +225,36 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 > CRUD endpointy pro vsechny entity.
 
 ### 5.1 Collection routes (GET + POST)
-- [x] 5.1.1 POST/GET /api/v1/agents (CASL auth, team_id validace, webhook_secret)
-- [x] 5.1.2 POST/GET /api/v1/credentials (CASL auth, team_id validace, AES-256 encryption)
-- [x] 5.1.3 POST/GET /api/v1/teams (CASL auth, slug uniqueness)
-- [x] 5.1.4 GET /api/v1/orgs (auth + membership check)
+- [x] 5.1.1 POST/GET /api/v1/agents (CASL auth, crew_id validace, webhook_secret)
+- [x] 5.1.2 POST/GET /api/v1/credentials (CASL auth, crew_id validace, AES-256 encryption)
+- [x] 5.1.3 POST/GET /api/v1/crews (CASL auth, slug uniqueness)
+- [x] 5.1.4 GET /api/v1/workspaces (auth + membership check)
 - [x] 5.1.5 Auth handlers (GET/POST /api/auth/[...nextauth])
-- [x] 5.1.6 POST /api/v1/auth/signup (bcrypt, auto-create org)
+- [x] 5.1.6 POST /api/v1/auth/signup (bcrypt, auto-create workspace)
 
 ### 5.2 Detail routes (GET/PUT/DELETE)
 - [x] 5.2.1 GET/PUT/DELETE /api/v1/agents/[agentId]
-- [x] 5.2.2 GET/PUT/DELETE /api/v1/teams/[teamId]
+- [x] 5.2.2 GET/PUT/DELETE /api/v1/crews/[crewId]
 - [x] 5.2.3 GET/PUT/DELETE /api/v1/credentials/[credentialId]
-- [x] 5.2.4 GET/PUT/DELETE /api/v1/orgs/[orgId]
+- [x] 5.2.4 GET/PUT/DELETE /api/v1/workspaces/[workspaceId]
 
 ### 5.3 Sub-resource routes
-- [x] 5.3.1 GET/POST /api/v1/teams/[teamId]/members
-- [x] 5.3.2 DELETE /api/v1/teams/[teamId]/members/[memberId]
-- [x] 5.3.3 GET /api/v1/orgs/[orgId]/members
+- [x] 5.3.1 GET/POST /api/v1/crews/[crewId]/members
+- [x] 5.3.2 DELETE /api/v1/crews/[crewId]/members/[memberId]
+- [x] 5.3.3 GET /api/v1/workspaces/[workspaceId]/members
 - [x] 5.3.4 GET/POST /api/v1/agents/[agentId]/skills
 - [x] 5.3.5 GET/POST /api/v1/agents/[agentId]/credentials
 - [x] 5.3.6 GET /api/v1/agents/[agentId]/sessions
 - [x] 5.3.7 GET /api/v1/agents/[agentId]/runs
 - [x] 5.3.8 GET /api/v1/skills (list + search, filterable)
 - [x] 5.3.9 GET /api/v1/audit (paginated, filterable)
-- [x] 5.3.10 POST/GET /api/v1/orgs/[orgId]/invitations — PR #18
+- [x] 5.3.10 POST/GET /api/v1/workspaces/[workspaceId]/invitations — PR #18
 - [x] 5.3.11 GET /api/v1/runs (globalni runs across agents) — PR #18
-- [x] 5.3.12 GET /api/v1/admin/stats + /admin/users + /admin/organizations — PR #18
+- [x] 5.3.12 GET /api/v1/admin/stats + /admin/users + /admin/workspaces — PR #18
 
 ### 5.4 Middleware a utility
-- [x] 5.4.1 requireAuth() helper (session + org membership check)
-- [x] 5.4.2 Zod validacni schemata (agents, teams, credentials, orgs, invitations)
+- [x] 5.4.1 requireAuth() helper (session + workspace membership check)
+- [x] 5.4.2 Zod validacni schemata (agents, crews, credentials, workspaces, invitations)
 - [x] 5.4.3 createAuditLog() helper (lib/audit.ts)
 - [ ] 5.4.4 Soft-delete middleware (Prisma middleware pro `deleted_at` filtr)
 - [ ] 5.4.5 Rate limiting middleware (z config/rate-limits.yml)
@@ -275,7 +275,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 6.1.6 Metrics endpoint (Prometheus /metrics) — PR #17
 
 ### 6.2 Provider interfaces
-- [x] 6.2.1 ContainerProvider interface (EnsureTeamRuntime, Stop, Remove, Exec, Status) — PR #19
+- [x] 6.2.1 ContainerProvider interface (EnsureCrewRuntime, Stop, Remove, Exec, Status) — PR #19
 - [x] 6.2.2 StorageProvider interface (Read, Write, List, Delete, Exists, Watch) — PR #19
 - [x] 6.2.3 StateProvider interface (Get, Set, Delete, List, ListByPrefix) — PR #19
 - [x] 6.2.4 Docker provider implementace (MVP) — PR #19
@@ -295,12 +295,12 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [ ] 6.4.5 Real-time log streaming
 
 ### 6.5 Docker orchestrace
-- [x] 6.5.1 Container lifecycle (create per team, start/stop) — PR #19
+- [x] 6.5.1 Container lifecycle (create per crew, start/stop) — PR #19
 - [x] 6.5.2 Docker exec (spusteni CLI session v kontejneru) — PR #19
 - [x] 6.5.3 Agent runtime Dockerfile (non-root, UID 1001, --internal network) — PR #19
 - [x] 6.5.4 Credential ENV injection (priority-based failover) — PR #19
 - [ ] 6.5.5 Container TTL management (auto-stop po neaktivite)
-- [ ] 6.5.6 Container resource limits (memory, CPU per team)
+- [ ] 6.5.6 Container resource limits (memory, CPU per crew)
 
 ### 6.6 Log collector
 - [x] 6.6.1 JSONL log writer (stdout capture -> soubory) — PR #19
@@ -313,7 +313,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 6.7.3 File list/download API — PR #19
 
 ### 6.8 Webhook ingress
-- [x] 6.8.1 Webhook receiver (POST /webhooks/{team}/{agent}/trigger) — PR #19
+- [x] 6.8.1 Webhook receiver (POST /webhooks/{crew}/{agent}/trigger) — PR #19
 - [x] 6.8.2 HMAC validace (per-agent webhook_secret) — PR #19
 - [ ] 6.8.3 Agent trigger z webhooku (handler existuje, neni napojen na orchestrator)
 
@@ -334,14 +334,14 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 > Formulare pro vytvareni a editaci entit. Napojeni na API.
 
-- [x] 7.1 Create Agent form (/agents/new -- vsechna pole, team dropdown, slug auto-gen)
+- [x] 7.1 Create Agent form (/agents/new -- vsechna pole, crew dropdown, slug auto-gen)
 - [x] 7.2 Edit Agent form (/agents/[id]/settings -- napojeno na API, save + delete)
-- [x] 7.3 Create Team form (/teams/new -- vsechna pole, color picker, slug auto-gen)
-- [x] 7.4 Edit Team form (/teams/[teamId] detail stranka s edit + delete) — PR #18
-- [x] 7.5 Add Credential dialog (form s show/hide hesla, scope, team select)
+- [x] 7.3 Create Crew form (/crews/new -- vsechna pole, color picker, slug auto-gen)
+- [x] 7.4 Edit Crew form (/crews/[crewId] detail stranka s edit + delete) — PR #18
+- [x] 7.5 Add Credential dialog (form s show/hide hesla, scope, crew select)
 - [x] 7.6 Edit Credential dialog (pre-fill, optional value change)
 - [x] 7.7 Invite Member dialog — PR #18
-- [x] 7.8 Org settings form (napojeno na API, save + members list)
+- [x] 7.8 Workspace settings form (napojeno na API, save + members list)
 
 ---
 
@@ -365,7 +365,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 > Seed skripty pro development, dev helper funkce.
 
-- [x] 9.1 Prisma seed skript (demo user, org, 2 teams, 4 agents, 3 skills, 2 credentials, plan, subscription, audit logs)
+- [x] 9.1 Prisma seed skript (demo user, workspace, 2 crews, 4 agents, 3 skills, 2 credentials, plan, subscription, audit logs)
 - [x] 9.2 Bundled skills seed (Coding Assistant, Web Researcher, DevOps Helper)
 - [ ] 9.3 Dev login bypass (auto-login pro development bez hesla)
 - [x] 9.4 .env.example s vsemi promennymi
@@ -388,80 +388,80 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 ---
 
-## Faze 2A/2B/3: Orchestrace + Crew Execution (po MVP) ❌ 0%
+## Faze 2A/2B/3: Orchestrace + Mission (po MVP) ❌ 0%
 
-> Crew Leader + Virtual Director + Crew Execution. Nezacinat pred dokoncenim MVP.
-> Specifikace: ORCHESTRATION.md (delegace, sidecar) + CREW-EXECUTION.md (execution, workflow, hiring)
+> Lead + Coordinator + Mission. Nezacinat pred dokoncenim MVP.
+> Specifikace: ORCHESTRATION.md (assignment, sidecar) + CREW-EXECUTION.md (mission, workflow, hiring)
 
-### Phase 2A: Crew Leader + zakladni Crew Execution
+### Phase 2A: Lead + zakladni Mission
 
 **Orchestrace (ORCHESTRATION.md):**
 - [ ] ORCH-01 AgentRole enum + DB migrace
-- [ ] ORCH-02 Leader designation UI
-- [ ] ORCH-03 Auto-generated leader system prompt
+- [ ] ORCH-02 Lead designation UI
+- [ ] ORCH-03 Auto-generated lead system prompt
 - [ ] ORCH-04 crewship-sidecar (loopback HTTP v kontejneru)
-- [ ] ORCH-05 Delegacni protokol (HTTP REST na sidecar)
-- [ ] ORCH-06 Leader → Worker delegace (Docker exec orchestrace)
-- [ ] ORCH-07 Delegacni timeline v UI
-- [ ] ORCH-08 DelegationLog tabulka (audit vsech delegaci)
-- [ ] ORCH-09 Leader auto-routing (user → team → leader rozhodne)
-- [ ] ORCH-10 Paralelni delegace (wait_group pattern)
+- [ ] ORCH-05 Assignment protokol (HTTP REST na sidecar)
+- [ ] ORCH-06 Lead → Agent assignment (Docker exec orchestrace)
+- [ ] ORCH-07 Activity feed v UI
+- [ ] ORCH-08 Assignment tabulka (audit vsech assignments)
+- [ ] ORCH-09 Lead auto-routing (user → crew → lead rozhodne)
+- [ ] ORCH-10 Paralelni assignment (wait_group pattern)
 - [ ] ORCH-11 Error handling + circuit breaker (3x retry → eskalace)
-- [ ] ORCH-12 Leader summary/agregace
+- [ ] ORCH-12 Lead summary/agregace
 
-**Crew Execution (CREW-EXECUTION.md):**
-- [ ] EXEC-01 CrewExecution + CrewExecutionTask Prisma modely + migrace
-- [ ] EXEC-02 Sidecar endpointy pro execution (/execution/create, /plan, /task/:id)
-- [ ] EXEC-03 ExecutionEngine v crewshipd (vytvareni, plan, dependency resolution)
+**Mission (CREW-EXECUTION.md):**
+- [ ] EXEC-01 Mission + MissionTask Prisma modely + migrace
+- [ ] EXEC-02 Sidecar endpointy pro mission (/mission/create, /plan, /task/:id)
+- [ ] EXEC-03 MissionEngine v crewshipd (vytvareni, plan, dependency resolution)
 - [ ] EXEC-04 JSONL progress writer (mirror do /output/, append-only)
-- [ ] EXEC-05 Execution Board UI -- tabulkovy spreadsheet view
-- [ ] EXEC-06 WebSocket real-time updaty (execution.* a task.* eventy)
-- [ ] EXEC-07 Execution historie (seznam dokoncenych execution per tym)
-- [ ] EXEC-08 Dashboard widget "Running Executions"
+- [ ] EXEC-05 Mission Board UI -- tabulkovy spreadsheet view
+- [ ] EXEC-06 WebSocket real-time updaty (mission.* a task.* eventy)
+- [ ] EXEC-07 Mission historie (seznam dokoncenych missions per crew)
+- [ ] EXEC-08 Dashboard widget "Running Missions"
 
-### Phase 2B: Workflow sablony + Auto-hiring + Director
+### Phase 2B: Workflow sablony + Auto-hiring + Coordinator
 
 **Orchestrace (ORCHESTRATION.md):**
-- [ ] ORCH-13 Director agent role (specialni agent na urovni organizace)
-- [ ] ORCH-14 Director lightweight execution (LLM call bez Docker kontejneru)
-- [ ] ORCH-15 Director → Leader delegace (cross-team)
-- [ ] ORCH-16 Director auto-routing
-- [ ] ORCH-17 Cross-team agregace
-- [ ] ORCH-18 Director UI (dashboard card + chat)
-- [ ] ORCH-19 Leader modes (active/passive)
-- [ ] ORCH-20 Worker output compression (auto-sumarizace)
+- [ ] ORCH-13 Coordinator agent role (specialni agent na urovni workspace)
+- [ ] ORCH-14 Coordinator lightweight execution (LLM call bez Docker kontejneru)
+- [ ] ORCH-15 Coordinator → Lead assignment (cross-crew)
+- [ ] ORCH-16 Coordinator auto-routing
+- [ ] ORCH-17 Cross-crew agregace
+- [ ] ORCH-18 Coordinator UI (dashboard card + chat)
+- [ ] ORCH-19 Lead modes (active/passive)
+- [ ] ORCH-20 Agent output compression (auto-sumarizace)
 - [ ] ORCH-21 Cost estimation per crew operation
 - [ ] ORCH-22 Per-crew budget limits
 - [ ] ORCH-23 crewship-agent binary (API-direct runtime)
-- [ ] ORCH-24 Trace ID across delegaci
-- [ ] ORCH-25 Meilisearch conversation search
+- [ ] ORCH-24 Trace ID across assignments
+- [ ] ORCH-25 Meilisearch chat search
 
-**Crew Execution (CREW-EXECUTION.md):**
+**Mission (CREW-EXECUTION.md):**
 - [ ] EXEC-09 Workflow sablony (JSON format, vestavene: dev-test-loop, sequential, parallel)
 - [ ] EXEC-10 Loop controller v crewshipd (condition check, iterace)
 - [ ] EXEC-11 Dev-test loop integrace (Developer → Tester → zpet)
 - [ ] EXEC-12 Auto-hiring: SUPERVISED mode (UI notifikace, schvaleni)
 - [ ] EXEC-13 Auto-hiring: SEMI_AUTO mode (automaticke prirazeni existujicich)
-- [ ] EXEC-14 Team hiring_autonomy nastaveni v UI
+- [ ] EXEC-14 Crew hiring_autonomy nastaveni v UI
 - [ ] EXEC-15 Docasni agenti (is_temporary, lifecycle: hired → working → expired)
-- [ ] EXEC-16 Director routing mode (passive router, dual model, full reasoning, budget)
-- [ ] EXEC-17 Inline metriky v Execution Board (duration, token count, cost per task)
+- [ ] EXEC-16 Coordinator routing mode (passive router, dual model, full reasoning, budget)
+- [ ] EXEC-17 Inline metriky v Mission Board (duration, token count, cost per task)
 
 ### Phase 3: Pokrocila orchestrace
 
 - [ ] EXEC-18 Auto-hiring: FULL_AUTO mode (plne autonomni + marketplace)
-- [ ] EXEC-19 Git worktree integrace (per-worker branch, leader merge)
-- [ ] EXEC-20 Cross-team execution (director koordinuje vice tymu)
-- [ ] EXEC-21 Execution replay/debug
-- [ ] EXEC-22 Primo lidr-lidr komunikace (bez directora, s RBAC)
-- [ ] EXEC-23 Execution analytics (grafy, trendy, srovnani efektivity)
+- [ ] EXEC-19 Git worktree integrace (per-agent branch, lead merge)
+- [ ] EXEC-20 Cross-crew mission (coordinator koordinuje vice crews)
+- [ ] EXEC-21 Mission replay/debug
+- [ ] EXEC-22 Primo lead-lead komunikace (bez coordinatora, s RBAC)
+- [ ] EXEC-23 Mission analytics (grafy, trendy, srovnani efektivity)
 - [ ] EXEC-24 Custom workflow sablony (uzivatel tvori v UI)
-- [ ] EXEC-25 Director full reasoning + budget limit
-- [ ] ORCH-26 Orchestracni vizualizace (graf delegaci v realtime)
-- [ ] ORCH-27 Auto-leader election
+- [ ] EXEC-25 Coordinator full reasoning + budget limit
+- [ ] ORCH-26 Orchestracni vizualizace (graf assignments v realtime)
+- [ ] ORCH-27 Auto-lead election
 - [ ] ORCH-29 NATS JetStream integrace
 - [ ] ORCH-30 gVisor runtime
-- [ ] ORCH-31 Delegation replay/debug
+- [ ] ORCH-31 Assignment replay/debug
 - [ ] ORCH-32 Landlock per-agent izolace
 - [ ] ORCH-33 API-direct jako default
 
@@ -497,17 +497,17 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 #### P1: SHOULD HAVE (pro rozumne demo)
 
 - [ ] **Container TTL** -- auto-stop po neaktivite
-- [ ] **Container resource limits** -- memory, CPU per team
+- [ ] **Container resource limits** -- memory, CPU per crew
 - [ ] **Webhook → orchestrator** -- napojeni trigger handleru na RunAgent
 - [ ] **Real-time log streaming** pres WebSocket
 - [ ] **Coolify deployment config** (staging Proxmox)
 
 #### P2: NICE TO HAVE (ne blokuje spusteni)
 
-- [ ] Org switcher funkcionalita
+- [ ] Workspace switcher funkcionalita
 - [ ] Command palette (⌘K)
 - [ ] Notifikacni system (bell icon + logika)
-- [ ] Team-scoped permissions (MANAGER)
+- [ ] Crew-scoped permissions (MANAGER)
 - [ ] Logrotate integrace
 - [ ] Advanced audit filtry (date range, user picker)
 - [ ] Skill detail stranka
@@ -527,27 +527,27 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [ ] 15-20 official skills s permissions modelem
 - [ ] Skill Store UI v dashboardu
 - [ ] Per-agent network control UI
-- [ ] Per-agent cost budgety a alerting
+- [ ] Per-agent cost budgets a alerting
 - [ ] Onboarding wizard
 - [ ] Landing page + README s "brew install crewship"
 
 #### Faze 2: Monetizace (+3-6 mesicu)
 - crewship.ai cloud tier
 - Community skill marketplace + revenue sharing
-- Crew Leader orchestrace (Phase 2A)
+- Lead orchestrace (Phase 2A)
 - Messaging integrace (Slack, Discord)
 - Stripe billing
 
 #### Faze 3: Enterprise (+6-12 mesicu)
 - K8s Helm chart
 - SSO/SAML
-- Virtual Director (Phase 2B)
+- Coordinator (Phase 2B)
 - SOC 2 compliance
 
 #### Phase 2A/2B/3 Orchestrace (nezmeneno)
-- **Phase 2A** -- Crew Leader delegace (sidecar, DelegationLog) + zakladni Crew Execution (Board UI, JSONL progress)
-- **Phase 2B** -- Workflow sablony (dev-test loop), Auto-hiring (supervised/semi-auto), Director routing
-- **Phase 3** -- Full auto hiring + marketplace, Git worktree, cross-team execution, analytics
+- **Phase 2A** -- Lead assignment (sidecar, Assignment) + zakladni Mission (Board UI, JSONL progress)
+- **Phase 2B** -- Workflow sablony (dev-test loop), Auto-hiring (supervised/semi-auto), Coordinator routing
+- **Phase 3** -- Full auto hiring + marketplace, Git worktree, cross-crew mission, analytics
 
 ### Merge historie
 

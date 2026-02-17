@@ -7,8 +7,8 @@
 **Auth:** NextAuth.js (Auth.js v5) s Prisma adapterem
 **Autorizace (MVP):** CASL (aplikacni uroven) -- zadne RLS v MVP
 **Autorizace (Phase 2):** CASL + RLS jako defense-in-depth (`current_setting()` pattern)
-**Multi-tenancy:** org_id sloupec + CASL (MVP), + RLS (Phase 2)
-**Mody:** Community (1 org, free) | Enterprise (multi-org, placeny)
+**Multi-tenancy:** workspace_id sloupec + CASL (MVP), + RLS (Phase 2)
+**Mody:** Community (1 workspace, free) | Enterprise (multi-workspace, placeny)
 
 ---
 
@@ -16,14 +16,14 @@
 
 | Data | Kde | Duvod |
 |---|---|---|
-| Uzivatele, organizace, tymy, agenti | PostgreSQL | Strukturovana data, relace, RBAC |
+| Uzivatele, workspaces, crews, agenti | PostgreSQL | Strukturovana data, relace, RBAC |
 | Credentials (sifrovane) | PostgreSQL | AES-256-GCM, pristup pres Prisma |
 | Skills, plany, feature flags | PostgreSQL | Konfigurace platformy |
 | Audit log | PostgreSQL | Immutable, queryable, GDPR |
 | Subscription (Stripe) | PostgreSQL | Billing stav |
 | **Session metadata** | **PostgreSQL** | ID, agent, title, status, cas — queryable |
-| **Konverzacni zpravy** | **JSONL soubory** | /var/lib/crewship/conversations/{org}/{agent}/{session}.jsonl |
-| **Logy agentu** | **JSONL soubory** | /var/log/crewship/teams/{team}/agents/{agent}/current.jsonl |
+| **Konverzacni zpravy** | **JSONL soubory** | /var/lib/crewship/conversations/{workspace}/{agent}/{session}.jsonl |
+| **Logy agentu** | **JSONL soubory** | /var/log/crewship/crews/{crew}/agents/{agent}/current.jsonl |
 | **Agent live status** | **Go pamet + bbolt** | crewshipd drzi v pameti, persistuje do bbolt WAL |
 | **WebSocket sessions** | **Go pamet** | goroutine per connection, zadna DB |
 | **Container status** | **Go pamet + Docker API** | crewshipd se pta Docker SDK |
@@ -46,8 +46,8 @@ V single binary mode (`crewship start`) pouzivame SQLite jako default databazi.
 - Zadne `@db.JsonB` -- pouzit `String` s JSON serializaci
 - Zadne `gen_random_uuid()` -- generovat v aplikacni vrstve
 - WAL mode pro lepsi concurrent reads
-- Vhodne pro: solo dev, maly tym (1-10 lidi)
-- Pro vetsi tymy: `crewship start --db postgres://...`
+- Vhodne pro: solo dev, mala crew (1-10 lidi)
+- Pro vetsi crews: `crewship start --db postgres://...`
 
 ### Migracni strategie
 - SQLite → PostgreSQL: export/import tool (`crewship migrate --to postgres://...`)
@@ -61,30 +61,30 @@ V single binary mode (`crewship start`) pouzivame SQLite jako default databazi.
 
 | Domena | Tabulky | Popis |
 |---|---|---|
-| **Uzivatele & Org** | User, Organization, OrganizationMember, OrganizationInvitation | Multi-tenant zaklad |
-| **Tymy** | Team, TeamMember | Izolacni boundary (1 kontejner = 1 tym) |
-| **Agenti** | Agent, AgentSkill, AgentCredential, AgentConfigHistory, DelegationLog | Virtualni zamestnanci + orchestrace |
+| **Uzivatele & Workspace** | User, Workspace, WorkspaceMember, WorkspaceInvitation | Multi-tenant zaklad |
+| **Crews** | Crew, CrewMember | Izolacni boundary (1 kontejner = 1 crew) |
+| **Agenti** | Agent, AgentSkill, AgentCredential, AgentConfigHistory, Assignment | Virtualni zamestnanci + orchestrace |
 | **Skills & Credentials** | Skill, SkillReview, Credential | Dovednosti, marketplace recenze, opravneni |
-| **Konverzace & Behy** | ConversationSession (metadata only), AgentRun | Session metadata, behy |
+| **Konverzace & Behy** | Chat (metadata only), AgentRun | Session metadata, behy |
 | **System** | AuditLog, Subscription, Plan, FeatureFlag, FeatureFlagOverride | Billing, audit, flags |
 
-> **Pozor:** ConversationSession je **metadata-only** model. Samotne zpravy jsou v JSONL souborech, NE v PostgreSQL.
+> **Pozor:** Chat je **metadata-only** model. Samotne zpravy jsou v JSONL souborech, NE v PostgreSQL.
 
 ### Entity Relationship Diagram (textovy)
 ```
-Organization (1) ──── (*) OrganizationMember (*) ──── (1) User
+Workspace (1) ──── (*) WorkspaceMember (*) ──── (1) User
      │                         │
-     │                    OrganizationInvitation
+     │                    WorkspaceInvitation
      │
-     ├── (*) Team (1) ──── (*) TeamMember (*) ──── (1) User
+     ├── (*) Crew (1) ──── (*) CrewMember (*) ──── (1) User
      │        │
-     │        ├── (*) Agent (agent_role: WORKER | LEADER | DIRECTOR)
+     │        ├── (*) Agent (agent_role: AGENT | LEAD | COORDINATOR)
      │        │       ├── (*) AgentSkill (*) ──── (1) Skill ──── (*) SkillReview (*) ──── (1) User
      │        │       ├── (*) AgentCredential (*) ──── (1) Credential
      │        │       ├── (*) AgentConfigHistory
-     │        │       ├── (*) ConversationSession (metadata only, zpravy v JSONL)
+     │        │       ├── (*) Chat (metadata only, zpravy v JSONL)
      │        │       ├── (*) AgentRun
-     │        │       └── (*) DelegationLog (source/target — leader↔worker, director↔leader)
+     │        │       └── (*) Assignment (assigned_by/assigned_to — lead↔agent, coordinator↔lead)
      │        │
      │
      ├── (*) Credential
@@ -103,17 +103,17 @@ Organization (1) ──── (*) OrganizationMember (*) ──── (1) User
 - `updated_at` -- TIMESTAMPTZ, default `now()`, automaticky updatovany triggerem
 
 ### Soft delete:
-- Hlavni entity (Organization, Team, Agent, Credential) maji `deleted_at` (TIMESTAMPTZ, nullable)
+- Hlavni entity (Workspace, Crew, Agent, Credential) maji `deleted_at` (TIMESTAMPTZ, nullable)
 - Dotazy VZDY filtruje `WHERE deleted_at IS NULL` (Prisma middleware)
 - Hard delete az po GDPR grace period (30 dni)
 
 ### Multi-tenancy:
-- Vsechny tabulky krome User, Skill, Plan, FeatureFlag maji `org_id` pro RLS
+- Vsechny tabulky krome User, Skill, Plan, FeatureFlag maji `workspace_id` pro RLS
 - MVP: CASL na aplikacni urovni
 - Phase 2: + RLS jako defense-in-depth
 
 ### Pojmenovani:
-- Tabulky: `snake_case`, mnozne cislo (organizations, teams, agents)
+- Tabulky: `snake_case`, mnozne cislo (workspaces, crews, agents)
 - Sloupce: `snake_case`
 - Indexy: `idx_{tabulka}_{sloupce}`
 - Unique constraints: `uq_{tabulka}_{sloupce}`
@@ -178,12 +178,12 @@ enum ToolProfile {
 }
 
 enum AgentRole {
-  WORKER       // default — radovy agent, specializovany na konkretni ukoly
-  LEADER       // 1 per team — sef tymu, orchestruje workery, primarni kontakt pro uzivatele
-  DIRECTOR     // 1 per org — reditel, orchestruje cross-team, deleguje na leadery
+  AGENT        // default — radovy agent, specializovany na konkretni ukoly
+  LEAD         // 1 per crew — vedouci crew, orchestruje agenty, primarni kontakt pro uzivatele
+  COORDINATOR  // 1 per workspace — koordinator, orchestruje cross-crew, prirazuje leadum
 }
 
-enum DelegationStatus {
+enum AssignmentStatus {
   PENDING
   RUNNING
   COMPLETED
@@ -267,8 +267,8 @@ enum PlanTier {
 }
 
 enum CredentialScope {
-  ORGANIZATION
-  TEAM
+  WORKSPACE
+  CREW
 }
 
 // ============================================================
@@ -288,25 +288,25 @@ model User {
   created_at      DateTime  @default(now()) @db.Timestamptz
   updated_at      DateTime  @default(now()) @updatedAt @db.Timestamptz
 
-  org_memberships     OrganizationMember[]
-  team_memberships    TeamMember[]
-  sent_invitations    OrganizationInvitation[] @relation("InvitedBy")
-  created_credentials Credential[]             @relation("CreatedBy")
-  created_sessions    ConversationSession[]    @relation("CreatedBy")
-  triggered_runs      AgentRun[]               @relation("TriggeredBy")
-  config_changes      AgentConfigHistory[]     @relation("ChangedBy")
-  audit_logs          AuditLog[]
-  authored_skills     Skill[]                  @relation("SkillAuthor")
-  skill_reviews       SkillReview[]
+  workspace_memberships WorkspaceMember[]
+  crew_memberships      CrewMember[]
+  sent_invitations      WorkspaceInvitation[] @relation("InvitedBy")
+  created_credentials   Credential[]          @relation("CreatedBy")
+  created_chats         Chat[]                @relation("CreatedBy")
+  triggered_runs        AgentRun[]            @relation("TriggeredBy")
+  config_changes        AgentConfigHistory[]  @relation("ChangedBy")
+  audit_logs            AuditLog[]
+  authored_skills       Skill[]               @relation("SkillAuthor")
+  skill_reviews         SkillReview[]
 
   @@map("users")
 }
 
 // ============================================================
-// 2. ORGANIZATION (Firma)
+// 2. WORKSPACE (Firma)
 // ============================================================
 
-model Organization {
+model Workspace {
   id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name       String
   slug       String    @unique
@@ -317,112 +317,112 @@ model Organization {
 
   default_container_ttl_hours Int?  // null = kontejnery bezi porad
 
-  members      OrganizationMember[]
-  invitations  OrganizationInvitation[]
-  teams        Team[]
+  members      WorkspaceMember[]
+  invitations  WorkspaceInvitation[]
+  crews        Crew[]
   agents       Agent[]
   credentials  Credential[]
-  sessions     ConversationSession[]
+  chats        Chat[]
   runs         AgentRun[]
   audit_logs   AuditLog[]
   subscription Subscription?
   flag_overrides FeatureFlagOverride[]
-  delegation_logs DelegationLog[]
+  assignments  Assignment[]
 
-  @@map("organizations")
+  @@map("workspaces")
 }
 
 // ============================================================
-// 3. ORGANIZATION MEMBER
+// 3. WORKSPACE MEMBER
 // ============================================================
 
-model OrganizationMember {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id     String   @db.Uuid
-  user_id    String   @db.Uuid
-  role       OrgRole  @default(MEMBER)
-  created_at DateTime @default(now()) @db.Timestamptz
-  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz
+model WorkspaceMember {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String   @db.Uuid
+  user_id      String   @db.Uuid
+  role         OrgRole  @default(MEMBER)
+  created_at   DateTime @default(now()) @db.Timestamptz
+  updated_at   DateTime @default(now()) @updatedAt @db.Timestamptz
 
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
-  @@unique([org_id, user_id], name: "uq_org_member")
-  @@index([org_id], name: "idx_org_member_org")
-  @@index([user_id], name: "idx_org_member_user")
-  @@map("organization_members")
+  @@unique([workspace_id, user_id], name: "uq_workspace_member")
+  @@index([workspace_id], name: "idx_workspace_member_workspace")
+  @@index([user_id], name: "idx_workspace_member_user")
+  @@map("workspace_members")
 }
 
 // ============================================================
-// 4. ORGANIZATION INVITATION
+// 4. WORKSPACE INVITATION
 // ============================================================
 
-model OrganizationInvitation {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String    @db.Uuid
-  email       String
-  role        OrgRole   @default(MEMBER)
-  invited_by  String    @db.Uuid
-  token       String    @unique @default(dbgenerated("gen_random_uuid()"))
-  expires_at  DateTime  @db.Timestamptz
-  accepted_at DateTime? @db.Timestamptz
-  created_at  DateTime  @default(now()) @db.Timestamptz
+model WorkspaceInvitation {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  email        String
+  role         OrgRole   @default(MEMBER)
+  invited_by   String    @db.Uuid
+  token        String    @unique @default(dbgenerated("gen_random_uuid()"))
+  expires_at   DateTime  @db.Timestamptz
+  accepted_at  DateTime? @db.Timestamptz
+  created_at   DateTime  @default(now()) @db.Timestamptz
 
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  inviter      User         @relation("InvitedBy", fields: [invited_by], references: [id])
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  inviter   User      @relation("InvitedBy", fields: [invited_by], references: [id])
 
-  @@index([org_id], name: "idx_invitation_org")
+  @@index([workspace_id], name: "idx_invitation_workspace")
   @@index([token], name: "idx_invitation_token")
-  @@index([email, org_id], name: "idx_invitation_email_org")
-  @@map("organization_invitations")
+  @@index([email, workspace_id], name: "idx_invitation_email_workspace")
+  @@map("workspace_invitations")
 }
 
 // ============================================================
-// 5. TEAM (Tym / Oddeleni = 1 Docker kontejner)
+// 5. CREW (Posadka / Oddeleni = 1 Docker kontejner)
 // ============================================================
 
-model Team {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String    @db.Uuid
-  name        String
-  slug        String
-  description String?
-  color       String?   @db.VarChar(7)
-  icon        String?   @db.VarChar(10)
-  created_at  DateTime  @default(now()) @db.Timestamptz
-  updated_at  DateTime  @default(now()) @updatedAt @db.Timestamptz
-  deleted_at  DateTime? @db.Timestamptz
+model Crew {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  name         String
+  slug         String
+  description  String?
+  color        String?   @db.VarChar(7)
+  icon         String?   @db.VarChar(10)
+  created_at   DateTime  @default(now()) @db.Timestamptz
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz
+  deleted_at   DateTime? @db.Timestamptz
 
   container_ttl_hours Int?
   container_memory_mb Int     @default(4096)
   container_cpus      Float   @default(2.0)
 
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  members      TeamMember[]
-  agents       Agent[]
+  workspace Workspace    @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  members   CrewMember[]
+  agents    Agent[]
 
-  @@unique([org_id, slug], name: "uq_team_slug")
-  @@index([org_id], name: "idx_team_org")
-  @@map("teams")
+  @@unique([workspace_id, slug], name: "uq_crew_slug")
+  @@index([workspace_id], name: "idx_crew_workspace")
+  @@map("crews")
 }
 
 // ============================================================
-// 6. TEAM MEMBER
+// 6. CREW MEMBER
 // ============================================================
 
-model TeamMember {
+model CrewMember {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  team_id    String   @db.Uuid
+  crew_id    String   @db.Uuid
   user_id    String   @db.Uuid
   created_at DateTime @default(now()) @db.Timestamptz
 
-  team Team @relation(fields: [team_id], references: [id], onDelete: Cascade)
+  crew Crew @relation(fields: [crew_id], references: [id], onDelete: Cascade)
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
-  @@unique([team_id, user_id], name: "uq_team_member")
-  @@index([team_id], name: "idx_team_member_team")
-  @@index([user_id], name: "idx_team_member_user")
-  @@map("team_members")
+  @@unique([crew_id, user_id], name: "uq_crew_member")
+  @@index([crew_id], name: "idx_crew_member_crew")
+  @@index([user_id], name: "idx_crew_member_user")
+  @@map("crew_members")
 }
 
 // ============================================================
@@ -431,13 +431,13 @@ model TeamMember {
 
 model Agent {
   id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  team_id         String?         @db.Uuid  // NULLABLE: Director nema team (patri org)
-  org_id          String          @db.Uuid
+  crew_id         String?         @db.Uuid  // NULLABLE: Coordinator nema crew (patri workspace)
+  workspace_id    String          @db.Uuid
   name            String
   slug            String
   description     String?
   role_title      String?          // "DevOps Engineer", "Sales Rep"
-  agent_role      AgentRole       @default(WORKER)  // WORKER | LEADER | DIRECTOR
+  agent_role      AgentRole       @default(AGENT)  // AGENT | LEAD | COORDINATOR
   status          AgentStatus     @default(IDLE)
   cli_adapter     CLIAdapter      @default(CLAUDE_CODE)
   llm_provider    LLMProvider?
@@ -453,24 +453,24 @@ model Agent {
   updated_at      DateTime        @default(now()) @updatedAt @db.Timestamptz
   deleted_at      DateTime?       @db.Timestamptz
 
-  // Orchestrace — leader/director specificke
-  delegation_timeout_s   Int?     // override timeout pro delegace (default: 2x agent timeout)
-  max_delegation_depth   Int?     @default(3)   // max hloubka delegace (director→leader→worker)
-  max_parallel_delegates Int?     @default(5)   // max paralelne bezicich delegaci
+  // Orchestrace — lead/coordinator specificke
+  assignment_timeout_s   Int?     // override timeout pro assignments (default: 2x agent timeout)
+  max_assignment_depth   Int?     @default(3)   // max hloubka assignments (coordinator→lead→agent)
+  max_parallel_assignees Int?     @default(5)   // max paralelne bezicich assignments
 
-  team             Team?                 @relation(fields: [team_id], references: [id], onDelete: Cascade)
-  organization     Organization          @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  crew             Crew?                 @relation(fields: [crew_id], references: [id], onDelete: Cascade)
+  workspace        Workspace             @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   skills           AgentSkill[]
   credentials      AgentCredential[]
-  sessions         ConversationSession[]
+  chats            Chat[]
   runs             AgentRun[]
   config_history   AgentConfigHistory[]
-  delegations_sent DelegationLog[]       @relation("DelegatedBy")
-  delegations_recv DelegationLog[]       @relation("DelegatedTo")
+  assignments_sent Assignment[]          @relation("AssignedBy")
+  assignments_recv Assignment[]          @relation("AssignedTo")
 
-  @@unique([team_id, slug], name: "uq_agent_slug")
-  @@index([org_id], name: "idx_agent_org")
-  @@index([team_id], name: "idx_agent_team")
+  @@unique([crew_id, slug], name: "uq_agent_slug")
+  @@index([workspace_id], name: "idx_agent_workspace")
+  @@index([crew_id], name: "idx_agent_crew")
   @@index([status], name: "idx_agent_status")
   @@index([agent_role], name: "idx_agent_role")
   @@map("agents")
@@ -486,37 +486,37 @@ model Agent {
 // AgentRun.token_count_output -- pocet output tokenu
 
 // ============================================================
-// 7b. DELEGATION LOG (Phase 2 — orchestracni audit)
+// 7b. ASSIGNMENT (Phase 2 — orchestracni audit)
 // ============================================================
-// Zaznamenava vsechny delegace mezi agenty (leader→worker, director→leader).
-// Umoznuje vizualizaci delegacniho stromu a audit kdo komu co delegoval.
+// Zaznamenava vsechny assignments mezi agenty (lead→agent, coordinator→lead).
+// Umoznuje vizualizaci assignment stromu a audit kdo komu co priradil.
 // Viz prd/ORCHESTRATION.md pro kompletni specifikaci.
 
-model DelegationLog {
+model Assignment {
   id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id          String           @db.Uuid
-  session_id      String           @db.Uuid
-  source_agent_id String           @db.Uuid  // kdo delegoval (leader/director)
-  target_agent_id String           @db.Uuid  // komu (worker/leader)
-  task            String           @db.Text  // co bylo delegovano
-  status          DelegationStatus @default(PENDING)
+  workspace_id    String           @db.Uuid
+  chat_id         String           @db.Uuid
+  assigned_by_id  String           @db.Uuid  // kdo priradil (lead/coordinator)
+  assigned_to_id  String           @db.Uuid  // komu (agent/lead)
+  task            String           @db.Text  // co bylo prirazeno
+  status          AssignmentStatus @default(PENDING)
   started_at      DateTime?        @db.Timestamptz
   finished_at     DateTime?        @db.Timestamptz
   result_summary  String?          @db.Text  // shrnuti vysledku od target agenta
   error_message   String?          @db.Text
-  group_id        String?          // pro paralelni delegace (wait_group)
+  group_id        String?          // pro paralelni assignments (wait_group)
   created_at      DateTime         @default(now()) @db.Timestamptz
 
-  organization Organization        @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  session      ConversationSession @relation(fields: [session_id], references: [id])
-  source_agent Agent               @relation("DelegatedBy", fields: [source_agent_id], references: [id])
-  target_agent Agent               @relation("DelegatedTo", fields: [target_agent_id], references: [id])
+  workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  chat         Chat      @relation(fields: [chat_id], references: [id])
+  assigned_by  Agent     @relation("AssignedBy", fields: [assigned_by_id], references: [id])
+  assigned_to  Agent     @relation("AssignedTo", fields: [assigned_to_id], references: [id])
 
-  @@index([session_id], name: "idx_delegation_session")
-  @@index([source_agent_id], name: "idx_delegation_source")
-  @@index([target_agent_id], name: "idx_delegation_target")
-  @@index([group_id], name: "idx_delegation_group")
-  @@map("delegation_logs")
+  @@index([chat_id], name: "idx_assignment_chat")
+  @@index([assigned_by_id], name: "idx_assignment_source")
+  @@index([assigned_to_id], name: "idx_assignment_target")
+  @@index([group_id], name: "idx_assignment_group")
+  @@map("assignments")
 }
 
 // ============================================================
@@ -639,31 +639,31 @@ model AgentSkill {
 
 model Credential {
   id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id          String          @db.Uuid
-  team_id         String?         @db.Uuid  // null = org-wide
+  workspace_id    String          @db.Uuid
+  crew_id         String?         @db.Uuid  // null = workspace-wide
   name            String
   description     String?
   encrypted_value String          @db.Text  // "v1:" + AES-256-GCM sifrovana hodnota
-  scope           CredentialScope @default(ORGANIZATION)
+  scope           CredentialScope @default(WORKSPACE)
   created_by      String          @db.Uuid
   created_at      DateTime        @default(now()) @db.Timestamptz
   updated_at      DateTime        @default(now()) @updatedAt @db.Timestamptz
   deleted_at      DateTime?       @db.Timestamptz
 
-  organization     Organization     @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  workspace        Workspace        @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   creator          User             @relation("CreatedBy", fields: [created_by], references: [id])
   agent_credentials AgentCredential[]
 
-  @@unique([org_id, name], name: "uq_credential_name")
-  @@index([org_id], name: "idx_credential_org")
-  @@index([team_id], name: "idx_credential_team")
+  @@unique([workspace_id, name], name: "uq_credential_name")
+  @@index([workspace_id], name: "idx_credential_workspace")
+  @@index([crew_id], name: "idx_credential_crew")
   @@map("credentials")
 }
 
 // ============================================================
 // 11. AGENT CREDENTIAL (M:N)
 // ============================================================
-// CONSTRAINT: Pokud credential.scope = TEAM, agent musi byt ve stejnem tymu.
+// CONSTRAINT: Pokud credential.scope = CREW, agent musi byt ve stejne crew.
 // Toto se kontroluje na aplikacni urovni (CASL/service layer), ne DB constraint.
 
 model AgentCredential {
@@ -686,18 +686,18 @@ model AgentCredential {
 }
 
 // ============================================================
-// 12. CONVERSATION SESSION (METADATA ONLY)
+// 12. CHAT (METADATA ONLY)
 // ============================================================
 // Samotne zpravy jsou v JSONL souboru:
-//   /var/lib/crewship/conversations/{org_id}/{agent_id}/{session_id}.jsonl
-// PostgreSQL drzi jen metadata pro querying (seznam sessions, filtering, pagination).
+//   /var/lib/crewship/conversations/{workspace_id}/{agent_id}/{chat_id}.jsonl
+// PostgreSQL drzi jen metadata pro querying (seznam chats, filtering, pagination).
 // Obsah zprav se cte primo z JSONL souboru pres Go service (crewshipd).
 
-model ConversationSession {
+model Chat {
   id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   agent_id      String        @db.Uuid
-  org_id        String        @db.Uuid
-  created_by    String?       @db.Uuid  // null pro webhook/cron triggered sessions
+  workspace_id  String        @db.Uuid
+  created_by    String?       @db.Uuid  // null pro webhook/cron triggered chats
   title         String?
   mode          SessionMode   @default(CHAT)
   status        SessionStatus @default(ACTIVE)
@@ -708,16 +708,16 @@ model ConversationSession {
   created_at    DateTime      @default(now()) @db.Timestamptz
   updated_at    DateTime      @default(now()) @updatedAt @db.Timestamptz
 
-  agent        Agent        @relation(fields: [agent_id], references: [id], onDelete: Cascade)
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  creator      User?        @relation("CreatedBy", fields: [created_by], references: [id])
-  runs         AgentRun[]
-  delegations  DelegationLog[]
+  agent       Agent     @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  creator     User?     @relation("CreatedBy", fields: [created_by], references: [id])
+  runs        AgentRun[]
+  assignments Assignment[]
 
-  @@index([agent_id], name: "idx_session_agent")
-  @@index([org_id], name: "idx_session_org")
-  @@index([created_at], name: "idx_session_created")
-  @@map("conversation_sessions")
+  @@index([agent_id], name: "idx_chat_agent")
+  @@index([workspace_id], name: "idx_chat_workspace")
+  @@index([created_at], name: "idx_chat_created")
+  @@map("chats")
 }
 
 // ============================================================
@@ -727,8 +727,8 @@ model ConversationSession {
 model AgentRun {
   id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   agent_id      String      @db.Uuid
-  session_id    String?     @db.Uuid  // null pro standalone runs
-  org_id        String      @db.Uuid
+  chat_id       String?     @db.Uuid  // null pro standalone runs
+  workspace_id  String      @db.Uuid
   triggered_by  String?     @db.Uuid  // null pro webhook/cron/system triggery
   trigger_type  RunTrigger  @default(USER)  // kdo spustil run
   status        RunStatus   @default(PENDING)
@@ -739,13 +739,13 @@ model AgentRun {
   metadata      Json?       // cli adapter, model, duration, token count
   created_at    DateTime    @default(now()) @db.Timestamptz
 
-  agent        Agent                @relation(fields: [agent_id], references: [id], onDelete: Cascade)
-  session      ConversationSession? @relation(fields: [session_id], references: [id])
-  organization Organization         @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  triggerer    User?                @relation("TriggeredBy", fields: [triggered_by], references: [id])
+  agent     Agent      @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  chat      Chat?      @relation(fields: [chat_id], references: [id])
+  workspace Workspace  @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  triggerer User?      @relation("TriggeredBy", fields: [triggered_by], references: [id])
 
   @@index([agent_id, created_at], name: "idx_run_agent_time")
-  @@index([org_id], name: "idx_run_org")
+  @@index([workspace_id], name: "idx_run_workspace")
   @@index([status], name: "idx_run_status")
   @@map("agent_runs")
 }
@@ -758,20 +758,20 @@ model AgentRun {
 
 model AuditLog {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String   @db.Uuid
+  workspace_id String  @db.Uuid
   user_id     String?  @db.Uuid  // null pro system akce
-  action      String   // "agent.created", "credential.added", "team.member.invited"
-  entity_type String   // "Agent", "Team", "Credential"
+  action      String   // "agent.created", "credential.added", "crew.member.invited"
+  entity_type String   // "Agent", "Crew", "Credential"
   entity_id   String?  @db.Uuid
   metadata    Json?    // old/new values, request info
   ip_address  String?  @db.VarChar(45)
   user_agent  String?
   created_at  DateTime @default(now()) @db.Timestamptz
 
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  user         User?        @relation(fields: [user_id], references: [id])
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [user_id], references: [id])
 
-  @@index([org_id, created_at], name: "idx_audit_org_time")
+  @@index([workspace_id, created_at], name: "idx_audit_workspace_time")
   @@index([entity_type, entity_id], name: "idx_audit_entity")
   @@index([user_id], name: "idx_audit_user")
   @@index([action], name: "idx_audit_action")
@@ -784,7 +784,7 @@ model AuditLog {
 
 model Subscription {
   id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id                 String             @unique @db.Uuid
+  workspace_id           String             @unique @db.Uuid
   plan_id                String             @db.Uuid
   stripe_customer_id     String?            @unique
   stripe_subscription_id String?            @unique
@@ -795,8 +795,8 @@ model Subscription {
   created_at             DateTime           @default(now()) @db.Timestamptz
   updated_at             DateTime           @default(now()) @updatedAt @db.Timestamptz
 
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  plan         Plan         @relation(fields: [plan_id], references: [id])
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  plan      Plan      @relation(fields: [plan_id], references: [id])
 
   @@map("subscriptions")
 }
@@ -811,10 +811,10 @@ model Plan {
   display_name     String
   stripe_price_id  String?  @unique
   max_agents       Int      // -1 = unlimited
-  max_teams        Int
+  max_crews        Int
   max_skills       Int      // per agent
-  max_credentials  Int      // per org
-  max_members      Int      // per org
+  max_credentials  Int      // per workspace
+  max_members      Int      // per workspace
   features         Json?
   price_monthly    Int      @default(0)  // v centech (2900 = $29)
   created_at       DateTime @default(now()) @db.Timestamptz
@@ -844,20 +844,20 @@ model FeatureFlag {
 }
 
 // ============================================================
-// 18. FEATURE FLAG OVERRIDE (per org)
+// 18. FEATURE FLAG OVERRIDE (per workspace)
 // ============================================================
 
 model FeatureFlagOverride {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  flag_id    String   @db.Uuid
-  org_id     String   @db.Uuid
-  enabled    Boolean
-  created_at DateTime @default(now()) @db.Timestamptz
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  flag_id      String   @db.Uuid
+  workspace_id String   @db.Uuid
+  enabled      Boolean
+  created_at   DateTime @default(now()) @db.Timestamptz
 
-  flag         FeatureFlag  @relation(fields: [flag_id], references: [id], onDelete: Cascade)
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  flag      FeatureFlag @relation(fields: [flag_id], references: [id], onDelete: Cascade)
+  workspace Workspace   @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
-  @@unique([flag_id, org_id], name: "uq_flag_override")
+  @@unique([flag_id, workspace_id], name: "uq_flag_override")
   @@map("feature_flag_overrides")
 }
 
@@ -965,7 +965,7 @@ Toto vyzaduje zmenu `cli_adapter` a `llm_model` za behu — slozitejsi, odlozeno
 
 ## 6. KONVERZACE — JSONL FORMAT
 
-Kazda session ma jeden JSONL soubor. Kazdy radek = jedna zprava:
+Kazdy chat ma jeden JSONL soubor. Kazdy radek = jedna zprava:
 
 ```jsonl
 {"id":"msg-uuid","role":"user","type":"text","content":"Vytvor report o socialnich sitich","user_id":"user-uuid","ts":"2026-02-11T10:00:00Z"}
@@ -976,7 +976,7 @@ Kazda session ma jeden JSONL soubor. Kazdy radek = jedna zprava:
 ```
 
 ### Jak se ctou zpravy:
-1. UI pozada o zpravy session X
+1. UI pozada o zpravy chat X
 2. Next.js posle request na Go service (pres Unix socket)
 3. Go service precte JSONL soubor, parsuje, vrati jako JSON array
 4. Podporuje pagination: `?offset=0&limit=50` (radky v JSONL)
@@ -998,11 +998,11 @@ Kazda session ma jeden JSONL soubor. Kazdy radek = jedna zprava:
 ```sql
 -- Pred kazdym dotazem Prisma middleware nastavi:
 SELECT set_config('app.current_user_id', $userId, true);
-SELECT set_config('app.current_org_id', $orgId, true);
+SELECT set_config('app.current_workspace_id', $workspaceId, true);
 
 -- RLS politika:
-CREATE POLICY "org_isolation" ON agents FOR ALL
-  USING (org_id = current_setting('app.current_org_id', true)::uuid);
+CREATE POLICY "workspace_isolation" ON agents FOR ALL
+  USING (workspace_id = current_setting('app.current_workspace_id', true)::uuid);
 ```
 
 Funguje na jakomkoli PostgreSQL (plain, RDS, Cloud SQL, Supabase).
@@ -1011,14 +1011,14 @@ Funguje na jakomkoli PostgreSQL (plain, RDS, Cloud SQL, Supabase).
 
 | Tabulka | SELECT | INSERT | UPDATE | DELETE |
 |---|---|---|---|---|
-| organizations | Member of org | Authenticated | OWNER/ADMIN | OWNER only |
-| organization_members | Member of org | OWNER/ADMIN | OWNER/ADMIN | OWNER/ADMIN |
-| teams | Member of org (team-scoped pro MGR/MBR) | OWNER/ADMIN/MANAGER | OWNER/ADMIN/MANAGER | OWNER/ADMIN |
-| agents | Member of team | OWNER/ADMIN/MANAGER | OWNER/ADMIN/MANAGER | OWNER/ADMIN |
+| workspaces | Member of workspace | Authenticated | OWNER/ADMIN | OWNER only |
+| workspace_members | Member of workspace | OWNER/ADMIN | OWNER/ADMIN | OWNER/ADMIN |
+| crews | Member of workspace (crew-scoped pro MGR/MBR) | OWNER/ADMIN/MANAGER | OWNER/ADMIN/MANAGER | OWNER/ADMIN |
+| agents | Member of crew | OWNER/ADMIN/MANAGER | OWNER/ADMIN/MANAGER | OWNER/ADMIN |
 | credentials | OWNER/ADMIN/MANAGER (masked) | OWNER/ADMIN/MANAGER | OWNER/ADMIN/MANAGER | OWNER/ADMIN |
-| conversation_sessions | Member of team | Any member | - | - |
-| agent_runs | Member of team | System/Any member | System only | - |
-| audit_logs | OWNER/ADMIN (all), MGR (team) | System only | Never | Never |
+| chats | Member of crew | Any member | - | - |
+| agent_runs | Member of crew | System/Any member | System only | - |
+| audit_logs | OWNER/ADMIN (all), MGR (crew) | System only | Never | Never |
 
 ---
 
@@ -1026,17 +1026,17 @@ Funguje na jakomkoli PostgreSQL (plain, RDS, Cloud SQL, Supabase).
 
 ```sql
 -- Nejcastejsi dotazy
-CREATE INDEX idx_agent_team ON agents(team_id) WHERE deleted_at IS NULL;
-CREATE INDEX idx_agent_org ON agents(org_id) WHERE deleted_at IS NULL;
-CREATE INDEX idx_session_agent ON conversation_sessions(agent_id);
-CREATE INDEX idx_audit_org_time ON audit_logs(org_id, created_at DESC);
+CREATE INDEX idx_agent_crew ON agents(crew_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_agent_workspace ON agents(workspace_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_chat_agent ON chats(agent_id);
+CREATE INDEX idx_audit_workspace_time ON audit_logs(workspace_id, created_at DESC);
 CREATE INDEX idx_run_status ON agent_runs(status) WHERE status IN ('PENDING', 'RUNNING');
 
 -- Partial indexy (soft delete)
-CREATE INDEX idx_org_active ON organizations(id) WHERE deleted_at IS NULL;
-CREATE INDEX idx_team_active ON teams(org_id) WHERE deleted_at IS NULL;
-CREATE INDEX idx_agent_active ON agents(team_id) WHERE deleted_at IS NULL;
-CREATE INDEX idx_credential_active ON credentials(org_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_workspace_active ON workspaces(id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_crew_active ON crews(workspace_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_agent_active ON agents(crew_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_credential_active ON credentials(workspace_id) WHERE deleted_at IS NULL;
 ```
 
 ---
@@ -1045,7 +1045,7 @@ CREATE INDEX idx_credential_active ON credentials(org_id) WHERE deleted_at IS NU
 
 ```sql
 -- Plan tiers
-INSERT INTO plans (tier, display_name, max_agents, max_teams, max_skills, max_credentials, max_members, price_monthly) VALUES
+INSERT INTO plans (tier, display_name, max_agents, max_crews, max_skills, max_credentials, max_members, price_monthly) VALUES
   ('FREE',       'Community',  5,   2,  5,  10,  5,     0),
   ('PRO',        'Pro',        20,  5,  20, 50,  10,  2900),
   ('TEAM',       'Team',       100, -1, -1, 200, 50,  7900),
@@ -1104,8 +1104,8 @@ Stejna schema, dva mody:
 
 | Aspekt | Community | Enterprise |
 |---|---|---|
-| Seed data | Auto-create 1 org + admin | Prazdna DB, registrace |
-| Plan | FREE (5 agents, 2 teams) | Plny tier system |
+| Seed data | Auto-create 1 workspace + admin | Prazdna DB, registrace |
+| Plan | FREE (5 agents, 2 crews) | Plny tier system |
 | Feature flags | billing=false, audit=false | Dle planu |
 | Subscription | Existuje ale prazdna | Aktivni (Stripe) |
 
@@ -1144,6 +1144,6 @@ $$ LANGUAGE plpgsql;
 ## 14. OTEVRENE OTAZKY
 
 1. **pgvector extension** — pripravit pro budouci RAG (Phase 3)?
-2. **Full-text search** — PostgreSQL `tsvector` pro session titles/metadata?
+2. **Full-text search** — PostgreSQL `tsvector` pro chat titles/metadata?
 3. **Partitioning** — audit_logs muze rust rychle. Partitioning po mesicich az bude potreba?
 4. **Archivace** — stare audit logy do cold storage (S3) po X mesicich?
