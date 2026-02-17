@@ -63,3 +63,5 @@ ehthumbs.db
 # Misc
 *.pem
 *.key
+*.db-shm
+*.db-wal

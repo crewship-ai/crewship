@@ -101,7 +101,7 @@ start_postgres() {
 
 start_go() {
   if pid=$(is_running "$GO_PID_FILE"); then
-    ok "crewshipd already running (pid $pid)"
+    ok "crewship already running (pid $pid)"
     return
   fi
 
@@ -110,7 +110,7 @@ start_go() {
     return 1
   fi
 
-  log "Starting crewshipd on :$GO_PORT..."
+  log "Starting crewship on :$GO_PORT..."
   mkdir -p /tmp/crewship-data /tmp/crewship-logs /tmp/crewship-state
 
   (
@@ -122,22 +122,22 @@ start_go() {
     export CREWSHIP_LOG_PATH=/tmp/crewship-logs
     export CREWSHIP_BOLT_PATH=/tmp/crewship-state/state.db
     export CREWSHIP_LOG_LEVEL=debug
-    exec go run ./cmd/crewshipd
+    exec go run ./cmd/crewship start --no-docker
   ) > "$GO_LOG" 2>&1 &
 
   echo $! > "$GO_PID_FILE"
 
   local attempts=0
   while [[ $attempts -lt 15 ]]; do
-    if curl -sf http://localhost:$GO_PORT/healthz >/dev/null 2>&1; then
-      ok "crewshipd started (pid $(cat "$GO_PID_FILE"))"
+    if curl -sf http://localhost:$GO_PORT/api/health >/dev/null 2>&1; then
+      ok "crewship started (pid $(cat "$GO_PID_FILE"))"
       return
     fi
     sleep 1
     attempts=$((attempts + 1))
   done
 
-  warn "crewshipd started but health check timed out -- check $GO_LOG"
+  warn "crewship started but health check timed out -- check $GO_LOG"
 }
 
 start_next() {
@@ -239,7 +239,7 @@ cmd_start() {
 cmd_stop() {
   echo -e "${BOLD}Stopping Crewship...${NC}"
   stop_service "Next.js" "$NEXT_PID_FILE" "$NEXT_PORT"
-  stop_service "crewshipd" "$GO_PID_FILE" "$GO_PORT"
+  stop_service "crewship" "$GO_PID_FILE" "$GO_PORT"
   local db_mode
   db_mode=$(detect_db_mode)
   if [[ "$db_mode" == "postgresql" ]]; then
@@ -273,17 +273,15 @@ cmd_status() {
   fi
 
   if pid=$(is_running "$GO_PID_FILE"); then
-    local uptime_info=""
-    if curl -sf http://localhost:$GO_PORT/healthz 2>/dev/null | grep -q "ok"; then
-      uptime_info=$(curl -sf http://localhost:$GO_PORT/healthz 2>/dev/null | grep -o '"uptime":"[^"]*"' | cut -d'"' -f4)
-      echo -e "  crewshipd:   ${GREEN}running${NC} (pid $pid, uptime $uptime_info)"
+    if curl -sf http://localhost:$GO_PORT/api/health >/dev/null 2>&1; then
+      echo -e "  crewship:    ${GREEN}running${NC} (pid $pid)"
     else
-      echo -e "  crewshipd:   ${YELLOW}starting${NC} (pid $pid)"
+      echo -e "  crewship:    ${YELLOW}starting${NC} (pid $pid)"
     fi
   elif port_in_use "$GO_PORT"; then
-    echo -e "  crewshipd:   ${YELLOW}running (orphan on :$GO_PORT)${NC}"
+    echo -e "  crewship:    ${YELLOW}running (orphan on :$GO_PORT)${NC}"
   else
-    echo -e "  crewshipd:   ${RED}stopped${NC}"
+    echo -e "  crewship:    ${RED}stopped${NC}"
   fi
 
   if pid=$(is_running "$NEXT_PID_FILE"); then
