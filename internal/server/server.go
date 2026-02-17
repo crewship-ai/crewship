@@ -39,6 +39,8 @@ type Server struct {
 	credMonitor  *llmproxy.CredentialMonitor
 	debugLogs    *logging.RingBuffer
 	startedAt    time.Time
+	runCtx       context.Context
+	runCancel    context.CancelFunc
 }
 
 type Deps struct {
@@ -186,6 +188,7 @@ func (s *Server) LogWriter() *logcollector.Writer {
 
 func (s *Server) Start(ctx context.Context) error {
 	s.startedAt = time.Now()
+	s.runCtx, s.runCancel = context.WithCancel(context.Background())
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -228,6 +231,9 @@ func (s *Server) Shutdown() error {
 	s.logger.Info("shutting down servers")
 
 	s.orchestrator.StopAccepting()
+	if s.runCancel != nil {
+		s.runCancel()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Server.ShutdownTimeout)
 	defer cancel()

@@ -187,7 +187,7 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		if timeout <= 0 {
 			timeout = 30 * time.Minute
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		ctx, cancel := context.WithTimeout(s.runCtx, timeout)
 		defer cancel()
 
 		handler := func(event orchestrator.AgentEvent) {
@@ -366,7 +366,9 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	filename := filepath.Base(filePath)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	w.Header().Set("Content-Type", "application/octet-stream")
-	io.Copy(w, reader)
+	if _, err := io.Copy(w, reader); err != nil {
+		s.logger.Error("file download stream error", "path", filePath, "error", err)
+	}
 }
 
 func (s *Server) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
@@ -426,9 +428,11 @@ func (s *Server) handleCredentialSync(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(s.runCtx, 10*time.Second)
 		defer cancel()
-		_ = s.tokenSyncer.SyncNow(ctx)
+		if err := s.tokenSyncer.SyncNow(ctx); err != nil {
+			s.logger.Error("credential sync failed", "error", err)
+		}
 	}()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "sync_triggered"})
 }

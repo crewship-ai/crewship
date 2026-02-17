@@ -43,10 +43,10 @@ export async function GET(
   try {
     const res = await getTeamFiles(agent.team_id, agent.slug)
     if (!res.ok) {
-      return NextResponse.json([])
+      return NextResponse.json({ error: "Failed to fetch files" }, { status: 502 })
     }
     return NextResponse.json(res.data.files ?? [])
   } catch {
-    return NextResponse.json([])
+    return NextResponse.json({ error: "Failed to fetch files" }, { status: 502 })
   }
 }
