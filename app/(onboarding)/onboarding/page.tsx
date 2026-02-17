@@ -62,7 +62,10 @@ export default function OnboardingPage() {
   // Check if onboarding already completed
   useEffect(() => {
     fetch("/api/v1/onboarding/status")
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) return { completed: false }
+        return res.json()
+      })
       .then((data) => {
         if (data.completed) {
           router.push("/")

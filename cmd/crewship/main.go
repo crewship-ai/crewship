@@ -218,7 +218,7 @@ func cmdStart(args []string) {
 		cancel()
 	}()
 
-	deps, err := initProviders(cfg, logger, *noDocker)
+	deps, err := initProviders(ctx, cfg, logger, *noDocker)
 	if err != nil {
 		logger.Error("failed to initialize providers", "error", err)
 		os.Exit(1)
@@ -260,7 +260,7 @@ func cmdStart(args []string) {
 	logger.Info("crewship stopped")
 }
 
-func initProviders(cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {
+func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {
 	deps := &server.Deps{}
 
 	switch cfg.Container.Provider {
@@ -269,7 +269,7 @@ func initProviders(cfg *config.Config, logger *slog.Logger, skipDocker bool) (*s
 			logger.Info("docker provider disabled via --no-docker")
 			break
 		}
-		d, err := docker.New(docker.Config{
+		d, err := docker.New(ctx, docker.Config{
 			RuntimeImage:   cfg.Container.RuntimeImage,
 			DefaultRuntime: cfg.Container.DefaultRuntime,
 			Network:        cfg.Container.Network,

@@ -104,6 +104,13 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 		}
 		sv, _ := cli.ServerVersion(ctx)
 		ver := sv.Version
+		// Podman masquerades as Docker -- check server components
+		for _, comp := range sv.Components {
+			if strings.EqualFold(comp.Name, "Podman Engine") {
+				rt = "podman"
+				ver = comp.Version
+			}
+		}
 		return &DetectResult{Runtime: rt, Socket: host, Version: ver}, nil
 	}
 
@@ -144,12 +151,12 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 // New creates a Provider by auto-detecting the container runtime and
 // establishing a Docker API client connection. Returns an error if no
 // compatible runtime is found.
-func New(cfg Config, logger *slog.Logger) (*Provider, error) {
+func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	detected, detectErr := Detect(context.Background())
+	detected, detectErr := Detect(ctx)
 	if detectErr != nil {
 		return nil, fmt.Errorf("container runtime: %w", detectErr)
 	}
@@ -168,7 +175,7 @@ func New(cfg Config, logger *slog.Logger) (*Provider, error) {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
 
-	if _, err := cli.Ping(context.Background()); err != nil {
+	if _, err := cli.Ping(ctx); err != nil {
 		cli.Close()
 		return nil, fmt.Errorf("docker ping: %w", err)
 	}
@@ -182,7 +189,7 @@ func New(cfg Config, logger *slog.Logger) (*Provider, error) {
 	)
 
 	if cfg.Network != "" {
-		if err := p.ensureNetwork(context.Background(), cfg.Network); err != nil {
+		if err := p.ensureNetwork(ctx, cfg.Network); err != nil {
 			logger.Warn("failed to create docker network", "network", cfg.Network, "error", err)
 		}
 	}

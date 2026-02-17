@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -10,6 +11,24 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
+
+var dashRegex = regexp.MustCompile(`-+`)
+
+type llmProviderInfo struct {
+	provider   string
+	envVarName string
+}
+
+func resolveLLMProvider(provider string) llmProviderInfo {
+	switch strings.ToUpper(provider) {
+	case "OPENAI":
+		return llmProviderInfo{provider: "OPENAI", envVarName: "OPENAI_API_KEY"}
+	case "GOOGLE":
+		return llmProviderInfo{provider: "GOOGLE", envVarName: "GOOGLE_API_KEY"}
+	default:
+		return llmProviderInfo{provider: "ANTHROPIC", envVarName: "ANTHROPIC_API_KEY"}
+	}
+}
 
 type OnboardingHandler struct {
 	db     *sql.DB
@@ -30,6 +49,10 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 	var completed bool
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT onboarding_completed FROM users WHERE id = ?", user.ID).Scan(&completed)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		return
+	}
 	if err != nil {
 		h.logger.Error("query onboarding status", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -76,7 +99,7 @@ var slugRegex = regexp.MustCompile(`[^a-z0-9-]`)
 func makeSlug(name string) string {
 	s := strings.ToLower(strings.TrimSpace(name))
 	s = slugRegex.ReplaceAllString(s, "-")
-	s = regexp.MustCompile(`-+`).ReplaceAllString(s, "-")
+	s = dashRegex.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
 	if s == "" {
 		s = "default"
@@ -112,9 +135,13 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		SELECT wm.workspace_id FROM workspace_members wm
 		WHERE wm.user_id = ? ORDER BY wm.created_at ASC LIMIT 1
 	`, user.ID).Scan(&workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No workspace found for user"})
+		return
+	}
 	if err != nil {
 		h.logger.Error("find workspace", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "No workspace found"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -192,12 +219,7 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 			credName = "API Key"
 		}
 
-		provider := "ANTHROPIC"
-		if strings.EqualFold(req.LlmProvider, "OPENAI") {
-			provider = "OPENAI"
-		} else if strings.EqualFold(req.LlmProvider, "GOOGLE") {
-			provider = "GOOGLE"
-		}
+		llm := resolveLLMProvider(req.LlmProvider)
 
 		encryptedValue, encErr := encryption.Encrypt(req.CredentialValue)
 		if encErr != nil {
@@ -209,7 +231,7 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		_, err = tx.ExecContext(r.Context(), `
 			INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, created_by, created_at, updated_at)
 			VALUES (?, ?, ?, ?, 'AI_CLI_TOKEN', ?, 'WORKSPACE', ?, ?, ?)
-		`, credentialID, workspaceID, credName, encryptedValue, provider, user.ID, now, now)
+		`, credentialID, workspaceID, credName, encryptedValue, llm.provider, user.ID, now, now)
 		if err != nil {
 			h.logger.Error("insert credential", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create credential"})
@@ -218,17 +240,11 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 
 		// Assign credential to agent
 		assignmentID := generateCUID()
-		envVarName := "ANTHROPIC_API_KEY"
-		if strings.EqualFold(req.LlmProvider, "OPENAI") {
-			envVarName = "OPENAI_API_KEY"
-		} else if strings.EqualFold(req.LlmProvider, "GOOGLE") {
-			envVarName = "GOOGLE_API_KEY"
-		}
 
 		_, err = tx.ExecContext(r.Context(), `
 			INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
 			VALUES (?, ?, ?, ?, 0, ?)
-		`, assignmentID, agentID, credentialID, envVarName, now)
+		`, assignmentID, agentID, credentialID, llm.envVarName, now)
 		if err != nil {
 			h.logger.Error("assign credential", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to assign credential"})
