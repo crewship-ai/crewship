@@ -42,6 +42,9 @@ export async function GET(req: NextRequest) {
     orderBy: [{ type: "asc" }, { created_at: "asc" }],
   })
 
+  // SECURITY NOTE: Plaintext tokens are intentionally returned here.
+  // This is an internal-only endpoint (requireInternal auth) consumed by crewshipd
+  // for the LLM token pool. Never exposed to browsers or external clients.
   const result = credentials.map((cred) => ({
     id: cred.id,
     org_id: cred.org_id,

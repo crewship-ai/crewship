@@ -17,7 +17,7 @@ vi.mock("next/server", () => ({
 // Import after mocks
 import { middleware } from "@/middleware"
 
-function createRequest(pathname: string, opts?: { hasCookie?: boolean; protocol?: string }) {
+function createRequest(pathname: string, opts?: { hasCookie?: boolean; protocol?: string; forwardedProto?: string }) {
   const protocol = opts?.protocol ?? "http:"
   const base = `${protocol}//localhost:3001`
   const url = new URL(pathname, base)
@@ -28,10 +28,15 @@ function createRequest(pathname: string, opts?: { hasCookie?: boolean; protocol?
       : "authjs.session-token"
     cookies.set(cookieName, { value: "mock-session-token" })
   }
+  const headerMap = new Map<string, string>()
+  if (opts?.forwardedProto) {
+    headerMap.set("x-forwarded-proto", opts.forwardedProto)
+  }
   return {
     nextUrl: url,
     url: url.toString(),
     cookies: { get: (name: string) => cookies.get(name) },
+    headers: { get: (name: string) => headerMap.get(name) ?? null },
   } as Parameters<typeof middleware>[0]
 }
 
@@ -120,6 +125,7 @@ describe("middleware", () => {
         nextUrl: url,
         url: url.toString(),
         cookies: { get: (name: string) => cookies.get(name) },
+        headers: { get: () => null },
       } as Parameters<typeof middleware>[0]
 
       middleware(req)

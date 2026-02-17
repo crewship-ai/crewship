@@ -23,7 +23,9 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  const cookieName = request.nextUrl.protocol === "https:"
+  const proto = request.headers.get("x-forwarded-proto") ?? request.nextUrl.protocol.replace(":", "")
+  const isSecure = proto === "https"
+  const cookieName = isSecure
     ? "__Secure-authjs.session-token"
     : "authjs.session-token"
   const sessionToken = request.cookies.get(cookieName)?.value

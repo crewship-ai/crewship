@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
 import { useCrewshipdStatus } from "@/hooks/use-crewshipd-status"
+import { useOrg } from "@/hooks/use-org"
 
 const pageConfig: Record<string, { title: string; breadcrumb?: string; pills?: { label: string; variant: "default" | "secondary" | "outline" | "destructive" }[] }> = {
   "/": { title: "Dashboard", pills: [{ label: "0 running", variant: "secondary" }] },
@@ -29,7 +30,8 @@ const pageConfig: Record<string, { title: string; breadcrumb?: string; pills?: {
 export function AppToolbar() {
   const pathname = usePathname()
   const config = pageConfig[pathname] ?? { title: "Crewship" }
-  const { status: daemonStatus } = useCrewshipdStatus()
+  const { orgId } = useOrg()
+  const { status: daemonStatus } = useCrewshipdStatus(orgId)
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-3 sm:px-4">

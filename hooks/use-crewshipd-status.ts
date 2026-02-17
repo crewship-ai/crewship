@@ -6,12 +6,14 @@ export type DaemonStatus = "connected" | "disconnected" | "checking"
 
 const POLL_INTERVAL = 10_000
 
-export function useCrewshipdStatus() {
+export function useCrewshipdStatus(orgId: string | null) {
   const [status, setStatus] = useState<DaemonStatus>("checking")
   const [uptime, setUptime] = useState<string | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
+    if (!orgId) return
+
     let timer: ReturnType<typeof setInterval> | undefined
 
     async function check() {
@@ -20,7 +22,7 @@ export function useCrewshipdStatus() {
       controllerRef.current = controller
 
       try {
-        const res = await fetch("/api/v1/crewshipd", {
+        const res = await fetch(`/api/v1/crewshipd?org_id=${encodeURIComponent(orgId!)}`, {
           signal: controller.signal,
           cache: "no-store",
         })
@@ -47,7 +49,7 @@ export function useCrewshipdStatus() {
       clearInterval(timer)
       controllerRef.current?.abort()
     }
-  }, [])
+  }, [orgId])
 
   return { status, uptime }
 }

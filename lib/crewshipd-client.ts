@@ -148,11 +148,54 @@ export async function getTeamFiles(teamId: string, agentSlug?: string) {
   );
 }
 
-/** Download a file from /output/ via IPC. Returns raw response for streaming. */
-export async function downloadTeamFile(teamId: string, filePath: string) {
-  return crewshipdRequest<Buffer>(
-    `/teams/${encodeURIComponent(teamId)}/files/download?path=${encodeURIComponent(filePath)}`,
-  );
+/** Download a file from /output/ via IPC. Returns raw buffer for binary-safe streaming. */
+export async function downloadTeamFile(
+  teamId: string,
+  filePath: string,
+): Promise<{ ok: true; status: number; data: Buffer; contentType: string } | IPCErrorResponse> {
+  const target = parseSocketURL(CREWSHIPD_URL);
+
+  return new Promise((resolve, reject) => {
+    const reqOptions: http.RequestOptions = {
+      path: `/teams/${encodeURIComponent(teamId)}/files/download?path=${encodeURIComponent(filePath)}`,
+      method: "GET",
+      timeout: 30_000,
+    };
+
+    if ("socketPath" in target) {
+      reqOptions.socketPath = target.socketPath;
+    } else {
+      const url = new URL(target.host);
+      reqOptions.hostname = url.hostname;
+      reqOptions.port = url.port;
+    }
+
+    const req = http.request(reqOptions, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => {
+        const status = res.statusCode ?? 500;
+        const buf = Buffer.concat(chunks);
+        if (status < 400) {
+          resolve({
+            ok: true,
+            status,
+            data: buf,
+            contentType: res.headers["content-type"] ?? "application/octet-stream",
+          });
+        } else {
+          resolve({ ok: false, status, error: buf.toString() });
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("File download timed out"));
+    });
+    req.end();
+  });
 }
 
 /** Read JSONL conversation messages for a session. */

@@ -36,12 +36,15 @@ export async function GET(
   const agent = session.agent
   const team = agent.team
 
+  // SECURITY NOTE: Plaintext values are intentionally returned here.
+  // This is an internal-only endpoint (requireInternal auth) consumed by crewshipd (Go)
+  // via IPC. crewshipd needs plaintext to inject as ENV vars into Docker exec.
+  // This endpoint is NEVER exposed to browsers or external clients.
   const credentials = agent.credentials.map((ac) => {
     let value = ""
     try {
       value = decrypt(ac.credential.encrypted_value)
     } catch {
-      // credential decryption failed -- skip silently, log server-side only
       console.error(`Failed to decrypt credential ${ac.credential_id} for agent ${agent.id}`)
     }
     return {

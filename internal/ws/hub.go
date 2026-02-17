@@ -339,7 +339,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		}
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		c.hub.logger.Debug("invalid send_message payload", "error", err, "raw", string(msg.Payload))
+		c.hub.logger.Debug("invalid send_message payload", "error", err, "payload_len", len(msg.Payload))
 		resp, _ := json.Marshal(ServerMessage{
 			Type:    "error",
 			Channel: msg.Channel,

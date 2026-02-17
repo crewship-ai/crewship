@@ -20,7 +20,7 @@ export async function GET(
   })
 
   if (!convSession) {
-    return NextResponse.json({ messages: [] })
+    return NextResponse.json({ error: "Session not found" }, { status: 404 })
   }
 
   const membership = await prisma.organizationMember.findUnique({
@@ -39,10 +39,10 @@ export async function GET(
   try {
     const result = await getSessionMessages(sessionId, offset, limit)
     if (!result.ok) {
-      return NextResponse.json({ messages: [] })
+      return NextResponse.json({ error: "Failed to fetch messages" }, { status: 502 })
     }
     return NextResponse.json(result.data)
   } catch {
-    return NextResponse.json({ messages: [] })
+    return NextResponse.json({ error: "Failed to fetch messages" }, { status: 502 })
   }
 }

@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from "react"
 import { useWebSocket, type WSStatus } from "@/hooks/use-websocket"
 
 export type MessageRole = "user" | "assistant" | "system" | "tool"
-export type StreamEventType = "text" | "tool_call" | "thinking" | "done" | "error"
+export type StreamEventType = "text" | "tool_call" | "tool_result" | "thinking" | "done" | "error"
 
 export interface ChatMessage {
   id: string
@@ -45,13 +45,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
 
       switch (eventType) {
         case "text":
-          // Backend streams line-by-line (no trailing newline), so we
-          // re-join with "\n" to preserve markdown structure (code blocks, lists, etc.)
-          if (streamBufferRef.current) {
-            streamBufferRef.current += "\n" + content
-          } else {
-            streamBufferRef.current = content
-          }
+          streamBufferRef.current += content
           setMessages((prev) => {
             const last = prev[prev.length - 1]
             if (last?.isStreaming) {
@@ -89,6 +83,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
           break
 
         case "tool_call":
+        case "tool_result":
           setMessages((prev) => [
             ...prev,
             {

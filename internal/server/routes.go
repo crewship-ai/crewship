@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/llmproxy"
@@ -337,12 +338,19 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Sanitize path to prevent directory traversal
+	cleanPath := filepath.Clean(filePath)
+	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
 	if s.storage == nil {
 		http.Error(w, "storage not configured", http.StatusServiceUnavailable)
 		return
 	}
 
-	fullPath := teamID + "/" + filePath
+	fullPath := filepath.Join(teamID, cleanPath)
 	reader, err := s.storage.Read(r.Context(), fullPath)
 	if err != nil {
 		http.Error(w, "file not found", http.StatusNotFound)

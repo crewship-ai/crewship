@@ -47,9 +47,13 @@ export async function POST(
 
   const existing = await prisma.conversationSession.findUnique({
     where: { id: sessionId },
+    select: { id: true, title: true, status: true, org_id: true, agent_id: true },
   })
 
   if (existing) {
+    if (existing.org_id !== authResult.orgId || existing.agent_id !== agentId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
     return NextResponse.json({
       id: existing.id,
       title: existing.title,

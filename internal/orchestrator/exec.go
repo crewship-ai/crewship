@@ -25,7 +25,7 @@ func BuildCLICommand(req AgentRunRequest) []string {
 	case "CLAUDE_CODE":
 		cmd := []string{
 			"claude", "--print",
-			"--no-session-persistence",
+			"--output-format", "stream-json",
 			"--dangerously-skip-permissions",
 			"--verbose",
 		}
@@ -194,6 +194,37 @@ chmod 600 /home/agent/.claude/.credentials.json /home/agent/.claude.json`,
 	return nil
 }
 
+// streamJSONMessage represents a line from Claude Code --output-format stream-json.
+// The format varies: top-level messages have "type" like "assistant", "result", "system";
+// stream events have type "stream_event" with nested "event" containing deltas.
+type streamJSONMessage struct {
+	Type    string          `json:"type"`
+	Message json.RawMessage `json:"message,omitempty"`
+	// For "assistant" type messages with content blocks
+	Content []contentBlock `json:"content,omitempty"`
+	// For "result" type
+	Result string `json:"result,omitempty"`
+	// For stream_event type (--include-partial-messages)
+	Event *streamEvent `json:"event,omitempty"`
+}
+
+type contentBlock struct {
+	Type  string `json:"type"`
+	Text  string `json:"text,omitempty"`
+	Name  string `json:"name,omitempty"`
+	Input any    `json:"input,omitempty"`
+}
+
+type streamEvent struct {
+	Type  string      `json:"type"`
+	Delta *eventDelta `json:"delta,omitempty"`
+}
+
+type eventDelta struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
 func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecResult, req AgentRunRequest, handler EventHandler) {
 	var closeOnce sync.Once
 	closeReader := func() {
@@ -211,24 +242,84 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	scanner := bufio.NewScanner(result.Reader)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 
+	useStreamJSON := req.CLIAdapter == "CLAUDE_CODE"
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
 			continue
 		}
 
-		event := AgentEvent{
-			Type:      "text",
-			Content:   line,
-			Timestamp: time.Now(),
-		}
-
-		if handler != nil {
-			handler(event)
+		if useStreamJSON {
+			o.handleStreamJSONLine(line, handler)
+		} else {
+			if handler != nil {
+				handler(AgentEvent{
+					Type:      "text",
+					Content:   line + "\n",
+					Timestamp: time.Now(),
+				})
+			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {
 		o.logger.Debug("scanner error", "error", err, "agent_id", req.AgentID)
+	}
+}
+
+func (o *Orchestrator) handleStreamJSONLine(line string, handler EventHandler) {
+	if handler == nil {
+		return
+	}
+
+	var msg streamJSONMessage
+	if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		// Not valid JSON -- emit as plain text (fallback)
+		handler(AgentEvent{Type: "text", Content: line + "\n", Timestamp: time.Now()})
+		return
+	}
+
+	switch msg.Type {
+	case "stream_event":
+		// Token-level streaming (when --include-partial-messages is used)
+		if msg.Event != nil && msg.Event.Delta != nil && msg.Event.Delta.Type == "text_delta" {
+			handler(AgentEvent{Type: "text", Content: msg.Event.Delta.Text, Timestamp: time.Now()})
+		}
+
+	case "assistant":
+		// Complete assistant message with content blocks
+		for _, block := range msg.Content {
+			switch block.Type {
+			case "text":
+				handler(AgentEvent{Type: "text", Content: block.Text, Timestamp: time.Now()})
+			case "tool_use":
+				name := block.Name
+				if name == "" {
+					name = "tool"
+				}
+				handler(AgentEvent{
+					Type:      "tool_call",
+					Content:   fmt.Sprintf("Using tool: %s", name),
+					Metadata:  block.Input,
+					Timestamp: time.Now(),
+				})
+			case "tool_result":
+				handler(AgentEvent{Type: "tool_result", Content: block.Text, Timestamp: time.Now()})
+			}
+		}
+
+	case "result":
+		if msg.Result != "" {
+			handler(AgentEvent{Type: "text", Content: msg.Result, Timestamp: time.Now()})
+		}
+
+	default:
+		// Unknown type -- emit raw content if any text content blocks exist
+		for _, block := range msg.Content {
+			if block.Text != "" {
+				handler(AgentEvent{Type: "text", Content: block.Text, Timestamp: time.Now()})
+			}
+		}
 	}
 }

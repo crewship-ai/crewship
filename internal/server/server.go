@@ -78,6 +78,8 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	logR := logcollector.NewReader(cfg.Storage.LogPath)
 	convStore := conversation.NewStore(cfg.Storage.BasePath, logger)
 
+	orch.SetConversationStore(convStore)
+
 	var jwtValidator *auth.JWTValidator
 	if cfg.Auth.JWTSecret != "" {
 		var err error

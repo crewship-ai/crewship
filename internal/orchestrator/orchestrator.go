@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
@@ -59,6 +61,7 @@ type EventHandler func(event AgentEvent)
 type Orchestrator struct {
 	container provider.ContainerProvider
 	state     provider.StateProvider
+	convStore *conversation.Store
 	logger    *slog.Logger
 	cooldown  *CooldownManager
 	mu        sync.Mutex
@@ -77,6 +80,11 @@ func New(
 		cooldown:  NewCooldownManager(),
 		accepting: true,
 	}
+}
+
+// SetConversationStore sets the conversation store for reading session history.
+func (o *Orchestrator) SetConversationStore(store *conversation.Store) {
+	o.convStore = store
 }
 
 func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handler EventHandler) error {
@@ -104,6 +112,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	stateBytes, _ := json.Marshal(runState)
 	if err := o.state.Set(ctx, "agent_runs", runState.ID, stateBytes); err != nil {
 		o.logger.Error("failed to persist run state", "error", err)
+	}
+
+	// Inject conversation history into system prompt for context continuity
+	if o.convStore != nil && req.SessionID != "" {
+		history := o.buildConversationContext(ctx, req.SessionID, 10)
+		if history != "" {
+			req.SystemPrompt = req.SystemPrompt + "\n\n" + history
+		}
 	}
 
 	env := BuildEnvVars(req, cred)
@@ -254,4 +270,50 @@ func (o *Orchestrator) updateRunStatus(ctx context.Context, runID, status string
 	if err := o.state.Set(ctx, "agent_runs", runID, updated); err != nil {
 		o.logger.Error("updateRunStatus: set failed", "run_id", runID, "error", err)
 	}
+}
+
+const maxConversationContextChars = 20000
+
+// buildConversationContext reads the last N messages from the session JSONL
+// and formats them as a conversation transcript for the system prompt.
+func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID string, maxMessages int) string {
+	messages, err := o.convStore.Read(ctx, sessionID, 0, 0)
+	if err != nil || len(messages) == 0 {
+		return ""
+	}
+
+	// Take last N messages (excluding the current user message which was just appended)
+	// The bridge appends the user message before calling RunAgent, so skip the very last one
+	if len(messages) > 0 && messages[len(messages)-1].Role == conversation.RoleUser {
+		messages = messages[:len(messages)-1]
+	}
+	if len(messages) == 0 {
+		return ""
+	}
+
+	start := 0
+	if len(messages) > maxMessages {
+		start = len(messages) - maxMessages
+	}
+	recent := messages[start:]
+
+	var b strings.Builder
+	b.WriteString("[CONVERSATION HISTORY - previous messages in this session]\n")
+	totalChars := 0
+	for _, msg := range recent {
+		content := msg.Content
+		if totalChars+len(content) > maxConversationContextChars {
+			remaining := maxConversationContextChars - totalChars
+			if remaining > 100 {
+				content = content[:remaining] + "...(truncated)"
+			} else {
+				break
+			}
+		}
+		b.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, content))
+		totalChars += len(content)
+	}
+	b.WriteString("[END CONVERSATION HISTORY]\n")
+	b.WriteString("The user's new message follows. Continue the conversation naturally, referencing previous context when relevant.")
+	return b.String()
 }
