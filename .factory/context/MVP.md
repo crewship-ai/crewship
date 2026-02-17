@@ -50,11 +50,11 @@
 - [x] `go run ./cmd/crewshipd` startuje
 
 ### Faze 2: Auth + Workspace + Crew CRUD [PRISTI]
-- [ ] NextAuth.js login/signup stranky
+- [ ] Go auth endpoints (NextAuth-compatible JWE) + login/signup stranky
 - [ ] Dashboard layout (sidebar + hlavni obsah)
-- [ ] Workspace CRUD + API routes
-- [ ] Crew CRUD + API routes
-- [ ] RBAC zaklad (CASL abilities)
+- [ ] Workspace CRUD + Go API routes
+- [ ] Crew CRUD + Go API routes
+- [ ] RBAC zaklad (Go middleware)
 - [ ] Zustand store (currentWorkspace, currentUser)
 
 ### Faze 3: Agent + Credentials
@@ -65,8 +65,8 @@
 - [ ] Audit log (zakladni)
 
 ### Faze 4: Go Backend + Chat (KRITICKA)
-- [ ] crewshipd WebSocket gateway
-- [ ] IPC vrstva (Unix socket)
+- [ ] Go WebSocket gateway
+- [ ] ~~IPC vrstva (Unix socket)~~ Not needed (single binary, in-process)
 - [ ] Docker container lifecycle (ContainerProvider)
 - [ ] Agent execution (Docker exec + CLI adapter)
 - [ ] Stdout streaming (Docker → WS → Browser)

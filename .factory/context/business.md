@@ -36,7 +36,7 @@ TBD -- will be determined based on market feedback and MVP validation.
 4. **Skills marketplace** -- modular, community-driven ecosystem
 5. **Terminal-first** -- CLI agents, structured logs, real file output
 6. **Webhook-driven** -- agents react to external events (alerts, triggers, other systems)
-7. **Two-language architecture** -- TypeScript UI + Go backend = efficient, K8s-native
+7. **Two-language architecture** -- TypeScript UI (build-time only) + Go backend (single binary) = efficient, K8s-native
 8. **3-level AI hierarchy** -- Coordinator → Lead → Agents. User talks to the
    Lead, not individual agents. Natural for business users ("talk to department head").
 

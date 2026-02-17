@@ -214,7 +214,7 @@ dnf install crewship
 winget install crewship
 
 # Docker (fallback)
-docker run -d -p 3001:3001 --name crewship ghcr.io/crewship-ai/crewship:latest
+docker run -d -p 8080:8080 --name crewship ghcr.io/crewship-ai/crewship:latest
 ```
 
 ### 4.3 Co `crewship start` udela
@@ -223,8 +223,8 @@ docker run -d -p 3001:3001 --name crewship ghcr.io/crewship-ai/crewship:latest
 1. Detekuje Docker (nainstaluje pokud chybi? -- TBD)
 2. Spusti embedded web server (Next.js static build)
 3. Inicializuje SQLite databazi (~/.crewship/crewship.db)
-4. Spusti crewshipd (WebSocket, Docker orchestrace)
-5. Otevre http://localhost:3001 v prohlizeci
+4. Spusti crewshipd engine (WebSocket, Docker orchestrace)
+5. Otevre http://localhost:8080 v prohlizeci
 6. Uzivatel vidi onboarding wizard
 ```
 
@@ -245,7 +245,7 @@ crewship (Go binary, ~50-80 MB)
   │     ├── SQLite (default, zero deps) -- ~/.crewship/crewship.db
   │     └── PostgreSQL (opt-in: crewship start --db postgres://...)
   ├── CLI:
-  │     ├── crewship start [--port 3001] [--db sqlite|postgres://...]
+  │     ├── crewship start [--port 8080] [--db sqlite|postgres://...]
   │     ├── crewship stop
   │     ├── crewship status
   │     ├── crewship logs [--follow]
@@ -577,20 +577,21 @@ Crewship je jediny, kdo kombinuje **granularni network control** s **klikacim UI
 
 ## 9. Technicka rozhodnuti k implementaci
 
-### 9.1 SQLite integrace
+### 9.1 SQLite integrace ✅ IMPLEMENTOVANO
 
-**Pristup:** Prisma multi-provider (sqlite + postgresql)
+**Pristup:** Go `database/sql` s pure-Go SQLite driverem (`modernc.org/sqlite`).
+Prisma schema se pouziva pouze pro TypeScript type generation.
+Go migration system (`internal/database/migrate.go`) spravuje schema pro oba providery.
 
-```prisma
-// prisma/schema.prisma
-datasource db {
-  provider = env("DB_PROVIDER")  // "sqlite" nebo "postgresql"
-  url      = env("DATABASE_URL") // "file:./crewship.db" nebo "postgresql://..."
+```go
+// internal/database/database.go
+func Open(databaseURL string) (*sql.DB, error) {
+    if strings.HasPrefix(databaseURL, "file:") || strings.HasSuffix(databaseURL, ".db") {
+        return sql.Open("sqlite", databaseURL) // modernc.org/sqlite
+    }
+    return sql.Open("postgres", databaseURL)
 }
 ```
-
-**Alternativa:** Pokud Prisma multi-provider je problematicky, pouzit
-`embedded-postgres-go` pro zero-deps PostgreSQL. Ale SQLite je cistsi.
 
 ### 9.2 Embedded Next.js
 

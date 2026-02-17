@@ -1,150 +1,167 @@
+<coding_guidelines>
 # Crewship -- AI Agent Orchestration Platform
 
 > Open-source platform for managing AI "virtual employees" in crews.
 > Brand: **Crewship** (Crew + Ship + "-ship" suffix -- triple meaning)
 > Domain: crewship.ai | GitHub: github.com/crewship-ai | npm: @crewship/*
-> GitLab: `ssh://git@gitlab.unifylab.cz:2222/development/crewship.git`
-> Company: Unify Technology s.r.o.
+> GitLab: `git@github.com:crewship-ai/crewship.git`
+
 
 ---
 
 ## Status
 
 **Phase:** MVP (UI + backend wired, agent runtime operational).
-`./dev.sh start` launches PostgreSQL + crewshipd + Next.js. See **Dev Environment** below.
+**Architecture:** Single Go binary with embedded static UI (Next.js static export).
 
-## Two-Language Project
+## Single Binary Architecture
 
 ```
-TypeScript (Next.js):  UI, CRUD API, auth, Prisma ORM
-Go (crewshipd):        WebSocket, Docker orchestration, logs, files, webhooks
+Go (crewship binary):  HTTP API, auth, DB, WebSocket, Docker orchestration, embedded UI
+TypeScript (Next.js):  UI only (static export -- HTML/CSS/JS, NO server, NO API routes)
 ```
 
-Communication: Unix socket (local) or gRPC (K8s).
+The Go binary embeds the Next.js static build via `embed.FS` and serves everything
+from a single process. There is NO separate Next.js server at runtime.
 
 ## Runtime Versions
 
 ```
-Node.js:  25.x (engines >=22)
-pnpm:     10.x
-Go:       1.25
+Go:       1.25          (production runtime)
+Node.js:  25.x          (build-time only -- Next.js static export, Prisma type generation)
+pnpm:     10.x          (build-time only)
 ```
 
 ## Core Commands
 
 ```bash
-# Dev environment (recommended)
-./dev.sh start        # Start all services (PostgreSQL + crewshipd + Next.js)
-./dev.sh stop         # Stop crewshipd + Next.js (PostgreSQL stays)
+# Production (single binary)
+crewship start            # Start everything (SQLite, localhost:8080)
+crewship start --port 9090  # Custom port
+crewship version          # Version info
+crewship doctor           # Diagnostics (Docker, ports, DB)
+
+# Dev environment (two processes for hot-reload)
+./dev.sh start        # Start Go + Next.js dev servers in background
+./dev.sh stop         # Stop both
 ./dev.sh restart      # Stop then start
-./dev.sh status       # Show status of all services
+./dev.sh status       # Show status
 ./dev.sh logs         # Tail combined logs
 make up               # Alias for ./dev.sh start
 make down             # Alias for ./dev.sh stop
 
-# Frontend (TypeScript)
-pnpm dev --port 3001  # Next.js dev server (localhost:3001)
-pnpm build            # Production build (MUST pass before commit)
+# Frontend (build-time only)
+pnpm dev --port 3001  # Next.js dev server (HMR, localhost:3001)
+pnpm build            # Static export to out/ (MUST pass before commit)
 pnpm test             # Vitest test suite
 pnpm lint             # ESLint
-pnpm db:generate      # Prisma generate (after schema changes)
-pnpm db:push          # Push schema to DB
-pnpm db:studio        # Prisma Studio (DB browser)
+pnpm db:generate      # Prisma generate (type generation only)
 
 # Backend (Go)
-go run ./cmd/crewshipd    # Go service dev (localhost:8080)
-go build ./cmd/crewshipd  # Build binary
+go run ./cmd/crewship     # Single binary dev
+go build ./cmd/crewship   # Build binary
 go test ./...             # Go tests
 
-# Infrastructure
-docker compose -f docker/docker-compose.yml up -d   # PostgreSQL
+# Build single binary (production)
+make build            # pnpm build → cp out web/out → go build
 ```
 
 ## Dev Environment
 
-**IMPORTANT: Both Next.js AND crewshipd must be running for full functionality.**
-
-Chat (WebSocket), logs, files, and debug pages all require the Go backend (`crewshipd`) on port 8080.
-Next.js alone only serves the UI shell without live agent features.
+In development, two processes run for hot-reload:
+- **Go server** (port 8080): API, auth, WebSocket, Docker orchestration
+- **Next.js dev server** (port 3001): UI with HMR (proxies API to Go)
 
 ```bash
-./dev.sh start     # Starts everything in background with health checks
-./dev.sh status    # Verify all services are running
-./dev.sh logs      # Watch combined output
+./dev.sh start     # Starts both in background
+./dev.sh status    # Verify services
+./dev.sh logs      # Watch output
 ./dev.sh stop      # Clean shutdown
 ```
 
 | Service | Port | Purpose |
 |---|---|---|
-| PostgreSQL | 5432 | Structured data (Docker Compose) |
-| crewshipd | 8080 | WebSocket, Docker orchestration, logs, files, IPC |
-| Next.js | 3001 | UI, CRUD API, auth, Prisma ORM |
+| crewship (Go) | 8080 | API, auth, WebSocket, Docker orchestration, embedded UI |
+| Next.js dev | 3001 | UI hot-reload (dev only, proxies /api/ to :8080) |
+
+> In production, only the single binary runs. Next.js is embedded as static files.
 
 PID files: `/tmp/crewship-{next,go}.pid` -- Logs: `/tmp/crewship-{next,go}.log`
-
-For Go hot-reload during development: `make dev:go` (requires `air`).
 
 ## Project Layout
 
 > Legend: ✅ exists now | 📋 create when implementing that feature (do NOT pre-create empty dirs)
 
 ```
-app/                          → Next.js frontend (TypeScript)
-  ├─ (auth)/                  📋 Login, signup, OAuth
-  ├─ (dashboard)/             ✅ Dashboard route group
-  │   └─ page.tsx             ✅ Dashboard root page
-  ├─ api/v1/                  📋 REST API routes
-  ├─ globals.css              ✅ Design tokens (Tailwind v4, @theme inline, oklch)
-  └─ layout.tsx               ✅ Root layout (Inter + JetBrains Mono)
-components/
-  ├─ ui/                      📋 shadcn/ui primitives (regenerate: npx shadcn@latest add)
-  └─ features/                📋 Feature components (chat, file-browser, terminal)
-lib/
-  ├─ services/                📋 Business logic (*.service.ts)
-  ├─ permissions/             📋 RBAC (CASL-based)
-  ├─ encryption.ts            ✅ Credentials vault (AES-256-GCM, key versioning v1:)
-  ├─ types/                   📋 TypeScript types
-  ├─ utils.ts                 ✅ Re-exports cn()
-  └─ utils/cn.ts              ✅ clsx + tailwind-merge
-prisma/
-  └─ schema.prisma            ✅ DB schema (placeholder — populate from DATABASE.md)
 cmd/
-  └─ crewshipd/main.go        ✅ Go service entrypoint (signal handling placeholder)
-internal/                     📋 Go internal packages
-  ├─ provider/                📋 Provider interfaces (Container, Storage, State)
-  │   ├─ container.go         📋 ContainerProvider interface
-  │   ├─ storage.go           📋 StorageProvider interface
-  │   ├─ state.go             📋 StateProvider interface
-  │   ├─ docker/              📋 Docker implementation (MVP)
-  │   ├─ k8s/                 📋 Kubernetes implementation (Enterprise)
-  │   ├─ localfs/             📋 Local filesystem implementation (MVP)
-  │   ├─ s3/                  📋 S3/MinIO implementation (Enterprise)
-  │   ├─ bbolt/               📋 bbolt WAL implementation (MVP)
-  │   └─ pgstate/             📋 PostgreSQL state implementation (Enterprise)
-  ├─ ws/                      📋 WebSocket gateway
-  ├─ orchestrator/            📋 Agent job orchestration + credential pool
-  ├─ webhook/                 📋 Webhook ingress handler
-  └─ config/                  📋 YAML config parser
+  └─ crewship/main.go         ✅ Single binary entry point (start/version/doctor)
+internal/                      ✅ Go internal packages
+  ├─ api/                      ✅ HTTP API layer (50+ routes)
+  │   ├─ router.go             ✅ Route registration with auth middleware
+  │   ├─ middleware.go          ✅ JWT auth (NextAuth JWE), workspace context, RBAC
+  │   ├─ nextauth.go           ✅ NextAuth-compatible endpoints (csrf/session/login/signout)
+  │   ├─ auth.go               ✅ Signup (bcrypt), ws-token
+  │   ├─ workspaces.go         ✅ Full CRUD + members + invitations
+  │   ├─ crews.go              ✅ Full CRUD + members
+  │   ├─ agents.go             ✅ Full CRUD + skills/credentials/chats/runs sub-resources
+  │   ├─ credentials.go        ✅ Full CRUD with AES-256-GCM encryption
+  │   ├─ skills.go             ✅ List with filters
+  │   ├─ runs.go               ✅ List with pagination + stats
+  │   ├─ audit.go              ✅ List with filters
+  │   ├─ admin.go              ✅ Stats, users, workspaces (OWNER only)
+  │   ├─ proxy.go              ✅ Crewshipd IPC proxy (agent debug/files/logs/stop)
+  │   ├─ internal.go           ✅ Internal routes for crewshipd (decrypted credentials)
+  │   └─ static.go             ✅ SPA-aware static file server (embedded Next.js)
+  ├─ database/                 ✅ Pure-Go SQLite (modernc.org/sqlite, no CGO)
+  │   ├─ database.go           ✅ Open, WAL mode, pragmas
+  │   └─ migrate.go            ✅ Migration system (20 tables)
+  ├─ auth/                     ✅ JWT validation + creation (NextAuth JWE compatible)
+  ├─ encryption/               ✅ AES-256-GCM (cross-compatible with TS format v1:)
+  ├─ server/                   ✅ HTTP + IPC server, combined SPA + API handler
+  ├─ config/                   ✅ YAML config parser
+  ├─ provider/                 ✅ Provider interfaces (Container, Storage, State)
+  │   ├─ docker/               ✅ Docker implementation (MVP)
+  │   ├─ localfs/              ✅ Local filesystem implementation
+  │   └─ bbolt/                ✅ bbolt WAL implementation
+  ├─ ws/                       ✅ WebSocket gateway
+  ├─ orchestrator/             ✅ Agent job orchestration
+  ├─ webhook/                  ✅ Webhook ingress handler
+  └─ logcollector/             ✅ JSONL log collection
+web/
+  └─ embed.go                  ✅ go:embed for web/out/ static files
+app/                           → Next.js frontend (static export only)
+  ├─ (auth)/                   ✅ Login, signup pages (client components)
+  ├─ (dashboard)/              ✅ Dashboard route group (client components)
+  ├─ globals.css               ✅ Design tokens (Tailwind v4, @theme inline, oklch)
+  └─ layout.tsx                ✅ Root layout (Inter + JetBrains Mono)
+components/
+  ├─ ui/                       ✅ shadcn/ui primitives
+  └─ features/                 📋 Feature components (chat, file-browser, terminal)
+lib/
+  ├─ utils.ts                  ✅ Re-exports cn()
+  └─ utils/cn.ts               ✅ clsx + tailwind-merge
+prisma/
+  └─ schema.prisma             ✅ DB schema (type generation only, NOT runtime ORM)
 docker/
-  ├─ agent-runtime/           📋 Agent container Dockerfile
-  └─ docker-compose.yml       ✅ PostgreSQL 16 (local dev)
-skills/                       📋 Created when skill system is implemented
+  ├─ agent-runtime/            📋 Agent container Dockerfile
+  ├─ docker-compose.yml        ✅ PostgreSQL 16 (optional, for PG mode)
+  └─ docker-compose.prod.yml   ✅ Production single binary deployment
 config/
-  └─ rate-limits.yml          ✅ Rate limiting rules per endpoint
+  └─ rate-limits.yml           ✅ Rate limiting rules per endpoint
 .factory/
-  └─ context/                 ✅ AI knowledge base (PRD, architecture, security, etc.)
+  └─ context/                  ✅ AI knowledge base (PRD, architecture, security, etc.)
 ```
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js, React, Tailwind CSS 4, shadcn/ui (new-york) |
+| **Runtime** | Go single binary (`crewship`) |
+| Frontend | Next.js (static export), React, Tailwind CSS 4, shadcn/ui (new-york) |
 | Icons | lucide-react (ONLY allowed icon library) |
-| Auth | NextAuth.js v5 beta.30 (Auth.js) with Prisma adapter. **Note:** Auth.js project merged into Better Auth -- evaluate migration in Phase 2. |
-| ORM | Prisma (ONLY DB access, from Next.js only) |
-| Database | PostgreSQL 16 (local Docker, structured data only) |
-| Backend | Go (`crewshipd` binary) |
+| Auth | Go (NextAuth-compatible JWE endpoints in `internal/api/`) |
+| Database | SQLite (default, embedded) or PostgreSQL (opt-in) |
+| DB access | Go `database/sql` (direct queries, NO ORM) |
 | WebSocket | Go native (goroutines) |
 | Docker mgmt | Docker SDK for Go |
 | Job state | bbolt (embedded KV, WAL) |
@@ -152,16 +169,21 @@ config/
 | Metrics | Prometheus (Go native) |
 | Logs | JSONL on filesystem + logrotate |
 | Agent output | Persistent filesystem (/output/ bind mount) |
-| State mgmt | Zustand (client) |
-| Validation | Zod |
-| RBAC | CASL |
+| State mgmt | Zustand (client-side only) |
+| Validation | Zod (client-side), Go validation (server-side) |
+| RBAC | Go middleware (`internal/api/middleware.go`) |
+| Encryption | AES-256-GCM (Go `internal/encryption/`) |
 | Design tokens | `app/globals.css` (oklch, tweakcn.com) |
 | Linting | ESLint 9 (pinned -- v10 awaiting @typescript-eslint support) |
 
 ## Architecture
 
 ```
-User → Chat UI → WebSocket (Go) → Docker exec → CLI session → LLM API
+User → Browser → Go HTTP server (port 8080)
+                   ├─ Static UI (embedded Next.js build via embed.FS)
+                   ├─ REST API (/api/v1/*) → SQLite/PostgreSQL
+                   ├─ Auth (/api/auth/*) → JWT (NextAuth-compatible JWE)
+                   └─ WebSocket → Docker exec → CLI session → LLM API
                                         ↓
                                 stdout → JSONL logs
                                         ↓
@@ -177,24 +199,29 @@ EPHEMERAL (container):     /workspace/  ← agent scratch space, disposable
 PERSISTENT (host):         /output/     ← agent deliverables, survives everything
 LOGS (host + logrotate):   /var/log/crewship/  ← JSONL, rotated hourly
 CHATS (host):              /var/lib/crewship/chats/  ← JSONL per session
+DATABASE:                  ~/.crewship/crewship.db  ← SQLite (default)
 ```
 
 ## Conventions
 
-### TypeScript (frontend)
+### TypeScript (frontend -- static export only)
 - Strict mode, no `any`, prefer interfaces for public APIs
 - JSDoc for exported functions
-- Zod for all validation
+- Zod for client-side validation
 - Named exports (no default exports except pages/layouts)
+- All pages are client components (no server components, no server actions)
+- API calls via fetch to `/api/v1/*` (handled by Go server)
 
-### Go (backend)
+### Go (backend -- single binary)
 - Standard Go project layout (cmd/, internal/)
 - No frameworks -- stdlib + minimal dependencies
 - Error wrapping with `fmt.Errorf("context: %w", err)`
 - Context propagation on all functions
 - Structured logging (JSON to stdout)
-- **Provider pattern**: NEVER access Docker/filesystem/bbolt directly — use provider interfaces
+- **Provider pattern**: NEVER access Docker/filesystem/bbolt directly -- use provider interfaces
 - Provider selection via env var: `CREWSHIP_CONTAINER_PROVIDER=docker|k8s`
+- Always check `sql.ErrNoRows` vs real DB errors
+- Always check `rows.Err()` after row iteration loops
 
 ### UI
 - **ONLY** shadcn/ui components (`npx shadcn@latest add [name]`)
@@ -202,25 +229,30 @@ CHATS (host):              /var/lib/crewship/chats/  ← JSONL per session
 - Tailwind CSS 4 only (no inline styles, no tailwind.config.ts)
 - Design tokens in `app/globals.css` via `@theme inline`
 - Responsive: mobile-first, use `md:` and `lg:` breakpoints
-- **Layout:** 3-layer — Top Toolbar (dark, full-width, h-12) + Sidebar (256px) + Main
-- **Top Toolbar:** Logo, Workspace Switcher, Search (⌘K), Docs, Notifications (bell+badge), Settings, User avatar
-- **Sidebar:** Navigation only (no logo, no user footer — both moved to toolbar)
+- **Layout:** 3-layer -- Top Toolbar (dark, full-width, h-12) + Sidebar (256px) + Main
+- **Top Toolbar:** Logo, Workspace Switcher, Search (Cmd+K), Docs, Notifications (bell+badge), Settings, User avatar
+- **Sidebar:** Navigation only (no logo, no user footer -- both moved to toolbar)
 - **Workspace Switcher:** Multi-workspace support, dropdown in toolbar, changes session `currentWorkspaceId`
-- **Reference:** Adapted from Advine.ai `DashboardHeader` + `DashboardSidebar` (ppc_saas_3)
 
 ### Database
-- **Prisma schema** = source of truth (19 tables defined in `.factory/context/prd/DATABASE.md`)
-- PostgreSQL for structured data ONLY (users, crews, agents, credentials, chat metadata)
-- NO logs in PostgreSQL. NO chat messages in PostgreSQL.
-- Logs → JSONL files. Chat messages → JSONL files (one file per session).
-- Chat metadata (id, agent, title, status, timestamps) → PostgreSQL.
+- **SQLite** is the default database (embedded, zero deps)
+- Go accesses DB directly via `database/sql` (NO Prisma at runtime)
+- Prisma schema is used ONLY for TypeScript type generation (`pnpm db:generate`)
+- Go migration system manages the actual schema (`internal/database/migrate.go`)
+- NO logs in database. NO chat messages in database.
+- Logs -> JSONL files. Chat messages -> JSONL files (one file per session).
+- Chat metadata (id, agent, title, status, timestamps) -> database.
 - Credential pool: agent can have MULTIPLE credentials for same env var (priority-based failover).
 
 ### Security (CRITICAL)
 - Credentials ALWAYS encrypted with AES-256-GCM (key versioning: `v1:base64data`)
+- Encryption/decryption in Go (`internal/encryption/`)
 - Agent containers: non-root (UID 1001), --internal network, no internet (except LLM allowlist)
 - Agent CANNOT escape container, CANNOT escalate to root
-- RBAC check on EVERY API endpoint
+- RBAC check on EVERY API endpoint (Go middleware)
+- CSRF token validation with cookie (login flow)
+- Constant-time token comparison for internal auth
+- Path traversal validation on file download routes
 - Webhook auth via per-agent secret token
 - Audit log: append-only (chattr +a in production)
 - Never log plaintext credentials, API keys, or secrets
@@ -260,23 +292,29 @@ CHATS (host):              /var/lib/crewship/chats/  ← JSONL per session
 - Do NOT use any icon library other than lucide-react
 - Do NOT use `tailwind.config.ts` (Tailwind v4 = CSS-first)
 - Do NOT store credentials in plain text
-- Do NOT store logs or chats in PostgreSQL
+- Do NOT store logs or chats in database
 - Do NOT skip RBAC checks on API endpoints
 - Do NOT give containers root access
 - Do NOT create empty placeholder directories (create when needed)
 - Do NOT create documentation files unless explicitly asked
 - Do NOT pre-create empty files for "future use"
+- Do NOT use Prisma at runtime (type generation only)
+- Do NOT add Next.js API routes (all API is in Go)
+- Do NOT use server components or server actions (static export)
 
 ## Environment Variables
 
 ```bash
-DATABASE_URL=postgresql://crewship:crewship@localhost:5432/crewship
-NEXTAUTH_SECRET=           # openssl rand -base64 32
-NEXTAUTH_URL=http://localhost:3000
-ENCRYPTION_KEY=            # openssl rand -hex 32
-CREWSHIPD_URL=unix:///tmp/crewship.sock   # MVP: unix socket, K8s: http://crewshipd:8080
+# Required
+NEXTAUTH_SECRET=           # openssl rand -base64 32 (JWT signing)
+ENCRYPTION_KEY=            # openssl rand -hex 32 (credential encryption)
 
-# Provider selection (MVP defaults)
+# Optional (defaults shown)
+CREWSHIP_PORT=8080         # HTTP port
+DATABASE_URL=              # Default: ~/.crewship/crewship.db (SQLite)
+                           # PostgreSQL: postgresql://user:pass@host/db
+
+# Provider selection (defaults)
 CREWSHIP_CONTAINER_PROVIDER=docker    # docker | k8s
 CREWSHIP_STORAGE_PROVIDER=localfs     # localfs | s3
 CREWSHIP_STATE_PROVIDER=bbolt         # bbolt | postgres
@@ -284,21 +322,22 @@ CREWSHIP_STATE_PROVIDER=bbolt         # bbolt | postgres
 
 ## Development Environment
 
-- **Local dev:** Mac Mini 16GB (macOS) -- Docker Compose (PostgreSQL), Next.js + Go natively
-- **Staging:** Coolify on Proxmox (128GB RAM, i7-12700)
-- **Production:** TBD
+- **Local dev:** Mac Mini 16GB (macOS) -- `./dev.sh start` (Go + Next.js hot-reload)
+- **Staging:** Coolify on Proxmox (128GB RAM, i7-12700) -- Docker image
+- **Production:** Single binary or Docker image
 
 ## Key Documentation (in .factory/context/)
 
 | Document | What's in it |
 |---|---|
-| `prd/DATABASE.md` | Full Prisma schema (20 tables), credential pool pattern, JSONL format |
+| `prd/DATABASE.md` | Full schema (20 tables), credential pool pattern, JSONL format |
 | `prd/SECURITY.md` | Threat model, isolation layers, OWASP, credential encryption |
 | `prd/AGENT-RUNTIME.md` | Container lifecycle, Docker exec, key failover, loop modes, mission runtime |
 | `prd/ORCHESTRATION.md` | **Lead + Coordinator**: 3-level hierarchy, assignment protocol, industry context |
-| `prd/API.md` | REST API, IPC protocol, WebSocket, webhook API |
-| `prd/DEPLOYMENT.md` | Coolify deployment, Docker images, networking |
-| `architecture.md` | Two-process arch, data flows, container model, RBAC, agent hierarchy |
+| `prd/API.md` | REST API (Go routes), WebSocket, webhook API |
+| `prd/DEPLOYMENT.md` | Single binary distribution, Docker image, GoReleaser |
+| `architecture.md` | Single binary arch, data flows, container model, RBAC |
 | `business.md` | Positioning, competition (vs OpenClaw, n8n, CrewAI), mission differentiator |
 | `TODO.md` | Product summary, OpenClaw comparison, phased task list |
-| `K8S-READINESS.md` | Provider interfaces, K8s manifests, migration path Docker→K8s |
+| `K8S-READINESS.md` | Provider interfaces, K8s manifests, migration path Docker->K8s |
+</coding_guidelines>
