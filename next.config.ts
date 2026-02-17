@@ -1,12 +1,14 @@
 import type { NextConfig } from "next"
 
+const isDev = process.env.NODE_ENV === "development"
+
 const nextConfig: NextConfig = {
-  output: "export",
+  ...(isDev ? {} : { output: "export" }),
   images: {
     unoptimized: true,
   },
   async rewrites() {
-    if (process.env.NODE_ENV !== "development") return []
+    if (!isDev) return []
     return [
       {
         source: "/api/:path*",
