@@ -49,18 +49,20 @@ pristupove udaje a dovednosti. Pracuji 24/7 a rano si stahnes vysledky."
 7. Rano SRE inzenyr precte report — agent uz problem vyresil
 ```
 
-### Architektura (2 procesy):
+### Architektura (single Go binary):
 
 ```
-Next.js (TypeScript)           crewshipd (Go binary)
-├─ UI (React, Tailwind v4)     ├─ WebSocket gateway (goroutines)
-├─ REST API (/api/v1/*)        ├─ Docker orchestrator (SDK for Go)
-├─ Auth (NextAuth.js)          ├─ Log collector (JSONL + logrotate)
-├─ Prisma ORM → PostgreSQL     ├─ File server (fsnotify)
-└─ ~300 MB RAM                 ├─ Webhook ingress
-                               ├─ Job state (bbolt WAL)
-    ↕ Unix socket (local)      └─ ~50 MB RAM
-    ↕ gRPC (K8s, Phase 3)
+crewship (Go binary, ~50-80 MB)
+├─ Embedded UI (Next.js static export via embed.FS)
+├─ REST API (/api/v1/*)
+├─ Auth (NextAuth-compatible JWE, internal/api/)
+├─ database/sql → SQLite (default) / PostgreSQL (opt-in)
+├─ WebSocket gateway (goroutines)
+├─ Docker orchestrator (SDK for Go)
+├─ Log collector (JSONL + logrotate)
+├─ File server (fsnotify)
+├─ Webhook ingress
+└─ Job state (bbolt WAL)
 ```
 
 ### Storage model:
@@ -119,13 +121,13 @@ VIEWER  → jen prirazene crews, read-only
 | Job queue | Go channels + bbolt WAL | Zadny Redis, prezije crash |
 | Logy | JSONL + logrotate | Zadny PostgreSQL overhead, Linux nativni |
 | **Chats** | **JSONL soubory** | **Konzistentni s logy, lehci DB, metadata v PostgreSQL** |
-| Auth | NextAuth.js (Auth.js v5) | Funguje s jakoukoli PostgreSQL, OAuth + credentials |
-| ORM | Prisma | Jediny pristup k DB, type-safe |
+| Auth | Go (NextAuth-compatible JWE) | Single binary, JWT/JWE, bcrypt, no Node.js dependency |
+| DB access | Go database/sql | Primy pristup k DB, Prisma jen pro TS type generation |
 | UI | Tailwind v4 + shadcn/ui | CSS-first config, new-york styl |
 | Icons | lucide-react ONLY | Zadna jina knihovna |
 | Rate limiting | Go in-memory (MVP) | Bez Redis, token bucket per-process |
 | Credentials | AES-256-GCM encrypted | ENV var injekce do kontejneru |
-| IPC | Unix socket (local) | Rychle, bezpecne (s file permissions) |
+| IPC | ~~Unix socket~~ In-process | Single binary, zadny IPC |
 | Monitoring | cAdvisor + Prometheus | Container metriky + Go /metrics endpoint |
 
 ### Business positioning:

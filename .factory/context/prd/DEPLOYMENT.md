@@ -42,7 +42,7 @@ winget install crewship
 scoop install crewship
 
 # Docker (fallback -- single binary v kontejneru)
-docker run -d -p 3001:3001 --name crewship ghcr.io/crewship-ai/crewship:latest
+docker run -d -p 8080:8080 --name crewship ghcr.io/crewship-ai/crewship:latest
 ```
 
 #### Co `crewship start` udela
@@ -53,7 +53,7 @@ docker run -d -p 3001:3001 --name crewship ghcr.io/crewship-ai/crewship:latest
 3. Inicializuje SQLite databazi (~/.crewship/crewship.db)
 4. Spusti embedded web server (Next.js static build pres Go HTTP server)
 5. Spusti crewshipd engine (WebSocket, Docker orchestrace)
-6. Otevre http://localhost:3001 v prohlizeci
+6. Otevre http://localhost:8080 v prohlizeci
 7. Uzivatel vidi onboarding wizard
 ```
 
@@ -61,8 +61,8 @@ docker run -d -p 3001:3001 --name crewship ghcr.io/crewship-ai/crewship:latest
 
 ```
 crewship                      # help
-crewship start                # spusti vse (SQLite, localhost:3001)
-crewship start --port 8080    # custom port
+crewship start                # spusti vse (SQLite, localhost:8080)
+crewship start --port 9090    # custom port
 crewship start --db postgres://user:pass@host/db  # PostgreSQL misto SQLite
 crewship stop                 # zastavi vse
 crewship status               # stav sluzeb
@@ -227,11 +227,10 @@ release:
 
 ### 2.4 Docker image build (Mode 2)
 
-Pro Docker Compose deploy se Next.js a crewshipd stale buildi jako oddelene Docker images:
-- `ghcr.io/crewship-ai/crewship:latest` (Next.js)
-- `ghcr.io/crewship-ai/crewshipd:latest` (Go)
+Pro Docker Compose deploy se pouziva single binary image:
+- `ghcr.io/crewship-ai/crewship:latest` (Go binary + embedded Next.js)
 
-Viz sekce 4 nize.
+Viz sekce 8 nize.
 
 ---
 
@@ -363,16 +362,16 @@ datasource db {
 
 ### 6.1 Prerekvizity
 
-- Node.js 22+ (pnpm)
-- Go 1.23+
-- Docker Desktop (nebo colima/podman)
-- PostgreSQL 16 (pres Docker Compose)
+- Node.js 25+ (pnpm -- build-time only for Next.js static export)
+- Go 1.25+
+- Docker Desktop (nebo colima/podman -- pro agent kontejnery)
+- PostgreSQL 16 (OPTIONAL -- jen pokud nechcete SQLite)
 
 ### 6.2 Setup
 
 ```bash
-# 1. Spustit PostgreSQL
-docker compose -f docker/docker-compose.yml up -d
+# 1. (OPTIONAL) Spustit PostgreSQL -- SQLite je default, nepotrebujete PG
+# docker compose -f docker/docker-compose.yml up -d
 
 # 2. Zkopirovat env
 cp .env.example .env.local
@@ -382,13 +381,15 @@ cp .env.example .env.local
 pnpm install
 go mod download
 
-# 4. Prisma
+# 4. Prisma (type generation only)
 pnpm db:generate
-pnpm db:push
 
-# 5. Spustit (dva terminaly)
-pnpm dev              # Next.js (localhost:3000)
-go run ./cmd/crewshipd  # Go service (localhost:8080)
+# 5. Spustit (dva terminaly pro hot-reload)
+pnpm dev --port 3001  # Next.js dev (HMR, localhost:3001)
+go run ./cmd/crewship  # Go server (localhost:8080, API + auth + DB)
+
+# Nebo pouzit dev.sh:
+./dev.sh start         # Spusti oba procesy na pozadi
 ```
 
 ### 6.3 docker-compose.yml (lokalni dev)
@@ -421,11 +422,15 @@ volumes:
 ### 6.4 .env.local (lokalni dev)
 
 ```bash
-DATABASE_URL=postgresql://crewship:crewship@localhost:5432/crewship
+# SQLite (default -- no PostgreSQL needed)
+# DATABASE_URL neni nutne, default: ~/.crewship/crewship.db
+
+# PostgreSQL (optional)
+# DATABASE_URL=postgresql://crewship:crewship@localhost:5432/crewship
+
 NEXTAUTH_SECRET=dev-secret-min-32-chars-openssl-rand
-NEXTAUTH_URL=http://localhost:3000
 ENCRYPTION_KEY=dev-key-64-hex-chars-openssl-rand-hex-32
-CREWSHIPD_SOCKET=/tmp/crewship.sock
+CREWSHIP_PORT=8080
 ```
 
 ---
@@ -447,82 +452,62 @@ Proxmox server (128GB RAM, i7-12700)
 
 | Service | Image | Port | Docker socket |
 |---|---|---|---|
-| crewship-nextjs | `ghcr.io/crewship-ai/crewship:latest` | 3000 | Ne |
-| crewship-go | `ghcr.io/crewship-ai/crewshipd:latest` | 8080 | Ano |
-| crewship-postgres | `postgres:16-alpine` | 5432 | Ne |
+| crewship | `ghcr.io/crewship-ai/crewship:latest` | 8080 | Ano |
+| crewship-postgres | `postgres:16-alpine` (optional) | 5432 | Ne |
+
+> **Poznamka:** Single binary image obsahuje embedded Next.js + Go server.
+> Neni potreba separatni Next.js image.
 
 ### 7.3 Deployment postup
 
 ```bash
-# 1. Build Next.js image
+# 1. Build single binary image
 docker build -t ghcr.io/crewship-ai/crewship:latest .
 
-# 2. Build Go image
-docker build -t ghcr.io/crewship-ai/crewshipd:latest -f docker/crewshipd/Dockerfile .
-
-# 3. Push to GHCR
+# 2. Push to GHCR
 docker push ghcr.io/crewship-ai/crewship:latest
-docker push ghcr.io/crewship-ai/crewshipd:latest
 
-# 4. Coolify auto-deploys (webhook trigger)
+# 3. Coolify auto-deploys (webhook trigger)
 ```
 
 ---
 
 ## 8. DOCKER IMAGES
 
-### 8.1 Next.js Dockerfile
+### 8.1 Crewship Single Binary Dockerfile
 
 ```dockerfile
 # Dockerfile (root)
-FROM node:22-alpine AS base
+# Stage 1: Build Next.js static export
+FROM node:25-alpine AS frontend
 RUN corepack enable pnpm
-
-FROM base AS deps
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
-
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm build
+# Static export in /app/out/
 
-FROM base AS runner
-WORKDIR /app
-ENV NODE_ENV=production
-RUN addgroup --system --gid 1001 crewship && \
-    adduser --system --uid 1001 crewship
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
-USER crewship
-EXPOSE 3000
-CMD ["node", "server.js"]
-```
-
-### 8.2 crewshipd Dockerfile
-
-```dockerfile
-# docker/crewshipd/Dockerfile
-FROM golang:1.23-alpine AS builder
+# Stage 2: Build Go binary with embedded UI
+FROM golang:1.25-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o /crewshipd ./cmd/crewshipd
+COPY --from=frontend /app/out ./web/out
+RUN CGO_ENABLED=0 go build -o /crewship ./cmd/crewship
 
+# Stage 3: Runtime
 FROM alpine:3.19
 RUN apk --no-cache add ca-certificates && \
     addgroup -S crewship && adduser -S crewship -G crewship
-COPY --from=builder /crewshipd /usr/local/bin/crewshipd
+COPY --from=builder /crewship /usr/local/bin/crewship
 USER crewship
 EXPOSE 8080
-ENTRYPOINT ["crewshipd"]
+ENTRYPOINT ["crewship", "start"]
 ```
 
-### 8.3 Agent Runtime Dockerfile
+### 8.2 Agent Runtime Dockerfile
 
 ```dockerfile
 # docker/agent-runtime/Dockerfile
@@ -655,7 +640,7 @@ services:
 ```
 $ crewship doctor
 ✅ Docker:         Running (v27.5.1)
-✅ Port 3001:      Available
+✅ Port 8080:      Available
 ✅ Database:       SQLite (~/.crewship/crewship.db, 2.4 MB)
 ✅ Data directory:  ~/.crewship/ (142 MB)
 ✅ Agent network:   crewship-agents (--internal)
@@ -667,33 +652,25 @@ $ crewship doctor
 
 ## 12. ENVIRONMENT VARIABLES
 
-### 12.1 Next.js
+### 12.1 ~~Next.js~~ (OBSOLETE -- single binary handles everything)
+
+> Next.js is static export only (build-time). No runtime env vars needed.
+> All API, auth, and DB access is handled by the Go binary.
+
+### 12.2 Go binary (crewship)
 
 | Promenna | Povinne | Popis |
 |---|---|---|
-| `DATABASE_URL` | Ano | PostgreSQL connection string |
-| `NEXTAUTH_SECRET` | Ano | JWT signing secret |
-| `NEXTAUTH_URL` | Ano | Application URL |
-| `ENCRYPTION_KEY` | Ano | AES-256-GCM key (hex) |
-| `CREWSHIPD_SOCKET` | Ano | Path k Unix socket |
-| `NODE_ENV` | Ano | production / development |
-
-### 12.2 crewshipd (Go)
-
-| Promenna | Povinne | Popis |
-|---|---|---|
-| `CREWSHIPD_SOCKET` | Ano | Path k Unix socket |
-| `CREWSHIPD_HTTP_PORT` | Ne | HTTP port pro WebSocket (default: 8080) |
-| `CREWSHIPD_LOG_DIR` | Ne | Log directory (default: /var/log/crewship) |
-| `CREWSHIPD_OUTPUT_DIR` | Ne | Output directory (default: /var/lib/crewship/output) |
-| `CREWSHIPD_BBOLT_PATH` | Ne | bbolt DB path (default: /var/lib/crewship/bbolt/crewship.db) |
-| `DATABASE_URL` | Ano | PostgreSQL (pro IPC validaci — Go cte agent/crew data) |
+| `NEXTAUTH_SECRET` | Ano | JWT signing secret (openssl rand -base64 32) |
+| `ENCRYPTION_KEY` | Ano | AES-256-GCM key (openssl rand -hex 32) |
+| `CREWSHIP_PORT` | Ne | HTTP port (default: 8080) |
+| `DATABASE_URL` | Ne | Default: ~/.crewship/crewship.db (SQLite). PostgreSQL: postgresql://... |
 
 ### 12.3 Single binary (Mode 1)
 
 | Promenna | Povinne | Popis |
 |---|---|---|
-| `CREWSHIP_PORT` | Ne | HTTP port (default: 3001) |
+| `CREWSHIP_PORT` | Ne | HTTP port (default: 8080) |
 | `CREWSHIP_DATA_DIR` | Ne | Data directory (default: ~/.crewship) |
 | `DB_PROVIDER` | Ne | `sqlite` (default) nebo `postgresql` |
 | `DATABASE_URL` | Ne | `file:~/.crewship/crewship.db` (default) nebo `postgresql://...` |

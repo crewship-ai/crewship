@@ -1,3 +1,7 @@
+export function generateStaticParams() {
+  return [{ agentId: "_" }]
+}
+
 import { Plus, Settings, Puzzle, Info } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
