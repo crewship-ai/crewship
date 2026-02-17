@@ -23,11 +23,11 @@ import {
 } from "@/components/ui/select"
 
 interface InviteMemberDialogProps {
-  orgId: string
+  workspaceId: string
   onInvited?: () => void
 }
 
-export function InviteMemberDialog({ orgId, onInvited }: InviteMemberDialogProps) {
+export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialogProps) {
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState("")
   const [role, setRole] = useState("MEMBER")
@@ -47,7 +47,7 @@ export function InviteMemberDialog({ orgId, onInvited }: InviteMemberDialogProps
     }
 
     try {
-      const res = await fetch(`/api/v1/orgs/${orgId}/invitations?org_id=${orgId}`, {
+      const res = await fetch(`/api/v1/workspaces/${workspaceId}/invitations?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(parsed.data),
@@ -87,7 +87,7 @@ export function InviteMemberDialog({ orgId, onInvited }: InviteMemberDialogProps
         <DialogHeader>
           <DialogTitle>Invite Member</DialogTitle>
           <DialogDescription>
-            Send an invitation to join your organization.
+            Send an invitation to join your workspace.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">

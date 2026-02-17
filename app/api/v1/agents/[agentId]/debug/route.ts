@@ -32,12 +32,12 @@ export async function GET(
   if (!z.string().uuid().safeParse(agentId).success) {
     return NextResponse.json({ error: "Invalid agent ID" }, { status: 400 })
   }
-  const orgId = req.nextUrl.searchParams.get("org_id")
-  if (orgId && !z.string().uuid().safeParse(orgId).success) {
-    return NextResponse.json({ error: "Invalid org_id" }, { status: 400 })
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
+  if (workspaceId && !z.string().uuid().safeParse(workspaceId).success) {
+    return NextResponse.json({ error: "Invalid workspace_id" }, { status: 400 })
   }
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -46,8 +46,8 @@ export async function GET(
   }
 
   const agent = await prisma.agent.findFirst({
-    where: { id: agentId, org_id: authResult.orgId, deleted_at: null },
-    select: { id: true, name: true, team_id: true, cli_adapter: true, status: true },
+    where: { id: agentId, workspace_id: authResult.workspaceId, deleted_at: null },
+    select: { id: true, name: true, crew_id: true, cli_adapter: true, status: true },
   })
 
   if (!agent) {
@@ -103,9 +103,9 @@ export async function GET(
   }
 
   // Agent output logs (JSONL from logcollector)
-  if (agent.team_id) {
+  if (agent.crew_id) {
     try {
-      const logs = await getAgentLogs(agentId, agent.team_id, 0, 50)
+      const logs = await getAgentLogs(agentId, agent.crew_id, 0, 50)
       const rawLogs = logs.ok ? (logs.data.logs ?? []) : []
       debug.agent_logs = redactLogEntries(rawLogs as unknown[])
     } catch {

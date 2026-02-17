@@ -30,8 +30,8 @@ interface Credential {
   type: "AI_CLI_TOKEN" | "API_KEY" | "SECRET"
   provider: "ANTHROPIC" | "OPENAI" | "GOOGLE" | "NONE"
   status: "ACTIVE" | "EXPIRED" | "RATE_LIMITED" | "REVOKED" | "ERROR"
-  scope: "ORGANIZATION" | "TEAM"
-  team_id: string | null
+  scope: "WORKSPACE" | "CREW"
+  crew_id: string | null
   account_label: string | null
   account_email: string | null
   token_expires_at: string | null
@@ -71,20 +71,20 @@ const STATUS_CONFIG = {
 export default function CredentialsPage() {
   const { abilities } = useAbilities()
   const [credentials, setCredentials] = React.useState<Credential[]>([])
-  const [orgId, setOrgId] = React.useState<string | null>(null)
+  const [workspaceId, setWorkspaceId] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [addOpen, setAddOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [editCredential, setEditCredential] = React.useState<CredentialData | null>(null)
   const canManage = abilities.can("create", "Credential")
 
-  const fetchOrg = React.useCallback(async () => {
+  const fetchWorkspace = React.useCallback(async () => {
     try {
-      const res = await fetch("/api/v1/orgs")
+      const res = await fetch("/api/v1/workspaces")
       if (!res.ok) return null
       const orgs: Org[] = await res.json()
       if (orgs.length > 0) {
-        setOrgId(orgs[0].id)
+        setWorkspaceId(orgs[0].id)
         return orgs[0].id
       }
     } catch {
@@ -95,7 +95,7 @@ export default function CredentialsPage() {
 
   const fetchCredentials = React.useCallback(async (oid: string) => {
     try {
-      const res = await fetch(`/api/v1/credentials?org_id=${oid}`)
+      const res = await fetch(`/api/v1/credentials?workspace_id=${oid}`)
       if (!res.ok) return
       const data: Credential[] = await res.json()
       setCredentials(data)
@@ -106,22 +106,22 @@ export default function CredentialsPage() {
 
   const loadData = React.useCallback(async () => {
     setLoading(true)
-    let oid = orgId
+    let oid = workspaceId
     if (!oid) {
-      oid = await fetchOrg()
+      oid = await fetchWorkspace()
     }
     if (oid) {
       await fetchCredentials(oid)
     }
     setLoading(false)
-  }, [orgId, fetchOrg, fetchCredentials])
+  }, [workspaceId, fetchWorkspace, fetchCredentials])
 
   React.useEffect(() => {
     loadData()
   }, [loadData])
 
   function handleRefresh() {
-    if (orgId) fetchCredentials(orgId)
+    if (workspaceId) fetchCredentials(workspaceId)
   }
 
   function handleEdit(credential: Credential) {
@@ -130,7 +130,7 @@ export default function CredentialsPage() {
       name: credential.name,
       description: credential.description,
       scope: credential.scope,
-      team_id: credential.team_id,
+      crew_id: credential.crew_id,
     })
     setEditOpen(true)
   }
@@ -139,10 +139,10 @@ export default function CredentialsPage() {
     const confirmed = window.confirm(
       `Are you sure you want to delete "${credential.name}"? This action cannot be undone.`
     )
-    if (!confirmed || !orgId) return
+    if (!confirmed || !workspaceId) return
 
     try {
-      const res = await fetch(`/api/v1/credentials/${credential.id}?org_id=${orgId}`, {
+      const res = await fetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
       if (res.ok) handleRefresh()
@@ -292,18 +292,18 @@ export default function CredentialsPage() {
         </div>
       )}
 
-      {orgId && (
+      {workspaceId && (
         <AddCredentialDialog
-          orgId={orgId}
+          workspaceId={workspaceId}
           open={addOpen}
           onOpenChange={setAddOpen}
           onSuccess={handleRefresh}
         />
       )}
 
-      {orgId && editCredential && (
+      {workspaceId && editCredential && (
         <EditCredentialDialog
-          orgId={orgId}
+          workspaceId={workspaceId}
           credential={editCredential}
           open={editOpen}
           onOpenChange={setEditOpen}

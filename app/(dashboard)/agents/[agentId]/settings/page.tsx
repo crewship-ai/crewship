@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 interface AgentDetail {
   id: string
@@ -35,8 +35,8 @@ interface AgentDetail {
   timeout_seconds: number
   tool_profile: string
   memory_enabled: boolean
-  team_id: string | null
-  team: { name: string; slug: string; color: string | null } | null
+  crew_id: string | null
+  crew: { name: string; slug: string; color: string | null } | null
 }
 
 interface TeamOption {
@@ -48,10 +48,10 @@ interface TeamOption {
 export default function SettingsPage({ params }: { params: Promise<{ agentId: string }> }) {
   const { agentId } = use(params)
   const router = useRouter()
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
 
   const [agent, setAgent] = useState<AgentDetail | null>(null)
-  const [teams, setTeams] = useState<TeamOption[]>([])
+  const [crews, setTeams] = useState<TeamOption[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -62,7 +62,7 @@ export default function SettingsPage({ params }: { params: Promise<{ agentId: st
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [roleTitle, setRoleTitle] = useState("")
-  const [agentRole, setAgentRole] = useState("WORKER")
+  const [agentRole, setAgentRole] = useState("AGENT")
   const [cliAdapter, setCliAdapter] = useState("CLAUDE_CODE")
   const [llmProvider, setLlmProvider] = useState("")
   const [llmModel, setLlmModel] = useState("")
@@ -71,18 +71,18 @@ export default function SettingsPage({ params }: { params: Promise<{ agentId: st
   const [maxTokens, setMaxTokens] = useState("")
   const [timeoutSeconds, setTimeoutSeconds] = useState("1800")
   const [toolProfile, setToolProfile] = useState("CODING")
-  const [teamId, setTeamId] = useState("")
+  const [crewId, setTeamId] = useState("")
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
 
     let cancelled = false
 
     async function fetchData() {
       try {
         const [agentRes, teamsRes] = await Promise.all([
-          fetch(`/api/v1/agents/${agentId}?org_id=${orgId}`),
-          fetch(`/api/v1/teams?org_id=${orgId}`),
+          fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`),
+          fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
         ])
 
         if (!agentRes.ok) {
@@ -105,7 +105,7 @@ export default function SettingsPage({ params }: { params: Promise<{ agentId: st
           setMaxTokens(agentData.max_tokens?.toString() ?? "")
           setTimeoutSeconds(agentData.timeout_seconds.toString())
           setToolProfile(agentData.tool_profile)
-          setTeamId(agentData.team_id ?? "")
+          setTeamId(agentData.crew_id ?? "")
         }
 
         if (teamsRes.ok) {
@@ -121,11 +121,11 @@ export default function SettingsPage({ params }: { params: Promise<{ agentId: st
 
     fetchData()
     return () => { cancelled = true }
-  }, [agentId, orgId])
+  }, [agentId, workspaceId])
 
   const handleSave = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!orgId) return
+    if (!workspaceId) return
 
     setSubmitting(true)
     setError(null)
@@ -146,10 +146,10 @@ export default function SettingsPage({ params }: { params: Promise<{ agentId: st
     if (llmModel) body.llm_model = llmModel
     if (systemPrompt) body.system_prompt = systemPrompt
     if (maxTokens) body.max_tokens = parseInt(maxTokens, 10)
-    if (teamId) body.team_id = teamId
+    if (crewId) body.crew_id = crewId
 
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}?org_id=${orgId}`, {
+      const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -167,10 +167,10 @@ export default function SettingsPage({ params }: { params: Promise<{ agentId: st
     } finally {
       setSubmitting(false)
     }
-  }, [orgId, agentId, name, description, roleTitle, agentRole, cliAdapter, llmProvider, llmModel, systemPrompt, temperature, maxTokens, timeoutSeconds, toolProfile, teamId])
+  }, [workspaceId, agentId, name, description, roleTitle, agentRole, cliAdapter, llmProvider, llmModel, systemPrompt, temperature, maxTokens, timeoutSeconds, toolProfile, crewId])
 
   const handleDelete = useCallback(async () => {
-    if (!orgId) return
+    if (!workspaceId) return
     if (!confirm("Are you sure you want to delete this agent? This action cannot be undone.")) return
 
     setDeleting(true)
@@ -178,7 +178,7 @@ export default function SettingsPage({ params }: { params: Promise<{ agentId: st
     setSuccess(null)
 
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}?org_id=${orgId}`, {
+      const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
 
@@ -194,9 +194,9 @@ export default function SettingsPage({ params }: { params: Promise<{ agentId: st
     } finally {
       setDeleting(false)
     }
-  }, [orgId, agentId, router])
+  }, [workspaceId, agentId, router])
 
-  if (orgLoading || loading) {
+  if (wsLoading || loading) {
     return <SettingsSkeleton />
   }
 
@@ -241,15 +241,15 @@ export default function SettingsPage({ params }: { params: Promise<{ agentId: st
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="team_id">Team</Label>
-              <Select value={teamId} onValueChange={setTeamId}>
-                <SelectTrigger id="team_id" className="w-full">
-                  <SelectValue placeholder="Select a team" />
+              <Label htmlFor="crew_id">Crew</Label>
+              <Select value={crewId} onValueChange={setTeamId}>
+                <SelectTrigger id="crew_id" className="w-full">
+                  <SelectValue placeholder="Select a crew" />
                 </SelectTrigger>
                 <SelectContent>
-                  {teams.map((team) => (
-                    <SelectItem key={team.id} value={team.id}>
-                      {team.name}
+                  {crews.map((crew) => (
+                    <SelectItem key={crew.id} value={crew.id}>
+                      {crew.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -281,9 +281,9 @@ export default function SettingsPage({ params }: { params: Promise<{ agentId: st
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="WORKER">Worker</SelectItem>
-                    <SelectItem value="LEADER">Leader</SelectItem>
-                    <SelectItem value="DIRECTOR">Director</SelectItem>
+                    <SelectItem value="AGENT">Agent</SelectItem>
+                    <SelectItem value="LEAD">Lead</SelectItem>
+                    <SelectItem value="COORDINATOR">Coordinator</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -4,9 +4,9 @@ import { requireAuth, isAuthError } from "@/lib/api-auth"
 import type { SkillCategory, SkillSource } from "@/lib/generated/prisma/client"
 
 export async function GET(req: NextRequest) {
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const category = req.nextUrl.searchParams.get("category") as SkillCategory | null

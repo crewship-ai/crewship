@@ -32,7 +32,7 @@ interface AssignCredentialDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   agentId: string
-  orgId: string
+  workspaceId: string
   onAssigned: () => void
 }
 
@@ -47,7 +47,7 @@ export function AssignCredentialDialog({
   open,
   onOpenChange,
   agentId,
-  orgId,
+  workspaceId,
   onAssigned,
 }: AssignCredentialDialogProps) {
   const [credentials, setCredentials] = React.useState<OrgCredential[]>([])
@@ -59,14 +59,14 @@ export function AssignCredentialDialog({
   const [error, setError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
-    if (!open || !orgId) return
+    if (!open || !workspaceId) return
     setLoadingCreds(true)
-    fetch(`/api/v1/credentials?org_id=${orgId}`)
+    fetch(`/api/v1/credentials?workspace_id=${workspaceId}`)
       .then((r) => r.json())
       .then((data: OrgCredential[]) => setCredentials(Array.isArray(data) ? data : []))
       .catch(() => setCredentials([]))
       .finally(() => setLoadingCreds(false))
-  }, [open, orgId])
+  }, [open, workspaceId])
 
   function reset() {
     setSelectedCredentialId("")
@@ -83,7 +83,7 @@ export function AssignCredentialDialog({
     setError(null)
 
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/credentials?org_id=${orgId}`, {
+      const res = await fetch(`/api/v1/agents/${agentId}/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -116,7 +116,7 @@ export function AssignCredentialDialog({
           <DialogHeader>
             <DialogTitle>Assign Credential</DialogTitle>
             <DialogDescription>
-              Select an organization credential and configure how it will be injected into the agent environment.
+              Select an workspace credential and configure how it will be injected into the agent environment.
             </DialogDescription>
           </DialogHeader>
 

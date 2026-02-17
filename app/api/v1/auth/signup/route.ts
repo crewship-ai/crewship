@@ -42,12 +42,12 @@ export async function POST(req: NextRequest) {
       full_name,
       email,
       hashed_password,
-      org_memberships: {
+      workspace_memberships: {
         create: {
           role: "OWNER",
-          organization: {
+          workspace: {
             create: {
-              name: `${full_name}'s Org`,
+              name: `${full_name}'s Workspace`,
               slug: `${slugBase}-${Date.now()}`,
             },
           },

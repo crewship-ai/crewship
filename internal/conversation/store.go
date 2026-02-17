@@ -24,7 +24,7 @@ const (
 
 type Message struct {
 	ID        string    `json:"id"`
-	SessionID string    `json:"session_id"`
+	ChatID string    `json:"session_id"`
 	Role      Role      `json:"role"`
 	Content   string    `json:"content"`
 	ToolName  string    `json:"tool_name,omitempty"`
@@ -59,7 +59,7 @@ func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error
 	if msg.Timestamp.IsZero() {
 		msg.Timestamp = time.Now().UTC()
 	}
-	msg.SessionID = sessionID
+	msg.ChatID = sessionID
 
 	data, err := json.Marshal(msg)
 	if err != nil {

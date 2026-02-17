@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   createAgentSchema,
-  createTeamSchema,
+  createCrewSchema,
   createCredentialSchema,
   inviteMemberSchema,
 } from "@/lib/validations"
@@ -11,7 +11,7 @@ describe("createAgentSchema", () => {
   const validAgent = {
     name: "Code Writer",
     slug: "code-writer",
-    team_id: randomUUID(),
+    crew_id: randomUUID(),
   }
 
   it("valid input passes", () => {
@@ -43,10 +43,10 @@ describe("createAgentSchema", () => {
     expect(result.success).toBe(false)
   })
 
-  it("team_id must be UUID", () => {
+  it("crew_id must be UUID", () => {
     const result = createAgentSchema.safeParse({
       ...validAgent,
-      team_id: "not-a-uuid",
+      crew_id: "not-a-uuid",
     })
     expect(result.success).toBe(false)
   })
@@ -93,7 +93,7 @@ describe("createAgentSchema", () => {
 
   it("applies correct default values", () => {
     const result = createAgentSchema.parse(validAgent)
-    expect(result.agent_role).toBe("WORKER")
+    expect(result.agent_role).toBe("AGENT")
     expect(result.cli_adapter).toBe("CLAUDE_CODE")
     expect(result.temperature).toBe(0.7)
     expect(result.timeout_seconds).toBe(1800)
@@ -101,19 +101,19 @@ describe("createAgentSchema", () => {
   })
 })
 
-describe("createTeamSchema", () => {
+describe("createCrewSchema", () => {
   const validTeam = {
     name: "Backend Team",
     slug: "backend-team",
   }
 
   it("valid input passes", () => {
-    const result = createTeamSchema.safeParse(validTeam)
+    const result = createCrewSchema.safeParse(validTeam)
     expect(result.success).toBe(true)
   })
 
   it("slug with uppercase fails", () => {
-    const result = createTeamSchema.safeParse({
+    const result = createCrewSchema.safeParse({
       ...validTeam,
       slug: "Backend-Team",
     })
@@ -121,7 +121,7 @@ describe("createTeamSchema", () => {
   })
 
   it("slug with special chars fails", () => {
-    const result = createTeamSchema.safeParse({
+    const result = createCrewSchema.safeParse({
       ...validTeam,
       slug: "backend_team!",
     })
@@ -129,19 +129,19 @@ describe("createTeamSchema", () => {
   })
 
   it("color must be #hex6", () => {
-    const validColor = createTeamSchema.safeParse({
+    const validColor = createCrewSchema.safeParse({
       ...validTeam,
       color: "#ff00aa",
     })
     expect(validColor.success).toBe(true)
 
-    const invalidColor = createTeamSchema.safeParse({
+    const invalidColor = createCrewSchema.safeParse({
       ...validTeam,
       color: "red",
     })
     expect(invalidColor.success).toBe(false)
 
-    const shortHex = createTeamSchema.safeParse({
+    const shortHex = createCrewSchema.safeParse({
       ...validTeam,
       color: "#fff",
     })
@@ -149,13 +149,13 @@ describe("createTeamSchema", () => {
   })
 
   it("icon max 10 chars", () => {
-    const validIcon = createTeamSchema.safeParse({
+    const validIcon = createCrewSchema.safeParse({
       ...validTeam,
       icon: "🚀",
     })
     expect(validIcon.success).toBe(true)
 
-    const tooLong = createTeamSchema.safeParse({
+    const tooLong = createCrewSchema.safeParse({
       ...validTeam,
       icon: "a".repeat(11),
     })
@@ -164,40 +164,40 @@ describe("createTeamSchema", () => {
 })
 
 describe("createCredentialSchema", () => {
-  it("valid org scope (no team_id)", () => {
+  it("valid workspace scope (no crew_id)", () => {
     const result = createCredentialSchema.safeParse({
       name: "OPENAI_API_KEY",
       value: "sk-1234567890",
-      scope: "ORGANIZATION",
+      scope: "WORKSPACE",
     })
     expect(result.success).toBe(true)
   })
 
-  it("valid team scope (with team_id)", () => {
+  it("valid crew scope (with crew_id)", () => {
     const result = createCredentialSchema.safeParse({
       name: "OPENAI_API_KEY",
       value: "sk-1234567890",
-      scope: "TEAM",
-      team_id: randomUUID(),
+      scope: "CREW",
+      crew_id: randomUUID(),
     })
     expect(result.success).toBe(true)
   })
 
-  it("team scope without team_id fails", () => {
+  it("crew scope without crew_id fails", () => {
     const result = createCredentialSchema.safeParse({
       name: "OPENAI_API_KEY",
       value: "sk-1234567890",
-      scope: "TEAM",
+      scope: "CREW",
     })
     expect(result.success).toBe(false)
   })
 
-  it("org scope with team_id fails", () => {
+  it("workspace scope with crew_id fails", () => {
     const result = createCredentialSchema.safeParse({
       name: "OPENAI_API_KEY",
       value: "sk-1234567890",
-      scope: "ORGANIZATION",
-      team_id: randomUUID(),
+      scope: "WORKSPACE",
+      crew_id: randomUUID(),
     })
     expect(result.success).toBe(false)
   })
@@ -206,7 +206,7 @@ describe("createCredentialSchema", () => {
     const result = createCredentialSchema.safeParse({
       name: "OPENAI_API_KEY",
       value: "",
-      scope: "ORGANIZATION",
+      scope: "WORKSPACE",
     })
     expect(result.success).toBe(false)
   })

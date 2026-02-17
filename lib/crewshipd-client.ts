@@ -101,7 +101,7 @@ export async function getAgentStatus(agentId: string) {
 /** Start an agent (Docker exec) via crewshipd. */
 export async function startAgent(
   agentId: string,
-  payload: { session_id: string; command?: string[] },
+  payload: { chat_id: string; command?: string[] },
 ) {
   return crewshipdRequest<{ agent_id: string; status: string }>(
     `/agents/${encodeURIComponent(agentId)}/start`,
@@ -117,47 +117,47 @@ export async function stopAgent(agentId: string) {
   );
 }
 
-/** Get Docker container status for a team. */
-export async function getContainerStatus(teamId: string) {
-  return crewshipdRequest<{ team_id: string; status: string }>(
-    `/teams/${encodeURIComponent(teamId)}/container/status`,
+/** Get Docker container status for a crew. */
+export async function getContainerStatus(crewId: string) {
+  return crewshipdRequest<{ crew_id: string; status: string }>(
+    `/crews/${encodeURIComponent(crewId)}/container/status`,
   );
 }
 
-/** Start a team's Docker container. */
-export async function startContainer(teamId: string) {
-  return crewshipdRequest<{ team_id: string; status: string }>(
-    `/teams/${encodeURIComponent(teamId)}/container/start`,
+/** Start a crew's Docker container. */
+export async function startContainer(crewId: string) {
+  return crewshipdRequest<{ crew_id: string; status: string }>(
+    `/crews/${encodeURIComponent(crewId)}/container/start`,
     { method: "POST" },
   );
 }
 
-/** Stop a team's Docker container. */
-export async function stopContainer(teamId: string) {
-  return crewshipdRequest<{ team_id: string; status: string }>(
-    `/teams/${encodeURIComponent(teamId)}/container/stop`,
+/** Stop a crew's Docker container. */
+export async function stopContainer(crewId: string) {
+  return crewshipdRequest<{ crew_id: string; status: string }>(
+    `/crews/${encodeURIComponent(crewId)}/container/stop`,
     { method: "POST" },
   );
 }
 
-/** List files in /output/ for a team, optionally filtered by agent slug. */
-export async function getTeamFiles(teamId: string, agentSlug?: string) {
+/** List files in /output/ for a crew, optionally filtered by agent slug. */
+export async function getCrewFiles(crewId: string, agentSlug?: string) {
   const params = agentSlug ? `?agent_slug=${encodeURIComponent(agentSlug)}` : "";
-  return crewshipdRequest<{ team_id: string; files: unknown[] }>(
-    `/teams/${encodeURIComponent(teamId)}/files${params}`,
+  return crewshipdRequest<{ crew_id: string; files: unknown[] }>(
+    `/crews/${encodeURIComponent(crewId)}/files${params}`,
   );
 }
 
 /** Download a file from /output/ via IPC. Returns raw buffer for binary-safe streaming. */
-export async function downloadTeamFile(
-  teamId: string,
+export async function downloadCrewFile(
+  crewId: string,
   filePath: string,
 ): Promise<{ ok: true; status: number; data: Buffer; contentType: string } | IPCErrorResponse> {
   const target = parseSocketURL(CREWSHIPD_URL);
 
   return new Promise((resolve, reject) => {
     const reqOptions: http.RequestOptions = {
-      path: `/teams/${encodeURIComponent(teamId)}/files/download?path=${encodeURIComponent(filePath)}`,
+      path: `/crews/${encodeURIComponent(crewId)}/files/download?path=${encodeURIComponent(filePath)}`,
       method: "GET",
       timeout: 30_000,
     };
@@ -199,25 +199,25 @@ export async function downloadTeamFile(
 }
 
 /** Read JSONL conversation messages for a session. */
-export async function getSessionMessages(
+export async function getChatMessages(
   sessionId: string,
   offset = 0,
   limit = 50,
 ) {
-  return crewshipdRequest<{ session_id: string; messages: unknown[] }>(
-    `/sessions/${encodeURIComponent(sessionId)}/messages?offset=${offset}&limit=${limit}`,
+  return crewshipdRequest<{ chat_id: string; messages: unknown[] }>(
+    `/chats/${encodeURIComponent(sessionId)}/messages?offset=${offset}&limit=${limit}`,
   );
 }
 
 /** Create a conversation session in Prisma via crewshipd relay. */
-export async function createSession(params: {
-  session_id: string;
+export async function createChat(params: {
+  chat_id: string;
   agent_id: string;
-  org_id: string;
+  workspace_id: string;
   user_id?: string;
   title?: string;
 }) {
-  return crewshipdRequest<{ id: string; status: string }>("/sessions", {
+  return crewshipdRequest<{ id: string; status: string }>("/chats", {
     method: "POST",
     body: params,
   });
@@ -226,7 +226,7 @@ export async function createSession(params: {
 /** Read agent logs from crewshipd. */
 export async function getAgentLogs(
   agentId: string,
-  teamId: string,
+  crewId: string,
   offset = 0,
   limit = 100,
 ) {
@@ -240,7 +240,7 @@ export async function getAgentLogs(
       content?: string;
     }>;
   }>(
-    `/agents/${encodeURIComponent(agentId)}/logs?team_id=${encodeURIComponent(teamId)}&offset=${offset}&limit=${limit}`,
+    `/agents/${encodeURIComponent(agentId)}/logs?crew_id=${encodeURIComponent(crewId)}&offset=${offset}&limit=${limit}`,
   );
 }
 

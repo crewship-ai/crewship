@@ -21,9 +21,9 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 type AgentRunRequest struct {
 	AgentID      string
 	AgentSlug    string
-	TeamID       string
-	TeamSlug     string
-	SessionID    string
+	CrewID       string
+	CrewSlug     string
+	ChatID    string
 	ContainerID  string
 	CLIAdapter   string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI
 	SystemPrompt string
@@ -44,7 +44,7 @@ type Credential struct {
 type RunState struct {
 	ID           string    `json:"id"`
 	AgentID      string    `json:"agent_id"`
-	SessionID    string    `json:"session_id"`
+	ChatID    string    `json:"chat_id"`
 	Status       string    `json:"status"`
 	StartedAt    time.Time `json:"started_at"`
 	ContainerID  string    `json:"container_id"`
@@ -100,9 +100,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	o.mu.Unlock()
 
 	runState := RunState{
-		ID:          req.SessionID,
+		ID:          req.ChatID,
 		AgentID:     req.AgentID,
-		SessionID:   req.SessionID,
+		ChatID:   req.ChatID,
 		Status:      "running",
 		StartedAt:   time.Now(),
 		ContainerID: req.ContainerID,
@@ -119,8 +119,8 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 
 	// Inject conversation history into system prompt for context continuity
-	if o.convStore != nil && req.SessionID != "" {
-		history := o.buildConversationContext(ctx, req.SessionID, 10)
+	if o.convStore != nil && req.ChatID != "" {
+		history := o.buildConversationContext(ctx, req.ChatID, 10)
 		if history != "" {
 			req.SystemPrompt = req.SystemPrompt + "\n\n" + history
 		}

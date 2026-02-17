@@ -21,7 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
 
@@ -38,7 +38,7 @@ interface TabDef {
 const userTabs: TabDef[] = [
   { type: "section", label: "ACCOUNT" },
   { key: "profile", label: "Profile", icon: User },
-  { key: "sessions", label: "Sessions", icon: Shield, badge: "Phase 2" },
+  { key: "chats", label: "Chats", icon: Shield, badge: "Phase 2" },
   { type: "section", label: "PREFERENCES" },
   { key: "appearance", label: "Appearance", icon: Palette, badge: "Phase 2" },
   { key: "notifications", label: "Notifications", icon: Bell, badge: "Phase 2" },
@@ -61,7 +61,7 @@ interface Org {
   id: string
   name: string
   slug: string
-  _count: { teams: number; agents: number; members: number }
+  _count: { crews: number; agents: number; members: number }
 }
 
 interface MemberUser {
@@ -89,15 +89,15 @@ const roleCls: Record<string, string> = {
 const permMatrix = [
   { role: "Owner", perms: [true, true, true, "All", true, true] },
   { role: "Admin", perms: [true, true, true, "All", true, true] },
-  { role: "Manager", perms: [false, true, "Team", "Team", false, false] },
+  { role: "Manager", perms: [false, true, "Crew", "Crew", false, false] },
   { role: "Member", perms: [false, false, false, "Own", false, false] },
   { role: "Viewer", perms: [false, false, false, false, false, false] },
 ]
-const permHeaders = ["See all teams", "Create agents", "Manage creds", "Audit access", "Manage members", "Billing"]
+const permHeaders = ["See all crews", "Create agents", "Manage creds", "Audit access", "Manage members", "Billing"]
 
 export default function SettingsPage() {
   const { data: session } = useSession()
-  const { orgId, role, loading: orgLoading } = useOrg()
+  const { workspaceId, role, loading: wsLoading } = useWorkspace()
   const { abilities } = useAbilities()
   const [scope, setScope] = useState<Scope>("user")
   const [tab, setTab] = useState("profile")
@@ -114,7 +114,7 @@ export default function SettingsPage() {
   const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
 
     let cancelled = false
 
@@ -123,12 +123,12 @@ export default function SettingsPage() {
       setError(null)
       try {
         const [orgRes, membersRes] = await Promise.all([
-          fetch(`/api/v1/orgs/${orgId}?org_id=${orgId}`),
-          fetch(`/api/v1/orgs/${orgId}/members?org_id=${orgId}`),
+          fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`),
+          fetch(`/api/v1/workspaces/${workspaceId}/members?workspace_id=${workspaceId}`),
         ])
 
         if (!orgRes.ok) {
-          setError("Failed to load organization")
+          setError("Failed to load workspace")
           return
         }
 
@@ -152,7 +152,7 @@ export default function SettingsPage() {
 
     fetchData()
     return () => { cancelled = true }
-  }, [orgId, refreshKey])
+  }, [workspaceId, refreshKey])
 
   function switchScope(s: Scope) {
     setScope(s)
@@ -161,13 +161,13 @@ export default function SettingsPage() {
 
   async function handleSaveOrg(e: FormEvent) {
     e.preventDefault()
-    if (!orgId) return
+    if (!workspaceId) return
 
     setSaveStatus("saving")
     setSaveError(null)
 
     try {
-      const res = await fetch(`/api/v1/orgs/${orgId}?org_id=${orgId}`, {
+      const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: formName, slug: formSlug }),
@@ -194,27 +194,27 @@ export default function SettingsPage() {
   }
 
   async function handleDeleteOrg() {
-    if (!orgId) return
+    if (!workspaceId) return
 
     const confirmed = window.confirm(
-      "Are you sure you want to delete this organization? This action cannot be undone."
+      "Are you sure you want to delete this workspace? This action cannot be undone."
     )
     if (!confirmed) return
 
     try {
-      const res = await fetch(`/api/v1/orgs/${orgId}?org_id=${orgId}`, { method: "DELETE" })
+      const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, { method: "DELETE" })
       if (res.ok) {
         window.location.href = "/"
       } else {
         const body = await res.json().catch(() => null)
-        setSaveError(typeof body?.error === "string" ? body.error : "Failed to delete organization")
+        setSaveError(typeof body?.error === "string" ? body.error : "Failed to delete workspace")
       }
     } catch {
-      setSaveError("Failed to delete organization")
+      setSaveError("Failed to delete workspace")
     }
   }
 
-  const isLoading = orgLoading || loading
+  const isLoading = wsLoading || loading
   const tabs = scope === "user" ? userTabs : orgTabs
 
   function renderContent() {
@@ -246,7 +246,7 @@ export default function SettingsPage() {
             </div>
             {role && (
               <div className="space-y-2">
-                <Label>Organization Role</Label>
+                <Label>Workspace Role</Label>
                 <Badge variant="outline">{role}</Badge>
               </div>
             )}
@@ -259,12 +259,12 @@ export default function SettingsPage() {
       return (
         <div className="space-y-5">
           <div className="pb-4 border-b">
-            <h3 className="text-sm font-medium">Organization Settings</h3>
-            <p className="text-xs text-muted-foreground">Update your organization details.</p>
+            <h3 className="text-sm font-medium">Workspace Settings</h3>
+            <p className="text-xs text-muted-foreground">Update your workspace details.</p>
           </div>
           <form onSubmit={handleSaveOrg} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="org-name">Organization Name</Label>
+              <Label htmlFor="org-name">Workspace Name</Label>
               <Input id="org-name" value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="My Company" />
             </div>
             <div className="space-y-2">
@@ -291,8 +291,8 @@ export default function SettingsPage() {
               <h3 className="text-sm font-medium">Members</h3>
               <p className="text-xs text-muted-foreground">{members.length} member{members.length !== 1 ? "s" : ""}</p>
             </div>
-            {abilities.can("create", "Member") && orgId && (
-              <InviteMemberDialog orgId={orgId} onInvited={() => setRefreshKey((k) => k + 1)} />
+            {abilities.can("create", "Member") && workspaceId && (
+              <InviteMemberDialog workspaceId={workspaceId} onInvited={() => setRefreshKey((k) => k + 1)} />
             )}
           </div>
           {members.length > 0 && (
@@ -382,22 +382,22 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <h3 className="text-sm font-medium">Current Plan</h3>
-                  <p className="text-xs text-muted-foreground">{org?.name ?? "Organization"}</p>
+                  <p className="text-xs text-muted-foreground">{org?.name ?? "Workspace"}</p>
                 </div>
                 <Badge className="bg-blue-50 text-blue-700">FREE</Badge>
               </div>
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between"><span className="text-muted-foreground">Agents</span><span className="font-medium">{org?._count.agents ?? 0} / 5</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Teams</span><span className="font-medium">{org?._count.teams ?? 0} / 2</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Teams</span><span className="font-medium">{org?._count.crews ?? 0} / 2</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Members</span><span className="font-medium">{org?._count.members ?? 0} / 5</span></div>
               </div>
             </CardContent>
           </Card>
           <div className="grid grid-cols-2 gap-2.5">
             {[
-              { name: "Free", price: "$0", desc: "5 agents, 2 teams", current: true },
-              { name: "Pro", price: "$29", desc: "20 agents, 5 teams" },
-              { name: "Team", price: "$79", desc: "100 agents, unlimited" },
+              { name: "Free", price: "$0", desc: "5 agents, 2 crews", current: true },
+              { name: "Pro", price: "$29", desc: "20 agents, 5 crews" },
+              { name: "Crew", price: "$79", desc: "100 agents, unlimited" },
               { name: "Enterprise", price: "Custom", desc: "Unlimited everything" },
             ].map((plan) => (
               <Card key={plan.name} className={cn(plan.current && "border-primary")}>
@@ -423,7 +423,7 @@ export default function SettingsPage() {
         return (
           <Card>
             <CardContent className="p-6 text-center">
-              <p className="text-sm text-muted-foreground">Only organization owners can access this section.</p>
+              <p className="text-sm text-muted-foreground">Only workspace owners can access this section.</p>
             </CardContent>
           </Card>
         )
@@ -440,7 +440,7 @@ export default function SettingsPage() {
           <CardContent>
             {saveError && <p className="text-sm text-destructive mb-3">{saveError}</p>}
             <Button variant="destructive" onClick={handleDeleteOrg}>
-              Delete Organization
+              Delete Workspace
             </Button>
           </CardContent>
         </Card>
@@ -489,7 +489,7 @@ export default function SettingsPage() {
               )}
               onClick={() => switchScope("org")}
             >
-              Organization
+              Workspace
             </button>
           </div>
           {scope === "org" && org && (

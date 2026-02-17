@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { PageHeader } from "@/components/layout/page-header"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 import { slugify } from "@/lib/utils/slugify"
 
 interface TeamOption {
@@ -28,9 +28,9 @@ interface TeamOption {
 
 export default function NewAgentPage() {
   const router = useRouter()
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
 
-  const [teams, setTeams] = useState<TeamOption[]>([])
+  const [crews, setTeams] = useState<TeamOption[]>([])
   const [teamsLoading, setTeamsLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -39,10 +39,10 @@ export default function NewAgentPage() {
   const [name, setName] = useState("")
   const [slug, setSlug] = useState("")
   const [slugManual, setSlugManual] = useState(false)
-  const [teamId, setTeamId] = useState("")
+  const [crewId, setTeamId] = useState("")
   const [description, setDescription] = useState("")
   const [roleTitle, setRoleTitle] = useState("")
-  const [agentRole, setAgentRole] = useState("WORKER")
+  const [agentRole, setAgentRole] = useState("AGENT")
   const [cliAdapter, setCliAdapter] = useState("CLAUDE_CODE")
   const [llmProvider, setLlmProvider] = useState("")
   const [llmModel, setLlmModel] = useState("")
@@ -57,34 +57,34 @@ export default function NewAgentPage() {
     }
   }, [name, slugManual])
 
-  // Fetch teams when orgId is available
+  // Fetch crews when workspaceId is available
   useEffect(() => {
-    if (!orgId) {
+    if (!workspaceId) {
       setTeamsLoading(false)
       return
     }
 
     async function fetchTeams() {
       try {
-        const res = await fetch(`/api/v1/teams?org_id=${orgId}`)
+        const res = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
         if (res.ok) {
           const data: TeamOption[] = await res.json()
           setTeams(data)
         }
       } catch {
-        // Silently fail — teams dropdown will be empty
+        // Silently fail — crews dropdown will be empty
       } finally {
         setTeamsLoading(false)
       }
     }
 
     fetchTeams()
-  }, [orgId])
+  }, [workspaceId])
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault()
-      if (!orgId) return
+      if (!workspaceId) return
 
       setSubmitting(true)
       setError(null)
@@ -92,7 +92,7 @@ export default function NewAgentPage() {
       const body: Record<string, unknown> = {
         name,
         slug,
-        team_id: teamId,
+        crew_id: crewId,
         agent_role: agentRole,
         cli_adapter: cliAdapter,
         tool_profile: toolProfile,
@@ -106,7 +106,7 @@ export default function NewAgentPage() {
       if (systemPrompt) body.system_prompt = systemPrompt
 
       try {
-        const res = await fetch(`/api/v1/agents?org_id=${orgId}`, {
+        const res = await fetch(`/api/v1/agents?workspace_id=${workspaceId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
@@ -130,10 +130,10 @@ export default function NewAgentPage() {
       }
     },
     [
-      orgId,
+      workspaceId,
       name,
       slug,
-      teamId,
+      crewId,
       description,
       roleTitle,
       agentRole,
@@ -147,7 +147,7 @@ export default function NewAgentPage() {
     ]
   )
 
-  if (orgLoading) {
+  if (wsLoading) {
     return (
       <div className="flex items-center justify-center p-12">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -200,15 +200,15 @@ export default function NewAgentPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="team_id">Team *</Label>
-              <Select value={teamId} onValueChange={setTeamId} required>
-                <SelectTrigger id="team_id" className="w-full">
-                  <SelectValue placeholder={teamsLoading ? "Loading teams…" : "Select a team"} />
+              <Label htmlFor="crew_id">Crew *</Label>
+              <Select value={crewId} onValueChange={setTeamId} required>
+                <SelectTrigger id="crew_id" className="w-full">
+                  <SelectValue placeholder={teamsLoading ? "Loading crews…" : "Select a crew"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {teams.map((team) => (
-                    <SelectItem key={team.id} value={team.id}>
-                      {team.name}
+                  {crews.map((crew) => (
+                    <SelectItem key={crew.id} value={crew.id}>
+                      {crew.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -241,9 +241,9 @@ export default function NewAgentPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="WORKER">Worker</SelectItem>
-                    <SelectItem value="LEADER">Leader</SelectItem>
-                    <SelectItem value="DIRECTOR">Director</SelectItem>
+                    <SelectItem value="AGENT">Agent</SelectItem>
+                    <SelectItem value="LEAD">Lead</SelectItem>
+                    <SelectItem value="COORDINATOR">Coordinator</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -354,7 +354,7 @@ export default function NewAgentPage() {
 
         {/* Actions */}
         <div className="flex items-center gap-3 pt-2">
-          <Button type="submit" disabled={submitting || !orgId} className="gap-2">
+          <Button type="submit" disabled={submitting || !workspaceId} className="gap-2">
             {submitting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (

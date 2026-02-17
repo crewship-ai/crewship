@@ -15,15 +15,15 @@ import (
 )
 
 type mockResolver struct {
-	info *SessionInfo
+	info *ChatInfo
 	err  error
 }
 
-func (m *mockResolver) ResolveSession(_ context.Context, _ string) (*SessionInfo, error) {
+func (m *mockResolver) ResolveChat(_ context.Context, _ string) (*ChatInfo, error) {
 	return m.info, m.err
 }
 
-func testBridge(t *testing.T, resolver SessionResolver) (*Bridge, string) {
+func testBridge(t *testing.T, resolver ChatResolver) (*Bridge, string) {
 	t.Helper()
 	dir := t.TempDir()
 	logger := slog.Default()
@@ -95,7 +95,7 @@ func TestGenerateMsgIDFormat(t *testing.T) {
 }
 
 func TestHandleChatMessageResolveError(t *testing.T) {
-	resolver := &mockResolver{err: fmt.Errorf("session not found")}
+	resolver := &mockResolver{err: fmt.Errorf("chat not found")}
 	b, _ := testBridge(t, resolver)
 
 	var events []ws.ChatEvent
@@ -105,8 +105,8 @@ func TestHandleChatMessageResolveError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "resolve session") {
-		t.Errorf("expected 'resolve session' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "resolve chat") {
+		t.Errorf("expected 'resolve chat' in error, got: %v", err)
 	}
 
 	hasError := false
@@ -122,11 +122,11 @@ func TestHandleChatMessageResolveError(t *testing.T) {
 
 type failContainer struct{}
 
-func (f *failContainer) EnsureTeamRuntime(_ context.Context, _ provider.TeamConfig) (string, error) {
+func (f *failContainer) EnsureCrewRuntime(_ context.Context, _ provider.CrewConfig) (string, error) {
 	return "", fmt.Errorf("container unavailable")
 }
-func (f *failContainer) StopTeamRuntime(_ context.Context, _ string) error   { return nil }
-func (f *failContainer) RemoveTeamRuntime(_ context.Context, _ string) error { return nil }
+func (f *failContainer) StopCrewRuntime(_ context.Context, _ string) error   { return nil }
+func (f *failContainer) RemoveCrewRuntime(_ context.Context, _ string) error { return nil }
 func (f *failContainer) ContainerStatus(_ context.Context, _ string) (*provider.ContainerStatus, error) {
 	return nil, fmt.Errorf("not running")
 }
@@ -137,7 +137,7 @@ func (f *failContainer) ExecInspect(_ context.Context, _ string) (bool, int, err
 	return false, 1, nil
 }
 
-func testBridgeWithContainer(t *testing.T, resolver SessionResolver, ctr provider.ContainerProvider) *Bridge {
+func testBridgeWithContainer(t *testing.T, resolver ChatResolver, ctr provider.ContainerProvider) *Bridge {
 	t.Helper()
 	dir := t.TempDir()
 	logger := slog.Default()
@@ -149,11 +149,11 @@ func testBridgeWithContainer(t *testing.T, resolver SessionResolver, ctr provide
 
 func TestHandleChatMessageRunAgentError(t *testing.T) {
 	resolver := &mockResolver{
-		info: &SessionInfo{
+		info: &ChatInfo{
 			AgentID:     "agent-1",
 			AgentSlug:   "test-agent",
-			TeamID:      "team-1",
-			TeamSlug:    "test-team",
+			CrewID:      "crew-1",
+			CrewSlug:    "test-crew",
 			CLIAdapter:  "CLAUDE_CODE",
 			ToolProfile: "CODING",
 			TimeoutSecs: 30,
@@ -179,9 +179,9 @@ func TestHandleChatMessagePersistsUserMessage(t *testing.T) {
 
 	streamFn := func(_ ws.ChatEvent) {}
 
-	_ = b.HandleChatMessage(context.Background(), "user-1", "test-session", "hello world", streamFn)
+	_ = b.HandleChatMessage(context.Background(), "user-1", "test-chat", "hello world", streamFn)
 
-	messages, err := b.convStore.Read(context.Background(), "test-session", 0, 0)
+	messages, err := b.convStore.Read(context.Background(), "test-chat", 0, 0)
 	if err != nil {
 		t.Fatalf("read messages: %v", err)
 	}

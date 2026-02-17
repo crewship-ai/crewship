@@ -161,6 +161,17 @@ What it does:
 - Health checks for containers
 - Graceful shutdown (SIGTERM handling)
 
+Phase 2 additions:
+- **Channel Gateway** (opt-in module) -- persistent messaging sessions
+  - Discord (discordgo), Telegram (go-telegram-bot-api), Slack (slack-go)
+  - WhatsApp (whatsmeow -- Go implementation of Baileys, Phase 2B)
+  - ChannelProvider interface (adapter pattern, same as ContainerProvider)
+  - Routes incoming messages to correct agent/crew
+  - Sends approval requests to configured channels
+  - NOT a skill -- must be persistent long-running process (like OpenClaw Gateway)
+- **Cron scheduler** (github.com/robfig/cron) -- scheduled missions
+- **Approval engine** -- trust levels per agent, multi-channel approval flow
+
 What it does NOT do:
 - No HTML rendering
 - No database access (Next.js owns PostgreSQL via Prisma)
@@ -266,6 +277,11 @@ Destroyed when container is removed. Cheap, disposable -- agent is cattle.
 > **Mode 1 (single binary):** Vsechna data v `~/.crewship/`:
 > `~/.crewship/data/` (SQLite DB), `~/.crewship/output/`, `~/.crewship/logs/`,
 > `~/.crewship/config.yaml`. Viz `prd/DEPLOYMENT.md`.
+>
+> **macOS integrace (nice-to-have Phase 3):**
+> - Konfigurovatelny output path: `crewship start --output ~/Documents/Crewship`
+> - Default: `~/.crewship/output/` (skryty adresar, tech-friendly)
+> - Symlink `~/Documents/Crewship/` → `~/.crewship/output/` (pro Finder pristup)
 
 ### Persistent (survives everything)
 
@@ -288,6 +304,17 @@ Destroyed when container is removed. Cheap, disposable -- agent is cattle.
 Agent output -- reports, code, data, exports. This is what the business cares about.
 When crew is deleted: container gone, but files moved to `_archived/` (not deleted).
 Admin can purge archives (GDPR).
+
+**Who manages directories:**
+- **crewshipd** (Go) = creates directories, bind-mounts into containers, archives on crew deletion
+- **Agent** = writes to `/output/` (inside container), which is bind mount to host `~/.crewship/output/{crew}/{agent}/`
+- **Lead** (orchestration) = does NOT have special FS access -- reads results via sidecar (HTTP GET /results)
+- **UI** = File browser displays content via crewshipd HTTP API (GET /crews/{id}/files/)
+
+**Per-agent vs per-crew isolation:**
+- `/output/{crew}/{agent}/` = per-agent (default, isolated)
+- `/output/{crew}/_shared/` = shared across agents in crew (for collaboration)
+- Landlock (Phase 2) = agent "bob" sees only `/output/{crew}/bob/` and `/output/{crew}/_shared/`, NOT `/output/{crew}/alice/`
 
 ### Logs
 

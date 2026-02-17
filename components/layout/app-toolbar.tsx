@@ -14,12 +14,11 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
 import { useCrewshipdStatus } from "@/hooks/use-crewshipd-status"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 const pageConfig: Record<string, { title: string; breadcrumb?: string; pills?: { label: string; variant: "default" | "secondary" | "outline" | "destructive" }[] }> = {
   "/": { title: "Dashboard", pills: [{ label: "0 running", variant: "secondary" }] },
   "/agents": { title: "Agents", pills: [{ label: "0 agents", variant: "secondary" }] },
-  "/teams": { title: "Teams" },
   "/crews": { title: "Crews" },
   "/credentials": { title: "Credentials" },
   "/skills": { title: "Skills" },
@@ -40,8 +39,8 @@ function getInitials(name: string): string {
 export function AppToolbar() {
   const pathname = usePathname()
   const config = pageConfig[pathname] ?? { title: "Crewship" }
-  const { orgId } = useOrg()
-  const { status: daemonStatus } = useCrewshipdStatus(orgId)
+  const { workspaceId } = useWorkspace()
+  const { status: daemonStatus } = useCrewshipdStatus(workspaceId)
   const { data: session } = useSession()
 
   const userName = session?.user?.name ?? "User"
@@ -62,7 +61,7 @@ export function AppToolbar() {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-72">
-            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Organizations</DropdownMenuLabel>
+            <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Workspaces</DropdownMenuLabel>
             <DropdownMenuItem className="flex items-center gap-3 py-2 bg-primary/5">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-[10px] font-bold text-primary-foreground shrink-0">U</div>
               <div className="min-w-0">
@@ -71,7 +70,7 @@ export function AppToolbar() {
               </div>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-xs">Create organization</DropdownMenuItem>
+            <DropdownMenuItem className="text-xs">Create workspace</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 

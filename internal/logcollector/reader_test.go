@@ -10,7 +10,7 @@ import (
 
 func writeTestLogFile(t *testing.T, dir string, entries []LogEntry) string {
 	t.Helper()
-	path := filepath.Join(dir, "teams", "team-1", "agents", "agent-1", "current.jsonl")
+	path := filepath.Join(dir, "crews", "crew-1", "agents", "agent-1", "current.jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestReadAgentLogsHappyPath(t *testing.T) {
 	writeTestLogFile(t, dir, entries)
 
 	reader := NewReader(dir)
-	result, err := reader.ReadAgentLogs("team-1", "agent-1", 0, 0)
+	result, err := reader.ReadAgentLogs("crew-1", "agent-1", 0, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestReadAgentLogsWithOffset(t *testing.T) {
 	writeTestLogFile(t, dir, entries)
 
 	reader := NewReader(dir)
-	result, err := reader.ReadAgentLogs("team-1", "agent-1", 1, 0)
+	result, err := reader.ReadAgentLogs("crew-1", "agent-1", 1, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestReadAgentLogsWithLimit(t *testing.T) {
 	writeTestLogFile(t, dir, entries)
 
 	reader := NewReader(dir)
-	result, err := reader.ReadAgentLogs("team-1", "agent-1", 0, 2)
+	result, err := reader.ReadAgentLogs("crew-1", "agent-1", 0, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestReadAgentLogsWithLimit(t *testing.T) {
 func TestReadAgentLogsMissingFile(t *testing.T) {
 	dir := t.TempDir()
 	reader := NewReader(dir)
-	result, err := reader.ReadAgentLogs("team-x", "agent-x", 0, 0)
+	result, err := reader.ReadAgentLogs("crew-x", "agent-x", 0, 0)
 	if err != nil {
 		t.Fatalf("unexpected error for missing file: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestValidatePathSegment(t *testing.T) {
 		valid bool
 	}{
 		{"valid uuid", "550e8400-e29b-41d4-a716-446655440000", true},
-		{"valid slug", "team-alpha", true},
+		{"valid slug", "crew-alpha", true},
 		{"empty", "", false},
 		{"with slash", "team/bad", false},
 		{"with backslash", "team\\bad", false},
@@ -126,7 +126,7 @@ func TestValidatePathSegment(t *testing.T) {
 	}
 }
 
-func TestReadAgentLogsInvalidTeamID(t *testing.T) {
+func TestReadAgentLogsInvalidCrewID(t *testing.T) {
 	reader := NewReader(t.TempDir())
 	_, err := reader.ReadAgentLogs("../escape", "agent-1", 0, 0)
 	if err == nil {
@@ -136,7 +136,7 @@ func TestReadAgentLogsInvalidTeamID(t *testing.T) {
 
 func TestReadAgentLogsInvalidAgentID(t *testing.T) {
 	reader := NewReader(t.TempDir())
-	_, err := reader.ReadAgentLogs("team-1", "", 0, 0)
+	_, err := reader.ReadAgentLogs("crew-1", "", 0, 0)
 	if err == nil {
 		t.Error("expected error for empty agent ID")
 	}

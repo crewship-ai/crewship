@@ -17,9 +17,9 @@ export async function GET(
   { params }: { params: Promise<{ agentId: string }> }
 ) {
   const { agentId } = await params
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -28,7 +28,7 @@ export async function GET(
   }
 
   const agent = await prisma.agent.findFirst({
-    where: { id: agentId, org_id: authResult.orgId, deleted_at: null },
+    where: { id: agentId, workspace_id: authResult.workspaceId, deleted_at: null },
     select: { id: true },
   })
 
@@ -64,9 +64,9 @@ export async function POST(
   { params }: { params: Promise<{ agentId: string }> }
 ) {
   const { agentId } = await params
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -75,7 +75,7 @@ export async function POST(
   }
 
   const agent = await prisma.agent.findFirst({
-    where: { id: agentId, org_id: authResult.orgId, deleted_at: null },
+    where: { id: agentId, workspace_id: authResult.workspaceId, deleted_at: null },
     select: { id: true },
   })
 

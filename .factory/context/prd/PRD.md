@@ -278,11 +278,24 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 | AUDIT-02 | Zobrazeni audit logu | P0 | Tabulka s filtry (kdo, co, kdy) |
 | AUDIT-03 | Audit per workspace | P0 | Izolace logu per workspace |
 
-#### 4.13 Onboarding [P0]
+#### 4.13 Onboarding + Blueprints [P0-P1]
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| ONBOARD-01 | Guided wizard (free tier) | P0 | Krok po kroku: firma → crew → agent → skill → chat |
-| ONBOARD-02 | Template picker | P1 | Vyber sablony ("IT firma", "Obchodni oddeleni") |
+| ONBOARD-01 | Guided wizard (free tier) | P0 | Krok po kroku: workspace → crew → agent → skill → chat |
+| ONBOARD-02 | Crew Blueprint picker | P1 | Vyber sablony crew ("SEO Crew", "DevOps Crew", "Support Crew") |
+| ONBOARD-03 | Workspace Blueprint picker | P1 | Vyber sablony celeho workspace ("Marketing Agency", "IT Startup", "Solo Dev") |
+| ONBOARD-04 | Blueprint marketplace | P2 | Komunitni sdileni blueprintu (rating, klonování, YAML definice) |
+| ONBOARD-05 | Blueprint export/import | P2 | Export vlastniho blueprintu, import z URL/souboru |
+
+> **Blueprinty fungují na dvou úrovních:**
+>
+> **Crew Blueprint:** Predkonfigurovana crew s agenty, skills, prompty, credential placeholdery.
+> Příklad: "SEO Crew" = Lead (Content Strategist) + Agent (SEO Writer) + Agent (Keyword Researcher).
+>
+> **Workspace Blueprint:** Predkonfigurovany cely workspace s vice crews.
+> Příklad: "Marketing Agency" = Content Crew + Analytics Crew + Social Media Crew (9 agentů celkem).
+>
+> Distribuce: YAML soubory, stejny marketplace jako skills (komunitni rating, Official/Verified/Community badges).
 
 #### 4.14 Stripe Billing [P1]
 | ID | Feature | Priorita | Popis |
@@ -388,7 +401,37 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 | ASYNC-01 | Task mode | P1 | Uzivatel zada ukol, agent bezi na pozadi |
 | ASYNC-02 | Task status tracking | P1 | Pending → Running → Completed/Failed |
 | ASYNC-03 | Task vysledky | P1 | Zobrazeni vysledku po dokonceni |
-| ASYNC-04 | Human-in-the-loop | P1 | Agent pozastavi a ceka na schvaleni nebezpecne akce |
+| ASYNC-04 | Human-in-the-loop (approval flow) | P0 | Agent pozastavi a ceka na schvaleni nebezpecne akce |
+| ASYNC-05 | Trust levels per agent | P0 | LOW/MEDIUM/HIGH/CUSTOM granularita schvalovani |
+| ASYNC-06 | Approval via messaging channels | P1 | Schvaleni pres WhatsApp/Discord/Telegram (viz MSG-08) |
+
+> **Approval flow detaily (ASYNC-04 + ASYNC-05):**
+>
+> Kazdy agent ma konfigurovatelny **Trust Level**:
+>
+> | Level | Chovani | Priklad |
+> |---|---|---|
+> | `LOW` (auto) | Auto-approve vse (file write, search, read, API calls) | Trusted agent, rutinni ukoly |
+> | `MEDIUM` (default) | Auto-approve bezpecne akce, approve destructivni | Default pro nove agenty |
+> | `HIGH` (paranoid) | Approve kazdou akci (kazdy tool call) | Testovani, nebezpecne prostredi |
+> | `CUSTOM` | Pravidla jako firewall rules (per-action) | Pokrocili uzivatele |
+>
+> **MEDIUM (default) pravidla:**
+> - Auto-approve: file read, file write do /output/, web search, grep
+> - Require approval: git push, external API call, file delete mimo /output/, bash s sudo
+> - Block always: network access mimo whitelist, escalace na root
+>
+> **Approval flow:**
+> 1. Agent vola tool → crewshipd zkontroluje trust level pravidla
+> 2. Pokud vyzaduje approval → agent se pozastavi (AWAITING_APPROVAL status)
+> 3. crewshipd posle approval request do VSECH nakonfigurovanych kanalu:
+>    - Crewship UI chat (vzdy, default)
+>    - Messaging kanal (Discord/Telegram/Slack/WhatsApp pokud nakonfigurovano)
+>    - Email (SMTP, pokud nakonfigurovano)
+>    - Webhook (custom endpoint)
+> 4. Uzivatel odpovi v JAKEMKOLI kanalu → approval se propaguje
+> 5. Agent pokracuje (APPROVED) nebo se zastavi (REJECTED)
+> 6. Timeout: konfigurovatelny (default 30 min) → auto-reject
 
 #### 4.25 M:1 Kolaborace [P1]
 | ID | Feature | Priorita | Popis |
@@ -442,12 +485,18 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 | ORCH-22 | Auto-lead election | P2 | AI doporuci ktery agent by mel byt lead |
 | ORCH-23 | Coordinator → Coordinator (multi-workspace) | P3 | Spoluprace mezi workspaces pres webhooky |
 
-#### 4.27 Cron Joby [P1]
+#### 4.27 Scheduled Missions (Cron) [P1]
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| CRON-01 | Schedule per agent | P1 | Nastaveni cron vyrazu |
-| CRON-02 | Schedule management UI | P1 | Pridani, editace, smazani schedulu |
-| CRON-03 | Run history | P1 | Historie automatickych spusteni |
+| CRON-01 | Schedule per agent | P1 | Nastaveni cron vyrazu nebo lidsky jazyk ("every Monday 8:00") |
+| CRON-02 | Schedule management UI | P1 | Kalendarovy pohled + pridani/editace/smazani schedulu |
+| CRON-03 | Run history | P1 | Historie automatickych spusteni s vysledky |
+| CRON-04 | Scheduled missions | P1 | Cron spusti celou mission (Lead koordinuje agenty dle sablony) |
+| CRON-05 | Natural language schedule | P2 | "Kazde pondeli rano priprav weekly report" → cron expression |
+
+> **Implementace:** Go `github.com/robfig/cron` scheduler v crewshipd.
+> Scheduled mission = ulozenou mission sablonu + cron trigger.
+> Uzivatel nastavi jednou, Crewship pracuje non-stop (24/7 AI employee pitch).
 
 #### 4.28 Agent Loop Modes [P1]
 | ID | Feature | Priorita | Popis |
@@ -463,12 +512,40 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 | LLM-02 | Ollama (local) | P1 | Lokalni LLM pro self-hosting |
 | LLM-03 | LLM adapter pattern | P1 | Jednotne rozhrani pro vsechny providery |
 
-#### 4.30 Messaging Kanaly [P1]
+#### 4.30 Messaging Channel Gateway [P1]
+
+> **Architektura:** Messaging kanaly jsou **opt-in modul v crewshipd** (Go), NE skills.
+> Duvod: messaging session musi byt persistent long-running process s otevrenymi
+> connections. Skill je ephemeral (spusti se, udela praci, skonci). Gateway musi
+> bezet non-stop a routovat zpravy ke spravnym agentum/crews.
+>
+> **Inspirace:** OpenClaw Gateway -- centralni daemon co vlastni vsechny messaging
+> sessions (WhatsApp pres Baileys/whatsmeow, Telegram pres grammY, Slack, Discord).
+> Crewship prebira tento pattern ale integruje ho do existujiciho crewshipd procesu.
+
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| MSG-01 | Discord integrace | P1 | Agent odpovida v Discord kanalu |
-| MSG-02 | Telegram integrace | P1 | Agent odpovida v Telegram chatu |
-| MSG-03 | Channel adapter pattern | P1 | Jednotne rozhrani pro kanaly |
+| MSG-01 | Channel Gateway modul v crewshipd | P1 | Persistent long-running messaging sessions (ne skill) |
+| MSG-02 | Discord integrace | P1 | discordgo bot — agent odpovida v Discord kanalu |
+| MSG-03 | Telegram integrace | P1 | go-telegram-bot-api — agent odpovida v Telegram chatu |
+| MSG-04 | Slack integrace | P1 | slack-go bot — agent v Slack workspace |
+| MSG-05 | WhatsApp integrace | P2 | whatsmeow (Go Baileys) — QR code pairing, WA Business API |
+| MSG-06 | Channel adapter pattern | P1 | Jednotne rozhrani pro kanaly (ChannelProvider interface) |
+| MSG-07 | Message routing | P1 | Incoming zprava z kanalu → spravny agent/crew (slug matching) |
+| MSG-08 | Approval pres messaging | P1 | Agent posle approval request → uzivatel odpovi v kanalu → propagace |
+| MSG-09 | Channel konfigurace UI | P1 | Nastaveni kanalu v workspace settings (API klice, bot tokeny) |
+
+```
+crewshipd (Go service)
+  ├── WebSocket gateway (existujici — agent ↔ UI)
+  ├── Docker orchestrator (existujici)
+  └── [Phase 2] Channel Gateway (opt-in)
+        ├── Discord   (discordgo)
+        ├── Telegram   (go-telegram-bot-api)
+        ├── Slack      (slack-go)
+        ├── WhatsApp   (whatsmeow, Phase 2B)
+        └── Custom webhook (incoming/outgoing)
+```
 
 #### 4.31 Crewship AI (Meta-agent) [P1]
 | ID | Feature | Priorita | Popis |

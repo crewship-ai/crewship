@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/layout/page-header"
 import { FilterBar } from "@/components/layout/filter-bar"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 interface Skill {
   id: string
@@ -34,15 +34,15 @@ interface Skill {
 }
 
 export default function SkillsPage() {
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [skills, setSkills] = useState<Skill[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState("All")
 
   useEffect(() => {
-    if (!orgId) {
-      if (!orgLoading) setLoading(false)
+    if (!workspaceId) {
+      if (!wsLoading) setLoading(false)
       return
     }
 
@@ -52,7 +52,7 @@ export default function SkillsPage() {
       setLoading(true)
       setError(null)
       try {
-        const res = await fetch(`/api/v1/skills?org_id=${orgId}`)
+        const res = await fetch(`/api/v1/skills?workspace_id=${workspaceId}`)
         if (!res.ok) {
           setError("Failed to load skills")
           return
@@ -70,9 +70,9 @@ export default function SkillsPage() {
     return () => {
       cancelled = true
     }
-  }, [orgId, orgLoading])
+  }, [workspaceId, wsLoading])
 
-  const isLoading = orgLoading || loading
+  const isLoading = wsLoading || loading
 
   const sourceFilters = ["All", "Bundled", "Managed", "Marketplace", "Custom"]
 
