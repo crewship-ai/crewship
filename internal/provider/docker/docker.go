@@ -10,8 +10,9 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/api/types/network"
+	dockernetwork "github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 )
@@ -42,7 +43,52 @@ func New(cfg Config, logger *slog.Logger) (*Provider, error) {
 		return nil, fmt.Errorf("docker ping: %w", err)
 	}
 
-	return &Provider{client: cli, cfg: cfg, logger: logger}, nil
+	p := &Provider{client: cli, cfg: cfg, logger: logger}
+
+	if cfg.Network != "" {
+		if err := p.ensureNetwork(context.Background(), cfg.Network); err != nil {
+			logger.Warn("failed to create docker network", "network", cfg.Network, "error", err)
+		}
+	}
+
+	return p, nil
+}
+
+func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
+	networks, err := p.client.NetworkList(ctx, dockernetwork.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list networks: %w", err)
+	}
+	for _, n := range networks {
+		if n.Name == name {
+			return nil
+		}
+	}
+	_, err = p.client.NetworkCreate(ctx, name, dockernetwork.CreateOptions{
+		Driver:   "bridge",
+		Internal: true,
+	})
+	if err != nil {
+		return fmt.Errorf("create network: %w", err)
+	}
+	p.logger.Info("created docker network", "network", name, "internal", true)
+	return nil
+}
+
+func (p *Provider) ensureImage(ctx context.Context, ref string) error {
+	_, _, err := p.client.ImageInspectWithRaw(ctx, ref)
+	if err == nil {
+		return nil
+	}
+	p.logger.Info("pulling agent runtime image", "image", ref)
+	reader, err := p.client.ImagePull(ctx, ref, image.PullOptions{})
+	if err != nil {
+		return fmt.Errorf("pull image %s: %w", ref, err)
+	}
+	defer reader.Close()
+	_, _ = io.Copy(io.Discard, reader)
+	p.logger.Info("agent runtime image pulled", "image", ref)
+	return nil
 }
 
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (string, error) {
@@ -82,6 +128,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	cpus := team.CPUs
 	if cpus == 0 {
 		cpus = 1.0
+	}
+
+	if err := p.ensureImage(ctx, p.cfg.RuntimeImage); err != nil {
+		return "", fmt.Errorf("ensure image: %w", err)
 	}
 
 	outputPath := filepath.Join(p.cfg.OutputBasePath, team.ID)
@@ -125,7 +175,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			},
 			NetworkMode: container.NetworkMode(p.cfg.Network),
 		},
-		&network.NetworkingConfig{},
+		&dockernetwork.NetworkingConfig{},
 		nil,
 		containerName,
 	)
