@@ -104,6 +104,7 @@ jobs:
   go-check:
     name: Go Check
     runs-on: ubuntu-latest
+    needs: build
     if: >-
       github.event_name == 'push' ||
       contains(github.event.pull_request.labels.*.name, 'go') ||
@@ -111,15 +112,39 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+        env:
+          DATABASE_URL: "file:./dev.db"
+
+      - name: Build Next.js static export
+        run: pnpm build
+        env:
+          NEXTAUTH_SECRET: "ci-build-secret-not-real"
+
+      - name: Copy static export for embed
+        run: cp -r out web/out
 
       - name: Go vet
         run: go vet ./...
 
       - name: Go build
-        run: go build ./cmd/crewshipd
+        run: go build ./cmd/crewship
 
       - name: Go test
         run: go test ./...

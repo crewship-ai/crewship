@@ -67,9 +67,15 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 			&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
 			&c.CreatedAt, &c.UpdatedAt, &c.AgentCount); err != nil {
 			h.logger.Error("scan credential", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		result = append(result, c)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (credentials)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 
 	if result == nil {

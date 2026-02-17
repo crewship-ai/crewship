@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -193,7 +195,13 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	agentFilePath := fmt.Sprintf("%s/%s", slug.String, filePath)
+	cleanPath := filepath.Clean(filePath)
+	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid file path"})
+		return
+	}
+
+	agentFilePath := fmt.Sprintf("%s/%s", slug.String, cleanPath)
 	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID.String, agentFilePath)
 
 	resp, err := h.ipcGet(r.Context(), ipcPath)

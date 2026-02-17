@@ -38,7 +38,7 @@ func canRole(role string, actions ...string) bool {
 				return false
 			}
 		case "read":
-			return true
+			continue
 		default:
 			return false
 		}

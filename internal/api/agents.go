@@ -92,10 +92,16 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.MaxTokens, &a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
 			&a.CreatedAt, &a.UpdatedAt); err != nil {
 			h.logger.Error("scan agent", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		a.MemoryEnabled = memEnabled == 1
 		result = append(result, a)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (agents)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 
 	if result == nil {
@@ -168,6 +174,11 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"SELECT id FROM agents WHERE workspace_id = ? AND slug = ?", workspaceID, req.Slug).Scan(&existingID)
 	if err == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "Agent slug already taken in this workspace"})
+		return
+	}
+	if err != sql.ErrNoRows {
+		h.logger.Error("check agent slug", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -399,10 +410,16 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&s.ID, &s.AgentID, &s.SkillID, &s.SkillName, &s.SkillSlug,
 			&s.SkillIcon, &enabled, &s.Config, &s.CreatedAt); err != nil {
 			h.logger.Error("scan agent skill", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		s.Enabled = enabled == 1
 		result = append(result, s)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (agent skills)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if result == nil {
 		result = []agentSkillResponse{}
@@ -501,9 +518,15 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 			&c.CredType, &c.CredProvider, &c.CredStatus,
 			&c.EnvVarName, &c.Priority, &c.CreatedAt); err != nil {
 			h.logger.Error("scan agent credential", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		result = append(result, c)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (agent credentials)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if result == nil {
 		result = []agentCredentialResponse{}
@@ -622,9 +645,15 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 			&c.Mode, &c.Status, &c.MessageCount,
 			&c.StartedAt, &c.EndedAt, &c.CreatedAt); err != nil {
 			h.logger.Error("scan chat", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		result = append(result, c)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (chats)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if result == nil {
 		result = []chatResponse{}
@@ -660,9 +689,15 @@ func (h *AgentHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 			&run.StartedAt, &run.FinishedAt, &run.ErrorMessage, &run.ExitCode,
 			&run.CreatedAt); err != nil {
 			h.logger.Error("scan run", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		result = append(result, run)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (runs)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if result == nil {
 		result = []runResponse{}

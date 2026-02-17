@@ -23,12 +23,24 @@ func Migrate(db *sql.DB, logger *slog.Logger) error {
 		}
 
 		logger.Info("applying migration", "version", m.version, "name", m.name)
-		if _, err := db.Exec(m.sql); err != nil {
+
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("begin migration %d (%s): %w", m.version, m.name, err)
+		}
+
+		if _, err := tx.Exec(m.sql); err != nil {
+			tx.Rollback()
 			return fmt.Errorf("migration %d (%s): %w", m.version, m.name, err)
 		}
 
-		if _, err := db.Exec("INSERT INTO _migrations (version, name) VALUES (?, ?)", m.version, m.name); err != nil {
+		if _, err := tx.Exec("INSERT INTO _migrations (version, name) VALUES (?, ?)", m.version, m.name); err != nil {
+			tx.Rollback()
 			return fmt.Errorf("record migration %d (%s): %w", m.version, m.name, err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %d (%s): %w", m.version, m.name, err)
 		}
 	}
 

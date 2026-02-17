@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"log/slog"
 	"net/http"
@@ -26,7 +27,7 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get("X-Internal-Token")
-		if token == "" || token != expected {
+		if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 			return
 		}
@@ -84,7 +85,8 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Type, &c.Provider,
 			&encValue, &encRefresh, &c.TokenExpires, &c.AccountLabel, &accountEmail, &c.Status); err != nil {
 			h.logger.Error("scan internal credential", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		decrypted, err := encryption.Decrypt(encValue)
 		if err != nil {
@@ -99,6 +101,11 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 			}
 		}
 		result = append(result, c)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (internal credentials)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if result == nil {
 		result = []credResult{}
@@ -259,7 +266,9 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		var ce credEntry
 		var encValue string
 		if err := rows.Scan(&ce.ID, &ce.EnvVar, &ce.Priority, &encValue, &ce.Type); err != nil {
-			continue
+			h.logger.Error("scan credential for resolve", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		dec, err := encryption.Decrypt(encValue)
 		if err != nil {
@@ -268,6 +277,11 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		}
 		ce.Value = dec
 		creds = append(creds, ce)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (resolve credentials)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if creds == nil {
 		creds = []credEntry{}

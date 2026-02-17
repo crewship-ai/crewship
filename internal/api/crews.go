@@ -62,9 +62,15 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 			&c.Color, &c.Icon, &c.ContainerMemoryMB, &c.ContainerCPUs,
 			&c.CreatedAt, &c.UpdatedAt, &c.AgentCount, &c.MemberCount); err != nil {
 			h.logger.Error("scan crew", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		result = append(result, c)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (crews)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 
 	if result == nil {
@@ -111,6 +117,11 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"SELECT id FROM crews WHERE workspace_id = ? AND slug = ?", workspaceID, req.Slug).Scan(&existingID)
 	if err == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "Crew slug already taken in this workspace"})
+		return
+	}
+	if err != sql.ErrNoRows {
+		h.logger.Error("check crew slug", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -237,6 +248,11 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			workspaceID, *req.Slug, crewID).Scan(&slugOwnerID)
 		if err == nil {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "Crew slug already taken in this workspace"})
+			return
+		}
+		if err != sql.ErrNoRows {
+			h.logger.Error("check crew slug", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
 	}
@@ -404,10 +420,16 @@ func (h *CrewHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&m.ID, &m.CrewID, &m.UserID, &m.CreatedAt,
 			&u.ID, &u.Email, &u.FullName, &u.AvatarURL); err != nil {
 			h.logger.Error("scan crew member", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		m.User = &u
 		result = append(result, m)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (crew members)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 
 	if result == nil {

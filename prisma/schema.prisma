@@ -2,10 +2,9 @@
 // Full spec: .factory/context/prd/DATABASE.md
 // Naming: .factory/context/NAMING.md
 //
-// DUAL PROVIDER: SQLite (default) + PostgreSQL (opt-in)
-// Set DB_PROVIDER env var to "postgresql" for PostgreSQL mode.
-// SQLite: DATABASE_URL="file:~/.crewship/crewship.db"
-// PostgreSQL: DATABASE_URL="postgresql://user:pass@host/db"
+// Provider: SQLite (single binary mode)
+// The Go server uses its own SQLite migration system (internal/database/).
+// This Prisma schema is used only for type generation (prisma-client).
 
 generator client {
   provider = "prisma-client"

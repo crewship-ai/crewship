@@ -15,7 +15,7 @@ services:
     ports:
       - "${CREWSHIP_PORT:-8080}:8080"
     environment:
-      DATABASE_URL: ${DATABASE_URL:-file:./crewship.db}
+      DATABASE_URL: ${DATABASE_URL:-file:/data/crewship.db}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
       CREWSHIP_CONTAINER_PROVIDER: docker

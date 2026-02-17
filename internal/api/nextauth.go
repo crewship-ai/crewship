@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -26,10 +27,19 @@ func NewNextAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTVali
 	return &NextAuthHandler{db: db, logger: logger, validator: validator}
 }
 
-func (h *NextAuthHandler) csrfToken() string {
+func (h *NextAuthHandler) csrfCookieName(r *http.Request) string {
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		return "__Host-authjs.csrf-token"
+	}
+	return "authjs.csrf-token"
+}
+
+func (h *NextAuthHandler) csrfToken() (string, error) {
 	b := make([]byte, 32)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func (h *NextAuthHandler) sessionCookieName(r *http.Request) string {
@@ -41,7 +51,22 @@ func (h *NextAuthHandler) sessionCookieName(r *http.Request) string {
 
 // CSRF returns a CSRF token (GET /api/auth/csrf)
 func (h *NextAuthHandler) CSRF(w http.ResponseWriter, r *http.Request) {
-	token := h.csrfToken()
+	token, err := h.csrfToken()
+	if err != nil {
+		h.logger.Error("generate csrf token", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	cookieName := h.csrfCookieName(r)
+	isSecure := strings.HasPrefix(cookieName, "__Host-")
+	http.SetCookie(w, &http.Cookie{
+		Name:     cookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   isSecure,
+		SameSite: http.SameSiteLaxMode,
+	})
 	writeJSON(w, http.StatusOK, map[string]string{"csrfToken": token})
 }
 
@@ -87,9 +112,15 @@ func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 
 // CallbackCredentials handles login (POST /api/auth/callback/credentials)
 func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Request) {
+	csrfCookie, _ := r.Cookie(h.csrfCookieName(r))
+	if csrfCookie == nil || csrfCookie.Value == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Missing CSRF token"})
+		return
+	}
+
 	isJSON := strings.Contains(r.Header.Get("Content-Type"), "json")
 
-	var email, password string
+	var email, password, csrfToken string
 	if isJSON {
 		var body map[string]interface{}
 		if err := readJSON(r, &body); err != nil {
@@ -102,11 +133,20 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 		if v, ok := body["password"].(string); ok {
 			password = v
 		}
+		if v, ok := body["csrfToken"].(string); ok {
+			csrfToken = v
+		}
 	} else {
 		r.ParseForm()
 		email = r.FormValue("email")
 		password = r.FormValue("password")
+		csrfToken = r.FormValue("csrfToken")
 		isJSON = r.FormValue("json") == "true"
+	}
+
+	if subtle.ConstantTimeCompare([]byte(csrfToken), []byte(csrfCookie.Value)) != 1 {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Invalid CSRF token"})
+		return
 	}
 
 	if email == "" || password == "" {

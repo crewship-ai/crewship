@@ -122,9 +122,15 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.EntityType, &a.EntityID, &a.Metadata, &a.IPAddress,
 			&a.UserAgent, &a.CreatedAt, &a.UserEmail, &a.UserName); err != nil {
 			h.logger.Error("scan audit log", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		result = append(result, a)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (audit logs)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if result == nil {
 		result = []auditResponse{}

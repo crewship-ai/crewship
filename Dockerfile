@@ -17,6 +17,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+COPY web/ ./web/
+COPY --from=frontend /app/out ./web/out
 ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown

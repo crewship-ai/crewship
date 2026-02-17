@@ -84,7 +84,8 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 			&s.Tags, &featured, &s.PricingTier, &s.ToolCount,
 			&s.CreatedAt, &s.UpdatedAt); err != nil {
 			h.logger.Error("scan skill", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		s.Featured = featured == 1
 		// Normalize tags from JSON string
@@ -92,6 +93,11 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 			s.Tags = nil
 		}
 		result = append(result, s)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (skills)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 
 	if result == nil {

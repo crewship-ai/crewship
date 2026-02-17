@@ -30,10 +30,22 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var s stats
-	h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM workspaces WHERE deleted_at IS NULL").Scan(&s.Workspaces)
-	h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users").Scan(&s.Users)
-	h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM agents WHERE deleted_at IS NULL").Scan(&s.Agents)
-	h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM agent_runs WHERE status = 'RUNNING'").Scan(&s.Running)
+	queries := []struct {
+		sql  string
+		dest *int
+	}{
+		{"SELECT COUNT(*) FROM workspaces WHERE deleted_at IS NULL", &s.Workspaces},
+		{"SELECT COUNT(*) FROM users", &s.Users},
+		{"SELECT COUNT(*) FROM agents WHERE deleted_at IS NULL", &s.Agents},
+		{"SELECT COUNT(*) FROM agent_runs WHERE status = 'RUNNING'", &s.Running},
+	}
+	for _, q := range queries {
+		if err := h.db.QueryRowContext(r.Context(), q.sql).Scan(q.dest); err != nil {
+			h.logger.Error("stats query", "sql", q.sql, "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+	}
 
 	writeJSON(w, http.StatusOK, s)
 }
@@ -81,7 +93,8 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&u.ID, &u.Email, &u.FullName, &u.AvatarURL, &u.CreatedAt,
 			&wsID, &wsName, &wsSlug, &role); err != nil {
 			h.logger.Error("scan user", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		if wsID.Valid {
 			u.Workspace = &struct {
@@ -94,6 +107,11 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 			u.Role = &role.String
 		}
 		result = append(result, u)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (users)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if result == nil {
 		result = []userRow{}
@@ -143,9 +161,15 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 			&ws.CreatedAt, &ws.UpdatedAt,
 			&ws.MemberCount, &ws.AgentCount, &ws.CrewCount); err != nil {
 			h.logger.Error("scan workspace (admin)", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		result = append(result, ws)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (workspaces)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if result == nil {
 		result = []wsRow{}

@@ -123,9 +123,15 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 			&run.StartedAt, &run.FinishedAt, &run.ErrorMessage, &run.ExitCode,
 			&run.CreatedAt, &run.AgentName, &run.AgentSlug, &run.CrewName); err != nil {
 			h.logger.Error("scan run", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (runs)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if runs == nil {
 		runs = []runResponse{}

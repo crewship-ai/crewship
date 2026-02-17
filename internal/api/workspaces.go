@@ -63,9 +63,15 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 			&ws.CreatedAt, &ws.UpdatedAt, &ws.CurrentUserRole,
 			&ws.CrewCount, &ws.AgentCount, &ws.MemberCount); err != nil {
 			h.logger.Error("scan workspace", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		result = append(result, ws)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (workspaces)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 
 	if result == nil {
@@ -106,6 +112,11 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), "SELECT id FROM workspaces WHERE slug = ?", req.Slug).Scan(&existingID)
 	if err == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "Workspace slug already taken"})
+		return
+	}
+	if err != sql.ErrNoRows {
+		h.logger.Error("check workspace slug", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -219,6 +230,11 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "Workspace slug already taken"})
 			return
 		}
+		if err != sql.ErrNoRows {
+			h.logger.Error("check workspace slug", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -313,10 +329,16 @@ func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&m.ID, &m.WorkspaceID, &m.UserID, &m.Role, &m.CreatedAt, &m.UpdatedAt,
 			&u.ID, &u.Email, &u.FullName, &u.AvatarURL); err != nil {
 			h.logger.Error("scan member", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		m.User = &u
 		result = append(result, m)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (members)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 
 	if result == nil {
@@ -484,10 +506,16 @@ func (h *WorkspaceHandler) ListInvitations(w http.ResponseWriter, r *http.Reques
 			&inv.InvitedBy, &inv.Token, &inv.ExpiresAt, &inv.AcceptedAt, &inv.CreatedAt,
 			&inviter.ID, &inviter.Email, &inviter.FullName); err != nil {
 			h.logger.Error("scan invitation", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		inv.Inviter = &inviter
 		result = append(result, inv)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (invitations)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 
 	if result == nil {
@@ -502,10 +530,12 @@ type createInvitationRequest struct {
 	Role  string `json:"role"`
 }
 
-func generateToken() string {
+func generateToken() (string, error) {
 	b := make([]byte, 32)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
@@ -556,7 +586,12 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	now := time.Now().UTC()
 	expiresAt := now.Add(7 * 24 * time.Hour)
 	invID := generateCUID()
-	token := generateToken()
+	token, err := generateToken()
+	if err != nil {
+		h.logger.Error("generate invitation token", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO workspace_invitations (id, workspace_id, email, role, invited_by, token, expires_at, created_at)

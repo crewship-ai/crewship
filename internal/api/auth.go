@@ -54,6 +54,11 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "Email already registered"})
 		return
 	}
+	if err != sql.ErrNoRows {
+		h.logger.Error("check existing email", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
