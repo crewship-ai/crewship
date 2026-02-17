@@ -19,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/server"
+	"github.com/crewship-ai/crewship/web"
 )
 
 var (
@@ -196,6 +197,14 @@ func cmdStart(args []string) {
 	defer deps.Close()
 	deps.DebugLogs = debugBuffer
 	deps.DB = db.DB
+
+	// Load embedded web UI (static export)
+	webFS, err := web.FS()
+	if err != nil {
+		logger.Warn("embedded web UI not available", "error", err)
+	} else {
+		deps.WebFS = webFS
+	}
 
 	srv := server.New(cfg, logger, deps)
 

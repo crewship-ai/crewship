@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"io/fs"
 	"log/slog"
 	"net/http"
 
@@ -15,7 +16,7 @@ type Router struct {
 	authMw *AuthMiddleware
 }
 
-func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger) (*Router, error) {
+func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
 	validator, err := auth.NewJWTValidator(jwtSecret, "")
 	if err != nil {
 		return nil, err
@@ -31,7 +32,21 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger) (*Router, erro
 	}
 
 	r.registerRoutes()
+
+	for _, opt := range opts {
+		opt(r)
+	}
+
 	return r, nil
+}
+
+type RouterOption func(*Router)
+
+func WithStaticFS(webFS fs.FS) RouterOption {
+	return func(r *Router) {
+		r.mux.Handle("GET /", StaticFileHandler(webFS))
+		r.logger.Info("serving embedded static UI")
+	}
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {

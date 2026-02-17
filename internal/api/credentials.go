@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
 type CredentialHandler struct {
@@ -142,10 +144,14 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	credID := generateCUID()
 
-	// Encrypt value using Go encryption (placeholder -- needs encryption.go port)
-	encryptedValue := req.Value // TODO: port encryption from lib/encryption.ts
+	encryptedValue, err := encryption.Encrypt(req.Value)
+	if err != nil {
+		h.logger.Error("encrypt credential", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt credential"})
+		return
+	}
 
-	_, err := h.db.ExecContext(r.Context(), `
+	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, crew_id, account_label, account_email,
 			token_expires_at, created_by, created_at, updated_at)

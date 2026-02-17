@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -51,6 +52,7 @@ type Deps struct {
 	State     provider.StateProvider
 	DebugLogs *logging.RingBuffer
 	DB        *sql.DB
+	WebFS     fs.FS
 }
 
 func (d *Deps) Close() {
@@ -154,12 +156,19 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 	// Mount Go API routes when database is available
 	if deps != nil && deps.DB != nil && cfg.Auth.JWTSecret != "" {
-		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger)
+		var opts []goapi.RouterOption
+		if deps.WebFS != nil {
+			opts = append(opts, goapi.WithStaticFS(deps.WebFS))
+		}
+		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 		if err != nil {
 			logger.Error("failed to create API router", "error", err)
 		} else {
-			mux.Handle("/api/v1/", apiRouter)
-			logger.Info("Go API routes mounted on /api/v1/")
+			mux.Handle("/api/", apiRouter)
+			if deps.WebFS != nil {
+				mux.Handle("/", apiRouter)
+			}
+			logger.Info("Go API routes mounted")
 		}
 	}
 
