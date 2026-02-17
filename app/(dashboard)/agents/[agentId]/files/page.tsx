@@ -20,7 +20,7 @@ import {
 } from "@/components/ai-elements/artifact"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import type { BundledLanguage } from "shiki"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 interface FileEntry {
   path: string
@@ -57,7 +57,7 @@ function totalSize(files: FileEntry[]): string {
 
 export default function FilesPage({ params }: { params: Promise<{ agentId: string }> }) {
   const { agentId } = use(params)
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [files, setFiles] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -66,12 +66,12 @@ export default function FilesPage({ params }: { params: Promise<{ agentId: strin
   const [loadingContent, setLoadingContent] = useState(false)
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
     let cancelled = false
 
     async function fetchFiles() {
       try {
-        const res = await fetch(`/api/v1/agents/${agentId}/files?org_id=${orgId}`)
+        const res = await fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
         if (!res.ok) {
           if (!cancelled) setError("Failed to load files")
           return
@@ -87,7 +87,7 @@ export default function FilesPage({ params }: { params: Promise<{ agentId: strin
 
     fetchFiles()
     return () => { cancelled = true }
-  }, [agentId, orgId])
+  }, [agentId, workspaceId])
 
   const handleFileSelect = useCallback((path: string) => {
     const file = files.find((f) => f.path === path)
@@ -97,22 +97,22 @@ export default function FilesPage({ params }: { params: Promise<{ agentId: strin
     setLoadingContent(true)
     setFileContent(null)
 
-    fetch(`/api/v1/agents/${agentId}/files/download?org_id=${orgId}&path=${encodeURIComponent(path)}`)
+    fetch(`/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`)
       .then((res) => res.ok ? res.text() : "(Unable to load file content)")
       .then((text) => setFileContent(text))
       .catch(() => setFileContent("(Network error loading file)"))
       .finally(() => setLoadingContent(false))
-  }, [agentId, orgId, files])
+  }, [agentId, workspaceId, files])
 
   const handleDownload = useCallback((path: string, name: string) => {
-    const url = `/api/v1/agents/${agentId}/files/download?org_id=${orgId}&path=${encodeURIComponent(path)}`
+    const url = `/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`
     const a = document.createElement("a")
     a.href = url
     a.download = name
     a.click()
-  }, [agentId, orgId])
+  }, [agentId, workspaceId])
 
-  if (orgLoading || loading) {
+  if (wsLoading || loading) {
     return <FilesSkeleton />
   }
 

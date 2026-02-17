@@ -12,14 +12,14 @@ export async function GET(
   { params }: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await params
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
   const filePath = req.nextUrl.searchParams.get("path")
 
   if (!filePath) {
     return NextResponse.json({ error: "path parameter required" }, { status: 400 })
   }
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -28,16 +28,16 @@ export async function GET(
   }
 
   const agent = await prisma.agent.findFirst({
-    where: { id: agentId, org_id: authResult.orgId, deleted_at: null },
-    select: { id: true, slug: true, team_id: true },
+    where: { id: agentId, workspace_id: authResult.workspaceId, deleted_at: null },
+    select: { id: true, slug: true, crew_id: true },
   })
 
-  if (!agent || !agent.team_id) {
+  if (!agent || !agent.crew_id) {
     return NextResponse.json({ error: "Agent not found" }, { status: 404 })
   }
 
   const agentFilePath = `${agent.slug}/${filePath}`
-  const ipcPath = `/teams/${encodeURIComponent(agent.team_id)}/files/download?path=${encodeURIComponent(agentFilePath)}`
+  const ipcPath = `/crews/${encodeURIComponent(agent.crew_id)}/files/download?path=${encodeURIComponent(agentFilePath)}`
 
   try {
     const buffer = await ipcDownload(ipcPath)

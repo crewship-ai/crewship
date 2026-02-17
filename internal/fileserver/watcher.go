@@ -20,7 +20,7 @@ type FileEvent struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-type EventHandler func(teamID string, event FileEvent)
+type EventHandler func(crewID string, event FileEvent)
 
 type Watcher struct {
 	basePath string
@@ -36,12 +36,12 @@ func NewWatcher(basePath string, logger *slog.Logger, handler EventHandler) *Wat
 	}
 }
 
-func (w *Watcher) Watch(ctx context.Context, teamID string) error {
-	if teamID == "" || filepath.IsAbs(teamID) || strings.Contains(teamID, "..") {
-		return fmt.Errorf("invalid team ID: %q", teamID)
+func (w *Watcher) Watch(ctx context.Context, crewID string) error {
+	if crewID == "" || filepath.IsAbs(crewID) || strings.Contains(crewID, "..") {
+		return fmt.Errorf("invalid crew ID: %q", crewID)
 	}
 
-	outputDir := filepath.Join(w.basePath, filepath.Clean(teamID))
+	outputDir := filepath.Join(w.basePath, filepath.Clean(crewID))
 	if err := os.MkdirAll(outputDir, 0750); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
@@ -66,7 +66,7 @@ func (w *Watcher) Watch(ctx context.Context, teamID string) error {
 				}
 				fe := w.toFileEvent(event, outputDir)
 				if fe != nil && w.handler != nil {
-					w.handler(teamID, *fe)
+					w.handler(crewID, *fe)
 				}
 				if event.Has(fsnotify.Create) {
 					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
@@ -84,7 +84,7 @@ func (w *Watcher) Watch(ctx context.Context, teamID string) error {
 		}
 	}()
 
-	w.logger.Info("watching output directory", "team_id", teamID, "path", outputDir)
+	w.logger.Info("watching output directory", "crew_id", crewID, "path", outputDir)
 	return nil
 }
 

@@ -31,7 +31,7 @@ interface Team {
 }
 
 interface AddCredentialDialogProps {
-  orgId: string
+  workspaceId: string
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess: () => void
@@ -62,7 +62,7 @@ const TYPE_CONFIG = {
 } as const
 
 export function AddCredentialDialog({
-  orgId,
+  workspaceId,
   open,
   onOpenChange,
   onSuccess,
@@ -73,10 +73,10 @@ export function AddCredentialDialog({
   const [description, setDescription] = React.useState("")
   const [value, setValue] = React.useState("")
   const [accountLabel, setAccountLabel] = React.useState("")
-  const [scope, setScope] = React.useState<"ORGANIZATION" | "TEAM">("ORGANIZATION")
-  const [teamId, setTeamId] = React.useState<string>("")
+  const [scope, setScope] = React.useState<"WORKSPACE" | "CREW">("WORKSPACE")
+  const [crewId, setTeamId] = React.useState<string>("")
   const [showValue, setShowValue] = React.useState(false)
-  const [teams, setTeams] = React.useState<Team[]>([])
+  const [crews, setTeams] = React.useState<Team[]>([])
   const [teamsLoading, setTeamsLoading] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
   const [error, setError] = React.useState("")
@@ -88,15 +88,15 @@ export function AddCredentialDialog({
   }, [type, provider])
 
   React.useEffect(() => {
-    if (scope === "TEAM" && teams.length === 0) {
+    if (scope === "CREW" && crews.length === 0) {
       setTeamsLoading(true)
-      fetch(`/api/v1/teams?org_id=${orgId}`)
+      fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
         .then((res) => res.json())
         .then((data: Team[]) => setTeams(data))
         .catch(() => setTeams([]))
         .finally(() => setTeamsLoading(false))
     }
-  }, [scope, orgId, teams.length])
+  }, [scope, workspaceId, crews.length])
 
   function resetForm() {
     setType("API_KEY")
@@ -105,7 +105,7 @@ export function AddCredentialDialog({
     setDescription("")
     setValue("")
     setAccountLabel("")
-    setScope("ORGANIZATION")
+    setScope("WORKSPACE")
     setTeamId("")
     setShowValue(false)
     setError("")
@@ -143,8 +143,8 @@ export function AddCredentialDialog({
       setError("Provider is required for AI CLI Token and API Key")
       return
     }
-    if (scope === "TEAM" && !teamId) {
-      setError("Team is required for team-scoped credentials")
+    if (scope === "CREW" && !crewId) {
+      setError("Crew is required for crew-scoped credentials")
       return
     }
 
@@ -160,9 +160,9 @@ export function AddCredentialDialog({
       }
       if (description.trim()) body.description = description.trim()
       if (accountLabel.trim()) body.account_label = accountLabel.trim()
-      if (scope === "TEAM") body.team_id = teamId
+      if (scope === "CREW") body.crew_id = crewId
 
-      const res = await fetch(`/api/v1/credentials?org_id=${orgId}`, {
+      const res = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -325,37 +325,37 @@ export function AddCredentialDialog({
             <Select
               value={scope}
               onValueChange={(v) => {
-                setScope(v as "ORGANIZATION" | "TEAM")
-                if (v === "ORGANIZATION") setTeamId("")
+                setScope(v as "WORKSPACE" | "CREW")
+                if (v === "WORKSPACE") setTeamId("")
               }}
             >
               <SelectTrigger id="cred-scope" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ORGANIZATION">Organization</SelectItem>
-                <SelectItem value="TEAM">Team</SelectItem>
+                <SelectItem value="WORKSPACE">Workspace</SelectItem>
+                <SelectItem value="CREW">Crew</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          {scope === "TEAM" && (
+          {scope === "CREW" && (
             <div className="space-y-2">
-              <Label htmlFor="cred-team">Team</Label>
+              <Label htmlFor="cred-team">Crew</Label>
               {teamsLoading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading teams...
+                  Loading crews...
                 </div>
               ) : (
-                <Select value={teamId} onValueChange={setTeamId}>
+                <Select value={crewId} onValueChange={setTeamId}>
                   <SelectTrigger id="cred-team" className="w-full">
-                    <SelectValue placeholder="Select a team" />
+                    <SelectValue placeholder="Select a crew" />
                   </SelectTrigger>
                   <SelectContent>
-                    {teams.map((team) => (
-                      <SelectItem key={team.id} value={team.id}>
-                        {team.name}
+                    {crews.map((crew) => (
+                      <SelectItem key={crew.id} value={crew.id}>
+                        {crew.name}
                       </SelectItem>
                     ))}
                   </SelectContent>

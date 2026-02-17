@@ -1,5 +1,6 @@
 // Crewship -- Prisma Schema (source of truth)
 // Full spec: .factory/context/prd/DATABASE.md
+// Naming: .factory/context/NAMING.md
 
 generator client {
   provider = "prisma-client"
@@ -51,12 +52,12 @@ enum ToolProfile {
 }
 
 enum AgentRole {
-  WORKER
-  LEADER
-  DIRECTOR
+  AGENT
+  LEAD
+  COORDINATOR
 }
 
-enum DelegationStatus {
+enum AssignmentStatus {
   PENDING
   RUNNING
   COMPLETED
@@ -140,8 +141,8 @@ enum PlanTier {
 }
 
 enum CredentialScope {
-  ORGANIZATION
-  TEAM
+  WORKSPACE
+  CREW
 }
 
 enum CredentialType {
@@ -179,18 +180,18 @@ model User {
   created_at      DateTime  @default(now()) @db.Timestamptz
   updated_at      DateTime  @default(now()) @updatedAt @db.Timestamptz
 
-  accounts            Account[]
-  sessions            Session[]
-  org_memberships     OrganizationMember[]
-  team_memberships    TeamMember[]
-  sent_invitations    OrganizationInvitation[] @relation("InvitedBy")
-  created_credentials Credential[]             @relation("CreatedBy")
-  created_sessions    ConversationSession[]    @relation("CreatedBy")
-  triggered_runs      AgentRun[]               @relation("TriggeredBy")
-  config_changes      AgentConfigHistory[]     @relation("ChangedBy")
-  audit_logs          AuditLog[]
-  authored_skills        Skill[]                  @relation("SkillAuthor")
-  skill_reviews          SkillReview[]
+  accounts              Account[]
+  sessions              Session[]
+  workspace_memberships WorkspaceMember[]
+  crew_memberships      CrewMember[]
+  sent_invitations      WorkspaceInvitation[] @relation("InvitedBy")
+  created_credentials   Credential[]          @relation("CreatedBy")
+  created_chats         Chat[]                @relation("CreatedBy")
+  triggered_runs        AgentRun[]            @relation("TriggeredBy")
+  config_changes        AgentConfigHistory[]  @relation("ChangedBy")
+  audit_logs            AuditLog[]
+  authored_skills       Skill[]               @relation("SkillAuthor")
+  skill_reviews         SkillReview[]
 
   @@map("users")
 }
@@ -240,10 +241,10 @@ model VerificationToken {
 }
 
 // ============================================================
-// 2. ORGANIZATION
+// 2. WORKSPACE (formerly Organization)
 // ============================================================
 
-model Organization {
+model Workspace {
   id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name       String
   slug       String    @unique
@@ -254,113 +255,113 @@ model Organization {
 
   default_container_ttl_hours Int?
 
-  members         OrganizationMember[]
-  invitations     OrganizationInvitation[]
-  teams           Team[]
-  agents          Agent[]
-  credentials     Credential[]
-  sessions        ConversationSession[]
-  runs            AgentRun[]
-  audit_logs      AuditLog[]
-  subscription    Subscription?
-  flag_overrides       FeatureFlagOverride[]
-  delegation_logs      DelegationLog[]
+  members        WorkspaceMember[]
+  invitations    WorkspaceInvitation[]
+  crews          Crew[]
+  agents         Agent[]
+  credentials    Credential[]
+  chats          Chat[]
+  runs           AgentRun[]
+  audit_logs     AuditLog[]
+  subscription   Subscription?
+  flag_overrides FeatureFlagOverride[]
+  assignments    Assignment[]
 
-  @@map("organizations")
+  @@map("workspaces")
 }
 
 // ============================================================
-// 3. ORGANIZATION MEMBER
+// 3. WORKSPACE MEMBER (formerly OrganizationMember)
 // ============================================================
 
-model OrganizationMember {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id     String   @db.Uuid
-  user_id    String   @db.Uuid
-  role       OrgRole  @default(MEMBER)
-  created_at DateTime @default(now()) @db.Timestamptz
-  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz
+model WorkspaceMember {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String   @db.Uuid
+  user_id      String   @db.Uuid
+  role         OrgRole  @default(MEMBER)
+  created_at   DateTime @default(now()) @db.Timestamptz
+  updated_at   DateTime @default(now()) @updatedAt @db.Timestamptz
 
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
-  @@unique([org_id, user_id], name: "uq_org_member")
-  @@index([org_id], name: "idx_org_member_org")
-  @@index([user_id], name: "idx_org_member_user")
-  @@map("organization_members")
+  @@unique([workspace_id, user_id], name: "uq_workspace_member")
+  @@index([workspace_id], name: "idx_workspace_member_workspace")
+  @@index([user_id], name: "idx_workspace_member_user")
+  @@map("workspace_members")
 }
 
 // ============================================================
-// 4. ORGANIZATION INVITATION
+// 4. WORKSPACE INVITATION (formerly OrganizationInvitation)
 // ============================================================
 
-model OrganizationInvitation {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String    @db.Uuid
-  email       String
-  role        OrgRole   @default(MEMBER)
-  invited_by  String    @db.Uuid
-  token       String    @unique @default(dbgenerated("gen_random_uuid()"))
-  expires_at  DateTime  @db.Timestamptz
-  accepted_at DateTime? @db.Timestamptz
-  created_at  DateTime  @default(now()) @db.Timestamptz
+model WorkspaceInvitation {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  email        String
+  role         OrgRole   @default(MEMBER)
+  invited_by   String    @db.Uuid
+  token        String    @unique @default(dbgenerated("gen_random_uuid()"))
+  expires_at   DateTime  @db.Timestamptz
+  accepted_at  DateTime? @db.Timestamptz
+  created_at   DateTime  @default(now()) @db.Timestamptz
 
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  inviter      User         @relation("InvitedBy", fields: [invited_by], references: [id])
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  inviter   User      @relation("InvitedBy", fields: [invited_by], references: [id])
 
-  @@index([org_id], name: "idx_invitation_org")
+  @@index([workspace_id], name: "idx_invitation_workspace")
   @@index([token], name: "idx_invitation_token")
-  @@index([email, org_id], name: "idx_invitation_email_org")
-  @@map("organization_invitations")
+  @@index([email, workspace_id], name: "idx_invitation_email_workspace")
+  @@map("workspace_invitations")
 }
 
 // ============================================================
-// 5. TEAM
+// 5. CREW (formerly Team)
 // ============================================================
 
-model Team {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String    @db.Uuid
-  name        String
-  slug        String
-  description String?
-  color       String?   @db.VarChar(7)
-  icon        String?   @db.VarChar(10)
-  created_at  DateTime  @default(now()) @db.Timestamptz
-  updated_at  DateTime  @default(now()) @updatedAt @db.Timestamptz
-  deleted_at  DateTime? @db.Timestamptz
+model Crew {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id String    @db.Uuid
+  name         String
+  slug         String
+  description  String?
+  color        String?   @db.VarChar(7)
+  icon         String?   @db.VarChar(10)
+  created_at   DateTime  @default(now()) @db.Timestamptz
+  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz
+  deleted_at   DateTime? @db.Timestamptz
 
   container_ttl_hours Int?
   container_memory_mb Int   @default(4096)
   container_cpus      Float @default(2.0)
 
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  members      TeamMember[]
-  agents       Agent[]
-  credentials  Credential[]
+  workspace   Workspace    @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  members     CrewMember[]
+  agents      Agent[]
+  credentials Credential[]
 
-  @@unique([org_id, slug], name: "uq_team_slug")
-  @@index([org_id], name: "idx_team_org")
-  @@map("teams")
+  @@unique([workspace_id, slug], name: "uq_crew_slug")
+  @@index([workspace_id], name: "idx_crew_workspace")
+  @@map("crews")
 }
 
 // ============================================================
-// 6. TEAM MEMBER
+// 6. CREW MEMBER (formerly TeamMember)
 // ============================================================
 
-model TeamMember {
+model CrewMember {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  team_id    String   @db.Uuid
+  crew_id    String   @db.Uuid
   user_id    String   @db.Uuid
   created_at DateTime @default(now()) @db.Timestamptz
 
-  team Team @relation(fields: [team_id], references: [id], onDelete: Cascade)
+  crew Crew @relation(fields: [crew_id], references: [id], onDelete: Cascade)
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
-  @@unique([team_id, user_id], name: "uq_team_member")
-  @@index([team_id], name: "idx_team_member_team")
-  @@index([user_id], name: "idx_team_member_user")
-  @@map("team_members")
+  @@unique([crew_id, user_id], name: "uq_crew_member")
+  @@index([crew_id], name: "idx_crew_member_crew")
+  @@index([user_id], name: "idx_crew_member_user")
+  @@map("crew_members")
 }
 
 // ============================================================
@@ -369,13 +370,13 @@ model TeamMember {
 
 model Agent {
   id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  team_id         String?     @db.Uuid
-  org_id          String      @db.Uuid
+  crew_id         String?     @db.Uuid
+  workspace_id    String      @db.Uuid
   name            String
   slug            String
   description     String?
   role_title      String?
-  agent_role      AgentRole   @default(WORKER)
+  agent_role      AgentRole   @default(AGENT)
   status          AgentStatus @default(IDLE)
   cli_adapter     CLIAdapter  @default(CLAUDE_CODE)
   llm_provider    LLMProvider?
@@ -391,40 +392,40 @@ model Agent {
   updated_at      DateTime    @default(now()) @updatedAt @db.Timestamptz
   deleted_at      DateTime?   @db.Timestamptz
 
-  delegation_timeout_s   Int? 
+  delegation_timeout_s   Int?
   max_delegation_depth   Int? @default(3)
   max_parallel_delegates Int? @default(5)
 
-  team             Team?                 @relation(fields: [team_id], references: [id], onDelete: Cascade)
-  organization     Organization          @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  crew             Crew?                @relation(fields: [crew_id], references: [id], onDelete: Cascade)
+  workspace        Workspace            @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   skills           AgentSkill[]
   credentials      AgentCredential[]
-  sessions         ConversationSession[]
+  chats            Chat[]
   runs             AgentRun[]
   config_history   AgentConfigHistory[]
-  delegations_sent DelegationLog[]       @relation("DelegatedBy")
-  delegations_recv DelegationLog[]       @relation("DelegatedTo")
+  assignments_sent Assignment[]         @relation("AssignedBy")
+  assignments_recv Assignment[]         @relation("AssignedTo")
 
-  @@unique([org_id, slug], name: "uq_agent_slug")
-  @@index([org_id], name: "idx_agent_org")
-  @@index([team_id], name: "idx_agent_team")
+  @@unique([workspace_id, slug], name: "uq_agent_slug")
+  @@index([workspace_id], name: "idx_agent_workspace")
+  @@index([crew_id], name: "idx_agent_crew")
   @@index([status], name: "idx_agent_status")
   @@index([agent_role], name: "idx_agent_role")
   @@map("agents")
 }
 
 // ============================================================
-// 7b. DELEGATION LOG (Phase 2)
+// 7b. ASSIGNMENT (formerly DelegationLog, Phase 2)
 // ============================================================
 
-model DelegationLog {
+model Assignment {
   id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id          String           @db.Uuid
-  session_id      String           @db.Uuid
-  source_agent_id String           @db.Uuid
-  target_agent_id String           @db.Uuid
+  workspace_id    String           @db.Uuid
+  chat_id         String           @db.Uuid
+  assigned_by_id  String           @db.Uuid
+  assigned_to_id  String           @db.Uuid
   task            String           @db.Text
-  status          DelegationStatus @default(PENDING)
+  status          AssignmentStatus @default(PENDING)
   started_at      DateTime?        @db.Timestamptz
   finished_at     DateTime?        @db.Timestamptz
   result_summary  String?          @db.Text
@@ -432,16 +433,16 @@ model DelegationLog {
   group_id        String?
   created_at      DateTime         @default(now()) @db.Timestamptz
 
-  organization Organization        @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  session      ConversationSession @relation(fields: [session_id], references: [id])
-  source_agent Agent               @relation("DelegatedBy", fields: [source_agent_id], references: [id])
-  target_agent Agent               @relation("DelegatedTo", fields: [target_agent_id], references: [id])
+  workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  chat         Chat      @relation(fields: [chat_id], references: [id])
+  assigned_by  Agent     @relation("AssignedBy", fields: [assigned_by_id], references: [id])
+  assigned_to  Agent     @relation("AssignedTo", fields: [assigned_to_id], references: [id])
 
-  @@index([session_id], name: "idx_delegation_session")
-  @@index([source_agent_id], name: "idx_delegation_source")
-  @@index([target_agent_id], name: "idx_delegation_target")
-  @@index([group_id], name: "idx_delegation_group")
-  @@map("delegation_logs")
+  @@index([chat_id], name: "idx_assignment_chat")
+  @@index([assigned_by_id], name: "idx_assignment_by")
+  @@index([assigned_to_id], name: "idx_assignment_to")
+  @@index([group_id], name: "idx_assignment_group")
+  @@map("assignments")
 }
 
 // ============================================================
@@ -550,12 +551,12 @@ model AgentSkill {
 
 model Credential {
   id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id          String             @db.Uuid
-  team_id         String?            @db.Uuid
+  workspace_id    String             @db.Uuid
+  crew_id         String?            @db.Uuid
   name            String
   description     String?
   encrypted_value String             @db.Text
-  scope           CredentialScope    @default(ORGANIZATION)
+  scope           CredentialScope    @default(WORKSPACE)
   type            CredentialType     @default(SECRET)
   provider        CredentialProvider @default(NONE)
   status          CredentialStatus   @default(ACTIVE)
@@ -573,15 +574,15 @@ model Credential {
   updated_at      DateTime           @default(now()) @updatedAt @db.Timestamptz
   deleted_at      DateTime?          @db.Timestamptz
 
-  organization      Organization      @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  team              Team?             @relation(fields: [team_id], references: [id], onDelete: SetNull)
+  workspace         Workspace         @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  crew              Crew?             @relation(fields: [crew_id], references: [id], onDelete: SetNull)
   creator           User              @relation("CreatedBy", fields: [created_by], references: [id])
   agent_credentials AgentCredential[]
 
-  @@unique([org_id, name], name: "uq_credential_name")
-  @@index([org_id], name: "idx_credential_org")
-  @@index([team_id], name: "idx_credential_team")
-  @@index([org_id, type, provider], name: "idx_credential_type_provider")
+  @@unique([workspace_id, name], name: "uq_credential_name")
+  @@index([workspace_id], name: "idx_credential_workspace")
+  @@index([crew_id], name: "idx_credential_crew")
+  @@index([workspace_id, type, provider], name: "idx_credential_type_provider")
   @@map("credentials")
 }
 
@@ -606,13 +607,13 @@ model AgentCredential {
 }
 
 // ============================================================
-// 12. CONVERSATION SESSION (metadata only, messages in JSONL)
+// 12. CHAT (formerly ConversationSession, metadata only, messages in JSONL)
 // ============================================================
 
-model ConversationSession {
+model Chat {
   id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   agent_id      String        @db.Uuid
-  org_id        String        @db.Uuid
+  workspace_id  String        @db.Uuid
   created_by    String?       @db.Uuid
   title         String?
   mode          SessionMode   @default(CHAT)
@@ -624,16 +625,16 @@ model ConversationSession {
   created_at    DateTime      @default(now()) @db.Timestamptz
   updated_at    DateTime      @default(now()) @updatedAt @db.Timestamptz
 
-  agent        Agent         @relation(fields: [agent_id], references: [id], onDelete: Cascade)
-  organization Organization  @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  creator      User?         @relation("CreatedBy", fields: [created_by], references: [id])
-  runs         AgentRun[]
-  delegations  DelegationLog[]
+  agent       Agent        @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  workspace   Workspace    @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  creator     User?        @relation("CreatedBy", fields: [created_by], references: [id])
+  runs        AgentRun[]
+  assignments Assignment[]
 
-  @@index([agent_id], name: "idx_session_agent")
-  @@index([org_id], name: "idx_session_org")
-  @@index([created_at], name: "idx_session_created")
-  @@map("conversation_sessions")
+  @@index([agent_id], name: "idx_chat_agent")
+  @@index([workspace_id], name: "idx_chat_workspace")
+  @@index([created_at], name: "idx_chat_created")
+  @@map("chats")
 }
 
 // ============================================================
@@ -643,8 +644,8 @@ model ConversationSession {
 model AgentRun {
   id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   agent_id      String     @db.Uuid
-  session_id    String?    @db.Uuid
-  org_id        String     @db.Uuid
+  chat_id       String?    @db.Uuid
+  workspace_id  String     @db.Uuid
   triggered_by  String?    @db.Uuid
   trigger_type  RunTrigger @default(USER)
   status        RunStatus  @default(PENDING)
@@ -655,13 +656,13 @@ model AgentRun {
   metadata      Json?
   created_at    DateTime   @default(now()) @db.Timestamptz
 
-  agent        Agent                @relation(fields: [agent_id], references: [id], onDelete: Cascade)
-  session      ConversationSession? @relation(fields: [session_id], references: [id])
-  organization Organization         @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  triggerer    User?                @relation("TriggeredBy", fields: [triggered_by], references: [id])
+  agent     Agent      @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+  chat      Chat?      @relation(fields: [chat_id], references: [id])
+  workspace Workspace  @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  triggerer User?      @relation("TriggeredBy", fields: [triggered_by], references: [id])
 
   @@index([agent_id, created_at], name: "idx_run_agent_time")
-  @@index([org_id], name: "idx_run_org")
+  @@index([workspace_id], name: "idx_run_workspace")
   @@index([status], name: "idx_run_status")
   @@map("agent_runs")
 }
@@ -672,7 +673,7 @@ model AgentRun {
 
 model AuditLog {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id      String   @db.Uuid
+  workspace_id String  @db.Uuid
   user_id     String?  @db.Uuid
   action      String
   entity_type String
@@ -682,10 +683,10 @@ model AuditLog {
   user_agent  String?
   created_at  DateTime @default(now()) @db.Timestamptz
 
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  user         User?        @relation(fields: [user_id], references: [id])
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [user_id], references: [id])
 
-  @@index([org_id, created_at], name: "idx_audit_org_time")
+  @@index([workspace_id, created_at], name: "idx_audit_workspace_time")
   @@index([entity_type, entity_id], name: "idx_audit_entity")
   @@index([user_id], name: "idx_audit_user")
   @@index([action], name: "idx_audit_action")
@@ -698,7 +699,7 @@ model AuditLog {
 
 model Subscription {
   id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id                 String             @unique @db.Uuid
+  workspace_id           String             @unique @db.Uuid
   plan_id                String             @db.Uuid
   stripe_customer_id     String?            @unique
   stripe_subscription_id String?            @unique
@@ -709,8 +710,8 @@ model Subscription {
   created_at             DateTime           @default(now()) @db.Timestamptz
   updated_at             DateTime           @default(now()) @updatedAt @db.Timestamptz
 
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
-  plan         Plan         @relation(fields: [plan_id], references: [id])
+  workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  plan      Plan      @relation(fields: [plan_id], references: [id])
 
   @@map("subscriptions")
 }
@@ -725,7 +726,7 @@ model Plan {
   display_name    String
   stripe_price_id String?  @unique
   max_agents      Int
-  max_teams       Int
+  max_crews       Int
   max_skills      Int
   max_credentials Int
   max_members     Int
@@ -762,16 +763,16 @@ model FeatureFlag {
 // ============================================================
 
 model FeatureFlagOverride {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  flag_id    String   @db.Uuid
-  org_id     String   @db.Uuid
-  enabled    Boolean
-  created_at DateTime @default(now()) @db.Timestamptz
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  flag_id      String   @db.Uuid
+  workspace_id String   @db.Uuid
+  enabled      Boolean
+  created_at   DateTime @default(now()) @db.Timestamptz
 
-  flag         FeatureFlag  @relation(fields: [flag_id], references: [id], onDelete: Cascade)
-  organization Organization @relation(fields: [org_id], references: [id], onDelete: Cascade)
+  flag      FeatureFlag @relation(fields: [flag_id], references: [id], onDelete: Cascade)
+  workspace Workspace   @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
-  @@unique([flag_id, org_id], name: "uq_flag_override")
+  @@unique([flag_id, workspace_id], name: "uq_flag_override")
   @@map("feature_flag_overrides")
 }
 

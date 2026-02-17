@@ -9,10 +9,10 @@ import { StatCard } from "@/components/layout/stat-card"
 import { FilterBar } from "@/components/layout/filter-bar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentCard } from "@/components/features/agents/agent-card"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 import Link from "next/link"
 
-interface AgentTeam {
+interface AgentCrew {
   name: string
   slug: string
   color: string | null
@@ -29,8 +29,8 @@ interface Agent {
   cli_adapter: string
   llm_provider: string
   llm_model: string
-  team: AgentTeam | null
-  _count: { skills: number; credentials: number; sessions: number }
+  crew: AgentCrew | null
+  _count: { skills: number; credentials: number; chats: number }
 }
 
 interface Credential {
@@ -38,7 +38,7 @@ interface Credential {
 }
 
 export default function DashboardPage() {
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [agents, setAgents] = useState<Agent[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [loading, setLoading] = useState(true)
@@ -46,7 +46,7 @@ export default function DashboardPage() {
   const [activeFilter, setActiveFilter] = useState("All")
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
 
     let cancelled = false
 
@@ -55,8 +55,8 @@ export default function DashboardPage() {
       setError(null)
       try {
         const [agentsRes, credsRes] = await Promise.all([
-          fetch(`/api/v1/agents?org_id=${orgId}`),
-          fetch(`/api/v1/credentials?org_id=${orgId}`),
+          fetch(`/api/v1/agents?workspace_id=${workspaceId}`),
+          fetch(`/api/v1/credentials?workspace_id=${workspaceId}`),
         ])
 
         if (!agentsRes.ok || !credsRes.ok) {
@@ -84,9 +84,9 @@ export default function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [orgId])
+  }, [workspaceId])
 
-  const isLoading = orgLoading || loading
+  const isLoading = wsLoading || loading
 
   const totalAgents = agents.length
   const runningNow = agents.filter((a) => a.status === "RUNNING").length
@@ -178,7 +178,7 @@ export default function DashboardPage() {
             title={agents.length === 0 ? "No agents yet" : "No matching agents"}
             description={
               agents.length === 0
-                ? "Create your first AI agent to start automating tasks. Agents work in teams and can chat, run tasks, and produce files."
+                ? "Create your first AI agent to start automating tasks. Agents work in crews and can chat, run tasks, and produce files."
                 : "No agents match the current filter. Try changing the filter."
             }
           >

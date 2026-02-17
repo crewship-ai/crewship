@@ -45,11 +45,11 @@ func (m *mockState) Close() error { return nil }
 // mock container provider
 type mockContainer struct{}
 
-func (m *mockContainer) EnsureTeamRuntime(_ context.Context, cfg provider.TeamConfig) (string, error) {
+func (m *mockContainer) EnsureCrewRuntime(_ context.Context, cfg provider.CrewConfig) (string, error) {
 	return "container-" + cfg.ID, nil
 }
-func (m *mockContainer) StopTeamRuntime(_ context.Context, _ string) error { return nil }
-func (m *mockContainer) RemoveTeamRuntime(_ context.Context, _ string) error { return nil }
+func (m *mockContainer) StopCrewRuntime(_ context.Context, _ string) error { return nil }
+func (m *mockContainer) RemoveCrewRuntime(_ context.Context, _ string) error { return nil }
 func (m *mockContainer) ContainerStatus(_ context.Context, id string) (*provider.ContainerStatus, error) {
 	return &provider.ContainerStatus{ID: id, State: "running", Uptime: "1h"}, nil
 }
@@ -115,7 +115,7 @@ func TestAgentStatusInvalidJSON(t *testing.T) {
 func TestContainerStatusWithProvider(t *testing.T) {
 	s := newTestServerWithDeps()
 
-	req := httptest.NewRequest("GET", "/teams/team-1/container/status", nil)
+	req := httptest.NewRequest("GET", "/crews/crew-1/container/status", nil)
 	w := httptest.NewRecorder()
 	s.ipcMux.ServeHTTP(w, req)
 
@@ -133,7 +133,7 @@ func TestContainerStatusWithProvider(t *testing.T) {
 func TestContainerStartWithProvider(t *testing.T) {
 	s := newTestServerWithDeps()
 
-	req := httptest.NewRequest("POST", "/teams/team-1/container/start", nil)
+	req := httptest.NewRequest("POST", "/crews/crew-1/container/start", nil)
 	w := httptest.NewRecorder()
 	s.ipcMux.ServeHTTP(w, req)
 
@@ -151,7 +151,7 @@ func TestContainerStartWithProvider(t *testing.T) {
 func TestContainerStopWithProvider(t *testing.T) {
 	s := newTestServerWithDeps()
 
-	req := httptest.NewRequest("POST", "/teams/team-1/container/stop", nil)
+	req := httptest.NewRequest("POST", "/crews/crew-1/container/stop", nil)
 	w := httptest.NewRecorder()
 	s.ipcMux.ServeHTTP(w, req)
 
@@ -170,14 +170,14 @@ func TestSessionMessagesWithStore(t *testing.T) {
 
 	store := conversation.NewStore(dir, logger)
 	s.convStore = store
-	store.Append(context.Background(), "sess-1", conversation.Message{
+	store.Append(context.Background(), "chat-1", conversation.Message{
 		ID:        "msg-1",
 		Role:      "user",
 		Content:   "hello",
 		Timestamp: time.Now(),
 	})
 
-	req := httptest.NewRequest("GET", "/sessions/sess-1/messages", nil)
+	req := httptest.NewRequest("GET", "/chats/chat-1/messages", nil)
 	w := httptest.NewRecorder()
 	s.ipcMux.ServeHTTP(w, req)
 

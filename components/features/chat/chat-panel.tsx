@@ -40,7 +40,7 @@ import {
 import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool"
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import { useChat, type ChatMessage } from "@/hooks/use-chat"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/ws"
 
@@ -57,7 +57,7 @@ const defaultSuggestions = [
 ]
 
 export function ChatPanel({ agentId, sessionId }: ChatPanelProps) {
-  const { orgId } = useOrg()
+  const { workspaceId } = useWorkspace()
   const [token, setToken] = useState<string | null>(null)
   const [authError, setAuthError] = useState(false)
   const [input, setInput] = useState("")
@@ -85,7 +85,7 @@ export function ChatPanel({ agentId, sessionId }: ChatPanelProps) {
   })
 
   useEffect(() => {
-    fetch(`/api/v1/sessions/${sessionId}/messages`)
+    fetch(`/api/v1/chats/${sessionId}/messages`)
       .then((r) => r.ok ? r.json() : null)
       .then((data: { messages?: { id: string; role: string; content: string; ts: string }[] } | null) => {
         if (!data?.messages?.length) return
@@ -101,9 +101,9 @@ export function ChatPanel({ agentId, sessionId }: ChatPanelProps) {
 
   // Best-effort session creation -- don't block message sending on it
   useEffect(() => {
-    if (sessionReady || !orgId) return
+    if (sessionReady || !workspaceId) return
     fetch(
-      `/api/v1/agents/${agentId}/sessions?org_id=${encodeURIComponent(orgId)}`,
+      `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -112,7 +112,7 @@ export function ChatPanel({ agentId, sessionId }: ChatPanelProps) {
     )
       .then((res) => { if (res.ok) setSessionReady(true) })
       .catch(() => {})
-  }, [agentId, orgId, sessionId, sessionReady])
+  }, [agentId, workspaceId, sessionId, sessionReady])
 
   const handleSubmit = useCallback((message: PromptInputMessage) => {
     const text = message.text?.trim()

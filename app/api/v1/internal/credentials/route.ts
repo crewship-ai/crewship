@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   const forbidden = requireInternal(req)
   if (forbidden) return forbidden
 
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
   const provider = req.nextUrl.searchParams.get("provider")
 
   const where: Record<string, unknown> = {
@@ -21,14 +21,14 @@ export async function GET(req: NextRequest) {
     type: { in: ["AI_CLI_TOKEN", "API_KEY"] },
     provider: { not: "NONE" },
   }
-  if (orgId) where.org_id = orgId
+  if (workspaceId) where.workspace_id = workspaceId
   if (provider) where.provider = provider
 
   const credentials = await prisma.credential.findMany({
     where,
     select: {
       id: true,
-      org_id: true,
+      workspace_id: true,
       name: true,
       type: true,
       provider: true,
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
   // for the LLM token pool. Never exposed to browsers or external clients.
   const result = credentials.map((cred) => ({
     id: cred.id,
-    org_id: cred.org_id,
+    workspace_id: cred.workspace_id,
     name: cred.name,
     type: cred.type,
     provider: cred.provider,

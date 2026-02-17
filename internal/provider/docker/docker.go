@@ -45,7 +45,7 @@ func New(cfg Config, logger *slog.Logger) (*Provider, error) {
 	return &Provider{client: cli, cfg: cfg, logger: logger}, nil
 }
 
-func (p *Provider) EnsureTeamRuntime(ctx context.Context, team provider.TeamConfig) (string, error) {
+func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (string, error) {
 	containerName := "crewship-team-" + team.Slug
 
 	// Check if container already exists
@@ -95,7 +95,7 @@ func (p *Provider) EnsureTeamRuntime(ctx context.Context, team provider.TeamConf
 			Image: p.cfg.RuntimeImage,
 			User:  "1001:1001",
 			Env: []string{
-				"CREWSHIP_TEAM_ID=" + team.ID,
+				"CREWSHIP_CREW_ID=" + team.ID,
 			},
 			Healthcheck: &container.HealthConfig{
 				Test:     []string{"CMD-SHELL", "test -f /workspace/.ready"},
@@ -137,8 +137,8 @@ func (p *Provider) EnsureTeamRuntime(ctx context.Context, team provider.TeamConf
 		return "", fmt.Errorf("container start: %w", err)
 	}
 
-	p.logger.Info("team container started",
-		"team_id", team.ID,
+	p.logger.Info("crew container started",
+		"crew_id", team.ID,
 		"container_id", resp.ID[:12],
 		"runtime", runtime,
 	)
@@ -146,12 +146,12 @@ func (p *Provider) EnsureTeamRuntime(ctx context.Context, team provider.TeamConf
 	return resp.ID, nil
 }
 
-func (p *Provider) StopTeamRuntime(ctx context.Context, containerID string) error {
+func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
 	timeout := 30
 	return p.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout})
 }
 
-func (p *Provider) RemoveTeamRuntime(ctx context.Context, containerID string) error {
+func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
 	return p.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
 }
 

@@ -21,12 +21,12 @@ func TestWriterAppend(t *testing.T) {
 		Content:   "Hello world",
 	}
 
-	if err := w.Append("team-1", "agent-1", entry); err != nil {
+	if err := w.Append("crew-1", "agent-1", entry); err != nil {
 		t.Fatal(err)
 	}
 	w.Flush()
 
-	path := filepath.Join(dir, "teams", "team-1", "agents", "agent-1", "current.jsonl")
+	path := filepath.Join(dir, "crews", "crew-1", "agents", "agent-1", "current.jsonl")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestWriterMultipleEntries(t *testing.T) {
 	defer w.Close()
 
 	for i := 0; i < 5; i++ {
-		if err := w.Append("team-1", "agent-1", LogEntry{
+		if err := w.Append("crew-1", "agent-1", LogEntry{
 			Event:   "text",
 			Content: "line",
 		}); err != nil {
@@ -53,7 +53,7 @@ func TestWriterMultipleEntries(t *testing.T) {
 	w.Flush()
 
 	reader := NewReader(dir)
-	entries, err := reader.ReadAgentLogs("team-1", "agent-1", 0, 0)
+	entries, err := reader.ReadAgentLogs("crew-1", "agent-1", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestReaderWithOffset(t *testing.T) {
 	defer w.Close()
 
 	for i := 0; i < 10; i++ {
-		if err := w.Append("team-1", "agent-1", LogEntry{
+		if err := w.Append("crew-1", "agent-1", LogEntry{
 			Event:   "text",
 			Content: "line",
 		}); err != nil {
@@ -78,7 +78,7 @@ func TestReaderWithOffset(t *testing.T) {
 	w.Flush()
 
 	reader := NewReader(dir)
-	entries, err := reader.ReadAgentLogs("team-1", "agent-1", 5, 3)
+	entries, err := reader.ReadAgentLogs("crew-1", "agent-1", 5, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestReaderWithOffset(t *testing.T) {
 
 func TestReaderMissingFile(t *testing.T) {
 	reader := NewReader(t.TempDir())
-	entries, err := reader.ReadAgentLogs("team-x", "agent-x", 0, 0)
+	entries, err := reader.ReadAgentLogs("crew-x", "agent-x", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestWriterDefaultTimestamp(t *testing.T) {
 	w := NewWriter(dir, slog.Default())
 	defer w.Close()
 
-	if err := w.Append("team-1", "agent-1", LogEntry{
+	if err := w.Append("crew-1", "agent-1", LogEntry{
 		Event:   "text",
 		Content: "no timestamp",
 	}); err != nil {
@@ -112,7 +112,7 @@ func TestWriterDefaultTimestamp(t *testing.T) {
 	w.Flush()
 
 	reader := NewReader(dir)
-	entries, err := reader.ReadAgentLogs("team-1", "agent-1", 0, 0)
+	entries, err := reader.ReadAgentLogs("crew-1", "agent-1", 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

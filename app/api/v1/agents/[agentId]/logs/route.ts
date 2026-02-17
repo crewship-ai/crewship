@@ -10,11 +10,11 @@ export async function GET(
   { params }: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await params
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
   const offset = parseInt(req.nextUrl.searchParams.get("offset") ?? "0", 10)
   const limit = parseInt(req.nextUrl.searchParams.get("limit") ?? "100", 10)
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -23,20 +23,20 @@ export async function GET(
   }
 
   const agent = await prisma.agent.findFirst({
-    where: { id: agentId, org_id: authResult.orgId, deleted_at: null },
-    select: { id: true, team_id: true },
+    where: { id: agentId, workspace_id: authResult.workspaceId, deleted_at: null },
+    select: { id: true, crew_id: true },
   })
 
   if (!agent) {
     return NextResponse.json({ error: "Agent not found" }, { status: 404 })
   }
 
-  if (!agent.team_id) {
+  if (!agent.crew_id) {
     return NextResponse.json([])
   }
 
   try {
-    const res = await getAgentLogs(agentId, agent.team_id, offset, limit)
+    const res = await getAgentLogs(agentId, agent.crew_id, offset, limit)
     if (!res.ok) {
       return NextResponse.json([])
     }

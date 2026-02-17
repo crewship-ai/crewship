@@ -5,7 +5,7 @@ import (
 	"io"
 )
 
-type TeamConfig struct {
+type CrewConfig struct {
 	ID       string
 	Slug     string
 	MemoryMB int
@@ -32,9 +32,9 @@ type ContainerStatus struct {
 }
 
 type ContainerProvider interface {
-	EnsureTeamRuntime(ctx context.Context, team TeamConfig) (string, error)
-	StopTeamRuntime(ctx context.Context, containerID string) error
-	RemoveTeamRuntime(ctx context.Context, containerID string) error
+	EnsureCrewRuntime(ctx context.Context, team CrewConfig) (string, error)
+	StopCrewRuntime(ctx context.Context, containerID string) error
+	RemoveCrewRuntime(ctx context.Context, containerID string) error
 	ContainerStatus(ctx context.Context, containerID string) (*ContainerStatus, error)
 	Exec(ctx context.Context, cfg ExecConfig) (*ExecResult, error)
 	ExecInspect(ctx context.Context, execID string) (bool, int, error)

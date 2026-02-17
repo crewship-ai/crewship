@@ -13,7 +13,7 @@ import {
   TerminalCopyButton,
   TerminalContent,
 } from "@/components/ai-elements/terminal"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 interface LogEntry {
   ts: string
@@ -64,7 +64,7 @@ function logsToAnsi(logs: LogEntry[]): string {
 
 export default function LogsPage({ params }: { params: Promise<{ agentId: string }> }) {
   const { agentId } = use(params)
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -72,9 +72,9 @@ export default function LogsPage({ params }: { params: Promise<{ agentId: string
   const [autoRefresh, setAutoRefresh] = useState(false)
 
   const fetchLogs = useCallback(async () => {
-    if (!orgId) return
+    if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/logs?org_id=${orgId}`)
+      const res = await fetch(`/api/v1/agents/${agentId}/logs?workspace_id=${workspaceId}`)
       if (!res.ok) {
         setError("Failed to load logs")
         return
@@ -87,18 +87,18 @@ export default function LogsPage({ params }: { params: Promise<{ agentId: string
     } finally {
       setLoading(false)
     }
-  }, [agentId, orgId])
+  }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
     fetchLogs()
-  }, [orgId, fetchLogs])
+  }, [workspaceId, fetchLogs])
 
   useEffect(() => {
-    if (!autoRefresh || !orgId) return
+    if (!autoRefresh || !workspaceId) return
     const interval = setInterval(fetchLogs, 3000)
     return () => clearInterval(interval)
-  }, [autoRefresh, orgId, fetchLogs])
+  }, [autoRefresh, workspaceId, fetchLogs])
 
   const filtered = filter === "ALL"
     ? logs
@@ -117,7 +117,7 @@ export default function LogsPage({ params }: { params: Promise<{ agentId: string
     URL.revokeObjectURL(url)
   }, [logs, agentId])
 
-  if (orgLoading || loading) {
+  if (wsLoading || loading) {
     return <LogsSkeleton />
   }
 

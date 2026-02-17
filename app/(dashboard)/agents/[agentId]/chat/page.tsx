@@ -7,10 +7,10 @@ import { redirect } from "next/navigation"
 
 export default async function ChatPage({ params, searchParams }: {
   params: Promise<{ agentId: string }>
-  searchParams: Promise<{ session?: string; org_id?: string }>
+  searchParams: Promise<{ session?: string; workspace_id?: string }>
 }) {
   const { agentId } = await params
-  const { session: sessionId, org_id: orgId } = await searchParams
+  const { session: sessionId, workspace_id: workspaceId } = await searchParams
 
   const authSession = await auth()
   if (!authSession?.user?.id) redirect("/login")
@@ -28,9 +28,9 @@ export default async function ChatPage({ params, searchParams }: {
       agent = { id: found.id, name: found.name, cli_adapter: String(found.cli_adapter) }
     }
 
-    if (agent && orgId) {
-      sessions = await prisma.conversationSession.findMany({
-        where: { agent_id: agentId, org_id: orgId },
+    if (agent && workspaceId) {
+      sessions = await prisma.chat.findMany({
+        where: { agent_id: agentId, workspace_id: workspaceId },
         select: { id: true, title: true, status: true },
         orderBy: { started_at: "desc" },
         take: 20,
@@ -65,7 +65,7 @@ export default async function ChatPage({ params, searchParams }: {
           </Button>
         )}
         <Button variant="outline" size="sm" className="gap-1.5 text-xs" asChild>
-          <a href={`/agents/${agentId}/chat?org_id=${orgId ?? ""}`}>
+          <a href={`/agents/${agentId}/chat?workspace_id=${workspaceId ?? ""}`}>
             <Plus className="h-3 w-3" /> New Session
           </a>
         </Button>

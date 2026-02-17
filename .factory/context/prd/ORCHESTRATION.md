@@ -1211,4 +1211,182 @@ Coordinator (neni — mala firma)
 
 ---
 
+## 14. HUMAN-IN-THE-LOOP (APPROVAL FLOW)
+
+### 14.1 Trust Levels
+
+Kazdy agent ma konfigurovatelny **Trust Level** ktery urcuje kdy se musi ptat na schvaleni:
+
+| Level | Chovani | Popis |
+|---|---|---|
+| `LOW` | Auto-approve vse | Trusted agent, rutinni ukoly. Zadne preruseni. |
+| `MEDIUM` (default) | Approve destructivni akce | Default pro nove agenty. Bezpecny zaklad. |
+| `HIGH` | Approve kazdou akci | Testovani, nebezpecne prostredi, novy agent. |
+| `CUSTOM` | Per-action pravidla | Pokrocili uzivatele, firewall-like rules. |
+
+**MEDIUM pravidla (default):**
+```
+Auto-approve:
+  ✅ file_read (cokoli)
+  ✅ file_write do /output/
+  ✅ web_search
+  ✅ grep, ls, cat
+  ✅ git status, git diff, git log
+
+Require approval:
+  ⚠️ git push
+  ⚠️ external API call (mimo whitelist)
+  ⚠️ file delete mimo /output/
+  ⚠️ bash s sudo
+  ⚠️ curl/wget na neznamy endpoint
+
+Block always:
+  🚫 network access mimo whitelist
+  🚫 eskalace na root
+  🚫 pristup mimo /workspace/ a /output/
+```
+
+### 14.2 Approval Flow
+
+```
+Agent vola tool
+    ↓
+crewshipd zkontroluje trust level pravidla
+    ↓
+Vyzaduje approval? ──── NE ──→ Provede se
+    ↓ ANO
+Agent se pozastavi (status: AWAITING_APPROVAL)
+    ↓
+crewshipd posle approval request do VSECH kanalu:
+    ├── Crewship UI chat (vzdy, default)
+    ├── Messaging kanal (Discord/Telegram/Slack/WhatsApp)
+    ├── Email (SMTP)
+    └── Webhook (custom endpoint)
+    ↓
+Uzivatel odpovi v JAKEMKOLI kanalu
+    ↓
+APPROVED → agent pokracuje
+REJECTED → agent se zastavi, dostane error message
+TIMEOUT (30 min default) → auto-reject
+```
+
+### 14.3 Approval v kontextu orchestrace
+
+Kdyz Lead deleguje na agenta a agent narazí na approval:
+- Agent se pozastavi → Lead je informovan ("Agent Bob ceka na schvaleni")
+- Lead NEMUZE schvalit za uzivatele (bezpecnostni omezeni)
+- Uzivatel schvali → agent pokracuje → Lead dostane vysledek
+- Uzivatel odmitne → Lead dostane error → muze zkusit alternativni pristup
+
+### 14.4 Konfigurace (DB)
+
+```prisma
+model Agent {
+  // ... existujici pole ...
+  trust_level    String  @default("MEDIUM")  // LOW | MEDIUM | HIGH | CUSTOM
+  // CUSTOM rules ulozeny v JSON sloupci nebo samostatne tabulce
+}
+```
+
+---
+
+## 15. CHANNEL GATEWAY (MESSAGING)
+
+### 15.1 Architektura
+
+Messaging kanaly jsou **opt-in modul v crewshipd**, NE skills.
+Messaging session musi byt persistent long-running process s otevrenymi connections.
+Skill je ephemeral. Gateway musi bezet non-stop a routovat zpravy ke spravnym agentum.
+
+**Inspirace:** OpenClaw Gateway — centralni daemon co vlastni vsechny messaging
+sessions (WhatsApp pres Baileys, Telegram pres grammY, Slack, Discord).
+Crewship integruje tento pattern do existujiciho crewshipd procesu.
+
+```
+crewshipd (Go service)
+  ├── WebSocket gateway (existujici — browser ↔ agent)
+  ├── Docker orchestrator (existujici)
+  └── Channel Gateway (opt-in, Phase 2)
+        ├── ChannelProvider interface
+        ├── Discord   (discordgo)
+        ├── Telegram   (go-telegram-bot-api)
+        ├── Slack      (slack-go)
+        ├── WhatsApp   (whatsmeow — Go reimpl of Baileys, Phase 2B)
+        └── Custom webhook (incoming/outgoing)
+```
+
+### 15.2 Message Routing
+
+```
+Incoming zprava z kanalu (napr. Telegram):
+1. Channel Gateway prijme zpravu
+2. Identifikuje odesilatele (phone/user mapping → Crewship user)
+3. Parsuje target: "@bob analyse this" → agent "bob"
+   nebo routuje na crew lead (default)
+4. Vytvori/najde chat session
+5. Posle zpravu do crewshipd → Docker exec → agent
+6. Agent odpovi → crewshipd → Channel Gateway → zpet do kanalu
+```
+
+### 15.3 Approval pres messaging
+
+```
+Agent Bob pozaduje schvaleni (git push)
+  → crewshipd vytvori approval request
+  → Posle do Crewship UI + Telegram (pokud nakonfigurovano)
+  
+Telegram zprava:
+  "🔔 Agent Bob ceka na schvaleni:
+   Akce: git push origin main
+   Crew: Development
+   
+   Odpovezte: /approve nebo /reject"
+
+Uzivatel odpovi /approve → propagace do crewshipd → Bob pokracuje
+```
+
+### 15.4 Proc ne skill
+
+| Aspekt | Skill (ephemeral) | Gateway modul (persistent) |
+|---|---|---|
+| Lifecycle | Spusti se → udela praci → skonci | Bezi non-stop s crewshipd |
+| WA session | Nova session kazdy run (QR scan) | Jedna session, perzistentni |
+| Message routing | Agent sam routuje | crewshipd routuje centralne |
+| Multi-agent | 1 skill = 1 agent | Gateway routuje na libovolneho agenta |
+| Approval | Nelze (skill neposloucha) | Gateway aktivne posloucha odpovedi |
+
+---
+
+## 16. CREWSHIP CONNECT (CROSS-WORKSPACE, Phase 3)
+
+### 16.1 Vize
+
+Workspaces mohou komunikovat navzajem pres zabezpecene webhooky.
+Priklad: Pavel ma osobniho AI asistenta → posle webhook na workspace zubare → objedna termin.
+
+### 16.2 Trust Model
+
+```
+Workspace A (Pavel) → webhook → Workspace B (Zubar)
+                        ↓
+Trust vyzaduje:
+  1. Oba workspaces se musi "propojit" (mutual trust — obastranny souhlas)
+  2. Podepsane zpravy (JWT/HMAC s workspace secret)
+  3. Rate limiting (max N zprav/min)
+  4. Sandbox: prijaty webhook prochazi stejnym approval flow
+  5. Scope: co muze externi workspace pozadovat (jen konkretni crew/agent)
+```
+
+### 16.3 Varianty implementace
+
+| Varianta | Pro cloud tier | Pro self-hosted |
+|---|---|---|
+| **Centralni registry (crewship.ai)** | Discovery, trust broker | Vyzaduje cloud |
+| **Federation (ActivityPub model)** | Decentralizovane | Komplexni, ale free |
+| **Primo webhook** | Jednoduche | Nutny public endpoint |
+
+**Doporuceni:** Phase 3, zacit s primym webhook (nejjednodussi), cloud tier prida registry.
+
+---
+
 *Tento dokument je zivý — bude se aktualizovat s kazdou novou iteraci implementace.*
