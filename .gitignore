@@ -32,6 +32,9 @@ coverage/
 # Prisma
 lib/generated/
 
+# SQLite
+*.db
+
 # Go
 /crewshipd
 *.exe

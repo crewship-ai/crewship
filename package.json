@@ -24,7 +24,7 @@
     "@auth/prisma-adapter": "^2.11.1",
     "@casl/ability": "^6.8.0",
     "@casl/prisma": "^1.6.1",
-    "@prisma/adapter-pg": "^7.4.0",
+    "@prisma/adapter-better-sqlite3": "^7.4.0",
     "@prisma/client": "^7.4.0",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@streamdown/cjk": "^1.0.2",
@@ -46,7 +46,6 @@
     "next": "^16.1.6",
     "next-auth": "5.0.0-beta.30",
     "next-themes": "^0.4.6",
-    "pg": "^8.18.0",
     "radix-ui": "^1.4.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
@@ -59,12 +58,14 @@
     "zod": "^4.3.6",
     "zustand": "^5.0.11"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3"]
+  },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^25.2.3",
-    "@types/pg": "^8.16.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^8.55.0",

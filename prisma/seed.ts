@@ -1,15 +1,12 @@
 import { randomBytes } from "crypto"
 
 import { hashSync } from "bcryptjs"
-import pg from "pg"
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3"
 
 import { PrismaClient } from "../lib/generated/prisma/client.js"
-import { PrismaPg } from "@prisma/adapter-pg"
 import { encrypt } from "../lib/encryption.js"
 
-const connectionString = process.env.DATABASE_URL ?? ""
-
-if (!connectionString) {
+if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL is not set")
   process.exit(1)
 }
@@ -19,8 +16,7 @@ if (!process.env.ENCRYPTION_KEY) {
   process.exit(1)
 }
 
-const pool = new pg.Pool({ connectionString })
-const adapter = new PrismaPg(pool)
+const adapter = new PrismaBetterSqlite3({ url: process.env.DATABASE_URL })
 const prisma = new PrismaClient({ adapter })
 
 async function main() {
@@ -54,7 +50,7 @@ async function main() {
   })
   console.log(`  ✓ Workspace: ${org.name} (${org.id})`)
 
-  // Step 3: OrgMember (link user to org as OWNER)
+  // Step 3: WorkspaceMember (link user to workspace as OWNER)
   console.log("🔗 Linking user to workspace...")
   await prisma.workspaceMember.upsert({
     where: {
@@ -69,7 +65,7 @@ async function main() {
   })
   console.log(`  ✓ ${user.email} → ${org.name} (OWNER)`)
 
-  // Step 4: Teams
+  // Step 4: Crews
   console.log("👥 Seeding crews...")
   const engineering = await prisma.crew.upsert({
     where: { uq_crew_slug: { workspace_id: org.id, slug: "engineering" } },
@@ -198,8 +194,7 @@ async function main() {
       display_name: "Coding Assistant",
       category: "CODING",
       source: "BUNDLED",
-      description:
-        "Code review, refactoring, debugging, test writing",
+      description: "Code review, refactoring, debugging, test writing",
       icon: "💻",
     },
   })
@@ -212,8 +207,7 @@ async function main() {
       display_name: "Web Researcher",
       category: "DATA",
       source: "BUNDLED",
-      description:
-        "Web search, data extraction, competitive analysis",
+      description: "Web search, data extraction, competitive analysis",
       icon: "🔍",
     },
   })
@@ -226,8 +220,7 @@ async function main() {
       display_name: "DevOps Helper",
       category: "DEVOPS",
       source: "BUNDLED",
-      description:
-        "Infrastructure monitoring, deployment, CI/CD",
+      description: "Infrastructure monitoring, deployment, CI/CD",
       icon: "🔧",
     },
   })
@@ -411,5 +404,4 @@ main()
   })
   .finally(async () => {
     await prisma.$disconnect()
-    await pool.end()
   })

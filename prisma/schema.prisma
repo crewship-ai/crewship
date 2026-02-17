@@ -1,6 +1,11 @@
 // Crewship -- Prisma Schema (source of truth)
 // Full spec: .factory/context/prd/DATABASE.md
 // Naming: .factory/context/NAMING.md
+//
+// DUAL PROVIDER: SQLite (default) + PostgreSQL (opt-in)
+// Set DB_PROVIDER env var to "postgresql" for PostgreSQL mode.
+// SQLite: DATABASE_URL="file:~/.crewship/crewship.db"
+// PostgreSQL: DATABASE_URL="postgresql://user:pass@host/db"
 
 generator client {
   provider = "prisma-client"
@@ -8,11 +13,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
 }
 
 // ============================================================
-// ENUMS
+// ENUMS — SQLite stores as strings, PostgreSQL as native enums
 // ============================================================
 
 enum OrgRole {
@@ -171,14 +176,14 @@ enum CredentialStatus {
 // ============================================================
 
 model User {
-  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id              String    @id @default(cuid())
   email           String    @unique
   full_name       String?
   avatar_url      String?
   hashed_password String?
-  email_verified  DateTime? @db.Timestamptz
-  created_at      DateTime  @default(now()) @db.Timestamptz
-  updated_at      DateTime  @default(now()) @updatedAt @db.Timestamptz
+  email_verified  DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @default(now()) @updatedAt
 
   accounts              Account[]
   sessions              Session[]
@@ -201,17 +206,17 @@ model User {
 // ============================================================
 
 model Account {
-  id                String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId            String  @db.Uuid
+  id                String  @id @default(cuid())
+  userId            String
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -221,9 +226,9 @@ model Account {
 }
 
 model Session {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id           String   @id @default(cuid())
   sessionToken String   @unique
-  userId       String   @db.Uuid
+  userId       String
   expires      DateTime
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -241,17 +246,17 @@ model VerificationToken {
 }
 
 // ============================================================
-// 2. WORKSPACE (formerly Organization)
+// 2. WORKSPACE
 // ============================================================
 
 model Workspace {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id         String    @id @default(cuid())
   name       String
   slug       String    @unique
   logo_url   String?
-  created_at DateTime  @default(now()) @db.Timestamptz
-  updated_at DateTime  @default(now()) @updatedAt @db.Timestamptz
-  deleted_at DateTime? @db.Timestamptz
+  created_at DateTime  @default(now())
+  updated_at DateTime  @default(now()) @updatedAt
+  deleted_at DateTime?
 
   default_container_ttl_hours Int?
 
@@ -271,16 +276,16 @@ model Workspace {
 }
 
 // ============================================================
-// 3. WORKSPACE MEMBER (formerly OrganizationMember)
+// 3. WORKSPACE MEMBER
 // ============================================================
 
 model WorkspaceMember {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id String   @db.Uuid
-  user_id      String   @db.Uuid
+  id           String   @id @default(cuid())
+  workspace_id String
+  user_id      String
   role         OrgRole  @default(MEMBER)
-  created_at   DateTime @default(now()) @db.Timestamptz
-  updated_at   DateTime @default(now()) @updatedAt @db.Timestamptz
+  created_at   DateTime @default(now())
+  updated_at   DateTime @default(now()) @updatedAt
 
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -292,19 +297,19 @@ model WorkspaceMember {
 }
 
 // ============================================================
-// 4. WORKSPACE INVITATION (formerly OrganizationInvitation)
+// 4. WORKSPACE INVITATION
 // ============================================================
 
 model WorkspaceInvitation {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id String    @db.Uuid
+  id           String    @id @default(cuid())
+  workspace_id String
   email        String
   role         OrgRole   @default(MEMBER)
-  invited_by   String    @db.Uuid
-  token        String    @unique @default(dbgenerated("gen_random_uuid()"))
-  expires_at   DateTime  @db.Timestamptz
-  accepted_at  DateTime? @db.Timestamptz
-  created_at   DateTime  @default(now()) @db.Timestamptz
+  invited_by   String
+  token        String    @unique @default(cuid())
+  expires_at   DateTime
+  accepted_at  DateTime?
+  created_at   DateTime  @default(now())
 
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   inviter   User      @relation("InvitedBy", fields: [invited_by], references: [id])
@@ -316,20 +321,20 @@ model WorkspaceInvitation {
 }
 
 // ============================================================
-// 5. CREW (formerly Team)
+// 5. CREW
 // ============================================================
 
 model Crew {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id String    @db.Uuid
+  id           String    @id @default(cuid())
+  workspace_id String
   name         String
   slug         String
   description  String?
-  color        String?   @db.VarChar(7)
-  icon         String?   @db.VarChar(10)
-  created_at   DateTime  @default(now()) @db.Timestamptz
-  updated_at   DateTime  @default(now()) @updatedAt @db.Timestamptz
-  deleted_at   DateTime? @db.Timestamptz
+  color        String?
+  icon         String?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+  deleted_at   DateTime?
 
   container_ttl_hours Int?
   container_memory_mb Int   @default(4096)
@@ -346,14 +351,14 @@ model Crew {
 }
 
 // ============================================================
-// 6. CREW MEMBER (formerly TeamMember)
+// 6. CREW MEMBER
 // ============================================================
 
 model CrewMember {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  crew_id    String   @db.Uuid
-  user_id    String   @db.Uuid
-  created_at DateTime @default(now()) @db.Timestamptz
+  id         String   @id @default(cuid())
+  crew_id    String
+  user_id    String
+  created_at DateTime @default(now())
 
   crew Crew @relation(fields: [crew_id], references: [id], onDelete: Cascade)
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
@@ -369,9 +374,9 @@ model CrewMember {
 // ============================================================
 
 model Agent {
-  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  crew_id         String?     @db.Uuid
-  workspace_id    String      @db.Uuid
+  id              String      @id @default(cuid())
+  crew_id         String?
+  workspace_id    String
   name            String
   slug            String
   description     String?
@@ -381,16 +386,16 @@ model Agent {
   cli_adapter     CLIAdapter  @default(CLAUDE_CODE)
   llm_provider    LLMProvider?
   llm_model       String?
-  system_prompt   String?     @db.Text
+  system_prompt   String?
   temperature     Float       @default(0.7)
   max_tokens      Int?
   timeout_seconds Int         @default(1800)
   tool_profile    ToolProfile @default(CODING)
   memory_enabled  Boolean     @default(false)
   webhook_secret  String?
-  created_at      DateTime    @default(now()) @db.Timestamptz
-  updated_at      DateTime    @default(now()) @updatedAt @db.Timestamptz
-  deleted_at      DateTime?   @db.Timestamptz
+  created_at      DateTime    @default(now())
+  updated_at      DateTime    @default(now()) @updatedAt
+  deleted_at      DateTime?
 
   delegation_timeout_s   Int?
   max_delegation_depth   Int? @default(3)
@@ -415,23 +420,23 @@ model Agent {
 }
 
 // ============================================================
-// 7b. ASSIGNMENT (formerly DelegationLog, Phase 2)
+// 7b. ASSIGNMENT (Phase 2)
 // ============================================================
 
 model Assignment {
-  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id    String           @db.Uuid
-  chat_id         String           @db.Uuid
-  assigned_by_id  String           @db.Uuid
-  assigned_to_id  String           @db.Uuid
-  task            String           @db.Text
+  id              String           @id @default(cuid())
+  workspace_id    String
+  chat_id         String
+  assigned_by_id  String
+  assigned_to_id  String
+  task            String
   status          AssignmentStatus @default(PENDING)
-  started_at      DateTime?        @db.Timestamptz
-  finished_at     DateTime?        @db.Timestamptz
-  result_summary  String?          @db.Text
-  error_message   String?          @db.Text
+  started_at      DateTime?
+  finished_at     DateTime?
+  result_summary  String?
+  error_message   String?
   group_id        String?
-  created_at      DateTime         @default(now()) @db.Timestamptz
+  created_at      DateTime         @default(now())
 
   workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   chat         Chat      @relation(fields: [chat_id], references: [id])
@@ -450,11 +455,11 @@ model Assignment {
 // ============================================================
 
 model Skill {
-  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id            String        @id @default(cuid())
   name          String        @unique
   slug          String        @unique
   display_name  String
-  description   String?       @db.Text
+  description   String?
   version       String        @default("1.0.0")
   author        String?
   license       String?       @default("MIT")
@@ -462,10 +467,10 @@ model Skill {
   source        SkillSource   @default(CUSTOM)
   config_schema Json?
   tool_definitions Json?
-  content       String?       @db.Text
-  icon          String?       @db.VarChar(10)
-  created_at    DateTime      @default(now()) @db.Timestamptz
-  updated_at    DateTime      @default(now()) @updatedAt @db.Timestamptz
+  content       String?
+  icon          String?
+  created_at    DateTime      @default(now())
+  updated_at    DateTime      @default(now()) @updatedAt
 
   mcp_server_command    String?
   mcp_server_image      String?
@@ -481,15 +486,15 @@ model Skill {
   downloads         Int                @default(0)
   rating_avg        Float?
   rating_count      Int                @default(0)
-  tags              String[]
+  tags              Json?              @default("[]")
   featured          Boolean            @default(false)
   oci_image         String?
   oci_digest        String?
   sbom_url          String?
-  allowed_domains   String[]
+  allowed_domains   Json?              @default("[]")
   pricing_tier      SkillPricing       @default(FREE)
   price_monthly     Int?
-  author_id         String?            @db.Uuid
+  author_id         String?
   revenue_share_pct Int?               @default(70)
   changelog         Json?
 
@@ -509,14 +514,14 @@ model Skill {
 // ============================================================
 
 model SkillReview {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  skill_id   String   @db.Uuid
-  user_id    String   @db.Uuid
+  id         String   @id @default(cuid())
+  skill_id   String
+  user_id    String
   rating     Int
   title      String?
-  body       String?  @db.Text
-  created_at DateTime @default(now()) @db.Timestamptz
-  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz
+  body       String?
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
 
   skill Skill @relation(fields: [skill_id], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [user_id], references: [id])
@@ -531,12 +536,12 @@ model SkillReview {
 // ============================================================
 
 model AgentSkill {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  agent_id   String   @db.Uuid
-  skill_id   String   @db.Uuid
+  id         String   @id @default(cuid())
+  agent_id   String
+  skill_id   String
   config     Json?
   enabled    Boolean  @default(true)
-  created_at DateTime @default(now()) @db.Timestamptz
+  created_at DateTime @default(now())
 
   agent Agent @relation(fields: [agent_id], references: [id], onDelete: Cascade)
   skill Skill @relation(fields: [skill_id], references: [id], onDelete: Cascade)
@@ -550,29 +555,29 @@ model AgentSkill {
 // ============================================================
 
 model Credential {
-  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id    String             @db.Uuid
-  crew_id         String?            @db.Uuid
+  id              String             @id @default(cuid())
+  workspace_id    String
+  crew_id         String?
   name            String
   description     String?
-  encrypted_value String             @db.Text
+  encrypted_value String
   scope           CredentialScope    @default(WORKSPACE)
   type            CredentialType     @default(SECRET)
   provider        CredentialProvider @default(NONE)
   status          CredentialStatus   @default(ACTIVE)
 
-  encrypted_refresh_token String?    @db.Text
-  token_expires_at        DateTime?  @db.Timestamptz
+  encrypted_refresh_token String?
+  token_expires_at        DateTime?
   account_label           String?
   account_email           String?
 
-  last_checked_at DateTime?          @db.Timestamptz
+  last_checked_at DateTime?
   last_error      String?
 
-  created_by      String             @db.Uuid
-  created_at      DateTime           @default(now()) @db.Timestamptz
-  updated_at      DateTime           @default(now()) @updatedAt @db.Timestamptz
-  deleted_at      DateTime?          @db.Timestamptz
+  created_by      String
+  created_at      DateTime           @default(now())
+  updated_at      DateTime           @default(now()) @updatedAt
+  deleted_at      DateTime?
 
   workspace         Workspace         @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   crew              Crew?             @relation(fields: [crew_id], references: [id], onDelete: SetNull)
@@ -591,12 +596,12 @@ model Credential {
 // ============================================================
 
 model AgentCredential {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  agent_id      String   @db.Uuid
-  credential_id String   @db.Uuid
+  id            String   @id @default(cuid())
+  agent_id      String
+  credential_id String
   env_var_name  String
   priority      Int      @default(0)
-  created_at    DateTime @default(now()) @db.Timestamptz
+  created_at    DateTime @default(now())
 
   agent      Agent      @relation(fields: [agent_id], references: [id], onDelete: Cascade)
   credential Credential @relation(fields: [credential_id], references: [id], onDelete: Cascade)
@@ -607,23 +612,23 @@ model AgentCredential {
 }
 
 // ============================================================
-// 12. CHAT (formerly ConversationSession, metadata only, messages in JSONL)
+// 12. CHAT (metadata only, messages in JSONL)
 // ============================================================
 
 model Chat {
-  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  agent_id      String        @db.Uuid
-  workspace_id  String        @db.Uuid
-  created_by    String?       @db.Uuid
+  id            String        @id @default(cuid())
+  agent_id      String
+  workspace_id  String
+  created_by    String?
   title         String?
   mode          SessionMode   @default(CHAT)
   status        SessionStatus @default(ACTIVE)
   message_count Int           @default(0)
   jsonl_path    String?
-  started_at    DateTime      @default(now()) @db.Timestamptz
-  ended_at      DateTime?     @db.Timestamptz
-  created_at    DateTime      @default(now()) @db.Timestamptz
-  updated_at    DateTime      @default(now()) @updatedAt @db.Timestamptz
+  started_at    DateTime      @default(now())
+  ended_at      DateTime?
+  created_at    DateTime      @default(now())
+  updated_at    DateTime      @default(now()) @updatedAt
 
   agent       Agent        @relation(fields: [agent_id], references: [id], onDelete: Cascade)
   workspace   Workspace    @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
@@ -642,19 +647,19 @@ model Chat {
 // ============================================================
 
 model AgentRun {
-  id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  agent_id      String     @db.Uuid
-  chat_id       String?    @db.Uuid
-  workspace_id  String     @db.Uuid
-  triggered_by  String?    @db.Uuid
+  id            String     @id @default(cuid())
+  agent_id      String
+  chat_id       String?
+  workspace_id  String
+  triggered_by  String?
   trigger_type  RunTrigger @default(USER)
   status        RunStatus  @default(PENDING)
-  started_at    DateTime?  @db.Timestamptz
-  finished_at   DateTime?  @db.Timestamptz
-  error_message String?    @db.Text
+  started_at    DateTime?
+  finished_at   DateTime?
+  error_message String?
   exit_code     Int?
   metadata      Json?
-  created_at    DateTime   @default(now()) @db.Timestamptz
+  created_at    DateTime   @default(now())
 
   agent     Agent      @relation(fields: [agent_id], references: [id], onDelete: Cascade)
   chat      Chat?      @relation(fields: [chat_id], references: [id])
@@ -672,16 +677,16 @@ model AgentRun {
 // ============================================================
 
 model AuditLog {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id String  @db.Uuid
-  user_id     String?  @db.Uuid
+  id          String   @id @default(cuid())
+  workspace_id String
+  user_id     String?
   action      String
   entity_type String
-  entity_id   String?  @db.Uuid
+  entity_id   String?
   metadata    Json?
-  ip_address  String?  @db.VarChar(45)
+  ip_address  String?
   user_agent  String?
-  created_at  DateTime @default(now()) @db.Timestamptz
+  created_at  DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   user      User?     @relation(fields: [user_id], references: [id])
@@ -698,17 +703,17 @@ model AuditLog {
 // ============================================================
 
 model Subscription {
-  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id           String             @unique @db.Uuid
-  plan_id                String             @db.Uuid
+  id                     String             @id @default(cuid())
+  workspace_id           String             @unique
+  plan_id                String
   stripe_customer_id     String?            @unique
   stripe_subscription_id String?            @unique
   status                 SubscriptionStatus @default(ACTIVE)
-  current_period_start   DateTime?          @db.Timestamptz
-  current_period_end     DateTime?          @db.Timestamptz
-  cancel_at              DateTime?          @db.Timestamptz
-  created_at             DateTime           @default(now()) @db.Timestamptz
-  updated_at             DateTime           @default(now()) @updatedAt @db.Timestamptz
+  current_period_start   DateTime?
+  current_period_end     DateTime?
+  cancel_at              DateTime?
+  created_at             DateTime           @default(now())
+  updated_at             DateTime           @default(now()) @updatedAt
 
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   plan      Plan      @relation(fields: [plan_id], references: [id])
@@ -721,7 +726,7 @@ model Subscription {
 // ============================================================
 
 model Plan {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id              String   @id @default(cuid())
   tier            PlanTier @unique
   display_name    String
   stripe_price_id String?  @unique
@@ -732,8 +737,8 @@ model Plan {
   max_members     Int
   features        Json?
   price_monthly   Int      @default(0)
-  created_at      DateTime @default(now()) @db.Timestamptz
-  updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz
+  created_at      DateTime @default(now())
+  updated_at      DateTime @default(now()) @updatedAt
 
   subscriptions Subscription[]
 
@@ -745,13 +750,13 @@ model Plan {
 // ============================================================
 
 model FeatureFlag {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id          String   @id @default(cuid())
   key         String   @unique
   description String?
   enabled     Boolean  @default(false)
   percentage  Int      @default(0)
-  created_at  DateTime @default(now()) @db.Timestamptz
-  updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
 
   overrides FeatureFlagOverride[]
 
@@ -763,11 +768,11 @@ model FeatureFlag {
 // ============================================================
 
 model FeatureFlagOverride {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  flag_id      String   @db.Uuid
-  workspace_id String   @db.Uuid
+  id           String   @id @default(cuid())
+  flag_id      String
+  workspace_id String
   enabled      Boolean
-  created_at   DateTime @default(now()) @db.Timestamptz
+  created_at   DateTime @default(now())
 
   flag      FeatureFlag @relation(fields: [flag_id], references: [id], onDelete: Cascade)
   workspace Workspace   @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
@@ -781,13 +786,13 @@ model FeatureFlagOverride {
 // ============================================================
 
 model AgentConfigHistory {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  agent_id   String   @db.Uuid
-  changed_by String   @db.Uuid
+  id         String   @id @default(cuid())
+  agent_id   String
+  changed_by String
   version    Int
   changes    Json
   snapshot   Json
-  created_at DateTime @default(now()) @db.Timestamptz
+  created_at DateTime @default(now())
 
   agent   Agent @relation(fields: [agent_id], references: [id], onDelete: Cascade)
   changer User  @relation("ChangedBy", fields: [changed_by], references: [id])

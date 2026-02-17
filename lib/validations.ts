@@ -20,7 +20,7 @@ export const updateCrewSchema = createCrewSchema.partial()
 export const createAgentSchema = z.object({
   name: z.string().min(2).max(100),
   slug: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens"),
-  crew_id: z.string().uuid(),
+  crew_id: z.string().min(1),
   description: z.string().max(1000).optional(),
   role_title: z.string().max(100).optional(),
   agent_role: z.enum(["AGENT", "LEAD", "COORDINATOR"]).default("AGENT"),
@@ -47,7 +47,7 @@ export const createCredentialSchema = z.object({
   type: z.enum(credentialTypeValues).default("SECRET"),
   provider: z.enum(credentialProviderValues).default("NONE"),
   scope: z.enum(["WORKSPACE", "CREW"]).default("WORKSPACE"),
-  crew_id: z.string().uuid().optional(),
+  crew_id: z.string().min(1).optional(),
   account_label: z.string().max(100).optional(),
   account_email: z.string().email().optional(),
   refresh_token: z.string().optional(),
