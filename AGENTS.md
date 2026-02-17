@@ -286,6 +286,22 @@ DATABASE:                  ~/.crewship/crewship.db  ← SQLite (default)
 - Use `gh pr comment` to respond to CodeRabbit or reviewers
 - Use `pnpm` (not npm/yarn) for all Node.js package management
 
+## Change Documentation (MANDATORY)
+
+Every code change MUST be documented. No exceptions.
+
+- **Before starting:** Read relevant docs in `.factory/context/` to understand current state.
+- **After every code change:** Update ALL affected documentation files immediately.
+  This includes: `AGENTS.md`, `.factory/context/architecture.md`, `.factory/context/prd/*.md`,
+  `.factory/context/TODO.md`, `.factory/context/STRATEGY-2026.md`, and any other relevant docs.
+- **What to update:** API changes → `prd/API.md`. DB changes → `prd/DATABASE.md`.
+  Security changes → `prd/SECURITY.md`. New features → `TODO.md` + `STRATEGY-2026.md` (Section 0).
+  Architecture changes → `architecture.md` + `AGENTS.md`.
+- **AGENTS.md is the most critical file** -- it is read by every AI session. Keep it accurate.
+- **STRATEGY-2026.md Section 0** ("Implementation Status") must reflect reality at all times.
+  Move items from "PLANOVANO" to "IMPLEMENTOVANO" only when fully working and tested.
+- **Commit docs together with code** -- never leave docs out of sync, even for one commit.
+
 ## What NOT To Do
 
 - Do NOT use any UI library other than shadcn/ui
