@@ -71,12 +71,22 @@ func (h *OnboardingHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := h.db.ExecContext(r.Context(),
+	res, err := h.db.ExecContext(r.Context(),
 		"UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ?",
 		time.Now().UTC().Format(time.RFC3339), user.ID)
 	if err != nil {
 		h.logger.Error("complete onboarding", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("complete onboarding rows affected", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if rows == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
 		return
 	}
 
@@ -129,9 +139,27 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Guard against duplicate onboarding
+	var alreadyCompleted bool
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT onboarding_completed FROM users WHERE id = ?", user.ID).Scan(&alreadyCompleted)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		return
+	}
+	if err != nil {
+		h.logger.Error("query onboarding status", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if alreadyCompleted {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Onboarding already completed"})
+		return
+	}
+
 	// Get user's first workspace
 	var workspaceID string
-	err := h.db.QueryRowContext(r.Context(), `
+	err = h.db.QueryRowContext(r.Context(), `
 		SELECT wm.workspace_id FROM workspace_members wm
 		WHERE wm.user_id = ? ORDER BY wm.created_at ASC LIMIT 1
 	`, user.ID).Scan(&workspaceID)
@@ -197,13 +225,14 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	if cliAdapter == "" {
 		cliAdapter = "CLAUDE_CODE"
 	}
+	llm := resolveLLMProvider(req.LlmProvider)
 	agentID := generateCUID()
 	agentSlug := makeSlug(req.AgentName)
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO agents (id, crew_id, workspace_id, name, slug, cli_adapter, llm_provider, llm_model, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, agentID, crewID, workspaceID, req.AgentName, agentSlug, cliAdapter,
-		nullableString(req.LlmProvider), nullableString(req.LlmModel), now, now)
+		llm.provider, nullableString(req.LlmModel), now, now)
 	if err != nil {
 		h.logger.Error("insert agent", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create agent"})
@@ -218,8 +247,6 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		if credName == "" {
 			credName = "API Key"
 		}
-
-		llm := resolveLLMProvider(req.LlmProvider)
 
 		encryptedValue, encErr := encryption.Encrypt(req.CredentialValue)
 		if encErr != nil {

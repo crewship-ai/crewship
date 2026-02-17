@@ -42,6 +42,7 @@ const CREW_TEMPLATES = [
   { name: "Marketing", description: "Content creation & SEO", icon: "📈" },
 ] as const
 
+/** Onboarding wizard page -- guides new users through crew, agent, and credential setup. */
 export default function OnboardingPage() {
   const router = useRouter()
   const [currentStep, setCurrentStep] = useState(0)
@@ -87,8 +88,12 @@ export default function OnboardingPage() {
     } else if (cliAdapter === "GEMINI_CLI") {
       setLlmProvider("GOOGLE")
       setCredentialName("GOOGLE_API_KEY")
+    } else if (cliAdapter === "OPENCODE") {
+      setLlmProvider("ANTHROPIC")
+      setCredentialName("ANTHROPIC_API_KEY")
     } else {
-      setCredentialName("API Key")
+      setLlmProvider("ANTHROPIC")
+      setCredentialName("ANTHROPIC_API_KEY")
     }
   }, [cliAdapter])
 

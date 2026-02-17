@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
@@ -83,7 +84,9 @@ func cmdDoctor() {
 	fmt.Printf("  Go runtime:    %s\n", runtime.Version())
 	fmt.Printf("  OS/Arch:       %s/%s\n", runtime.GOOS, runtime.GOARCH)
 
-	detected, detectErr := docker.Detect(context.Background())
+	doctorCtx, doctorCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer doctorCancel()
+	detected, detectErr := docker.Detect(doctorCtx)
 	if detectErr == nil {
 		label := detected.Runtime
 		if detected.Version != "" {
@@ -122,8 +125,8 @@ func cmdDoctor() {
 	}
 }
 
-func checkDocker() bool {
-	_, err := docker.Detect(context.Background())
+func checkDocker(ctx context.Context) bool {
+	_, err := docker.Detect(ctx)
 	return err == nil
 }
 
@@ -134,7 +137,9 @@ func cmdStart(args []string) {
 	noDocker := fs.Bool("no-docker", false, "start without Docker (dashboard only, agents cannot run)")
 	fs.Parse(args)
 
-	if !*noDocker && !checkDocker() {
+	detectCtx, detectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer detectCancel()
+	if !*noDocker && !checkDocker(detectCtx) {
 		fmt.Fprintln(os.Stderr, "Error: No container runtime found.")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Crewship requires a Docker-compatible runtime to run AI agents.")
