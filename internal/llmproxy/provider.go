@@ -38,7 +38,7 @@ const (
 
 type ProviderConnection struct {
 	ID             string           `json:"id"`
-	OrgID          string           `json:"org_id"`
+	WorkspaceID          string           `json:"workspace_id"`
 	Name           string           `json:"name"`
 	Type           CredentialType   `json:"type"`
 	Provider       ProviderType     `json:"provider"`
@@ -53,7 +53,7 @@ type ProviderConnection struct {
 type TokenPool struct {
 	mu          sync.RWMutex
 	connections []ProviderConnection
-	roundRobin  map[string]int // orgID+provider -> index
+	roundRobin  map[string]int // workspaceID+provider -> index
 	logger      *slog.Logger
 }
 
@@ -72,14 +72,14 @@ func (tp *TokenPool) Update(connections []ProviderConnection) {
 }
 
 // SelectToken picks the next active token for a given org+provider using round-robin.
-func (tp *TokenPool) SelectToken(orgID string, provider ProviderType) *ProviderConnection {
+func (tp *TokenPool) SelectToken(workspaceID string, provider ProviderType) *ProviderConnection {
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
 
-	key := orgID + ":" + string(provider)
+	key := workspaceID + ":" + string(provider)
 	var candidates []int
 	for i, conn := range tp.connections {
-		if conn.OrgID == orgID && conn.Provider == provider && conn.Status == StatusActive {
+		if conn.WorkspaceID == workspaceID && conn.Provider == provider && conn.Status == StatusActive {
 			candidates = append(candidates, i)
 		}
 	}
@@ -107,12 +107,12 @@ func (tp *TokenPool) MarkStatus(connID string, status ConnectionStatus) {
 	}
 }
 
-func (tp *TokenPool) ActiveCount(orgID string, provider ProviderType) int {
+func (tp *TokenPool) ActiveCount(workspaceID string, provider ProviderType) int {
 	tp.mu.RLock()
 	defer tp.mu.RUnlock()
 	count := 0
 	for _, conn := range tp.connections {
-		if conn.OrgID == orgID && conn.Provider == provider && conn.Status == StatusActive {
+		if conn.WorkspaceID == workspaceID && conn.Provider == provider && conn.Status == StatusActive {
 			count++
 		}
 	}

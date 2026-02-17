@@ -10,7 +10,7 @@ Precti ho PRVNI, nez zacnes cokoliv delat.
 ## 1. CO JE CREWSHIP
 
 Open-source (FSL licence) platforma pro orchestraci AI agentu.
-Agenti jsou prezentovani jako **"virtualni zamestnanci"** organizovani do tymu/oddeleni.
+Agenti jsou prezentovani jako **"virtualni zamestnanci"** organizovani do crews/oddeleni.
 Cilovka: firmy od 20 do 500 lidi, ktere chteji AI automatizaci bez developera.
 
 **One-liner:** "Crewship je Linux stroj, kde pracuji AI zamestnanci. Das jim instrukce,
@@ -25,11 +25,11 @@ pristupove udaje a dovednosti. Pracuji 24/7 a rano si stahnes vysledky."
 ### Zakladni flow (chat):
 
 ```
-1. Uzivatel se prihlasi (NextAuth.js) → vidi dashboard s tymy
-2. Otevre tym "Marketing" → vidi agenty (Anna, Bob)
+1. Uzivatel se prihlasi (NextAuth.js) → vidi dashboard s crews
+2. Otevre crew "Marketing" → vidi agenty (Anna, Bob)
 3. Klikne na agenta "Anna" → otevre chat UI
 4. Napise zpravu: "Vytvor mi report o socialnich sitich za leden"
-5. Zprava jde pres WebSocket (Go service) → Go service spusti Docker exec v kontejneru tymu
+5. Zprava jde pres WebSocket (Go service) → Go service spusti Docker exec v kontejneru crew
 6. V kontejneru bezi CLI session (Claude Code / Codex CLI / Gemini CLI)
 7. Agent pouziva skills (web-scraper, csv-writer) a credentials (Twitter API key)
 8. Agent pise do /output/ → PDF report
@@ -41,7 +41,7 @@ pristupove udaje a dovednosti. Pracuji 24/7 a rano si stahnes vysledky."
 
 ```
 1. Grafana detekuje CPU > 95% na produkci
-2. Posle POST /api/v1/webhooks/{team-id}/{agent-id}/trigger s X-Webhook-Secret
+2. Posle POST /api/v1/webhooks/{crew-id}/{agent-id}/trigger s X-Webhook-Secret
 3. Go service prijme webhook, overi secret, spusti agenta
 4. SRE agent SSH do serveru, analyzuje logy, restartuje service
 5. Napise incident report do /output/
@@ -72,18 +72,18 @@ EPHEMERAL (kontejner):
 
 PERSISTENT (host filesystem):
   /output/             ← agent vysledky (reporty, kod, data)
-  /var/lib/crewship/output/{org-id}/{team-name}/{agent-name}/
-                         Kdyz se tym smaze → presune do _archived/ (NE smazat)
+  /var/lib/crewship/output/{workspace-id}/{crew-name}/{agent-name}/
+                         Kdyz se crew smaze → presune do _archived/ (NE smazat)
                          Admin muze purgovat (GDPR)
 
 LOGY (host + logrotate):
-  /var/log/crewship/teams/{team-id}/agents/{agent-id}/current.jsonl
+  /var/log/crewship/crews/{crew-id}/agents/{agent-id}/current.jsonl
                          Hodinova rotace, gzip, 30 dni retence
                          Linux logrotate — nula custom kodu
 
-KONVERZACE (host filesystem, JSONL):
-  /var/lib/crewship/conversations/{org-id}/{agent-id}/{session-id}.jsonl
-                         Kazda session = jeden JSONL soubor
+CHATS (host filesystem, JSONL):
+  /var/lib/crewship/chats/{workspace-id}/{agent-id}/{chat-id}.jsonl
+                         Kazdy chat = jeden JSONL soubor
                          Metadata (session ID, agent, cas, status) → PostgreSQL
                          Samotne zpravy → JSONL (NE v PostgreSQL)
 ```
@@ -91,8 +91,8 @@ KONVERZACE (host filesystem, JSONL):
 ### Kontejnerovy model:
 
 ```
-1 kontejner = 1 tym (ne 1 agent!)
-Agenti v tymu sdili kontejner (ale kazdy ma svuj /workspace/{agent-name}/)
+1 kontejner = 1 crew (ne 1 agent!)
+Agenti v crew sdili kontejner (ale kazdy ma svuj /workspace/{agent-name}/)
 Kontejner:
   - Non-root (UID 1001) — NIKDY root
   - --internal Docker network — bez internetu (krome LLM API allowlist)
@@ -105,9 +105,9 @@ Kontejner:
 ```
 OWNER  → vidi vse, spravuje vse, pristup k auditu
 ADMIN  → vidi vse, spravuje vse, pristup k auditu
-MANAGER → jen prirazene tymy, vytvari agenty, spravuje team credentials
-MEMBER  → jen prirazene tymy, pouziva agenty, nemuze menit
-VIEWER  → jen prirazene tymy, read-only
+MANAGER → jen prirazene crews, vytvari agenty, spravuje crew credentials
+MEMBER  → jen prirazene crews, pouziva agenty, nemuze menit
+VIEWER  → jen prirazene crews, read-only
 ```
 
 ### Klicova technologicka rozhodnuti:
@@ -118,7 +118,7 @@ VIEWER  → jen prirazene tymy, read-only
 | WebSocket | Go native | Tisice spojeni, zadna knihovna |
 | Job queue | Go channels + bbolt WAL | Zadny Redis, prezije crash |
 | Logy | JSONL + logrotate | Zadny PostgreSQL overhead, Linux nativni |
-| **Konverzace** | **JSONL soubory** | **Konzistentni s logy, lehci DB, metadata v PostgreSQL** |
+| **Chats** | **JSONL soubory** | **Konzistentni s logy, lehci DB, metadata v PostgreSQL** |
 | Auth | NextAuth.js (Auth.js v5) | Funguje s jakoukoli PostgreSQL, OAuth + credentials |
 | ORM | Prisma | Jediny pristup k DB, type-safe |
 | UI | Tailwind v4 + shadcn/ui | CSS-first config, new-york styl |
@@ -162,7 +162,7 @@ Kooperace: n8n posle webhook → Crewship agent analyzuje a jedna.
 | Feature | Popis | Proc OpenClaw nema |
 |---|---|---|
 | **Credential pooling** (CRED-07) | Vice API klicu pro stejny env var, round-robin/failover | OpenClaw = 1 klic, single user |
-| **Rate limit failover** (RUN-11) | Automaticke prepnuti klice pri 429 | OpenClaw nema pool, nemá co prepnout |
+| **Rate limit failover** (RUN-11) | Automaticke prepnuti klice pri 429 | OpenClaw nema pool, nema co prepnout |
 | **Proactive monitoring** (RUN-12) | Agent loop mode + webhooky (silnejsi nez polling) | OpenClaw monitoruje, ale jen z jednoho stroje |
 | **Cross-provider fallback** | Anthropic vycerpa → prepne na OpenAI | OpenClaw pouziva primarne Claude |
 | **Context preservation** (RUN-14) | JSONL catch-up pri key switch/restartu | OpenClaw nema key rotation |
@@ -181,7 +181,7 @@ Kooperace: n8n posle webhook → Crewship agent analyzuje a jedna.
 
 | Oblast | OpenClaw | Crewship |
 |---|---|---|
-| **RBAC** | Zadne role, single-user | 5 roli (Owner→Viewer), per-team |
+| **RBAC** | Zadne role, single-user | 5 roli (Owner→Viewer), per-crew |
 | **Audit log** | Zadny | Immutable, append-only, queryable |
 | **Container izolace** | Bezi PRIMO NA HOSTU (riziko!) | Docker kontejner, non-root, --internal network |
 | **Multi-tenant** | 1 uzivatel = 1 instance | Cela firma v jedne instanci |
@@ -189,7 +189,7 @@ Kooperace: n8n posle webhook → Crewship agent analyzuje a jedna.
 | **Credential encryption** | Config v plaintextu! | AES-256-GCM + key versioning |
 | **File output management** | Zadny /output/ koncept | Persistent output, archivace, file browser |
 | **Credential pool** | 1 API klic | Multi-key pool s failover |
-| **Team organizace** | Zadna (flat) | Tymy/oddeleni s izolaci |
+| **Crew organizace** | Zadna (flat) | Crews/oddeleni s izolaci |
 | **Security hardening** | Minimalni (no sandbox) | cap-drop ALL, read-only root, network isolation |
 
 ---
@@ -208,12 +208,12 @@ Kooperace: n8n posle webhook → Crewship agent analyzuje a jedna.
 
 - [x] **0.1** Prepsat `prd/DATABASE.md`
   - Smazat sekci 8 "Redis Schema" (cela)
-  - Smazat modely `ConversationSession` a `ConversationMessage` z Prisma schema
-  - Pridat `ConversationSession` jako metadata-only model (session_id, agent_id, org_id, title, mode, status, started_at, ended_at, message_count, jsonl_path) — samotne zpravy jsou v JSONL
+  - Smazat modely `Chat` a `ConversationMessage` z Prisma schema
+  - Pridat `Chat` jako metadata-only model (chat_id, agent_id, workspace_id, title, mode, status, started_at, ended_at, message_count, jsonl_path) — samotne zpravy jsou v JSONL
   - Smazat vsechny reference na Supabase Auth Phase 2
   - Opravit `AgentRun.triggered_by` na **nullable** (webhook/cron triggery nemaji uzivatele)
   - Pridat `webhook_secret` sloupec do modelu `Agent`
-  - Pridat `AgentCredential` constraint — credential scope musi odpovidat tymu agenta
+  - Pridat `AgentCredential` constraint — credential scope musi odpovidat crew agenta
   - Smazat Redis v docker-compose ukce
   - Aktualizovat sekci 9 (Auth) — smazat Supabase Auth adapter, nechat jen NextAuth.js
   - ~15 stale referenci k oprave
@@ -234,8 +234,8 @@ Kooperace: n8n posle webhook → Crewship agent analyzuje a jedna.
   - Smazat vsechny Redis PubSub / BullMQ reference (~30)
   - Prepsat WebSocket sekci — Go native, ne Node.js (`import { redis }`, `subscribeRedis()`)
   - Prepsat health endpoint — kontroluje DB + Go service, NE Redis
-  - Pridat webhook API endpoints (POST /api/v1/webhooks/{team-id}/{agent-id}/trigger)
-  - Pridat file API endpoints (GET /api/v1/teams/{id}/files/*, download)
+  - Pridat webhook API endpoints (POST /api/v1/webhooks/{crew-id}/{agent-id}/trigger)
+  - Pridat file API endpoints (GET /api/v1/crews/{id}/files/*, download)
   - Smazat agent status "Redis + DB fallback" — Go service drzi stav v pameti + bbolt
   - Prepsat agent start flow — ne BullMQ job, ale IPC na Go service
   - Aktualizovat architekturni diagram na 2 procesy
@@ -265,7 +265,7 @@ Kooperace: n8n posle webhook → Crewship agent analyzuje a jedna.
 
 - [x] **0.7** Prepsat `config/rate-limits.yml`
   - Smazat vsechny Advine endpointy (organizations, projects, integrations, sklik, google-ads, meta-ads...)
-  - Pridat Crewship endpointy (teams, agents, skills, credentials, webhooks)
+  - Pridat Crewship endpointy (crews, agents, skills, credentials, webhooks)
   - Smazat Vercel Cron IPs
   - Zmenit poznamku "Redis unavailable" na "Go in-memory rate limiter"
 
@@ -304,40 +304,40 @@ Kooperace: n8n posle webhook → Crewship agent analyzuje a jedna.
 ### FAZE 2: MVP features (po dokonceni Faze 1)
 
 - [ ] **2.1** Auth (NextAuth.js + Prisma adapter, login/signup pages)
-- [ ] **2.2** Organization + Team CRUD
+- [ ] **2.2** Workspace + Crew CRUD
 - [ ] **2.3** Agent CRUD + skills/credentials assignment
 - [ ] **2.4** Go WebSocket gateway
-- [ ] **2.5** Docker container lifecycle (create/start/stop per team)
+- [ ] **2.5** Docker container lifecycle (create/start/stop per crew)
 - [ ] **2.6** Chat UI + real-time streaming
 - [ ] **2.7** File browser + download
 - [ ] **2.8** Webhook ingress
 - [ ] **2.9** Credentials vault (AES-256-GCM, ENV var injection)
 - [ ] **2.10** RBAC (CASL-based, check on every API endpoint)
 - [ ] **2.11** Audit log (append-only)
-- [ ] **2.12** Dashboard (team overview, agent status, resource usage)
+- [ ] **2.12** Dashboard (crew overview, agent status, resource usage)
 
-### FAZE 2A: Crew Leader orchestrace (po MVP)
+### FAZE 2A: Lead orchestrace (po MVP)
 
-- [ ] **2A.1** AgentRole enum (WORKER/LEADER/DIRECTOR) + DB migrace
-- [ ] **2A.2** Leader designation UI (oznaceni agenta jako leadera, max 1 per team)
-- [ ] **2A.3** Auto-generated leader system prompt (kontext tymu, agenty, role)
-- [ ] **2A.4** Delegacni protokol — parsovani @delegate/@ask prikazu ze stdout v crewshipd
-- [ ] **2A.5** Leader → Worker delegace (Docker exec orchestrace v ramci kontejneru tymu)
-- [ ] **2A.6** DelegationLog tabulka + audit delegaci
-- [ ] **2A.7** Leader auto-routing (uzivatel pise do tymu → leader rozhodne komu delegovat)
-- [ ] **2A.8** Paralelni delegace (wait_group pattern pro vice workeru soucasne)
-- [ ] **2A.9** Error handling + fallback (leader reaguje na selhani workera)
-- [ ] **2A.10** Leader summary/agregace (leader shrnuje vysledky pred odeslani)
-- [ ] **2A.11** Delegacni timeline v chat UI (vizualizace delegaci)
+- [ ] **2A.1** AgentRole enum (AGENT/LEAD/COORDINATOR) + DB migrace
+- [ ] **2A.2** Lead designation UI (oznaceni agenta jako lead, max 1 per crew)
+- [ ] **2A.3** Auto-generated lead system prompt (kontext crew, agenty, role)
+- [ ] **2A.4** Assignment protokol — parsovani @assign/@ask prikazu ze stdout v crewshipd
+- [ ] **2A.5** Lead → Agent assignment (Docker exec orchestrace v ramci kontejneru crew)
+- [ ] **2A.6** Assignment tabulka + audit assignments
+- [ ] **2A.7** Lead auto-routing (uzivatel pise do crew → lead rozhodne komu assignovat)
+- [ ] **2A.8** Paralelni assignment (wait_group pattern pro vice agentu soucasne)
+- [ ] **2A.9** Error handling + fallback (lead reaguje na selhani agenta)
+- [ ] **2A.10** Lead summary/agregace (lead shrnuje vysledky pred odeslani)
+- [ ] **2A.11** Activity feed v chat UI (vizualizace assignments)
 
-### FAZE 2B: Virtual Director (po validaci leaderu)
+### FAZE 2B: Coordinator (po validaci leads)
 
-- [ ] **2B.1** Director agent role (specialni agent na urovni org, team_id = null)
-- [ ] **2B.2** Director lightweight execution (LLM call bez Docker kontejneru)
-- [ ] **2B.3** Director → Leader delegace (cross-team orchestrace)
-- [ ] **2B.4** Director auto-routing (director rozhodne ktery tym oslovit)
-- [ ] **2B.5** Cross-team agregace (director sbira odpovedi od vice tymu)
-- [ ] **2B.6** Director UI (dashboard card + dedicovany chat)
+- [ ] **2B.1** Coordinator agent role (specialni agent na urovni workspace, crew_id = null)
+- [ ] **2B.2** Coordinator lightweight execution (LLM call bez Docker kontejneru)
+- [ ] **2B.3** Coordinator → Lead assignment (cross-crew orchestrace)
+- [ ] **2B.4** Coordinator auto-routing (coordinator rozhodne kterou crew oslovit)
+- [ ] **2B.5** Cross-crew agregace (coordinator sbira odpovedi od vice crews)
+- [ ] **2B.6** Coordinator UI (dashboard card + dedicovany chat)
 
 ---
 
@@ -357,7 +357,7 @@ Kooperace: n8n posle webhook → Crewship agent analyzuje a jedna.
 | `prd/SECURITY.md` | ✅ Aktualni (v2.0) | Prepsano 2026-02-11: Go architektura, Unix socket security, webhook auth, in-memory rate limiting |
 | `prd/API.md` | ✅ Aktualni (v2.0) | Prepsano 2026-02-11: 2 procesy, IPC protokol, webhook API, file API |
 | `prd/DEPLOYMENT.md` | ✅ Aktualni (v2.0) | Prepsano 2026-02-11: smazany Redis/Vercel/Railway, Coolify deployment, 2 services |
-| `prd/AGENT-RUNTIME.md` | ✅ Aktualni (v2.0) | Prepsano 2026-02-11: Go orchestrator, Docker exec, JSONL logy, bbolt WAL, fsnotify. Aktualizovano 2026-02-13: orchestracni runtime (leader/director) |
-| `prd/ORCHESTRATION.md` | ✅ **Novy (v1.0)** | 2026-02-13: Crew Leader + Virtual Director, 3-urovnova hierarchie, delegacni protokol, industry kontext |
+| `prd/AGENT-RUNTIME.md` | ✅ Aktualni (v2.0) | Prepsano 2026-02-11: Go orchestrator, Docker exec, JSONL logy, bbolt WAL, fsnotify. Aktualizovano 2026-02-13: orchestracni runtime (lead/coordinator) |
+| `prd/ORCHESTRATION.md` | ✅ **Novy (v1.0)** | 2026-02-13: Lead + Coordinator, 3-urovnova hierarchie, assignment protokol, industry kontext |
 
 **Vsechny dokumenty jsou ted pouzitelne pro kodovani.** PRD.md a DEPENDENCIES.md maji drobne stale reference, ale klicove sekce jsou spravne.

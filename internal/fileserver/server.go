@@ -28,10 +28,10 @@ func NewServer(basePath string) *Server {
 }
 
 func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
-	teamID := r.PathValue("id")
+	crewID := r.PathValue("id")
 	subPath := r.URL.Query().Get("path")
 
-	base := filepath.Join(s.basePath, teamID)
+	base := filepath.Join(s.basePath, crewID)
 	dir := base
 	if subPath != "" {
 		dir = filepath.Join(base, filepath.Clean(subPath))
@@ -47,7 +47,7 @@ func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			writeJSON(w, http.StatusOK, map[string]any{
-				"team_id": teamID,
+				"crew_id": crewID,
 				"files":   []FileInfo{},
 			})
 			return
@@ -62,7 +62,7 @@ func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		rel, _ := filepath.Rel(filepath.Join(s.basePath, teamID), filepath.Join(dir, e.Name()))
+		rel, _ := filepath.Rel(filepath.Join(s.basePath, crewID), filepath.Join(dir, e.Name()))
 		files = append(files, FileInfo{
 			Path:    rel,
 			Name:    e.Name(),
@@ -73,16 +73,16 @@ func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"team_id": teamID,
+		"crew_id": crewID,
 		"files":   files,
 	})
 }
 
 func (s *Server) HandleFileDownload(w http.ResponseWriter, r *http.Request) {
-	teamID := r.PathValue("id")
+	crewID := r.PathValue("id")
 	filePath := r.PathValue("path")
 
-	base := filepath.Join(s.basePath, teamID)
+	base := filepath.Join(s.basePath, crewID)
 	full := filepath.Join(base, filepath.Clean(filePath))
 	rel, err := filepath.Rel(base, full)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {

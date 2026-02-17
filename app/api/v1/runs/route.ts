@@ -5,9 +5,9 @@ import { defineAbilitiesFor } from "@/lib/permissions/abilities"
 import type { OrgRole } from "@/lib/generated/prisma/client"
 
 export async function GET(req: NextRequest) {
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, parseInt(req.nextUrl.searchParams.get("page") ?? "1"))
   const limit = Math.min(100, Math.max(1, parseInt(req.nextUrl.searchParams.get("limit") ?? "50")))
 
-  const where: Record<string, unknown> = { org_id: authResult.orgId }
+  const where: Record<string, unknown> = { workspace_id: authResult.workspaceId }
 
   if (status) where.status = status
   if (agentId) where.agent_id = agentId
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
             slug: true,
             cli_adapter: true,
             llm_provider: true,
-            team: { select: { id: true, name: true, color: true } },
+            crew: { select: { id: true, name: true, color: true } },
           },
         },
         triggerer: {
@@ -64,9 +64,9 @@ export async function GET(req: NextRequest) {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
 
   const [runningCount, todayCount, failedCount] = await Promise.all([
-    prisma.agentRun.count({ where: { org_id: authResult.orgId, status: "RUNNING" } }),
-    prisma.agentRun.count({ where: { org_id: authResult.orgId, created_at: { gte: todayStart } } }),
-    prisma.agentRun.count({ where: { org_id: authResult.orgId, status: "FAILED", created_at: { gte: todayStart } } }),
+    prisma.agentRun.count({ where: { workspace_id: authResult.workspaceId, status: "RUNNING" } }),
+    prisma.agentRun.count({ where: { workspace_id: authResult.workspaceId, created_at: { gte: todayStart } } }),
+    prisma.agentRun.count({ where: { workspace_id: authResult.workspaceId, status: "FAILED", created_at: { gte: todayStart } } }),
   ])
 
   return NextResponse.json({

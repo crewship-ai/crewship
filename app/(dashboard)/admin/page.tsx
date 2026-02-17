@@ -17,11 +17,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 
 type TabKey =
-  | "overview" | "logs" | "organizations" | "users"
+  | "overview" | "logs" | "workspaces" | "users"
   | "providers" | "resources" | "networking" | "backups"
   | "gateway" | "security" | "auth" | "flags" | "ratelimits"
 
@@ -37,7 +37,7 @@ const sections: TabDef[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
   { key: "logs", label: "System Logs", icon: ScrollText },
   { type: "section", label: "ORGANIZATIONS" },
-  { key: "organizations", label: "Organizations", icon: Building },
+  { key: "workspaces", label: "Workspaces", icon: Building },
   { key: "users", label: "All Users", icon: Users },
   { type: "section", label: "INFRASTRUCTURE" },
   { key: "providers", label: "Providers", icon: Server },
@@ -53,10 +53,10 @@ const sections: TabDef[] = [
   { key: "ratelimits", label: "Rate Limits", icon: Activity },
 ]
 
-const realTabs: TabKey[] = ["overview", "organizations", "users"]
+const realTabs: TabKey[] = ["overview", "workspaces", "users"]
 
 interface Stats {
-  organizations: number
+  workspaces: number
   users: number
   agents: number
   running: number
@@ -67,7 +67,7 @@ interface AdminOrg {
   name: string
   slug: string
   created_at: string
-  _count: { members: number; agents: number; teams: number }
+  _count: { members: number; agents: number; crews: number }
 }
 
 interface AdminUser {
@@ -75,13 +75,13 @@ interface AdminUser {
   email: string
   full_name: string | null
   created_at: string
-  organization: { id: string; name: string } | null
+  workspace: { id: string; name: string } | null
   role: string | null
 }
 
 export default function AdminPage() {
   const router = useRouter()
-  const { orgId, role, loading: orgLoading } = useOrg()
+  const { workspaceId, role, loading: wsLoading } = useWorkspace()
   const [tab, setTab] = useState<TabKey>("overview")
   const [stats, setStats] = useState<Stats | null>(null)
   const [orgs, setOrgs] = useState<AdminOrg[]>([])
@@ -89,15 +89,15 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (orgLoading) return
+    if (wsLoading) return
     if (role !== "OWNER") {
       router.push("/")
       return
     }
-  }, [orgLoading, role, router])
+  }, [wsLoading, role, router])
 
   useEffect(() => {
-    if (!orgId || role !== "OWNER") return
+    if (!workspaceId || role !== "OWNER") return
 
     let cancelled = false
 
@@ -105,9 +105,9 @@ export default function AdminPage() {
       setLoading(true)
       try {
         const [statsRes, orgsRes, usersRes] = await Promise.all([
-          fetch(`/api/v1/admin/stats?org_id=${orgId}`),
-          fetch(`/api/v1/admin/organizations?org_id=${orgId}`),
-          fetch(`/api/v1/admin/users?org_id=${orgId}`),
+          fetch(`/api/v1/admin/stats?workspace_id=${workspaceId}`),
+          fetch(`/api/v1/admin/workspaces?workspace_id=${workspaceId}`),
+          fetch(`/api/v1/admin/users?workspace_id=${workspaceId}`),
         ])
 
         if (statsRes.ok && !cancelled) setStats(await statsRes.json())
@@ -122,9 +122,9 @@ export default function AdminPage() {
 
     fetchData()
     return () => { cancelled = true }
-  }, [orgId, role])
+  }, [workspaceId, role])
 
-  if (orgLoading || role !== "OWNER") {
+  if (wsLoading || role !== "OWNER") {
     return (
       <div className="p-6">
         <Skeleton className="h-8 w-48 mb-4" />
@@ -143,7 +143,7 @@ export default function AdminPage() {
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { label: "Organizations", value: stats?.organizations ?? 0 },
+              { label: "Workspaces", value: stats?.workspaces ?? 0 },
               { label: "Total Users", value: stats?.users ?? 0 },
               { label: "Total Agents", value: stats?.agents ?? 0 },
               { label: "Running", value: stats?.running ?? 0, color: "text-emerald-600" },
@@ -180,19 +180,19 @@ export default function AdminPage() {
       )
     }
 
-    if (tab === "organizations") {
+    if (tab === "workspaces") {
       return (
         <div className="space-y-4">
           <div>
-            <h3 className="text-sm font-medium">All Organizations</h3>
-            <p className="text-xs text-muted-foreground">{orgs.length} organizations on this instance</p>
+            <h3 className="text-sm font-medium">All Workspaces</h3>
+            <p className="text-xs text-muted-foreground">{orgs.length} workspaces on this instance</p>
           </div>
           <Card>
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Organization</TableHead>
+                    <TableHead>Workspace</TableHead>
                     <TableHead className="text-center">Members</TableHead>
                     <TableHead className="text-center">Agents</TableHead>
                     <TableHead className="text-center">Teams</TableHead>
@@ -215,7 +215,7 @@ export default function AdminPage() {
                       </TableCell>
                       <TableCell className="text-center text-xs">{o._count.members}</TableCell>
                       <TableCell className="text-center text-xs">{o._count.agents}</TableCell>
-                      <TableCell className="text-center text-xs">{o._count.teams}</TableCell>
+                      <TableCell className="text-center text-xs">{o._count.crews}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {new Date(o.created_at).toLocaleDateString()}
                       </TableCell>
@@ -234,7 +234,7 @@ export default function AdminPage() {
         <div className="space-y-4">
           <div>
             <h3 className="text-sm font-medium">All Users</h3>
-            <p className="text-xs text-muted-foreground">{users.length} users across all organizations</p>
+            <p className="text-xs text-muted-foreground">{users.length} users across all workspaces</p>
           </div>
           <Card>
             <CardContent className="p-0">
@@ -242,7 +242,7 @@ export default function AdminPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>User</TableHead>
-                    <TableHead>Organization</TableHead>
+                    <TableHead>Workspace</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Joined</TableHead>
                   </TableRow>
@@ -257,7 +257,7 @@ export default function AdminPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {u.organization?.name ?? "—"}
+                        {u.workspace?.name ?? "—"}
                       </TableCell>
                       <TableCell>
                         {u.role && <Badge variant="outline" className="text-[10px]">{u.role}</Badge>}

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 interface ServiceLogEntry {
   time: string
@@ -89,7 +89,7 @@ function levelColor(level: string): { badge: string; text: string } {
 
 export default function DebugPage({ params }: { params: Promise<{ agentId: string }> }) {
   const { agentId } = use(params)
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [data, setData] = useState<DebugData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -98,9 +98,9 @@ export default function DebugPage({ params }: { params: Promise<{ agentId: strin
   const [logTab, setLogTab] = useState<LogTab>("service")
 
   const fetchDebug = useCallback(async () => {
-    if (!orgId) return
+    if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/debug?org_id=${orgId}`)
+      const res = await fetch(`/api/v1/agents/${agentId}/debug?workspace_id=${workspaceId}`)
       if (!res.ok) {
         setError("Failed to load debug info")
         return
@@ -114,25 +114,25 @@ export default function DebugPage({ params }: { params: Promise<{ agentId: strin
       setLoading(false)
       setRefreshing(false)
     }
-  }, [agentId, orgId])
+  }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
     fetchDebug()
-  }, [orgId, fetchDebug])
+  }, [workspaceId, fetchDebug])
 
   useEffect(() => {
-    if (!autoRefresh || !orgId) return
+    if (!autoRefresh || !workspaceId) return
     const interval = setInterval(fetchDebug, 3000)
     return () => clearInterval(interval)
-  }, [autoRefresh, orgId, fetchDebug])
+  }, [autoRefresh, workspaceId, fetchDebug])
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true)
     fetchDebug()
   }, [fetchDebug])
 
-  if (orgLoading || loading) {
+  if (wsLoading || loading) {
     return <DebugSkeleton />
   }
 

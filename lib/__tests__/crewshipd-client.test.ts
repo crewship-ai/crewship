@@ -92,13 +92,13 @@ describe("crewshipd-client", () => {
     expect(result.ok).toBe(true)
   })
 
-  it("createSession sends POST with body", async () => {
+  it("createChat sends POST with body", async () => {
     mockHttpRequest(201, { id: "s1", status: "created" })
-    const { createSession } = await loadClient()
-    const result = await createSession({
+    const { createChat } = await loadClient()
+    const result = await createChat({
       session_id: "s1",
       agent_id: "a1",
-      org_id: "o1",
+      workspace_id: "o1",
     })
     expect(result.ok).toBe(true)
     if (result.ok) {
@@ -107,16 +107,16 @@ describe("crewshipd-client", () => {
   })
 
   it("getContainerStatus calls correct path", async () => {
-    mockHttpRequest(200, { team_id: "t1", status: "running" })
+    mockHttpRequest(200, { crew_id: "t1", status: "running" })
     const { getContainerStatus } = await loadClient()
     const result = await getContainerStatus("t1")
     expect(result.ok).toBe(true)
   })
 
-  it("getSessionMessages calls correct path", async () => {
+  it("getChatMessages calls correct path", async () => {
     mockHttpRequest(200, { session_id: "s1", messages: [] })
-    const { getSessionMessages } = await loadClient()
-    const result = await getSessionMessages("s1", 0, 50)
+    const { getChatMessages } = await loadClient()
+    const result = await getChatMessages("s1", 0, 50)
     expect(result.ok).toBe(true)
   })
 })

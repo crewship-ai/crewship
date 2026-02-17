@@ -16,9 +16,9 @@ type WebhookPayload struct {
 	RecvAt time.Time `json:"received_at"`
 }
 
-type SecretLookup func(ctx context.Context, teamID, agentID string) (string, error)
+type SecretLookup func(ctx context.Context, crewID, agentID string) (string, error)
 
-type TriggerFunc func(ctx context.Context, teamID, agentID string, payload WebhookPayload) error
+type TriggerFunc func(ctx context.Context, crewID, agentID string, payload WebhookPayload) error
 
 type Handler struct {
 	logger       *slog.Logger
@@ -40,29 +40,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	teamID := r.PathValue("teamId")
+	crewID := r.PathValue("crewId")
 	agentID := r.PathValue("agentId")
-	if teamID == "" || agentID == "" {
+	if crewID == "" || agentID == "" {
 		http.Error(w, "missing team or agent ID", http.StatusBadRequest)
 		return
 	}
 
 	providedSecret := r.Header.Get("X-Webhook-Secret")
 	if providedSecret == "" {
-		h.logger.Warn("webhook missing secret", "team_id", teamID, "agent_id", agentID)
+		h.logger.Warn("webhook missing secret", "crew_id", crewID, "agent_id", agentID)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	expectedSecret, err := h.lookupSecret(r.Context(), teamID, agentID)
+	expectedSecret, err := h.lookupSecret(r.Context(), crewID, agentID)
 	if err != nil {
-		h.logger.Error("webhook secret lookup failed", "error", err, "team_id", teamID, "agent_id", agentID)
+		h.logger.Error("webhook secret lookup failed", "error", err, "crew_id", crewID, "agent_id", agentID)
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 
 	if !ValidateSecret(providedSecret, expectedSecret) {
-		h.logger.Warn("webhook invalid secret", "team_id", teamID, "agent_id", agentID)
+		h.logger.Warn("webhook invalid secret", "crew_id", crewID, "agent_id", agentID)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -82,13 +82,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	payload.RecvAt = time.Now().UTC()
 
-	if err := h.trigger(r.Context(), teamID, agentID, payload); err != nil {
-		h.logger.Error("webhook trigger failed", "error", err, "team_id", teamID, "agent_id", agentID)
+	if err := h.trigger(r.Context(), crewID, agentID, payload); err != nil {
+		h.logger.Error("webhook trigger failed", "error", err, "crew_id", crewID, "agent_id", agentID)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	h.logger.Info("webhook triggered", "team_id", teamID, "agent_id", agentID, "event", payload.Event, "source", payload.Source)
+	h.logger.Info("webhook triggered", "crew_id", crewID, "agent_id", agentID, "event", payload.Event, "source", payload.Source)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)

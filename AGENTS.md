@@ -1,6 +1,6 @@
 # Crewship -- AI Agent Orchestration Platform
 
-> Open-source platform for managing AI "virtual employees" in teams.
+> Open-source platform for managing AI "virtual employees" in crews.
 > Brand: **Crewship** (Crew + Ship + "-ship" suffix -- triple meaning)
 > Domain: crewship.ai | GitHub: github.com/crewship-ai | npm: @crewship/*
 > GitLab: `ssh://git@gitlab.example.com:2222/development/crewship.git`
@@ -176,7 +176,7 @@ External → Webhook (Go) → Agent trigger → same flow as above
 EPHEMERAL (container):     /workspace/  ← agent scratch space, disposable
 PERSISTENT (host):         /output/     ← agent deliverables, survives everything
 LOGS (host + logrotate):   /var/log/crewship/  ← JSONL, rotated hourly
-CONVERSATIONS (host):      /var/lib/crewship/conversations/  ← JSONL per session
+CHATS (host):              /var/lib/crewship/chats/  ← JSONL per session
 ```
 
 ## Conventions
@@ -203,17 +203,17 @@ CONVERSATIONS (host):      /var/lib/crewship/conversations/  ← JSONL per sessi
 - Design tokens in `app/globals.css` via `@theme inline`
 - Responsive: mobile-first, use `md:` and `lg:` breakpoints
 - **Layout:** 3-layer — Top Toolbar (dark, full-width, h-12) + Sidebar (256px) + Main
-- **Top Toolbar:** Logo, Organization Switcher, Search (⌘K), Docs, Notifications (bell+badge), Settings, User avatar
+- **Top Toolbar:** Logo, Workspace Switcher, Search (⌘K), Docs, Notifications (bell+badge), Settings, User avatar
 - **Sidebar:** Navigation only (no logo, no user footer — both moved to toolbar)
-- **Organization Switcher:** Multi-org support, dropdown in toolbar, changes session `currentOrgId`
+- **Workspace Switcher:** Multi-workspace support, dropdown in toolbar, changes session `currentWorkspaceId`
 - **Reference:** Adapted from Advine.ai `DashboardHeader` + `DashboardSidebar` (ppc_saas_3)
 
 ### Database
 - **Prisma schema** = source of truth (19 tables defined in `.factory/context/prd/DATABASE.md`)
-- PostgreSQL for structured data ONLY (users, teams, agents, credentials, session metadata)
-- NO logs in PostgreSQL. NO conversation messages in PostgreSQL.
-- Logs → JSONL files. Conversation messages → JSONL files (one file per session).
-- Conversation session metadata (id, agent, title, status, timestamps) → PostgreSQL.
+- PostgreSQL for structured data ONLY (users, crews, agents, credentials, chat metadata)
+- NO logs in PostgreSQL. NO chat messages in PostgreSQL.
+- Logs → JSONL files. Chat messages → JSONL files (one file per session).
+- Chat metadata (id, agent, title, status, timestamps) → PostgreSQL.
 - Credential pool: agent can have MULTIPLE credentials for same env var (priority-based failover).
 
 ### Security (CRITICAL)
@@ -237,11 +237,11 @@ CONVERSATIONS (host):      /var/lib/crewship/conversations/  ← JSONL per sessi
 
 ## Roles (RBAC)
 
-| Role | See all teams | Create agents | Manage credentials | Audit access |
+| Role | See all crews | Create agents | Manage credentials | Audit access |
 |------|:---:|:---:|:---:|:---:|
 | OWNER | Yes | Yes | Yes | All |
 | ADMIN | Yes | Yes | Yes | All |
-| MANAGER | Assigned only | In assigned teams | Team-level | Team |
+| MANAGER | Assigned only | In assigned crews | Crew-level | Crew |
 | MEMBER | Assigned only | No | No | Own actions |
 | VIEWER | Assigned only | No | No | None |
 
@@ -260,7 +260,7 @@ CONVERSATIONS (host):      /var/lib/crewship/conversations/  ← JSONL per sessi
 - Do NOT use any icon library other than lucide-react
 - Do NOT use `tailwind.config.ts` (Tailwind v4 = CSS-first)
 - Do NOT store credentials in plain text
-- Do NOT store logs or conversations in PostgreSQL
+- Do NOT store logs or chats in PostgreSQL
 - Do NOT skip RBAC checks on API endpoints
 - Do NOT give containers root access
 - Do NOT create empty placeholder directories (create when needed)
@@ -294,11 +294,11 @@ CREWSHIP_STATE_PROVIDER=bbolt         # bbolt | postgres
 |---|---|
 | `prd/DATABASE.md` | Full Prisma schema (20 tables), credential pool pattern, JSONL format |
 | `prd/SECURITY.md` | Threat model, isolation layers, OWASP, credential encryption |
-| `prd/AGENT-RUNTIME.md` | Container lifecycle, Docker exec, key failover, loop modes, orchestration runtime |
-| `prd/ORCHESTRATION.md` | **Crew Leader + Virtual Director**: 3-level hierarchy, delegation protocol, industry context |
+| `prd/AGENT-RUNTIME.md` | Container lifecycle, Docker exec, key failover, loop modes, mission runtime |
+| `prd/ORCHESTRATION.md` | **Lead + Coordinator**: 3-level hierarchy, assignment protocol, industry context |
 | `prd/API.md` | REST API, IPC protocol, WebSocket, webhook API |
 | `prd/DEPLOYMENT.md` | Coolify deployment, Docker images, networking |
 | `architecture.md` | Two-process arch, data flows, container model, RBAC, agent hierarchy |
-| `business.md` | Positioning, competition (vs OpenClaw, n8n, CrewAI), orchestration differentiator |
+| `business.md` | Positioning, competition (vs OpenClaw, n8n, CrewAI), mission differentiator |
 | `TODO.md` | Product summary, OpenClaw comparison, phased task list |
 | `K8S-READINESS.md` | Provider interfaces, K8s manifests, migration path Docker→K8s |

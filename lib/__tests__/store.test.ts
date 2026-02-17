@@ -4,24 +4,24 @@ import { useAppStore } from "@/lib/store"
 describe("useAppStore", () => {
   beforeEach(() => {
     // Reset store between tests
-    useAppStore.setState({ currentOrgId: null, sidebarOpen: true })
+    useAppStore.setState({ currentWorkspaceId: null, sidebarOpen: true })
   })
 
   it("has correct initial state", () => {
     const state = useAppStore.getState()
-    expect(state.currentOrgId).toBeNull()
+    expect(state.currentWorkspaceId).toBeNull()
     expect(state.sidebarOpen).toBe(true)
   })
 
-  it("setCurrentOrgId sets org ID", () => {
-    useAppStore.getState().setCurrentOrgId("org-123")
-    expect(useAppStore.getState().currentOrgId).toBe("org-123")
+  it("setCurrentWorkspaceId sets workspace ID", () => {
+    useAppStore.getState().setCurrentWorkspaceId("workspace-123")
+    expect(useAppStore.getState().currentWorkspaceId).toBe("workspace-123")
   })
 
-  it("setCurrentOrgId clears org ID with null", () => {
-    useAppStore.getState().setCurrentOrgId("org-123")
-    useAppStore.getState().setCurrentOrgId(null)
-    expect(useAppStore.getState().currentOrgId).toBeNull()
+  it("setCurrentWorkspaceId clears workspace ID with null", () => {
+    useAppStore.getState().setCurrentWorkspaceId("workspace-123")
+    useAppStore.getState().setCurrentWorkspaceId(null)
+    expect(useAppStore.getState().currentWorkspaceId).toBeNull()
   })
 
   it("setSidebarOpen toggles sidebar", () => {

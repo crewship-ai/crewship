@@ -4,7 +4,7 @@ import { use, useState, useEffect } from "react"
 import { AlertCircle, Inbox } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 
 interface AgentRun {
   id: string
@@ -62,19 +62,19 @@ function formatRelativeTime(dateStr: string | null): string {
 
 export default function RunsPage({ params }: { params: Promise<{ agentId: string }> }) {
   const { agentId } = use(params)
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [runs, setRuns] = useState<AgentRun[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
 
     let cancelled = false
 
     async function fetchRuns() {
       try {
-        const res = await fetch(`/api/v1/agents/${agentId}/runs?org_id=${orgId}`)
+        const res = await fetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`)
         if (!res.ok) {
           if (!cancelled) setError("Failed to load runs")
           return
@@ -90,9 +90,9 @@ export default function RunsPage({ params }: { params: Promise<{ agentId: string
 
     fetchRuns()
     return () => { cancelled = true }
-  }, [agentId, orgId])
+  }, [agentId, workspaceId])
 
-  if (orgLoading || loading) {
+  if (wsLoading || loading) {
     return <RunsSkeleton />
   }
 

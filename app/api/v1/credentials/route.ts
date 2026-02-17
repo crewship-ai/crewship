@@ -14,7 +14,7 @@ const CREDENTIAL_LIST_SELECT = {
   provider: true,
   status: true,
   scope: true,
-  team_id: true,
+  crew_id: true,
   account_label: true,
   account_email: true,
   token_expires_at: true,
@@ -26,13 +26,13 @@ const CREDENTIAL_LIST_SELECT = {
 } as const
 
 export async function GET(req: NextRequest) {
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const credentials = await prisma.credential.findMany({
-    where: { org_id: authResult.orgId, deleted_at: null },
+    where: { workspace_id: authResult.workspaceId, deleted_at: null },
     select: CREDENTIAL_LIST_SELECT,
     orderBy: [{ type: "asc" }, { created_at: "desc" }],
   })
@@ -41,9 +41,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -63,20 +63,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
   }
 
-  if (parsed.data.team_id) {
-    const team = await prisma.team.findFirst({
-      where: { id: parsed.data.team_id, org_id: authResult.orgId, deleted_at: null },
+  if (parsed.data.crew_id) {
+    const team = await prisma.crew.findFirst({
+      where: { id: parsed.data.crew_id, workspace_id: authResult.workspaceId, deleted_at: null },
       select: { id: true },
     })
     if (!team) {
-      return NextResponse.json({ error: "Invalid team_id" }, { status: 400 })
+      return NextResponse.json({ error: "Invalid crew_id" }, { status: 400 })
     }
   }
 
   // Remove soft-deleted credential with same name to avoid unique constraint violation
   await prisma.credential.deleteMany({
     where: {
-      org_id: authResult.orgId,
+      workspace_id: authResult.workspaceId,
       name: parsed.data.name,
       deleted_at: { not: null },
     },
@@ -85,14 +85,14 @@ export async function POST(req: NextRequest) {
   try {
     const credential = await prisma.credential.create({
       data: {
-        org_id: authResult.orgId,
+        workspace_id: authResult.workspaceId,
         name: parsed.data.name,
         description: parsed.data.description,
         encrypted_value: encrypt(parsed.data.value),
         type: parsed.data.type,
         provider: parsed.data.provider,
         scope: parsed.data.scope,
-        team_id: parsed.data.team_id,
+        crew_id: parsed.data.crew_id,
         account_label: parsed.data.account_label,
         account_email: parsed.data.account_email,
         encrypted_refresh_token: parsed.data.refresh_token
@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
         provider: true,
         status: true,
         scope: true,
-        team_id: true,
+        crew_id: true,
         created_at: true,
       },
     })

@@ -59,8 +59,8 @@ func BuildCLICommand(req AgentRunRequest) []string {
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	env := []string{
 		"CREWSHIP_AGENT_ID=" + req.AgentID,
-		"CREWSHIP_TEAM_ID=" + req.TeamID,
-		"CREWSHIP_SESSION_ID=" + req.SessionID,
+		"CREWSHIP_CREW_ID=" + req.CrewID,
+		"CREWSHIP_CHAT_ID=" + req.ChatID,
 	}
 
 	if activeCred != nil {

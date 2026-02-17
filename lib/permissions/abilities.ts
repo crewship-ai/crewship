@@ -3,8 +3,8 @@ import type { OrgRole } from "@/lib/generated/prisma/client"
 
 type Actions = "create" | "read" | "update" | "delete" | "manage"
 type Subjects =
-  | "Organization"
-  | "Team"
+  | "Workspace"
+  | "Crew"
   | "Agent"
   | "Credential"
   | "Skill"
@@ -24,10 +24,10 @@ export function defineAbilitiesFor(role: OrgRole): AppAbility {
       break
 
     case "MANAGER":
-      can("read", "Organization")
-      can("create", "Team")
-      can("read", "Team")
-      can("update", "Team")
+      can("read", "Workspace")
+      can("create", "Crew")
+      can("read", "Crew")
+      can("update", "Crew")
       can("create", "Agent")
       can("read", "Agent")
       can("update", "Agent")
@@ -40,15 +40,15 @@ export function defineAbilitiesFor(role: OrgRole): AppAbility {
       break
 
     case "MEMBER":
-      can("read", "Organization")
-      can("read", "Team")
+      can("read", "Workspace")
+      can("read", "Crew")
       can("read", "Agent")
       can("read", "Skill")
       break
 
     case "VIEWER":
-      can("read", "Organization")
-      can("read", "Team")
+      can("read", "Workspace")
+      can("read", "Crew")
       can("read", "Agent")
       can("read", "Skill")
       break

@@ -4,16 +4,16 @@ import { prisma } from "@/lib/db"
 
 interface AuthResult {
   userId: string
-  orgId: string
+  workspaceId: string
   role: string
 }
 
 /**
- * Authenticate and authorize user for an org-scoped API request.
- * Returns user info + org role, or a NextResponse error.
+ * Authenticate and authorize user for an workspace-scoped API request.
+ * Returns user info + workspace role, or a NextResponse error.
  */
 export async function requireAuth(
-  orgId: string | null
+  workspaceId: string | null
 ): Promise<AuthResult | NextResponse> {
   const session = await auth()
 
@@ -21,13 +21,13 @@ export async function requireAuth(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  if (!orgId) {
-    return NextResponse.json({ error: "org_id is required" }, { status: 400 })
+  if (!workspaceId) {
+    return NextResponse.json({ error: "workspace_id is required" }, { status: 400 })
   }
 
-  const membership = await prisma.organizationMember.findUnique({
+  const membership = await prisma.workspaceMember.findUnique({
     where: {
-      uq_org_member: { org_id: orgId, user_id: session.user.id },
+      uq_workspace_member: { workspace_id: workspaceId, user_id: session.user.id },
     },
     select: { role: true },
   })
@@ -38,7 +38,7 @@ export async function requireAuth(
 
   return {
     userId: session.user.id,
-    orgId,
+    workspaceId,
     role: membership.role,
   }
 }
