@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
@@ -77,10 +78,8 @@ func cmdDoctor() {
 
 	allOK := true
 
-	// Go runtime
 	fmt.Printf("  Go runtime:    %s\n", runtime.Version())
 
-	// Docker
 	if checkDocker() {
 		fmt.Println("  Docker:        OK")
 	} else {
@@ -88,12 +87,17 @@ func cmdDoctor() {
 		allOK = false
 	}
 
-	// Data directories
-	for _, dir := range []string{"/tmp/crewship-data", "/tmp/crewship-logs", "/tmp/crewship-state"} {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
-			fmt.Printf("  %-14s OK\n", dir+":")
+	dataDir, err := database.DefaultDataDir()
+	if err != nil {
+		fmt.Printf("  Data dir:      ERROR (%v)\n", err)
+		allOK = false
+	} else {
+		fmt.Printf("  Data dir:      %s\n", dataDir.Root)
+		dbPath := dataDir.DatabasePath()
+		if _, err := os.Stat(dbPath); err == nil {
+			fmt.Printf("  Database:      %s (exists)\n", dbPath)
 		} else {
-			fmt.Printf("  %-14s MISSING (will be created on start)\n", dir+":")
+			fmt.Printf("  Database:      %s (will be created on start)\n", dbPath)
 		}
 	}
 
@@ -113,6 +117,7 @@ func checkDocker() bool {
 func cmdStart(args []string) {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	configPath := fs.String("config", "", "path to config file (YAML)")
+	dbURL := fs.String("db", "", "database URL (default: ~/.crewship/crewship.db)")
 	fs.Parse(args)
 
 	bootstrapLogger := logging.New("info", "json", os.Stdout)
@@ -130,8 +135,38 @@ func cmdStart(args []string) {
 	logger := slog.New(ringHandler)
 	slog.SetDefault(logger)
 
+	// Resolve database URL
+	databaseURL := *dbURL
+	if databaseURL == "" {
+		databaseURL = os.Getenv("DATABASE_URL")
+	}
+	if databaseURL == "" {
+		dataDir, err := database.DefaultDataDir()
+		if err != nil {
+			logger.Error("failed to create data directory", "error", err)
+			os.Exit(1)
+		}
+		databaseURL = dataDir.DatabaseURL()
+		cfg.Storage.BasePath = dataDir.OutputDir()
+		cfg.Storage.LogPath = dataDir.LogsDir()
+	}
+
+	// Open and migrate SQLite
+	db, err := database.Open(databaseURL)
+	if err != nil {
+		logger.Error("failed to open database", "error", err, "url", databaseURL)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	if err := database.Migrate(db.DB, logger); err != nil {
+		logger.Error("failed to run migrations", "error", err)
+		os.Exit(1)
+	}
+
 	logger.Info("crewship starting",
 		"version", version,
+		"database", db.Path(),
 		"container_provider", cfg.Container.Provider,
 		"storage_provider", cfg.Storage.Provider,
 		"state_provider", cfg.State.Provider,
