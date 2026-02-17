@@ -305,6 +305,17 @@ Agent output -- reports, code, data, exports. This is what the business cares ab
 When crew is deleted: container gone, but files moved to `_archived/` (not deleted).
 Admin can purge archives (GDPR).
 
+**Who manages directories:**
+- **crewshipd** (Go) = creates directories, bind-mounts into containers, archives on crew deletion
+- **Agent** = writes to `/output/` (inside container), which is bind mount to host `~/.crewship/output/{crew}/{agent}/`
+- **Lead** (orchestration) = does NOT have special FS access -- reads results via sidecar (HTTP GET /results)
+- **UI** = File browser displays content via crewshipd HTTP API (GET /crews/{id}/files/)
+
+**Per-agent vs per-crew isolation:**
+- `/output/{crew}/{agent}/` = per-agent (default, isolated)
+- `/output/{crew}/_shared/` = shared across agents in crew (for collaboration)
+- Landlock (Phase 2) = agent "bob" sees only `/output/{crew}/bob/` and `/output/{crew}/_shared/`, NOT `/output/{crew}/alice/`
+
 ### Logs
 
 ```
