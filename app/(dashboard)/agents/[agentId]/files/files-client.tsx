@@ -78,8 +78,8 @@ export function FilesPageClient() {
           if (!cancelled) setError("Failed to load files")
           return
         }
-        const data: FileEntry[] = await res.json()
-        if (!cancelled) setFiles(data)
+        const data = await res.json()
+        if (!cancelled) setFiles(Array.isArray(data) ? data : [])
       } catch {
         if (!cancelled) setError("Network error. Is crewshipd running?")
       } finally {

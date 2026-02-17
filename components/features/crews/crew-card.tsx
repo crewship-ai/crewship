@@ -55,11 +55,11 @@ export function CrewCard({ crew }: { crew: CrewData }) {
           <div className="mt-3 pt-3 border-t flex items-center gap-4 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Bot className="h-3 w-3" />
-              {crew._count.agents} agents
+              {crew._count?.agents ?? 0} agents
             </span>
             <span className="flex items-center gap-1">
               <Users className="h-3 w-3" />
-              {crew._count.members} members
+              {crew._count?.members ?? 0} members
             </span>
           </div>
         </CardContent>

@@ -81,8 +81,8 @@ export function RunsPageClient() {
           if (!cancelled) setError("Failed to load runs")
           return
         }
-        const data: AgentRun[] = await res.json()
-        if (!cancelled) setRuns(data)
+        const data = await res.json()
+        if (!cancelled) setRuns(Array.isArray(data) ? data : [])
       } catch {
         if (!cancelled) setError("Network error. Please try again.")
       } finally {

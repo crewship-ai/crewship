@@ -213,9 +213,9 @@ export default function AdminPage() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-center text-xs">{o._count.members}</TableCell>
-                      <TableCell className="text-center text-xs">{o._count.agents}</TableCell>
-                      <TableCell className="text-center text-xs">{o._count.crews}</TableCell>
+                      <TableCell className="text-center text-xs">{o._count?.members ?? 0}</TableCell>
+                      <TableCell className="text-center text-xs">{o._count?.agents ?? 0}</TableCell>
+                      <TableCell className="text-center text-xs">{o._count?.crews ?? 0}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {new Date(o.created_at).toLocaleDateString()}
                       </TableCell>

@@ -325,7 +325,7 @@ export function CrewDetailClient() {
               <Bot className="h-4 w-4" />
               <span className="text-xs">Agents</span>
             </div>
-            <p className="text-2xl font-bold mt-1">{crew._count.agents}</p>
+            <p className="text-2xl font-bold mt-1">{crew._count?.agents ?? 0}</p>
           </CardContent>
         </Card>
         <Card>
@@ -334,7 +334,7 @@ export function CrewDetailClient() {
               <Users className="h-4 w-4" />
               <span className="text-xs">Members</span>
             </div>
-            <p className="text-2xl font-bold mt-1">{crew._count.members}</p>
+            <p className="text-2xl font-bold mt-1">{crew._count?.members ?? 0}</p>
           </CardContent>
         </Card>
         <Card>
