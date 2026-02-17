@@ -1,0 +1,79 @@
+import { NextRequest, NextResponse } from "next/server"
+import { prisma } from "@/lib/db"
+import { requireAuth, isAuthError } from "@/lib/api-auth"
+import { defineAbilitiesFor } from "@/lib/permissions/abilities"
+import { getDebugInfo, getDebugLogs, getAgentStatus, getAgentLogs } from "@/lib/crewshipd-client"
+import type { OrgRole } from "@/lib/generated/prisma/client"
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ agentId: string }> },
+) {
+  const { agentId } = await params
+  const orgId = req.nextUrl.searchParams.get("org_id")
+
+  const authResult = await requireAuth(orgId)
+  if (isAuthError(authResult)) return authResult
+
+  const abilities = defineAbilitiesFor(authResult.role as OrgRole)
+  if (!abilities.can("manage", "Agent")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  const agent = await prisma.agent.findFirst({
+    where: { id: agentId, org_id: authResult.orgId, deleted_at: null },
+    select: { id: true, name: true, team_id: true, cli_adapter: true, status: true },
+  })
+
+  if (!agent) {
+    return NextResponse.json({ error: "Agent not found" }, { status: 404 })
+  }
+
+  const debug: Record<string, unknown> = {
+    agent: { id: agent.id, name: agent.name, cli_adapter: agent.cli_adapter, db_status: agent.status },
+    crewshipd_reachable: false,
+  }
+
+  // crewshipd comprehensive info
+  try {
+    const info = await getDebugInfo()
+    if (info.ok) {
+      debug.crewshipd = info.data
+      debug.crewshipd_reachable = true
+    } else {
+      debug.crewshipd = { error: info.error }
+    }
+  } catch (err) {
+    debug.crewshipd = { error: String(err) }
+  }
+
+  // Agent runtime status from state
+  try {
+    const status = await getAgentStatus(agentId)
+    debug.runtime = status.ok ? status.data : { status: "unknown" }
+  } catch {
+    debug.runtime = { status: "unreachable" }
+  }
+
+  // crewshipd service logs (filtered to this agent where possible)
+  try {
+    const svcLogs = await getDebugLogs(200, agentId)
+    debug.service_logs = svcLogs.ok ? (svcLogs.data.logs ?? []) : []
+  } catch {
+    debug.service_logs = []
+  }
+
+  // Agent output logs (JSONL from logcollector)
+  if (agent.team_id) {
+    try {
+      const logs = await getAgentLogs(agentId, agent.team_id, 0, 50)
+      debug.agent_logs = logs.ok ? (logs.data.logs ?? []) : []
+    } catch {
+      debug.agent_logs = []
+    }
+  } else {
+    debug.agent_logs = []
+  }
+
+  return NextResponse.json(debug)
+}

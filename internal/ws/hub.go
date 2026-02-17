@@ -330,7 +330,16 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 	}
 
 	var payload sendMessagePayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+	raw := msg.Payload
+	// Handle double-encoded payload (frontend sends JSON.stringify'd string)
+	if len(raw) > 0 && raw[0] == '"' {
+		var unwrapped string
+		if err := json.Unmarshal(raw, &unwrapped); err == nil {
+			raw = json.RawMessage(unwrapped)
+		}
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		c.hub.logger.Debug("invalid send_message payload", "error", err, "raw", string(msg.Payload))
 		resp, _ := json.Marshal(ServerMessage{
 			Type:    "error",
 			Channel: msg.Channel,

@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
+import { useCrewshipdStatus } from "@/hooks/use-crewshipd-status"
 
 const pageConfig: Record<string, { title: string; breadcrumb?: string; pills?: { label: string; variant: "default" | "secondary" | "outline" | "destructive" }[] }> = {
   "/": { title: "Dashboard", pills: [{ label: "0 running", variant: "secondary" }] },
@@ -28,6 +29,7 @@ const pageConfig: Record<string, { title: string; breadcrumb?: string; pills?: {
 export function AppToolbar() {
   const pathname = usePathname()
   const config = pageConfig[pathname] ?? { title: "Crewship" }
+  const { status: daemonStatus } = useCrewshipdStatus()
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-3 sm:px-4">
@@ -84,10 +86,22 @@ export function AppToolbar() {
       {/* Right: crewshipd + search + help + notifications + user */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
         {/* crewshipd status */}
-        <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 mr-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400">crewshipd</span>
-        </div>
+        {daemonStatus === "connected" ? (
+          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 mr-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400">crewshipd</span>
+          </div>
+        ) : daemonStatus === "checking" ? (
+          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 mr-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+            <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400">crewshipd</span>
+          </div>
+        ) : (
+          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 mr-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+            <span className="text-[10px] font-medium text-red-700 dark:text-red-400">crewshipd</span>
+          </div>
+        )}
 
         {/* Search */}
         <Button variant="outline" size="sm" className="h-8 gap-2 rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground px-3" aria-label="Search">

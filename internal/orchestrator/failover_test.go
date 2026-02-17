@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"context"
+	"log/slog"
 	"testing"
 	"time"
 )
@@ -88,17 +90,17 @@ func TestBuildCLICommand(t *testing.T) {
 		{
 			"claude code default",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", UserMessage: "hello"},
-			[]string{"claude", "--print", "--no-session-persistence", "--verbose", "hello"},
+			[]string{"claude", "--print", "--no-session-persistence", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble, "hello"},
 		},
 		{
 			"claude code with system prompt",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", SystemPrompt: "be helpful", UserMessage: "hello"},
-			[]string{"claude", "--print", "--no-session-persistence", "--verbose", "--system-prompt", "be helpful", "hello"},
+			[]string{"claude", "--print", "--no-session-persistence", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble + "be helpful", "hello"},
 		},
 		{
 			"claude code minimal profile",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", ToolProfile: "MINIMAL", UserMessage: "hello"},
-			[]string{"claude", "--print", "--no-session-persistence", "--verbose", "--tools", "Read,Search,Grep", "hello"},
+			[]string{"claude", "--print", "--no-session-persistence", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Search,Grep", "hello"},
 		},
 		{
 			"codex cli",
@@ -169,5 +171,75 @@ func TestBuildEnvVars(t *testing.T) {
 		if !found {
 			t.Fatalf("missing env var: %s", k)
 		}
+	}
+}
+
+func TestBuildEnvVarsOAuthToken(t *testing.T) {
+	req := AgentRunRequest{
+		AgentID:   "agent-1",
+		TeamID:    "team-1",
+		SessionID: "sess-1",
+	}
+
+	cred := &Credential{
+		ID:         "cred-1",
+		EnvVarName: "ANTHROPIC_API_KEY",
+		PlainValue: "sk-ant-oat01-test",
+		Type:       "AI_CLI_TOKEN",
+	}
+
+	env := BuildEnvVars(req, cred)
+
+	found := false
+	for _, e := range env {
+		if e == "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-test" {
+			found = true
+		}
+		if e == "ANTHROPIC_API_KEY=sk-ant-oat01-test" {
+			t.Fatal("AI_CLI_TOKEN should NOT set ANTHROPIC_API_KEY")
+		}
+		if e == "ANTHROPIC_AUTH_TOKEN=sk-ant-oat01-test" {
+			t.Fatal("AI_CLI_TOKEN should NOT set ANTHROPIC_AUTH_TOKEN anymore")
+		}
+	}
+	if !found {
+		t.Fatal("expected CLAUDE_CODE_OAUTH_TOKEN env var for AI_CLI_TOKEN credential")
+	}
+}
+
+func TestResolveEnvVar(t *testing.T) {
+	tests := []struct {
+		name     string
+		cred     Credential
+		expected string
+	}{
+		{"API key stays as-is", Credential{Type: "API_KEY", EnvVarName: "ANTHROPIC_API_KEY"}, "ANTHROPIC_API_KEY"},
+		{"AI_CLI_TOKEN maps to CLAUDE_CODE_OAUTH_TOKEN", Credential{Type: "AI_CLI_TOKEN", EnvVarName: "ANTHROPIC_API_KEY"}, "CLAUDE_CODE_OAUTH_TOKEN"},
+		{"AI_CLI_TOKEN without env var name", Credential{Type: "AI_CLI_TOKEN", EnvVarName: ""}, "CLAUDE_CODE_OAUTH_TOKEN"},
+		{"SECRET stays as-is", Credential{Type: "SECRET", EnvVarName: "MY_SECRET"}, "MY_SECRET"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := resolveEnvVar(&tt.cred)
+			if result != tt.expected {
+				t.Fatalf("resolveEnvVar(%+v) = %q, want %q", tt.cred, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSetupClaudeCredentialsNilCred(t *testing.T) {
+	err := setupClaudeCredentials(context.Background(), nil, "container-1", nil, slog.Default())
+	if err != nil {
+		t.Fatalf("expected nil error for nil cred, got: %v", err)
+	}
+}
+
+func TestSetupClaudeCredentialsNonOAuthType(t *testing.T) {
+	cred := &Credential{Type: "API_KEY", PlainValue: "sk-test"}
+	err := setupClaudeCredentials(context.Background(), nil, "container-1", cred, slog.Default())
+	if err != nil {
+		t.Fatalf("expected nil error for non-OAuth type, got: %v", err)
 	}
 }

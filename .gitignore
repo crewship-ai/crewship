@@ -9,6 +9,9 @@ build/
 dist/
 next-env.d.ts
 
+# TypeScript build cache
+*.tsbuildinfo
+
 # Environment
 .env
 .env.local
@@ -35,6 +38,9 @@ lib/generated/
 *.dll
 *.so
 *.dylib
+
+# Air (Go hot-reload)
+tmp/
 
 # Logs
 *.log

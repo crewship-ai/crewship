@@ -14,6 +14,7 @@ const tabs = [
   { label: "Settings", href: "/settings" },
   { label: "Skills", href: "/skills" },
   { label: "Credentials", href: "/credentials" },
+  { label: "Debug", href: "/debug" },
   { label: "History", href: "/history" },
 ]
 

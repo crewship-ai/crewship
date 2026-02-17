@@ -28,21 +28,30 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
   const streamBufferRef = useRef("")
 
   const handleMessage = useCallback(
-    (msg: { type: string; payload?: string; [key: string]: unknown }) => {
+    (msg: { type: string; payload?: string | Record<string, unknown>; channel?: string; [key: string]: unknown }) => {
       if (msg.type !== "chat_event") return
 
-      const event = msg as {
-        type: string
-        event_type: StreamEventType
-        content?: string
-        session_id?: string
-      }
+      // Server sends: { type: "chat_event", channel: "session:xxx", payload: { type, content } }
+      const payload = (typeof msg.payload === "object" && msg.payload !== null)
+        ? msg.payload as Record<string, unknown>
+        : {}
 
-      if (event.session_id && event.session_id !== sessionId) return
+      const eventType = (payload.type as StreamEventType) ?? undefined
+      const content = (payload.content as string) ?? ""
 
-      switch (event.event_type) {
+      // Filter by session from channel (format: "session:{id}")
+      const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
+      if (channelSessionId && channelSessionId !== sessionId) return
+
+      switch (eventType) {
         case "text":
-          streamBufferRef.current += event.content ?? ""
+          // Backend streams line-by-line (no trailing newline), so we
+          // re-join with "\n" to preserve markdown structure (code blocks, lists, etc.)
+          if (streamBufferRef.current) {
+            streamBufferRef.current += "\n" + content
+          } else {
+            streamBufferRef.current = content
+          }
           setMessages((prev) => {
             const last = prev[prev.length - 1]
             if (last?.isStreaming) {
@@ -51,7 +60,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
                 { ...last, content: streamBufferRef.current },
               ]
             }
-            streamBufferRef.current = event.content ?? ""
+            streamBufferRef.current = content
             return [
               ...prev,
               {
@@ -72,7 +81,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             {
               id: crypto.randomUUID(),
               role: "assistant",
-              content: event.content ?? "Thinking...",
+              content: content || "Thinking...",
               eventType: "thinking",
               timestamp: new Date(),
             },
@@ -85,7 +94,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             {
               id: crypto.randomUUID(),
               role: "tool",
-              content: event.content ?? "",
+              content,
               eventType: "tool_call",
               timestamp: new Date(),
             },
@@ -110,7 +119,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             {
               id: crypto.randomUUID(),
               role: "system",
-              content: event.content ?? "An error occurred",
+              content: content || "An error occurred",
               eventType: "error",
               timestamp: new Date(),
             },
@@ -155,9 +164,14 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
     [sessionId, send, isStreaming],
   )
 
+  const loadHistory = useCallback((history: ChatMessage[]) => {
+    setMessages(history)
+  }, [])
+
   return {
     messages,
     sendMessage,
+    loadHistory,
     isStreaming,
     connectionStatus: status as WSStatus,
   }

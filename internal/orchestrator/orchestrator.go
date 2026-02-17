@@ -32,6 +32,7 @@ type Credential struct {
 	EnvVarName string `json:"env_var"`
 	PlainValue string `json:"value"`
 	Priority   int    `json:"priority"`
+	Type       string `json:"type,omitempty"` // API_KEY, AI_CLI_TOKEN, SECRET
 }
 
 type RunState struct {
@@ -109,18 +110,27 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	cmd := BuildCLICommand(req)
 
 	workDir := "/workspace/" + req.AgentSlug
+	outputDir := "/output/" + req.AgentSlug
+
+	// Create both workspace and output directories for the agent
 	mkdirCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,
-		Cmd:         []string{"mkdir", "-p", workDir},
+		Cmd:         []string{"mkdir", "-p", workDir, outputDir},
 		User:        "1001:1001",
 	}
 	mkResult, err := o.container.Exec(ctx, mkdirCfg)
 	if err != nil {
-		o.logger.Warn("failed to create agent workspace dir", "error", err)
+		o.logger.Warn("failed to create agent dirs", "error", err)
 	} else {
-		// drain and wait for mkdir to finish
 		io.Copy(io.Discard, mkResult.Reader)
 		mkResult.Reader.Close()
+	}
+
+	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
+
+	// Inject Claude OAuth credential files into the container
+	if err := setupClaudeCredentials(ctx, o.container, req.ContainerID, cred, o.logger); err != nil {
+		o.logger.Warn("failed to inject claude credentials", "error", err, "agent_id", req.AgentID)
 	}
 
 	execCfg := provider.ExecConfig{
@@ -138,8 +148,15 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	cIDShort := req.ContainerID
+	if len(cIDShort) > 12 {
+		cIDShort = cIDShort[:12]
+	}
+	o.logger.Info("exec agent", "agent_id", req.AgentID, "container_id", cIDShort, "cmd", cmd)
+
 	result, err := o.container.Exec(execCtx, execCfg)
 	if err != nil {
+		o.logger.Error("exec agent failed", "error", err, "agent_id", req.AgentID)
 		o.updateRunStatus(ctx, runState.ID, "error")
 		return fmt.Errorf("exec agent: %w", err)
 	}
@@ -147,6 +164,8 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	o.streamOutput(execCtx, result, req, handler)
 
 	running, exitCode, _ := o.container.ExecInspect(ctx, result.ExecID)
+	o.logger.Info("exec finished", "agent_id", req.AgentID, "running", running, "exit_code", exitCode)
+
 	if running {
 		o.updateRunStatus(ctx, runState.ID, "running")
 		return nil
@@ -155,6 +174,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	status := "completed"
 	if exitCode != 0 {
 		status = "error"
+		o.logger.Warn("agent exited with error", "agent_id", req.AgentID, "exit_code", exitCode)
 	}
 	o.updateRunStatus(ctx, runState.ID, status)
 

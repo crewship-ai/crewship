@@ -192,3 +192,133 @@ func TestSessionMessagesWithStore(t *testing.T) {
 		t.Errorf("expected 1 message, got %v", body["messages"])
 	}
 }
+
+func TestDebugInfoEndpoint(t *testing.T) {
+	s := newTestServerWithDeps()
+
+	req := httptest.NewRequest("GET", "/debug/info", nil)
+	w := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+
+	if body["status"] != "ok" {
+		t.Errorf("expected status ok, got %v", body["status"])
+	}
+	if _, ok := body["uptime"]; !ok {
+		t.Error("expected uptime field")
+	}
+	if _, ok := body["providers"]; !ok {
+		t.Error("expected providers field")
+	}
+
+	// Verify no secrets are leaked
+	cfg, ok := body["config"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected config map")
+	}
+	if _, hasSecret := cfg["jwt_secret"]; hasSecret {
+		t.Error("SECURITY: jwt_secret must not be in response")
+	}
+	if _, hasToken := cfg["internal_token"]; hasToken {
+		t.Error("SECURITY: internal_token must not be in response")
+	}
+	// jwt_configured should be boolean, not the secret
+	if jwtCfg, ok := cfg["jwt_configured"]; ok {
+		if _, isBool := jwtCfg.(bool); !isBool {
+			t.Error("SECURITY: jwt_configured must be boolean, not the secret value")
+		}
+	}
+}
+
+func TestDebugLogsEmpty(t *testing.T) {
+	s := newTestServerWithDeps()
+	// s.debugLogs is nil -- no ring buffer
+
+	req := httptest.NewRequest("GET", "/debug/logs", nil)
+	w := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var body map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &body)
+	logs, ok := body["logs"].([]interface{})
+	if !ok || len(logs) != 0 {
+		t.Errorf("expected empty logs array, got %v", body["logs"])
+	}
+}
+
+func TestDebugLogsWithBuffer(t *testing.T) {
+	s := newTestServerWithDeps()
+	rb := logging.NewRingBuffer(100)
+	s.debugLogs = rb
+
+	rb.Append(logging.LogRecord{Time: time.Now(), Level: "INFO", Message: "server started"})
+	rb.Append(logging.LogRecord{Time: time.Now(), Level: "ERROR", Message: "ws auth failed", Attrs: map[string]string{"error": "invalid token"}})
+	rb.Append(logging.LogRecord{Time: time.Now(), Level: "INFO", Message: "agent started", Attrs: map[string]string{"agent_id": "a1"}})
+
+	req := httptest.NewRequest("GET", "/debug/logs", nil)
+	w := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var body map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &body)
+	logs, ok := body["logs"].([]interface{})
+	if !ok {
+		t.Fatalf("expected logs array, got %T", body["logs"])
+	}
+	if len(logs) != 3 {
+		t.Errorf("expected 3 log entries, got %d", len(logs))
+	}
+}
+
+func TestDebugLogsFiltering(t *testing.T) {
+	s := newTestServerWithDeps()
+	rb := logging.NewRingBuffer(100)
+	s.debugLogs = rb
+
+	rb.Append(logging.LogRecord{Time: time.Now(), Level: "INFO", Message: "startup"})
+	rb.Append(logging.LogRecord{Time: time.Now(), Level: "ERROR", Message: "auth error"})
+	rb.Append(logging.LogRecord{Time: time.Now(), Level: "INFO", Message: "agent a1 started", Attrs: map[string]string{"agent_id": "a1"}})
+	rb.Append(logging.LogRecord{Time: time.Now(), Level: "INFO", Message: "agent a2 started", Attrs: map[string]string{"agent_id": "a2"}})
+
+	// Filter by level=ERROR
+	req := httptest.NewRequest("GET", "/debug/logs?level=ERROR", nil)
+	w := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(w, req)
+
+	var body map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &body)
+	logs := body["logs"].([]interface{})
+	if len(logs) != 1 {
+		t.Errorf("level filter: expected 1 ERROR entry, got %d", len(logs))
+	}
+
+	// Filter by agent_id=a1 -- should include service-level logs (no agent_id) + a1 logs
+	req2 := httptest.NewRequest("GET", "/debug/logs?agent_id=a1", nil)
+	w2 := httptest.NewRecorder()
+	s.ipcMux.ServeHTTP(w2, req2)
+
+	var body2 map[string]interface{}
+	json.Unmarshal(w2.Body.Bytes(), &body2)
+	logs2 := body2["logs"].([]interface{})
+	// Should be: "startup" (no agent_id), "auth error" (no agent_id), "agent a1 started" (matches) = 3
+	// Should NOT include "agent a2 started"
+	if len(logs2) != 3 {
+		t.Errorf("agent_id filter: expected 3 entries (2 service + 1 matching), got %d", len(logs2))
+	}
+}

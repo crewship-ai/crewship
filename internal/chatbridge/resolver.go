@@ -50,6 +50,7 @@ type credentialResponse struct {
 	EnvVar   string `json:"env_var"`
 	Value    string `json:"value"`
 	Priority int    `json:"priority"`
+	Type     string `json:"type"`
 }
 
 type CreateSessionRequest struct {
@@ -126,6 +127,7 @@ func (r *IPCResolver) ResolveSession(ctx context.Context, sessionID string) (*Se
 			EnvVarName: c.EnvVar,
 			PlainValue: c.Value,
 			Priority:   c.Priority,
+			Type:       c.Type,
 		}
 	}
 

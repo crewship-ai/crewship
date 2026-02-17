@@ -20,7 +20,7 @@ export async function GET(
           team: { select: { id: true, slug: true } },
           credentials: {
             include: {
-              credential: { select: { id: true, encrypted_value: true } },
+              credential: { select: { id: true, encrypted_value: true, type: true } },
             },
             orderBy: { priority: "asc" },
           },
@@ -49,6 +49,7 @@ export async function GET(
       env_var: ac.env_var_name,
       value,
       priority: ac.priority,
+      type: ac.credential.type,
     }
   })
 

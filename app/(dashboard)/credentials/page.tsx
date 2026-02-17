@@ -1,7 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { Key, Plus, Download, Upload, Pencil, Trash2 } from "lucide-react"
+import {
+  Key, Plus, Pencil, Trash2,
+  Bot, Lock, CheckCircle, AlertTriangle, Clock, XCircle,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -24,8 +27,16 @@ interface Credential {
   id: string
   name: string
   description: string | null
+  type: "AI_CLI_TOKEN" | "API_KEY" | "SECRET"
+  provider: "ANTHROPIC" | "OPENAI" | "GOOGLE" | "NONE"
+  status: "ACTIVE" | "EXPIRED" | "RATE_LIMITED" | "REVOKED" | "ERROR"
   scope: "ORGANIZATION" | "TEAM"
   team_id: string | null
+  account_label: string | null
+  account_email: string | null
+  token_expires_at: string | null
+  last_checked_at: string | null
+  last_error: string | null
   created_at: string
   updated_at: string
   _count: { agent_credentials: number }
@@ -34,6 +45,27 @@ interface Credential {
 interface Org {
   id: string
   name: string
+}
+
+const TYPE_CONFIG = {
+  AI_CLI_TOKEN: { icon: Bot, label: "AI CLI Token", color: "text-violet-600" },
+  API_KEY: { icon: Key, label: "API Key", color: "text-amber-600" },
+  SECRET: { icon: Lock, label: "Secret", color: "text-muted-foreground" },
+} as const
+
+const PROVIDER_LABELS: Record<string, string> = {
+  ANTHROPIC: "Anthropic",
+  OPENAI: "OpenAI",
+  GOOGLE: "Google",
+  NONE: "--",
+}
+
+const STATUS_CONFIG = {
+  ACTIVE: { icon: CheckCircle, label: "Active", variant: "default" as const, color: "text-green-600" },
+  RATE_LIMITED: { icon: Clock, label: "Rate Limited", variant: "secondary" as const, color: "text-yellow-600" },
+  EXPIRED: { icon: AlertTriangle, label: "Expired", variant: "destructive" as const, color: "text-orange-600" },
+  REVOKED: { icon: XCircle, label: "Revoked", variant: "destructive" as const, color: "text-red-600" },
+  ERROR: { icon: AlertTriangle, label: "Error", variant: "destructive" as const, color: "text-red-600" },
 }
 
 export default function CredentialsPage() {
@@ -89,9 +121,7 @@ export default function CredentialsPage() {
   }, [loadData])
 
   function handleRefresh() {
-    if (orgId) {
-      fetchCredentials(orgId)
-    }
+    if (orgId) fetchCredentials(orgId)
   }
 
   function handleEdit(credential: Credential) {
@@ -115,9 +145,7 @@ export default function CredentialsPage() {
       const res = await fetch(`/api/v1/credentials/${credential.id}?org_id=${orgId}`, {
         method: "DELETE",
       })
-      if (res.ok) {
-        handleRefresh()
-      }
+      if (res.ok) handleRefresh()
     } catch {
       // silently fail
     }
@@ -134,7 +162,7 @@ export default function CredentialsPage() {
   if (loading) {
     return (
       <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-        <PageHeader title="Credentials" description="Manage API keys and secrets for your agents" />
+        <PageHeader title="Credentials" description="Manage API keys, AI tokens, and secrets" />
         <div className="space-y-3">
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
@@ -146,15 +174,7 @@ export default function CredentialsPage() {
 
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <PageHeader title="Credentials" description="Manage API keys and secrets for your agents">
-        <Button variant="outline" size="sm">
-          <Download className="mr-2 h-4 w-4" />
-          Export JSON
-        </Button>
-        <Button variant="outline" size="sm">
-          <Upload className="mr-2 h-4 w-4" />
-          Import JSON
-        </Button>
+      <PageHeader title="Credentials" description="Manage API keys, AI tokens, and secrets for your agents">
         {canManage && (
           <Button onClick={() => setAddOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
@@ -167,7 +187,7 @@ export default function CredentialsPage() {
         <EmptyState
           icon={Key}
           title="No credentials yet"
-          description="Add API keys and secrets that your agents will use. All credentials are encrypted with AES-256-GCM."
+          description="Add AI CLI tokens, API keys, or secrets that your agents will use. All values are encrypted with AES-256-GCM."
         >
           {canManage && (
             <Button className="mt-4" onClick={() => setAddOpen(true)}>
@@ -182,63 +202,91 @@ export default function CredentialsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>Scope</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Provider</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Used by</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {credentials.map((cred) => (
-                <TableRow key={cred.id}>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Key className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div>
-                        <p className="font-medium">{cred.name}</p>
-                        {cred.description && (
-                          <p className="text-xs text-muted-foreground">{cred.description}</p>
-                        )}
+              {credentials.map((cred) => {
+                const typeConfig = TYPE_CONFIG[cred.type]
+                const TypeIcon = typeConfig.icon
+                const statusConfig = STATUS_CONFIG[cred.status]
+                const StatusIcon = statusConfig.icon
+                const showStatus = cred.type !== "SECRET"
+
+                return (
+                  <TableRow key={cred.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <TypeIcon className={`h-4 w-4 shrink-0 ${typeConfig.color}`} />
+                        <div className="min-w-0">
+                          <p className="font-medium font-mono text-sm">{cred.name}</p>
+                          {cred.account_label && (
+                            <p className="text-xs text-muted-foreground">{cred.account_label}</p>
+                          )}
+                          {!cred.account_label && cred.description && (
+                            <p className="text-xs text-muted-foreground truncate max-w-48">{cred.description}</p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={cred.scope === "ORGANIZATION" ? "secondary" : "outline"}>
-                      {cred.scope === "ORGANIZATION" ? "Organization" : "Team"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-muted-foreground">
-                      {cred._count.agent_credentials} {cred._count.agent_credentials === 1 ? "agent" : "agents"}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-muted-foreground">{formatDate(cred.created_at)}</span>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => handleEdit(cred)}
-                        title="Edit credential"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                        <span className="sr-only">Edit</span>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => handleDelete(cred)}
-                        title="Delete credential"
-                      >
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                        <span className="sr-only">Delete</span>
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-xs font-normal">
+                        {typeConfig.label}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm text-muted-foreground">
+                        {PROVIDER_LABELS[cred.provider]}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {showStatus ? (
+                        <div className="flex items-center gap-1.5">
+                          <StatusIcon className={`h-3.5 w-3.5 ${statusConfig.color}`} />
+                          <span className="text-xs">{statusConfig.label}</span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">--</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-muted-foreground">
+                        {cred._count.agent_credentials} {cred._count.agent_credentials === 1 ? "agent" : "agents"}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-muted-foreground">{formatDate(cred.created_at)}</span>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => handleEdit(cred)}
+                          title="Edit credential"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          <span className="sr-only">Edit</span>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => handleDelete(cred)}
+                          title="Delete credential"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                          <span className="sr-only">Delete</span>
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         </div>

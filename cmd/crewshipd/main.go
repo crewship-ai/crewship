@@ -33,7 +33,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := logging.New(cfg.Logging.Level, "json", os.Stdout)
+	debugBuffer := logging.NewRingBuffer(500)
+	innerLogger := logging.New(cfg.Logging.Level, "json", os.Stdout)
+	ringHandler := logging.NewRingHandler(innerLogger.Handler(), debugBuffer)
+	logger := slog.New(ringHandler)
 	slog.SetDefault(logger)
 
 	logger.Info("crewshipd starting",
@@ -65,6 +68,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer deps.Close()
+	deps.DebugLogs = debugBuffer
 
 	srv := server.New(cfg, logger, deps)
 

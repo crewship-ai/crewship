@@ -133,7 +133,7 @@ export default function SessionsPage({ params }: { params: Promise<{ agentId: st
               {sessions.map((s) => (
                 <tr key={s.id} className="hover:bg-muted/50">
                   <td className="px-4 sm:px-6 py-3">
-                    <Link href={`/agents/${agentId}/chat`} className="hover:underline flex items-center gap-1.5">
+                    <Link href={`/agents/${agentId}/chat?session=${s.id}&org_id=${orgId ?? ""}`} className="hover:underline flex items-center gap-1.5">
                       <MessageSquare className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       <span className="truncate max-w-[200px] sm:max-w-none">{s.title ?? "Untitled session"}</span>
                     </Link>

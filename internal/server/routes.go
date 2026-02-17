@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/llmproxy"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -33,7 +36,12 @@ func (s *Server) registerIPCRoutes() {
 	s.ipcMux.HandleFunc("POST /teams/{id}/container/stop", s.handleContainerStop)
 	s.ipcMux.HandleFunc("GET /agents/{id}/logs", s.handleAgentLogs)
 	s.ipcMux.HandleFunc("GET /teams/{id}/files", s.handleFileList)
+	s.ipcMux.HandleFunc("GET /teams/{id}/files/download", s.handleFileDownload)
 	s.ipcMux.HandleFunc("GET /sessions/{id}/messages", s.handleSessionMessages)
+	s.ipcMux.HandleFunc("POST /credentials/sync", s.handleCredentialSync)
+	s.ipcMux.HandleFunc("GET /credentials/{orgId}/token", s.handleCredentialToken)
+	s.ipcMux.HandleFunc("GET /debug/logs", s.handleDebugLogs)
+	s.ipcMux.HandleFunc("GET /debug/info", s.handleDebugInfo)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -296,21 +304,56 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	teamID := r.PathValue("id")
+	agentSlug := r.URL.Query().Get("agent_slug")
 
 	if s.storage == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": id, "files": []interface{}{}})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": teamID, "files": []interface{}{}})
 		return
 	}
 
-	files, err := s.storage.List(r.Context(), id)
+	// If agent_slug is provided, list only that agent's output namespace
+	dir := teamID
+	if agentSlug != "" {
+		dir = teamID + "/" + agentSlug
+	}
+
+	files, err := s.storage.List(r.Context(), dir)
 	if err != nil {
-		s.logger.Error("file list failed", "team_id", id, "error", err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": id, "files": []interface{}{}})
+		s.logger.Error("file list failed", "team_id", teamID, "agent_slug", agentSlug, "error", err)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": teamID, "files": []interface{}{}})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": id, "files": files})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"team_id": teamID, "files": files})
+}
+
+func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
+	teamID := r.PathValue("id")
+	filePath := r.URL.Query().Get("path")
+
+	if filePath == "" {
+		http.Error(w, "path query parameter required", http.StatusBadRequest)
+		return
+	}
+
+	if s.storage == nil {
+		http.Error(w, "storage not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	fullPath := teamID + "/" + filePath
+	reader, err := s.storage.Read(r.Context(), fullPath)
+	if err != nil {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
+	defer reader.Close()
+
+	filename := filepath.Base(filePath)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.Header().Set("Content-Type", "application/octet-stream")
+	io.Copy(w, reader)
 }
 
 func (s *Server) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
@@ -357,6 +400,120 @@ func (s *Server) handleSessionMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"session_id": id, "messages": messages})
+}
+
+func (s *Server) handleCredentialSync(w http.ResponseWriter, _ *http.Request) {
+	if s.tokenSyncer == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "LLM proxy not enabled"})
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = s.tokenSyncer.SyncNow(ctx)
+	}()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sync_triggered"})
+}
+
+func (s *Server) handleCredentialToken(w http.ResponseWriter, r *http.Request) {
+	orgID := r.PathValue("orgId")
+	provider := r.URL.Query().Get("provider")
+
+	if provider == "" {
+		provider = "ANTHROPIC"
+	}
+
+	if s.tokenPool == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "token pool not initialized"})
+		return
+	}
+
+	conn := s.tokenPool.SelectToken(orgID, llmproxy.ProviderType(provider))
+	if conn == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no active credential for provider"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"credential_id": conn.ID,
+		"provider":      conn.Provider,
+		"type":          conn.Type,
+		"access_token":  conn.AccessToken,
+	})
+}
+
+func (s *Server) handleDebugLogs(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 200
+	}
+
+	if s.debugLogs == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"logs": []interface{}{}})
+		return
+	}
+
+	entries := s.debugLogs.Entries(limit)
+
+	filterLevel := r.URL.Query().Get("level")
+	filterAgent := r.URL.Query().Get("agent_id")
+
+	if filterLevel != "" || filterAgent != "" {
+		var filtered []interface{}
+		for _, e := range entries {
+			if filterLevel != "" && e.Level != filterLevel {
+				continue
+			}
+			if filterAgent != "" {
+				agentVal, hasAgent := e.Attrs["agent_id"]
+				if hasAgent && agentVal != filterAgent {
+					continue
+				}
+			}
+			filtered = append(filtered, e)
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"logs": filtered})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"logs": entries})
+}
+
+func (s *Server) handleDebugInfo(w http.ResponseWriter, _ *http.Request) {
+	info := map[string]interface{}{
+		"status":      "ok",
+		"uptime":      time.Since(s.startedAt).String(),
+		"uptime_secs": time.Since(s.startedAt).Seconds(),
+		"connections":  s.wsHub.ConnectionCount(),
+		"started_at":  s.startedAt.Format(time.RFC3339),
+	}
+
+	providers := map[string]string{
+		"container": s.cfg.Container.Provider,
+		"storage":   s.cfg.Storage.Provider,
+		"state":     s.cfg.State.Provider,
+	}
+	info["providers"] = providers
+
+	info["container_available"] = s.container != nil
+	info["storage_available"] = s.storage != nil
+	info["state_available"] = s.state != nil
+	info["llm_proxy_enabled"] = s.tokenSyncer != nil
+
+	config := map[string]interface{}{
+		"runtime_image":     s.cfg.Container.RuntimeImage,
+		"default_memory_mb": s.cfg.Container.DefaultMemoryMB,
+		"default_cpus":      s.cfg.Container.DefaultCPUs,
+		"network":           s.cfg.Container.Network,
+		"log_path":          s.cfg.Storage.LogPath,
+		"storage_base_path": s.cfg.Storage.BasePath,
+		"nextjs_url":        s.cfg.Auth.NextjsURL,
+		"jwt_configured":    s.cfg.Auth.JWTSecret != "",
+		"internal_token_set": s.cfg.Auth.InternalToken != "",
+	}
+	info["config"] = config
+
+	writeJSON(w, http.StatusOK, info)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

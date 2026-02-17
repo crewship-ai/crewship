@@ -140,6 +140,12 @@
 - [x] 4.5.2 Add credential dialog (form + sifrovani)
 - [x] 4.5.3 Edit credential dialog
 - [x] 4.5.4 Delete credential (s potvrzenim)
+- [x] 4.5.5 Typovany credentials (AI_CLI_TOKEN / API_KEY / SECRET) -- enum CredentialType, CredentialProvider, CredentialStatus
+- [x] 4.5.6 Add dialog s 3 taby (AI CLI Token / API Key / Secret) -- auto-fill env var name dle providera
+- [x] 4.5.7 Tabulka s ikony (Bot/Key/Lock), status badges, provider labels
+- [x] 4.5.8 Smazana /providers stranka + OAuth flow (nefunkcni server-side, nahrazeno setup-token)
+- [ ] 4.5.9 TODO: User docs pro setup-token flow (claude setup-token -> paste do UI)
+- [ ] 4.5.10 TODO: Auto-refresh pro AI_CLI_TOKEN (crewshipd CredentialMonitor refresh_token grant)
 
 ### 4.6 Skills (/skills)
 - [x] 4.6.1 Skills z API (card layout)
