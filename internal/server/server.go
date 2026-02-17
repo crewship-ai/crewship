@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"time"
 
+	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/conversation"
@@ -48,6 +50,7 @@ type Deps struct {
 	Storage   provider.StorageProvider
 	State     provider.StateProvider
 	DebugLogs *logging.RingBuffer
+	DB        *sql.DB
 }
 
 func (d *Deps) Close() {
@@ -148,6 +151,17 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 	s.registerRoutes()
 	s.registerIPCRoutes()
+
+	// Mount Go API routes when database is available
+	if deps != nil && deps.DB != nil && cfg.Auth.JWTSecret != "" {
+		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger)
+		if err != nil {
+			logger.Error("failed to create API router", "error", err)
+		} else {
+			mux.Handle("/api/v1/", apiRouter)
+			logger.Info("Go API routes mounted on /api/v1/")
+		}
+	}
 
 	s.httpServer = &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),

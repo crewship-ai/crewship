@@ -195,6 +195,7 @@ func cmdStart(args []string) {
 	}
 	defer deps.Close()
 	deps.DebugLogs = debugBuffer
+	deps.DB = db.DB
 
 	srv := server.New(cfg, logger, deps)
 

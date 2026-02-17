@@ -42,11 +42,20 @@ func (r *Router) registerRoutes() {
 	ws := NewWorkspaceHandler(r.db, r.logger)
 	crews := NewCrewHandler(r.db, r.logger)
 	agents := NewAgentHandler(r.db, r.logger)
+	creds := NewCredentialHandler(r.db, r.logger)
+	skills := NewSkillHandler(r.db, r.logger)
+	runs := NewRunHandler(r.db, r.logger)
+	audit := NewAuditHandler(r.db, r.logger)
 
 	authed := r.authMw.RequireAuth
 	wsCtx := r.authMw.RequireWorkspace
 
-	// Workspaces (auth only, no workspace context)
+	// Health (no auth)
+	r.mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	// Workspaces (auth only, no workspace context needed)
 	r.mux.Handle("GET /api/v1/workspaces", authed(http.HandlerFunc(ws.List)))
 	r.mux.Handle("POST /api/v1/workspaces", authed(http.HandlerFunc(ws.Create)))
 
@@ -58,4 +67,17 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.List))))
 	r.mux.Handle("POST /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.Create))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Get))))
+
+	// Credentials (require workspace context + manage role for create)
+	r.mux.Handle("GET /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.List))))
+	r.mux.Handle("POST /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.Create))))
+
+	// Skills (require auth)
+	r.mux.Handle("GET /api/v1/skills", authed(wsCtx(http.HandlerFunc(skills.List))))
+
+	// Runs (require workspace context)
+	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))
+
+	// Audit logs (require workspace context + manage role)
+	r.mux.Handle("GET /api/v1/audit", authed(wsCtx(http.HandlerFunc(audit.List))))
 }
