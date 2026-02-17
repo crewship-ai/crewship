@@ -150,7 +150,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/onboarding/setup", authed(http.HandlerFunc(onboarding.Setup)))
 
 	// Auth (no auth required)
-	authH := NewAuthHandler(r.db, r.logger)
+	authH := NewAuthHandler(r.db, r.logger, r.authMw.validator)
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
 	r.mux.Handle("GET /api/v1/ws-token", authed(http.HandlerFunc(authH.WsToken)))
 

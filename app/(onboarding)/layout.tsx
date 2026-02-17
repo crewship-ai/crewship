@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { useSession } from "next-auth/react"
+import { useSession } from "@/hooks/use-auth"
 import { useRouter } from "next/navigation"
 import { Loader2 } from "lucide-react"
 

@@ -5,7 +5,7 @@ import {
   User, Palette, Bell, Shield, Building, Users, CreditCard,
   AlertTriangle, Check, X, Key
 } from "lucide-react"
-import { useSession } from "next-auth/react"
+import { useSession } from "@/hooks/use-auth"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
