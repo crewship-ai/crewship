@@ -90,7 +90,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
               id: crypto.randomUUID(),
               role: "tool",
               content,
-              eventType: "tool_call",
+              eventType,
               timestamp: new Date(),
             },
           ])

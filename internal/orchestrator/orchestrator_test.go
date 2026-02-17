@@ -127,6 +127,7 @@ func TestRunAgentExecError(t *testing.T) {
 
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
+		AgentSlug:   "test-agent",
 		SessionID:   "s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
@@ -168,6 +169,7 @@ func TestRunAgentSuccess(t *testing.T) {
 
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
+		AgentSlug:   "test-agent",
 		SessionID:   "s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
@@ -218,6 +220,7 @@ func TestRunAgentExitCodeError(t *testing.T) {
 
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
+		AgentSlug:   "test-agent",
 		SessionID:   "s1",
 		ContainerID: "c1",
 		TimeoutSecs: 5,
@@ -232,6 +235,27 @@ func TestRunAgentExitCodeError(t *testing.T) {
 	json.Unmarshal(data, &run)
 	if run.Status != "error" {
 		t.Errorf("expected error status for non-zero exit, got %q", run.Status)
+	}
+}
+
+func TestRunAgentInvalidSlug(t *testing.T) {
+	mc := &mockContainer{}
+	o := New(mc, newMemState(), slog.Default())
+
+	for _, slug := range []string{"", "../escape", "a/b", "..", "bad slug"} {
+		err := o.RunAgent(context.Background(), AgentRunRequest{
+			AgentID:     "a1",
+			AgentSlug:   slug,
+			SessionID:   "s1",
+			ContainerID: "c1",
+			TimeoutSecs: 5,
+		}, nil)
+		if err == nil {
+			t.Errorf("expected error for invalid slug %q", slug)
+		}
+		if !strings.Contains(err.Error(), "invalid agent slug") {
+			t.Errorf("expected 'invalid agent slug' error for %q, got: %v", slug, err)
+		}
 	}
 }
 

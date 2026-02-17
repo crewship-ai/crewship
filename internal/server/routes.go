@@ -316,7 +316,12 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	// If agent_slug is provided, list only that agent's output namespace
 	dir := teamID
 	if agentSlug != "" {
-		dir = teamID + "/" + agentSlug
+		clean := filepath.Base(agentSlug)
+		if clean == "." || clean == ".." || strings.ContainsAny(clean, `/\`) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent_slug"})
+			return
+		}
+		dir = filepath.Join(teamID, clean)
 	}
 
 	files, err := s.storage.List(r.Context(), dir)

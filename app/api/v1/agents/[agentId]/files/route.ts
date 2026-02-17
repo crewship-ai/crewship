@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { z } from "zod"
 import { prisma } from "@/lib/db"
 import { requireAuth, isAuthError } from "@/lib/api-auth"
 import { defineAbilitiesFor } from "@/lib/permissions/abilities"
@@ -10,6 +11,9 @@ export async function GET(
   { params }: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await params
+  if (!z.string().uuid().safeParse(agentId).success) {
+    return NextResponse.json({ error: "Invalid agent ID" }, { status: 400 })
+  }
   const orgId = req.nextUrl.searchParams.get("org_id")
 
   const authResult = await requireAuth(orgId)

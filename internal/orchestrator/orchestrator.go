@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +15,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 type AgentRunRequest struct {
 	AgentID      string
@@ -122,11 +126,15 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	}
 
+	if !validSlugRe.MatchString(req.AgentSlug) || req.AgentSlug != path.Base(req.AgentSlug) {
+		return fmt.Errorf("invalid agent slug: %q", req.AgentSlug)
+	}
+
 	env := BuildEnvVars(req, cred)
 	cmd := BuildCLICommand(req)
 
-	workDir := "/workspace/" + req.AgentSlug
-	outputDir := "/output/" + req.AgentSlug
+	workDir := path.Join("/workspace", req.AgentSlug)
+	outputDir := path.Join("/output", req.AgentSlug)
 
 	// Create both workspace and output directories for the agent
 	mkdirCfg := provider.ExecConfig{

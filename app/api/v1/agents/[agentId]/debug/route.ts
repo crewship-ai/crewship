@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { z } from "zod"
 import { prisma } from "@/lib/db"
 import { requireAuth, isAuthError } from "@/lib/api-auth"
 import { defineAbilitiesFor } from "@/lib/permissions/abilities"
@@ -10,6 +11,9 @@ export async function GET(
   { params }: { params: Promise<{ agentId: string }> },
 ) {
   const { agentId } = await params
+  if (!z.string().uuid().safeParse(agentId).success) {
+    return NextResponse.json({ error: "Invalid agent ID" }, { status: 400 })
+  }
   const orgId = req.nextUrl.searchParams.get("org_id")
 
   const authResult = await requireAuth(orgId)
@@ -34,11 +38,24 @@ export async function GET(
     crewshipd_reachable: false,
   }
 
-  // crewshipd comprehensive info
+  // crewshipd comprehensive info (redact sensitive config fields)
   try {
     const info = await getDebugInfo()
     if (info.ok) {
-      debug.crewshipd = info.data
+      const data = info.data as Record<string, unknown>
+      if (data.config && typeof data.config === "object") {
+        const cfg = data.config as Record<string, unknown>
+        const safeConfig: Record<string, unknown> = {}
+        const allowedKeys = [
+          "runtime_image", "default_memory_mb", "default_cpus", "network",
+          "log_path", "storage_base_path", "jwt_configured", "internal_token_set",
+        ]
+        for (const k of allowedKeys) {
+          if (k in cfg) safeConfig[k] = cfg[k]
+        }
+        data.config = safeConfig
+      }
+      debug.crewshipd = data
       debug.crewshipd_reachable = true
     } else {
       debug.crewshipd = { error: info.error }

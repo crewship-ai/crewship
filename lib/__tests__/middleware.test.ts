@@ -147,5 +147,46 @@ describe("middleware", () => {
       const redirectUrl = mockRedirect.mock.calls[0][0] as URL
       expect(redirectUrl.searchParams.get("callbackUrl")).toBe("/teams/t1/agents/a1/settings")
     })
+
+    it("preserves query parameters in callbackUrl", () => {
+      const req = createRequest("/agents?tab=chat&org=123", { hasCookie: false })
+      middleware(req)
+      const redirectUrl = mockRedirect.mock.calls[0][0] as URL
+      expect(redirectUrl.searchParams.get("callbackUrl")).toBe("/agents?tab=chat&org=123")
+    })
+  })
+
+  describe("x-forwarded-proto handling", () => {
+    it("handles comma-separated proto values", () => {
+      const url = new URL("/agents", "http://localhost:3001")
+      const cookies = new Map<string, { value: string }>()
+      cookies.set("authjs.session-token", { value: "token" })
+      const headerMap = new Map<string, string>()
+      headerMap.set("x-forwarded-proto", "http, https")
+      const req = {
+        nextUrl: url,
+        url: url.toString(),
+        cookies: { get: (name: string) => cookies.get(name) },
+        headers: { get: (name: string) => headerMap.get(name) ?? null },
+      } as Parameters<typeof middleware>[0]
+      middleware(req)
+      expect(mockNext).toHaveBeenCalled()
+    })
+
+    it("uses first proto when comma-separated with https first", () => {
+      const url = new URL("/agents", "http://localhost:3001")
+      const cookies = new Map<string, { value: string }>()
+      cookies.set("__Secure-authjs.session-token", { value: "token" })
+      const headerMap = new Map<string, string>()
+      headerMap.set("x-forwarded-proto", "https, http")
+      const req = {
+        nextUrl: url,
+        url: url.toString(),
+        cookies: { get: (name: string) => cookies.get(name) },
+        headers: { get: (name: string) => headerMap.get(name) ?? null },
+      } as Parameters<typeof middleware>[0]
+      middleware(req)
+      expect(mockNext).toHaveBeenCalled()
+    })
   })
 })

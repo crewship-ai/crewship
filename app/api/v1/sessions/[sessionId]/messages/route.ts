@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
+import { z } from "zod"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/db"
+import { defineAbilitiesFor } from "@/lib/permissions/abilities"
 import { getSessionMessages } from "@/lib/crewshipd-client"
+import type { OrgRole } from "@/lib/generated/prisma/client"
+
+const querySchema = z.object({
+  offset: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number().int().min(1).max(500).default(50),
+})
 
 export async function GET(
   req: NextRequest,
@@ -13,6 +21,9 @@ export async function GET(
   }
 
   const { sessionId } = await params
+  if (!z.string().uuid().safeParse(sessionId).success) {
+    return NextResponse.json({ error: "Invalid session ID" }, { status: 400 })
+  }
 
   const convSession = await prisma.conversationSession.findUnique({
     where: { id: sessionId },
@@ -33,8 +44,19 @@ export async function GET(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  const offset = parseInt(req.nextUrl.searchParams.get("offset") ?? "0", 10)
-  const limit = parseInt(req.nextUrl.searchParams.get("limit") ?? "50", 10)
+  const abilities = defineAbilitiesFor(membership.role as OrgRole)
+  if (!abilities.can("read", "Agent")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  const parsed = querySchema.safeParse({
+    offset: req.nextUrl.searchParams.get("offset") ?? "0",
+    limit: req.nextUrl.searchParams.get("limit") ?? "50",
+  })
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid query parameters" }, { status: 400 })
+  }
+  const { offset, limit } = parsed.data
 
   try {
     const result = await getSessionMessages(sessionId, offset, limit)

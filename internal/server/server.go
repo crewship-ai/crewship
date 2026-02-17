@@ -99,11 +99,11 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 	var tokenSyncer *llmproxy.TokenSyncer
 	var credMonitor *llmproxy.CredentialMonitor
-	if cfg.LLMProxy.Enabled {
+	if cfg.LLMProxy.Enabled && cfg.Auth.InternalToken == "" {
+		logger.Warn("LLM proxy enabled but INTERNAL_TOKEN not set, proxy features disabled")
+	}
+	if cfg.LLMProxy.Enabled && cfg.Auth.InternalToken != "" {
 		internalToken := cfg.Auth.InternalToken
-		if internalToken == "" {
-			internalToken = "crewshipd"
-		}
 		tokenSyncer = llmproxy.NewTokenSyncer(
 			tokenPool, cfg.Auth.NextjsURL, internalToken,
 			cfg.LLMProxy.TokenSyncInterval, logger,

@@ -23,7 +23,10 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  const proto = request.headers.get("x-forwarded-proto") ?? request.nextUrl.protocol.replace(":", "")
+  const rawProto = request.headers.get("x-forwarded-proto")
+  const proto = rawProto
+    ? rawProto.split(",")[0].trim().toLowerCase()
+    : request.nextUrl.protocol.replace(":", "")
   const isSecure = proto === "https"
   const cookieName = isSecure
     ? "__Secure-authjs.session-token"
@@ -32,7 +35,8 @@ export function middleware(request: NextRequest) {
 
   if (!sessionToken) {
     const loginUrl = new URL("/login", request.url)
-    loginUrl.searchParams.set("callbackUrl", pathname)
+    const callbackUrl = pathname + (request.nextUrl.search || "")
+    loginUrl.searchParams.set("callbackUrl", callbackUrl)
     return NextResponse.redirect(loginUrl)
   }
 
