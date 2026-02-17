@@ -24,7 +24,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := database.Migrate(db.DB, logger); err != nil {
+	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 

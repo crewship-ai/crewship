@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -72,7 +73,7 @@ func TestMigrate(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	if err := Migrate(db.DB, logger); err != nil {
+	if err := Migrate(context.Background(), db.DB, logger); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 
@@ -96,7 +97,7 @@ func TestMigrate(t *testing.T) {
 	}
 
 	// Run again -- should be idempotent
-	if err := Migrate(db.DB, logger); err != nil {
+	if err := Migrate(context.Background(), db.DB, logger); err != nil {
 		t.Fatalf("Migrate (idempotent): %v", err)
 	}
 }
@@ -110,7 +111,7 @@ func TestMigrateInsertAndQuery(t *testing.T) {
 	defer db.Close()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	if err := Migrate(db.DB, logger); err != nil {
+	if err := Migrate(context.Background(), db.DB, logger); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 

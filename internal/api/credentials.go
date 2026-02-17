@@ -207,7 +207,12 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
 		&c.CreatedAt, &c.UpdatedAt, &c.AgentCount)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+			return
+		}
+		h.logger.Error("get credential", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -243,6 +248,19 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"provider": "provider", "status": "status", "scope": "scope",
 		"crew_id": "crew_id", "account_label": "account_label",
 		"account_email": "account_email", "token_expires_at": "token_expires_at",
+	}
+
+	if crewIDVal, ok := body["crew_id"]; ok && crewIDVal != nil {
+		if crewIDStr, ok := crewIDVal.(string); ok && crewIDStr != "" {
+			var crewExists string
+			err := h.db.QueryRowContext(r.Context(),
+				"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+				crewIDStr, workspaceID).Scan(&crewExists)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid crew_id"})
+				return
+			}
+		}
 	}
 
 	var setClauses []string

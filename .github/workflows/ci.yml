@@ -36,7 +36,7 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
         env:
-          DATABASE_URL: "postgresql://x:x@localhost:5432/x"
+          DATABASE_URL: "file:./dev.db"
 
       - name: Lint
         run: pnpm lint
@@ -65,13 +65,18 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
         env:
-          DATABASE_URL: "postgresql://x:x@localhost:5432/x"
+          DATABASE_URL: "file:./dev.db"
 
-      - name: Build
+      - name: Build Next.js static export
         run: pnpm build
         env:
-          DATABASE_URL: "postgresql://x:x@localhost:5432/x"
           NEXTAUTH_SECRET: "ci-build-secret-not-real"
+
+      - name: Upload static export
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextjs-static-export
+          path: out/
 
   test:
     name: Test
@@ -94,12 +99,10 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
         env:
-          DATABASE_URL: "postgresql://x:x@localhost:5432/x"
+          DATABASE_URL: "file:./dev.db"
 
       - name: Test
         run: pnpm test
-        env:
-          DATABASE_URL: "postgresql://x:x@localhost:5432/x"
 
   go-check:
     name: Go Check
@@ -107,38 +110,19 @@ jobs:
     needs: build
     if: >-
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'go') ||
-      true
+      contains(github.event.pull_request.labels.*.name, 'go')
     steps:
       - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
 
       - uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma Client
-        run: pnpm db:generate
-        env:
-          DATABASE_URL: "file:./dev.db"
-
-      - name: Build Next.js static export
-        run: pnpm build
-        env:
-          NEXTAUTH_SECRET: "ci-build-secret-not-real"
-
-      - name: Copy static export for embed
-        run: cp -r out web/out
+      - name: Download static export
+        uses: actions/download-artifact@v4
+        with:
+          name: nextjs-static-export
+          path: web/out
 
       - name: Go vet
         run: go vet ./...

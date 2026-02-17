@@ -160,7 +160,7 @@ func cmdStart(args []string) {
 	}
 	defer db.Close()
 
-	if err := database.Migrate(db.DB, logger); err != nil {
+	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
 		logger.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}

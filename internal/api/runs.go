@@ -138,15 +138,31 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var total int
-	h.db.QueryRowContext(r.Context(), countQuery, countArgs...).Scan(&total)
+	if err := h.db.QueryRowContext(r.Context(), countQuery, countArgs...).Scan(&total); err != nil {
+		h.logger.Error("count runs", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	var running, today, failed int
-	h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND status = 'RUNNING'", workspaceID).Scan(&running)
-	h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND date(created_at) = date('now')", workspaceID).Scan(&today)
-	h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND status = 'FAILED' AND date(created_at) = date('now')", workspaceID).Scan(&failed)
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND status = 'RUNNING'", workspaceID).Scan(&running); err != nil {
+		h.logger.Error("count running runs", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND date(created_at) = date('now')", workspaceID).Scan(&today); err != nil {
+		h.logger.Error("count today runs", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND status = 'FAILED' AND date(created_at) = date('now')", workspaceID).Scan(&failed); err != nil {
+		h.logger.Error("count failed runs", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	writeJSON(w, http.StatusOK, runListResponse{
 		Data:  runs,

@@ -137,7 +137,11 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var total int
-	h.db.QueryRowContext(r.Context(), countQuery, countArgs...).Scan(&total)
+	if err := h.db.QueryRowContext(r.Context(), countQuery, countArgs...).Scan(&total); err != nil {
+		h.logger.Error("count audit logs", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	writeJSON(w, http.StatusOK, auditListResponse{
 		Data: result,

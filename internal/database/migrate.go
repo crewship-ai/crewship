@@ -1,13 +1,15 @@
 package database
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 )
 
-func Migrate(db *sql.DB, logger *slog.Logger) error {
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS _migrations (
+func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _migrations (
 		version INTEGER PRIMARY KEY,
 		name TEXT NOT NULL,
 		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -17,24 +19,27 @@ func Migrate(db *sql.DB, logger *slog.Logger) error {
 
 	for _, m := range migrations {
 		var exists bool
-		err := db.QueryRow("SELECT 1 FROM _migrations WHERE version = ?", m.version).Scan(&exists)
+		err := db.QueryRowContext(ctx, "SELECT 1 FROM _migrations WHERE version = ?", m.version).Scan(&exists)
 		if err == nil {
 			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("check migration %d (%s): %w", m.version, m.name, err)
 		}
 
 		logger.Info("applying migration", "version", m.version, "name", m.name)
 
-		tx, err := db.Begin()
+		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin migration %d (%s): %w", m.version, m.name, err)
 		}
 
-		if _, err := tx.Exec(m.sql); err != nil {
+		if _, err := tx.ExecContext(ctx, m.sql); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("migration %d (%s): %w", m.version, m.name, err)
 		}
 
-		if _, err := tx.Exec("INSERT INTO _migrations (version, name) VALUES (?, ?)", m.version, m.name); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO _migrations (version, name) VALUES (?, ?)", m.version, m.name); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("record migration %d (%s): %w", m.version, m.name, err)
 		}
@@ -208,6 +213,26 @@ CREATE INDEX IF NOT EXISTS idx_agent_crew ON agents(crew_id);
 CREATE INDEX IF NOT EXISTS idx_agent_status ON agents(status);
 CREATE INDEX IF NOT EXISTS idx_agent_role ON agents(agent_role);
 
+-- Chats (metadata only)
+CREATE TABLE IF NOT EXISTS chats (
+	id TEXT PRIMARY KEY,
+	agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	created_by TEXT REFERENCES users(id),
+	title TEXT,
+	mode TEXT NOT NULL DEFAULT 'CHAT',
+	status TEXT NOT NULL DEFAULT 'ACTIVE',
+	message_count INTEGER NOT NULL DEFAULT 0,
+	jsonl_path TEXT,
+	started_at TEXT NOT NULL DEFAULT (datetime('now')),
+	ended_at TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chat_agent ON chats(agent_id);
+CREATE INDEX IF NOT EXISTS idx_chat_workspace ON chats(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_chat_created ON chats(created_at);
+
 -- Assignments
 CREATE TABLE IF NOT EXISTS assignments (
 	id TEXT PRIMARY KEY,
@@ -341,26 +366,6 @@ CREATE TABLE IF NOT EXISTS agent_credentials (
 	UNIQUE(agent_id, credential_id)
 );
 CREATE INDEX IF NOT EXISTS idx_agent_credential_env ON agent_credentials(agent_id, env_var_name);
-
--- Chats (metadata only)
-CREATE TABLE IF NOT EXISTS chats (
-	id TEXT PRIMARY KEY,
-	agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-	created_by TEXT REFERENCES users(id),
-	title TEXT,
-	mode TEXT NOT NULL DEFAULT 'CHAT',
-	status TEXT NOT NULL DEFAULT 'ACTIVE',
-	message_count INTEGER NOT NULL DEFAULT 0,
-	jsonl_path TEXT,
-	started_at TEXT NOT NULL DEFAULT (datetime('now')),
-	ended_at TEXT,
-	created_at TEXT NOT NULL DEFAULT (datetime('now')),
-	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_chat_agent ON chats(agent_id);
-CREATE INDEX IF NOT EXISTS idx_chat_workspace ON chats(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_chat_created ON chats(created_at);
 
 -- Agent runs
 CREATE TABLE IF NOT EXISTS agent_runs (

@@ -37,7 +37,7 @@ func (h *NextAuthHandler) csrfCookieName(r *http.Request) string {
 func (h *NextAuthHandler) csrfToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		return "", err
+		return "", fmt.Errorf("csrfToken: %w", err)
 	}
 	return hex.EncodeToString(b), nil
 }

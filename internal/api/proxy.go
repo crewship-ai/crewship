@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -84,7 +85,12 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 		"SELECT name, cli_adapter, status, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&agentName, &cliAdapter, &status, &crewID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("get agent for debug", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -202,7 +208,7 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 	}
 
 	agentFilePath := fmt.Sprintf("%s/%s", slug.String, cleanPath)
-	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID.String, agentFilePath)
+	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID.String, url.QueryEscape(agentFilePath))
 
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
@@ -291,9 +297,18 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 	h.ipcPost(r.Context(), fmt.Sprintf("/agents/%s/stop", agentID), nil)
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	h.db.ExecContext(r.Context(),
+	res, err := h.db.ExecContext(r.Context(),
 		"UPDATE agents SET status = 'STOPPED', updated_at = ? WHERE id = ? AND workspace_id = ?",
 		now, agentID, workspaceID)
+	if err != nil {
+		h.logger.Error("update agent status to STOPPED", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"id": agentID, "status": "STOPPED"})
 }

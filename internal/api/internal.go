@@ -23,6 +23,7 @@ func NewInternalHandler(db *sql.DB, logger *slog.Logger) *InternalHandler {
 func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 	expected := os.Getenv("CREWSHIP_INTERNAL_TOKEN")
 	if expected == "" {
+		h.logger.Warn("CREWSHIP_INTERNAL_TOKEN not set, using insecure default")
 		expected = "crewshipd"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +97,9 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		c.AccessToken = decrypted
 		if encRefresh.Valid {
 			rt, err := encryption.Decrypt(encRefresh.String)
-			if err == nil {
+			if err != nil {
+				h.logger.Debug("decrypt refresh token", "id", c.ID, "error", err)
+			} else {
 				c.RefreshToken = &rt
 			}
 		}
@@ -154,22 +157,44 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 	}
 
 	if body.LastError != nil {
-		tx.ExecContext(r.Context(), "UPDATE credentials SET last_error = ? WHERE id = ?", *body.LastError, credID)
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET last_error = ? WHERE id = ?", *body.LastError, credID); err != nil {
+			h.logger.Error("update credential last_error", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 	}
 	if body.AccessToken != nil {
 		enc, err := encryption.Encrypt(*body.AccessToken)
-		if err == nil {
-			tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_value = ? WHERE id = ?", enc, credID)
+		if err != nil {
+			h.logger.Error("encrypt access token", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt token"})
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_value = ? WHERE id = ?", enc, credID); err != nil {
+			h.logger.Error("update credential access token", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 	}
 	if body.RefreshToken != nil {
 		enc, err := encryption.Encrypt(*body.RefreshToken)
-		if err == nil {
-			tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_refresh_token = ? WHERE id = ?", enc, credID)
+		if err != nil {
+			h.logger.Error("encrypt refresh token", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt token"})
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_refresh_token = ? WHERE id = ?", enc, credID); err != nil {
+			h.logger.Error("update credential refresh token", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 	}
 	if body.TokenExpires != nil {
-		tx.ExecContext(r.Context(), "UPDATE credentials SET token_expires_at = ? WHERE id = ?", *body.TokenExpires, credID)
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET token_expires_at = ? WHERE id = ?", *body.TokenExpires, credID); err != nil {
+			h.logger.Error("update credential token_expires_at", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

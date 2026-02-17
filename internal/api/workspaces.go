@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -384,11 +385,21 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "User is already a member of this workspace"})
 		return
 	}
+	if err != sql.ErrNoRows {
+		h.logger.Error("check existing member", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	var userExists bool
 	err = h.db.QueryRowContext(r.Context(), "SELECT 1 FROM users WHERE id = ?", req.UserID).Scan(&userExists)
-	if err != nil {
+	if err == sql.ErrNoRows {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		return
+	}
+	if err != nil {
+		h.logger.Error("check user exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -533,7 +544,7 @@ type createInvitationRequest struct {
 func generateToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		return "", err
+		return "", fmt.Errorf("generateToken: %w", err)
 	}
 	return hex.EncodeToString(b), nil
 }
@@ -572,6 +583,11 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "User is already a member of this workspace"})
 		return
 	}
+	if err != sql.ErrNoRows {
+		h.logger.Error("check existing member by email", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	var existingInviteID string
 	err = h.db.QueryRowContext(r.Context(), `
@@ -580,6 +596,11 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	`, workspaceID, req.Email).Scan(&existingInviteID)
 	if err == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "An active invitation already exists for this email"})
+		return
+	}
+	if err != sql.ErrNoRows {
+		h.logger.Error("check existing invitation", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 

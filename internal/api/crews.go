@@ -489,8 +489,13 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	err = h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
 		workspaceID, req.UserID).Scan(&wsMemberID)
-	if err != nil {
+	if err == sql.ErrNoRows {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "User is not a member of this workspace"})
+		return
+	}
+	if err != nil {
+		h.logger.Error("check workspace membership", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -501,6 +506,11 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		crewID, req.UserID).Scan(&existingMemberID)
 	if err == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "User is already a member of this crew"})
+		return
+	}
+	if err != sql.ErrNoRows {
+		h.logger.Error("check crew membership", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
