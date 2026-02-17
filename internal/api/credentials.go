@@ -2,8 +2,10 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -179,4 +181,131 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	})
+}
+
+func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
+	credID := r.PathValue("credentialId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	var c credentialResponse
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT c.id, c.name, c.description, c.type, c.provider, c.status,
+			c.scope, c.crew_id, c.account_label, c.account_email,
+			c.token_expires_at, c.last_checked_at, c.last_error,
+			c.created_at, c.updated_at,
+			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
+		FROM credentials c
+		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
+	`, credID, workspaceID).Scan(&c.ID, &c.Name, &c.Description, &c.Type, &c.Provider,
+		&c.Status, &c.Scope, &c.CrewID, &c.AccountLabel, &c.AccountEmail,
+		&c.TokenExpiresAt, &c.LastCheckedAt, &c.LastError,
+		&c.CreatedAt, &c.UpdatedAt, &c.AgentCount)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, c)
+}
+
+func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
+	credID := r.PathValue("credentialId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	var exists string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT id FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		credID, workspaceID).Scan(&exists); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		return
+	}
+
+	var body map[string]interface{}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		return
+	}
+
+	allowed := map[string]string{
+		"name": "name", "description": "description", "type": "type",
+		"provider": "provider", "status": "status", "scope": "scope",
+		"crew_id": "crew_id", "account_label": "account_label",
+		"account_email": "account_email", "token_expires_at": "token_expires_at",
+	}
+
+	var setClauses []string
+	var args []interface{}
+
+	// Handle value separately (needs encryption)
+	if val, ok := body["value"]; ok {
+		if s, ok := val.(string); ok && s != "" {
+			encrypted, err := encryption.Encrypt(s)
+			if err != nil {
+				h.logger.Error("encrypt credential value", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt credential"})
+				return
+			}
+			setClauses = append(setClauses, "encrypted_value = ?")
+			args = append(args, encrypted)
+		}
+	}
+
+	for jsonKey, col := range allowed {
+		if val, ok := body[jsonKey]; ok {
+			setClauses = append(setClauses, col+" = ?")
+			args = append(args, val)
+		}
+	}
+
+	if len(setClauses) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No fields to update"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	setClauses = append(setClauses, "updated_at = ?")
+	args = append(args, now, credID, workspaceID)
+
+	query := fmt.Sprintf("UPDATE credentials SET %s WHERE id = ? AND workspace_id = ?", strings.Join(setClauses, ", "))
+	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
+		h.logger.Error("update credential", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	h.Get(w, r)
+}
+
+func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	credID := r.PathValue("credentialId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := h.db.ExecContext(r.Context(),
+		"UPDATE credentials SET deleted_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		now, credID, workspaceID)
+	if err != nil {
+		h.logger.Error("delete credential", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }

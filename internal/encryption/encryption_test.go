@@ -66,3 +66,98 @@ func TestMissingKey(t *testing.T) {
 		t.Error("expected error for missing key")
 	}
 }
+
+func TestEncryptDecryptEmpty(t *testing.T) {
+	os.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	defer os.Unsetenv("ENCRYPTION_KEY")
+
+	encrypted, err := Encrypt("")
+	if err != nil {
+		t.Fatalf("Encrypt empty: %v", err)
+	}
+	decrypted, err := Decrypt(encrypted)
+	if err != nil {
+		t.Fatalf("Decrypt empty: %v", err)
+	}
+	if decrypted != "" {
+		t.Errorf("expected empty string, got %q", decrypted)
+	}
+}
+
+func TestEncryptDecryptUnicode(t *testing.T) {
+	os.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	defer os.Unsetenv("ENCRYPTION_KEY")
+
+	special := "héllo wörld! 🚀 日本語 中文 <script>alert('xss')</script> \n\t"
+	encrypted, err := Encrypt(special)
+	if err != nil {
+		t.Fatalf("Encrypt unicode: %v", err)
+	}
+	decrypted, err := Decrypt(encrypted)
+	if err != nil {
+		t.Fatalf("Decrypt unicode: %v", err)
+	}
+	if decrypted != special {
+		t.Errorf("decrypted = %q, want %q", decrypted, special)
+	}
+}
+
+func TestEncryptDecryptLong(t *testing.T) {
+	os.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	defer os.Unsetenv("ENCRYPTION_KEY")
+
+	long := ""
+	for i := 0; i < 2000; i++ {
+		long += "x"
+	}
+	encrypted, err := Encrypt(long)
+	if err != nil {
+		t.Fatalf("Encrypt long: %v", err)
+	}
+	decrypted, err := Decrypt(encrypted)
+	if err != nil {
+		t.Fatalf("Decrypt long: %v", err)
+	}
+	if decrypted != long {
+		t.Errorf("decrypted length = %d, want 2000", len(decrypted))
+	}
+}
+
+func TestDecryptWrongKey(t *testing.T) {
+	os.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+
+	encrypted, err := Encrypt("test-data")
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	// Change key
+	os.Setenv("ENCRYPTION_KEY", "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210")
+	defer os.Unsetenv("ENCRYPTION_KEY")
+
+	_, err = Decrypt(encrypted)
+	if err == nil {
+		t.Error("expected error when decrypting with wrong key")
+	}
+}
+
+func TestLegacyFormat(t *testing.T) {
+	os.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	defer os.Unsetenv("ENCRYPTION_KEY")
+
+	// Encrypt with version, strip prefix for "legacy" format
+	encrypted, err := Encrypt("legacy-test")
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	// Remove "v1:" prefix to test legacy format handling
+	legacyFormat := encrypted[3:] // strip "v1:"
+	decrypted, err := Decrypt(legacyFormat)
+	if err != nil {
+		t.Fatalf("Decrypt legacy: %v", err)
+	}
+	if decrypted != "legacy-test" {
+		t.Errorf("decrypted = %q, want 'legacy-test'", decrypted)
+	}
+}

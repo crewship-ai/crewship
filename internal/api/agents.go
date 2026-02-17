@@ -2,8 +2,10 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -251,4 +253,419 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	a.MemoryEnabled = memEnabled == 1
 
 	writeJSON(w, http.StatusOK, a)
+}
+
+func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+
+	if !canRole(role, "create") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	var existing string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&existing); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+
+	var body map[string]interface{}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		return
+	}
+
+	allowed := map[string]string{
+		"name": "name", "slug": "slug", "description": "description",
+		"role_title": "role_title", "agent_role": "agent_role",
+		"cli_adapter": "cli_adapter", "llm_provider": "llm_provider",
+		"llm_model": "llm_model", "system_prompt": "system_prompt",
+		"temperature": "temperature", "max_tokens": "max_tokens",
+		"timeout_seconds": "timeout_seconds", "tool_profile": "tool_profile",
+		"memory_enabled": "memory_enabled", "crew_id": "crew_id",
+	}
+
+	var setClauses []string
+	var args []interface{}
+	for jsonKey, col := range allowed {
+		if val, ok := body[jsonKey]; ok {
+			if col == "memory_enabled" {
+				if b, ok := val.(bool); ok {
+					if b {
+						val = 1
+					} else {
+						val = 0
+					}
+				}
+			}
+			setClauses = append(setClauses, col+" = ?")
+			args = append(args, val)
+		}
+	}
+
+	if len(setClauses) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No fields to update"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	setClauses = append(setClauses, "updated_at = ?")
+	args = append(args, now, agentID, workspaceID)
+
+	query := fmt.Sprintf("UPDATE agents SET %s WHERE id = ? AND workspace_id = ?", strings.Join(setClauses, ", "))
+	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
+		h.logger.Error("update agent", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	h.Get(w, r)
+}
+
+func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := h.db.ExecContext(r.Context(),
+		"UPDATE agents SET deleted_at = ? WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		now, agentID, workspaceID)
+	if err != nil {
+		h.logger.Error("delete agent", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+type agentSkillResponse struct {
+	ID        string  `json:"id"`
+	AgentID   string  `json:"agent_id"`
+	SkillID   string  `json:"skill_id"`
+	SkillName string  `json:"skill_name"`
+	SkillSlug string  `json:"skill_slug"`
+	SkillIcon *string `json:"skill_icon"`
+	Enabled   bool    `json:"enabled"`
+	Config    *string `json:"config"`
+	CreatedAt string  `json:"created_at"`
+}
+
+func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	var exists string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&exists); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT as2.id, as2.agent_id, as2.skill_id, s.name, s.slug, s.icon,
+			as2.enabled, as2.config, as2.created_at
+		FROM agent_skills as2
+		JOIN skills s ON s.id = as2.skill_id
+		WHERE as2.agent_id = ?
+	`, agentID)
+	if err != nil {
+		h.logger.Error("list agent skills", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	var result []agentSkillResponse
+	for rows.Next() {
+		var s agentSkillResponse
+		var enabled int
+		if err := rows.Scan(&s.ID, &s.AgentID, &s.SkillID, &s.SkillName, &s.SkillSlug,
+			&s.SkillIcon, &enabled, &s.Config, &s.CreatedAt); err != nil {
+			h.logger.Error("scan agent skill", "error", err)
+			continue
+		}
+		s.Enabled = enabled == 1
+		result = append(result, s)
+	}
+	if result == nil {
+		result = []agentSkillResponse{}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+type addAgentSkillRequest struct {
+	SkillID string  `json:"skill_id"`
+	Config  *string `json:"config"`
+}
+
+func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+
+	if !canRole(role, "create") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	var exists string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&exists); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+
+	var req addAgentSkillRequest
+	if err := readJSON(r, &req); err != nil || req.SkillID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "skill_id is required"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	id := generateCUID()
+
+	_, err := h.db.ExecContext(r.Context(),
+		"INSERT INTO agent_skills (id, agent_id, skill_id, config, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)",
+		id, agentID, req.SkillID, req.Config, now)
+	if err != nil {
+		h.logger.Error("add agent skill", "error", err)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Skill already assigned to agent"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+}
+
+type agentCredentialResponse struct {
+	ID           string  `json:"id"`
+	AgentID      string  `json:"agent_id"`
+	CredentialID string  `json:"credential_id"`
+	CredName     string  `json:"credential_name"`
+	CredType     string  `json:"credential_type"`
+	CredProvider string  `json:"credential_provider"`
+	CredStatus   string  `json:"credential_status"`
+	EnvVarName   string  `json:"env_var_name"`
+	Priority     int     `json:"priority"`
+	CreatedAt    string  `json:"created_at"`
+}
+
+func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	var exists string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&exists); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT ac.id, ac.agent_id, ac.credential_id, c.name, c.type, c.provider, c.status,
+			ac.env_var_name, ac.priority, ac.created_at
+		FROM agent_credentials ac
+		JOIN credentials c ON c.id = ac.credential_id
+		WHERE ac.agent_id = ?
+		ORDER BY ac.env_var_name, ac.priority DESC
+	`, agentID)
+	if err != nil {
+		h.logger.Error("list agent credentials", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	var result []agentCredentialResponse
+	for rows.Next() {
+		var c agentCredentialResponse
+		if err := rows.Scan(&c.ID, &c.AgentID, &c.CredentialID, &c.CredName,
+			&c.CredType, &c.CredProvider, &c.CredStatus,
+			&c.EnvVarName, &c.Priority, &c.CreatedAt); err != nil {
+			h.logger.Error("scan agent credential", "error", err)
+			continue
+		}
+		result = append(result, c)
+	}
+	if result == nil {
+		result = []agentCredentialResponse{}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+type addAgentCredentialRequest struct {
+	CredentialID string `json:"credential_id"`
+	EnvVarName   string `json:"env_var_name"`
+	Priority     int    `json:"priority"`
+}
+
+func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	var exists string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&exists); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+
+	var req addAgentCredentialRequest
+	if err := readJSON(r, &req); err != nil || req.CredentialID == "" || req.EnvVarName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "credential_id and env_var_name are required"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	id := generateCUID()
+
+	_, err := h.db.ExecContext(r.Context(),
+		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		id, agentID, req.CredentialID, req.EnvVarName, req.Priority, now)
+	if err != nil {
+		h.logger.Error("add agent credential", "error", err)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Credential already assigned to agent"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+}
+
+func (h *AgentHandler) RemoveCredential(w http.ResponseWriter, r *http.Request) {
+	assignmentID := r.PathValue("assignmentId")
+	agentID := r.PathValue("agentId")
+	role := RoleFromContext(r.Context())
+
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	res, err := h.db.ExecContext(r.Context(),
+		"DELETE FROM agent_credentials WHERE id = ? AND agent_id = ?",
+		assignmentID, agentID)
+	if err != nil {
+		h.logger.Error("remove agent credential", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Assignment not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT id, agent_id, workspace_id, title, mode, status,
+			message_count, started_at, ended_at, created_at
+		FROM chats
+		WHERE agent_id = ? AND workspace_id = ?
+		ORDER BY created_at DESC
+		LIMIT 100
+	`, agentID, workspaceID)
+	if err != nil {
+		h.logger.Error("list agent chats", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	type chatResponse struct {
+		ID           string  `json:"id"`
+		AgentID      string  `json:"agent_id"`
+		WorkspaceID  string  `json:"workspace_id"`
+		Title        *string `json:"title"`
+		Mode         string  `json:"mode"`
+		Status       string  `json:"status"`
+		MessageCount int     `json:"message_count"`
+		StartedAt    string  `json:"started_at"`
+		EndedAt      *string `json:"ended_at"`
+		CreatedAt    string  `json:"created_at"`
+	}
+
+	var result []chatResponse
+	for rows.Next() {
+		var c chatResponse
+		if err := rows.Scan(&c.ID, &c.AgentID, &c.WorkspaceID, &c.Title,
+			&c.Mode, &c.Status, &c.MessageCount,
+			&c.StartedAt, &c.EndedAt, &c.CreatedAt); err != nil {
+			h.logger.Error("scan chat", "error", err)
+			continue
+		}
+		result = append(result, c)
+	}
+	if result == nil {
+		result = []chatResponse{}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *AgentHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT id, agent_id, chat_id, workspace_id, triggered_by,
+			trigger_type, status, started_at, finished_at,
+			error_message, exit_code, created_at
+		FROM agent_runs
+		WHERE agent_id = ? AND workspace_id = ?
+		ORDER BY created_at DESC
+		LIMIT 100
+	`, agentID, workspaceID)
+	if err != nil {
+		h.logger.Error("list agent runs", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	var result []runResponse
+	for rows.Next() {
+		var run runResponse
+		if err := rows.Scan(&run.ID, &run.AgentID, &run.ChatID, &run.WorkspaceID,
+			&run.TriggeredBy, &run.TriggerType, &run.Status,
+			&run.StartedAt, &run.FinishedAt, &run.ErrorMessage, &run.ExitCode,
+			&run.CreatedAt); err != nil {
+			h.logger.Error("scan run", "error", err)
+			continue
+		}
+		result = append(result, run)
+	}
+	if result == nil {
+		result = []runResponse{}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
