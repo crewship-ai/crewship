@@ -248,6 +248,15 @@ func (h *NextAuthHandler) SignOut(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// SignIn redirects to the login page (GET /api/auth/signin)
+func (h *NextAuthHandler) SignIn(w http.ResponseWriter, r *http.Request) {
+	callbackUrl := r.URL.Query().Get("callbackUrl")
+	if callbackUrl == "" {
+		callbackUrl = "/"
+	}
+	http.Redirect(w, r, "/login?callbackUrl="+callbackUrl, http.StatusFound)
+}
+
 // Error shows auth error (GET /api/auth/error)
 func (h *NextAuthHandler) Error(w http.ResponseWriter, r *http.Request) {
 	errType := r.URL.Query().Get("error")

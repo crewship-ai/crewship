@@ -159,6 +159,7 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("GET /api/auth/providers", nextAuth.Providers)
 	r.mux.HandleFunc("GET /api/auth/session", nextAuth.Session)
 	r.mux.HandleFunc("POST /api/auth/callback/credentials", nextAuth.CallbackCredentials)
+	r.mux.HandleFunc("GET /api/auth/signin", nextAuth.SignIn)
 	r.mux.HandleFunc("POST /api/auth/signout", nextAuth.SignOut)
 	r.mux.HandleFunc("GET /api/auth/error", nextAuth.Error)
 
