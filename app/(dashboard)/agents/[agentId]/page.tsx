@@ -7,9 +7,9 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 
-interface AgentTeam {
+interface AgentCrew {
   name: string
   slug: string
   color: string | null
@@ -17,8 +17,8 @@ interface AgentTeam {
 
 interface AgentDetail {
   id: string
-  org_id: string
-  team_id: string | null
+  workspace_id: string
+  crew_id: string | null
   name: string
   slug: string
   description: string | null
@@ -36,11 +36,11 @@ interface AgentDetail {
   memory_enabled: boolean
   created_at: string
   updated_at: string
-  team: AgentTeam | null
+  crew: AgentCrew | null
   _count: {
     skills: number
     credentials: number
-    sessions: number
+    chats: number
   }
 }
 
@@ -52,9 +52,9 @@ const CLI_ADAPTER_LABELS: Record<string, string> = {
 }
 
 const AGENT_ROLE_COLORS: Record<string, string> = {
-  WORKER: "text-blue-600 border-blue-300",
-  LEADER: "text-amber-600 border-amber-300",
-  DIRECTOR: "text-purple-600 border-purple-300",
+  AGENT: "text-blue-600 border-blue-300",
+  LEAD: "text-amber-600 border-amber-300",
+  COORDINATOR: "text-purple-600 border-purple-300",
 }
 
 const STATUS_STYLES: Record<string, { class: string; pulse: boolean }> = {
@@ -71,20 +71,20 @@ function formatTimeout(seconds: number): string {
 
 export default function AgentOverviewPage({ params }: { params: Promise<{ agentId: string }> }) {
   const { agentId } = use(params)
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [agent, setAgent] = useState<AgentDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [stopping, setStopping] = useState(false)
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
 
     let cancelled = false
 
     async function fetchAgent() {
       try {
-        const res = await fetch(`/api/v1/agents/${agentId}?org_id=${orgId}`)
+        const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
         if (!res.ok) {
           const data = await res.json().catch(() => ({ error: "Failed to load agent" }))
           if (!cancelled) setError(typeof data.error === "string" ? data.error : "Failed to load agent")
@@ -101,13 +101,13 @@ export default function AgentOverviewPage({ params }: { params: Promise<{ agentI
 
     fetchAgent()
     return () => { cancelled = true }
-  }, [agentId, orgId])
+  }, [agentId, workspaceId])
 
   const handleStop = useCallback(async () => {
-    if (!orgId || !agent || stopping) return
+    if (!workspaceId || !agent || stopping) return
     setStopping(true)
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/stop?org_id=${orgId}`, { method: "POST" })
+      const res = await fetch(`/api/v1/agents/${agentId}/stop?workspace_id=${workspaceId}`, { method: "POST" })
       if (res.ok) {
         const data = await res.json()
         setAgent((prev) => prev ? { ...prev, status: data.status } : prev)
@@ -117,9 +117,9 @@ export default function AgentOverviewPage({ params }: { params: Promise<{ agentI
     } finally {
       setStopping(false)
     }
-  }, [agentId, orgId, agent, stopping])
+  }, [agentId, workspaceId, agent, stopping])
 
-  if (orgLoading || loading) {
+  if (wsLoading || loading) {
     return <OverviewSkeleton />
   }
 
@@ -198,15 +198,15 @@ export default function AgentOverviewPage({ params }: { params: Promise<{ agentI
                 <span className="text-muted-foreground">Slug</span>
                 <code className="text-xs bg-muted px-2 py-0.5 rounded">{agent.slug}</code>
               </div>
-              {agent.team && (
+              {agent.crew && (
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Team</span>
+                  <span className="text-muted-foreground">Crew</span>
                   <span className="flex items-center gap-1.5">
                     <span
                       className="h-2 w-2 rounded-full"
-                      style={{ backgroundColor: agent.team.color ?? "#6b7280" }}
+                      style={{ backgroundColor: agent.crew.color ?? "#6b7280" }}
                     />
-                    {agent.team.name}
+                    {agent.crew.name}
                   </span>
                 </div>
               )}
@@ -316,9 +316,9 @@ export default function AgentOverviewPage({ params }: { params: Promise<{ agentI
               <MessagesSquare className="h-3.5 w-3.5" />
               <span className="text-xs uppercase tracking-wide font-medium">Sessions</span>
             </div>
-            <div className="text-2xl font-bold">{agent._count.sessions}</div>
+            <div className="text-2xl font-bold">{agent._count.chats}</div>
             <Link href={`/agents/${agentId}/sessions`} className="text-xs text-primary hover:underline">
-              View sessions
+              View chats
             </Link>
           </CardContent>
         </Card>

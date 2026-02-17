@@ -5,9 +5,9 @@ import { defineAbilitiesFor } from "@/lib/permissions/abilities"
 import type { OrgRole } from "@/lib/generated/prisma/client"
 
 export async function GET(req: NextRequest) {
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const workspaceId = req.nextUrl.searchParams.get("workspace_id")
 
-  const authResult = await requireAuth(orgId)
+  const authResult = await requireAuth(workspaceId)
   if (isAuthError(authResult)) return authResult
 
   const abilities = defineAbilitiesFor(authResult.role as OrgRole)
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(parseInt(req.nextUrl.searchParams.get("limit") ?? "50", 10), 100)
   const skip = (page - 1) * limit
 
-  const where: Record<string, unknown> = { org_id: authResult.orgId }
+  const where: Record<string, unknown> = { workspace_id: authResult.workspaceId }
 
   if (action) where.action = action
   if (entityType) where.entity_type = entityType

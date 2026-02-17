@@ -123,11 +123,11 @@ func TestIPCEndpoints(t *testing.T) {
 		{"agent status", "GET", "/agents/test-uuid/status", http.StatusOK, "agent_id", "test-uuid"},
 		{"agent start", "POST", "/agents/test-uuid/start", http.StatusServiceUnavailable, "error", "container provider not configured"},
 		{"agent stop", "POST", "/agents/test-uuid/stop", http.StatusOK, "agent_id", "test-uuid"},
-		{"container status", "GET", "/teams/team-uuid/container/status", http.StatusOK, "team_id", "team-uuid"},
-		{"container start", "POST", "/teams/team-uuid/container/start", http.StatusServiceUnavailable, "error", "container provider not configured"},
-		{"container stop", "POST", "/teams/team-uuid/container/stop", http.StatusServiceUnavailable, "error", "container provider not configured"},
-		{"file list", "GET", "/teams/team-uuid/files", http.StatusOK, "team_id", "team-uuid"},
-		{"session messages", "GET", "/sessions/session-uuid/messages", http.StatusOK, "session_id", "session-uuid"},
+		{"container status", "GET", "/crews/crew-uuid/container/status", http.StatusOK, "crew_id", "crew-uuid"},
+		{"container start", "POST", "/crews/crew-uuid/container/start", http.StatusServiceUnavailable, "error", "container provider not configured"},
+		{"container stop", "POST", "/crews/crew-uuid/container/stop", http.StatusServiceUnavailable, "error", "container provider not configured"},
+		{"file list", "GET", "/crews/crew-uuid/files", http.StatusOK, "crew_id", "crew-uuid"},
+		{"chat messages", "GET", "/chats/chat-uuid/messages", http.StatusOK, "chat_id", "chat-uuid"},
 	}
 
 	for _, tt := range tests {

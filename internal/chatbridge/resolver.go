@@ -32,11 +32,11 @@ func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCRe
 	}
 }
 
-type sessionResolveResponse struct {
+type chatResolveResponse struct {
 	AgentID      string               `json:"agent_id"`
 	AgentSlug    string               `json:"agent_slug"`
-	TeamID       string               `json:"team_id"`
-	TeamSlug     string               `json:"team_slug"`
+	CrewID       string               `json:"crew_id"`
+	CrewSlug     string               `json:"crew_slug"`
 	ContainerID  string               `json:"container_id"`
 	CLIAdapter   string               `json:"cli_adapter"`
 	SystemPrompt string               `json:"system_prompt"`
@@ -53,20 +53,20 @@ type credentialResponse struct {
 	Type     string `json:"type"`
 }
 
-type CreateSessionRequest struct {
-	SessionID string `json:"session_id"`
+type CreateChatRequest struct {
+	ChatID string `json:"chat_id"`
 	AgentID   string `json:"agent_id"`
-	OrgID     string `json:"org_id"`
+	WorkspaceID     string `json:"workspace_id"`
 	UserID    string `json:"user_id,omitempty"`
 	Title     string `json:"title,omitempty"`
 }
 
-func (r *IPCResolver) CreateSession(ctx context.Context, req CreateSessionRequest) error {
-	url := fmt.Sprintf("%s/api/v1/internal/sessions", r.baseURL)
+func (r *IPCResolver) CreateChat(ctx context.Context, req CreateChatRequest) error {
+	url := fmt.Sprintf("%s/api/v1/internal/chats", r.baseURL)
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("marshal create session request: %w", err)
+		return fmt.Errorf("marshal create chat request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
@@ -78,20 +78,20 @@ func (r *IPCResolver) CreateSession(ctx context.Context, req CreateSessionReques
 
 	resp, err := r.httpClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("create session %s: %w", req.SessionID, err)
+		return fmt.Errorf("create chat %s: %w", req.ChatID, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		r.logger.Error("session create failed", "session_id", req.SessionID, "status", resp.StatusCode)
-		return fmt.Errorf("session create returned %d", resp.StatusCode)
+		r.logger.Error("chat create failed", "chat_id", req.ChatID, "status", resp.StatusCode)
+		return fmt.Errorf("chat create returned %d", resp.StatusCode)
 	}
 
 	return nil
 }
 
-func (r *IPCResolver) ResolveSession(ctx context.Context, sessionID string) (*SessionInfo, error) {
-	resolveURL := fmt.Sprintf("%s/api/v1/internal/sessions/%s/resolve", r.baseURL, url.PathEscape(sessionID))
+func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error) {
+	resolveURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/resolve", r.baseURL, url.PathEscape(chatID))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resolveURL, nil)
 	if err != nil {
@@ -101,7 +101,7 @@ func (r *IPCResolver) ResolveSession(ctx context.Context, sessionID string) (*Se
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("resolve session %s: %w", sessionID, err)
+		return nil, fmt.Errorf("resolve chat %s: %w", chatID, err)
 	}
 	defer resp.Body.Close()
 
@@ -111,11 +111,11 @@ func (r *IPCResolver) ResolveSession(ctx context.Context, sessionID string) (*Se
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		r.logger.Error("session resolve failed", "session_id", sessionID, "status", resp.StatusCode)
-		return nil, fmt.Errorf("session resolve returned %d", resp.StatusCode)
+		r.logger.Error("chat resolve failed", "chat_id", chatID, "status", resp.StatusCode)
+		return nil, fmt.Errorf("chat resolve returned %d", resp.StatusCode)
 	}
 
-	var data sessionResolveResponse
+	var data chatResolveResponse
 	if err := json.Unmarshal(body, &data); err != nil {
 		return nil, fmt.Errorf("decode resolve response: %w", err)
 	}
@@ -131,11 +131,11 @@ func (r *IPCResolver) ResolveSession(ctx context.Context, sessionID string) (*Se
 		}
 	}
 
-	return &SessionInfo{
+	return &ChatInfo{
 		AgentID:      data.AgentID,
 		AgentSlug:    data.AgentSlug,
-		TeamID:       data.TeamID,
-		TeamSlug:     data.TeamSlug,
+		CrewID:       data.CrewID,
+		CrewSlug:     data.CrewSlug,
 		ContainerID:  data.ContainerID,
 		CLIAdapter:   data.CLIAdapter,
 		SystemPrompt: data.SystemPrompt,

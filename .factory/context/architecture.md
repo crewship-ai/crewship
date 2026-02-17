@@ -161,6 +161,17 @@ What it does:
 - Health checks for containers
 - Graceful shutdown (SIGTERM handling)
 
+Phase 2 additions:
+- **Channel Gateway** (opt-in module) -- persistent messaging sessions
+  - Discord (discordgo), Telegram (go-telegram-bot-api), Slack (slack-go)
+  - WhatsApp (whatsmeow -- Go implementation of Baileys, Phase 2B)
+  - ChannelProvider interface (adapter pattern, same as ContainerProvider)
+  - Routes incoming messages to correct agent/crew
+  - Sends approval requests to configured channels
+  - NOT a skill -- must be persistent long-running process (like OpenClaw Gateway)
+- **Cron scheduler** (github.com/robfig/cron) -- scheduled missions
+- **Approval engine** -- trust levels per agent, multi-channel approval flow
+
 What it does NOT do:
 - No HTML rendering
 - No database access (Next.js owns PostgreSQL via Prisma)
@@ -266,6 +277,11 @@ Destroyed when container is removed. Cheap, disposable -- agent is cattle.
 > **Mode 1 (single binary):** Vsechna data v `~/.crewship/`:
 > `~/.crewship/data/` (SQLite DB), `~/.crewship/output/`, `~/.crewship/logs/`,
 > `~/.crewship/config.yaml`. Viz `prd/DEPLOYMENT.md`.
+>
+> **macOS integrace (nice-to-have Phase 3):**
+> - Konfigurovatelny output path: `crewship start --output ~/Documents/Crewship`
+> - Default: `~/.crewship/output/` (skryty adresar, tech-friendly)
+> - Symlink `~/Documents/Crewship/` → `~/.crewship/output/` (pro Finder pristup)
 
 ### Persistent (survives everything)
 

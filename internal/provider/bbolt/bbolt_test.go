@@ -113,13 +113,13 @@ func TestList(t *testing.T) {
 func TestListByPrefix(t *testing.T) {
 	p := tempDB(t)
 	ctx := context.Background()
-	for _, kv := range []struct{ k, v string }{{"team-a:run-1", "1"}, {"team-a:run-2", "2"}, {"team-b:run-1", "3"}} {
+	for _, kv := range []struct{ k, v string }{{"crew-a:run-1", "1"}, {"crew-a:run-2", "2"}, {"crew-b:run-1", "3"}} {
 		if err := p.Set(ctx, "runs", kv.k, []byte(kv.v)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	result, err := p.ListByPrefix(ctx, "runs", "team-a:")
+	result, err := p.ListByPrefix(ctx, "runs", "crew-a:")
 	if err != nil {
 		t.Fatal(err)
 	}

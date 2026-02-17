@@ -15,15 +15,15 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
-type SessionResolver interface {
-	ResolveSession(ctx context.Context, sessionID string) (*SessionInfo, error)
+type ChatResolver interface {
+	ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error)
 }
 
-type SessionInfo struct {
+type ChatInfo struct {
 	AgentID      string
 	AgentSlug    string
-	TeamID       string
-	TeamSlug     string
+	CrewID       string
+	CrewSlug     string
 	ContainerID  string
 	CLIAdapter   string
 	SystemPrompt string
@@ -37,7 +37,7 @@ type Bridge struct {
 	container provider.ContainerProvider
 	convStore *conversation.Store
 	logWriter *logcollector.Writer
-	resolver  SessionResolver
+	resolver  ChatResolver
 	cfg       BridgeConfig
 	logger    *slog.Logger
 }
@@ -52,7 +52,7 @@ func New(
 	container provider.ContainerProvider,
 	convStore *conversation.Store,
 	logWriter *logcollector.Writer,
-	resolver SessionResolver,
+	resolver ChatResolver,
 	cfg BridgeConfig,
 	logger *slog.Logger,
 ) *Bridge {
@@ -81,8 +81,8 @@ func generateMsgID() string {
 	return fmt.Sprintf("msg_%d_%s", time.Now().UnixNano(), hex.EncodeToString(b))
 }
 
-func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, content string, streamFn func(ws.ChatEvent)) error {
-	if err := b.convStore.Append(ctx, sessionID, conversation.Message{
+func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content string, streamFn func(ws.ChatEvent)) error {
+	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:        generateMsgID(),
 		Role:      conversation.RoleUser,
 		Content:   content,
@@ -93,19 +93,19 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, conte
 		return fmt.Errorf("persist user message: %w", err)
 	}
 
-	info, err := b.resolver.ResolveSession(ctx, sessionID)
+	info, err := b.resolver.ResolveChat(ctx, chatID)
 	if err != nil {
-		streamFn(ws.ChatEvent{Type: "error", Content: "failed to resolve session"})
-		return fmt.Errorf("resolve session: %w", err)
+		streamFn(ws.ChatEvent{Type: "error", Content: "failed to resolve chat"})
+		return fmt.Errorf("resolve chat: %w", err)
 	}
 
 	streamFn(ws.ChatEvent{Type: "thinking", Content: "Processing..."})
 
 	containerID := info.ContainerID
 	if containerID == "" && b.container != nil {
-		cID, err := b.container.EnsureTeamRuntime(ctx, provider.TeamConfig{
-			ID:       info.TeamID,
-			Slug:     info.TeamSlug,
+		cID, err := b.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
+			ID:       info.CrewID,
+			Slug:     info.CrewSlug,
 			MemoryMB: b.cfg.DefaultMemoryMB,
 			CPUs:     b.cfg.DefaultCPUs,
 		})
@@ -114,7 +114,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, conte
 			return fmt.Errorf("ensure team runtime: %w", err)
 		}
 		containerID = cID
-		b.logger.Info("team container ensured", "team_id", info.TeamID, "container_id", containerID[:12])
+		b.logger.Info("team container ensured", "crew_id", info.CrewID, "container_id", containerID[:12])
 	} else if containerID == "" {
 		streamFn(ws.ChatEvent{Type: "error", Content: "container provider not configured"})
 		return fmt.Errorf("no container provider and no container ID")
@@ -125,9 +125,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, conte
 	req := orchestrator.AgentRunRequest{
 		AgentID:      info.AgentID,
 		AgentSlug:    info.AgentSlug,
-		TeamID:       info.TeamID,
-		TeamSlug:     info.TeamSlug,
-		SessionID:    sessionID,
+		CrewID:       info.CrewID,
+		CrewSlug:     info.CrewSlug,
+		ChatID:    chatID,
 		ContainerID:  containerID,
 		CLIAdapter:   info.CLIAdapter,
 		SystemPrompt: info.SystemPrompt,
@@ -144,7 +144,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, conte
 		})
 		fullResponse += event.Content
 
-		if err := b.logWriter.Append(info.TeamID, info.AgentSlug, logcollector.LogEntry{
+		if err := b.logWriter.Append(info.CrewID, info.AgentSlug, logcollector.LogEntry{
 			Timestamp: event.Timestamp,
 			Level:     "info",
 			Agent:     info.AgentSlug,
@@ -160,13 +160,13 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, conte
 		return fmt.Errorf("run agent: %w", err)
 	}
 
-	if err := b.convStore.Append(ctx, sessionID, conversation.Message{
+	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:        generateMsgID(),
 		Role:      conversation.RoleAssistant,
 		Content:   fullResponse,
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
-		b.logger.Error("failed to persist assistant message", "error", err, "session_id", sessionID)
+		b.logger.Error("failed to persist assistant message", "error", err, "chat_id", chatID)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save response"})
 		return fmt.Errorf("persist assistant message: %w", err)
 	}

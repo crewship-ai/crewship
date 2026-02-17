@@ -10,11 +10,11 @@ import (
 )
 
 func TestIPCResolverResolveSession(t *testing.T) {
-	mockResp := sessionResolveResponse{
+	mockResp := chatResolveResponse{
 		AgentID:      "agent-uuid-1",
 		AgentSlug:    "claude-dev",
-		TeamID:       "team-uuid-1",
-		TeamSlug:     "engineering",
+		CrewID:       "crew-uuid-1",
+		CrewSlug:     "engineering",
 		ContainerID:  "",
 		CLIAdapter:   "CLAUDE_CODE",
 		SystemPrompt: "You are a helpful assistant.",
@@ -26,7 +26,7 @@ func TestIPCResolverResolveSession(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/internal/sessions/session-123/resolve" {
+		if r.URL.Path != "/api/v1/internal/chats/chat-123/resolve" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		if r.Header.Get("X-Internal-Token") != "crewshipd" {
@@ -39,7 +39,7 @@ func TestIPCResolverResolveSession(t *testing.T) {
 
 	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
 
-	info, err := resolver.ResolveSession(context.Background(), "session-123")
+	info, err := resolver.ResolveChat(context.Background(), "chat-123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,8 +50,8 @@ func TestIPCResolverResolveSession(t *testing.T) {
 	if info.AgentSlug != "claude-dev" {
 		t.Errorf("expected agent_slug 'claude-dev', got %q", info.AgentSlug)
 	}
-	if info.TeamSlug != "engineering" {
-		t.Errorf("expected team_slug 'engineering', got %q", info.TeamSlug)
+	if info.CrewSlug != "engineering" {
+		t.Errorf("expected team_slug 'engineering', got %q", info.CrewSlug)
 	}
 	if info.CLIAdapter != "CLAUDE_CODE" {
 		t.Errorf("expected cli_adapter 'CLAUDE_CODE', got %q", info.CLIAdapter)
@@ -73,21 +73,21 @@ func TestIPCResolverResolveSession(t *testing.T) {
 func TestIPCResolverResolveSessionNotFound(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Session not found"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Chat not found"})
 	}))
 	defer ts.Close()
 
 	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
 
-	_, err := resolver.ResolveSession(context.Background(), "nonexistent")
+	_, err := resolver.ResolveChat(context.Background(), "nonexistent")
 	if err == nil {
-		t.Fatal("expected error for nonexistent session")
+		t.Fatal("expected error for nonexistent chat")
 	}
 }
 
 func TestIPCResolverCreateSession(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/internal/sessions" {
+		if r.URL.Path != "/api/v1/internal/chats" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		if r.Method != http.MethodPost {
@@ -100,28 +100,28 @@ func TestIPCResolverCreateSession(t *testing.T) {
 			t.Fatal("missing content-type header")
 		}
 
-		var body CreateSessionRequest
+		var body CreateChatRequest
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		if body.SessionID != "sess-001" {
-			t.Errorf("expected session_id 'sess-001', got %q", body.SessionID)
+		if body.ChatID != "chat-001" {
+			t.Errorf("expected chat_id 'chat-001', got %q", body.ChatID)
 		}
 		if body.AgentID != "agent-1" {
 			t.Errorf("expected agent_id 'agent-1', got %q", body.AgentID)
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"id": "sess-001", "status": "created"})
+		json.NewEncoder(w).Encode(map[string]string{"id": "chat-001", "status": "created"})
 	}))
 	defer ts.Close()
 
 	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
 
-	err := resolver.CreateSession(context.Background(), CreateSessionRequest{
-		SessionID: "sess-001",
+	err := resolver.CreateChat(context.Background(), CreateChatRequest{
+		ChatID: "chat-001",
 		AgentID:   "agent-1",
-		OrgID:     "org-1",
+		WorkspaceID:     "org-1",
 		UserID:    "user-1",
 	})
 	if err != nil {
@@ -138,10 +138,10 @@ func TestIPCResolverCreateSessionError(t *testing.T) {
 
 	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
 
-	err := resolver.CreateSession(context.Background(), CreateSessionRequest{
-		SessionID: "sess-001",
+	err := resolver.CreateChat(context.Background(), CreateChatRequest{
+		ChatID: "chat-001",
 		AgentID:   "agent-1",
-		OrgID:     "org-1",
+		WorkspaceID:     "org-1",
 	})
 	if err == nil {
 		t.Fatal("expected error for server error")

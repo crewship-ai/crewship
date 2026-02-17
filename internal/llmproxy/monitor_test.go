@@ -49,7 +49,7 @@ func TestCredentialMonitor_OnChange(t *testing.T) {
 
 	pool := NewTokenPool(testLogger())
 	pool.Update([]ProviderConnection{
-		{ID: "c1", OrgID: "org1", Provider: ProviderAnthropic, AccessToken: "tok", Status: StatusActive},
+		{ID: "c1", WorkspaceID: "org1", Provider: ProviderAnthropic, AccessToken: "tok", Status: StatusActive},
 	})
 
 	nextjsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -93,8 +93,8 @@ func TestTokenPool_AllConnections(t *testing.T) {
 	// Verify it's a copy (modifying doesn't affect pool)
 	all[0].Status = StatusRevoked
 	poolConn := pool.SelectToken("", ProviderAnthropic)
-	// Won't match because OrgID is empty
+	// Won't match because WorkspaceID is empty
 	if poolConn != nil {
-		t.Log("no match expected since OrgID is empty")
+		t.Log("no match expected since WorkspaceID is empty")
 	}
 }

@@ -17,9 +17,9 @@ func testLogger() *slog.Logger {
 func TestTokenPool_SelectToken_RoundRobin(t *testing.T) {
 	pool := NewTokenPool(testLogger())
 	pool.Update([]ProviderConnection{
-		{ID: "c1", OrgID: "org1", Provider: ProviderAnthropic, AccessToken: "tok1", Status: StatusActive},
-		{ID: "c2", OrgID: "org1", Provider: ProviderAnthropic, AccessToken: "tok2", Status: StatusActive},
-		{ID: "c3", OrgID: "org1", Provider: ProviderAnthropic, AccessToken: "tok3", Status: StatusActive},
+		{ID: "c1", WorkspaceID: "org1", Provider: ProviderAnthropic, AccessToken: "tok1", Status: StatusActive},
+		{ID: "c2", WorkspaceID: "org1", Provider: ProviderAnthropic, AccessToken: "tok2", Status: StatusActive},
+		{ID: "c3", WorkspaceID: "org1", Provider: ProviderAnthropic, AccessToken: "tok3", Status: StatusActive},
 	})
 
 	tokens := make([]string, 3)
@@ -39,8 +39,8 @@ func TestTokenPool_SelectToken_RoundRobin(t *testing.T) {
 func TestTokenPool_SelectToken_SkipsInactive(t *testing.T) {
 	pool := NewTokenPool(testLogger())
 	pool.Update([]ProviderConnection{
-		{ID: "c1", OrgID: "org1", Provider: ProviderAnthropic, AccessToken: "tok1", Status: StatusExpired},
-		{ID: "c2", OrgID: "org1", Provider: ProviderAnthropic, AccessToken: "tok2", Status: StatusActive},
+		{ID: "c1", WorkspaceID: "org1", Provider: ProviderAnthropic, AccessToken: "tok1", Status: StatusExpired},
+		{ID: "c2", WorkspaceID: "org1", Provider: ProviderAnthropic, AccessToken: "tok2", Status: StatusActive},
 	})
 
 	conn := pool.SelectToken("org1", ProviderAnthropic)
@@ -55,7 +55,7 @@ func TestTokenPool_SelectToken_SkipsInactive(t *testing.T) {
 func TestTokenPool_SelectToken_NoActive(t *testing.T) {
 	pool := NewTokenPool(testLogger())
 	pool.Update([]ProviderConnection{
-		{ID: "c1", OrgID: "org1", Provider: ProviderAnthropic, AccessToken: "tok1", Status: StatusExpired},
+		{ID: "c1", WorkspaceID: "org1", Provider: ProviderAnthropic, AccessToken: "tok1", Status: StatusExpired},
 	})
 
 	conn := pool.SelectToken("org1", ProviderAnthropic)
@@ -67,8 +67,8 @@ func TestTokenPool_SelectToken_NoActive(t *testing.T) {
 func TestTokenPool_SelectToken_FiltersByOrg(t *testing.T) {
 	pool := NewTokenPool(testLogger())
 	pool.Update([]ProviderConnection{
-		{ID: "c1", OrgID: "org1", Provider: ProviderAnthropic, AccessToken: "org1-tok", Status: StatusActive},
-		{ID: "c2", OrgID: "org2", Provider: ProviderAnthropic, AccessToken: "org2-tok", Status: StatusActive},
+		{ID: "c1", WorkspaceID: "org1", Provider: ProviderAnthropic, AccessToken: "org1-tok", Status: StatusActive},
+		{ID: "c2", WorkspaceID: "org2", Provider: ProviderAnthropic, AccessToken: "org2-tok", Status: StatusActive},
 	})
 
 	conn := pool.SelectToken("org2", ProviderAnthropic)
@@ -80,7 +80,7 @@ func TestTokenPool_SelectToken_FiltersByOrg(t *testing.T) {
 func TestTokenPool_MarkStatus(t *testing.T) {
 	pool := NewTokenPool(testLogger())
 	pool.Update([]ProviderConnection{
-		{ID: "c1", OrgID: "org1", Provider: ProviderAnthropic, AccessToken: "tok1", Status: StatusActive},
+		{ID: "c1", WorkspaceID: "org1", Provider: ProviderAnthropic, AccessToken: "tok1", Status: StatusActive},
 	})
 
 	pool.MarkStatus("c1", StatusRateLimited)
@@ -98,9 +98,9 @@ func TestTokenPool_MarkStatus(t *testing.T) {
 func TestTokenPool_ActiveCount(t *testing.T) {
 	pool := NewTokenPool(testLogger())
 	pool.Update([]ProviderConnection{
-		{ID: "c1", OrgID: "org1", Provider: ProviderAnthropic, Status: StatusActive},
-		{ID: "c2", OrgID: "org1", Provider: ProviderAnthropic, Status: StatusActive},
-		{ID: "c3", OrgID: "org1", Provider: ProviderAnthropic, Status: StatusExpired},
+		{ID: "c1", WorkspaceID: "org1", Provider: ProviderAnthropic, Status: StatusActive},
+		{ID: "c2", WorkspaceID: "org1", Provider: ProviderAnthropic, Status: StatusActive},
+		{ID: "c3", WorkspaceID: "org1", Provider: ProviderAnthropic, Status: StatusExpired},
 	})
 
 	if count := pool.ActiveCount("org1", ProviderAnthropic); count != 2 {
@@ -110,7 +110,7 @@ func TestTokenPool_ActiveCount(t *testing.T) {
 
 func TestTokenSyncer_Sync(t *testing.T) {
 	connections := []ProviderConnection{
-		{ID: "c1", OrgID: "org1", Provider: ProviderAnthropic, AccessToken: "test-token", Status: StatusActive},
+		{ID: "c1", WorkspaceID: "org1", Provider: ProviderAnthropic, AccessToken: "test-token", Status: StatusActive},
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

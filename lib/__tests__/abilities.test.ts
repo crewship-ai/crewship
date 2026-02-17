@@ -25,8 +25,8 @@ describe("defineAbilitiesFor", () => {
 
     it("can create, read, update, delete any subject", () => {
       const subjects = [
-        "Organization",
-        "Team",
+        "Workspace",
+        "Crew",
         "Agent",
         "Credential",
         "Skill",
@@ -51,8 +51,8 @@ describe("defineAbilitiesFor", () => {
 
     it("can create, read, update, delete any subject", () => {
       const subjects = [
-        "Organization",
-        "Team",
+        "Workspace",
+        "Crew",
         "Agent",
         "Credential",
         "Skill",
@@ -72,13 +72,13 @@ describe("defineAbilitiesFor", () => {
     const ability = defineAbilitiesFor("MANAGER" as OrgRole)
 
     it("can create Team, Agent, Credential", () => {
-      expect(ability.can("create", "Team")).toBe(true)
+      expect(ability.can("create", "Crew")).toBe(true)
       expect(ability.can("create", "Agent")).toBe(true)
       expect(ability.can("create", "Credential")).toBe(true)
     })
 
     it("can read Team, Agent, Credential, Skill, AuditLog, Member", () => {
-      expect(ability.can("read", "Team")).toBe(true)
+      expect(ability.can("read", "Crew")).toBe(true)
       expect(ability.can("read", "Agent")).toBe(true)
       expect(ability.can("read", "Credential")).toBe(true)
       expect(ability.can("read", "Skill")).toBe(true)
@@ -87,21 +87,21 @@ describe("defineAbilitiesFor", () => {
     })
 
     it("can update Team, Agent, Credential", () => {
-      expect(ability.can("update", "Team")).toBe(true)
+      expect(ability.can("update", "Crew")).toBe(true)
       expect(ability.can("update", "Agent")).toBe(true)
       expect(ability.can("update", "Credential")).toBe(true)
     })
 
     it("cannot delete Team, Agent, Credential", () => {
-      expect(ability.can("delete", "Team")).toBe(false)
+      expect(ability.can("delete", "Crew")).toBe(false)
       expect(ability.can("delete", "Agent")).toBe(false)
       expect(ability.can("delete", "Credential")).toBe(false)
     })
 
-    it("cannot manage Organization", () => {
-      expect(ability.can("create", "Organization")).toBe(false)
-      expect(ability.can("update", "Organization")).toBe(false)
-      expect(ability.can("delete", "Organization")).toBe(false)
+    it("cannot manage Workspace", () => {
+      expect(ability.can("create", "Workspace")).toBe(false)
+      expect(ability.can("update", "Workspace")).toBe(false)
+      expect(ability.can("delete", "Workspace")).toBe(false)
     })
 
     it("cannot manage Member", () => {
@@ -115,29 +115,29 @@ describe("defineAbilitiesFor", () => {
     const ability = defineAbilitiesFor("MEMBER" as OrgRole)
 
     it("can read Org, Team, Agent, Skill", () => {
-      expect(ability.can("read", "Organization")).toBe(true)
-      expect(ability.can("read", "Team")).toBe(true)
+      expect(ability.can("read", "Workspace")).toBe(true)
+      expect(ability.can("read", "Crew")).toBe(true)
       expect(ability.can("read", "Agent")).toBe(true)
       expect(ability.can("read", "Skill")).toBe(true)
     })
 
     it("cannot create anything", () => {
-      expect(ability.can("create", "Organization")).toBe(false)
-      expect(ability.can("create", "Team")).toBe(false)
+      expect(ability.can("create", "Workspace")).toBe(false)
+      expect(ability.can("create", "Crew")).toBe(false)
       expect(ability.can("create", "Agent")).toBe(false)
       expect(ability.can("create", "Credential")).toBe(false)
     })
 
     it("cannot update anything", () => {
-      expect(ability.can("update", "Organization")).toBe(false)
-      expect(ability.can("update", "Team")).toBe(false)
+      expect(ability.can("update", "Workspace")).toBe(false)
+      expect(ability.can("update", "Crew")).toBe(false)
       expect(ability.can("update", "Agent")).toBe(false)
       expect(ability.can("update", "Credential")).toBe(false)
     })
 
     it("cannot delete anything", () => {
-      expect(ability.can("delete", "Organization")).toBe(false)
-      expect(ability.can("delete", "Team")).toBe(false)
+      expect(ability.can("delete", "Workspace")).toBe(false)
+      expect(ability.can("delete", "Crew")).toBe(false)
       expect(ability.can("delete", "Agent")).toBe(false)
       expect(ability.can("delete", "Credential")).toBe(false)
     })
@@ -153,29 +153,29 @@ describe("defineAbilitiesFor", () => {
     const ability = defineAbilitiesFor("VIEWER" as OrgRole)
 
     it("can read Org, Team, Agent, Skill", () => {
-      expect(ability.can("read", "Organization")).toBe(true)
-      expect(ability.can("read", "Team")).toBe(true)
+      expect(ability.can("read", "Workspace")).toBe(true)
+      expect(ability.can("read", "Crew")).toBe(true)
       expect(ability.can("read", "Agent")).toBe(true)
       expect(ability.can("read", "Skill")).toBe(true)
     })
 
     it("cannot create anything", () => {
-      expect(ability.can("create", "Organization")).toBe(false)
-      expect(ability.can("create", "Team")).toBe(false)
+      expect(ability.can("create", "Workspace")).toBe(false)
+      expect(ability.can("create", "Crew")).toBe(false)
       expect(ability.can("create", "Agent")).toBe(false)
       expect(ability.can("create", "Credential")).toBe(false)
     })
 
     it("cannot update anything", () => {
-      expect(ability.can("update", "Organization")).toBe(false)
-      expect(ability.can("update", "Team")).toBe(false)
+      expect(ability.can("update", "Workspace")).toBe(false)
+      expect(ability.can("update", "Crew")).toBe(false)
       expect(ability.can("update", "Agent")).toBe(false)
       expect(ability.can("update", "Credential")).toBe(false)
     })
 
     it("cannot delete anything", () => {
-      expect(ability.can("delete", "Organization")).toBe(false)
-      expect(ability.can("delete", "Team")).toBe(false)
+      expect(ability.can("delete", "Workspace")).toBe(false)
+      expect(ability.can("delete", "Crew")).toBe(false)
       expect(ability.can("delete", "Agent")).toBe(false)
       expect(ability.can("delete", "Credential")).toBe(false)
     })

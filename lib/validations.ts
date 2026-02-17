@@ -1,13 +1,13 @@
 import { z } from "zod"
 
-export const createOrgSchema = z.object({
+export const createWorkspaceSchema = z.object({
   name: z.string().min(2).max(100),
   slug: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens"),
 })
 
-export const updateOrgSchema = createOrgSchema.partial()
+export const updateWorkspaceSchema = createWorkspaceSchema.partial()
 
-export const createTeamSchema = z.object({
+export const createCrewSchema = z.object({
   name: z.string().min(2).max(100),
   slug: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens"),
   description: z.string().max(500).optional(),
@@ -15,15 +15,15 @@ export const createTeamSchema = z.object({
   icon: z.string().max(10).optional(),
 })
 
-export const updateTeamSchema = createTeamSchema.partial()
+export const updateCrewSchema = createCrewSchema.partial()
 
 export const createAgentSchema = z.object({
   name: z.string().min(2).max(100),
   slug: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens"),
-  team_id: z.string().uuid(),
+  crew_id: z.string().uuid(),
   description: z.string().max(1000).optional(),
   role_title: z.string().max(100).optional(),
-  agent_role: z.enum(["WORKER", "LEADER", "DIRECTOR"]).default("WORKER"),
+  agent_role: z.enum(["AGENT", "LEAD", "COORDINATOR"]).default("AGENT"),
   cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI"]).default("CLAUDE_CODE"),
   llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "OLLAMA"]).optional(),
   llm_model: z.string().max(100).optional(),
@@ -46,21 +46,21 @@ export const createCredentialSchema = z.object({
   value: z.string().min(1),
   type: z.enum(credentialTypeValues).default("SECRET"),
   provider: z.enum(credentialProviderValues).default("NONE"),
-  scope: z.enum(["ORGANIZATION", "TEAM"]).default("ORGANIZATION"),
-  team_id: z.string().uuid().optional(),
+  scope: z.enum(["WORKSPACE", "CREW"]).default("WORKSPACE"),
+  crew_id: z.string().uuid().optional(),
   account_label: z.string().max(100).optional(),
   account_email: z.string().email().optional(),
   refresh_token: z.string().optional(),
   token_expires_at: z.string().datetime().optional(),
 }).refine(
   (data) => {
-    if (data.scope === "TEAM" && !data.team_id) return false
-    if (data.scope === "ORGANIZATION" && data.team_id) return false
+    if (data.scope === "CREW" && !data.crew_id) return false
+    if (data.scope === "WORKSPACE" && data.crew_id) return false
     return true
   },
   {
-    message: "team_id is required for TEAM scope and must be absent for ORGANIZATION scope",
-    path: ["team_id"],
+    message: "crew_id is required for CREW scope and must be absent for WORKSPACE scope",
+    path: ["crew_id"],
   }
 ).refine(
   (data) => {

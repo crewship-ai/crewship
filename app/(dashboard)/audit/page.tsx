@@ -30,7 +30,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { useOrg } from "@/hooks/use-org"
+import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 
 interface AuditUser {
@@ -65,9 +65,9 @@ const categories = [
   { label: "All", value: "all" },
   { label: "Agents", value: "Agent" },
   { label: "Credentials", value: "Credential" },
-  { label: "Teams", value: "Team" },
-  { label: "Users", value: "OrganizationMember" },
-  { label: "System", value: "Organization" },
+  { label: "Crews", value: "Crew" },
+  { label: "Users", value: "WorkspaceMember" },
+  { label: "System", value: "Workspace" },
 ]
 
 const dateRanges = [
@@ -106,7 +106,7 @@ function getActionColor(action: string): string {
 }
 
 export default function AuditPage() {
-  const { orgId, loading: orgLoading } = useOrg()
+  const { workspaceId, loading: wsLoading } = useWorkspace()
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -116,7 +116,7 @@ export default function AuditPage() {
   const [searchQuery, setSearchQuery] = useState("")
 
   useEffect(() => {
-    if (!orgId) return
+    if (!workspaceId) return
 
     let cancelled = false
 
@@ -124,7 +124,7 @@ export default function AuditPage() {
       setLoading(true)
       setError(null)
       try {
-        const params = new URLSearchParams({ org_id: orgId as string })
+        const params = new URLSearchParams({ workspace_id: workspaceId as string })
         if (category !== "all") params.set("entity_type", category)
         const dateFrom = getDateFrom(dateRange)
         if (dateFrom) params.set("date_from", dateFrom)
@@ -145,9 +145,9 @@ export default function AuditPage() {
 
     fetchLogs()
     return () => { cancelled = true }
-  }, [orgId, category, dateRange])
+  }, [workspaceId, category, dateRange])
 
-  const isLoading = orgLoading || loading
+  const isLoading = wsLoading || loading
 
   const filteredLogs = searchQuery
     ? logs.filter(
@@ -160,7 +160,7 @@ export default function AuditPage() {
 
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <PageHeader title="Audit Log" description="Track all actions in your organization" />
+      <PageHeader title="Audit Log" description="Track all actions in your workspace" />
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
