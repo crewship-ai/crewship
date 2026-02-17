@@ -88,13 +88,17 @@ func (h *NextAuthHandler) Session(w http.ResponseWriter, r *http.Request) {
 	cookieName := h.sessionCookieName(r)
 	cookie, err := r.Cookie(cookieName)
 	if err != nil || cookie.Value == "" {
-		writeJSON(w, http.StatusOK, map[string]interface{}{})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("null"))
 		return
 	}
 
 	claims, err := h.validator.Validate(cookie.Value)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("null"))
 		return
 	}
 
