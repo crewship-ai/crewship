@@ -34,7 +34,7 @@
 | (structured       |              |            |            |
 |  data ONLY)       |              v            v            v
 |  - users, auth    |     +----------+   +----------+   +--------+
-|  - orgs, teams    |     | Team A   |   | Team B   |   | Output |
+|  - workspaces, crews    |     | Crew A   |   | Crew B   |   | Output |
 |  - agents, skills |     | container|   | container|   | storage|
 |  - credentials    |     |          |   |          |   | (persi-|
 +-------------------+     | /workspace   | /workspace   | stent) |
@@ -48,44 +48,44 @@
 
 ## Core Concepts
 
-- **Organization** = company (multi-tenant root)
-- **Team** = department (isolation boundary, maps to Docker container or K8s Pod)
+- **Workspace** = company (multi-tenant root)
+- **Crew** = department (isolation boundary, maps to Docker container or K8s Pod)
 - **Agent** = virtual employee (CLI session inside container, has LLM, skills, credentials)
 - **Skill** = MCP Server wrapper (tools + resources + system prompt + credential requirements)
 - **Credential** = encrypted secret (AES-256-GCM, injected by sidecar into MCP servers at runtime)
-- **Delegation** = leader/director deleguje ukol na podrizeneho agenta (auditovano)
-- **Sidecar** = crewship-sidecar Go binary running inside team container (localhost:9119)
+- **Assignment** = lead/coordinator deleguje ukol na podrizeneho agenta (auditovano)
+- **Sidecar** = crewship-sidecar Go binary running inside crew container (localhost:9119)
 - **Runtime** = CLI mode (Claude Code, OpenCode) or API-direct mode (crewship-agent binary)
 
 ### Agent Hierarchy (3-level orchestration, Phase 2)
 
 ```
-VIRTUAL DIRECTOR (1 per org, optional)
-  │  - Koordinuje cross-team ukoly
-  │  - Deleguje na Crew Leadery (nikdy primo na workery)
+VIRTUAL COORDINATOR (1 per workspace, optional)
+  │  - Koordinuje cross-crew ukoly
+  │  - Deleguje na Crew Leady (nikdy primo na agenty)
   │  - Bezi jako lightweight LLM call (bez Docker kontejneru)
   │
-  ├── CREW LEADER (1 per team)
-  │     │  - Primarni kontaktni bod pro uzivatel ↔ team komunikaci
+  ├── CREW LEAD (1 per crew)
+  │     │  - Primarni kontaktni bod pro uzivatel ↔ crew komunikaci
   │     │  - Rozdeluje prace, agreguje vysledky, kontroluje kvalitu
   │     │  - Bezi v kontejneru sveho tymu (Docker exec)
   │     │
-  │     ├── WORKER (default role)
+  │     ├── AGENT (default role)
   │     │     - Specializovany na konkretni ukoly
-  │     │     - Komunikuje primarne se svym leaderem
+  │     │     - Komunikuje primarne se svym leadem
   │     │     - Bezi v kontejneru sveho tymu (Docker exec)
-  │     ├── WORKER ...
-  │     └── WORKER ...
+  │     ├── AGENT ...
+  │     └── AGENT ...
   │
-  ├── CREW LEADER (jiny tym)
-  │     ├── WORKER ...
-  │     └── WORKER ...
+  ├── CREW LEAD (jiny tym)
+  │     ├── AGENT ...
+  │     └── AGENT ...
   └── ...
 ```
 
-Uzivatel chatuje primarne s Crew Leaderem (90 % interakci).
-Pro cross-team otazky chatuje s Virtual Directorem.
-Muze take chatovat primo s worker agentem (bypass leadera).
+Uzivatel chatuje primarne s Crew Leadem (90 % interakci).
+Pro cross-crew otazky chatuje s Virtual Coordinatorem.
+Muze take chatovat primo s agent agentem (bypass leada).
 
 > Plna specifikace: `.factory/context/prd/ORCHESTRATION.md`
 
@@ -191,7 +191,7 @@ Remote (K8s, multi-node):
    (crewship-sidecar already running in container on localhost:9119)
 4. Agent process starts (CLI tool OR crewship-agent API-direct)
 5. Agent writes response to stdout (user-facing, clean)
-6. Agent delegates via HTTP to sidecar: POST localhost:9119/delegate
+6. Agent delegates via HTTP to sidecar: POST localhost:9119/assign
    (CLI mode: curl; API-direct: native HTTP call)
 7. Sidecar validates (RBAC, circuit breaker) → forwards to crewshipd
 8. Go service reads stdout → WebSocket + JSONL log
@@ -201,7 +201,7 @@ Remote (K8s, multi-node):
 ### External webhook triggers agent
 
 ```
-1. Grafana/n8n/Make sends POST to /api/v1/webhooks/{team}/{agent}/trigger
+1. Grafana/n8n/Make sends POST to /api/v1/webhooks/{crew}/{agent}/trigger
 2. Go service validates webhook secret
 3. Go service wakes agent (start container if stopped)
 4. Agent processes the event
@@ -257,7 +257,7 @@ Pool exhausted (all keys in cooldown):
   ├─ .cache/             ← pip/npm cache
   ├─ .local/             ← agent local state
   ├─ tmp/                ← temp files
-  └─ ...                 ← working directory for agent
+  └─ ...                 ← working coordinatory for agent
 ```
 
 Agent's scratch space. Installed packages, temp files, CLI state.
@@ -271,22 +271,22 @@ Destroyed when container is removed. Cheap, disposable -- agent is cattle.
 
 ```
 /var/lib/crewship/output/        ← bind mount, on host filesystem
-  ├─ {org-id}/
-  │   ├─ {team-name}/
+  ├─ {workspace-id}/
+  │   ├─ {crew-name}/
   │   │   ├─ {agent-name}/
   │   │   │   ├─ reports/
   │   │   │   │   ├─ q1-report.pdf
   │   │   │   │   └─ q1-report.pdf.meta.json
   │   │   │   └─ code/
   │   │   │       └─ scraper.py
-  │   │   └─ shared/             ← shared across agents in team
-  │   └─ _archived/              ← moved here when team is deleted
+  │   │   └─ shared/             ← shared across agents in crew
+  │   └─ _archived/              ← moved here when crew is deleted
   │       └─ marketing-2026-02-11/
   └─ ...
 ```
 
 Agent output -- reports, code, data, exports. This is what the business cares about.
-When team is deleted: container gone, but files moved to `_archived/` (not deleted).
+When crew is deleted: container gone, but files moved to `_archived/` (not deleted).
 Admin can purge archives (GDPR).
 
 ### Logs
@@ -295,13 +295,13 @@ Admin can purge archives (GDPR).
 /var/log/crewship/
   ├─ service.jsonl               ← Go service logs
   ├─ teams/
-  │   ├─ {team-id}/
+  │   ├─ {crew-id}/
   │   │   ├─ agents/
   │   │   │   ├─ {agent-id}/
   │   │   │   │   ├─ current.jsonl        ← active log
   │   │   │   │   ├─ 2026-02-11T13.jsonl.gz  ← rotated (hourly)
   │   │   │   │   └─ ...
-  │   │   └─ audit.jsonl         ← team audit trail
+  │   │   └─ audit.jsonl         ← crew audit trail
   │   └─ ...
   └─ audit.jsonl                 ← global audit (append-only: chattr +a)
 ```
@@ -312,14 +312,14 @@ Zero custom code -- Linux has done this for 30 years.
 ## Container Model
 
 ```
-Every team gets ONE Docker container:
+Every crew gets ONE Docker container:
   - Base image: ghcr.io/crewship-ai/agent-runtime:latest (Ubuntu 24.04)
   - Runtime: runc (default) or runsc/gVisor (optional, ADR-003)
   - Non-root user: agent (UID 1001) -- NEVER root
   - Network: crewship-agents (--internal, no internet by default)
   - Explicit allowlist for LLM API endpoints only
   - Contains:
-    - crewship-sidecar (Go binary, localhost:9119, MCP Gateway + delegation proxy)
+    - crewship-sidecar (Go binary, localhost:9119, MCP Gateway + assignment proxy)
     - crewship-agent (Go binary, API-direct runtime, Phase 2)
     - CLI tools (Claude Code, OpenCode, Codex -- for CLI mode)
     - landrun (Landlock wrapper, per-agent filesystem isolation, Phase 2)
@@ -327,7 +327,7 @@ Every team gets ONE Docker container:
   - Mounts:
     - /workspace (ephemeral Docker volume)
     - /output (persistent bind mount to host, includes .memory/ and .skills/)
-  - Resource limits: configurable per team (default 1GB RAM, 0.5 CPU)
+  - Resource limits: configurable per crew (default 1GB RAM, 0.5 CPU)
   - Always-on by default, configurable TTL for auto-shutdown
 ```
 
@@ -362,7 +362,7 @@ Container = jail. Agent cannot:
 ## Messaging Architecture (ADR-002)
 
 **MVP (single-node):** Go channels + goroutines (in-process messaging)
-- Delegation commands: named pipe → goroutine reads → Go channel → DelegationEngine
+- Assignment commands: named pipe → goroutine reads → Go channel → AssignmentEngine
 - WebSocket broadcast: in-process (single crewshipd instance)
 - No external message broker dependency
 
@@ -440,7 +440,7 @@ MCP Top 10, 53% plaintext credential storage in community servers).
                              │
                              ▼  install to agent
 ┌──────────────────────────────────────────────────────────────┐
-│ Team Container                                               │
+│ Crew Container                                               │
 │ Agent ◄─MCP─► Sidecar ──srt sandbox──► MCP Server (OCI)     │
 │                 ↑ credentials injected, RBAC, audit          │
 │                 ↑ network: only Skill.allowed_domains        │
@@ -462,7 +462,7 @@ Result: `security_score` (0-100) + `verification` status.
 ### MCP Server Sandboxing (ADR-017)
 
 Each MCP server runs inside Anthropic Sandbox Runtime (`srt`) within the
-team container. Double sandboxing: Docker (container) + srt (process).
+crew container. Double sandboxing: Docker (container) + srt (process).
 
 ```
 Sidecar generates per-skill srt-settings.json from Skill.allowed_domains:
@@ -496,16 +496,16 @@ Agents can run in two modes -- CLI-first or API-direct:
 ```
 CLI mode (Phase 1):       Docker exec → CLI tool (Claude Code, OpenCode, Codex)
                           CLI tool calls LLM API, has own tool use
-                          Delegation via curl to sidecar
+                          Assignment via curl to sidecar
 
 API-direct mode (Phase 2): Docker exec → crewship-agent (Go binary, ~5MB)
                           Calls LLM API directly (Anthropic/OpenAI/Google SDK)
-                          Native tool use, native delegation via HTTP
+                          Native tool use, native assignment via HTTP
                           Precise token tracking from API response
 ```
 
 Both modes communicate with crewshipd through the same crewship-sidecar
-(localhost:9119). The sidecar provides a unified delegation API regardless
+(localhost:9119). The sidecar provides a unified assignment API regardless
 of agent runtime type. See ORCHESTRATION.md section 5.9.
 
 ## Conversation Search (Phase 2, ADR-011)
@@ -526,7 +526,7 @@ JSONL append (real-time) → crewshipd → async indexer → Meilisearch
 
 | Tool | What | How |
 |---|---|---|
-| cAdvisor | Container metrics (CPU, RAM, disk, network per team) | Separate container, zero config |
+| cAdvisor | Container metrics (CPU, RAM, disk, network per crew) | Separate container, zero config |
 | Prometheus | Go service metrics (connections, agent runs, errors) | Native Go, /metrics endpoint |
 | fsnotify | Real-time file change detection | inotify via Go, push to frontend via WS |
 | Web terminal | SSH-like access to agent container from browser | xterm.js (frontend) + Docker exec API (Go) |
@@ -550,7 +550,7 @@ V primarnim distribucnim modu bezi Crewship jako jeden Go binary:
 - CLI: `crewship start/stop/status/logs`
 - Detail: `prd/DEPLOYMENT.md` sekce 1-4
 
-Data directory: `~/.crewship/` (konfigurace, DB, logy, output).
+Data coordinatory: `~/.crewship/` (konfigurace, DB, logy, output).
 Mode 2 (Docker Compose) pouziva `/var/lib/crewship/` a `/var/log/crewship/`.
 
 ## Graceful Shutdown (Go service)
@@ -571,6 +571,6 @@ Mode 2 (Docker Compose) pouziva `/var/lib/crewship/` a `/var/log/crewship/`.
 |------|-------|--------|-------------|-------|-------|
 | OWNER | All | All | All | All | All |
 | ADMIN | All | All | All | All | All |
-| MANAGER | Assigned | Create/Edit in assigned | Team-level | Team | Team |
-| MEMBER | Assigned | Interact with assigned | None | Team (read) | Own |
-| VIEWER | Assigned | Read-only | None | Team (read) | None |
+| MANAGER | Assigned | Create/Edit in assigned | Crew-level | Crew | Crew |
+| MEMBER | Assigned | Interact with assigned | None | Crew (read) | Own |
+| VIEWER | Assigned | Read-only | None | Crew (read) | None |

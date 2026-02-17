@@ -22,7 +22,7 @@ Domena: crewship.ai | GitHub: github.com/crewship-ai
 ### Elevator pitch
 > "Crewship je open-source platforma kde vytvorite virtualni firmu. Nainstalujete jednim prikazem,
 > spustite, a za 60 sekund mate bezicho AI agenta v izolovanem kontejneru. Pridavate AI zamestnance
-> do tymu, date jim dovednosti a opravneni, nastavite sitovy pristup, a oni pracuji -- generuji reporty,
+> do crew, date jim dovednosti a opravneni, nastavite sitovy pristup, a oni pracuji -- generuji reporty,
 > monitoruji systemy, resolvuji tikety. Vsechno pod vasim dohledem, s plnym audit logem a enterprise
 > zabezpecenim. `brew install crewship && crewship start` -- hotovo."
 
@@ -30,13 +30,13 @@ Domena: crewship.ai | GitHub: github.com/crewship-ai
 1. **Jednoprikazova instalace** -- `brew install crewship && crewship start`. Ollama model distribuce.
 2. **Container isolation by default** -- kazdy agent v Docker kontejneru (non-root, cap-drop ALL).
 3. **Per-agent network control** -- internet ON/OFF, domain whitelist, local network -- klikaci UI.
-4. **"Lidska" terminologie** -- tym, zamestnanec, dovednost, opravneni. Ne agent, orchestrator, MCP.
+4. **"Lidska" terminologie** -- crew, zamestnanec, dovednost, opravneni. Ne agent, orchestrator, MCP.
 5. **Enterprise-ready od dne 1** -- RBAC, audit log, sifrovane credentials, cost control.
 6. **Curated Skills marketplace** -- sandbox enforcement, permissions model, Official/Verified/Community badges.
-7. **3-tier orchestrace** -- Director → Leader → Worker hierarchie (inspirace realnymi firmami).
+7. **3-tier orchestrace** -- Coordinator → Lead → Agent hierarchie (inspirace realnymi firmami).
 8. **Zero-deps Free tier** -- single binary, SQLite, Docker. Zadny cloud, zadna registrace.
 9. **Open-source + self-hosted** -- FSL licence (→ Apache 2.0 po 2 letech).
-10. **Crewship AI (meta-agent)** -- AI ktery pomaha vytvoret AI tym.
+10. **Crewship AI (meta-agent)** -- AI ktery pomaha vytvoret AI crew.
 
 ### Architekturni vzor: inspirace OpenClaw
 Crewship je architektonicky inspirovana projektem **OpenClaw** (157k+ GitHub stars, MIT licence).
@@ -65,7 +65,7 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 - **Potreba:** Chce automatizovat rutinni prace (emaily, reporty, CRM) bez najimani dalsich lidi
 - **Bolest:** Nerozumi pojmum jako MCP, orchestrator, prompt engineering
 - **Jak ho ziskame:** "Lidska" terminologie, Crewship AI (meta-agent) ho provede setupem
-- **Tier:** Team (placeny cloud)
+- **Tier:** Crew (placeny cloud)
 
 ### Persona 2: "Marek" -- IT Admin / CTO
 - **Profil:** 28-40 let, technicky zamereny, spravuje infrastrukturu firmy
@@ -79,7 +79,7 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 - **Potreba:** Rychle protypovat AI automatizace pro klienty
 - **Bolest:** CrewAI/AutoGen vyzaduji hodne kodu, zadne UI pro klienta
 - **Jak ho ziskame:** Free tier, snadny setup, sablony oddeleni
-- **Tier:** Free → Team
+- **Tier:** Free → Crew
 
 ### Persona 4: "David" -- Developer na laptope
 - **Profil:** 20-35 let, vyvojar, chce osobniho AI asistenta na svem stroji
@@ -94,17 +94,17 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 
 | UI termin (anglicky) | UI termin (cesky) | Kod | Popis |
 |---|---|---|---|
-| Company | Firma | Organization | Multi-tenant root entita |
-| Department / Team | Oddeleni / Tym | Team | Izolacni boundary, kontejner |
+| Workspace | Pracovni prostor | Workspace | Multi-tenant root entita |
+| Crew | Crew / Tym | Crew | Izolacni boundary, kontejner |
 | Virtual Employee | Virtualni zamestnanec | Agent | CLI session s LLM, skilly, credentials |
 | Skill | Dovednost | Skill | Balicek nastroju + MCP + skripty |
 | Permission / Credential | Opravneni | Credential | Sifrovany API klic v trezoru |
-| Department Head / Team Leader | Sef oddeleni | Agent (role=LEADER) | 1 per team, primarni kontakt pro uzivatel, deleguje na workery |
-| Director | Reditel | Agent (role=DIRECTOR) | 1 per org, koordinuje cross-team, deleguje na leadery |
-| Employee | Zamestnanec | Agent (role=WORKER) | Default role, specializovany na konkretni ukoly |
+| Crew Lead | Sef crew | Agent (role=LEAD) | 1 per crew, primarni kontakt pro uzivatel, prideluje ukoly agentum |
+| Coordinator | Koordinator | Agent (role=COORDINATOR) | 1 per workspace, koordinuje cross-crew, prideluje ukoly leadum |
+| Agent | Agent / Zamestnanec | Agent (role=AGENT) | Default role, specializovany na konkretni ukoly |
 | Task | Ukol | AgentRun | Jednotlivy beh agenta |
-| Delegation | Delegace | DelegationLog | Leader/Director deleguje ukol na podrizeneho |
-| Conversation | Konverzace | ConversationSession | Chat session s agentem |
+| Assignment | Prideleni | Assignment | Lead/Coordinator prideluje ukol podrizenemu |
+| Chat | Chat / Konverzace | Chat | Chat session s agentem |
 
 ---
 
@@ -120,7 +120,7 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 
 ### PHASE 1: MVP (8-12 tydnu, solo dev + AI)
 
-**Cil:** Funkcni platforma kde uzivatel nainstaluje jednim prikazem, vytvori firmu, tym, agenta, prida mu skilly a credentials, nastavi sitovy pristup, spusti ho a vidi konverzaci v chat UI. Vcetne single binary distribuce a skill marketplace.
+**Cil:** Funkcni platforma kde uzivatel nainstaluje jednim prikazem, vytvori workspace, crew, agenta, prida mu skilly a credentials, nastavi sitovy pristup, spusti ho a vidi konverzaci v chat UI. Vcetne single binary distribuce a skill marketplace.
 
 #### 4.1 Autentizace a uzivatelsky ucet [P0]
 
@@ -133,37 +133,37 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 | AUTH-05 | Zapomenute heslo | P0 | Reset hesla pres email (Resend) |
 | AUTH-06 | Magic link prihlaseni | P2 | Phase 2 (vyzaduje email service) |
 
-#### 4.2 Organizace (Firma) [P0]
+#### 4.2 Workspace (Firma) [P0]
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| ORG-01 | Vytvoreni organizace | P0 | Novy uzivatel vytvori firmu (nazev, slug) |
-| ORG-02 | Nastaveni organizace | P0 | Editace nazvu, popisu, loga |
+| ORG-01 | Vytvoreni workspace | P0 | Novy uzivatel vytvori firmu (nazev, slug) |
+| ORG-02 | Nastaveni workspace | P0 | Editace nazvu, popisu, loga |
 | ORG-03 | Pozvani clenu | P0 | Pozvanka emailem + RBAC role |
 | ORG-04 | Sprava clenu | P0 | Zmena role, odebreni clena |
 | ORG-05 | RBAC role | P0 | Owner, Admin, Manager, Member, Viewer |
-| ORG-06 | Smazani organizace | P1 | Soft delete + grace period (GDPR) |
+| ORG-06 | Smazani workspace | P1 | Soft delete + grace period (GDPR) |
 
-#### 4.3 Tymy (Oddeleni) [P0]
+#### 4.3 Crews (Oddeleni) [P0]
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| TEAM-01 | Vytvoreni tymu | P0 | Nazev, popis, barva/ikona |
-| TEAM-02 | Prirazeni clenu do tymu | P0 | Manager priradi uzivatele do tymu |
-| TEAM-03 | Seznam tymu | P0 | Dashboard s prehledem tymu |
-| TEAM-04 | Editace tymu | P0 | Zmena nazvu, popisu, clenu |
-| TEAM-05 | Smazani tymu | P1 | Soft delete (agenti se deaktivuji) |
-| TEAM-06 | Sablony tymu | P1 | Preddefinovane sablony ("IT Firma", "Obchod", "Podpora") |
+| TEAM-01 | Vytvoreni crew | P0 | Nazev, popis, barva/ikona |
+| TEAM-02 | Prirazeni clenu do crew | P0 | Manager priradi uzivatele do crew |
+| TEAM-03 | Seznam crews | P0 | Dashboard s prehledem crews |
+| TEAM-04 | Editace crew | P0 | Zmena nazvu, popisu, clenu |
+| TEAM-05 | Smazani crew | P1 | Soft delete (agenti se deaktivuji) |
+| TEAM-06 | Sablony crew | P1 | Preddefinovane sablony ("IT Firma", "Obchod", "Podpora") |
 
 #### 4.4 Agenti (Virtualni zamestnanci) [P0]
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| AGENT-01 | Vytvoreni agenta | P0 | Jmeno, popis, role, prirazeni do tymu |
+| AGENT-01 | Vytvoreni agenta | P0 | Jmeno, popis, role, prirazeni do crew |
 | AGENT-02 | Konfigurace agenta | P0 | CLI adapter (Claude Code/OpenCode/Codex/Gemini), LLM model, system prompt, temperature, max tokens |
 | AGENT-03 | Prirazeni skillu | P0 | Vyber skillu z registru a prirazeni agentovi |
 | AGENT-04 | Prirazeni credentials | P0 | Vyber credentials z vaultu pro agenta |
 | AGENT-05 | Spusteni agenta | P0 | Start agent session (crewshipd job orchestrace) |
 | AGENT-06 | Zastaveni agenta | P0 | Graceful stop + force kill |
 | AGENT-07 | Status agenta | P0 | Idle, Running, Error, Stopped |
-| AGENT-08 | Seznam agentu v tymu | P0 | Prehled agentu s jejich statusem |
+| AGENT-08 | Seznam agentu v crew | P0 | Prehled agentu s jejich statusem |
 | AGENT-09 | Timeout per agent | P0 | Max doba behu (safety) |
 | AGENT-10 | Editace agenta | P0 | Zmena konfigurace |
 | AGENT-11 | Smazani agenta | P1 | Soft delete |
@@ -195,7 +195,7 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 | CRED-02 | Seznam credentials | P0 | Nazvy + masked hodnoty (***) |
 | CRED-03 | Smazani credential | P0 | Permanentni smazani |
 | CRED-04 | Injekce do agenta | P0 | Credential → ENV var pri startu agenta |
-| CRED-05 | Scope credentials | P0 | Org-level vs Team-level credentials |
+| CRED-05 | Scope credentials | P0 | Workspace-level vs Crew-level credentials |
 | CRED-06 | Rotace credential | P1 | Update hodnoty bez zmeny reference |
 | CRED-07 | Credential pool | P1 | Vice klicu pro stejny env var s priority (round-robin/failover) |
 
@@ -204,12 +204,12 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 > **Architekturni poznamka:** Gateway je nativni Go WebSocket server v crewshipd.
 > Typed WebSocket protokol: `{type:"req", method, params}` → `{type:"res", ok, payload}`.
 > Routuje zpravy z web UI (a pozdeji Discord/Telegram) na agenty.
-> Kazda organizace/tym ma izolovanou session.
+> Kazdy workspace/crew ma izolovanou session.
 
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
 | GW-01 | WebSocket server | P0 | Nativni Go WebSocket (goroutines), typed protokol (req/res/event) |
-| GW-02 | Multi-tenant routing | P0 | Izolace sessions per org/team |
+| GW-02 | Multi-tenant routing | P0 | Izolace sessions per workspace/crew |
 | GW-03 | Autentizace | P0 | JWT token validace na connect |
 | GW-04 | Agent events | P0 | Streaming agent outputu jako events |
 | GW-05 | Health/heartbeat | P0 | Connection health monitoring |
@@ -261,13 +261,13 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
 | LOG-01 | Real-time log stream | P0 | WebSocket tail logu agenta (Go → JSONL → WS event) |
-| LOG-02 | Filtrovani logu | P1 | Podle agenta, tymu, severity |
+| LOG-02 | Filtrovani logu | P1 | Podle agenta, crew, severity |
 | LOG-03 | Hledani v lozich | P1 | Fulltext search |
 
 #### 4.11 Dashboard [P0]
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| DASH-01 | Team overview | P0 | Pocet agentu, aktivnich tasku, posledni aktivita |
+| DASH-01 | Crew overview | P0 | Pocet agentu, aktivnich tasku, posledni aktivita |
 | DASH-02 | Agent status cards | P0 | Karty agentu s jejich stavem |
 | DASH-03 | Quick actions | P1 | Rychle spusteni agenta, prechod do chatu |
 
@@ -276,20 +276,20 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 |---|---|---|---|
 | AUDIT-01 | Logovani state-changing akci | P0 | CRUD operace, spusteni agenta, zmena konfigurace |
 | AUDIT-02 | Zobrazeni audit logu | P0 | Tabulka s filtry (kdo, co, kdy) |
-| AUDIT-03 | Audit per organizace | P0 | Izolace logu per org |
+| AUDIT-03 | Audit per workspace | P0 | Izolace logu per workspace |
 
 #### 4.13 Onboarding [P0]
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| ONBOARD-01 | Guided wizard (free tier) | P0 | Krok po kroku: firma → tym → agent → skill → chat |
+| ONBOARD-01 | Guided wizard (free tier) | P0 | Krok po kroku: firma → crew → agent → skill → chat |
 | ONBOARD-02 | Template picker | P1 | Vyber sablony ("IT firma", "Obchodni oddeleni") |
 
 #### 4.14 Stripe Billing [P1]
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
 | BILL-01 | Stripe integrace | P1 | Subscription CRUD (create, update, cancel) |
-| BILL-02 | Plan tiers v DB | P1 | Free, Team, Enterprise s limity |
-| BILL-03 | Enforcement limitu | P1 | Pocet agentu, tymu, skillu per plan |
+| BILL-02 | Plan tiers v DB | P1 | Free, Crew, Enterprise s limity |
+| BILL-03 | Enforcement limitu | P1 | Pocet agentu, crews, skillu per plan |
 | BILL-04 | Billing portal | P1 | Stripe Customer Portal (faktury, platebni metody) |
 | BILL-05 | Webhook handler | P1 | Stripe eventy (payment succeeded, subscription updated) |
 
@@ -317,7 +317,7 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 |---|---|---|---|
 | COST-01 | Per-agent budget limits | P0 | Maximalní utrata za den/tyden/mesic per agent |
 | COST-02 | Cost alerting | P0 | Notifikace kdyz agent prekroci % rozpoctu (50%, 80%, 100%) |
-| COST-03 | Usage dashboard | P1 | Prehled nakladu per agent/tym/organizace |
+| COST-03 | Usage dashboard | P1 | Prehled nakladu per agent/crew/workspace |
 
 #### 4.18 Skills Marketplace [P0-P1]
 | ID | Feature | Priorita | Popis |
@@ -329,19 +329,19 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 | MARKET-05 | Skill sandbox enforcement | P0 | Kazdy skill deklaruje permissions, Docker je vynucuje |
 | MARKET-06 | Skill permissions model | P0 | Granularni: filesystem (r/w/none), network (on/off/whitelist), secrets (list) |
 | MARKET-07 | Official/Verified/Community badges | P0 | Kvalitni signaly: Official = rucne reviewed, Verified = auto-scan passed, Community = user-submitted |
-| MARKET-08 | Revenue sharing pro skill autory | P2 | Community autori dostavaji podil z Team/Enterprise tier |
+| MARKET-08 | Revenue sharing pro skill autory | P2 | Community autori dostavaji podil z Crew/Enterprise tier |
 
 #### 4.19 Webhooky [P0]
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| WEBHOOK-01 | Webhook ingress endpoint | P0 | POST /api/v1/webhooks/{team}/{agent}/trigger -- externi triggery (Grafana, n8n, Make) |
+| WEBHOOK-01 | Webhook ingress endpoint | P0 | POST /api/v1/webhooks/{crew}/{agent}/trigger -- externi triggery (Grafana, n8n, Make) |
 | WEBHOOK-02 | Webhook secret per agent | P0 | Kazdy agent ma unikatni webhook secret pro autentizaci |
 | WEBHOOK-03 | Webhook retry/delivery log | P1 | Log vsech prichozcich webhooku, retry logika |
 
 #### 4.20 File Management [P0]
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| FILE-01 | Persistent output storage | P0 | /output/ bind mount -- soubory prezijou restart i smazani tymu |
+| FILE-01 | Persistent output storage | P0 | /output/ bind mount -- soubory prezijou restart i smazani crew |
 | FILE-02 | File browser v UI | P0 | Stromovy prohlizec souboru agenta s download tlacitkem |
 | FILE-03 | File preview | P1 | PDF, Markdown, obrazky primo v prohlizeci |
 | FILE-04 | fsnotify notifikace | P0 | Real-time WebSocket notifikace pri vytvoreni/zmene souboru |
@@ -349,7 +349,7 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 #### 4.21 Monitoring [P0]
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| MONITOR-01 | cAdvisor container metrics | P0 | CPU, RAM, disk, sit per agent/kontejner |
+| MONITOR-01 | cAdvisor container metrics | P0 | CPU, RAM, disk, network per agent/kontejner |
 | MONITOR-02 | Web terminal | P0 | xterm.js -- SSH-like pristup do kontejneru z prohlizece |
 | MONITOR-03 | Agent activity stream | P0 | Real-time feed akci agenta (stdout pres WebSocket) |
 | MONITOR-04 | Prometheus /metrics | P1 | Go service vystavuje metriky pro Prometheus/Grafana |
@@ -397,50 +397,50 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 | COLLAB-02 | Identifikace uzivatelu | P1 | Agent vi kdo mu pise |
 | COLLAB-03 | Real-time sync | P1 | Vsichni vidi zpravy ostatnich okamzite |
 
-#### 4.26 Orchestrace: Crew Leader + Virtual Director [P1]
+#### 4.26 Orchestrace: Crew Lead + Coordinator [P1]
 
-> **Architektura:** 3-urovnova hierarchie (Director → Leader → Worker) inspirovana
-> realnymi firemnimi strukturami. Uzivatel si primarne povida s Crew Leaderem tymu.
-> Pro cross-team otazky existuje Virtual Director na urovni organizace.
+> **Architektura:** 3-urovnova hierarchie (Coordinator → Lead → Agent) inspirovana
+> realnymi firemnimi strukturami. Uzivatel si primarne povida s Crew Leadem sve crew.
+> Pro cross-crew otazky existuje Coordinator na urovni workspace.
 > Plna specifikace: **`prd/ORCHESTRATION.md`**
 
-**Phase 2A: Crew Leader (in-team orchestrace)**
+**Phase 2A: Crew Lead (in-crew orchestrace)**
 
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| ORCH-01 | AgentRole enum (WORKER/LEADER/DIRECTOR) | P1 | Novy enum + DB migrace |
-| ORCH-02 | Leader designation UI | P1 | Oznaceni agenta jako leadera v team settings (max 1 per team) |
-| ORCH-03 | Auto-generated leader system prompt | P1 | System prompt s informacemi o tymu |
-| ORCH-04 | Delegacni protokol (stdout parsing) | P1 | Parsovani @delegate/@ask prikazu ze stdout leadera v crewshipd |
-| ORCH-05 | Leader → Worker delegace | P1 | Docker exec orchestrace |
-| ORCH-06 | agents_list | P1 | Leader vidi seznam agentu ktere muze targetnout |
-| ORCH-07 | DelegationLog tabulka | P1 | Auditovani vsech delegaci |
-| ORCH-08 | Leader auto-routing | P1 | Uzivatel pise do tymu → leader rozhodne komu delegovat |
-| ORCH-09 | Paralelni delegace | P1 | wait_group pattern pro vice workeru soucasne |
-| ORCH-10 | Error handling + fallback | P1 | Leader reaguje na selhani workera |
-| ORCH-11 | Leader summary/agregace | P1 | Leader shrnuje vysledky pred odeslani uzivateli |
+| ORCH-01 | AgentRole enum (AGENT/LEAD/COORDINATOR) | P1 | Novy enum + DB migrace |
+| ORCH-02 | Lead designation UI | P1 | Oznaceni agenta jako leada v crew settings (max 1 per crew) |
+| ORCH-03 | Auto-generated lead system prompt | P1 | System prompt s informacemi o crew |
+| ORCH-04 | Assignment protokol (stdout parsing) | P1 | Parsovani @assign/@ask prikazu ze stdout leada v crewshipd |
+| ORCH-05 | Lead → Agent assignment | P1 | Docker exec orchestrace |
+| ORCH-06 | agents_list | P1 | Lead vidi seznam agentu ktere muze targetnout |
+| ORCH-07 | Assignment tabulka | P1 | Auditovani vsech assignments |
+| ORCH-08 | Lead auto-routing | P1 | Uzivatel pise do crew → lead rozhodne komu pridelit |
+| ORCH-09 | Paralelni assignment | P1 | wait_group pattern pro vice agentu soucasne |
+| ORCH-10 | Error handling + fallback | P1 | Lead reaguje na selhani agenta |
+| ORCH-11 | Lead summary/agregace | P1 | Lead shrnuje vysledky pred odeslani uzivateli |
 
-**Phase 2B: Virtual Director (cross-team orchestrace)**
+**Phase 2B: Coordinator (cross-crew orchestrace)**
 
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| ORCH-12 | Director agent role | P1 | Specialni agent na urovni org (max 1 per org) |
-| ORCH-13 | Director lightweight execution | P1 | LLM call bez Docker kontejneru (jen reasoning + delegace) |
-| ORCH-14 | Director → Leader delegace | P1 | Cross-team orchestrace pres leadery |
-| ORCH-15 | Director auto-routing | P1 | Director rozhodne ktery tym oslovit |
-| ORCH-16 | Cross-team agregace | P1 | Director sbira odpovedi od vice tymu |
-| ORCH-17 | Director UI (dashboard card + chat) | P1 | Karta directora na dashboardu, dedicovany chat |
+| ORCH-12 | Coordinator agent role | P1 | Specialni agent na urovni workspace (max 1 per workspace) |
+| ORCH-13 | Coordinator lightweight execution | P1 | LLM call bez Docker kontejneru (jen reasoning + assignment) |
+| ORCH-14 | Coordinator → Lead assignment | P1 | Cross-crew orchestrace pres leady |
+| ORCH-15 | Coordinator auto-routing | P1 | Coordinator rozhodne kterou crew oslovit |
+| ORCH-16 | Cross-crew agregace | P1 | Coordinator sbira odpovedi od vice crews |
+| ORCH-17 | Coordinator UI (dashboard card + chat) | P1 | Karta coordinatora na dashboardu, dedicovany chat |
 
 **Phase 3: Pokrocila orchestrace**
 
 | ID | Feature | Priorita | Popis |
 |---|---|---|---|
-| ORCH-18 | Leader ↔ Leader primo | P2 | Cross-team komunikace bez directora |
-| ORCH-19 | Director s tools + kontejnerem | P2 | Director dostane vlastni kontejner a nastroje |
-| ORCH-20 | Director long-term memory | P2 | Strategicke cile, KPIs, trendy organizace |
-| ORCH-21 | Orchestracni vizualizace (OrchVis) | P2 | Real-time graf delegaci |
-| ORCH-22 | Auto-leader election | P2 | AI doporuci ktery agent by mel byt leader |
-| ORCH-23 | Director → Director (multi-org) | P3 | Spoluprace mezi organizacemi pres webhooky |
+| ORCH-18 | Lead ↔ Lead primo | P2 | Cross-crew komunikace bez coordinatora |
+| ORCH-19 | Coordinator s tools + kontejnerem | P2 | Coordinator dostane vlastni kontejner a nastroje |
+| ORCH-20 | Coordinator long-term memory | P2 | Strategicke cile, KPIs, trendy workspace |
+| ORCH-21 | Orchestracni vizualizace (OrchVis) | P2 | Real-time graf assignments |
+| ORCH-22 | Auto-lead election | P2 | AI doporuci ktery agent by mel byt lead |
+| ORCH-23 | Coordinator → Coordinator (multi-workspace) | P3 | Spoluprace mezi workspaces pres webhooky |
 
 #### 4.27 Cron Joby [P1]
 | ID | Feature | Priorita | Popis |
@@ -560,50 +560,50 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 
 ### US-02: Registrace a prvni firma
 **Jako** novy uzivatel
-**chci** se zaregistrovat a vytvorit firmu
+**chci** se zaregistrovat a vytvorit workspace
 **abych** mohl zacit pouzivat platformu.
 
 **Acceptance criteria:**
 1. Uzivatel se registruje pres email+heslo nebo OAuth
 2. Po prvnim prihlaseni se spusti guided wizard
-3. Wizard vyzve k vytvoreni firmy (nazev, slug)
-4. Firma se vytvori a uzivatel je automaticky Owner
+3. Wizard vyzve k vytvoreni workspace (nazev, slug)
+4. Workspace se vytvori a uzivatel je automaticky Owner
 5. Uzivatel je presmerovan na dashboard
 
-### US-03: Pozvani clena do firmy
+### US-03: Pozvani clena do workspace
 **Jako** Owner/Admin
-**chci** pozvat kolegu do firmy
+**chci** pozvat kolegu do workspace
 **abych** mohl delegovat spravu agentu.
 
 **Acceptance criteria:**
 1. Owner/Admin vlozi email a vybere roli (Admin/Manager/Member/Viewer)
 2. System posle email s pozvankou
-3. Pozvaný se registruje/prihlasi a je automaticky prirazen do org
+3. Pozvaný se registruje/prihlasi a je automaticky prirazen do workspace
 4. Zobrazi se v seznamu clenu s prirazenu roli
 
-### US-04: Vytvoreni tymu
+### US-04: Vytvoreni crew
 **Jako** Owner/Admin/Manager
-**chci** vytvorit tym (oddeleni)
+**chci** vytvorit crew (oddeleni)
 **abych** organizoval agenty do logickych skupin.
 
 **Acceptance criteria:**
-1. Uzivatel vytvori tym (nazev, popis, volitelne z sablony)
-2. Priradi cleny z organizace do tymu
-3. Tym se zobrazi na dashboardu
-4. Clenove tymu vidi agenty v nem
+1. Uzivatel vytvori crew (nazev, popis, volitelne z sablony)
+2. Priradi cleny z workspace do crew
+3. Crew se zobrazi na dashboardu
+4. Clenove crew vidi agenty v ni
 
 ### US-05: Vytvoreni agenta
-**Jako** Owner/Admin/Manager (v prirazenem tymu)
+**Jako** Owner/Admin/Manager (v prirazene crew)
 **chci** vytvorit virtualniho zamestnance
 **abych** mohl automatizovat ukoly.
 
 **Acceptance criteria:**
-1. Uzivatel vytvori agenta v tymu (jmeno, popis, role)
+1. Uzivatel vytvori agenta v crew (jmeno, popis, role)
 2. Vybere CLI adapter (Claude Code, OpenCode, Codex CLI, Gemini CLI) a LLM model
 3. Nastavi system prompt (instrukce pro agenta)
 4. Nastavi sitovy pristup (internet on/off, whitelist)
 5. Nastavi cost budget (volitelne)
-6. Agent se zobrazi v seznamu agentu tymu se statusem "Idle"
+6. Agent se zobrazi v seznamu agentu crew se statusem "Idle"
 
 ### US-06: Instalace a prirazeni skillu
 **Jako** Owner/Admin/Manager
@@ -630,7 +630,7 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 5. Pri spusteni agenta se injektuje jako ENV var do kontejneru
 
 ### US-08: Chat s agentem
-**Jako** Member (v prirazenem tymu)
+**Jako** Member (v prirazene crew)
 **chci** konverzovat s agentem v chat UI
 **abych** mohl zadat ulohu a sledovat jeji plneni.
 
@@ -655,25 +655,25 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 
 ### US-10: Audit log
 **Jako** Owner/Admin
-**chci** videt vsechny dulezite akce v organizaci
+**chci** videt vsechny dulezite akce ve workspace
 **abych** mel prehled kdo co udelal.
 
 **Acceptance criteria:**
 1. Kazda state-changing akce se loguje (kdo, co, kdy, odkud)
 2. Audit log je dostupny v admin sekci
 3. Lze filtrovat podle uzivatele, typu akce, casu
-4. Audit log je izolovany per organizace
+4. Audit log je izolovany per workspace
 
 ### US-11: Dashboard
 **Jako** prihlaseny uzivatel
-**chci** videt prehled svych tymu a agentu
+**chci** videt prehled svych crews a agentu
 **abych** mel rychly prehled o stavu.
 
 **Acceptance criteria:**
-1. Po prihlaseni vidim team overview
-2. Kazdy tym ukazuje: pocet agentu, aktivnich tasku, posledni aktivitu
+1. Po prihlaseni vidim crew overview
+2. Kazda crew ukazuje: pocet agentu, aktivnich tasku, posledni aktivitu
 3. Agent karty ukazuji status (Idle/Running/Error)
-4. Kliknutim se dostanu na detail tymu/agenta
+4. Kliknutim se dostanu na detail crew/agenta
 
 ---
 
@@ -723,12 +723,12 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 
 ### 7.3 Skalovatlenost
 - Free tier: 1 instance, SQLite, 1-10 uzivatelu
-- Team tier: PostgreSQL, 5-50 uzivatelu, horizontalni scaling
+- Crew tier: PostgreSQL, 5-50 uzivatelu, horizontalni scaling
 - Enterprise tier: K8s Helm chart, 100+ uzivatelu, dedicated resources
 
 ### 7.4 Dostupnost
 - Free (self-hosted): zavisla na infrastrukture uzivatele
-- Team (cloud): 99.5% uptime
+- Crew (cloud): 99.5% uptime
 - Enterprise: 99.9% uptime (SLA)
 
 ### 7.5 Kompatibilita
@@ -740,7 +740,7 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 ### 7.6 GDPR / Ochrana dat
 - Pravo na vymazani uctu + vsech dat (30 dni grace period)
 - Export dat (JSON/CSV)
-- Data retention politiky (konfigurovatelne per org)
+- Data retention politiky (konfigurovatelne per workspace)
 - Zpracovani pouze v EU/US (konfigurovatelne)
 
 ---
@@ -795,7 +795,7 @@ Komunikace: Unix socket `/tmp/crewship.sock` (lokalni dev), gRPC (K8s).
 
 ### Databaze
 - **SQLite** (default) -- zero deps, `~/.crewship/crewship.db`. Vhodne pro single binary, solo dev, maly tym.
-- **PostgreSQL 16** (opt-in) -- `crewship start --db postgres://...`. Vhodne pro Team/Enterprise.
+- **PostgreSQL 16** (opt-in) -- `crewship start --db postgres://...`. Vhodne pro Crew/Enterprise.
 - Prisma podporuje oba providery. Prepinani pres `DB_PROVIDER` env var.
 
 ### Distribuce
@@ -896,24 +896,24 @@ crewship (Go binary, ~50-80 MB)
 
 ---
 
-## 10. TIERS -- FREE / TEAM / ENTERPRISE
+## 10. TIERS -- FREE / CREW / ENTERPRISE
 
 Crewship pouziva 3-tier model inspirovany Gitea (SQLite default → PostgreSQL opt-in) a Ollama (single binary distribuce):
 
 ### Srovnani tieru
 
-| Feature | Free (self-hosted) | Team (cloud) | Enterprise (K8s) |
+| Feature | Free (self-hosted) | Crew (cloud) | Enterprise (K8s) |
 |---|---|---|---|
 | **Cena** | $0 navzdy | $15-30/user/mesic | $50-100/user/mesic |
 | **Distribuce** | Single binary (brew, curl) | crewship.ai (hosted) | Helm chart na K8s |
 | **Databaze** | SQLite (default) | PostgreSQL (managed) | PostgreSQL (dedicated) |
-| **Organizace** | 1 (auto-created) | Neomezene | Neomezene |
+| **Workspaces** | 1 (auto-created) | Neomezene | Neomezene |
 | **Agenti** | Unlimited | Unlimited | Unlimited |
 | **RBAC** | Vsichni ADMIN (zjednoduseny) | 5 roli (Owner→Viewer) | 5 roli + custom |
 | **Auth** | NextAuth.js (email, OAuth) | NextAuth.js (email, OAuth) | SSO/SAML (Okta, Azure AD) |
 | **Skills** | Official + Community | + Premium skills | + Custom development |
 | **Network control** | Per-agent (Docker policies) | Per-agent (Docker policies) | Per-agent (K8s NetworkPolicy) |
-| **Cost control** | Per-agent budgety | Per-agent budgety + org billing | + chargeback reports |
+| **Cost control** | Per-agent budgety | Per-agent budgety + workspace billing | + chargeback reports |
 | **Audit log** | Lokalni (append-only) | Cloud + export + retention | + compliance (SOC 2) |
 | **Container izolace** | Docker (per agent) | Docker (per agent) | K8s Pod + gVisor/Kata |
 | **Podpora** | Community (GitHub Issues) | Priority (email) | Dedicated (Slack channel, SLA) |
@@ -923,7 +923,7 @@ Crewship pouziva 3-tier model inspirovany Gitea (SQLite default → PostgreSQL o
 - **Stejny codebase** -- zadna separatni verze (CE vs EE)
 - **Stejna DB schema** pro vsechny tiery (Prisma, SQLite/PostgreSQL)
 - Feature flagy v DB rozlisuji co je dostupne
-- Free tier seed automaticky vytvori 1 org + admin usera
+- Free tier seed automaticky vytvori 1 workspace + admin usera
 - Model inspirovany **Gitea** (jeden repo, SQLite default, PostgreSQL opt-in)
 
 ---
@@ -954,7 +954,7 @@ Kazdy agent ma svuj workspace adresar. Format je kompatibilni s OpenClaw.
 
 ### Struktura workspace
 ```
-~/.crewship/workspaces/{org_slug}/{team_slug}/{agent_slug}/
+~/.crewship/workspaces/{workspace_slug}/{crew_slug}/{agent_slug}/
 ├── AGENTS.md          # Operacni instrukce + "pamet" agenta
 ├── CLAUDE.md          # Kopie/symlink AGENTS.md (Claude Code cte CLAUDE.md)
 ├── SOUL.md            # Osobnost, hranice, ton komunikace
@@ -1015,11 +1015,11 @@ Pri prvnim turnu nove session Crewship injektuje obsah bootstrap souboru do agen
 1. `brew install crewship && crewship start`
 2. Prohlizec se otevre na localhost:3001
 3. Registrace (email+heslo nebo OAuth)
-4. "Vitejte v Crewship! Pojdme vytvorit vasi prvni firmu."
-   → Nazev firmy, slug
-5. "Skvele! Ted vytvorime vas prvni tym."
+4. "Vitejte v Crewship! Pojdme vytvorit vas prvni workspace."
+   → Nazev workspace, slug
+5. "Skvele! Ted vytvorime vasi prvni crew."
    → Vyber sablony NEBO vlastni nazev
-6. "Pridejme virtualniho zamestnance do tymu."
+6. "Pridejme virtualniho zamestnance do crew."
    → Jmeno, role, vyber CLI adapteru + LLM modelu
 7. "Nastavime pristup k siti."
    → Internet on/off, whitelist (vizualne, klikani)
@@ -1031,13 +1031,13 @@ Pri prvnim turnu nove session Crewship injektuje obsah bootstrap souboru do agen
     → Presmerovani na chat UI
 ```
 
-### Cloud (Team Tier): Crewship AI (Phase 2)
+### Cloud (Crew Tier): Crewship AI (Phase 2)
 ```
 1. Registrace na crewship.ai + subscription
 2. Otevre se chat s Crewship AI
-3. "Ahoj! Jsem Crewship AI. Pomahu vam vytvorit virtualni tym."
+3. "Ahoj! Jsem Crewship AI. Pomahu vam vytvorit virtualni crew."
 4. Uzivatel popisuje potreby
-5. Crewship AI navrhne strukturu (tymy, agenty, skilly, network policies)
+5. Crewship AI navrhne strukturu (crews, agenty, skilly, network policies)
 6. Po schvaleni Crewship AI automaticky vse vytvori
 ```
 
@@ -1054,10 +1054,10 @@ Sablony budou staticke YAML soubory v `skills/templates/`.
 ```yaml
 name: it-company
 display_name: "IT Company"
-description: "Complete IT team with DevOps, QA, and support"
-teams:
+description: "Complete IT crew with DevOps, QA, and support"
+crews:
   - name: development
-    display_name: "Development Team"
+    display_name: "Development Crew"
     agents:
       - name: devops-bot
         role: "DevOps Engineer"
@@ -1073,7 +1073,7 @@ teams:
         network:
           internet: false
   - name: support
-    display_name: "Customer Support"
+    display_name: "Customer Support Crew"
     agents:
       - name: support-bot
         role: "Support Agent"
@@ -1097,7 +1097,7 @@ teams:
 - 0 kritickych security issues
 
 ### Phase 2 (Monetizace)
-- 100+ platicich tymu (Cloud tier)
+- 100+ platicich crews (Cloud tier)
 - $10,000+ MRR
 - 50+ community skills v marketplace
 - 70%+ mesicni retence
@@ -1136,22 +1136,22 @@ teams:
 
 | Tyden | Milestone | Deliverables |
 |---|---|---|
-| 1-2 | Core platform | Auth (NextAuth.js), Org CRUD, Team CRUD, RBAC (CASL), Prisma schema (SQLite + PG) |
+| 1-2 | Core platform | Auth (NextAuth.js), Workspace CRUD, Crew CRUD, RBAC (CASL), Prisma schema (SQLite + PG) |
 | 3-4 | Agent system | Agent CRUD, Workspace setup, Skills registry, Credentials vault (AES-256-GCM), crewshipd job orchestrace |
 | 5-6 | Gateway + Runtime | Go WebSocket gateway, CLI adapter (Claude Code), Docker kontejner lifecycle, stdout streaming |
-| 7 | Chat UI + Dashboard | Chat UI (block streaming), Log viewer, Dashboard (team/agent cards), Audit log |
+| 7 | Chat UI + Dashboard | Chat UI (block streaming), Log viewer, Dashboard (crew/agent cards), Audit log |
 | 8 | Single binary + Skills | GoReleaser build, brew tap, curl installer, embed.FS, 15-20 official skills, Skill Store UI |
 | 9 | Network + Cost | Per-agent network control UI, cost budgets, alerting |
 | 10 | Polish + Launch | Onboarding wizard, `crewship doctor`, landing page (crewship.ai), README hero, benchmarky vs OpenClaw |
 
 ### Phase 2: Monetizace (+3-6 mesicu)
 
-**Cil:** 100 platicich tymu, $10k MRR.
+**Cil:** 100 platicich crews, $10k MRR.
 
 | Tyden | Milestone |
 |---|---|
 | 1-3 | Cloud tier (crewship.ai hosted), Stripe billing, auto-update |
-| 4-6 | Crew Leader orchestrace (Phase 2A), Task mode, Human-in-the-loop |
+| 4-6 | Crew Lead orchestrace (Phase 2A), Task mode, Human-in-the-loop |
 | 7-9 | Community skill marketplace (submit, review, publish, revenue sharing) |
 | 10-12 | Messaging integrace (Slack, Discord), Crewship AI meta-agent, REST API |
 
@@ -1161,7 +1161,7 @@ teams:
 
 | Tyden | Milestone |
 |---|---|
-| 1-4 | Helm chart pro K8s, Virtual Director orchestrace (Phase 2B) |
+| 1-4 | Helm chart pro K8s, Coordinator orchestrace (Phase 2B) |
 | 5-8 | SSO/SAML, compliance features (audit export, retention, data residency) |
 | 9-12 | GPU node support (Ollama), premium skills, SOC 2 proces |
 

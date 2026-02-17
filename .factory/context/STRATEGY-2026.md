@@ -56,7 +56,7 @@ open-source AI projekt zacatku roku 2026. Klicove faktory uspechu:
 | **Astronomicke API naklady** | $20 pres noc za basic operace, $200+ za par dni heavy use, $500-750/mesic. ZADNY cost control, zadne budgety, zadne limity, zadny alerting. |
 | **Slozita instalace** | Node.js 22+, config soubory, env variables, messaging platform setup. Operational burden odrazuje bezne uzivatele. |
 | **Nespolehlive workflow** | Inkonsistentni vysledky pri multi-tool taskach. Agent "zapomina" uprostred slozitejsich ukolu. |
-| **Spatne skalovani** | Nefunguje v multi-user/organizacnim kontextu. Jeden agent = jeden uzivatel. Zadny team management. |
+| **Spatne skalovani** | Nefunguje v multi-user/workspace kontextu. Jeden agent = jeden uzivatel. Zadny crew management. |
 | **Obrovska codebase** | 430,000+ radku kodu. Tezko auditovatelne, tezko contributable pro novy vyvojare. |
 | **Nestabilni identita** | 3 rebrandy za par tydnu (Clawdbot → Moltbot → OpenClaw) kvuli trademark issues. Signalizuje chaoticky management. |
 | **Hosting slozitost** | Self-hosting vyzaduje VPS, Docker, config management. Ekosystem 30+ hostingovych nastroju (SimpleClaw, ClawdHost, soulstack...) signalizuje, ze zakladni setup je prilis tezky. |
@@ -86,7 +86,7 @@ open-source AI projekt zacatku roku 2026. Klicove faktory uspechu:
 
 1. **Sandboxing/isolation** -- #1 pozadavek. Lidi chteji, aby agent nemohl znicit jejich system.
 2. **Cost control** -- budgety, limity, alerting kdyz agent prekroci spending.
-3. **Team/org support** -- multi-user, RBAC, sdileni agentu v tymu.
+3. **Crew/workspace support** -- multi-user, RBAC, sdileni agentu v crew.
 4. **Jednodussi setup** -- "proc to nejde nainstalovat jednim prikazem?"
 5. **Audit trail** -- co agent udelal, kdy, s jakymi daty.
 6. **Vetted skills** -- curated marketplace, ne wild west.
@@ -119,10 +119,10 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 | **Instalace** | npm + config + messaging setup | `brew install crewship && crewship start` | Crewship |
 | **Security** | Bezi na hostu, zadny sandbox | Docker kontejner, non-root, encrypted creds | Crewship |
 | **UI** | Zadne vlastni UI (messaging-only) | Full web dashboard (chat, files, logs, settings) | Crewship |
-| **RBAC** | Zadne (single-user) | 5 roli (Owner→Viewer), per-team izolace | Crewship |
+| **RBAC** | Zadne (single-user) | 5 roli (Owner→Viewer), per-crew izolace | Crewship |
 | **Audit** | Zadny | Immutable, append-only, queryable | Crewship |
-| **Multi-tenant** | 1 instance = 1 uzivatel | Cela firma v jedne instanci | Crewship |
-| **Orchestrace** | Zadna (flat, 1 agent) | CEO → Lidr → Worker hierarchie | Crewship |
+| **Multi-workspace** | 1 instance = 1 uzivatel | Cela firma v jedne instanci | Crewship |
+| **Orchestrace** | Zadna (flat, 1 agent) | Coordinator → Lead → Agent hierarchie | Crewship |
 | **Cost control** | Zadny (lidi plati $750/mesic) | Per-agent budgety, alerting, limity | Crewship |
 | **Network control** | Zadny (full internet access) | Per-agent: internet ON/OFF, whitelist, VPN | Crewship |
 | **Skills bezpecnost** | 20% malware, zadny sandbox | Sandboxed, curated, permissions model | Crewship |
@@ -153,12 +153,12 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 
 | Platforma | Typ | Instalace | Isolation | Orchestrace | UI | Nase vyhoda |
 |---|---|---|---|---|---|---|
-| **OpenClaw** | Personal assistant | npm + config | ZADNA (host) | ZADNA | Messaging-only | Security, UI, orchestrace, teams |
-| **Docker cagent** | Agent runtime | Docker | Docker sandbox | Agent handoff | CLI only | UI, RBAC, teams, marketplace |
+| **OpenClaw** | Personal assistant | npm + config | ZADNA (host) | ZADNA | Messaging-only | Security, UI, missions, crews |
+| **Docker cagent** | Agent runtime | Docker | Docker sandbox | Agent handoff | CLI only | UI, RBAC, crews, marketplace |
 | **AgentSystems** | Agent app store | Docker compose | Container + egress | ZADNA | Basic web | Orchestrace, single binary, better UX |
 | **NanoClaw** | Secure OpenClaw alt | Docker | Container | ZADNA | Minimal | Full platform vs wrapper |
 | **Netclode** | Cloud coding agent | K8s + microVM | microVM | ZADNA | iOS app | Self-hosted, sirsi use case |
-| **Goose** (Block) | Enterprise agent | Binary | Modular | ZADNA | CLI | UI, marketplace, teams |
+| **Goose** (Block) | Enterprise agent | Binary | Modular | ZADNA | CLI | UI, marketplace, crews |
 | **Manus AI** | Cloud SaaS | Zero-setup | Cloud | ZADNA | Web | Self-hosted, open-source |
 
 ### 3.2 ClawHub Marketplace -- pouceni
@@ -177,7 +177,7 @@ ClawHub (OpenClaw skill marketplace) ma 700+ skills, ale:
 Crewship je **JEDINY** projekt, ktery kombinuje:
 1. Jednoprikazovou instalaci (Ollama model)
 2. Container isolation (Docker) -- kazdy agent v sandboxu
-3. Multi-level orchestraci (CEO → Lidr → Worker hierarchie)
+3. Multi-level orchestraci (Coordinator → Lead → Agent hierarchie)
 4. Full web UI s dashboardem
 5. Per-agent network policies (klikaci, ne iptables)
 6. Curated skill marketplace s sandbox enforcement
@@ -338,7 +338,7 @@ To je lock-in, ktery se tezko kopiruje. OpenClaw to pochopil, ale provedeni je k
 | **Permissions model** | Vsechno nebo nic | Granularni: filesystem (r/w/none), network (on/off/whitelist), secrets (list) |
 | **Kategorie** | Flat list | Strukturovane kategorie + tagy |
 | **Kvalita signaly** | Zadne | Rating, install count, "Official"/"Verified" badge |
-| **Revenue sharing** | ZADNY | Community autori dostavaji podil z Team/Enterprise tier |
+| **Revenue sharing** | ZADNY | Community autori dostavaji podil z Cloud/Enterprise tier |
 | **Skill compose** | NELZE | Kombinovani skills do workflow ("Research + Summarize + Email") |
 
 ### 5.4 Official skills pro launch (15-20)
@@ -442,7 +442,7 @@ Agent: "Customer Support"
 UI kliknuti → API call → crewshipd → Docker network policies
 
 Technicky:
-1. Kazdy tym/agent ma vlastni Docker network
+1. Kazdy crew/agent ma vlastni Docker network
 2. Network mode: "internal" (default, zadny internet)
 3. Whitelist → iptables rules v kontejneru (nebo Docker network connect k bridge s filtrem)
 4. Local network → macvlan/ipvlan driver s CIDR rozsahem
@@ -467,7 +467,7 @@ Crewship je jediny, kdo kombinuje **granularni network control** s **klikacim UI
 | Tier | Nazev | Cilovy zakaznik | Cena | Distribuce |
 |---|---|---|---|---|
 | **Free** | Community | Solo dev, student, hacker | $0 | Single binary, SQLite, Docker |
-| **Team** | Cloud | Startup, mala firma (5-50 lidi) | $15-30/user/mesic | crewship.ai hosted, PostgreSQL |
+| **Cloud** | Cloud | Startup, mala firma (5-50 lidi) | $15-30/user/mesic | crewship.ai hosted, PostgreSQL |
 | **Enterprise** | Self-managed | Korporat (100+ lidi) | $50-100/user/mesic | Helm chart na zakaznikuv K8s |
 
 ### 7.2 Co je v kazdem tieru
@@ -478,17 +478,17 @@ Crewship je jediny, kdo kombinuje **granularni network control** s **klikacim UI
 - Docker kontejnerova izolace
 - Vsechny official skills
 - Community skills (z marketplace)
-- 1 organizace, unlimited agents
+- 1 workspace, unlimited agents
 - Per-agent network control
 - Audit log (lokalni)
 - Web UI dashboard
 - CLI nastroje
 
-**Team (Cloud):**
+**Cloud:**
 - Vse z Free +
 - Hosted na crewship.ai (zero infra management)
 - PostgreSQL (managed)
-- Team collaboration (sdileni agentu, RBAC)
+- Crew collaboration (sdileni agentu, RBAC)
 - Skill marketplace (community + premium skills)
 - Priority support (email)
 - SSO (Google, GitHub)
@@ -496,7 +496,7 @@ Crewship je jediny, kdo kombinuje **granularni network control** s **klikacim UI
 - Automatic backups
 
 **Enterprise (Self-managed):**
-- Vse z Team +
+- Vse z Cloud +
 - Helm chart pro K8s (GKE, EKS, AKS)
 - SSO/SAML (Okta, Azure AD)
 - Compliance audit trail (export, retention policies)
@@ -508,7 +508,7 @@ Crewship je jediny, kdo kombinuje **granularni network control** s **klikacim UI
 
 ### 7.3 Srovnani s trhem
 
-| | OpenClaw | Manus AI | Claude Code | **Crewship Free** | **Crewship Team** |
+| | OpenClaw | Manus AI | Claude Code | **Crewship Free** | **Crewship Cloud** |
 |---|---|---|---|---|---|
 | Cena | $0 (BYOK) + $500+/m API | $39-199/m | $20-200/m | **$0 (BYOK)** | **$15-30/user/m** |
 | Self-hosted | Ano | Ne | Ne | **Ano** | Hosted |
@@ -546,14 +546,14 @@ Crewship je jediny, kdo kombinuje **granularni network control** s **klikacim UI
 
 ### Faze 2: Monetizace (+3-6 mesicu)
 
-**Cil:** 100 platicich tymu, $10k MRR.
+**Cil:** 100 platicich workspaces, $10k MRR.
 
 **Deliverables:**
 - [ ] crewship.ai cloud tier (hosted PostgreSQL, managed infra)
 - [ ] Community skill marketplace (submit, review, publish)
 - [ ] Revenue sharing pro skill autory
-- [ ] Team collaboration features (shared agents, RBAC invites)
-- [ ] Crew Leader orchestrace (Phase 2A z PROGRESS.md)
+- [ ] Crew collaboration features (shared agents, RBAC invites)
+- [ ] Lead orchestrace (Phase 2A z PROGRESS.md)
 - [ ] Messaging integrace (Slack, Discord -- Phase 2 kanaly)
 - [ ] Usage analytics dashboard
 - [ ] Stripe billing integrace
@@ -566,7 +566,7 @@ Crewship je jediny, kdo kombinuje **granularni network control** s **klikacim UI
 **Deliverables:**
 - [ ] Helm chart pro K8s (GKE, EKS, AKS)
 - [ ] SSO/SAML (Okta, Azure AD, Google Workspace)
-- [ ] Virtual Director orchestrace (Phase 2B z PROGRESS.md)
+- [ ] Coordinator orchestrace (Phase 2B z PROGRESS.md)
 - [ ] Compliance features (audit export, retention policies, data residency)
 - [ ] GPU node support (lokalni LLM pres Ollama)
 - [ ] Premium skills (enterprise-only)
@@ -642,11 +642,11 @@ crewship doctor               # diagnostika (Docker check, port check, DB check)
   │   ├── web-research/
   │   └── ...
   ├── output/               # agent vystupy
-  │   └── {org-id}/{team-name}/{agent-name}/
-  ├── conversations/        # JSONL konverzace
-  │   └── {org-id}/{agent-id}/{session-id}.jsonl
+  │   └── {workspace-id}/{crew-name}/{agent-name}/
+  ├── chats/                # JSONL chats
+  │   └── {workspace-id}/{agent-id}/{session-id}.jsonl
   ├── logs/                 # JSONL logy
-  │   └── teams/{team-id}/agents/{agent-id}/current.jsonl
+  │   └── crews/{crew-id}/agents/{agent-id}/current.jsonl
   └── crewship.pid          # PID soubor
 ```
 
@@ -675,7 +675,7 @@ crewship doctor               # diagnostika (Docker check, port check, DB check)
 - Cas od instalace k prvnimu agentu: < 5 minut
 
 ### Faze 2
-- Platici tymy (Cloud tier): 100+
+- Platici workspaces (Cloud tier): 100+
 - MRR: $10,000+
 - Community skills v marketplace: 50+
 - Retence (mesicni): 70%+

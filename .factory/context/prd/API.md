@@ -81,18 +81,18 @@ export async function requireAuth(): Promise<User> {
 1. Browser pozada Next.js API o short-lived WS token (5min, JWT)
 2. Browser se pripoji na wss://host/ws?token=<jwt>
 3. crewshipd validuje JWT pri handshake
-4. crewshipd overi team membership pres IPC dotaz na Next.js
+4. crewshipd overi crew membership pres IPC dotaz na Next.js
 5. Po pripojeni: token neni dale potreba (connection = authenticated)
 ```
 
 ### 2.3 Webhook autentizace (Go service)
 
 ```
-POST /api/v1/webhooks/{team-id}/{agent-id}/trigger
+POST /api/v1/webhooks/{crew-id}/{agent-id}/trigger
 Headers: X-Webhook-Secret: <per-agent-secret>
 
 crewshipd:
-1. Extrahuje team-id a agent-id z URL
+1. Extrahuje crew-id a agent-id z URL
 2. Nacte agent.webhook_secret z DB (pres IPC na Next.js)
 3. Porovna s X-Webhook-Secret headerem (constant-time comparison)
 4. Neplatny secret → 401 + audit log
@@ -115,65 +115,65 @@ crewshipd:
 |---|---|---|---|
 | `GET` | `/api/v1/orgs` | Auth | Seznam org uzivatele |
 | `POST` | `/api/v1/orgs` | Auth | Vytvorit organizaci |
-| `GET` | `/api/v1/orgs/{orgId}` | Member | Detail organizace |
-| `PATCH` | `/api/v1/orgs/{orgId}` | ADMIN+ | Upravit organizaci |
-| `DELETE` | `/api/v1/orgs/{orgId}` | OWNER | Smazat organizaci (soft delete) |
+| `GET` | `/api/v1/workspaces/{workspaceId}` | Member | Detail organizace |
+| `PATCH` | `/api/v1/workspaces/{workspaceId}` | ADMIN+ | Upravit organizaci |
+| `DELETE` | `/api/v1/workspaces/{workspaceId}` | OWNER | Smazat organizaci (soft delete) |
 
-### 3.2 Organization Members
-
-| Metoda | Path | Role | Popis |
-|---|---|---|---|
-| `GET` | `/api/v1/orgs/{orgId}/members` | Member | Seznam clenu |
-| `POST` | `/api/v1/orgs/{orgId}/members/invite` | ADMIN+ | Pozvat clena (email) |
-| `PATCH` | `/api/v1/orgs/{orgId}/members/{memberId}` | ADMIN+ | Zmenit roli |
-| `DELETE` | `/api/v1/orgs/{orgId}/members/{memberId}` | ADMIN+ | Odebrat clena |
-
-### 3.3 Teams
+### 3.2 Workspace Members
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/orgs/{orgId}/teams` | Member | Seznam tymu (RBAC filtered) |
-| `POST` | `/api/v1/orgs/{orgId}/teams` | MANAGER+ | Vytvorit tym |
-| `GET` | `/api/v1/orgs/{orgId}/teams/{teamId}` | TeamMember | Detail tymu |
-| `PATCH` | `/api/v1/orgs/{orgId}/teams/{teamId}` | MANAGER+ | Upravit tym |
-| `DELETE` | `/api/v1/orgs/{orgId}/teams/{teamId}` | ADMIN+ | Smazat tym (soft delete) |
+| `GET` | `/api/v1/workspaces/{workspaceId}/members` | Member | Seznam clenu |
+| `POST` | `/api/v1/workspaces/{workspaceId}/members/invite` | ADMIN+ | Pozvat clena (email) |
+| `PATCH` | `/api/v1/workspaces/{workspaceId}/members/{memberId}` | ADMIN+ | Zmenit roli |
+| `DELETE` | `/api/v1/workspaces/{workspaceId}/members/{memberId}` | ADMIN+ | Odebrat clena |
 
-### 3.4 Team Members
+### 3.3 Crews
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/orgs/{orgId}/teams/{teamId}/members` | TeamMember | Seznam clenu tymu |
-| `POST` | `/api/v1/orgs/{orgId}/teams/{teamId}/members` | MANAGER+ | Pridat clena do tymu |
-| `DELETE` | `/api/v1/orgs/{orgId}/teams/{teamId}/members/{memberId}` | MANAGER+ | Odebrat z tymu |
+| `GET` | `/api/v1/workspaces/{workspaceId}/crews` | Member | Seznam crews (RBAC filtered) |
+| `POST` | `/api/v1/workspaces/{workspaceId}/crews` | MANAGER+ | Vytvorit crew |
+| `GET` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}` | CrewMember | Detail crew |
+| `PATCH` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}` | MANAGER+ | Upravit crew |
+| `DELETE` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}` | ADMIN+ | Smazat crew (soft delete) |
+
+### 3.4 Crew Members
+
+| Metoda | Path | Role | Popis |
+|---|---|---|---|
+| `GET` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/members` | CrewMember | Seznam clenu crew |
+| `POST` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/members` | MANAGER+ | Pridat clena do crew |
+| `DELETE` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/members/{memberId}` | MANAGER+ | Odebrat z crew |
 
 ### 3.5 Agents
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/orgs/{orgId}/agents` | Member | Seznam agentu (RBAC filtered) |
-| `POST` | `/api/v1/orgs/{orgId}/agents` | MANAGER+ | Vytvorit agenta |
-| `GET` | `/api/v1/orgs/{orgId}/agents/{agentId}` | TeamMember | Detail agenta |
-| `PATCH` | `/api/v1/orgs/{orgId}/agents/{agentId}` | MANAGER+ | Upravit agenta |
-| `DELETE` | `/api/v1/orgs/{orgId}/agents/{agentId}` | ADMIN+ | Smazat agenta (soft delete) |
-| `POST` | `/api/v1/orgs/{orgId}/agents/{agentId}/start` | MEMBER+ | Spustit agenta (IPC → Go) |
-| `POST` | `/api/v1/orgs/{orgId}/agents/{agentId}/stop` | MEMBER+ | Zastavit agenta (IPC → Go) |
-| `GET` | `/api/v1/orgs/{orgId}/agents/{agentId}/status` | TeamMember | Live status (IPC → Go) |
+| `GET` | `/api/v1/workspaces/{workspaceId}/agents` | Member | Seznam agentu (RBAC filtered) |
+| `POST` | `/api/v1/workspaces/{workspaceId}/agents` | MANAGER+ | Vytvorit agenta |
+| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}` | CrewMember | Detail agenta |
+| `PATCH` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}` | MANAGER+ | Upravit agenta |
+| `DELETE` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}` | ADMIN+ | Smazat agenta (soft delete) |
+| `POST` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/start` | MEMBER+ | Spustit agenta (IPC → Go) |
+| `POST` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/stop` | MEMBER+ | Zastavit agenta (IPC → Go) |
+| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/status` | CrewMember | Live status (IPC → Go) |
 
 ### 3.6 Agent Skills
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/orgs/{orgId}/agents/{agentId}/skills` | TeamMember | Prirazene skills |
-| `POST` | `/api/v1/orgs/{orgId}/agents/{agentId}/skills` | MANAGER+ | Priradit skill |
-| `DELETE` | `/api/v1/orgs/{orgId}/agents/{agentId}/skills/{skillId}` | MANAGER+ | Odebrat skill |
+| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/skills` | CrewMember | Prirazene skills |
+| `POST` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/skills` | MANAGER+ | Priradit skill |
+| `DELETE` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/skills/{skillId}` | MANAGER+ | Odebrat skill |
 
 ### 3.7 Agent Credentials
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/orgs/{orgId}/agents/{agentId}/credentials` | MANAGER+ | Prirazene credentials (masked) |
-| `POST` | `/api/v1/orgs/{orgId}/agents/{agentId}/credentials` | MANAGER+ | Priradit credential |
-| `DELETE` | `/api/v1/orgs/{orgId}/agents/{agentId}/credentials/{credId}` | MANAGER+ | Odebrat credential |
+| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/credentials` | MANAGER+ | Prirazene credentials (masked) |
+| `POST` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/credentials` | MANAGER+ | Priradit credential |
+| `DELETE` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/credentials/{credId}` | MANAGER+ | Odebrat credential |
 
 ### 3.8 Skills (catalog)
 
@@ -186,39 +186,39 @@ crewshipd:
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/orgs/{orgId}/credentials` | MANAGER+ | Seznam credentials (masked values) |
-| `POST` | `/api/v1/orgs/{orgId}/credentials` | MANAGER+ | Vytvorit credential (encrypt + store) |
-| `PATCH` | `/api/v1/orgs/{orgId}/credentials/{credId}` | MANAGER+ | Upravit (re-encrypt value) |
-| `DELETE` | `/api/v1/orgs/{orgId}/credentials/{credId}` | ADMIN+ | Smazat credential (soft delete) |
+| `GET` | `/api/v1/workspaces/{workspaceId}/credentials` | MANAGER+ | Seznam credentials (masked values) |
+| `POST` | `/api/v1/workspaces/{workspaceId}/credentials` | MANAGER+ | Vytvorit credential (encrypt + store) |
+| `PATCH` | `/api/v1/workspaces/{workspaceId}/credentials/{credId}` | MANAGER+ | Upravit (re-encrypt value) |
+| `DELETE` | `/api/v1/workspaces/{workspaceId}/credentials/{credId}` | ADMIN+ | Smazat credential (soft delete) |
 
 ### 3.10 Conversation Sessions (metadata)
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/orgs/{orgId}/agents/{agentId}/sessions` | TeamMember | Seznam sessions (metadata) |
-| `GET` | `/api/v1/orgs/{orgId}/sessions/{sessionId}` | TeamMember | Detail session + zpravy (IPC → Go cte JSONL) |
-| `POST` | `/api/v1/orgs/{orgId}/agents/{agentId}/sessions` | MEMBER+ | Vytvorit session |
+| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/sessions` | CrewMember | Seznam sessions (metadata) |
+| `GET` | `/api/v1/workspaces/{workspaceId}/sessions/{sessionId}` | CrewMember | Detail session + zpravy (IPC → Go cte JSONL) |
+| `POST` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/sessions` | MEMBER+ | Vytvorit session |
 
 ### 3.11 Agent Runs
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/orgs/{orgId}/agents/{agentId}/runs` | TeamMember | Historie behu |
-| `GET` | `/api/v1/orgs/{orgId}/runs/{runId}` | TeamMember | Detail behu |
+| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/runs` | CrewMember | Historie behu |
+| `GET` | `/api/v1/workspaces/{workspaceId}/runs/{runId}` | CrewMember | Detail behu |
 
 ### 3.12 Files (agent output)
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/orgs/{orgId}/teams/{teamId}/files` | TeamMember | Seznam souboru (IPC → Go, fsnotify) |
-| `GET` | `/api/v1/orgs/{orgId}/teams/{teamId}/files/{path}` | TeamMember | Stahnout soubor (IPC → Go) |
-| `GET` | `/api/v1/orgs/{orgId}/teams/{teamId}/files/{path}/preview` | TeamMember | Preview (PDF, MD, image) |
+| `GET` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/files` | CrewMember | Seznam souboru (IPC → Go, fsnotify) |
+| `GET` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/files/{path}` | CrewMember | Stahnout soubor (IPC → Go) |
+| `GET` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/files/{path}/preview` | CrewMember | Preview (PDF, MD, image) |
 
 ### 3.13 Audit Log
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/orgs/{orgId}/audit-logs` | ADMIN+ | Audit log (cursor paginated) |
+| `GET` | `/api/v1/workspaces/{workspaceId}/audit-logs` | ADMIN+ | Audit log (cursor paginated) |
 
 ### 3.14 WebSocket Token
 
@@ -250,7 +250,7 @@ crewshipd:
 ### 4.1 Webhook trigger
 
 ```
-POST /api/v1/webhooks/{team-id}/{agent-id}/trigger
+POST /api/v1/webhooks/{crew-id}/{agent-id}/trigger
 Headers:
   Content-Type: application/json
   X-Webhook-Secret: <per-agent-secret>
@@ -295,7 +295,7 @@ wss://host/ws?token=<short-lived-jwt>
 // Client → Server
 interface WSClientMessage {
   type: "subscribe" | "unsubscribe" | "send_message" | "ping"
-  channel?: string           // "agent:{agentId}" | "team:{teamId}" | "files:{teamId}"
+  channel?: string           // "agent:{agentId}" | "crew:{crewId}" | "files:{crewId}"
   payload?: {
     session_id?: string
     content?: string         // user message to agent
@@ -315,8 +315,8 @@ interface WSServerMessage {
 | Kanal | Format | Eventy |
 |---|---|---|
 | `agent:{agentId}` | Agent streaming | `thinking`, `text`, `tool_call`, `tool_result`, `status_change` |
-| `team:{teamId}` | Team events | `agent_started`, `agent_stopped`, `container_status` |
-| `files:{teamId}` | File events (fsnotify) | `file_created`, `file_modified`, `file_deleted` |
+| `crew:{crewId}` | Crew events | `agent_started`, `agent_stopped`, `container_status` |
+| `files:{crewId}` | File events (fsnotify) | `file_created`, `file_modified`, `file_deleted` |
 
 ### 5.4 Agent streaming events
 
@@ -331,7 +331,7 @@ interface WSServerMessage {
 ### 5.5 File events (fsnotify)
 
 ```json
-{"type":"file_event","channel":"files:team-uuid","payload":{
+{"type":"file_event","channel":"files:crew-uuid","payload":{
   "event":"file_created",
   "path":"reports/january-2026.pdf",
   "agent":"anna",
@@ -343,7 +343,7 @@ interface WSServerMessage {
 ### 5.6 Bezpecnost
 
 - Auth: JWT validated pri handshake, connection = authenticated
-- Channel subscription: Go service overuje team membership (IPC → Next.js)
+- Channel subscription: Go service overuje crew membership (IPC → Next.js)
 - Rate limiting: 60 messages/min per connection
 - Heartbeat: ping/pong kazdych 30s, timeout 60s
 - Max connections per user: 10
@@ -374,7 +374,7 @@ export async function crewshipdRequest(path: string, options?: RequestInit) {
 // Priklady:
 await crewshipdRequest('/agents/uuid/start', { method: 'POST', body: JSON.stringify({...}) })
 await crewshipdRequest('/agents/uuid/status')
-await crewshipdRequest('/teams/uuid/files')
+await crewshipdRequest('/crews/uuid/files')
 await crewshipdRequest('/sessions/uuid/messages?offset=0&limit=50')
 ```
 
@@ -386,11 +386,11 @@ await crewshipdRequest('/sessions/uuid/messages?offset=0&limit=50')
 | `POST` | `/agents/{id}/stop` | Zastavit agenta |
 | `GET` | `/agents/{id}/status` | Live status |
 | `GET` | `/sessions/{id}/messages` | Cist JSONL zpravy |
-| `GET` | `/teams/{id}/files` | Seznam souboru v /output/ |
-| `GET` | `/teams/{id}/files/{path}` | Stahnout soubor |
-| `POST` | `/teams/{id}/container/start` | Spustit kontejner tymu |
-| `POST` | `/teams/{id}/container/stop` | Zastavit kontejner tymu |
-| `GET` | `/teams/{id}/container/status` | Status kontejneru |
+| `GET` | `/crews/{id}/files` | Seznam souboru v /output/ |
+| `GET` | `/crews/{id}/files/{path}` | Stahnout soubor |
+| `POST` | `/crews/{id}/container/start` | Spustit kontejner crew |
+| `POST` | `/crews/{id}/container/stop` | Zastavit kontejner crew |
+| `GET` | `/crews/{id}/container/status` | Status kontejneru |
 | `GET` | `/metrics` | Prometheus metriky |
 | `GET` | `/health` | Healthcheck Go service |
 
@@ -428,7 +428,7 @@ await crewshipdRequest('/sessions/uuid/messages?offset=0&limit=50')
 ## 8. PAGINATION (cursor-based)
 
 ```
-GET /api/v1/orgs/{orgId}/agents?cursor=abc123&limit=20
+GET /api/v1/workspaces/{workspaceId}/agents?cursor=abc123&limit=20
 
 Response:
 {

@@ -249,11 +249,11 @@ Single binary (Mode 1) uklada veskera data do `~/.crewship/`:
   │   ├── web-research/
   │   └── ...
   ├── output/               # agent vystupy (persistent)
-  │   └── {org-id}/{team-name}/{agent-name}/
+  │   └── {workspace-id}/{crew-name}/{agent-name}/
   ├── conversations/        # JSONL konverzace
-  │   └── {org-id}/{agent-id}/{session-id}.jsonl
+  │   └── {workspace-id}/{agent-id}/{session-id}.jsonl
   └── logs/                 # JSONL logy
-      └── teams/{team-id}/agents/{agent-id}/current.jsonl
+      └── crews/{crew-id}/agents/{agent-id}/current.jsonl
 ```
 
 > **Docker Compose (Mode 2)** pouziva systemove cesty:
@@ -302,7 +302,7 @@ datasource db {
 | **Next.js** | TypeScript, Prisma | `crewship-internal` | Ne |
 | **crewshipd** | Go binary | `crewship-internal` | Ano (spravuje kontejnery) |
 | **PostgreSQL** | PostgreSQL 16 | `crewship-internal` | Ne |
-| **Agent kontejnery** | Docker (per team) | `crewship-agents` (--internal) | Ne |
+| **Agent kontejnery** | Docker (per crew) | `crewship-agents` (--internal) | Ne |
 
 ### Jeden proces (Mode 1 / Single Binary)
 
@@ -310,7 +310,7 @@ datasource db {
 |---|---|---|---|
 | **crewship** | Go binary + embedded Next.js | localhost | Ano (spravuje kontejnery) |
 | **SQLite** | Embedded v binary | N/A (file) | Ne |
-| **Agent kontejnery** | Docker (per team) | `crewship-agents` (--internal) | Ne |
+| **Agent kontejnery** | Docker (per crew) | `crewship-agents` (--internal) | Ne |
 
 > V obou modech: Next.js a crewshipd komunikuji pres Unix socket (Mode 2)
 > nebo primo v procesu (Mode 1).
@@ -339,7 +339,7 @@ datasource db {
                               ┌──────────────────┼────────── crewship-agents ──────┐
                               │                  │                                  │
                               │  ┌───────────┐  ┌───────────┐  ┌───────────┐       │
-                              │  │ Team A    │  │ Team B    │  │ Team C    │       │
+                              │  │ Crew A    │  │ Crew B    │  │ Crew C    │       │
                               │  │ container │  │ container │  │ container │       │
                               │  └───────────┘  └───────────┘  └───────────┘       │
                               │  (--internal, no internet, LLM allowlist only)      │
@@ -577,21 +577,21 @@ iptables -A DOCKER-USER -s crewship-agents -j DROP
   ├── config.yaml                                  ← konfigurace
   ├── crewship.pid                                 ← PID soubor
   ├── skills/                                      ← nainstalovane skills
-  ├── output/{org-id}/{team-name}/{agent-name}/    ← agent deliverables
-  ├── conversations/{org-id}/{agent-id}/           ← JSONL session files
-  └── logs/teams/{team-id}/agents/{agent-id}/      ← JSONL logy
+  ├── output/{workspace-id}/{crew-name}/{agent-name}/    ← agent deliverables
+  ├── conversations/{workspace-id}/{agent-id}/           ← JSONL session files
+  └── logs/crews/{crew-id}/agents/{agent-id}/      ← JSONL logy
 ```
 
 ### Mode 2 (Docker Compose)
 
 ```
 /var/lib/crewship/
-  ├── output/{org-id}/{team-name}/{agent-name}/   ← agent deliverables
-  ├── conversations/{org-id}/{agent-id}/           ← JSONL session files
+  ├── output/{workspace-id}/{crew-name}/{agent-name}/   ← agent deliverables
+  ├── conversations/{workspace-id}/{agent-id}/           ← JSONL session files
   └── bbolt/                                       ← Go service WAL
 
 /var/log/crewship/
-  └── teams/{team-id}/agents/{agent-id}/
+  └── crews/{crew-id}/agents/{agent-id}/
       └── current.jsonl                            ← agent logs (logrotated)
 ```
 
@@ -599,7 +599,7 @@ iptables -A DOCKER-USER -s crewship-agents -j DROP
 
 ```
 # /etc/logrotate.d/crewship
-/var/log/crewship/teams/*/agents/*/current.jsonl {
+/var/log/crewship/crews/*/agents/*/current.jsonl {
     hourly
     rotate 720        # 30 dni * 24h
     compress
@@ -687,7 +687,7 @@ $ crewship doctor
 | `CREWSHIPD_LOG_DIR` | Ne | Log directory (default: /var/log/crewship) |
 | `CREWSHIPD_OUTPUT_DIR` | Ne | Output directory (default: /var/lib/crewship/output) |
 | `CREWSHIPD_BBOLT_PATH` | Ne | bbolt DB path (default: /var/lib/crewship/bbolt/crewship.db) |
-| `DATABASE_URL` | Ano | PostgreSQL (pro IPC validaci — Go cte agent/team data) |
+| `DATABASE_URL` | Ano | PostgreSQL (pro IPC validaci — Go cte agent/crew data) |
 
 ### 12.3 Single binary (Mode 1)
 
@@ -704,7 +704,7 @@ $ crewship doctor
 | Promenna | Popis |
 |---|---|
 | `CREWSHIP_AGENT_ID` | Agent UUID |
-| `CREWSHIP_TEAM_ID` | Team UUID |
+| `CREWSHIP_TEAM_ID` | Crew UUID |
 | `CREWSHIP_SESSION_ID` | Current session UUID |
 | `{USER_CREDENTIALS}` | Dynamicky dle AgentCredential (napr. OPENAI_API_KEY) |
 
