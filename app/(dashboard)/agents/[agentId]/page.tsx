@@ -314,10 +314,10 @@ export default function AgentOverviewPage({ params }: { params: Promise<{ agentI
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-1">
               <MessagesSquare className="h-3.5 w-3.5" />
-              <span className="text-xs uppercase tracking-wide font-medium">Sessions</span>
+              <span className="text-xs uppercase tracking-wide font-medium">Chats</span>
             </div>
             <div className="text-2xl font-bold">{agent._count.chats}</div>
-            <Link href={`/agents/${agentId}/sessions`} className="text-xs text-primary hover:underline">
+            <Link href={`/agents/${agentId}/chats`} className="text-xs text-primary hover:underline">
               View chats
             </Link>
           </CardContent>
