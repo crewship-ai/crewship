@@ -14,14 +14,16 @@
 - **Zod** latest (validation)
 - **Zustand** latest (client state)
 - **xterm.js** latest (web terminal to agent containers)
-- **Prisma** latest (ORM for PostgreSQL CRUD)
+- **Prisma** latest (type generation ONLY -- NOT runtime ORM, Go accesses DB directly)
 
-## Frontend Auth & Security
+## Auth & Security (Go backend)
 
-- **NextAuth.js** (Auth.js v5) -- email+password, OAuth
-- **@auth/prisma-adapter** -- NextAuth Prisma integration
-- **CASL** latest (RBAC)
-- **jose** latest (JWT verification)
+- **Go auth** -- NextAuth-compatible JWE endpoints (`internal/api/auth.go`, `internal/api/nextauth.go`)
+- **Go RBAC middleware** -- role-based access control (`internal/api/middleware.go`)
+- **Go encryption** -- AES-256-GCM credentials (`internal/encryption/`)
+- ~~NextAuth.js~~ -- replaced by Go auth
+- ~~CASL~~ -- replaced by Go RBAC middleware
+- ~~@auth/prisma-adapter~~ -- not used at runtime
 
 ## Backend (Go)
 
@@ -35,8 +37,10 @@
 
 ## Database
 
-- **PostgreSQL** 16 (local Docker, structured data only)
-- **Prisma** (ORM, schema source of truth, accessed only from Next.js)
+- **SQLite** (default, embedded, pure-Go driver modernc.org/sqlite)
+- **PostgreSQL** 16 (opt-in for teams/enterprise)
+- **Go `database/sql`** -- direct DB access (NO ORM at runtime)
+- **Prisma** (schema used ONLY for TypeScript type generation, NOT runtime)
 
 ## Storage
 

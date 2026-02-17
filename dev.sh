@@ -43,6 +43,18 @@ port_in_use() {
   lsof -ti:"$1" >/dev/null 2>&1
 }
 
+detect_db_mode() {
+  if [[ -f "$PROJECT_DIR/.env.local" ]]; then
+    local db_url
+    db_url=$(grep -E '^DATABASE_URL=' "$PROJECT_DIR/.env.local" | head -1 | cut -d'=' -f2- | tr -d '"' || true)
+    if [[ "$db_url" == postgresql://* ]] || [[ "$db_url" == postgres://* ]]; then
+      echo "postgresql"
+      return
+    fi
+  fi
+  echo "sqlite"
+}
+
 check_prerequisites() {
   local missing=0
 
@@ -51,12 +63,17 @@ check_prerequisites() {
     missing=1
   fi
 
-  for cmd in node pnpm go docker; do
+  for cmd in node pnpm go; do
     if ! command -v "$cmd" &>/dev/null; then
       err "$cmd is not installed"
       missing=1
     fi
   done
+
+  # Docker is only required if agents will be run
+  if ! command -v docker &>/dev/null; then
+    warn "docker is not installed -- agent containers will not work"
+  fi
 
   if [[ $missing -ne 0 ]]; then
     err "Prerequisites check failed"
@@ -65,7 +82,15 @@ check_prerequisites() {
 }
 
 start_postgres() {
-  log "Starting PostgreSQL..."
+  local db_mode
+  db_mode=$(detect_db_mode)
+
+  if [[ "$db_mode" != "postgresql" ]]; then
+    ok "Using SQLite (no PostgreSQL needed)"
+    return
+  fi
+
+  log "Starting PostgreSQL (DATABASE_URL points to PostgreSQL)..."
   if docker compose -f "$PROJECT_DIR/docker/docker-compose.yml" ps --format '{{.Status}}' 2>/dev/null | grep -qi "up"; then
     ok "PostgreSQL already running"
   else
@@ -102,7 +127,6 @@ start_go() {
 
   echo $! > "$GO_PID_FILE"
 
-  # Wait for health check
   local attempts=0
   while [[ $attempts -lt 15 ]]; do
     if curl -sf http://localhost:$GO_PORT/healthz >/dev/null 2>&1; then
@@ -136,7 +160,6 @@ start_next() {
 
   echo $! > "$NEXT_PID_FILE"
 
-  # Wait for ready
   local attempts=0
   while [[ $attempts -lt 20 ]]; do
     if curl -sf -o /dev/null http://localhost:$NEXT_PORT 2>/dev/null; then
@@ -152,7 +175,6 @@ start_next() {
 
 kill_tree() {
   local pid="$1"
-  # Kill all children first, then parent
   local children
   children=$(pgrep -P "$pid" 2>/dev/null || true)
   for child in $children; do
@@ -167,7 +189,6 @@ stop_service() {
   if pid=$(is_running "$pid_file"); then
     log "Stopping $name (pid $pid)..."
     kill_tree "$pid"
-    # Wait for graceful shutdown
     local attempts=0
     while kill -0 "$pid" 2>/dev/null && [[ $attempts -lt 10 ]]; do
       sleep 0.5
@@ -179,7 +200,6 @@ stop_service() {
     rm -f "$pid_file"
   fi
 
-  # Clean up any orphans on the port
   if port_in_use "$port"; then
     local orphan_pids
     orphan_pids=$(lsof -ti:"$port" 2>/dev/null || true)
@@ -187,7 +207,6 @@ stop_service() {
       kill "$orphan_pid" 2>/dev/null || true
     done
     sleep 1
-    # Force kill remaining
     orphan_pids=$(lsof -ti:"$port" 2>/dev/null || true)
     for orphan_pid in $orphan_pids; do
       kill -9 "$orphan_pid" 2>/dev/null || true
@@ -201,6 +220,10 @@ cmd_start() {
   check_prerequisites
   echo -e "${BOLD}Crewship Dev Environment${NC}"
   echo "========================"
+  echo ""
+  local db_mode
+  db_mode=$(detect_db_mode)
+  echo -e "  Database:  ${CYAN}$db_mode${NC}"
   echo ""
   start_postgres
   start_go
@@ -217,8 +240,13 @@ cmd_stop() {
   echo -e "${BOLD}Stopping Crewship...${NC}"
   stop_service "Next.js" "$NEXT_PID_FILE" "$NEXT_PORT"
   stop_service "crewshipd" "$GO_PID_FILE" "$GO_PORT"
-  # PostgreSQL stays running (fast to keep, slow to restart)
-  ok "Stopped (PostgreSQL left running)"
+  local db_mode
+  db_mode=$(detect_db_mode)
+  if [[ "$db_mode" == "postgresql" ]]; then
+    ok "Stopped (PostgreSQL left running)"
+  else
+    ok "Stopped"
+  fi
 }
 
 cmd_restart() {
@@ -231,14 +259,19 @@ cmd_status() {
   echo -e "${BOLD}Crewship Dev Environment${NC}"
   echo "========================"
 
-  # PostgreSQL
-  if docker compose -f "$PROJECT_DIR/docker/docker-compose.yml" ps --format '{{.Status}}' 2>/dev/null | grep -qi "up"; then
-    echo -e "  PostgreSQL:  ${GREEN}running${NC}"
+  local db_mode
+  db_mode=$(detect_db_mode)
+
+  if [[ "$db_mode" == "postgresql" ]]; then
+    if docker compose -f "$PROJECT_DIR/docker/docker-compose.yml" ps --format '{{.Status}}' 2>/dev/null | grep -qi "up"; then
+      echo -e "  PostgreSQL:  ${GREEN}running${NC}"
+    else
+      echo -e "  PostgreSQL:  ${RED}stopped${NC}"
+    fi
   else
-    echo -e "  PostgreSQL:  ${RED}stopped${NC}"
+    echo -e "  SQLite:      ${GREEN}file:./crewship.db${NC}"
   fi
 
-  # crewshipd
   if pid=$(is_running "$GO_PID_FILE"); then
     local uptime_info=""
     if curl -sf http://localhost:$GO_PORT/healthz 2>/dev/null | grep -q "ok"; then
@@ -253,7 +286,6 @@ cmd_status() {
     echo -e "  crewshipd:   ${RED}stopped${NC}"
   fi
 
-  # Next.js
   if pid=$(is_running "$NEXT_PID_FILE"); then
     echo -e "  Next.js:     ${GREEN}running${NC} (pid $pid, port $NEXT_PORT)"
   elif port_in_use "$NEXT_PORT"; then
@@ -292,8 +324,8 @@ case "${1:-help}" in
   *)
     echo "Usage: ./dev.sh {start|stop|restart|status|logs|logs:go|logs:next}"
     echo ""
-    echo "  start     Start PostgreSQL + crewshipd + Next.js"
-    echo "  stop      Stop crewshipd + Next.js (PostgreSQL stays)"
+    echo "  start     Start crewshipd + Next.js (+ PostgreSQL if configured)"
+    echo "  stop      Stop crewshipd + Next.js"
     echo "  restart   Stop then start all services"
     echo "  status    Show status of all services"
     echo "  logs      Tail combined logs"

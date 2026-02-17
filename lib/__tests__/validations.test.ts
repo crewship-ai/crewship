@@ -43,10 +43,10 @@ describe("createAgentSchema", () => {
     expect(result.success).toBe(false)
   })
 
-  it("crew_id must be UUID", () => {
+  it("crew_id must be non-empty string", () => {
     const result = createAgentSchema.safeParse({
       ...validAgent,
-      crew_id: "not-a-uuid",
+      crew_id: "",
     })
     expect(result.success).toBe(false)
   })

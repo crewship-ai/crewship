@@ -6,44 +6,68 @@
 
 ---
 
-## Two-Process Architecture
+## Single Binary Architecture
 
-> **Poznamka:** Toto je **Mode 2 (Docker Compose)** — dva separatni procesy.
-> V **Mode 1 (single binary)** bezi vse jako jeden Go proces s embedded
-> Next.js static buildem a SQLite. Viz sekce "Deployment" nize.
+Crewship bezi jako **jeden Go binary** (`crewship`). Next.js je staticky
+exportovany (HTML/CSS/JS) a embedded pres `go:embed`. Zadny separatni
+Node.js server, zadne API routes v Next.js, zadny Unix socket IPC.
 
 ```
-+-------------------+   Unix socket    +--------------------+
-|   Next.js         | ---------------> |   Go service       |
-|   (TypeScript)    |   (or gRPC)      |   (crewshipd)      |
-|                   |                  |                    |
-|   - React UI      |                  |   - WebSocket GW   |
-|   - shadcn/ui     |                  |   - Docker mgmt    |
-|   - NextAuth      |                  |   - Agent orchestr. |
-|   - Prisma CRUD   |                  |   - Log collector   |
-|   - File browser  |                  |   - File server     |
-|   - Web terminal  |                  |   - fsnotify watch  |
-|   - Port 3000     |                  |   - WAL (bbolt)     |
-|   ~300 MB RAM     |                  |   - Prometheus      |
-|                   |                  |   - Webhook ingress |
-+--------+----------+                  |   - Rate limiter    |
-         |                             |   ~50 MB RAM        |
-         v                             +--------+-----------+
-+--------+----------+                           |
-| PostgreSQL        |              +------------+------------+
-| (structured       |              |            |            |
-|  data ONLY)       |              v            v            v
-|  - users, auth    |     +----------+   +----------+   +--------+
-|  - workspaces, crews    |     | Crew A   |   | Crew B   |   | Output |
-|  - agents, skills |     | container|   | container|   | storage|
-|  - credentials    |     |          |   |          |   | (persi-|
-+-------------------+     | /workspace   | /workspace   | stent) |
-                          | (ephemeral)  | (ephemeral)  |        |
-+-------------------+     +----------+   +----------+   +--------+
-| Filesystem        |
-|  /var/log/crewship/  ← JSONL logs (logrotate)
-|  /var/lib/crewship/  ← WAL, config, output storage
-+-------------------+
++------------------------------------------------------------------+
+|                     crewship (Go binary)                         |
+|                                                                  |
+|  ┌─────────────────────────────────────────────────────────────┐ |
+|  │  Embedded static UI (Next.js static export via embed.FS)   │ |
+|  │  React, shadcn/ui, Tailwind CSS 4, client components only  │ |
+|  └─────────────────────────────────────────────────────────────┘ |
+|                                                                  |
+|  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  |
+|  │ REST API     │  │ Auth         │  │ WebSocket Gateway     │  |
+|  │ /api/v1/*    │  │ /api/auth/*  │  │ (native goroutines)   │  |
+|  │ (50+ routes) │  │ NextAuth JWE │  │                       │  |
+|  └──────┬───────┘  └──────┬───────┘  └───────────┬───────────┘  |
+|         │                 │                       │              |
+|  ┌──────┴─────────────────┴───────────────────────┴───────────┐  |
+|  │  SQLite (default, embedded) or PostgreSQL (opt-in)         │  |
+|  │  Go database/sql (direct queries, NO ORM)                  │  |
+|  └────────────────────────────────────────────────────────────┘  |
+|                                                                  |
+|  ┌────────────┐  ┌────────────┐  ┌─────────────┐  ┌──────────┐ |
+|  │ Docker     │  │ bbolt      │  │ LocalFS     │  │ Log      │ |
+|  │ orchestr.  │  │ WAL state  │  │ storage     │  │ collect. │ |
+|  └─────┬──────┘  └────────────┘  └─────────────┘  └──────────┘ |
+|        │                                                         |
++--------+---------------------------------------------------------+
+         │
+         │  Docker SDK (agent containers only)
+         │
+    ┌────┴──────────────────────────────────────────┐
+    │  crewship-agents network (--internal)         │
+    │                                               │
+    │  ┌──────────┐  ┌──────────┐  ┌────────────┐  │
+    │  │ Crew A   │  │ Crew B   │  │ Output     │  │
+    │  │ container│  │ container│  │ storage    │  │
+    │  │          │  │          │  │ (persist)  │  │
+    │  │/workspace│  │/workspace│  │            │  │
+    │  │(ephemer.)│  │(ephemer.)│  │            │  │
+    │  └──────────┘  └──────────┘  └────────────┘  │
+    └───────────────────────────────────────────────┘
+```
+
+### How it works
+
+```
+User → Browser → Go HTTP server (port 8080)
+                   ├─ GET / → Embedded static UI (Next.js build via embed.FS)
+                   ├─ REST API (/api/v1/*) → SQLite (database/sql)
+                   ├─ Auth (/api/auth/*) → JWT (NextAuth-compatible JWE)
+                   └─ WebSocket → Docker exec → CLI session → LLM API
+                                        ↓
+                                stdout → JSONL logs
+                                        ↓
+                                /output/ → persistent files
+
+External → Webhook (Go) → Agent trigger → same flow as above
 ```
 
 ## Core Concepts
@@ -85,18 +109,18 @@ VIRTUAL COORDINATOR (1 per workspace, optional)
 
 Uzivatel chatuje primarne s Crew Leadem (90 % interakci).
 Pro cross-crew otazky chatuje s Virtual Coordinatorem.
-Muze take chatovat primo s agent agentem (bypass leada).
+Muze take chatovat primo s agentem (bypass leada).
 
 > Plna specifikace: `.factory/context/prd/ORCHESTRATION.md`
 
 ## Provider Pattern (K8s Readiness)
 
-crewshipd NEVER accesses Docker, filesystem, or bbolt directly.
+Crewship NEVER accesses Docker, filesystem, or bbolt directly.
 Everything goes through provider interfaces — swap implementation, not rewrite.
 
 ```
                         ┌─────────────────────────────┐
-                        │        crewshipd             │
+                        │         crewship             │
                         │   (business logic only)      │
                         └──┬──────────┬──────────┬─────┘
                            │          │          │
@@ -114,7 +138,6 @@ Everything goes through provider interfaces — swap implementation, not rewrite
 | ContainerProvider | Docker SDK (exec) | client-go (Pods/Jobs) |
 | StorageProvider | Local filesystem + fsnotify | S3/MinIO + event notifications |
 | StateProvider | bbolt (embedded WAL) | PostgreSQL table (shared) |
-| IPC transport | HTTP over Unix socket | HTTP over TCP (K8s Service) |
 | WS broadcast | In-process (single instance) | PostgreSQL LISTEN/NOTIFY |
 | Rate limiting | In-memory token bucket | PostgreSQL-backed counters |
 
@@ -129,25 +152,22 @@ Full details: `.factory/context/K8S-READINESS.md`
 
 ## Process Responsibilities
 
-### Next.js (TypeScript) -- UI + CRUD
+### Single Go Binary (crewship)
 
-What it does:
-- React UI (dashboard, chat, file browser, web terminal, settings)
-- NextAuth.js authentication (email+password, OAuth)
-- Prisma ORM for CRUD operations on PostgreSQL
-- REST API for frontend consumption (`/api/v1/`)
-- Communicates with Go service via Unix socket (local) or gRPC (remote)
+Everything runs in one process:
 
-What it does NOT do:
-- No WebSocket server (Go handles that)
-- No Docker management
-- No log collection
-- No file serving from agent workspace
-- No job queue
+**UI Serving:**
+- Embedded static UI via `embed.FS` (Next.js static export: HTML/CSS/JS)
+- SPA-aware file server (`internal/api/static.go`)
 
-### Go service (crewshipd) -- Brain + Hands
+**API (internal/api/):**
+- REST API for all CRUD operations (`/api/v1/*`, 50+ routes)
+- NextAuth-compatible auth endpoints (`/api/auth/*` -- csrf, session, login, signout)
+- Signup with bcrypt, JWT signing/validation (JWE compatible)
+- RBAC middleware on every endpoint
+- CSRF token validation
 
-What it does:
+**Orchestration:**
 - WebSocket gateway (native goroutines, handles thousands of connections)
 - Docker container lifecycle (create, start, stop, exec, logs)
 - Agent orchestration (dispatch commands, collect results)
@@ -160,52 +180,37 @@ What it does:
 - Rate limiting (token bucket, in-memory)
 - Health checks for containers
 - Graceful shutdown (SIGTERM handling)
+- Credential encryption/decryption (AES-256-GCM, `internal/encryption/`)
+
+**Database:**
+- SQLite (default, embedded, zero deps) or PostgreSQL (opt-in)
+- Go `database/sql` direct queries (NO ORM, NO Prisma at runtime)
+- Migration system (`internal/database/migrate.go`, 20 tables)
 
 Phase 2 additions:
 - **Channel Gateway** (opt-in module) -- persistent messaging sessions
   - Discord (discordgo), Telegram (go-telegram-bot-api), Slack (slack-go)
-  - WhatsApp (whatsmeow -- Go implementation of Baileys, Phase 2B)
-  - ChannelProvider interface (adapter pattern, same as ContainerProvider)
+  - WhatsApp (whatsmeow, Phase 2B)
+  - ChannelProvider interface (adapter pattern)
   - Routes incoming messages to correct agent/crew
-  - Sends approval requests to configured channels
-  - NOT a skill -- must be persistent long-running process (like OpenClaw Gateway)
 - **Cron scheduler** (github.com/robfig/cron) -- scheduled missions
 - **Approval engine** -- trust levels per agent, multi-channel approval flow
-
-What it does NOT do:
-- No HTML rendering
-- No database access (Next.js owns PostgreSQL via Prisma)
-- No authentication (validates JWT tokens from NextAuth)
-
-## IPC: Next.js ↔ Go service
-
-```
-Local (same host):
-  Dev: Unix domain socket /tmp/crewship.sock
-  Prod: Unix domain socket /run/crewship/crewship.sock (chmod 0660)
-  = zero TCP overhead, secure (not exposed on port)
-
-Remote (K8s, multi-node):
-  gRPC over HTTP/2 on port 8080
-  = typed protobuf messages, auto-generated clients
-  = mTLS for security
-```
 
 ## Data Flow
 
 ### User sends message to agent
 
 ```
-1. User types in chat UI (React)
-2. Next.js sends to Go service via Unix socket
-3. Go service delivers to agent container via Docker exec
+1. User types in chat UI (React, client component)
+2. Browser sends fetch/WS to Go server (port 8080)
+3. Go server delivers to agent container via Docker exec
    (crewship-sidecar already running in container on localhost:9119)
 4. Agent process starts (CLI tool OR crewship-agent API-direct)
 5. Agent writes response to stdout (user-facing, clean)
 6. Agent delegates via HTTP to sidecar: POST localhost:9119/assign
    (CLI mode: curl; API-direct: native HTTP call)
-7. Sidecar validates (RBAC, circuit breaker) → forwards to crewshipd
-8. Go service reads stdout → WebSocket + JSONL log
+7. Sidecar validates (RBAC, circuit breaker) → forwards to crewship
+8. Go server reads stdout → WebSocket + JSONL log
 9. User sees response in real-time
 ```
 
@@ -213,11 +218,11 @@ Remote (K8s, multi-node):
 
 ```
 1. Grafana/n8n/Make sends POST to /api/v1/webhooks/{crew}/{agent}/trigger
-2. Go service validates webhook secret
-3. Go service wakes agent (start container if stopped)
+2. Go server validates webhook secret
+3. Go server wakes agent (start container if stopped)
 4. Agent processes the event
 5. Agent writes results to /output/ (persistent)
-6. Go service notifies via WebSocket (if user is online)
+6. Go server notifies via WebSocket (if user is online)
 7. Agent optionally calls external service (Slack, Jira, email via skill)
 ```
 
@@ -226,16 +231,16 @@ Remote (K8s, multi-node):
 ```
 1. Agent writes file to /output/reports/q1-report.pdf
 2. fsnotify (inotify) detects new file
-3. Go service indexes file metadata
-4. Go service sends WebSocket notification to frontend
+3. Go server indexes file metadata
+4. Go server sends WebSocket notification to frontend
 5. User sees "Agent created q1-report.pdf" in UI
-6. User clicks Download → Go service serves file via HTTP
+6. User clicks Download → Go server serves file via HTTP
 ```
 
 ### Credential pool selection + failover
 
 ```
-Agent start request arrives at crewshipd:
+Agent start request arrives at crewship:
   1. For each env_var_name (e.g. ANTHROPIC_API_KEY):
      → Query credentials pool (sorted by priority ASC)
      → Skip credentials in cooldown (recent 429)
@@ -244,7 +249,7 @@ Agent start request arrives at crewshipd:
   3. Agent runs with selected API key
 
 If agent fails with 429 (rate limit):
-  1. crewshipd detects rate limit error in stderr
+  1. crewship detects rate limit error in stderr
   2. Mark current credential as cooldown (5 min)
   3. Select next credential from pool (priority order)
   4. Context preservation:
@@ -261,6 +266,15 @@ Pool exhausted (all keys in cooldown):
 
 ## Storage Model
 
+### Data directories
+
+> **Single binary mode (primary):** Vsechna data v `~/.crewship/`:
+> `~/.crewship/crewship.db` (SQLite), `~/.crewship/output/`, `~/.crewship/logs/`,
+> `~/.crewship/config.yaml`. Viz `prd/DEPLOYMENT.md`.
+>
+> **Docker Compose mode (legacy/enterprise):** pouziva `/var/lib/crewship/`
+> a `/var/log/crewship/`.
+
 ### Ephemeral (dies with container)
 
 ```
@@ -268,25 +282,17 @@ Pool exhausted (all keys in cooldown):
   ├─ .cache/             ← pip/npm cache
   ├─ .local/             ← agent local state
   ├─ tmp/                ← temp files
-  └─ ...                 ← working coordinatory for agent
+  └─ ...                 ← working directory for agent
 ```
 
 Agent's scratch space. Installed packages, temp files, CLI state.
 Destroyed when container is removed. Cheap, disposable -- agent is cattle.
 
-> **Mode 1 (single binary):** Vsechna data v `~/.crewship/`:
-> `~/.crewship/data/` (SQLite DB), `~/.crewship/output/`, `~/.crewship/logs/`,
-> `~/.crewship/config.yaml`. Viz `prd/DEPLOYMENT.md`.
->
-> **macOS integrace (nice-to-have Phase 3):**
-> - Konfigurovatelny output path: `crewship start --output ~/Documents/Crewship`
-> - Default: `~/.crewship/output/` (skryty adresar, tech-friendly)
-> - Symlink `~/Documents/Crewship/` → `~/.crewship/output/` (pro Finder pristup)
-
 ### Persistent (survives everything)
 
 ```
-/var/lib/crewship/output/        ← bind mount, on host filesystem
+~/.crewship/output/              ← host filesystem (single binary)
+/var/lib/crewship/output/        ← host filesystem (Docker Compose)
   ├─ {workspace-id}/
   │   ├─ {crew-name}/
   │   │   ├─ {agent-name}/
@@ -306,10 +312,10 @@ When crew is deleted: container gone, but files moved to `_archived/` (not delet
 Admin can purge archives (GDPR).
 
 **Who manages directories:**
-- **crewshipd** (Go) = creates directories, bind-mounts into containers, archives on crew deletion
-- **Agent** = writes to `/output/` (inside container), which is bind mount to host `~/.crewship/output/{crew}/{agent}/`
+- **crewship** (Go) = creates directories, bind-mounts into containers, archives on crew deletion
+- **Agent** = writes to `/output/` (inside container), bind mount to host `~/.crewship/output/{crew}/{agent}/`
 - **Lead** (orchestration) = does NOT have special FS access -- reads results via sidecar (HTTP GET /results)
-- **UI** = File browser displays content via crewshipd HTTP API (GET /crews/{id}/files/)
+- **UI** = File browser displays content via crewship HTTP API (GET /api/v1/crews/{id}/files/)
 
 **Per-agent vs per-crew isolation:**
 - `/output/{crew}/{agent}/` = per-agent (default, isolated)
@@ -319,8 +325,9 @@ Admin can purge archives (GDPR).
 ### Logs
 
 ```
-/var/log/crewship/
-  ├─ service.jsonl               ← Go service logs
+~/.crewship/logs/                    ← single binary mode
+/var/log/crewship/                   ← Docker Compose mode
+  ├─ service.jsonl                   ← Go service logs
   ├─ teams/
   │   ├─ {crew-id}/
   │   │   ├─ agents/
@@ -328,9 +335,9 @@ Admin can purge archives (GDPR).
   │   │   │   │   ├─ current.jsonl        ← active log
   │   │   │   │   ├─ 2026-02-11T13.jsonl.gz  ← rotated (hourly)
   │   │   │   │   └─ ...
-  │   │   └─ audit.jsonl         ← crew audit trail
+  │   │   └─ audit.jsonl             ← crew audit trail
   │   └─ ...
-  └─ audit.jsonl                 ← global audit (append-only: chattr +a)
+  └─ audit.jsonl                     ← global audit (append-only: chattr +a)
 ```
 
 Managed by Linux logrotate. Hourly rotation, gzip compression, 30-day retention.
@@ -368,10 +375,10 @@ Container = jail. Agent cannot:
 
 ## Security Layers
 
-1. **Auth**: NextAuth.js (email+password, OAuth)
-2. **JWT validation**: Go service verifies NextAuth JWT on every WS/webhook request
-3. **RBAC**: CASL abilities (Owner/Admin/Manager/Member/Viewer)
-4. **Encryption**: AES-256-GCM for all credentials at rest
+1. **Auth**: Go (NextAuth-compatible JWE endpoints in `internal/api/`)
+2. **JWT validation**: Go validates JWT on every API/WS/webhook request
+3. **RBAC**: Go middleware (`internal/api/middleware.go`) -- Owner/Admin/Manager/Member/Viewer
+4. **Encryption**: AES-256-GCM for all credentials at rest (`internal/encryption/`)
 5. **Container isolation**: non-root, --internal network, resource limits
 6. **Network allowlist**: only LLM API endpoints reachable from containers
 7. **Audit trail**: append-only JSONL (chattr +a), immutable
@@ -389,12 +396,12 @@ Container = jail. Agent cannot:
 ## Messaging Architecture (ADR-002)
 
 **MVP (single-node):** Go channels + goroutines (in-process messaging)
-- Assignment commands: named pipe → goroutine reads → Go channel → AssignmentEngine
-- WebSocket broadcast: in-process (single crewshipd instance)
+- Assignment commands: goroutine reads → Go channel → AssignmentEngine
+- WebSocket broadcast: in-process (single crewship instance)
 - No external message broker dependency
 
 **Phase 3 (multi-node cluster):** NATS JetStream
-- When crewshipd needs to scale horizontally (multiple instances)
+- When crewship needs to scale horizontally (multiple instances)
 - NATS JetStream for exactly-once delivery, persistence, replay
 - External NATS service (docker-compose for staging, Helm chart for K8s)
 
@@ -416,7 +423,7 @@ Skill Definition (DB):
   └── defer_loading (true = on-demand via tool search)
 
 Runtime Flow:
-  1. Container starts → sidecar reads skill list from crewshipd
+  1. Container starts → sidecar reads skill list from crewship
   2. Sidecar starts MCP servers (stdio) with injected credentials
   3. Agent starts → gets only search_tools meta-tool + critical tools
   4. Agent needs a tool → calls search_tools("create github issue")
@@ -531,14 +538,14 @@ API-direct mode (Phase 2): Docker exec → crewship-agent (Go binary, ~5MB)
                           Precise token tracking from API response
 ```
 
-Both modes communicate with crewshipd through the same crewship-sidecar
+Both modes communicate with crewship through the same crewship-sidecar
 (localhost:9119). The sidecar provides a unified assignment API regardless
 of agent runtime type. See ORCHESTRATION.md section 5.9.
 
 ## Conversation Search (Phase 2, ADR-011)
 
 ```
-JSONL append (real-time) → crewshipd → async indexer → Meilisearch
+JSONL append (real-time) → crewship → async indexer → Meilisearch
                                                           ↓
                                               UI search: instant results
                                               across all conversations,
@@ -562,25 +569,45 @@ JSONL append (real-time) → crewshipd → async indexer → Meilisearch
 
 ## Deployment
 
-- **Local dev**: Mac Mini 16GB -- Docker Compose (PostgreSQL + crewshipd), Next.js native
-- **Staging**: Coolify on Proxmox (128GB RAM, i7-12700)
-- **Production**: TBD (Coolify, K8s, or bare metal)
-- **Container registry**: ghcr.io/crewship-ai/*
-
-### Single binary distribuce (Mode 1 -- PRIMARY)
+### Single binary (Mode 1 -- PRIMARY)
 
 V primarnim distribucnim modu bezi Crewship jako jeden Go binary:
-- Next.js static build embedded pres `embed.FS`
-- crewshipd engine integrovan v binary
-- SQLite jako default DB
-- Docker pouze pro agent kontejnery
-- CLI: `crewship start/stop/status/logs`
-- Detail: `prd/DEPLOYMENT.md` sekce 1-4
+- Next.js static build embedded pres `embed.FS` (`web/embed.go`)
+- Vsechny API routes v Go (`internal/api/router.go`)
+- Auth v Go (`internal/api/auth.go`, `internal/api/nextauth.go`)
+- SQLite jako default DB (`~/.crewship/crewship.db`)
+- Docker pouze pro agent kontejnery (ne pro Crewship samotny)
+- Default port: **8080**
+- CLI: `crewship start/version/doctor`
 
-Data coordinatory: `~/.crewship/` (konfigurace, DB, logy, output).
-Mode 2 (Docker Compose) pouziva `/var/lib/crewship/` a `/var/log/crewship/`.
+Data: `~/.crewship/` (konfigurace, DB, logy, output).
 
-## Graceful Shutdown (Go service)
+```bash
+# Production
+crewship start                # Start (SQLite, localhost:8080)
+crewship start --port 9090    # Custom port
+
+# Dev (hot-reload -- dva procesy)
+./dev.sh start                # Go :8080 + Next.js :3001 (HMR, proxies API)
+./dev.sh stop
+```
+
+### Docker Compose (Mode 2 -- legacy/enterprise)
+
+Pro enterprise deploy s PostgreSQL a externima sluzbama:
+- Docker image (`Dockerfile`)
+- PostgreSQL 16 (optional, misto SQLite)
+- Data v `/var/lib/crewship/`, logy v `/var/log/crewship/`
+- Viz `docker/docker-compose.prod.yml`
+
+### Environment
+
+- **Local dev**: Mac Mini 16GB (macOS) -- `./dev.sh start` (Go + Next.js hot-reload)
+- **Staging**: Coolify on Proxmox (128GB RAM, i7-12700) -- Docker image
+- **Production**: Single binary or Docker image
+- **Container registry**: ghcr.io/crewship-ai/*
+
+## Graceful Shutdown
 
 ```
 1. Receives SIGTERM
