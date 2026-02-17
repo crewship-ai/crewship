@@ -2,7 +2,7 @@
 # Multi-stage build: deps → builder → runner
 # Image: ghcr.io/crewship-ai/crewship:latest
 
-FROM node:22-alpine AS base
+FROM node:24-alpine AS base
 RUN corepack enable pnpm
 
 # -- Dependencies --
