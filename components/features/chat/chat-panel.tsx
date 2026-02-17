@@ -42,7 +42,12 @@ import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import { useChat, type ChatMessage } from "@/hooks/use-chat"
 import { useWorkspace } from "@/hooks/use-workspace"
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/ws"
+function getWsUrl(): string {
+  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL
+  if (typeof window === "undefined") return "ws://localhost:8080/ws"
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
+  return `${proto}//${window.location.host}/ws`
+}
 
 interface ChatPanelProps {
   agentId: string
@@ -79,7 +84,7 @@ export function ChatPanel({ agentId, sessionId }: ChatPanelProps) {
   }, [])
 
   const { messages, sendMessage, loadHistory, isStreaming, connectionStatus } = useChat({
-    wsUrl: WS_URL,
+    wsUrl: getWsUrl(),
     token,
     sessionId,
   })
