@@ -43,6 +43,10 @@ func New(cfg Config, logger *slog.Logger) (*Provider, error) {
 		return nil, fmt.Errorf("docker ping: %w", err)
 	}
 
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	p := &Provider{client: cli, cfg: cfg, logger: logger}
 
 	if cfg.Network != "" {
