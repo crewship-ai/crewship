@@ -41,6 +41,7 @@ dev\:go-once:
 
 build:
 	pnpm build
+	rm -rf web/out && cp -r out web/out
 	go build $(LDFLAGS) -o crewship ./cmd/crewship
 
 build\:go:

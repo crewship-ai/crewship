@@ -147,6 +147,15 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
 	r.mux.Handle("GET /api/v1/ws-token", authed(http.HandlerFunc(authH.WsToken)))
 
+	// NextAuth-compatible endpoints (for next-auth/react client SDK)
+	nextAuth := NewNextAuthHandler(r.db, r.logger, r.authMw.validator)
+	r.mux.HandleFunc("GET /api/auth/csrf", nextAuth.CSRF)
+	r.mux.HandleFunc("GET /api/auth/providers", nextAuth.Providers)
+	r.mux.HandleFunc("GET /api/auth/session", nextAuth.Session)
+	r.mux.HandleFunc("POST /api/auth/callback/credentials", nextAuth.CallbackCredentials)
+	r.mux.HandleFunc("POST /api/auth/signout", nextAuth.SignOut)
+	r.mux.HandleFunc("GET /api/auth/error", nextAuth.Error)
+
 	// Admin (require workspace context + OWNER)
 	admin := NewAdminHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/admin/stats", authed(wsCtx(http.HandlerFunc(admin.Stats))))
