@@ -21,6 +21,7 @@ import (
 
 var _ provider.ContainerProvider = (*Provider)(nil)
 
+// Config holds Docker provider configuration for container creation and runtime selection.
 type Config struct {
 	RuntimeImage   string
 	DefaultRuntime string // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
@@ -35,6 +36,9 @@ type DetectResult struct {
 	Version string // server version string
 }
 
+// Provider implements provider.ContainerProvider using the Docker API.
+// It auto-detects the container runtime (Docker, Podman, Colima, OrbStack, etc.)
+// and manages crew containers with security isolation (non-root, cap-drop ALL).
 type Provider struct {
 	client   *client.Client
 	cfg      Config
@@ -49,6 +53,7 @@ type socketCandidate struct {
 }
 
 // candidateSockets returns Docker-API-compatible sockets to try, in priority order.
+// Covers Docker Desktop, Colima, OrbStack, Rancher Desktop, Podman (rootless/root), and nerdctl.
 func candidateSockets() []socketCandidate {
 	home, _ := os.UserHomeDir()
 	uid := strconv.Itoa(os.Getuid())
@@ -78,8 +83,10 @@ func candidateSockets() []socketCandidate {
 }
 
 // Detect probes for a Docker-API-compatible socket and returns info about
-// the detected runtime. Does not require a Config.
-func Detect() (*DetectResult, error) {
+// the detected runtime. It checks DOCKER_HOST first, then iterates candidate
+// sockets (Docker, Colima, OrbStack, Rancher, Podman, nerdctl). The ctx
+// parameter is propagated to all Docker API calls for proper cancellation.
+func Detect(ctx context.Context) (*DetectResult, error) {
 	// If DOCKER_HOST is set, use that directly.
 	if host := os.Getenv("DOCKER_HOST"); host != "" {
 		cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -87,7 +94,7 @@ func Detect() (*DetectResult, error) {
 			return nil, fmt.Errorf("docker client (DOCKER_HOST=%s): %w", host, err)
 		}
 		defer cli.Close()
-		info, err := cli.Ping(context.Background())
+		info, err := cli.Ping(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("docker ping (DOCKER_HOST=%s): %w", host, err)
 		}
@@ -95,7 +102,7 @@ func Detect() (*DetectResult, error) {
 		if strings.Contains(info.APIVersion, "libpod") {
 			rt = "podman"
 		}
-		sv, _ := cli.ServerVersion(context.Background())
+		sv, _ := cli.ServerVersion(ctx)
 		ver := sv.Version
 		return &DetectResult{Runtime: rt, Socket: host, Version: ver}, nil
 	}
@@ -112,12 +119,12 @@ func Detect() (*DetectResult, error) {
 		if err != nil {
 			continue
 		}
-		_, pingErr := cli.Ping(context.Background())
+		_, pingErr := cli.Ping(ctx)
 		if pingErr != nil {
 			cli.Close()
 			continue
 		}
-		sv, _ := cli.ServerVersion(context.Background())
+		sv, _ := cli.ServerVersion(ctx)
 		ver := sv.Version
 		rt := c.runtime
 		// Podman masquerades as Docker -- check server components
@@ -134,12 +141,15 @@ func Detect() (*DetectResult, error) {
 	return nil, fmt.Errorf("no Docker-compatible runtime found (tried Docker, Podman, Colima, OrbStack, Rancher Desktop)")
 }
 
+// New creates a Provider by auto-detecting the container runtime and
+// establishing a Docker API client connection. Returns an error if no
+// compatible runtime is found.
 func New(cfg Config, logger *slog.Logger) (*Provider, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
-	detected, detectErr := Detect()
+	detected, detectErr := Detect(context.Background())
 	if detectErr != nil {
 		return nil, fmt.Errorf("container runtime: %w", detectErr)
 	}
@@ -185,6 +195,7 @@ func (p *Provider) Detected() DetectResult {
 	return p.detected
 }
 
+// ensureNetwork creates the Docker bridge network if it doesn't already exist.
 func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
 	networks, err := p.client.NetworkList(ctx, dockernetwork.ListOptions{})
 	if err != nil {
@@ -206,6 +217,7 @@ func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
 	return nil
 }
 
+// ensureImage pulls the agent runtime image if it is not already present locally.
 func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	_, _, err := p.client.ImageInspectWithRaw(ctx, ref)
 	if err == nil {
@@ -225,6 +237,9 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
+// EnsureCrewRuntime creates or starts a Docker container for the given crew.
+// It applies security isolation (non-root UID, cap-drop ALL, read-only rootfs)
+// and resource limits (memory, CPU, PID). Returns the container ID.
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (string, error) {
 	containerName := "crewship-team-" + team.Slug
 
@@ -330,15 +345,18 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	return resp.ID, nil
 }
 
+// StopCrewRuntime gracefully stops a crew container with a 30-second timeout.
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
 	timeout := 30
 	return p.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout})
 }
 
+// RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
 	return p.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
 }
 
+// ContainerStatus inspects a container and returns its current state (running/stopped/error).
 func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*provider.ContainerStatus, error) {
 	inspect, err := p.client.ContainerInspect(ctx, containerID)
 	if err != nil {
@@ -362,6 +380,8 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 	}, nil
 }
 
+// Exec runs a command inside a container via Docker exec. Returns a reader
+// for the combined stdout/stderr stream.
 func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	execCfg := container.ExecOptions{
 		Cmd:          cfg.Cmd,
@@ -397,6 +417,7 @@ func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider
 	}, nil
 }
 
+// ExecInspect checks if an exec process is still running and returns its exit code.
 func (p *Provider) ExecInspect(ctx context.Context, execID string) (bool, int, error) {
 	resp, err := p.client.ContainerExecInspect(ctx, execID)
 	if err != nil {
@@ -405,6 +426,7 @@ func (p *Provider) ExecInspect(ctx context.Context, execID string) (bool, int, e
 	return resp.Running, resp.ExitCode, nil
 }
 
+// Close releases the Docker API client connection.
 func (p *Provider) Close() error {
 	return p.client.Close()
 }

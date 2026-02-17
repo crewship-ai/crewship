@@ -121,6 +121,104 @@
 
 ---
 
+## EPIC: Onboarding Flow
+
+> **Cil:** Novy uzivatel od `crewship start` k prvnimu chat s agentem za < 60 sekund.
+> **Priorita:** P0 (bez onboardingu uzivatel neví co delat, bounce rate bude vysoka).
+> **Ref:** PRD ONBOARD-01..05, STRATEGY Section 14, Section 11 metrika "< 5 min to first agent".
+
+### Soucasny stav
+
+- [x] Signup vytvori ucet + auto-workspace (jmeno, slug, OWNER role)
+- [x] Login s CSRF cookie validaci
+- [x] Dashboard s empty state ("No agents yet" + "Create First Agent" button)
+- [ ] Zadny guided wizard po prvnim prihlaseni
+- [ ] Zadny onboarding state tracking (nevime jestli uzivatel uz proslo wizardem)
+- [ ] Zadne crew blueprinty / sablony
+- [ ] Zadne agent templates (predkonfigurovane role)
+
+### Faze 1: Guided Wizard (P0 -- MVP)
+
+> Krok-po-kroku wizard po prvnim prihlaseni. Uzivatel je proveden celym setupem.
+> Inspirace: PRD Section 14 (10-step flow).
+
+#### Backend (Go API)
+
+- [ ] **ONBOARD-B01** -- Onboarding state v DB: `users.onboarding_completed` boolean (migrace)
+- [ ] **ONBOARD-B02** -- `GET /api/v1/onboarding/status` -- vraci stav onboardingu (completed, current_step)
+- [ ] **ONBOARD-B03** -- `POST /api/v1/onboarding/complete` -- oznaci onboarding jako dokonceny
+- [ ] **ONBOARD-B04** -- Quick-create endpoint: `POST /api/v1/onboarding/setup` -- atomicky vytvori crew + agent + priradi credential (1 API call misto 3)
+
+#### Frontend (Next.js)
+
+- [ ] **ONBOARD-F01** -- Route `/onboarding` s multi-step wizard komponentou
+- [ ] **ONBOARD-F02** -- Redirect logika: po loginu check onboarding_completed → redirect na /onboarding nebo /dashboard
+- [ ] **ONBOARD-F03** -- Step 1: Welcome screen ("Vitejte v Crewship! Pojdme vytvorit vas prvni workspace.") -- workspace uz existuje, jen pojmenovani/potvrzeni
+- [ ] **ONBOARD-F04** -- Step 2: Crew creation (nazev + popis, nebo vyber ze sablony "DevOps", "Support", "Research")
+- [ ] **ONBOARD-F05** -- Step 3: Agent creation (jmeno, role, vyber CLI adapteru + LLM modelu)
+- [ ] **ONBOARD-F06** -- Step 4: Credential setup (API klic pro zvoleny LLM -- formular s masked inputem)
+- [ ] **ONBOARD-F07** -- Step 5: Success screen + "Start your first chat" CTA → redirect na agent chat
+- [ ] **ONBOARD-F08** -- Progress indicator (stepper/breadcrumb v horni casti wizardu)
+- [ ] **ONBOARD-F09** -- Skip moznost (pro zkusene uzivatele -- "I'll set up manually" link)
+- [ ] **ONBOARD-F10** -- Responsive design (mobile-first, md: breakpoints)
+
+#### UX detaily
+
+- Wizard je fullscreen overlay (ne v dashboard layoutu) -- ciste, bez distrakce
+- Kazdy step ma ilustraci/ikonu, kratky popis co delame a proc
+- Validace na kazdem kroku pred posunem dal (nazev crew, API klic format)
+- Po dokonceni wizardu: confetti/success animace + presmerovani do chatu s agentem
+- "Back" tlacitko na kazdem kroku (krome Step 1)
+
+### Faze 2: Crew Blueprinty (P1)
+
+> Predkonfigurovane sablony crew s agenty, skills, prompty. Vyber v onboarding wizardu.
+
+- [ ] **ONBOARD-BP01** -- Blueprint YAML format (viz PRD Section 15): crews, agents, skills, prompty
+- [ ] **ONBOARD-BP02** -- 3-5 bundled blueprintů: "Solo Developer", "DevOps Team", "Customer Support", "Research Crew", "Marketing Agency"
+- [ ] **ONBOARD-BP03** -- Blueprint picker UI v onboarding Step 2 (karty s preview: kolik agentu, jake skills)
+- [ ] **ONBOARD-BP04** -- `POST /api/v1/blueprints/apply` -- aplikuje blueprint (vytvori crew + agenty + priradi skills)
+- [ ] **ONBOARD-BP05** -- Blueprint detail modal (popis, seznam agentu, screenshot)
+
+### Faze 3: Empty State Upgrade (P1)
+
+> Vylepseni empty states na dashboardu pro uzivatele co skipnou wizard.
+
+- [ ] **ONBOARD-ES01** -- Dashboard empty state s onboarding checklistem (progress bar: "3 of 5 steps done")
+- [ ] **ONBOARD-ES02** -- Checklist items: Create crew, Add agent, Add credential, Send first message, Explore skills
+- [ ] **ONBOARD-ES03** -- Kazdy checklist item je klikatelny → naviguje na prislusnou stranku
+- [ ] **ONBOARD-ES04** -- Po splneni vsech kroku: checklist zmizi, zobrazi se normalni dashboard
+- [ ] **ONBOARD-ES05** -- Tooltip hints na sidebar polozkach pro noveho uzivatele ("Start here" badge)
+
+### Faze 4: Crewship AI Onboarding (P2 -- Phase 2 roadmap)
+
+> Konverzacni onboarding pres meta-agenta. Uzivatel popisuje potreby, AI navrrhne strukturu.
+
+- [ ] **ONBOARD-AI01** -- Crewship AI meta-agent chat interface
+- [ ] **ONBOARD-AI02** -- AI zna celou platformu (crews, skills, network policies, credentials)
+- [ ] **ONBOARD-AI03** -- AI navrhne crew strukturu na zaklade popisu uzivatele
+- [ ] **ONBOARD-AI04** -- One-click aplikace navrhu (AI vola API pro vytvoreni crew/agentu)
+
+### Metriky uspechu
+
+| Metrika | Cil |
+|---|---|
+| Cas signup → prvni chat | < 60 sekund (wizard path) |
+| Wizard completion rate | > 80% (kdo zacne, dokonci) |
+| Wizard skip rate | < 15% |
+| First-day retention | > 60% (vrati se do 24h) |
+| Onboarding-to-active | > 50% (posle alespon 5 zprav agentovi) |
+
+### Technicke poznamky
+
+- Wizard state (current step) ulozen v `localStorage` (ne v DB -- jednodussi, neni treba sync)
+- `onboarding_completed` flag v DB -- jediny persistent stav (pro redirect logiku)
+- Wizard pouziva shadcn/ui komponenty (Card, Button, Input, Select, Progress)
+- Stepper komponenta: bud shadcn/ui Stepper (pokud existuje) nebo vlastni z Progress + Badge
+- Vsechny API calls pres existujici endpointy (crews, agents, credentials) + novy quick-create
+
+---
+
 ## CO CHYBI pro real launch
 
 ### P0: MUST HAVE (bez toho to nejede)
@@ -128,7 +226,7 @@
 - [ ] **Agent runtime Docker image** -- `docker/agent-runtime/Dockerfile` s Claude Code, Node.js, git, jq. Bez nej agent container nema co spustit.
 - [ ] **Homebrew tap repo** -- vytvorit `crewship-ai/homebrew-tap` na GitHubu + nastavit `HOMEBREW_TAP_TOKEN` secret
 - [ ] **Tagged release** -- `git tag v0.1.0 && git push github v0.1.0` → GoReleaser vytvori GitHub Release + binaries
-- [~] **Onboarding flow** -- signup vytvori workspace, ale neni dedicated wizard pro prvni agenta
+- [~] **Onboarding flow** -- signup vytvori workspace, ale neni dedicated wizard pro prvni agenta (viz EPIC: Onboarding Flow vyse)
 
 ### P1: SHOULD HAVE (pro rozumne demo)
 

@@ -140,6 +140,9 @@ var (
 	validContainerProviders = map[string]bool{"docker": true, "k8s": true}
 	validStorageProviders   = map[string]bool{"localfs": true, "s3": true}
 	validStateProviders     = map[string]bool{"bbolt": true, "postgres": true}
+	validContainerRuntimes  = map[string]bool{
+		"runc": true, "runsc": true, "kata-runtime": true, "sysbox-runc": true,
+	}
 )
 
 func (c *Config) Validate() error {
@@ -157,6 +160,9 @@ func (c *Config) Validate() error {
 	}
 	if !validStateProviders[c.State.Provider] {
 		return fmt.Errorf("state.provider must be 'bbolt' or 'postgres', got %q", c.State.Provider)
+	}
+	if v := c.Container.DefaultRuntime; v != "" && !validContainerRuntimes[v] {
+		return fmt.Errorf("container.default_runtime must be one of runc, runsc, kata-runtime, sysbox-runc; got %q", v)
 	}
 	if c.Auth.NextjsURL == "" {
 		return fmt.Errorf("auth.nextjs_url is required (set CREWSHIP_NEXTJS_URL)")

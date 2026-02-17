@@ -83,7 +83,7 @@ func cmdDoctor() {
 	fmt.Printf("  Go runtime:    %s\n", runtime.Version())
 	fmt.Printf("  OS/Arch:       %s/%s\n", runtime.GOOS, runtime.GOARCH)
 
-	detected, detectErr := docker.Detect()
+	detected, detectErr := docker.Detect(context.Background())
 	if detectErr == nil {
 		label := detected.Runtime
 		if detected.Version != "" {
@@ -123,7 +123,7 @@ func cmdDoctor() {
 }
 
 func checkDocker() bool {
-	_, err := docker.Detect()
+	_, err := docker.Detect(context.Background())
 	return err == nil
 }
 

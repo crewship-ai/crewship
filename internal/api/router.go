@@ -142,6 +142,12 @@ func (r *Router) registerRoutes() {
 	// Audit logs (require workspace context + manage role)
 	r.mux.Handle("GET /api/v1/audit", authed(wsCtx(http.HandlerFunc(audit.List))))
 
+	// Onboarding (require auth, no workspace context needed)
+	onboarding := NewOnboardingHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/onboarding/status", authed(http.HandlerFunc(onboarding.Status)))
+	r.mux.Handle("POST /api/v1/onboarding/complete", authed(http.HandlerFunc(onboarding.Complete)))
+	r.mux.Handle("POST /api/v1/onboarding/setup", authed(http.HandlerFunc(onboarding.Setup)))
+
 	// Auth (no auth required)
 	authH := NewAuthHandler(r.db, r.logger)
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
