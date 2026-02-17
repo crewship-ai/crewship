@@ -384,6 +384,11 @@ func (s *Server) handleAgentLogs(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 
+	if s.logReader == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"agent_id": agentID, "logs": []interface{}{}})
+		return
+	}
+
 	entries, err := s.logReader.ReadAgentLogs(teamID, agentID, offset, limit)
 	if err != nil {
 		s.logger.Error("read agent logs failed", "agent_id", agentID, "error", err)
@@ -520,9 +525,6 @@ func (s *Server) handleDebugInfo(w http.ResponseWriter, _ *http.Request) {
 		"network":           s.cfg.Container.Network,
 		"log_path":          s.cfg.Storage.LogPath,
 		"storage_base_path": s.cfg.Storage.BasePath,
-		"nextjs_url":        s.cfg.Auth.NextjsURL,
-		"jwt_configured":    s.cfg.Auth.JWTSecret != "",
-		"internal_token_set": s.cfg.Auth.InternalToken != "",
 	}
 	info["config"] = config
 

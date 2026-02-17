@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
+import { z } from "zod"
 import { healthCheck } from "@/lib/crewshipd-client"
 import { requireAuth, isAuthError } from "@/lib/api-auth"
 import { defineAbilitiesFor } from "@/lib/permissions/abilities"
 import type { OrgRole } from "@/lib/generated/prisma/client"
 
 export async function GET(req: NextRequest) {
-  const orgId = req.nextUrl.searchParams.get("org_id")
+  const rawOrgId = req.nextUrl.searchParams.get("org_id")
+  if (rawOrgId && !z.string().uuid().safeParse(rawOrgId).success) {
+    return NextResponse.json({ error: "Invalid org_id" }, { status: 400 })
+  }
+  const orgId = rawOrgId
   const authResult = await requireAuth(orgId)
   if (isAuthError(authResult)) return authResult
 

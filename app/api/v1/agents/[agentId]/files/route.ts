@@ -15,6 +15,9 @@ export async function GET(
     return NextResponse.json({ error: "Invalid agent ID" }, { status: 400 })
   }
   const orgId = req.nextUrl.searchParams.get("org_id")
+  if (orgId && !z.string().uuid().safeParse(orgId).success) {
+    return NextResponse.json({ error: "Invalid org_id" }, { status: 400 })
+  }
 
   const authResult = await requireAuth(orgId)
   if (isAuthError(authResult)) return authResult

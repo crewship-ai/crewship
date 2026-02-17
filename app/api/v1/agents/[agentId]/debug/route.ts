@@ -6,6 +6,24 @@ import { defineAbilitiesFor } from "@/lib/permissions/abilities"
 import { getDebugInfo, getDebugLogs, getAgentStatus, getAgentLogs } from "@/lib/crewshipd-client"
 import type { OrgRole } from "@/lib/generated/prisma/client"
 
+const SENSITIVE_PATTERNS = /token|secret|password|key|authorization|credential|bearer/i
+
+function redactLogEntries(logs: unknown[]): unknown[] {
+  return logs.map((entry) => {
+    if (typeof entry !== "object" || entry === null) return entry
+    const e = entry as Record<string, unknown>
+    const redacted: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(e)) {
+      if (typeof v === "string" && SENSITIVE_PATTERNS.test(k)) {
+        redacted[k] = "[REDACTED]"
+      } else {
+        redacted[k] = v
+      }
+    }
+    return redacted
+  })
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ agentId: string }> },
@@ -15,6 +33,9 @@ export async function GET(
     return NextResponse.json({ error: "Invalid agent ID" }, { status: 400 })
   }
   const orgId = req.nextUrl.searchParams.get("org_id")
+  if (orgId && !z.string().uuid().safeParse(orgId).success) {
+    return NextResponse.json({ error: "Invalid org_id" }, { status: 400 })
+  }
 
   const authResult = await requireAuth(orgId)
   if (isAuthError(authResult)) return authResult
@@ -48,7 +69,7 @@ export async function GET(
         const safeConfig: Record<string, unknown> = {}
         const allowedKeys = [
           "runtime_image", "default_memory_mb", "default_cpus", "network",
-          "log_path", "storage_base_path", "jwt_configured", "internal_token_set",
+          "log_path", "storage_base_path",
         ]
         for (const k of allowedKeys) {
           if (k in cfg) safeConfig[k] = cfg[k]
@@ -75,7 +96,8 @@ export async function GET(
   // crewshipd service logs (filtered to this agent where possible)
   try {
     const svcLogs = await getDebugLogs(200, agentId)
-    debug.service_logs = svcLogs.ok ? (svcLogs.data.logs ?? []) : []
+    const rawLogs = svcLogs.ok ? (svcLogs.data.logs ?? []) : []
+    debug.service_logs = redactLogEntries(rawLogs as unknown[])
   } catch {
     debug.service_logs = []
   }
@@ -84,7 +106,8 @@ export async function GET(
   if (agent.team_id) {
     try {
       const logs = await getAgentLogs(agentId, agent.team_id, 0, 50)
-      debug.agent_logs = logs.ok ? (logs.data.logs ?? []) : []
+      const rawLogs = logs.ok ? (logs.data.logs ?? []) : []
+      debug.agent_logs = redactLogEntries(rawLogs as unknown[])
     } catch {
       debug.agent_logs = []
     }

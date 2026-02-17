@@ -135,7 +135,7 @@ export function AppSidebar() {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton onClick={toggleSidebar} className="justify-center group-data-[collapsible=icon]:justify-center">
+            <SidebarMenuButton onClick={toggleSidebar} aria-label="Toggle sidebar" className="justify-center group-data-[collapsible=icon]:justify-center">
               <ChevronsLeft className="group-data-[collapsible=icon]:hidden" />
               <span className="group-data-[collapsible=icon]:hidden">Collapse</span>
               <ChevronsRight className="hidden group-data-[collapsible=icon]:block" />

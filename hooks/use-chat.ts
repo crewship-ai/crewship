@@ -161,6 +161,8 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
 
   const loadHistory = useCallback((history: ChatMessage[]) => {
     setMessages(history)
+    setIsStreaming(false)
+    streamBufferRef.current = ""
   }, [])
 
   return {
