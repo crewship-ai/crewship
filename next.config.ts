@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
     unoptimized: true,
   },
   async rewrites() {
+    if (process.env.NODE_ENV !== "development") return []
     return [
       {
         source: "/api/:path*",
