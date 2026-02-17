@@ -34,7 +34,8 @@ interface Crew {
   container_memory_mb: number
   container_cpus: number
   created_at: string
-  _count: { agents: number; members: number }
+  _count_agents: number
+  _count_members: number
 }
 
 interface CrewMember {
@@ -325,7 +326,7 @@ export function CrewDetailClient() {
               <Bot className="h-4 w-4" />
               <span className="text-xs">Agents</span>
             </div>
-            <p className="text-2xl font-bold mt-1">{crew._count?.agents ?? 0}</p>
+            <p className="text-2xl font-bold mt-1">{crew._count_agents ?? 0}</p>
           </CardContent>
         </Card>
         <Card>
@@ -334,7 +335,7 @@ export function CrewDetailClient() {
               <Users className="h-4 w-4" />
               <span className="text-xs">Members</span>
             </div>
-            <p className="text-2xl font-bold mt-1">{crew._count?.members ?? 0}</p>
+            <p className="text-2xl font-bold mt-1">{crew._count_members ?? 0}</p>
           </CardContent>
         </Card>
         <Card>

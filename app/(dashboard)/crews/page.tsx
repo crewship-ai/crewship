@@ -18,7 +18,8 @@ interface Crew {
   description: string | null
   color: string | null
   icon: string | null
-  _count: { agents: number; members: number }
+  _count_agents: number
+  _count_members: number
 }
 
 export default function CrewsPage() {

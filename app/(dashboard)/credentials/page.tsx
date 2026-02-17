@@ -39,7 +39,7 @@ interface Credential {
   last_error: string | null
   created_at: string
   updated_at: string
-  _count: { agent_credentials: number }
+  _count_agent_credentials: number
 }
 
 interface Org {
@@ -256,7 +256,7 @@ export default function CredentialsPage() {
                     </TableCell>
                     <TableCell>
                       <span className="text-muted-foreground">
-                        {cred._count?.agent_credentials ?? 0} {(cred._count?.agent_credentials ?? 0) === 1 ? "agent" : "agents"}
+                        {cred._count_agent_credentials ?? 0} {(cred._count_agent_credentials ?? 0) === 1 ? "agent" : "agents"}
                       </span>
                     </TableCell>
                     <TableCell>

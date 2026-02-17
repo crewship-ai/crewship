@@ -61,7 +61,9 @@ interface Org {
   id: string
   name: string
   slug: string
-  _count: { crews: number; agents: number; members: number }
+  _count_crews: number
+  _count_agents: number
+  _count_members: number
 }
 
 interface MemberUser {
@@ -387,9 +389,9 @@ export default function SettingsPage() {
                 <Badge className="bg-blue-50 text-blue-700">FREE</Badge>
               </div>
               <div className="space-y-2 text-xs">
-                <div className="flex justify-between"><span className="text-muted-foreground">Agents</span><span className="font-medium">{org?._count.agents ?? 0} / 5</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Teams</span><span className="font-medium">{org?._count.crews ?? 0} / 2</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Members</span><span className="font-medium">{org?._count.members ?? 0} / 5</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Agents</span><span className="font-medium">{org?._count_agents ?? 0} / 5</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Teams</span><span className="font-medium">{org?._count_crews ?? 0} / 2</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Members</span><span className="font-medium">{org?._count_members ?? 0} / 5</span></div>
               </div>
             </CardContent>
           </Card>

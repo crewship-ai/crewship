@@ -4,11 +4,6 @@ import Link from "next/link"
 import { Bot, Users } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 
-interface TeamCount {
-  agents: number
-  members: number
-}
-
 interface CrewData {
   id: string
   name: string
@@ -16,7 +11,8 @@ interface CrewData {
   description: string | null
   color: string | null
   icon: string | null
-  _count: TeamCount
+  _count_agents: number
+  _count_members: number
 }
 
 export function CrewCard({ crew }: { crew: CrewData }) {
@@ -55,11 +51,11 @@ export function CrewCard({ crew }: { crew: CrewData }) {
           <div className="mt-3 pt-3 border-t flex items-center gap-4 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Bot className="h-3 w-3" />
-              {crew._count?.agents ?? 0} agents
+              {crew._count_agents ?? 0} agents
             </span>
             <span className="flex items-center gap-1">
               <Users className="h-3 w-3" />
-              {crew._count?.members ?? 0} members
+              {crew._count_members ?? 0} members
             </span>
           </div>
         </CardContent>
