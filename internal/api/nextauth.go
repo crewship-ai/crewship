@@ -91,17 +91,17 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 
 	var email, password string
 	if isJSON {
-		var body struct {
-			Email    string `json:"email"`
-			Password string `json:"password"`
-			Redirect string `json:"redirect"`
-		}
+		var body map[string]interface{}
 		if err := readJSON(r, &body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 			return
 		}
-		email = body.Email
-		password = body.Password
+		if v, ok := body["email"].(string); ok {
+			email = v
+		}
+		if v, ok := body["password"].(string); ok {
+			password = v
+		}
 	} else {
 		r.ParseForm()
 		email = r.FormValue("email")
