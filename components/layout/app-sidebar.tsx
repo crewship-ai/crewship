@@ -1,8 +1,8 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname } from "next/navigation"
-import { useSession } from "next-auth/react"
 import {
   LayoutDashboard,
   Bot,
@@ -14,6 +14,8 @@ import {
   Shield,
   Store,
   ShieldCheck,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
@@ -28,6 +30,7 @@ import {
   SidebarMenuItem,
   SidebarMenuBadge,
   SidebarFooter,
+  useSidebar,
 } from "@/components/ui/sidebar"
 
 const navSections = [
@@ -43,7 +46,7 @@ const navSections = [
     label: "Configure",
     items: [
       { title: "Skills", href: "/skills", icon: Zap },
-      { title: "Marketplace", href: "/marketplace", icon: Store, badge: "FUTURE" },
+      { title: "Marketplace", href: "/marketplace", icon: Store, badge: "FUTURE" as const },
       { title: "Credentials", href: "/credentials", icon: Key },
     ],
   },
@@ -58,40 +61,30 @@ const navSections = [
     label: "System",
     items: [
       { title: "Settings", href: "/settings", icon: Settings },
-      { title: "Admin", href: "/admin", icon: ShieldCheck, badge: "OWNER" },
+      { title: "Admin", href: "/admin", icon: ShieldCheck, badge: "OWNER" as const },
     ],
   },
 ]
 
 export function AppSidebar() {
   const pathname = usePathname()
-  const { data: session } = useSession()
   const { role } = useAbilities()
-
-  const userName = session?.user?.name ?? "User"
-  const userInitials = userName
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase()
+  const { toggleSidebar } = useSidebar()
 
   return (
-    <Sidebar variant="inset">
+    <Sidebar variant="sidebar" collapsible="icon">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link href="/">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1 .6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1" />
-                    <path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76" />
-                    <path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6" />
-                    <path d="M12 10v4" />
-                    <path d="M12 2v3" />
-                  </svg>
-                </div>
+                <Image
+                  src="/logo.svg"
+                  alt="Crewship"
+                  width={28}
+                  height={28}
+                  className="shrink-0"
+                />
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-semibold">Crewship</span>
                 </div>
@@ -100,6 +93,7 @@ export function AppSidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
+
       <SidebarContent>
         {navSections.map((section) => (
           <SidebarGroup key={section.label}>
@@ -112,36 +106,39 @@ export function AppSidebar() {
                     return true
                   })
                   .map((item) => (
-                  <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton asChild isActive={pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href))}>
-                      <Link href={item.href}>
-                        <item.icon />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                    {item.badge === "FUTURE" && (
-                      <SidebarMenuBadge className="text-[9px] bg-muted text-muted-foreground px-1.5">FUTURE</SidebarMenuBadge>
-                    )}
-                  </SidebarMenuItem>
-                ))}
+                    <SidebarMenuItem key={item.href}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={
+                          pathname === item.href ||
+                          (item.href !== "/" && pathname.startsWith(item.href))
+                        }
+                      >
+                        <Link href={item.href}>
+                          <item.icon />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                      {item.badge === "FUTURE" && (
+                        <SidebarMenuBadge className="text-[9px] bg-muted text-muted-foreground px-1.5">
+                          FUTURE
+                        </SidebarMenuBadge>
+                      )}
+                    </SidebarMenuItem>
+                  ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
       </SidebarContent>
+
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-muted">
-                <span className="text-xs font-medium">{userInitials}</span>
-              </div>
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold text-xs">{userName}</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {session?.user?.email ?? ""}
-                </span>
-              </div>
+            <SidebarMenuButton onClick={toggleSidebar} className="justify-center group-data-[collapsible=icon]:justify-center">
+              <ChevronsLeft className="group-data-[collapsible=icon]:hidden" />
+              <span className="group-data-[collapsible=icon]:hidden">Collapse</span>
+              <ChevronsRight className="hidden group-data-[collapsible=icon]:block" />
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

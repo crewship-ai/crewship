@@ -16,6 +16,9 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Crewship",
   description: "AI Agent Orchestration Platform",
+  icons: {
+    icon: "/icon.svg",
+  },
 }
 
 export default function RootLayout({

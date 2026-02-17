@@ -1,7 +1,7 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { signOut } from "next-auth/react"
+import { useSession, signOut } from "next-auth/react"
 import { Search, Bell, BookOpen, ChevronDown, User, HelpCircle, Github, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,14 +27,28 @@ const pageConfig: Record<string, { title: string; breadcrumb?: string; pills?: {
   "/settings": { title: "Settings" },
 }
 
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase()
+}
+
 export function AppToolbar() {
   const pathname = usePathname()
   const config = pageConfig[pathname] ?? { title: "Crewship" }
   const { orgId } = useOrg()
   const { status: daemonStatus } = useCrewshipdStatus(orgId)
+  const { data: session } = useSession()
+
+  const userName = session?.user?.name ?? "User"
+  const userEmail = session?.user?.email ?? ""
+  const userInitials = getInitials(userName)
 
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-3 sm:px-4">
+    <header className="flex h-12 shrink-0 items-center justify-between bg-white dark:bg-background px-3 sm:px-4">
       {/* Left: Org switcher + breadcrumb + pills */}
       <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
         {/* Org switcher */}
@@ -146,18 +160,18 @@ export function AppToolbar() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent transition-colors" aria-label="User menu">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">PS</div>
-              <span className="text-xs font-medium hidden sm:inline">Pavel</span>
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">{userInitials}</div>
+              <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
               <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-64">
             <div className="px-2 py-3">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">PS</div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">{userInitials}</div>
                 <div>
-                  <div className="text-sm font-medium">Pavel Srba</div>
-                  <div className="text-xs text-muted-foreground">pavel@unifylab.cz</div>
+                  <div className="text-sm font-medium">{userName}</div>
+                  <div className="text-xs text-muted-foreground">{userEmail}</div>
                 </div>
               </div>
               <div className="flex items-center gap-1.5 mt-2">
