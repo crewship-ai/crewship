@@ -102,7 +102,7 @@ func Default() *Config {
 		},
 		Auth: AuthConfig{
 			WSTokenExpiry: 5 * time.Minute,
-			NextjsURL:     "http://localhost:3000",
+			NextjsURL:     "http://localhost:8080",
 		},
 		LLMProxy: LLMProxyConfig{
 			Enabled:             true,
@@ -122,6 +122,12 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(cfg)
+
+	// Auto-derive NextjsURL from server port if not explicitly overridden.
+	// In single binary mode, the internal resolver calls itself on the same port.
+	if os.Getenv("CREWSHIP_NEXTJS_URL") == "" {
+		cfg.Auth.NextjsURL = fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
