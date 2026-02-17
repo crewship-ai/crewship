@@ -1,22 +1,46 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
-  Send,
-  PanelRightOpen,
   Bot,
-  User,
-  Wrench,
-  Brain,
   AlertCircle,
-  Loader2,
   Wifi,
   WifiOff,
+  Loader2,
+  Copy,
+  ThumbsUp,
+  ThumbsDown,
+  PanelRightOpen,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { Textarea } from "@/components/ui/textarea"
-import { useChat, type ChatMessage, type StreamEventType } from "@/hooks/use-chat"
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton,
+  ConversationEmptyState,
+} from "@/components/ai-elements/conversation"
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+  MessageActions,
+  MessageAction,
+} from "@/components/ai-elements/message"
+import {
+  PromptInput,
+  PromptInputTextarea,
+  PromptInputFooter,
+  PromptInputSubmit,
+  type PromptInputMessage,
+} from "@/components/ai-elements/prompt-input"
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning"
+import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool"
+import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
+import { useChat, type ChatMessage } from "@/hooks/use-chat"
+import { useOrg } from "@/hooks/use-org"
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080/ws"
 
@@ -25,116 +49,92 @@ interface ChatPanelProps {
   sessionId: string
 }
 
-function MessageIcon({ role, eventType }: { role: string; eventType?: StreamEventType }) {
-  if (role === "user") {
-    return (
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-        <User className="h-4 w-4 text-primary" />
-      </div>
-    )
-  }
-  if (eventType === "thinking") {
-    return (
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-950">
-        <Brain className="h-4 w-4 text-amber-600" />
-      </div>
-    )
-  }
-  if (role === "tool" || eventType === "tool_call") {
-    return (
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-100 dark:bg-cyan-950">
-        <Wrench className="h-4 w-4 text-cyan-600" />
-      </div>
-    )
-  }
-  if (eventType === "error" || role === "system") {
-    return (
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-destructive/10">
-        <AlertCircle className="h-4 w-4 text-destructive" />
-      </div>
-    )
-  }
-  return (
-    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950">
-      <Bot className="h-4 w-4 text-emerald-600" />
-    </div>
-  )
-}
-
-function MessageLabel({ msg }: { msg: ChatMessage }) {
-  const time = msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-
-  if (msg.role === "user") return <p className="text-xs text-muted-foreground">You · {time}</p>
-  if (msg.eventType === "thinking") return <p className="text-xs text-muted-foreground">Agent · Thinking</p>
-  if (msg.role === "tool") return <p className="text-xs text-muted-foreground">Tool Call</p>
-  if (msg.eventType === "error") return <p className="text-xs text-muted-foreground">Error</p>
-  return <p className="text-xs text-muted-foreground">Agent · {time}</p>
-}
-
-function MessageContent({ msg }: { msg: ChatMessage }) {
-  if (msg.role === "tool" || msg.eventType === "tool_call") {
-    return (
-      <Card className="py-2">
-        <CardContent className="p-3 font-mono text-xs whitespace-pre-wrap break-all">
-          {msg.content}
-        </CardContent>
-      </Card>
-    )
-  }
-  if (msg.eventType === "thinking") {
-    return <p className="text-sm text-muted-foreground italic">{msg.content}</p>
-  }
-  return (
-    <div className="text-sm whitespace-pre-wrap">
-      {msg.content}
-      {msg.isStreaming && <span className="inline-block w-1.5 h-4 bg-foreground/70 animate-pulse ml-0.5 align-text-bottom" />}
-    </div>
-  )
-}
+const defaultSuggestions = [
+  "Help me get started",
+  "What can you do?",
+  "Show me your skills",
+  "Run a quick task",
+]
 
 export function ChatPanel({ agentId, sessionId }: ChatPanelProps) {
+  const { orgId } = useOrg()
   const [token, setToken] = useState<string | null>(null)
+  const [authError, setAuthError] = useState(false)
   const [input, setInput] = useState("")
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [sessionReady, setSessionReady] = useState(false)
 
   useEffect(() => {
     fetch("/api/v1/ws-token")
-      .then((r) => r.json())
-      .then((data: { token?: string }) => {
-        if (data.token) setToken(data.token)
+      .then((r) => {
+        if (r.status === 401) {
+          setAuthError(true)
+          return null
+        }
+        return r.json()
+      })
+      .then((data: { token?: string } | null) => {
+        if (data?.token) setToken(data.token)
       })
       .catch(() => {})
   }, [])
 
-  const { messages, sendMessage, isStreaming, connectionStatus } = useChat({
+  const { messages, sendMessage, loadHistory, isStreaming, connectionStatus } = useChat({
     wsUrl: WS_URL,
     token,
     sessionId,
   })
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    fetch(`/api/v1/sessions/${sessionId}/messages`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: { messages?: { id: string; role: string; content: string; ts: string }[] } | null) => {
+        if (!data?.messages?.length) return
+        loadHistory(data.messages.map((m) => ({
+          id: m.id,
+          role: m.role as "user" | "assistant" | "system" | "tool",
+          content: m.content,
+          timestamp: new Date(m.ts),
+        })))
+      })
+      .catch(() => {})
+  }, [sessionId, loadHistory])
 
-  const handleSend = useCallback(() => {
-    if (!input.trim() || isStreaming) return
-    sendMessage(input)
+  // Best-effort session creation -- don't block message sending on it
+  useEffect(() => {
+    if (sessionReady || !orgId) return
+    fetch(
+      `/api/v1/agents/${agentId}/sessions?org_id=${encodeURIComponent(orgId)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId }),
+      },
+    )
+      .then((res) => { if (res.ok) setSessionReady(true) })
+      .catch(() => {})
+  }, [agentId, orgId, sessionId, sessionReady])
+
+  const handleSubmit = useCallback((message: PromptInputMessage) => {
+    const text = message.text?.trim()
+    if (!text || isStreaming) return
+    sendMessage(text)
     setInput("")
-  }, [input, isStreaming, sendMessage])
+  }, [isStreaming, sendMessage])
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault()
-        handleSend()
-      }
-    },
-    [handleSend],
-  )
+  const handleSuggestionClick = useCallback((suggestion: string) => {
+    if (isStreaming) return
+    sendMessage(suggestion)
+  }, [isStreaming, sendMessage])
+
+  const handleCopy = useCallback((content: string) => {
+    navigator.clipboard.writeText(content).catch(() => {})
+  }, [])
+
+  const chatStatus = isStreaming ? "streaming" as const : "ready" as const
 
   return (
     <div className="flex flex-col h-full">
-      {/* Connection status */}
+      {/* Connection status bar */}
       <div className="flex items-center gap-2 border-b px-4 sm:px-6 py-2 bg-muted/30">
         <div className="flex items-center gap-1.5">
           {connectionStatus === "connected" ? (
@@ -153,25 +153,34 @@ export function ChatPanel({ agentId, sessionId }: ChatPanelProps) {
 
       {/* Chat area */}
       <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-          {messages.length === 0 && (
+        <div className="flex-1 overflow-hidden">
+          {authError ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-              <Bot className="h-12 w-12 mb-3 opacity-30" />
-              <p className="text-sm">Send a message to start the conversation</p>
+              <AlertCircle className="h-12 w-12 mb-3 opacity-30" />
+              <p className="text-sm">Session expired. Redirecting to login...</p>
             </div>
+          ) : (
+            <Conversation>
+              <ConversationContent>
+                {messages.length === 0 && (
+                  <ConversationEmptyState
+                    icon={<Bot className="h-12 w-12" />}
+                    title="Start a conversation"
+                    description="Send a message or pick a suggestion below"
+                  />
+                )}
+
+                {messages.map((msg) => (
+                  <MessageBubble
+                    key={msg.id}
+                    msg={msg}
+                    onCopy={handleCopy}
+                  />
+                ))}
+              </ConversationContent>
+              <ConversationScrollButton />
+            </Conversation>
           )}
-
-          {messages.map((msg) => (
-            <div key={msg.id} className="flex gap-3 max-w-2xl">
-              <MessageIcon role={msg.role} eventType={msg.eventType} />
-              <div className="space-y-1 min-w-0 flex-1">
-                <MessageLabel msg={msg} />
-                <MessageContent msg={msg} />
-              </div>
-            </div>
-          ))}
-
-          <div ref={messagesEndRef} />
         </div>
 
         {/* File preview panel */}
@@ -186,32 +195,118 @@ export function ChatPanel({ agentId, sessionId }: ChatPanelProps) {
         </div>
       </div>
 
+      {/* Suggestions (show only when no messages) */}
+      {messages.length === 0 && !authError && (
+        <div className="px-4 sm:px-6 pb-2">
+          <Suggestions>
+            {defaultSuggestions.map((s) => (
+              <Suggestion
+                key={s}
+                suggestion={s}
+                onClick={() => handleSuggestionClick(s)}
+              >
+                {s}
+              </Suggestion>
+            ))}
+          </Suggestions>
+        </div>
+      )}
+
       {/* Input area */}
       <div className="border-t bg-background p-4 sm:px-6">
-        <div className="flex items-end gap-2 max-w-2xl">
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={`Message agent ${agentId}...`}
-            className="min-h-[44px] max-h-32 resize-none"
-            rows={1}
-            disabled={connectionStatus !== "connected"}
-          />
-          <Button
-            size="icon"
-            className="shrink-0 h-10 w-10"
-            onClick={handleSend}
-            disabled={!input.trim() || isStreaming || connectionStatus !== "connected"}
+        <div className="max-w-2xl">
+          <PromptInput
+            className="rounded-xl border"
+            onSubmit={handleSubmit}
           >
-            {isStreaming ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
-          </Button>
+            <PromptInputTextarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={`Message agent...`}
+              className="min-h-[44px]"
+            />
+            <PromptInputFooter className="justify-end p-2">
+              <PromptInputSubmit
+                disabled={!input.trim() || connectionStatus !== "connected"}
+                status={chatStatus}
+              />
+            </PromptInputFooter>
+          </PromptInput>
         </div>
       </div>
     </div>
+  )
+}
+
+function MessageBubble({ msg, onCopy }: { msg: ChatMessage; onCopy: (content: string) => void }) {
+  if (msg.eventType === "thinking") {
+    return (
+      <Message from="assistant">
+        <Reasoning isStreaming={msg.isStreaming} duration={0}>
+          <ReasoningTrigger />
+          <ReasoningContent>{msg.content}</ReasoningContent>
+        </Reasoning>
+      </Message>
+    )
+  }
+
+  if (msg.role === "tool" || msg.eventType === "tool_call") {
+    return (
+      <Message from="assistant">
+        <Tool defaultOpen={false}>
+          <ToolHeader
+            title={msg.toolName ?? "Tool Call"}
+            type="tool-invocation"
+            state="output-available"
+          />
+          <ToolContent>
+            <pre className="text-xs whitespace-pre-wrap break-all">{msg.content}</pre>
+          </ToolContent>
+        </Tool>
+      </Message>
+    )
+  }
+
+  if (msg.eventType === "error" || msg.role === "system") {
+    return (
+      <Message from="assistant">
+        <MessageContent className="border-destructive/50 bg-destructive/5 rounded-lg px-4 py-3">
+          <div className="flex items-center gap-2 text-destructive text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {msg.content}
+          </div>
+        </MessageContent>
+      </Message>
+    )
+  }
+
+  return (
+    <Message from={msg.role === "user" ? "user" : "assistant"}>
+      <MessageContent>
+        {msg.role === "user" ? (
+          <span>{msg.content}</span>
+        ) : (
+          <MessageResponse>
+            {msg.isStreaming ? msg.content + " " : msg.content}
+          </MessageResponse>
+        )}
+      </MessageContent>
+      {msg.role === "assistant" && !msg.isStreaming && msg.content && (
+        <MessageActions>
+          <MessageAction
+            tooltip="Copy"
+            onClick={() => onCopy(msg.content)}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </MessageAction>
+          <MessageAction tooltip="Good response">
+            <ThumbsUp className="h-3.5 w-3.5" />
+          </MessageAction>
+          <MessageAction tooltip="Bad response">
+            <ThumbsDown className="h-3.5 w-3.5" />
+          </MessageAction>
+        </MessageActions>
+      )}
+    </Message>
   )
 }

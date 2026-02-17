@@ -10,8 +10,16 @@ const CREDENTIAL_SAFE_SELECT = {
   id: true,
   name: true,
   description: true,
+  type: true,
+  provider: true,
+  status: true,
   scope: true,
   team_id: true,
+  account_label: true,
+  account_email: true,
+  token_expires_at: true,
+  last_checked_at: true,
+  last_error: true,
   created_by: true,
   created_at: true,
   updated_at: true,
@@ -24,6 +32,8 @@ const updateCredentialSchema = z.object({
   value: z.string().min(1).optional(),
   scope: z.enum(["ORGANIZATION", "TEAM"]).optional(),
   team_id: z.string().uuid().optional().nullable(),
+  account_label: z.string().max(100).optional().nullable(),
+  account_email: z.string().email().optional().nullable(),
 })
 
 export async function GET(

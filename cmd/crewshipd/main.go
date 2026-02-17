@@ -33,7 +33,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := logging.New(cfg.Logging.Level, "json", os.Stdout)
+	debugBuffer := logging.NewRingBuffer(500)
+	innerLogger := logging.New(cfg.Logging.Level, "json", os.Stdout)
+	ringHandler := logging.NewRingHandler(innerLogger.Handler(), debugBuffer)
+	logger := slog.New(ringHandler)
 	slog.SetDefault(logger)
 
 	logger.Info("crewshipd starting",
@@ -65,15 +68,21 @@ func main() {
 		os.Exit(1)
 	}
 	defer deps.Close()
+	deps.DebugLogs = debugBuffer
 
 	srv := server.New(cfg, logger, deps)
 
 	resolver := chatbridge.NewIPCResolver(cfg.Auth.NextjsURL, cfg.Auth.InternalToken, logger)
 	bridge := chatbridge.New(
 		srv.Orchestrator(),
+		deps.Container,
 		srv.ConversationStore(),
 		srv.LogWriter(),
 		resolver,
+		chatbridge.BridgeConfig{
+			DefaultMemoryMB: cfg.Container.DefaultMemoryMB,
+			DefaultCPUs:     cfg.Container.DefaultCPUs,
+		},
 		logger,
 	)
 	srv.SetChatHandler(bridge)

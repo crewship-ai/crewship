@@ -10,8 +10,8 @@
 
 ## Status
 
-**Phase:** MVP UI (scaffolding done, pages implemented, awaiting backend).
-`pnpm dev` runs Next.js on localhost:3000. Go backend (`crewshipd`) not yet implemented.
+**Phase:** MVP (UI + backend wired, agent runtime operational).
+`./dev.sh start` launches PostgreSQL + crewshipd + Next.js. See **Dev Environment** below.
 
 ## Two-Language Project
 
@@ -33,8 +33,17 @@ Go:       1.25
 ## Core Commands
 
 ```bash
+# Dev environment (recommended)
+./dev.sh start        # Start all services (PostgreSQL + crewshipd + Next.js)
+./dev.sh stop         # Stop crewshipd + Next.js (PostgreSQL stays)
+./dev.sh restart      # Stop then start
+./dev.sh status       # Show status of all services
+./dev.sh logs         # Tail combined logs
+make up               # Alias for ./dev.sh start
+make down             # Alias for ./dev.sh stop
+
 # Frontend (TypeScript)
-pnpm dev              # Next.js dev server (localhost:3000)
+pnpm dev --port 3001  # Next.js dev server (localhost:3001)
 pnpm build            # Production build (MUST pass before commit)
 pnpm test             # Vitest test suite
 pnpm lint             # ESLint
@@ -50,6 +59,30 @@ go test ./...             # Go tests
 # Infrastructure
 docker compose -f docker/docker-compose.yml up -d   # PostgreSQL
 ```
+
+## Dev Environment
+
+**IMPORTANT: Both Next.js AND crewshipd must be running for full functionality.**
+
+Chat (WebSocket), logs, files, and debug pages all require the Go backend (`crewshipd`) on port 8080.
+Next.js alone only serves the UI shell without live agent features.
+
+```bash
+./dev.sh start     # Starts everything in background with health checks
+./dev.sh status    # Verify all services are running
+./dev.sh logs      # Watch combined output
+./dev.sh stop      # Clean shutdown
+```
+
+| Service | Port | Purpose |
+|---|---|---|
+| PostgreSQL | 5432 | Structured data (Docker Compose) |
+| crewshipd | 8080 | WebSocket, Docker orchestration, logs, files, IPC |
+| Next.js | 3001 | UI, CRUD API, auth, Prisma ORM |
+
+PID files: `/tmp/crewship-{next,go}.pid` -- Logs: `/tmp/crewship-{next,go}.log`
+
+For Go hot-reload during development: `make dev:go` (requires `air`).
 
 ## Project Layout
 

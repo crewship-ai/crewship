@@ -1,10 +1,12 @@
 "use client"
 
-import { use, useState, useEffect } from "react"
-import { ShieldCheck, AlertCircle, Inbox } from "lucide-react"
+import { use, useState, useEffect, useCallback } from "react"
+import { ShieldCheck, AlertCircle, Inbox, Plus, Trash2, Loader2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useOrg } from "@/hooks/use-org"
+import { AssignCredentialDialog } from "@/components/features/credentials/assign-credential-dialog"
 
 interface CredentialData {
   id: string
@@ -33,30 +35,46 @@ export default function CredentialsPage({ params }: { params: Promise<{ agentId:
   const [credentials, setCredentials] = useState<AgentCredential[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [removingId, setRemovingId] = useState<string | null>(null)
+
+  const fetchCredentials = useCallback(async () => {
+    if (!orgId) return
+    try {
+      const res = await fetch(`/api/v1/agents/${agentId}/credentials?org_id=${orgId}`)
+      if (!res.ok) {
+        setError("Failed to load credentials")
+        return
+      }
+      const data: AgentCredential[] = await res.json()
+      setCredentials(data)
+    } catch {
+      setError("Network error. Please try again.")
+    } finally {
+      setLoading(false)
+    }
+  }, [agentId, orgId])
 
   useEffect(() => {
     if (!orgId) return
-
-    let cancelled = false
-
-    async function fetchCredentials() {
-      try {
-        const res = await fetch(`/api/v1/agents/${agentId}/credentials?org_id=${orgId}`)
-        if (!res.ok) {
-          if (!cancelled) setError("Failed to load credentials")
-          return
-        }
-        const data: AgentCredential[] = await res.json()
-        if (!cancelled) setCredentials(data)
-      } catch {
-        if (!cancelled) setError("Network error. Please try again.")
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
     fetchCredentials()
-    return () => { cancelled = true }
+  }, [orgId, fetchCredentials])
+
+  const handleRemove = useCallback(async (assignmentId: string) => {
+    if (!orgId) return
+    setRemovingId(assignmentId)
+    try {
+      const res = await fetch(`/api/v1/agents/${agentId}/credentials/${assignmentId}?org_id=${orgId}`, {
+        method: "DELETE",
+      })
+      if (res.ok) {
+        setCredentials((prev) => prev.filter((c) => c.id !== assignmentId))
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setRemovingId(null)
+    }
   }, [agentId, orgId])
 
   if (orgLoading || loading) {
@@ -77,11 +95,17 @@ export default function CredentialsPage({ params }: { params: Promise<{ agentId:
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-2">
-        <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
-          {credentials.length} credential{credentials.length !== 1 ? "s" : ""} assigned · AES-256-GCM encrypted
-        </p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            {credentials.length} credential{credentials.length !== 1 ? "s" : ""} assigned · AES-256-GCM encrypted
+          </p>
+        </div>
+        <Button size="sm" className="gap-1.5" onClick={() => setAssignOpen(true)}>
+          <Plus className="h-4 w-4" />
+          Assign Credential
+        </Button>
       </div>
 
       {credentials.length === 0 ? (
@@ -99,6 +123,7 @@ export default function CredentialsPage({ params }: { params: Promise<{ agentId:
                 <th className="text-left px-4 sm:px-6 py-3 font-medium">Env Variable</th>
                 <th className="text-left px-4 sm:px-6 py-3 font-medium">Priority</th>
                 <th className="text-left px-4 sm:px-6 py-3 font-medium hidden sm:table-cell">Scope</th>
+                <th className="text-right px-4 sm:px-6 py-3 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -119,6 +144,21 @@ export default function CredentialsPage({ params }: { params: Promise<{ agentId:
                       {c.credential.scope}
                     </Badge>
                   </td>
+                  <td className="px-4 sm:px-6 py-3 text-right">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:text-destructive"
+                      onClick={() => handleRemove(c.id)}
+                      disabled={removingId === c.id}
+                    >
+                      {removingId === c.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -130,6 +170,16 @@ export default function CredentialsPage({ params }: { params: Promise<{ agentId:
       <p className="text-xs text-muted-foreground">
         Credentials are injected at container start. Priority-based failover rotates keys automatically on rate limit errors.
       </p>
+
+      {orgId && (
+        <AssignCredentialDialog
+          open={assignOpen}
+          onOpenChange={setAssignOpen}
+          agentId={agentId}
+          orgId={orgId}
+          onAssigned={fetchCredentials}
+        />
+      )}
     </div>
   )
 }

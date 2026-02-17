@@ -1,8 +1,8 @@
 "use client"
 
-import { use, useState, useEffect } from "react"
+import { use, useState, useEffect, useCallback } from "react"
 import Link from "next/link"
-import { Bot, MessageSquare, ScrollText, Settings, Pause, AlertCircle, Puzzle, KeyRound, MessagesSquare } from "lucide-react"
+import { Bot, MessageSquare, ScrollText, Settings, Pause, AlertCircle, Puzzle, KeyRound, MessagesSquare, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -75,6 +75,7 @@ export default function AgentOverviewPage({ params }: { params: Promise<{ agentI
   const [agent, setAgent] = useState<AgentDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [stopping, setStopping] = useState(false)
 
   useEffect(() => {
     if (!orgId) return
@@ -102,6 +103,22 @@ export default function AgentOverviewPage({ params }: { params: Promise<{ agentI
     return () => { cancelled = true }
   }, [agentId, orgId])
 
+  const handleStop = useCallback(async () => {
+    if (!orgId || !agent || stopping) return
+    setStopping(true)
+    try {
+      const res = await fetch(`/api/v1/agents/${agentId}/stop?org_id=${orgId}`, { method: "POST" })
+      if (res.ok) {
+        const data = await res.json()
+        setAgent((prev) => prev ? { ...prev, status: data.status } : prev)
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setStopping(false)
+    }
+  }, [agentId, orgId, agent, stopping])
+
   if (orgLoading || loading) {
     return <OverviewSkeleton />
   }
@@ -123,9 +140,15 @@ export default function AgentOverviewPage({ params }: { params: Promise<{ agentI
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       {/* Quick Actions */}
       <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-        <Button variant="outline" size="sm" className="text-destructive border-destructive/30 hover:bg-destructive/10 gap-2">
-          <Pause className="h-4 w-4" />
-          Stop Agent
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-destructive border-destructive/30 hover:bg-destructive/10 gap-2"
+          onClick={handleStop}
+          disabled={stopping || agent.status === "STOPPED"}
+        >
+          {stopping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pause className="h-4 w-4" />}
+          {stopping ? "Stopping..." : "Stop Agent"}
         </Button>
         <Button size="sm" className="gap-2" asChild>
           <Link href={`/agents/${agentId}/chat`}>

@@ -8,7 +8,7 @@ export type WSStatus = "connecting" | "connected" | "disconnected" | "error"
 const wsMessageSchema = z.object({
   type: z.string(),
   channel: z.string().optional(),
-  payload: z.string().optional(),
+  payload: z.union([z.string(), z.record(z.string(), z.unknown())]).optional(),
 }).passthrough()
 
 export type WSMessage = z.infer<typeof wsMessageSchema>
