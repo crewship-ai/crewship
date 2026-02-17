@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/docker/docker/api/types/container"
@@ -21,19 +23,137 @@ var _ provider.ContainerProvider = (*Provider)(nil)
 
 type Config struct {
 	RuntimeImage   string
-	DefaultRuntime string // "runc" | "runsc"
+	DefaultRuntime string // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
 	Network        string
 	OutputBasePath string
 }
 
+// DetectResult contains info about the detected container runtime.
+type DetectResult struct {
+	Runtime string // "docker" | "podman" | "colima" | "orbstack" | "rancher" | "nerdctl"
+	Socket  string // socket path used
+	Version string // server version string
+}
+
 type Provider struct {
-	client *client.Client
-	cfg    Config
-	logger *slog.Logger
+	client   *client.Client
+	cfg      Config
+	logger   *slog.Logger
+	detected DetectResult
+}
+
+// socketCandidate is a socket path + label for auto-detection.
+type socketCandidate struct {
+	path    string
+	runtime string
+}
+
+// candidateSockets returns Docker-API-compatible sockets to try, in priority order.
+func candidateSockets() []socketCandidate {
+	home, _ := os.UserHomeDir()
+	uid := strconv.Itoa(os.Getuid())
+
+	candidates := []socketCandidate{
+		// Docker Desktop / Engine defaults
+		{"/var/run/docker.sock", "docker"},
+		// Colima (macOS)
+		{filepath.Join(home, ".colima", "default", "docker.sock"), "colima"},
+		// OrbStack (macOS)
+		{filepath.Join(home, ".orbstack", "run", "docker.sock"), "orbstack"},
+		// Rancher Desktop (macOS/Linux)
+		{filepath.Join(home, ".rd", "docker.sock"), "rancher"},
+		// Docker Desktop (macOS new path)
+		{filepath.Join(home, ".docker", "run", "docker.sock"), "docker"},
+		// Podman rootless
+		{filepath.Join("/run/user", uid, "podman", "podman.sock"), "podman"},
+		// Podman machine (macOS)
+		{filepath.Join(home, ".local", "share", "containers", "podman", "machine", "podman.sock"), "podman"},
+		// Podman root
+		{"/run/podman/podman.sock", "podman"},
+		// containerd/nerdctl
+		{"/run/containerd/containerd.sock", "nerdctl"},
+	}
+
+	return candidates
+}
+
+// Detect probes for a Docker-API-compatible socket and returns info about
+// the detected runtime. Does not require a Config.
+func Detect() (*DetectResult, error) {
+	// If DOCKER_HOST is set, use that directly.
+	if host := os.Getenv("DOCKER_HOST"); host != "" {
+		cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+		if err != nil {
+			return nil, fmt.Errorf("docker client (DOCKER_HOST=%s): %w", host, err)
+		}
+		defer cli.Close()
+		info, err := cli.Ping(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("docker ping (DOCKER_HOST=%s): %w", host, err)
+		}
+		rt := "docker"
+		if strings.Contains(info.APIVersion, "libpod") {
+			rt = "podman"
+		}
+		sv, _ := cli.ServerVersion(context.Background())
+		ver := sv.Version
+		return &DetectResult{Runtime: rt, Socket: host, Version: ver}, nil
+	}
+
+	// Try candidate sockets in order.
+	for _, c := range candidateSockets() {
+		if _, err := os.Stat(c.path); err != nil {
+			continue
+		}
+		cli, err := client.NewClientWithOpts(
+			client.WithHost("unix://"+c.path),
+			client.WithAPIVersionNegotiation(),
+		)
+		if err != nil {
+			continue
+		}
+		_, pingErr := cli.Ping(context.Background())
+		if pingErr != nil {
+			cli.Close()
+			continue
+		}
+		sv, _ := cli.ServerVersion(context.Background())
+		ver := sv.Version
+		rt := c.runtime
+		// Podman masquerades as Docker -- check server components
+		for _, comp := range sv.Components {
+			if strings.EqualFold(comp.Name, "Podman Engine") {
+				rt = "podman"
+				ver = comp.Version
+			}
+		}
+		cli.Close()
+		return &DetectResult{Runtime: rt, Socket: c.path, Version: ver}, nil
+	}
+
+	return nil, fmt.Errorf("no Docker-compatible runtime found (tried Docker, Podman, Colima, OrbStack, Rancher Desktop)")
 }
 
 func New(cfg Config, logger *slog.Logger) (*Provider, error) {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	detected, detectErr := Detect()
+	if detectErr != nil {
+		return nil, fmt.Errorf("container runtime: %w", detectErr)
+	}
+
+	// Build client options based on detected socket.
+	var opts []client.Opt
+	if os.Getenv("DOCKER_HOST") != "" {
+		opts = append(opts, client.FromEnv)
+	} else {
+		opts = append(opts, client.WithHost("unix://"+detected.Socket))
+	}
+	opts = append(opts, client.WithAPIVersionNegotiation())
+
+	cli, err := client.NewClientWithOpts(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("docker client: %w", err)
 	}
@@ -43,11 +163,13 @@ func New(cfg Config, logger *slog.Logger) (*Provider, error) {
 		return nil, fmt.Errorf("docker ping: %w", err)
 	}
 
-	if logger == nil {
-		logger = slog.Default()
-	}
+	p := &Provider{client: cli, cfg: cfg, logger: logger, detected: *detected}
 
-	p := &Provider{client: cli, cfg: cfg, logger: logger}
+	logger.Info("container runtime detected",
+		"runtime", detected.Runtime,
+		"version", detected.Version,
+		"socket", detected.Socket,
+	)
 
 	if cfg.Network != "" {
 		if err := p.ensureNetwork(context.Background(), cfg.Network); err != nil {
@@ -56,6 +178,11 @@ func New(cfg Config, logger *slog.Logger) (*Provider, error) {
 	}
 
 	return p, nil
+}
+
+// Detected returns info about the detected container runtime.
+func (p *Provider) Detected() DetectResult {
+	return p.detected
 }
 
 func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
@@ -83,6 +210,9 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	_, _, err := p.client.ImageInspectWithRaw(ctx, ref)
 	if err == nil {
 		return nil
+	}
+	if !client.IsErrNotFound(err) {
+		return fmt.Errorf("inspect image %s: %w", ref, err)
 	}
 	p.logger.Info("pulling agent runtime image", "image", ref)
 	reader, err := p.client.ImagePull(ctx, ref, image.PullOptions{})

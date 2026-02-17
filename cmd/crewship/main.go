@@ -83,13 +83,20 @@ func cmdDoctor() {
 	fmt.Printf("  Go runtime:    %s\n", runtime.Version())
 	fmt.Printf("  OS/Arch:       %s/%s\n", runtime.GOOS, runtime.GOARCH)
 
-	if checkDocker() {
-		fmt.Println("  Docker:        OK")
+	detected, detectErr := docker.Detect()
+	if detectErr == nil {
+		label := detected.Runtime
+		if detected.Version != "" {
+			label += " " + detected.Version
+		}
+		fmt.Printf("  Container:     %s (via %s)\n", label, detected.Socket)
 	} else {
-		fmt.Println("  Docker:        NOT FOUND")
+		fmt.Println("  Container:     NOT FOUND")
 		fmt.Println()
-		fmt.Println("  Docker is required to run AI agents.")
+		fmt.Println("  A Docker-compatible runtime is required to run AI agents.")
+		fmt.Println("  Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop")
 		fmt.Println("  Install Docker Desktop: https://docs.docker.com/get-docker/")
+		fmt.Println("  Install Podman:         https://podman.io/docs/installation")
 		allOK = false
 	}
 
@@ -116,7 +123,7 @@ func cmdDoctor() {
 }
 
 func checkDocker() bool {
-	_, err := docker.New(docker.Config{}, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	_, err := docker.Detect()
 	return err == nil
 }
 
@@ -128,12 +135,15 @@ func cmdStart(args []string) {
 	fs.Parse(args)
 
 	if !*noDocker && !checkDocker() {
-		fmt.Fprintln(os.Stderr, "Error: Docker is not available.")
+		fmt.Fprintln(os.Stderr, "Error: No container runtime found.")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Crewship requires Docker to run AI agents.")
+		fmt.Fprintln(os.Stderr, "Crewship requires a Docker-compatible runtime to run AI agents.")
+		fmt.Fprintln(os.Stderr, "Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop")
+		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Install Docker Desktop: https://docs.docker.com/get-docker/")
+		fmt.Fprintln(os.Stderr, "Install Podman:         https://podman.io/docs/installation")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "To start without Docker (dashboard only, no agents):")
+		fmt.Fprintln(os.Stderr, "To start without containers (dashboard only, no agents):")
 		fmt.Fprintln(os.Stderr, "  crewship start --no-docker")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Run 'crewship doctor' for full diagnostics.")

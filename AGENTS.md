@@ -334,6 +334,11 @@ DATABASE_URL=              # Default: ~/.crewship/crewship.db (SQLite)
 CREWSHIP_CONTAINER_PROVIDER=docker    # docker | k8s
 CREWSHIP_STORAGE_PROVIDER=localfs     # localfs | s3
 CREWSHIP_STATE_PROVIDER=bbolt         # bbolt | postgres
+
+# Container runtime (auto-detected: Docker, Podman, Colima, OrbStack, Rancher Desktop)
+DOCKER_HOST=                           # Override socket (e.g. unix:///run/user/1000/podman/podman.sock)
+CREWSHIP_RUNTIME=runc                  # OCI runtime: runc | runsc (gVisor) | kata-runtime | sysbox-runc
+CREWSHIP_RUNTIME_IMAGE=ghcr.io/crewship-ai/agent-runtime:latest
 ```
 
 ## Development Environment

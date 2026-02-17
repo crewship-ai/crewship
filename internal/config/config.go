@@ -34,7 +34,7 @@ type IPCConfig struct {
 type ContainerConfig struct {
 	Provider       string `yaml:"provider"` // "docker" | "k8s"
 	RuntimeImage   string `yaml:"runtime_image"`
-	DefaultRuntime string `yaml:"default_runtime"` // "runc" | "runsc"
+	DefaultRuntime string `yaml:"default_runtime"` // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
 	Network        string `yaml:"network"`
 	DefaultMemoryMB int   `yaml:"default_memory_mb"`
 	DefaultCPUs    float64 `yaml:"default_cpus"`
