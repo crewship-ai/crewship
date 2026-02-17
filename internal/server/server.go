@@ -188,9 +188,9 @@ func (s *Server) LogWriter() *logcollector.Writer {
 
 func (s *Server) Start(ctx context.Context) error {
 	s.startedAt = time.Now()
-	s.runCtx, s.runCancel = context.WithCancel(context.Background())
 
 	ctx, cancel := context.WithCancel(ctx)
+	s.runCtx, s.runCancel = ctx, cancel
 	defer cancel()
 
 	errCh := make(chan error, 2)

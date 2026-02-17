@@ -1,7 +1,50 @@
 # Crewship -- Progress Tracker
 
-**Posledni aktualizace:** 2026-02-16
+**Posledni aktualizace:** 2026-02-17
 **Ucel:** Sledovani stavu implementace po epicich a taskach.
+
+---
+
+## Strategicke priority (2026-02-17)
+
+> Detailni analyza: `.factory/context/STRATEGY-2026.md`
+
+Na zaklade hloubkove analyzy OpenClaw ekosystemu (bezpecnostni incidenty, community feedback,
+konkurencni krajina) jsme definovali strategicke priority pro Crewship:
+
+### Distribuce: Single Binary (Ollama model)
+- `brew install crewship && crewship start` -- 2 prikazy, running platforma
+- Go binary s embedded Next.js (static export), SQLite default, PostgreSQL opt-in
+- Cross-platform: macOS (brew), Linux (curl/apt/dnf), Windows (winget)
+- Cil: "zero deps" instalace (Docker jedina zavislost pro agent kontejnery)
+
+### 8 klicovych diferentiatoru (co uzivatelum chybi na OpenClaw)
+1. **Container isolation** -- kazdy agent v Docker sandboxu (OpenClaw bezi na hostu)
+2. **Cost control** -- per-agent budgety, limity, alerting (OpenClaw: $750/mesic bez kontroly)
+3. **Team/org support** -- multi-user, RBAC, sdileni agentu (OpenClaw: single-user)
+4. **Jednoduchy setup** -- single binary, 2 prikazy (OpenClaw: npm + config + messaging)
+5. **Audit trail** -- append-only, immutable (OpenClaw: zadny)
+6. **Vetted skills** -- curated marketplace, sandbox enforcement (OpenClaw ClawHub: 20% malware)
+7. **Visual orchestration** -- dashboard + CEO→Lidr→Worker hierarchie (OpenClaw: zadna)
+8. **Full UI** -- web dashboard s chat, files, logs, settings (OpenClaw: messaging-only)
+
+### Skill Marketplace
+- 15-20 official skills pro launch (DevOps, Development, Business, Data)
+- Sandbox enforcement -- kazdy skill deklaruje permissions (fs, network, secrets)
+- One-click install v UI dashboardu (ne CLI)
+- Community skills s review procesem
+- Revenue sharing pro autory (Team/Enterprise tier)
+
+### Per-Agent Network Control (killer feature)
+- Internet ON/OFF per agent, whitelist domen
+- Local network access per agent (CIDR rozsah)
+- Remote access per agent (K8s cluster, SSH, VPN)
+- Konfigurace klikanim v UI, Docker network policies pod kapotou
+
+### Monetizacni model (3 tiery)
+- **Free:** single binary, SQLite, Docker, vsechny official skills, $0
+- **Team:** crewship.ai hosted, PostgreSQL, collaboration, $15-30/user/mesic
+- **Enterprise:** Helm chart, SSO/SAML, audit export, $50-100/user/mesic
 
 ---
 
@@ -472,8 +515,36 @@
 - [ ] Google OAuth (Phase 2, disabled button uz existuje)
 - [ ] Billing/subscription tab
 
-### Dalsi kroky (Phase 2 -- Orchestrace + Crew Execution)
+### Dalsi kroky
 
+#### Faze 1: Open Source Wow (aktualni priorita)
+> Detail: `.factory/context/STRATEGY-2026.md` sekce 8
+
+- [ ] Single binary distribuce (GoReleaser, brew tap, curl installer)
+- [ ] SQLite jako default DB (Prisma migrace, zero deps)
+- [ ] Embedded Next.js (static export v Go binary)
+- [ ] `crewship start/stop/status/logs` CLI
+- [ ] 15-20 official skills s permissions modelem
+- [ ] Skill Store UI v dashboardu
+- [ ] Per-agent network control UI
+- [ ] Per-agent cost budgety a alerting
+- [ ] Onboarding wizard
+- [ ] Landing page + README s "brew install crewship"
+
+#### Faze 2: Monetizace (+3-6 mesicu)
+- crewship.ai cloud tier
+- Community skill marketplace + revenue sharing
+- Crew Leader orchestrace (Phase 2A)
+- Messaging integrace (Slack, Discord)
+- Stripe billing
+
+#### Faze 3: Enterprise (+6-12 mesicu)
+- K8s Helm chart
+- SSO/SAML
+- Virtual Director (Phase 2B)
+- SOC 2 compliance
+
+#### Phase 2A/2B/3 Orchestrace (nezmeneno)
 - **Phase 2A** -- Crew Leader delegace (sidecar, DelegationLog) + zakladni Crew Execution (Board UI, JSONL progress)
 - **Phase 2B** -- Workflow sablony (dev-test loop), Auto-hiring (supervised/semi-auto), Director routing
 - **Phase 3** -- Full auto hiring + marketplace, Git worktree, cross-team execution, analytics
