@@ -1,7 +1,7 @@
 # Crewship -- Agent Runtime (AGENT-RUNTIME.md)
 
-**Verze:** 4.0
-**Datum:** 2026-02-16
+**Verze:** 4.1
+**Datum:** 2026-02-17
 **Zmeny v4.0:** Loopback HTTP sidecar (nahrazuje named pipe), dual runtime
 (CLI + API-direct crewship-agent), Landlock per-agent filesystem izolace,
 optional gVisor runtime, leader modes (active/passive).
@@ -831,6 +831,18 @@ Double sandboxing: Docker (kontejner) + srt (MCP server proces).
 RUN npm install -g @anthropic-ai/sandbox-runtime
 ```
 
+#### 6A.10.4a Skill sandbox enforcement (planovane)
+
+Kazdy skill deklaruje permissions v `skill.yaml`:
+- filesystem: read/write paths
+- network: enabled/disabled + whitelist
+- secrets: required env vars
+- shell: allowed/denied commands
+
+Docker vynucuje permissions. Skill bez deklarace se nespusti.
+Tiers: OFFICIAL (reviewed), VERIFIED (scanned), COMMUNITY (sandbox-only).
+Detail: ADR-025, SECURITY.md sekce 13
+
 #### 6A.10.5 End-to-end flow
 
 ```
@@ -1482,7 +1494,16 @@ Layer 12: Sidecar auth        localhost-only (127.0.0.1:9119), session token
 Layer 13: Credential isolation Go service desifruje (ne Next.js), ENV var per-exec
 ```
 
-### 16.3 gVisor instalace (pro ty co to potrebuji)
+### 16.3a Per-agent network control (planovane)
+
+Kazdy agent/tym bude mit individualne nastavitelny sitovy pristup:
+- Internet ON/OFF per agent
+- Domain whitelist per agent
+- Local network access (CIDR rozsah) per agent
+- Konfigurace pres UI, enforcement pres Docker network policies
+- Detail: ADR-024, API.md sekce 13
+
+### 16.3b gVisor instalace (pro ty co to potrebuji)
 
 ```bash
 # Na hostu (Linux only — gVisor na macOS nepodporovan):
@@ -1541,3 +1562,4 @@ Pro Phase 3+ zvazit Firecracker pro scenare kde gVisor nestaci
 18. **MCP server crash** — Co kdyz MCP server spadne? Sidecar restart? Agent retry?
 19. **Externi MCP servery** — Phase 3: sdilene MCP servery across tymu. Streamable HTTP transport.
 20. **MCP server resource limits** — Max MCP serveru per kontejner? Memory/CPU limity per server?
+21. **Per-agent cost tracking** — Sledovani nakladu per agent/team/org (LLM tokeny, compute time). ADR planovane.

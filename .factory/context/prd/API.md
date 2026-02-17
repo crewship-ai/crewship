@@ -1,7 +1,7 @@
 # Crewship -- API & Wire Protocol (API.md)
 
-**Verze:** 2.0
-**Datum:** 2026-02-11
+**Verze:** 3.0
+**Datum:** 2026-02-17
 **Runtime:** Next.js API Routes (REST) + crewshipd Go service (WebSocket + Webhooks)
 **Validace:** Zod (vstupy) + RFC 7807 Problem Details (chyby)
 **Auth:** NextAuth.js (Auth.js v5) — JWT session token
@@ -488,7 +488,53 @@ iptables -A DOCKER-USER -s crewship-agents -j DROP
 
 ---
 
-## 11. OTEVRENE OTAZKY
+## 11. CLI commands (single binary mode)
+
+| Command | Popis |
+|---|---|
+| `crewship start [--port N] [--db URL]` | Spusti platformu (default: SQLite, port 3001) |
+| `crewship stop` | Zastavi platformu |
+| `crewship status` | Status sluzeb (web, engine, Docker) |
+| `crewship logs [--follow]` | Tail logy |
+| `crewship doctor` | Diagnostika (Docker check, port check, DB check) |
+| `crewship skill install <name>` | Instalace skillu z marketplace |
+| `crewship skill list` | Seznam nainstalovanych skills |
+| `crewship skill search <query>` | Hledani v marketplace |
+| `crewship update` | Aktualizace na nejnovejsi verzi |
+| `crewship version` | Verze |
+| `crewship migrate --to <db-url>` | Migrace SQLite → PostgreSQL |
+
+---
+
+## 12. Skill Marketplace API (planovane)
+
+### Endpoints
+- `GET /api/v1/marketplace/skills` -- browse skills (search, category, badge filter)
+- `GET /api/v1/marketplace/skills/:slug` -- skill detail (permissions, rating, install count)
+- `POST /api/v1/marketplace/skills/:slug/install` -- install skill to agent
+- `DELETE /api/v1/marketplace/skills/:slug/uninstall` -- uninstall skill
+- `POST /api/v1/marketplace/skills` -- publish skill (community)
+- `GET /api/v1/marketplace/categories` -- skill categories
+
+---
+
+## 13. Per-Agent Network Control API (planovane)
+
+### Endpoints
+- `GET /api/v1/agents/:id/network` -- current network config
+- `PUT /api/v1/agents/:id/network` -- update network config
+  ```json
+  {
+    "internet_enabled": true,
+    "domain_whitelist": ["github.com", "api.openai.com"],
+    "local_network_enabled": false,
+    "local_network_cidr": null
+  }
+  ```
+
+---
+
+## 14. OTEVRENE OTAZKY
 
 1. **API versioning** — jak budeme delat v2 endpointy? Novy prefix `/api/v2/`?
 2. **Rate limit storage** — per-process Map staci pro single instance, ale ne pro multi-instance. Phase 2 reseni?

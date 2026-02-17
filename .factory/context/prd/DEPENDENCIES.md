@@ -1,13 +1,13 @@
 # Crewship -- Dependencies (DEPENDENCIES.md)
 
-**Verze:** 2.0
-**Datum:** 2026-02-11
+**Verze:** 3.0
+**Datum:** 2026-02-17
 **Autor:** Pavel Srba + AI analyza
-**Status:** Aktualizovano -- Tailwind v4, NextAuth, lokalni PostgreSQL
+**Status:** Aktualizovano 2026-02-17: Odstranen Redis/BullMQ/ws/pino, pridany Go deps, SQLite planovany.
 
-**Package manager:** pnpm (latest)
-**Runtime:** Node.js 22 LTS
-**Poznamka:** Vsechny verze "latest" -- pinnou se az pri `pnpm install`
+**Package manager:** pnpm 10.x
+**Runtime:** Node.js 25.x (engines >=22)
+**Go:** 1.25
 
 ---
 
@@ -15,145 +15,200 @@
 
 ### Principy
 
-1. **Minimalni zavislosti** -- kazdá dependency musi mit jasny duvod
+1. **Minimalni zavislosti** -- kazda dependency musi mit jasny duvod
 2. **Pinned verze** -- `pnpm-lock.yaml` committed, `--frozen-lockfile` v CI
-3. **Advine reuse** -- vetsina dependencies uz je v Advine na spravnych verzich
-4. **Zadne duplicity** -- jeden nastroj per ucel (napr. jen Zod pro validaci, ne Yup)
-5. **Licence check** -- zadne copyleft (GPL) v enterprise mode
-6. **Security audit** -- `pnpm audit` v CI, fail na critical
+3. **Zadne duplicity** -- jeden nastroj per ucel (napr. jen Zod pro validaci, ne Yup)
+4. **Licence check** -- zadne copyleft (GPL) v enterprise mode
+5. **Security audit** -- `pnpm audit` v CI, fail na critical
+6. **Dve jazykova prostredi** -- TypeScript (Next.js) pro UI/CRUD/auth, Go (crewshipd) pro infra/runtime
 
 ### Kategorie
 
 | Kategorie | Pocet | Popis |
 |---|---|---|
 | Core (framework) | 6 | Next.js, React, Prisma, Zod, Zustand, Tailwind |
-| Auth & Security | 4 | NextAuth, CASL, jose, bcrypt (CSRF je custom kod z Advine) |
-| Infrastructure | 4 | BullMQ, ioredis, ws, pino |
-| Business | 5 | Stripe, Resend, dockerode, bull-board (api + adapter) |
-| UI | 4 | shadcn/ui, lucide-react, clsx, tailwind-merge |
-| Dev | 8 | TypeScript, Vitest, ESLint, Prettier, ... |
+| Auth & Security | 4 | NextAuth, CASL, bcrypt, @auth/prisma-adapter |
+| UI | 12 | shadcn/ui, lucide-react, clsx, tailwind-merge, radix-ui, cmdk, motion, embla, next-themes, shiki, streamdown, ansi-to-react |
+| AI / Chat | 3 | ai (Vercel AI SDK), use-stick-to-bottom, tokenlens |
+| Flow / Diagram | 1 | @xyflow/react |
+| Utility | 2 | nanoid, pg |
+| Dev | 16 | TypeScript, Vitest, ESLint, Prisma CLI, PostCSS, testing-library, ... |
+| Go (crewshipd) | 5 | Docker SDK, bbolt, fsnotify, go-jose, yaml |
 | CLI tools (agent-runtime) | 4 | Claude Code, OpenCode, Codex CLI, Gemini CLI |
+
+> **Poznamka:** Node.js NEOBSAHUJE zadne infrastrukturni deps (zadne WebSocket, job queue, logging, Docker).
+> Veskerá infra je v Go service `crewshipd`.
 
 ---
 
-## 2. PRODUCTION DEPENDENCIES
+## 2. TYPESCRIPT PRODUCTION DEPENDENCIES
 
 ### 2.1 Core Framework
 
-| Balicek | Verze | Ucel | Licence | Zdroj |
-|---|---|---|---|---|
-| `next` | latest | Framework (App Router, RSC, Turbopack) | MIT | Advine |
-| `react` | latest | UI knihovna | MIT | Advine |
-| `react-dom` | latest | React DOM renderer | MIT | Advine |
-| `@prisma/client` | latest | ORM -- JEDINY zpusob pristupu k DB | Apache-2.0 | Advine |
-| `zod` | latest | Runtime validace | MIT | Advine |
-| `zustand` | latest | Client state management | MIT | Advine |
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `next` | ^16.1.6 | Framework (App Router, RSC, Turbopack) | MIT |
+| `react` | ^19.2.4 | UI knihovna | MIT |
+| `react-dom` | ^19.2.4 | React DOM renderer | MIT |
+| `@prisma/client` | ^7.4.0 | ORM -- JEDINY zpusob pristupu k DB | Apache-2.0 |
+| `@prisma/adapter-pg` | ^7.4.0 | Prisma driver adapter pro `pg` | Apache-2.0 |
+| `zod` | ^4.3.6 | Runtime validace | MIT |
+| `zustand` | ^5.0.11 | Client state management | MIT |
 
 ### 2.2 Auth & Security
 
-| Balicek | Verze | Ucel | Licence | Zdroj |
-|---|---|---|---|---|
-| `next-auth` | latest (Auth.js v5) | Autentizace (email+heslo, OAuth) | ISC | Novy |
-| `@auth/prisma-adapter` | latest | NextAuth Prisma adapter | ISC | Novy |
-| `@casl/ability` | latest | RBAC (role-based access control) | MIT | Advine |
-| `@casl/prisma` | latest | CASL Prisma integrace (Phase 2) | MIT | Advine |
-| `jose` | latest | JWT (WS token, overovani) | MIT | Advine |
-| `bcryptjs` | latest | Password hashing (NextAuth) | MIT | Advine |
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `next-auth` | 5.0.0-beta.30 | Autentizace (Auth.js v5, email+heslo, OAuth) | ISC |
+| `@auth/prisma-adapter` | ^2.11.1 | NextAuth Prisma adapter | ISC |
+| `@casl/ability` | ^6.8.0 | RBAC (role-based access control) | MIT |
+| `@casl/prisma` | ^1.6.1 | CASL Prisma integrace (filtruje dotazy) | MIT |
+| `bcryptjs` | ^3.0.3 | Password hashing (NextAuth) | MIT |
 
-### 2.3 Infrastructure (Node.js)
+### 2.3 UI
 
-> **WebSocket, Docker, logging, job queue** are handled by Go service (`crewshipd`).
-> Node.js infrastructure deps are minimal.
-
-| Balicek | Verze | Ucel | Licence | Zdroj |
-|---|---|---|---|---|
-| (none) | -- | Infra presunuta do Go service | -- | -- |
-
-### 2.4 Business Logic
-
-| Balicek | Verze | Ucel | Licence | Zdroj |
-|---|---|---|---|---|
-| `stripe` | latest | Billing a subscriptions (Phase 2+) | MIT | Advine |
-| `resend` | latest | Transakcni emaily (Phase 2+) | MIT | Advine |
-
-### 2.5 UI
-
-| Balicek | Verze | Ucel | Licence | Zdroj |
-|---|---|---|---|---|
-| `tailwindcss` | 4.x (latest) | CSS framework (CSS-first config, @theme inline) | MIT | Novy |
-| `lucide-react` | latest | Ikony (JEDINA povolena ikonova knihovna) | ISC | Advine |
-| `clsx` | latest | Conditional CSS classes | MIT | Advine |
-| `tailwind-merge` | latest | Merge Tailwind classes (cn() util) | MIT | Advine |
-| `class-variance-authority` | latest | Varianty komponent (shadcn/ui) | Apache-2.0 | Advine |
-| `next-themes` | latest | Dark mode provider (class strategy) | MIT | Novy |
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `lucide-react` | ^0.564.0 | Ikony (JEDINA povolena ikonova knihovna) | ISC |
+| `clsx` | ^2.1.1 | Conditional CSS classes | MIT |
+| `tailwind-merge` | ^3.4.1 | Merge Tailwind classes (cn() util) | MIT |
+| `class-variance-authority` | ^0.7.1 | Varianty komponent (shadcn/ui) | Apache-2.0 |
+| `next-themes` | ^0.4.6 | Dark mode provider (class strategy) | MIT |
+| `radix-ui` | ^1.4.3 | Headless UI primitives (shadcn/ui zaklad) | MIT |
+| `@radix-ui/react-use-controllable-state` | ^1.2.2 | Radix utility hook | MIT |
+| `cmdk` | ^1.1.1 | Command palette (⌘K) | MIT |
+| `motion` | ^12.34.0 | Animace (Framer Motion) | MIT |
+| `embla-carousel-react` | ^8.6.0 | Carousel komponenta | MIT |
+| `tw-animate-css` | ^1.4.0 | Tailwind animace (nahradi deprecated tailwindcss-animate) | MIT |
 
 > **shadcn/ui** neni npm balicek -- je to kolekce komponent kopirovanych do `components/ui/`.
-> Styl: **new-york** (deprecated `default`). Pregenerovat po instalaci TW4.
+> Styl: **new-york**. Pouziva Tailwind CSS 4, CSS-first konfigurace.
 
-### 2.6 Utility
+### 2.4 AI / Chat
 
-| Balicek | Verze | Ucel | Licence | Zdroj |
-|---|---|---|---|---|
-| `date-fns` | latest | Datumove operace | MIT | Advine |
-| `slugify` | latest | URL slug generovani | MIT | Novy |
-| `nanoid` | latest | Kratke unikatni ID (request ID, tokeny) | MIT | Novy |
-| `yaml` | 2.7.0 | YAML parser (skill templates, konfigurace) | ISC | Novy |
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `ai` | ^6.0.86 | Vercel AI SDK (streaming, chat UI hooks) | Apache-2.0 |
+| `use-stick-to-bottom` | ^1.1.3 | Auto-scroll v chatovem okne | MIT |
+| `tokenlens` | ^1.3.1 | Token counting / visualization | MIT |
+
+### 2.5 Rendering & Formatting
+
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `shiki` | ^3.22.0 | Syntax highlighting (code bloky) | MIT |
+| `streamdown` | ^2.2.0 | Streaming markdown rendering | MIT |
+| `@streamdown/cjk` | ^1.0.2 | Streamdown CJK plugin | MIT |
+| `@streamdown/code` | ^1.0.2 | Streamdown code plugin | MIT |
+| `@streamdown/math` | ^1.0.2 | Streamdown math plugin | MIT |
+| `@streamdown/mermaid` | ^1.0.2 | Streamdown mermaid plugin | MIT |
+| `ansi-to-react` | ^6.2.6 | ANSI escape kody → React komponenty (terminaly) | MIT |
+| `media-chrome` | ^4.17.2 | Media player web components | MIT |
+
+### 2.6 Flow / Diagram
+
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `@xyflow/react` | ^12.10.0 | Flow diagram editor (orchestrace agentů) | MIT |
+
+### 2.7 Utility
+
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `nanoid` | ^5.1.6 | Kratke unikatni ID (request ID, tokeny) | MIT |
+| `pg` | ^8.18.0 | PostgreSQL klient (Prisma driver adapter) | MIT |
+
+### 2.8 Business (Phase 2+, zatim neinstalovano)
+
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `stripe` | latest | Billing a subscriptions | MIT |
+| `resend` | latest | Transakcni emaily | MIT |
+
+> Tyto balicky budou pridany az v Phase 2 pri implementaci billing/email.
 
 ---
 
-## 3. DEV DEPENDENCIES
+## 3. TYPESCRIPT DEV DEPENDENCIES
 
 ### 3.1 TypeScript & Build
 
-| Balicek | Verze | Ucel | Licence | Zdroj |
-|---|---|---|---|---|
-| `typescript` | 5.8.x | TypeScript compiler (strict mode) | Apache-2.0 | Advine |
-| `@types/node` | 22.x | Node.js type definitions | MIT | Advine |
-| `@types/react` | 19.x | React type definitions | MIT | Advine |
-| `@types/react-dom` | 19.x | React DOM type definitions | MIT | Advine |
-| `prisma` | latest | Prisma CLI (generate, migrate, push) | Apache-2.0 | Advine |
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `typescript` | ^5.9.3 | TypeScript compiler (strict mode) | Apache-2.0 |
+| `@types/node` | ^25.2.3 | Node.js type definitions | MIT |
+| `@types/react` | ^19.2.14 | React type definitions | MIT |
+| `@types/react-dom` | ^19.2.3 | React DOM type definitions | MIT |
+| `@types/pg` | ^8.16.0 | PostgreSQL klient typy | MIT |
+| `prisma` | ^7.4.0 | Prisma CLI (generate, migrate, push) | Apache-2.0 |
+| `tsx` | ^4.21.0 | TypeScript execution (seed skripty) | MIT |
+| `dotenv-cli` | ^11.0.0 | Dotenv pro CLI prikazy (prisma) | MIT |
+| `globals` | ^17.3.0 | Global variable definitions pro ESLint | MIT |
 
 ### 3.2 Testing
 
-| Balicek | Verze | Ucel | Licence | Zdroj |
-|---|---|---|---|---|
-| `vitest` | 3.x | Unit + integracni testy | MIT | Advine |
-| `@vitest/coverage-v8` | 3.x | Code coverage (V8 provider) | MIT | Advine |
-| `happy-dom` | 17.x | DOM simulace pro testy | MIT | Advine |
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `vitest` | ^4.0.18 | Unit + integracni testy | MIT |
+| `happy-dom` | ^20.6.1 | DOM simulace pro testy | MIT |
+| `@testing-library/react` | ^16.3.2 | React testing utilities | MIT |
+| `@testing-library/jest-dom` | ^6.9.1 | DOM matchers pro testy | MIT |
+| `@vitejs/plugin-react` | ^5.1.4 | React plugin pro Vite/Vitest | MIT |
 
-### 3.3 Linting & Formatting
+### 3.3 Linting
 
-| Balicek | Verze | Ucel | Licence | Zdroj |
-|---|---|---|---|---|
-| `eslint` | 9.x | Linter | MIT | Advine |
-| `@eslint/js` | 9.x | ESLint JS config | MIT | Advine |
-| `typescript-eslint` | 8.x | ESLint TypeScript plugin | MIT | Advine |
-| `eslint-plugin-react-hooks` | 5.x | React hooks linting | MIT | Advine |
-| `eslint-config-next` | 16.x | Next.js ESLint config | MIT | Advine |
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `eslint` | ^9.39.2 | Linter | MIT |
+| `@typescript-eslint/eslint-plugin` | ^8.55.0 | ESLint TypeScript plugin | MIT |
+| `@typescript-eslint/parser` | ^8.55.0 | ESLint TypeScript parser | MIT |
+| `eslint-plugin-react` | ^7.37.5 | React linting pravidla | MIT |
+| `eslint-plugin-react-hooks` | ^7.0.1 | React hooks linting | MIT |
 
 ### 3.4 PostCSS & CSS
 
-| Balicek | Verze | Ucel | Licence | Zdroj |
-|---|---|---|---|---|
-| `@tailwindcss/postcss` | latest | Tailwind v4 PostCSS plugin (nahradi postcss+autoprefixer) | MIT | Novy |
-| `tw-animate-css` | latest | Animace (nahradi deprecated tailwindcss-animate) | MIT | Novy |
+| Balicek | Verze | Ucel | Licence |
+|---|---|---|---|
+| `tailwindcss` | ^4.1.18 | CSS framework (CSS-first config, @theme inline, Tailwind 4) | MIT |
+| `@tailwindcss/postcss` | ^4.1.18 | Tailwind v4 PostCSS plugin | MIT |
+| `postcss` | ^8.5.6 | CSS post-processor | MIT |
 
 ---
 
 ## 4. GO DEPENDENCIES (crewshipd)
 
 > Go service `crewshipd` -- WebSocket, Docker orchestration, logs, files, webhooks.
-> Managed via `go.mod`. Minimal dependencies -- prefer stdlib.
+> Managed via `go.mod`. Prefer stdlib -- minimalni externé dependencies.
 
-| Modul | Ucel | Licence |
-|---|---|---|
-| `github.com/docker/docker` | Docker SDK -- container lifecycle | Apache-2.0 |
-| `go.etcd.io/bbolt` | Embedded KV store (WAL, durable job state) | MIT |
-| `github.com/fsnotify/fsnotify` | inotify file watcher | BSD-3 |
-| `nhooyr.io/websocket` | WebSocket server (or gorilla/websocket) | ISC |
-| `github.com/prometheus/client_golang` | Prometheus metrics | Apache-2.0 |
-| `gopkg.in/yaml.v3` | YAML config parsing | MIT |
-| `google.golang.org/grpc` | gRPC (Phase 2, K8s inter-service) | Apache-2.0 |
+### 4.1 Primé dependencies (require)
+
+| Modul | Verze | Ucel | Licence |
+|---|---|---|---|
+| `github.com/docker/docker` | v28.5.2 | Docker SDK -- container lifecycle, exec, logs | Apache-2.0 |
+| `go.etcd.io/bbolt` | v1.4.3 | Embedded KV store (WAL, durable job state) | MIT |
+| `github.com/fsnotify/fsnotify` | v1.9.0 | inotify file watcher (/output/ zmeny) | BSD-3 |
+| `golang.org/x/net` | v0.50.0 | Stdlib extension -- `x/net/websocket` server | BSD-3 |
+| `gopkg.in/yaml.v3` | v3.0.1 | YAML config parsing (crewshipd.yaml) | MIT |
+
+### 4.2 Neprime dependencies (indirect, vyznamne)
+
+| Modul | Verze | Ucel | Licence |
+|---|---|---|---|
+| `github.com/go-jose/go-jose/v4` | v4.1.3 | JOSE/JWT -- NextAuth token validace v Go | Apache-2.0 |
+| `golang.org/x/crypto` | v0.48.0 | Kryptografie (HKDF pro JWT derivaci) | BSD-3 |
+| `golang.org/x/time` | v0.14.0 | Rate limiting (x/time/rate) | BSD-3 |
+| `go.opentelemetry.io/otel` | v1.40.0 | OpenTelemetry tracing (Docker SDK dep) | Apache-2.0 |
+| `github.com/docker/go-connections` | v0.6.0 | Docker connection utilities | Apache-2.0 |
+
+### 4.3 Stdlib -- klicove pouzite packages
+
+> Go service preferuje stdlib. Nasledujici jsou pouzite BEZ externich deps:
+
+- `log/slog` -- strukturovane JSON logging (nahradi pino)
+- `net/http` -- HTTP server + routes (nahradi Express/Fastify)
+- `crypto/hmac`, `crypto/sha256` -- webhook HMAC validace
+- `encoding/json` -- JSON serialization
+- `context` -- context propagation na vsech funkcich
 
 ---
 
@@ -171,9 +226,6 @@
 
 > **Verze se pinuji v Dockerfile** (viz DEPLOYMENT.md sekce 4.4).
 > Update postup: novy release → update Dockerfile → build → test → rolling deploy.
->
-> **OpenCode install:** Canonical URL je `https://opencode.ai/install` (curl | bash).
-> SECURITY.md pouziva GitHub releases URL -- pri scaffoldingu sjednotit na jednu.
 
 ### Phase 2 SDK (volitelne)
 
@@ -184,194 +236,43 @@
 
 ---
 
-## 5. INFRASTRUKTURNI ZAVISLOSTI
+## 6. INFRASTRUKTURNI ZAVISLOSTI
 
-### 5.1 Docker images
+### 6.1 Docker images
 
 | Image | Verze | Ucel |
 |---|---|---|
-| `node:22-bookworm-slim` | 22 LTS | Zaklad pro vsechny Crewship images |
-| `postgres:16-alpine` | 16.x | PostgreSQL databaze |
-| `redis:7-alpine` | 7.x | Redis (BullMQ, PubSub, cache) |
+| `node:22-bookworm-slim` | 22 LTS | Zaklad pro Crewship frontend image |
+| `golang:1.25` | 1.25 | Build image pro crewshipd |
+| `postgres:16-alpine` | 16.x | PostgreSQL databaze (docker-compose) |
 
-### 5.2 System packages (agent-runtime image)
+> **Zadne Redis!** Job queue + PubSub + cache jsou reseny v Go (bbolt + in-memory).
+
+### 6.2 System packages (agent-runtime image)
 
 | Balicek | Ucel |
 |---|---|
-| `auditd` | Kernel-level syscall logging (forensic trail) |
-| `inotify-tools` | Filesystem change tracking (host-side) |
 | `ca-certificates` | TLS certifikaty pro HTTPS |
-| `git` | Git operace v workspace (nekteri agenti) |
+| `git` | Git operace v workspace (agenti) |
 | `curl` | HTTP requesty (health checks, CLI install) |
 | `jq` | JSON parsovani v shell skriptech |
 
-### 5.3 System packages (worker image)
-
-| Balicek | Ucel |
-|---|---|
-| `docker.io` | Docker CLI (kontejner management, ne daemon) |
-
 ---
 
-## 6. ADVINE REUSE MATICE
+## 7. BUDOUCI: SINGLE BINARY DEPENDENCIES
 
-### Co kopirujeme primo
+> Planovano pro Phase 3+ -- crewship jako single binary (bez Docker Compose pro default).
 
-| Soubor z Advine | Pouziti v Pasece | Zmeny |
-|---|---|---|
-| `package.json` (dependencies) | Zaklad pro Crewship package.json | Pridat: ws, dockerode, slugify. Odebrat: PPC-specificke |
-| `lib/encryption.ts` | Credentials vault (AES-256-GCM) | Zadne zmeny |
-| `lib/logger.ts` + config | Pino logger s redakci | Pridat Crewship-specificke redaction paths |
-| `lib/redis-config.ts` | Redis multi-env konfigurace | Zadne zmeny |
-| `lib/rate-limit.ts` | Rate limiting (Upstash + ioredis) | Zmenit endpointy |
-| `lib/csrf.ts` | CSRF ochrana (Origin-based) | Zadne zmeny |
-| `lib/security-middleware.ts` | Brute force tracking | Zmenit action typy |
-| `lib/api-middleware.ts` | Request ID, logging | Zadne zmeny |
-| `lib/request-context.ts` | AsyncLocalStorage per request | Zadne zmeny |
-| `lib/utils/cn.ts` | clsx + tailwind-merge utility | Zadne zmeny |
-| `components/ui/*` (34 komponent) | shadcn/ui primitives | Zadne zmeny |
-| `hooks/use-mobile.tsx` | Responzivni design hook | Zadne zmeny |
-| `vitest.config.ts` + setup | Test konfigurace | Zadne zmeny |
-| `eslint.config.mjs` | ESLint konfigurace | Zadne zmeny |
-| `tailwind.config.ts` | Tailwind konfigurace | Zadne zmeny |
-| `tsconfig.json` | TypeScript konfigurace | Zadne zmeny |
-| `postcss.config.cjs` | PostCSS konfigurace | Zadne zmeny |
+| Dependency | Verze | Ucel | Typ |
+|---|---|---|---|
+| SQLite driver (Go) | TBD | Default DB misto PostgreSQL (zero-config) | Go modul |
+| `embed.FS` | stdlib | Embedded Next.js export v Go binary | Go stdlib |
+| `goreleaser` | latest | Multi-platform release (macOS, Linux, Windows) | CI tool |
 
-### Co adaptujeme
-
-| Soubor z Advine | Pouziti v Pasece | Zmeny |
-|---|---|---|
-| `lib/permissions/abilities.ts` | CASL RBAC | Subjects: Campaign→Agent, Integration→Skill, Alert→AgentRun |
-| `lib/auth-helpers.ts` | Auth abstrakce | Refaktor na NextAuth-only (MVP) |
-| `lib/security/audit-logger.ts` | Audit logger | `supabase.from()` → `prisma.auditLog.create()` |
-| `lib/services/feature-flags.service.ts` | Feature flags | Odstranit PostHog, nechat DB flagy |
-| `lib/services/subscription.service.ts` | Stripe billing | Refaktor na Prisma-only |
-| `lib/validation.ts` | Zod schemata | Nove schemata pro Agent, Team, Skill, Credential |
-| `lib/services/email.service.ts` | Resend emaily | Nove templates pro Paseku |
-| `workers/sync-worker.ts` | BullMQ worker pattern | Nahradit sync logiku za agent logiku |
-| `prisma/schema.prisma` | DB schema | Novy Crewship schema (20 tabulek) |
-
-### Co nepouzijeme
-
-| Soubor z Advine | Duvod |
-|---|---|
-| `lib/services/google-ads-*` | PPC-specificke |
-| `lib/services/sklik-*` | PPC-specificke |
-| `lib/services/meta-ads-*` | PPC-specificke |
-| `lib/services/linkedin-*` | PPC-specificke |
-| `lib/services/amazon-*` | PPC-specificke |
-| `lib/services/microsoft-*` | PPC-specificke |
-| `lib/alert-engine/*` | PPC alert system |
-| `app/(dashboard)/monitoring/*` | PPC dashboard |
-| `app/(dashboard)/campaigns/*` | PPC campaigns |
-| `components/alerts/*` | PPC alerty |
-| `components/analytics/*` | PPC analytics |
-| `@sentry/nextjs` | Odlozeno na Phase 2 |
-| `posthog-js` | Odlozeno na Phase 2 |
-
----
-
-## 7. PACKAGE.JSON SABLONA
-
-```jsonc
-{
-  "name": "crewship",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint .",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "worker:dev": "tsx watch workers/agent-worker.ts",
-    "build:worker": "tsc -p tsconfig.worker.json",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
-    "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio"
-  },
-  "dependencies": {
-    // Core
-    "next": "16.1.6",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "@prisma/client": "7.3.0",
-    "zod": "4.3.6",
-    "zustand": "5.0.11",
-
-    // Auth & Security
-    "next-auth": "5.0.0",
-    "@auth/prisma-adapter": "2.0.0",
-    "@casl/ability": "6.8.0",
-    "jose": "6.1.3",
-    "bcryptjs": "3.0.2",
-
-    // Infrastructure
-    "bullmq": "5.67.2",
-    "ioredis": "5.9.2",
-    "ws": "8.19.0",
-    "pino": "10.3.0",
-    "pino-pretty": "13.0.0",
-
-    // Business
-    "stripe": "20.2.0",
-    "resend": "6.9.1",
-    "dockerode": "4.0.0",
-    "@bull-board/api": "6.0.0",
-    "@bull-board/server-adapter": "6.0.0",
-
-    // UI
-    "tailwindcss": "3.4.18",
-    "lucide-react": "0.563.0",
-    "clsx": "2.1.1",
-    "tailwind-merge": "3.0.2",
-    "class-variance-authority": "0.7.1",
-
-    // Utility
-    "date-fns": "4.1.0",
-    "slugify": "1.6.6",
-    "nanoid": "5.1.0",
-    "yaml": "2.7.0"
-  },
-  "devDependencies": {
-    // TypeScript & Build
-    "typescript": "5.8.3",
-    "@types/node": "22.15.0",
-    "@types/react": "19.2.0",
-    "@types/react-dom": "19.2.0",
-    "@types/ws": "8.18.0",
-    "@types/bcryptjs": "3.0.0",
-    "@types/dockerode": "3.3.0",
-    "prisma": "7.3.0",
-    "tsx": "4.19.0",
-
-    // Testing
-    "vitest": "3.2.0",
-    "@vitest/coverage-v8": "3.2.0",
-    "happy-dom": "17.4.0",
-
-    // Linting
-    "eslint": "9.20.0",
-    "@eslint/js": "9.20.0",
-    "typescript-eslint": "8.25.0",
-    "eslint-plugin-react-hooks": "5.2.0",
-    "eslint-config-next": "16.1.6",
-
-    // PostCSS
-    "postcss": "8.5.0",
-    "autoprefixer": "10.4.0"
-  }
-}
-```
-
-> **POZNAMKA:** Presne verze budou aktualizovany pri scaffoldingu (Tyden 1).
-> Verze z Advine jsou pouzity kde je to mozne. Nove dependencies (ws, dockerode,
-> slugify, nanoid, @auth/prisma-adapter) budou nainstalovany v latest stable.
+> **SQLite vs PostgreSQL:**
+> Default = SQLite (single binary, zero config, `crewship start` just works).
+> PostgreSQL = optional pro scaling (multi-replica, production).
+> Obe varianty pres provider pattern (`CREWSHIP_DB_PROVIDER=sqlite|postgres`).
 
 ---
 
@@ -379,25 +280,17 @@
 
 | Komponenta | Vyzadovana verze | Duvod |
 |---|---|---|
-| Node.js | 22 LTS | Nativni TS type stripping, stable LTS |
-| pnpm | 10+ | Corepack, workspace podpora |
+| Node.js | 25.x (engines >=22) | Nativni TS type stripping, stable LTS |
+| pnpm | 10.x | Corepack, workspace podpora |
+| Go | 1.25 | Generics, slog, latest stdlib |
 | Docker Engine | 24+ | Buildx, compose v2, security features |
 | PostgreSQL | 16+ | `gen_random_uuid()`, performance |
-| Redis | 7+ | Streams, ACL (pouzite pro fs-events) |
 | Next.js | 16.x | App Router RSC, Turbopack |
 | React | 19.x | Server Components, use() |
-| TypeScript | 5.8.x | Strict mode, satisfies, decorators |
+| TypeScript | 5.9.x | Strict mode, satisfies |
 | Prisma | 7.x | TS-native (bez Rust engine), pg adapter |
 | Zod | 4.x | JSON Schema support, 14x rychlejsi |
-
-### Budouci upgrady (planovane)
-
-| Upgrade | Kdy | Duvod |
-|---|---|---|
-| Tailwind CSS 3 → 4 | Phase 2 | 34 Advine komponent funguje s v3, migrace neni kriticka |
-| TypeScript 5.8 → 7.0 | Kdyz stable (odhad H2/2026) | Go-based compiler (10x rychlejsi build) |
-| @casl/prisma integrace | Phase 2 | CASL filtruje Prisma dotazy (doplnek k RLS) |
-| @supabase/ssr | Phase 2 | Supabase Auth adapter pro cloud |
+| Tailwind CSS | 4.x | CSS-first config, @theme inline, oklch |
 
 ---
 
@@ -405,17 +298,15 @@
 
 ### 9.1 Kriticke dependencies
 
-| Dependency | Riziko | Mitigace | Viz |
-|---|---|---|---|
-| `@prisma/client` | SQL injection (nepravdepodobne) | Parametrizovane dotazy, zadne `$executeRaw` | SECURITY.md 9.2 |
-| `next` | RSC/middleware exploity | Vzdy latest patch verze | SECURITY.md 9.2 |
-| `@casl/ability` | Logic error = auth bypass | Unit testy na ability matici | SECURITY.md 10.2 |
-| `bullmq` | Job poisoning | Validace job dat pred zpracovanim | SECURITY.md 9.2 |
-| `jose` / `next-auth` | Token forgery | NEXTAUTH_SECRET rotace, short expirece | SECURITY.md 9.2 |
-| `ioredis` | Connection hijack | Redis AUTH + TLS (`rediss://`) | SECURITY.md 9.2 |
-| `ws` | Connection hijack, DoS | Auth handshake, rate limiting, heartbeat | SECURITY.md 9.2 |
-| `dockerode` | Container escape | Docker security options (viz DEPLOYMENT.md 5.3) | SECURITY.md 6.2 |
-| `stripe` | Payment fraud | Webhook signature overovani (HMAC-SHA256) | API.md 5.15 |
+| Dependency | Riziko | Mitigace |
+|---|---|---|
+| `@prisma/client` | SQL injection (nepravdepodobne) | Parametrizovane dotazy, zadne `$executeRaw` |
+| `next` | RSC/middleware exploity | Vzdy latest patch verze |
+| `@casl/ability` | Logic error = auth bypass | Unit testy na ability matici |
+| `next-auth` | Token forgery | NEXTAUTH_SECRET rotace, short expiry |
+| `docker SDK (Go)` | Container escape | Docker security options, non-root UID 1001 |
+| `stripe` (Phase 2) | Payment fraud | Webhook signature overovani (HMAC-SHA256) |
+| `go-jose` | JWT vulnerabilities | Pinned verze, algorithm restriction |
 
 ### 9.2 CI audit pipeline
 
@@ -427,8 +318,12 @@ pnpm licenses list --json            # export licenci
 # Kazdý tyden (GitHub Dependabot):
 # Automaticke PR pro security updates
 
+# Go dependencies:
+go vet ./...                          # static analysis
+govulncheck ./...                     # Go vulnerability database
+
 # Kazdý Docker build:
-# Trivy scan na Docker image (viz DEPLOYMENT.md 13.3)
+# Trivy scan na Docker image (viz DEPLOYMENT.md)
 ```
 
 ### 9.3 Licence kontrola
@@ -436,9 +331,9 @@ pnpm licenses list --json            # export licenci
 | Licence | Povoleno | Poznamka |
 |---|---|---|
 | MIT | Ano | Vetsina dependencies |
-| Apache-2.0 | Ano | Prisma, CVA, dockerode |
+| Apache-2.0 | Ano | Prisma, CVA, Docker SDK |
 | ISC | Ano | NextAuth, lucide-react |
-| BSD-2/3 | Ano | |
+| BSD-2/3 | Ano | Go stdlib extensions |
 | GPL-2.0/3.0 | **NE** | Copyleft, nekompatibilni s enterprise |
 | AGPL | **NE** | Server-side copyleft |
 | Proprietary | Opatrne | Claude Code CLI (ok, jen v runtime image) |
@@ -449,38 +344,25 @@ pnpm licenses list --json            # export licenci
 
 | Alternativa | Proc NE |
 |---|---|
-| **tRPC** (misto REST) | Vendor lock-in, slozitejsi pro verejne API (Phase 2) |
-| **Socket.IO** (misto ws) | Vetsi overhead, nepotrebujeme polling fallback |
-| **Drizzle** (misto Prisma) | Mensi ekosystem, Prisma uz v Advine |
-| **Valibot/ArkType** (misto Zod) | Mensi komunita, mene integrace |
-| **Yup/Joi** (misto Zod) | Pomalejsi, mene type-safe |
-| **Material-UI/Chakra/Ant** (misto shadcn) | Tezke, opinionated, Advine uz ma shadcn |
-| **Bun** (misto Node.js) | Mladsi, riziko nekompatibility s npm balicky |
-| **Express/Fastify** (misto Next.js API) | Dve codebasy pro solo dev |
-| **Supabase JS client** (pro queries) | Vendor lock-in, Prisma je univerzalni |
-| **Passport.js** (misto NextAuth) | Starsi, vice boilerplate, NextAuth je modernijsi |
-| **Redis (standalone)** (misto Upstash) | Upstash = managed Redis s TLS, BullMQ kompatibilni |
-| **Sentry** (v MVP) | Pridava slozitost, Pino staci pro MVP |
-| **PostHog** (v MVP) | Pridava slozitost, neni kriticke pro launch |
-| **Turborepo** (monorepo) | Overengineering pro solo dev, jeden repo staci |
-
-> **Poznamka k Turborepo:** PRD.md zminuje Turborepo, ale pro solo dev s jednim
-> repozitarem (frontend + worker ve stejnem projektu) je Turborepo zbytecna slozitost.
-> Next.js + separatni worker script staci. Turborepo az pokud se projekt rozdeli
-> na vice packages (Phase 2+).
-
----
-
-## 11. OTEVRENE OTAZKY
-
-1. **next-auth verze** -- Auth.js v5 je stable? Overit kompatibilitu s Prisma adapter pri scaffoldingu.
-2. **dockerode vs Docker CLI** -- dockerode (programmatic) vs `child_process.exec("docker ...")` (jednodussi, mene dependencies)?
-   Rozhodnuti: **dockerode** -- type-safe, streaming, lepssi error handling.
-3. **Tailwind 4 migrace** -- Kdy presne? Sledovat stabilitu shadcn/ui s Tailwind 4.
-4. **@opencode-ai/sdk** -- Phase 2 dependency. Overit stabilitu a API kompatibilitu.
-5. **Monorepo split** -- Pokud projekt roste, rozdelit na `packages/` (shared types, UI, worker). Zatim jeden repo.
+| **BullMQ + Redis** (job queue) | Go service (`crewshipd`) resi job orchestraci primo -- bbolt pro state, goroutines pro concurrency. Redis = zbytecna infrastruktura. |
+| **ws (npm)** (WebSocket) | Go nativni `x/net/websocket` -- rychlejsi, mene overhead, jednotna codebaze. |
+| **pino** (logging) | Go `log/slog` -- strukturovane JSON logging, stdlib, zadna dependency. |
+| **dockerode** (Docker SDK) | Go `docker/docker` SDK -- type-safe, streaming, nativni v Go service. |
+| **Socket.IO** (misto ws) | Vetsi overhead, nepotrebujeme polling fallback. Go ws staci. |
+| **tRPC** (misto REST) | Vendor lock-in, slozitejsi pro verejne API (Phase 2). |
+| **Drizzle** (misto Prisma) | Mensi ekosystem, Prisma uz zavedene v projektu. |
+| **Valibot/ArkType** (misto Zod) | Mensi komunita, mene integrace. |
+| **Material-UI/Chakra/Ant** (misto shadcn) | Tezke, opinionated. shadcn = kopirovane komponenty, plna kontrola. |
+| **Bun** (misto Node.js) | Mladsi ekosystem, riziko nekompatibility. |
+| **Express/Fastify** (misto Next.js API) | Dve codebasy, Next.js API Routes staci pro CRUD. |
+| **Passport.js** (misto NextAuth) | Starsi, vice boilerplate. NextAuth (Auth.js) je modernijsi. |
+| **Sentry** (v MVP) | Pridava slozitost, Go slog + Next.js console staci pro MVP. |
+| **PostHog** (v MVP) | Pridava slozitost, neni kriticke pro launch. |
+| **Turborepo** (monorepo) | Overengineering pro solo dev, jeden repo staci. |
+| **SQLite v MVP** | PostgreSQL pro MVP (uz bezici v Docker Compose). SQLite az pro single-binary distribuce (Phase 3+). |
+| **@supabase/ssr** | Nepouzivame Supabase -- Prisma + vlastni PostgreSQL. |
+| **Tailwind 3.x** | Tailwind 4 je CSS-first, lepsi performance, @theme inline. Zadny tailwind.config.ts. |
 
 ---
 
-*Posledni dokument ze 7. Vsechny PRD dokumenty kompletni:
-PRD.md, DATABASE.md, AGENT-RUNTIME.md, API.md, SECURITY.md, DEPLOYMENT.md, DEPENDENCIES.md*
+*Aktualizovano 2026-02-17. Plne reflektuje skutecny stav package.json, go.mod a AGENTS.md.*

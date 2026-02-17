@@ -1,7 +1,7 @@
 # Crewship -- Database Schema (DATABASE.md)
 
-**Verze:** 2.0
-**Datum:** 2026-02-11
+**Verze:** 3.0
+**Datum:** 2026-02-17
 **ORM:** Prisma (JEDINY zpusob pristupu k DB z Next.js)
 **Databaze:** PostgreSQL 16+ (plain PostgreSQL, RDS, Cloud SQL — jakykoli provider)
 **Auth:** NextAuth.js (Auth.js v5) s Prisma adapterem
@@ -30,6 +30,28 @@
 | **Rate limiting** | **Go pamet** | In-memory token bucket (MVP), per-process |
 
 > **PRAVIDLO:** PostgreSQL = strukturovana data s relacemi. Vsechno ostatni (logy, zpravy, live stav) je mimo DB.
+
+---
+
+## SQLite kompatibilita (single binary mode)
+
+V single binary mode (`crewship start`) pouzivame SQLite jako default databazi.
+
+### Prisma multi-provider
+- `DB_PROVIDER=sqlite` + `DATABASE_URL=file:./crewship.db` (default)
+- `DB_PROVIDER=postgresql` + `DATABASE_URL=postgresql://...` (opt-in)
+
+### SQLite omezeni
+- Zadne `@db.Uuid` -- pouzit `String` s nanoid/cuid
+- Zadne `@db.JsonB` -- pouzit `String` s JSON serializaci
+- Zadne `gen_random_uuid()` -- generovat v aplikacni vrstve
+- WAL mode pro lepsi concurrent reads
+- Vhodne pro: solo dev, maly tym (1-10 lidi)
+- Pro vetsi tymy: `crewship start --db postgres://...`
+
+### Migracni strategie
+- SQLite → PostgreSQL: export/import tool (`crewship migrate --to postgres://...`)
+- Schema je STEJNE pro oba providery (Prisma abstrahuje)
 
 ---
 
@@ -455,6 +477,15 @@ model Agent {
 }
 
 // ============================================================
+// 7a. COST TRACKING (planovane)
+// ============================================================
+// Agent.budget_limit_usd -- maximalni mesicni budget per agent (nullable)
+// Agent.budget_alert_threshold -- prah pro alerting (0-100%, default 80%)
+// AgentRun.estimated_cost_usd -- odhadovane naklady per run
+// AgentRun.token_count_input -- pocet input tokenu
+// AgentRun.token_count_output -- pocet output tokenu
+
+// ============================================================
 // 7b. DELEGATION LOG (Phase 2 — orchestracni audit)
 // ============================================================
 // Zaznamenava vsechny delegace mezi agenty (leader→worker, director→leader).
@@ -548,6 +579,14 @@ model Skill {
   @@index([featured], name: "idx_skill_featured")
   @@map("skills")
 }
+
+// ============================================================
+// 8a. SKILL PERMISSIONS (planovane)
+// ============================================================
+// Skill.permissions_json -- JSON s deklarovanymi permissions (filesystem, network, secrets, shell)
+// Skill.badge -- enum: OFFICIAL, VERIFIED, COMMUNITY
+// Skill.install_count -- pocet instalaci
+// Skill.rating_avg -- prumerne hodnoceni
 
 // ============================================================
 // 8B. SKILL REVIEW (marketplace recenze, ADR-019)

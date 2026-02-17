@@ -1,7 +1,7 @@
 # Crewship -- Security (SECURITY.md)
 
-**Verze:** 2.0
-**Datum:** 2026-02-11
+**Verze:** 3.0
+**Datum:** 2026-02-17
 
 ---
 
@@ -648,7 +648,47 @@ CORS_ORIGIN=https://your-domain.com  # explicitni, zadny wildcard
 
 ---
 
-## 12. OTEVRENE OTAZKY
+## 12. Pouceni z OpenClaw bezpecnostnich incidentu (unor 2026)
+
+OpenClaw prosla masivni bezpecnostni krizi (viz STRATEGY-2026.md):
+- CVE-2026-25253 (CVSS 8.8): one-click RCE
+- 42,900 exposed instanci, 15,200 zranitelnych
+- 341+ malicious skills na ClawHub (20% vsech skills)
+- 36% skills ma prompt injection zranitelnosti
+- Credentials v plaintext
+
+### Jak Crewship predchazi kazdemu problemu:
+| OpenClaw problem | Crewship reseni |
+|---|---|
+| Zadna container isolation | Docker kontejnery, non-root UID 1001, --internal network |
+| Credentials v plaintext | AES-256-GCM + key versioning |
+| Malicious skills (zadny sandbox) | Skill permissions model + Docker enforcement |
+| Zadny audit trail | Append-only audit log |
+| Prompt injection → full access | Agent v kontejneru = bounded blast radius |
+| Exposed control panels | localhost default, auth required, RBAC |
+| Supply-chain attacks | Official/Verified/Community tiers, automated scanning |
+
+---
+
+## 13. Skill sandbox enforcement
+
+### Permissions model
+Kazdy skill deklaruje v `skill.yaml`:
+- `filesystem`: read/write paths (whitelist)
+- `network`: enabled/disabled + domain whitelist
+- `secrets`: required/optional env var names
+- `shell`: allowed/denied commands
+
+### Enforcement
+- Docker vynucuje filesystem a network permissions
+- Skill bez permissions deklarace se NESPUSTI
+- OFFICIAL skills: rucne reviewed Crewship tymem
+- VERIFIED skills: automated VirusTotal + sandbox test
+- COMMUNITY skills: sandbox-only (omezena prava)
+
+---
+
+## 14. OTEVRENE OTAZKY
 
 1. **Workspace quota** — jak limitovat disk usage per team? Docker `--storage-opt size=10G`?
 2. **DNS exfiltrace** — CoreDNS s logovanim v kontejneru? (Phase 2)
