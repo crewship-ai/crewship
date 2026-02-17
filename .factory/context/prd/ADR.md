@@ -1,6 +1,6 @@
 # Crewship -- Architecture Decision Records (ADR)
 
-**Datum:** 2026-02-15
+**Datum:** 2026-02-17
 **Status:** Zivý dokument — nové ADR se přidávají průběžně.
 
 ---
@@ -814,6 +814,48 @@ v team kontejneru (Docker-in-Docker nebo bind-mounted socket).
 
 ---
 
+---
+
+### ADR-022: SQLite jako default databaze
+- **Status:** Proposed
+- **Kontext:** Single binary distribuce vyzaduje zero-deps setup. PostgreSQL vyzaduje Docker nebo externi server.
+- **Rozhodnuti:** SQLite jako default pro `crewship start`, PostgreSQL jako opt-in pro tymy/enterprise.
+- **Prisma:** multi-provider (sqlite + postgresql), schema sdilene.
+- **Dusledky:** Omezeni na SQLite typy (zadne UUID, JSONB), WAL mode pro concurrency, migracni tool.
+- **Inspirace:** Gitea (50k+ stars) pouziva SQLite default, PostgreSQL opt-in.
+
+### ADR-023: Single binary distribuce (Ollama model)
+- **Status:** Proposed
+- **Kontext:** OpenClaw ma slozitou instalaci (npm + config + messaging). Ollama ukazal, ze single binary je optimalni UX.
+- **Rozhodnuti:** Go binary s embedded Next.js (embed.FS), SQLite, CLI (start/stop/status/logs).
+- **Build:** GoReleaser (linux/darwin/windows, amd64/arm64), brew tap, curl installer.
+- **Distribuce:** brew, curl, winget, scoop, Docker (fallback).
+- **Dusledky:** Next.js musi byt static export (zadne SSR), API routes v Go serveru.
+
+### ADR-024: Per-agent network control
+- **Status:** Proposed
+- **Kontext:** OpenClaw agenti maji full internet access bez omezeni. Bezpecnostni riziko.
+- **Rozhodnuti:** Kazdy agent/tym ma konfigurovatelny sitovy pristup (internet on/off, whitelist, local network).
+- **Implementace:** Docker network policies, UI klikaci konfigurace.
+- **Dusledky:** Slozitejsi Docker network setup, nutnost custom bridge networks per agent.
+
+### ADR-025: Skill sandbox enforcement
+- **Status:** Proposed
+- **Kontext:** OpenClaw ClawHub ma 20% malicious skills (zadny sandbox). Supply-chain utoky.
+- **Rozhodnuti:** Kazdy skill deklaruje permissions (filesystem, network, secrets, shell). Docker vynucuje.
+- **Format:** skill.yaml s permissions blokem.
+- **Urovne:** OFFICIAL (rucne reviewed), VERIFIED (automated scan), COMMUNITY (sandbox-only).
+- **Dusledky:** Skills bez permissions deklarace se nespusti. Zpetna kompatibilita s existujicimi skills.
+
+### ADR-026: 3-tier monetizacni model
+- **Status:** Proposed
+- **Kontext:** Potrebujeme udrzitelny business model. GitLab (CE/EE), Gitea (free+paid) jako vzory.
+- **Rozhodnuti:** Free (single binary, SQLite), Team (cloud, $15-30/user), Enterprise (K8s, $50-100/user).
+- **Implementace:** Feature flags v DB, env var CREWSHIP_TIER.
+- **Dusledky:** Stejna codebase pro vsechny tiery, feature gating.
+
+---
+
 ## Přehled všech ADR
 
 | ID | Rozhodnutí | Status | Dopad |
@@ -839,6 +881,11 @@ v team kontejneru (Docker-in-Docker nebo bind-mounted socket).
 | ADR-019 | Crewship Skill Hub (Marketplace) | Accepted | DATABASE.md, AGENT-RUNTIME.md 6A.10, architecture.md |
 | ADR-020 | Skill Security Pipeline | Accepted | AGENT-RUNTIME.md 6A.10, architecture.md |
 | ADR-021 | Skill Distribution via OCI | Accepted | AGENT-RUNTIME.md 6A.10, architecture.md |
+| ADR-022 | SQLite jako default databaze | Proposed | DATABASE.md, architecture.md |
+| ADR-023 | Single binary distribuce (Ollama model) | Proposed | architecture.md, DEPLOYMENT.md |
+| ADR-024 | Per-agent network control | Proposed | SECURITY.md, AGENT-RUNTIME.md |
+| ADR-025 | Skill sandbox enforcement | Proposed | SECURITY.md, AGENT-RUNTIME.md |
+| ADR-026 | 3-tier monetizacni model | Proposed | business.md, DATABASE.md |
 
 ---
 

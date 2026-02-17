@@ -8,6 +8,10 @@
 
 ## Two-Process Architecture
 
+> **Poznamka:** Toto je **Mode 2 (Docker Compose)** — dva separatni procesy.
+> V **Mode 1 (single binary)** bezi vse jako jeden Go proces s embedded
+> Next.js static buildem a SQLite. Viz sekce "Deployment" nize.
+
 ```
 +-------------------+   Unix socket    +--------------------+
 |   Next.js         | ---------------> |   Go service       |
@@ -258,6 +262,10 @@ Pool exhausted (all keys in cooldown):
 
 Agent's scratch space. Installed packages, temp files, CLI state.
 Destroyed when container is removed. Cheap, disposable -- agent is cattle.
+
+> **Mode 1 (single binary):** Vsechna data v `~/.crewship/`:
+> `~/.crewship/data/` (SQLite DB), `~/.crewship/output/`, `~/.crewship/logs/`,
+> `~/.crewship/config.yaml`. Viz `prd/DEPLOYMENT.md`.
 
 ### Persistent (survives everything)
 
@@ -531,6 +539,19 @@ JSONL append (real-time) → crewshipd → async indexer → Meilisearch
 - **Staging**: Coolify on Proxmox (128GB RAM, i7-12700)
 - **Production**: TBD (Coolify, K8s, or bare metal)
 - **Container registry**: ghcr.io/crewship-ai/*
+
+### Single binary distribuce (Mode 1 -- PRIMARY)
+
+V primarnim distribucnim modu bezi Crewship jako jeden Go binary:
+- Next.js static build embedded pres `embed.FS`
+- crewshipd engine integrovan v binary
+- SQLite jako default DB
+- Docker pouze pro agent kontejnery
+- CLI: `crewship start/stop/status/logs`
+- Detail: `prd/DEPLOYMENT.md` sekce 1-4
+
+Data directory: `~/.crewship/` (konfigurace, DB, logy, output).
+Mode 2 (Docker Compose) pouziva `/var/lib/crewship/` a `/var/log/crewship/`.
 
 ## Graceful Shutdown (Go service)
 
