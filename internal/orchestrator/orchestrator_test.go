@@ -54,8 +54,9 @@ func (m *memState) Close() error { return nil }
 
 // mock container provider
 type mockContainer struct {
-	execResult    *provider.ExecResult
+	execResults   []*provider.ExecResult
 	execErr       error
+	execCallIdx   int
 	inspectResult struct {
 		running  bool
 		exitCode int
@@ -75,7 +76,13 @@ func (m *mockContainer) Exec(_ context.Context, _ provider.ExecConfig) (*provide
 	if m.execErr != nil {
 		return nil, m.execErr
 	}
-	return m.execResult, nil
+	idx := m.execCallIdx
+	m.execCallIdx++
+	if idx < len(m.execResults) {
+		return m.execResults[idx], nil
+	}
+	// fallback: return a no-op result for mkdir etc.
+	return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 }
 func (m *mockContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return m.inspectResult.running, m.inspectResult.exitCode, m.inspectErr
@@ -120,6 +127,7 @@ func TestRunAgentExecError(t *testing.T) {
 
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
+		AgentSlug:   "test-agent",
 		SessionID:   "s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
@@ -143,7 +151,10 @@ func TestRunAgentSuccess(t *testing.T) {
 	}()
 
 	mc := &mockContainer{
-		execResult: &provider.ExecResult{ExecID: "exec-1", Reader: r},
+		execResults: []*provider.ExecResult{
+			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
+			{ExecID: "exec-1", Reader: r},
+		},
 		inspectResult: struct {
 			running  bool
 			exitCode int
@@ -158,6 +169,7 @@ func TestRunAgentSuccess(t *testing.T) {
 
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
+		AgentSlug:   "test-agent",
 		SessionID:   "s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
@@ -193,7 +205,10 @@ func TestRunAgentExitCodeError(t *testing.T) {
 	}()
 
 	mc := &mockContainer{
-		execResult: &provider.ExecResult{ExecID: "exec-1", Reader: r},
+		execResults: []*provider.ExecResult{
+			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
+			{ExecID: "exec-1", Reader: r},
+		},
 		inspectResult: struct {
 			running  bool
 			exitCode int
@@ -205,6 +220,7 @@ func TestRunAgentExitCodeError(t *testing.T) {
 
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
+		AgentSlug:   "test-agent",
 		SessionID:   "s1",
 		ContainerID: "c1",
 		TimeoutSecs: 5,
@@ -219,6 +235,27 @@ func TestRunAgentExitCodeError(t *testing.T) {
 	json.Unmarshal(data, &run)
 	if run.Status != "error" {
 		t.Errorf("expected error status for non-zero exit, got %q", run.Status)
+	}
+}
+
+func TestRunAgentInvalidSlug(t *testing.T) {
+	mc := &mockContainer{}
+	o := New(mc, newMemState(), slog.Default())
+
+	for _, slug := range []string{"", "../escape", "a/b", "..", "bad slug"} {
+		err := o.RunAgent(context.Background(), AgentRunRequest{
+			AgentID:     "a1",
+			AgentSlug:   slug,
+			SessionID:   "s1",
+			ContainerID: "c1",
+			TimeoutSecs: 5,
+		}, nil)
+		if err == nil {
+			t.Errorf("expected error for invalid slug %q", slug)
+		}
+		if !strings.Contains(err.Error(), "invalid agent slug") {
+			t.Errorf("expected 'invalid agent slug' error for %q, got: %v", slug, err)
+		}
 	}
 }
 

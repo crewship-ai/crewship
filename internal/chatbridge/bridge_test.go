@@ -30,7 +30,7 @@ func testBridge(t *testing.T, resolver SessionResolver) (*Bridge, string) {
 	convStore := conversation.NewStore(dir, logger)
 	logWriter := logcollector.NewWriter(dir, logger)
 	orch := orchestrator.New(nil, &memState{data: make(map[string]map[string][]byte)}, logger)
-	return New(orch, convStore, logWriter, resolver, logger), dir
+	return New(orch, nil, convStore, logWriter, resolver, BridgeConfig{}, logger), dir
 }
 
 // minimal in-memory state for tests
@@ -144,7 +144,7 @@ func testBridgeWithContainer(t *testing.T, resolver SessionResolver, ctr provide
 	convStore := conversation.NewStore(dir, logger)
 	logWriter := logcollector.NewWriter(dir, logger)
 	orch := orchestrator.New(ctr, &memState{data: make(map[string]map[string][]byte)}, logger)
-	return New(orch, convStore, logWriter, resolver, logger)
+	return New(orch, ctr, convStore, logWriter, resolver, BridgeConfig{}, logger)
 }
 
 func TestHandleChatMessageRunAgentError(t *testing.T) {
@@ -168,8 +168,8 @@ func TestHandleChatMessageRunAgentError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from RunAgent")
 	}
-	if !strings.Contains(err.Error(), "run agent") {
-		t.Errorf("expected 'run agent' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "ensure team runtime") && !strings.Contains(err.Error(), "run agent") {
+		t.Errorf("expected 'ensure team runtime' or 'run agent' in error, got: %v", err)
 	}
 }
 

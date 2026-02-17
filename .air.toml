@@ -1,0 +1,27 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  bin = "tmp/crewshipd"
+  cmd = "go build -o tmp/crewshipd ./cmd/crewshipd"
+  full_bin = "set -a && . ./.env.local && set +a && CREWSHIP_NEXTJS_URL=http://localhost:3001 CREWSHIP_INTERNAL_TOKEN=crewshipd CREWSHIP_STORAGE_BASE_PATH=/tmp/crewship-data CREWSHIP_LOG_PATH=/tmp/crewship-logs CREWSHIP_BOLT_PATH=/tmp/crewship-state/state.db CREWSHIP_LOG_LEVEL=debug tmp/crewshipd"
+  delay = 1000
+  exclude_dir = ["node_modules", "tmp", "vendor", ".git", "docker", "prisma", "app", "components", "hooks", "lib", "config"]
+  exclude_regex = ["_test\\.go$"]
+  include_ext = ["go"]
+  include_dir = ["cmd", "internal"]
+  kill_delay = 500
+  stop_on_error = true
+
+[log]
+  main_only = true
+  time = false
+
+[color]
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[misc]
+  clean_on_exit = true

@@ -36,12 +36,22 @@ export const createAgentSchema = z.object({
 
 export const updateAgentSchema = createAgentSchema.partial()
 
+export const credentialTypeValues = ["AI_CLI_TOKEN", "API_KEY", "SECRET"] as const
+export const credentialProviderValues = ["ANTHROPIC", "OPENAI", "GOOGLE", "NONE"] as const
+export const credentialStatusValues = ["ACTIVE", "EXPIRED", "RATE_LIMITED", "REVOKED", "ERROR"] as const
+
 export const createCredentialSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
   value: z.string().min(1),
+  type: z.enum(credentialTypeValues).default("SECRET"),
+  provider: z.enum(credentialProviderValues).default("NONE"),
   scope: z.enum(["ORGANIZATION", "TEAM"]).default("ORGANIZATION"),
   team_id: z.string().uuid().optional(),
+  account_label: z.string().max(100).optional(),
+  account_email: z.string().email().optional(),
+  refresh_token: z.string().optional(),
+  token_expires_at: z.string().datetime().optional(),
 }).refine(
   (data) => {
     if (data.scope === "TEAM" && !data.team_id) return false
@@ -51,6 +61,15 @@ export const createCredentialSchema = z.object({
   {
     message: "team_id is required for TEAM scope and must be absent for ORGANIZATION scope",
     path: ["team_id"],
+  }
+).refine(
+  (data) => {
+    if (data.type !== "SECRET" && data.provider === "NONE") return false
+    return true
+  },
+  {
+    message: "provider is required for AI_CLI_TOKEN and API_KEY types",
+    path: ["provider"],
   }
 )
 

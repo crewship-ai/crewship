@@ -121,7 +121,7 @@ func TestIPCEndpoints(t *testing.T) {
 	}{
 		{"health", "GET", "/health", http.StatusOK, "status", "ok"},
 		{"agent status", "GET", "/agents/test-uuid/status", http.StatusOK, "agent_id", "test-uuid"},
-		{"agent start", "POST", "/agents/test-uuid/start", http.StatusAccepted, "agent_id", "test-uuid"},
+		{"agent start", "POST", "/agents/test-uuid/start", http.StatusServiceUnavailable, "error", "container provider not configured"},
 		{"agent stop", "POST", "/agents/test-uuid/stop", http.StatusOK, "agent_id", "test-uuid"},
 		{"container status", "GET", "/teams/team-uuid/container/status", http.StatusOK, "team_id", "team-uuid"},
 		{"container start", "POST", "/teams/team-uuid/container/start", http.StatusServiceUnavailable, "error", "container provider not configured"},

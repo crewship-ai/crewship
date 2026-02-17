@@ -11,7 +11,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/llmproxy"
 	"github.com/crewship-ai/crewship/internal/logcollector"
+	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -30,14 +32,22 @@ type Server struct {
 	storage      provider.StorageProvider
 	state        provider.StateProvider
 	logWriter    *logcollector.Writer
+	logReader    *logcollector.Reader
 	convStore    *conversation.Store
+	tokenPool    *llmproxy.TokenPool
+	tokenSyncer  *llmproxy.TokenSyncer
+	credMonitor  *llmproxy.CredentialMonitor
+	debugLogs    *logging.RingBuffer
 	startedAt    time.Time
+	runCtx       context.Context
+	runCancel    context.CancelFunc
 }
 
 type Deps struct {
 	Container provider.ContainerProvider
 	Storage   provider.StorageProvider
 	State     provider.StateProvider
+	DebugLogs *logging.RingBuffer
 }
 
 func (d *Deps) Close() {
@@ -57,15 +67,20 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	var sto provider.StorageProvider
 	var sta provider.StateProvider
 
+	var debugLogs *logging.RingBuffer
 	if deps != nil {
 		ctr = deps.Container
 		sto = deps.Storage
 		sta = deps.State
+		debugLogs = deps.DebugLogs
 	}
 
 	orch := orchestrator.New(ctr, sta, logger)
 	logW := logcollector.NewWriter(cfg.Storage.LogPath, logger)
+	logR := logcollector.NewReader(cfg.Storage.LogPath)
 	convStore := conversation.NewStore(cfg.Storage.BasePath, logger)
+
+	orch.SetConversationStore(convStore)
 
 	var jwtValidator *auth.JWTValidator
 	if cfg.Auth.JWTSecret != "" {
@@ -82,6 +97,36 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 	wsHub := ws.NewHub(logger, nil, jwtValidator)
 
+	tokenPool := llmproxy.NewTokenPool(logger)
+
+	var tokenSyncer *llmproxy.TokenSyncer
+	var credMonitor *llmproxy.CredentialMonitor
+	if cfg.LLMProxy.Enabled && cfg.Auth.InternalToken == "" {
+		logger.Warn("LLM proxy enabled but INTERNAL_TOKEN not set, proxy features disabled")
+	}
+	if cfg.LLMProxy.Enabled && cfg.Auth.InternalToken != "" {
+		internalToken := cfg.Auth.InternalToken
+		tokenSyncer = llmproxy.NewTokenSyncer(
+			tokenPool, cfg.Auth.NextjsURL, internalToken,
+			cfg.LLMProxy.TokenSyncInterval, logger,
+		)
+		credMonitor = llmproxy.NewCredentialMonitor(
+			tokenPool, cfg.Auth.NextjsURL, internalToken,
+			cfg.LLMProxy.HealthCheckInterval, logger,
+		)
+		credMonitor.SetOnChange(func(connID string, oldStatus, newStatus llmproxy.ConnectionStatus) {
+			wsHub.Broadcast("providers", ws.ServerMessage{
+				Type:    "provider_status",
+				Channel: "providers",
+				Payload: map[string]string{
+					"connection_id": connID,
+					"old_status":    string(oldStatus),
+					"new_status":    string(newStatus),
+				},
+			})
+		})
+	}
+
 	s := &Server{
 		mux:          mux,
 		ipcMux:       ipcMux,
@@ -93,7 +138,12 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		storage:      sto,
 		state:        sta,
 		logWriter:    logW,
+		logReader:    logR,
 		convStore:    convStore,
+		tokenPool:    tokenPool,
+		tokenSyncer:  tokenSyncer,
+		credMonitor:  credMonitor,
+		debugLogs:    debugLogs,
 	}
 
 	s.registerRoutes()
@@ -124,6 +174,10 @@ func (s *Server) Orchestrator() *orchestrator.Orchestrator {
 	return s.orchestrator
 }
 
+func (s *Server) TokenPool() *llmproxy.TokenPool {
+	return s.tokenPool
+}
+
 func (s *Server) ConversationStore() *conversation.Store {
 	return s.convStore
 }
@@ -136,6 +190,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.startedAt = time.Now()
 
 	ctx, cancel := context.WithCancel(ctx)
+	s.runCtx, s.runCancel = ctx, cancel
 	defer cancel()
 
 	errCh := make(chan error, 2)
@@ -155,6 +210,13 @@ func (s *Server) Start(ctx context.Context) error {
 
 	go s.wsHub.Run(ctx)
 
+	if s.tokenSyncer != nil {
+		go s.tokenSyncer.Run(ctx)
+	}
+	if s.credMonitor != nil {
+		go s.credMonitor.Run(ctx)
+	}
+
 	select {
 	case err := <-errCh:
 		cancel()
@@ -169,6 +231,9 @@ func (s *Server) Shutdown() error {
 	s.logger.Info("shutting down servers")
 
 	s.orchestrator.StopAccepting()
+	if s.runCancel != nil {
+		s.runCancel()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Server.ShutdownTimeout)
 	defer cancel()

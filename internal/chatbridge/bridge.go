@@ -11,6 +11,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -33,24 +34,41 @@ type SessionInfo struct {
 
 type Bridge struct {
 	orch      *orchestrator.Orchestrator
+	container provider.ContainerProvider
 	convStore *conversation.Store
 	logWriter *logcollector.Writer
 	resolver  SessionResolver
+	cfg       BridgeConfig
 	logger    *slog.Logger
+}
+
+type BridgeConfig struct {
+	DefaultMemoryMB int
+	DefaultCPUs     float64
 }
 
 func New(
 	orch *orchestrator.Orchestrator,
+	container provider.ContainerProvider,
 	convStore *conversation.Store,
 	logWriter *logcollector.Writer,
 	resolver SessionResolver,
+	cfg BridgeConfig,
 	logger *slog.Logger,
 ) *Bridge {
+	if cfg.DefaultMemoryMB == 0 {
+		cfg.DefaultMemoryMB = 512
+	}
+	if cfg.DefaultCPUs == 0 {
+		cfg.DefaultCPUs = 1.0
+	}
 	return &Bridge{
 		orch:      orch,
+		container: container,
 		convStore: convStore,
 		logWriter: logWriter,
 		resolver:  resolver,
+		cfg:       cfg,
 		logger:    logger,
 	}
 }
@@ -83,6 +101,25 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, conte
 
 	streamFn(ws.ChatEvent{Type: "thinking", Content: "Processing..."})
 
+	containerID := info.ContainerID
+	if containerID == "" && b.container != nil {
+		cID, err := b.container.EnsureTeamRuntime(ctx, provider.TeamConfig{
+			ID:       info.TeamID,
+			Slug:     info.TeamSlug,
+			MemoryMB: b.cfg.DefaultMemoryMB,
+			CPUs:     b.cfg.DefaultCPUs,
+		})
+		if err != nil {
+			streamFn(ws.ChatEvent{Type: "error", Content: "failed to start agent container"})
+			return fmt.Errorf("ensure team runtime: %w", err)
+		}
+		containerID = cID
+		b.logger.Info("team container ensured", "team_id", info.TeamID, "container_id", containerID[:12])
+	} else if containerID == "" {
+		streamFn(ws.ChatEvent{Type: "error", Content: "container provider not configured"})
+		return fmt.Errorf("no container provider and no container ID")
+	}
+
 	var fullResponse string
 
 	req := orchestrator.AgentRunRequest{
@@ -91,7 +128,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, sessionID, conte
 		TeamID:       info.TeamID,
 		TeamSlug:     info.TeamSlug,
 		SessionID:    sessionID,
-		ContainerID:  info.ContainerID,
+		ContainerID:  containerID,
 		CLIAdapter:   info.CLIAdapter,
 		SystemPrompt: info.SystemPrompt,
 		UserMessage:  content,

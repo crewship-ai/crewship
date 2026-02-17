@@ -140,11 +140,62 @@ export async function stopContainer(teamId: string) {
   );
 }
 
-/** List files in /output/ for a team. */
-export async function getTeamFiles(teamId: string) {
+/** List files in /output/ for a team, optionally filtered by agent slug. */
+export async function getTeamFiles(teamId: string, agentSlug?: string) {
+  const params = agentSlug ? `?agent_slug=${encodeURIComponent(agentSlug)}` : "";
   return crewshipdRequest<{ team_id: string; files: unknown[] }>(
-    `/teams/${encodeURIComponent(teamId)}/files`,
+    `/teams/${encodeURIComponent(teamId)}/files${params}`,
   );
+}
+
+/** Download a file from /output/ via IPC. Returns raw buffer for binary-safe streaming. */
+export async function downloadTeamFile(
+  teamId: string,
+  filePath: string,
+): Promise<{ ok: true; status: number; data: Buffer; contentType: string } | IPCErrorResponse> {
+  const target = parseSocketURL(CREWSHIPD_URL);
+
+  return new Promise((resolve, reject) => {
+    const reqOptions: http.RequestOptions = {
+      path: `/teams/${encodeURIComponent(teamId)}/files/download?path=${encodeURIComponent(filePath)}`,
+      method: "GET",
+      timeout: 30_000,
+    };
+
+    if ("socketPath" in target) {
+      reqOptions.socketPath = target.socketPath;
+    } else {
+      const url = new URL(target.host);
+      reqOptions.hostname = url.hostname;
+      reqOptions.port = url.port;
+    }
+
+    const req = http.request(reqOptions, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => {
+        const status = res.statusCode ?? 500;
+        const buf = Buffer.concat(chunks);
+        if (status < 400) {
+          resolve({
+            ok: true,
+            status,
+            data: buf,
+            contentType: res.headers["content-type"] ?? "application/octet-stream",
+          });
+        } else {
+          resolve({ ok: false, status, error: buf.toString() });
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy();
+      reject(new Error("File download timed out"));
+    });
+    req.end();
+  });
 }
 
 /** Read JSONL conversation messages for a session. */
@@ -170,6 +221,58 @@ export async function createSession(params: {
     method: "POST",
     body: params,
   });
+}
+
+/** Read agent logs from crewshipd. */
+export async function getAgentLogs(
+  agentId: string,
+  teamId: string,
+  offset = 0,
+  limit = 100,
+) {
+  return crewshipdRequest<{
+    agent_id: string;
+    logs: Array<{
+      ts: string;
+      level: string;
+      agent: string;
+      event: string;
+      content?: string;
+    }>;
+  }>(
+    `/agents/${encodeURIComponent(agentId)}/logs?team_id=${encodeURIComponent(teamId)}&offset=${offset}&limit=${limit}`,
+  );
+}
+
+/** Get crewshipd service logs from ring buffer. */
+export async function getDebugLogs(limit = 200, agentId?: string) {
+  let url = `/debug/logs?limit=${limit}`;
+  if (agentId) url += `&agent_id=${encodeURIComponent(agentId)}`;
+  return crewshipdRequest<{
+    logs: Array<{
+      time: string;
+      level: string;
+      msg: string;
+      attrs?: Record<string, string>;
+    }>;
+  }>(url);
+}
+
+/** Get comprehensive debug info from crewshipd. */
+export async function getDebugInfo() {
+  return crewshipdRequest<{
+    status: string;
+    uptime: string;
+    uptime_secs: number;
+    connections: number;
+    started_at: string;
+    providers: Record<string, string>;
+    container_available: boolean;
+    storage_available: boolean;
+    state_available: boolean;
+    llm_proxy_enabled: boolean;
+    config: Record<string, unknown>;
+  }>("/debug/info");
 }
 
 /** Check if crewshipd is running and healthy. */

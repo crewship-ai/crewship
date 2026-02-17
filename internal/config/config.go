@@ -18,6 +18,7 @@ type Config struct {
 	State     StateConfig     `yaml:"state"`
 	Logging   LoggingConfig   `yaml:"logging"`
 	Auth      AuthConfig      `yaml:"auth"`
+	LLMProxy  LLMProxyConfig  `yaml:"llm_proxy"`
 }
 
 type ServerConfig struct {
@@ -62,6 +63,12 @@ type AuthConfig struct {
 	InternalToken string        `yaml:"internal_token"`
 }
 
+type LLMProxyConfig struct {
+	Enabled          bool          `yaml:"enabled"`
+	TokenSyncInterval time.Duration `yaml:"token_sync_interval"`
+	HealthCheckInterval time.Duration `yaml:"health_check_interval"`
+}
+
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -96,6 +103,11 @@ func Default() *Config {
 		Auth: AuthConfig{
 			WSTokenExpiry: 5 * time.Minute,
 			NextjsURL:     "http://localhost:3000",
+		},
+		LLMProxy: LLMProxyConfig{
+			Enabled:             true,
+			TokenSyncInterval:   30 * time.Second,
+			HealthCheckInterval: 60 * time.Second,
 		},
 	}
 }

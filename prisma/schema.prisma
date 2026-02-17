@@ -144,6 +144,27 @@ enum CredentialScope {
   TEAM
 }
 
+enum CredentialType {
+  AI_CLI_TOKEN
+  API_KEY
+  SECRET
+}
+
+enum CredentialProvider {
+  ANTHROPIC
+  OPENAI
+  GOOGLE
+  NONE
+}
+
+enum CredentialStatus {
+  ACTIVE
+  EXPIRED
+  RATE_LIMITED
+  REVOKED
+  ERROR
+}
+
 // ============================================================
 // 1. USER (NextAuth.js Prisma adapter compatible)
 // ============================================================
@@ -168,8 +189,8 @@ model User {
   triggered_runs      AgentRun[]               @relation("TriggeredBy")
   config_changes      AgentConfigHistory[]     @relation("ChangedBy")
   audit_logs          AuditLog[]
-  authored_skills     Skill[]                  @relation("SkillAuthor")
-  skill_reviews       SkillReview[]
+  authored_skills        Skill[]                  @relation("SkillAuthor")
+  skill_reviews          SkillReview[]
 
   @@map("users")
 }
@@ -242,8 +263,8 @@ model Organization {
   runs            AgentRun[]
   audit_logs      AuditLog[]
   subscription    Subscription?
-  flag_overrides  FeatureFlagOverride[]
-  delegation_logs DelegationLog[]
+  flag_overrides       FeatureFlagOverride[]
+  delegation_logs      DelegationLog[]
 
   @@map("organizations")
 }
@@ -528,17 +549,29 @@ model AgentSkill {
 // ============================================================
 
 model Credential {
-  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  org_id          String          @db.Uuid
-  team_id         String?         @db.Uuid
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String             @db.Uuid
+  team_id         String?            @db.Uuid
   name            String
   description     String?
-  encrypted_value String          @db.Text
-  scope           CredentialScope @default(ORGANIZATION)
-  created_by      String          @db.Uuid
-  created_at      DateTime        @default(now()) @db.Timestamptz
-  updated_at      DateTime        @default(now()) @updatedAt @db.Timestamptz
-  deleted_at      DateTime?       @db.Timestamptz
+  encrypted_value String             @db.Text
+  scope           CredentialScope    @default(ORGANIZATION)
+  type            CredentialType     @default(SECRET)
+  provider        CredentialProvider @default(NONE)
+  status          CredentialStatus   @default(ACTIVE)
+
+  encrypted_refresh_token String?    @db.Text
+  token_expires_at        DateTime?  @db.Timestamptz
+  account_label           String?
+  account_email           String?
+
+  last_checked_at DateTime?          @db.Timestamptz
+  last_error      String?
+
+  created_by      String             @db.Uuid
+  created_at      DateTime           @default(now()) @db.Timestamptz
+  updated_at      DateTime           @default(now()) @updatedAt @db.Timestamptz
+  deleted_at      DateTime?          @db.Timestamptz
 
   organization      Organization      @relation(fields: [org_id], references: [id], onDelete: Cascade)
   team              Team?             @relation(fields: [team_id], references: [id], onDelete: SetNull)
@@ -548,6 +581,7 @@ model Credential {
   @@unique([org_id, name], name: "uq_credential_name")
   @@index([org_id], name: "idx_credential_org")
   @@index([team_id], name: "idx_credential_team")
+  @@index([org_id, type, provider], name: "idx_credential_type_provider")
   @@map("credentials")
 }
 

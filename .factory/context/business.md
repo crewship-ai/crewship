@@ -124,45 +124,71 @@ analyze WHY, decide WHAT to do, and write a report.
 
 ### OpenClaw vs Crewship — detailni porovnani
 
-> OpenClaw (163k+ GitHub stars, MIT, Feb 2026) je open-source personal AI assistant
+> **Kompletni analyza:** `.factory/context/STRATEGY-2026.md`
+>
+> OpenClaw (157k+ GitHub stars, MIT, Feb 2026) je open-source personal AI assistant
 > od Petera Steinbergera. Bezi lokalne na desktopu uzivatele, pripojuje se na messaging
-> apps (WhatsApp, Telegram, Discord, Slack, Signal), ma 53+ skills a 100+ AgentSkills.
+> apps (WhatsApp, Telegram, Discord, Slack, Signal), ma 700+ skills v ClawHub marketplace.
 
 **Positioning:**
 ```
 OpenClaw  = PERSONAL (single-user, bezi na desktopu, bez RBAC/audit)
-Crewship  = BUSINESS (multi-tenant, container isolation, RBAC, audit, webhooky)
+Crewship  = BUSINESS + PERSONAL (multi-tenant, container isolation, RBAC, audit, self-hosted)
 ```
+
+**Bezpecnostni krize OpenClaw (unor 2026):**
+
+OpenClaw prosla masivni bezpecnostni krizi. Klicove incidenty:
+- **CVE-2026-25253** (CVSS 8.8) -- one-click RCE pres malicious link
+- **42,900 exposed instanci** na internetu (Shodan), 15,200 zranitelnych na RCE
+- **341+ malicious skills** na ClawHub (Atomic Stealer malware, koordinovany utok)
+- **20% vsech skills** obsahuje malware, **36% ma prompt injection** zranitelnosti
+- **Credentials v plaintext** -- Moltbook leakl 32,000 agent credentials
+- Varovani od: **Kaspersky, MITRE ATLAS, Snyk, Cisco, Koi Security**
+
+Community reakce: "Anatomy of a Dumpster Fire" (Medium), "Not ready for serious work" (HN).
 
 **Detailni feature porovnani:**
 
 | Oblast | OpenClaw | Crewship | Vyhoda |
 |---|---|---|---|
-| Cilovy uzivatel | Jednotlivec (developer/power user) | Firma (20-500 lidi) | Crewship: sirsi trh |
-| Instalace | npm/Docker na desktop | Docker Compose / Coolify / K8s | Crewship: enterprise deploy |
-| Security | Bezi na hostu (zadny sandbox!) | Docker kontejner, non-root, --internal | Crewship: bezpecnejsi |
+| Cilovy uzivatel | Jednotlivec (developer/power user) | Kdokoliv (solo dev az firma 500 lidi) | Crewship: sirsi trh |
+| Instalace | npm + config + messaging setup | `brew install crewship && crewship start` | Crewship: jednodussi |
+| Security | Bezi NA HOSTU (zadny sandbox!) | Docker kontejner, non-root, --internal | Crewship: bezpecnejsi |
 | Credentials | Config soubor (plaintext!) | AES-256-GCM + key versioning | Crewship: sifrovane |
 | API key management | 1 klic per provider | Credential pool (multi-key, failover) | Crewship: enterprise |
 | RBAC | Zadne (single user) | 5 roli, per-team izolace | Crewship: enterprise |
 | Audit | Zadny | Immutable, append-only, queryable | Crewship: compliance |
 | Multi-tenant | 1 instance = 1 uzivatel | 1 instance = cela firma | Crewship: efektivnejsi |
+| UI | ZADNE vlastni UI (messaging-only) | Full web dashboard (chat, files, logs, settings) | Crewship |
+| Orchestrace | ZADNA (flat, 1 agent) | CEO → Lidr → Worker hierarchie | Crewship |
+| Cost control | ZADNY ($500-750/mesic bez limitu) | Per-agent budgety, alerting | Crewship |
+| Network control | ZADNY (full internet access) | Per-agent: internet ON/OFF, whitelist, VPN | Crewship |
+| Skills bezpecnost | 20% malware, zadny sandbox | Sandboxed, curated, permissions model | Crewship |
 | Messaging | 50+ platform (WhatsApp, Telegram...) | Web UI (MVP), messaging Phase 2 | OpenClaw: vice kanalu |
-| Skills | 53 built-in + community | Bundled + managed + marketplace | Srovnatelne |
-| Persistent memory | Across sessions | /workspace/ + JSONL | Srovnatelne |
+| Persistent memory | Across sessions | /workspace/.claude/, agent memory | Srovnatelne |
 | Always-on | Daemon na desktopu | Agent loop mode + webhooky | Crewship: silnejsi triggery |
 | Desktop access | Clipboard, Finder, System Prefs | Kontejner only (bezpecnejsi) | Trade-off |
-| Cena | Free (BYOK) | Free (BYOK) + Enterprise tiers | Srovnatelne |
-| Community | 163k+ stars, massive hype | Novy projekt | OpenClaw: vetsi komunita |
+| Cena | Free (BYOK) + $500+/m API | Free (BYOK) + Team $15-30/user + Enterprise | Crewship: transparentnejsi |
+| Community | 157k+ stars, massive hype | Novy projekt | OpenClaw: vetsi komunita |
+| Codebase | 430,000+ LOC | ~15,000 LOC | Crewship: cistsi, auditovatelnejsi |
 
-**Klicovy insight:** OpenClaw je skvely OSOBNI asistent. Crewship je pro FIRMY.
-Nekompetujeme primo — ruzne segmenty. Uzivatel muze mit OpenClaw na svem notebooku
-A jeho firma muze pouzivat Crewship pro teamove agenty.
+**Co komunita na OpenClaw postrada (a Crewship resi):**
+1. Sandboxing/isolation → Docker kontejnery
+2. Cost control → per-agent budgety
+3. Team/org support → multi-user RBAC
+4. Jednoduchy setup → single binary (`brew install crewship`)
+5. Audit trail → append-only log
+6. Vetted skills → curated marketplace se sandbox enforcement
+7. Visual orchestration → dashboard + hierarchie
+8. Vlastni UI → full web dashboard
 
 **Co se muzeme naucit od OpenClaw:**
 - Skills format (markdown + YAML metadata) — kompatibilni format
 - Always-on daemon koncept → agent loop mode
 - Messaging-first UX → Phase 2 messaging integrace
 - Community growth (README, examples, quick start) → marketing strategie
+- Viralni moment (jednoduchy "wow" prikaz) → `brew install crewship`
 
 ### Docker cagent vs Crewship
 

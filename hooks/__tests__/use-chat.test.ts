@@ -85,9 +85,8 @@ describe("useChat", () => {
     act(() => {
       onMessage({
         type: "chat_event",
-        event_type: "text",
-        content: "Hello ",
-        session_id: "s1",
+        channel: "session:s1",
+        payload: { type: "text", content: "Hello " },
       })
     })
 
@@ -107,11 +106,11 @@ describe("useChat", () => {
     })
 
     act(() => {
-      onMessage({ type: "chat_event", event_type: "text", content: "response", session_id: "s1" })
+      onMessage({ type: "chat_event", channel: "session:s1", payload: { type: "text", content: "response" } })
     })
 
     act(() => {
-      onMessage({ type: "chat_event", event_type: "done", session_id: "s1" })
+      onMessage({ type: "chat_event", channel: "session:s1", payload: { type: "done" } })
     })
 
     expect(result.current.isStreaming).toBe(false)
@@ -128,9 +127,8 @@ describe("useChat", () => {
     act(() => {
       onMessage({
         type: "chat_event",
-        event_type: "error",
-        content: "Something went wrong",
-        session_id: "s1",
+        channel: "session:s1",
+        payload: { type: "error", content: "Something went wrong" },
       })
     })
 
@@ -149,9 +147,8 @@ describe("useChat", () => {
     act(() => {
       onMessage({
         type: "chat_event",
-        event_type: "text",
-        content: "wrong session",
-        session_id: "s2",
+        channel: "session:s2",
+        payload: { type: "text", content: "wrong session" },
       })
     })
 
