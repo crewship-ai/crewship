@@ -1,9 +1,9 @@
 "use client"
 
 import { Suspense, useState, type FormEvent } from "react"
-import { signIn } from "next-auth/react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Ship } from "lucide-react"
+import { useAuth } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -25,22 +25,19 @@ function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const registered = searchParams.get("registered") === "true"
+  const { signIn } = useAuth()
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
     setLoading(true)
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    })
+    const result = await signIn(email, password)
 
     setLoading(false)
 
-    if (result?.error) {
-      setError("Invalid email or password")
+    if (!result.ok) {
+      setError(result.error ?? "Invalid email or password")
       return
     }
 

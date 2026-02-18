@@ -191,8 +191,8 @@ func TestValidationEmptySocketPath(t *testing.T) {
 
 func TestDefaultNextjsURL(t *testing.T) {
 	cfg := Default()
-	if cfg.Auth.NextjsURL != "http://localhost:3000" {
-		t.Errorf("expected default NextjsURL, got %q", cfg.Auth.NextjsURL)
+	if cfg.Auth.NextjsURL != "http://localhost:8080" {
+		t.Errorf("expected default NextjsURL http://localhost:8080, got %q", cfg.Auth.NextjsURL)
 	}
 }
 

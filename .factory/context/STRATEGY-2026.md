@@ -8,6 +8,71 @@ a community feedbacku z unora 2026.
 
 ---
 
+## 0. Implementation Status (stav k 2026-02-17)
+
+> **DULEZITE:** Tento dokument obsahuje jak implementovane features, tak planovane.
+> Tato sekce jasne oddeli co uz funguje od toho, co je aspiracni.
+
+### IMPLEMENTOVANO (funguje, otestovano)
+
+| Feature | Detail |
+|---|---|
+| Single Go binary | 30MB, `crewship start`, embedded SQLite + static UI |
+| SQLite default DB | Pure-Go driver (modernc.org/sqlite), 20-table migration, WAL mode |
+| Embedded Next.js UI | Static export via `embed.FS`, SPA routing funguje |
+| 50+ REST API routes | Full CRUD: workspaces, crews, agents, credentials, skills, runs, audit |
+| JWT auth (NextAuth-compat) | Signup, login, session, signout s CSRF cookie validaci |
+| RBAC middleware | 5 roli (Owner/Admin/Manager/Member/Viewer) na kazdem endpointu |
+| AES-256-GCM credentials | Sifrovane ulozeni, key versioning (`v1:base64data`), Go/TS kompatibilni |
+| Docker container isolation | Non-root (UID 1001), `--internal` network, provider interface |
+| Audit log | Queryable s filtry (akce, uzivatel, rozsah datumu) |
+| WebSocket gateway | Go native, goroutines |
+| CLI commands | `start`, `version`, `doctor` |
+| Docker check | `crewship start` odmitne bez Dockeru (s `--no-docker` escape hatch) |
+| CI pipeline | Lint, typecheck, build, test (pnpm + Go) na kazdem PR |
+| E2E testy | 25 test cases, vsechny passing |
+
+### PLANOVANO (zatim neexistuje, neni implementovano)
+
+| Feature | Popisovano v sekci | Priorita |
+|---|---|---|
+| GoReleaser + `brew install` | 4.2, 4.6 | **Faze 1 -- DALSI KROK** |
+| Onboarding wizard | 4.3 | Faze 1 |
+| Skill marketplace (Skill Store UI) | 5.2-5.5 | Faze 1 |
+| 15-20 official skills | 5.4 | Faze 1 |
+| Skill sandbox enforcement (permissions model) | 5.3, 5.5 | Faze 1 |
+| Per-agent network policies (UI) | 6.1-6.3 | Faze 1 |
+| Per-agent cost budgety + alerting | 7.2 | Faze 1 |
+| LLM API allowlist (iptables granularni) | 6.2 | Faze 1 |
+| `crewship stop/status/logs/update` CLI | 9.3 | Faze 1 |
+| Install script (`get.crewship.ai`) | 4.2 | Faze 1 |
+| Landing page (crewship.ai) | 8 (Faze 1) | Faze 1 |
+| Immutable audit log (`chattr +a`) | 2.1 | Faze 1 |
+| Cloud tier (crewship.ai hosted) | 7.1-7.2 | Faze 2 |
+| Community skill marketplace | 7.2 | Faze 2 |
+| Messaging integrace (Slack, Discord) | 8 (Faze 2) | Faze 2 |
+| Lead orchestrace (multi-agent runtime) | 8 (Faze 2) | Faze 2 |
+| Stripe billing | 8 (Faze 2) | Faze 2 |
+| Coordinator orchestrace | 8 (Faze 3) | Faze 3 |
+| Helm chart pro K8s | 8 (Faze 3) | Faze 3 |
+| SSO/SAML (Okta, Azure AD) | 8 (Faze 3) | Faze 3 |
+| GPU node support (Ollama) | 8 (Faze 3) | Faze 3 |
+
+### CO TVRDIME ALE ZATIM NEMAME (pozor na marketing)
+
+Tyto features jsou v dokumentech popisovany jako existujici/hotove, ale **nejsou implementovane**.
+Pri marketingu a komunikaci je potreba byt uprimny:
+
+1. **"Curated skill marketplace"** -- zadny marketplace, zadny review proces, zadne skills
+2. **"Cost control s budgety"** -- zadny cost tracking, zadne limity, zadne alerty
+3. **"Per-agent network policies"** -- `--internal` network blokuje vse, ale neni granularni allowlist
+4. **"Multi-agent orchestrace"** -- DB schema existuje, ale zadna runtime logika
+5. **"brew install crewship"** -- binary se buildne, ale neni distribuovany (GoReleaser v priprave)
+6. **"Immutable audit log"** -- je to normalni DB tabulka, ne `chattr +a`
+7. **"Vetted skills"** -- zadne skills, zadny vetting
+
+---
+
 ## 1. OpenClaw -- Hluboka analyza
 
 ### 1.1 Proc je OpenClaw populární (157k+ GitHub stars za 60 dni)
@@ -105,12 +170,12 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 |---|---|---|
 | Zadna container isolation | Docker kontejnery pro kazdeho agenta, non-root UID 1001, `--internal` network | ✅ Implementovano |
 | Credentials v plaintext | AES-256-GCM sifrovani s key versioning (`v1:base64data`) | ✅ Implementovano |
-| Malicious skills (zadny sandbox) | Sandboxed skills s deklarovanymi permissions (filesystem, network, secrets) | 📋 Faze 1 |
-| Zadny audit trail | Append-only audit log, immutable, queryable | ✅ Implementovano |
+| Malicious skills (zadny sandbox) | Sandboxed skills s deklarovanymi permissions (filesystem, network, secrets) | 📋 NENI -- Faze 1 |
+| Zadny audit trail | Queryable audit log (DB tabulka, NE immutable/chattr +a) | ✅ Implementovano (bez immutability) |
 | Prompt injection → full access | Agent v kontejneru nemuze uniknout ani kdyz je injected. Container = hranice. | ✅ Architektura |
 | Exposed control panels | Web UI na localhost, auth required, RBAC na kazdem endpointu | ✅ Implementovano |
 | Session cookie theft | Zadny browser relay server. Agenti bezi v kontejnerech, ne na hostu. | ✅ Architektura |
-| Supply-chain attacks (skills) | Curated official skills + community review + sandbox enforcement | 📋 Faze 1 |
+| Supply-chain attacks (skills) | Curated official skills + community review + sandbox enforcement | 📋 NENI -- Faze 1 |
 
 ### 2.2 Feature porovnani
 
@@ -214,7 +279,7 @@ dnf install crewship
 winget install crewship
 
 # Docker (fallback)
-docker run -d -p 3001:3001 --name crewship ghcr.io/crewship-ai/crewship:latest
+docker run -d -p 8080:8080 --name crewship ghcr.io/crewship-ai/crewship:latest
 ```
 
 ### 4.3 Co `crewship start` udela
@@ -223,8 +288,8 @@ docker run -d -p 3001:3001 --name crewship ghcr.io/crewship-ai/crewship:latest
 1. Detekuje Docker (nainstaluje pokud chybi? -- TBD)
 2. Spusti embedded web server (Next.js static build)
 3. Inicializuje SQLite databazi (~/.crewship/crewship.db)
-4. Spusti crewshipd (WebSocket, Docker orchestrace)
-5. Otevre http://localhost:3001 v prohlizeci
+4. Spusti crewshipd engine (WebSocket, Docker orchestrace)
+5. Otevre http://localhost:8080 v prohlizeci
 6. Uzivatel vidi onboarding wizard
 ```
 
@@ -245,7 +310,7 @@ crewship (Go binary, ~50-80 MB)
   │     ├── SQLite (default, zero deps) -- ~/.crewship/crewship.db
   │     └── PostgreSQL (opt-in: crewship start --db postgres://...)
   ├── CLI:
-  │     ├── crewship start [--port 3001] [--db sqlite|postgres://...]
+  │     ├── crewship start [--port 8080] [--db sqlite|postgres://...]
   │     ├── crewship stop
   │     ├── crewship status
   │     ├── crewship logs [--follow]
@@ -577,20 +642,21 @@ Crewship je jediny, kdo kombinuje **granularni network control** s **klikacim UI
 
 ## 9. Technicka rozhodnuti k implementaci
 
-### 9.1 SQLite integrace
+### 9.1 SQLite integrace ✅ IMPLEMENTOVANO
 
-**Pristup:** Prisma multi-provider (sqlite + postgresql)
+**Pristup:** Go `database/sql` s pure-Go SQLite driverem (`modernc.org/sqlite`).
+Prisma schema se pouziva pouze pro TypeScript type generation.
+Go migration system (`internal/database/migrate.go`) spravuje schema pro oba providery.
 
-```prisma
-// prisma/schema.prisma
-datasource db {
-  provider = env("DB_PROVIDER")  // "sqlite" nebo "postgresql"
-  url      = env("DATABASE_URL") // "file:./crewship.db" nebo "postgresql://..."
+```go
+// internal/database/database.go
+func Open(databaseURL string) (*sql.DB, error) {
+    if strings.HasPrefix(databaseURL, "file:") || strings.HasSuffix(databaseURL, ".db") {
+        return sql.Open("sqlite", databaseURL) // modernc.org/sqlite
+    }
+    return sql.Open("postgres", databaseURL)
 }
 ```
-
-**Alternativa:** Pokud Prisma multi-provider je problematicky, pouzit
-`embedded-postgres-go` pro zero-deps PostgreSQL. Ale SQLite je cistsi.
 
 ### 9.2 Embedded Next.js
 
