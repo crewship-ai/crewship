@@ -61,7 +61,10 @@ export default function HistoryPage({ params }: { params: Promise<{ agentId: str
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setLoading(false)
+      return
+    }
     let cancelled = false
 
     async function fetchHistory() {

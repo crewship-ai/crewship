@@ -423,11 +423,13 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
   )
 }
 
-function MessageBubble({ msg, onCopy, onFileClick }: {
+interface MessageBubbleProps {
   msg: ChatMessage
   onCopy: (content: string) => void
   onFileClick: (fileName: string) => void
-}) {
+}
+
+function MessageBubble({ msg, onCopy, onFileClick }: MessageBubbleProps) {
   // Thinking block
   if (msg.eventType === "thinking") {
     return (
@@ -555,7 +557,11 @@ function MessageBubble({ msg, onCopy, onFileClick }: {
   )
 }
 
-function DelegationBlock({ content }: { content: string }) {
+interface DelegationBlockProps {
+  content: string
+}
+
+function DelegationBlock({ content }: DelegationBlockProps) {
   const targetMatch = content.match(/to\s+([^]]+?)(?:\s*\(|$)/)
   const taskMatch = content.match(/"([^"]+)"/)
   const completedMatch = content.match(/Completed in (.+)/)

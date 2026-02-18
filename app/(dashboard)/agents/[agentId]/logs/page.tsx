@@ -43,7 +43,12 @@ const EVENT_COLORS: Record<string, string> = {
   error: "text-red-400",
 }
 
-export default function LogsPage({ params }: { params: Promise<{ agentId: string }> }) {
+interface LogsPageProps {
+  params: Promise<{ agentId: string }>
+}
+
+/** Agent logs viewer with dark terminal style, filtering, and auto-refresh. */
+export default function LogsPage({ params }: LogsPageProps) {
   const { agentId } = use(params)
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [logs, setLogs] = useState<LogEntry[]>([])

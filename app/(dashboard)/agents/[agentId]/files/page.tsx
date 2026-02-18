@@ -63,7 +63,12 @@ function formatModTime(modTime: string): string {
   return "Yesterday"
 }
 
-export default function FilesPage({ params }: { params: Promise<{ agentId: string }> }) {
+interface FilesPageProps {
+  params: Promise<{ agentId: string }>
+}
+
+/** Agent output files browser with real-time fsnotify updates. */
+export default function FilesPage({ params }: FilesPageProps) {
   const { agentId } = use(params)
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [files, setFiles] = useState<FileEntry[]>([])
@@ -82,7 +87,7 @@ export default function FilesPage({ params }: { params: Promise<{ agentId: strin
         const res = await fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
         if (!res.ok) { if (!cancelled) setError("Failed to load files"); return }
         const data: FileEntry[] = await res.json()
-        if (!cancelled) setFiles(data)
+        if (!cancelled) { setFiles(data); setError(null) }
       } catch { if (!cancelled) setError("Network error. Is crewshipd running?") }
       finally { if (!cancelled) setLoading(false) }
     }

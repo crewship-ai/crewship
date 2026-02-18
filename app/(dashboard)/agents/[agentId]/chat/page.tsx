@@ -22,10 +22,13 @@ interface SessionInfo {
   message_count: number
 }
 
-export default function ChatPage({ params, searchParams }: {
+interface ChatPageProps {
   params: Promise<{ agentId: string }>
   searchParams: Promise<{ session?: string; workspace_id?: string }>
-}) {
+}
+
+/** Agent chat page with session selector and split-view chat panel. */
+export default function ChatPage({ params, searchParams }: ChatPageProps) {
   const { agentId } = use(params)
   const { session: sessionParam, workspace_id: wsParam } = use(searchParams)
   const { workspaceId: storeWorkspaceId } = useWorkspace()
@@ -71,7 +74,8 @@ export default function ChatPage({ params, searchParams }: {
         console.error("Failed to fetch sessions:", err)
         setSessionsLoaded(true)
       })
-  }, [agentId, workspaceId, activeSessionId])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- activeSessionId intentionally excluded to avoid refetch loop
+  }, [agentId, workspaceId])
 
   useEffect(() => {
     if (sessionsLoaded && !activeSessionId) {
