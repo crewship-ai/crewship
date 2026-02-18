@@ -79,9 +79,14 @@ export default function LogsPage({ params }: LogsPageProps) {
   }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (wsLoading) return
+    if (!workspaceId) {
+      setLoading(false)
+      setError("No workspace selected")
+      return
+    }
     fetchLogs()
-  }, [workspaceId, fetchLogs])
+  }, [workspaceId, wsLoading, fetchLogs])
 
   useEffect(() => {
     if (!autoRefresh || !workspaceId) return

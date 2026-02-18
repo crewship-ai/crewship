@@ -83,7 +83,12 @@ export default function FilesPage({ params }: FilesPageProps) {
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (wsLoading) return
+    if (!workspaceId) {
+      setLoading(false)
+      setError("No workspace selected")
+      return
+    }
     let cancelled = false
     async function fetchFiles() {
       try {
@@ -97,7 +102,7 @@ export default function FilesPage({ params }: FilesPageProps) {
     fetchFiles()
     const interval = setInterval(fetchFiles, 10000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [agentId, workspaceId])
+  }, [agentId, workspaceId, wsLoading])
 
   const handleFileSelect = useCallback((path: string) => {
     const file = files.find((f) => f.path === path)
@@ -202,6 +207,8 @@ export default function FilesPage({ params }: FilesPageProps) {
                 <div className="flex items-center gap-2 shrink-0 ml-4">
                   <button className="text-xs text-primary hover:underline" onClick={(e) => { e.stopPropagation(); handleDownload(f.path, f.name) }}>Download</button>
                   <button
+                    aria-label="Copy file path"
+                    title="Copy file path"
                     className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
                     onClick={(e) => { e.stopPropagation(); handleCopyPath(f.path) }}
                   >
