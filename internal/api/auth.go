@@ -8,16 +8,47 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db        *sql.DB
+	logger    *slog.Logger
+	validator *auth.JWTValidator
 }
 
-func NewAuthHandler(db *sql.DB, logger *slog.Logger) *AuthHandler {
-	return &AuthHandler{db: db, logger: logger}
+func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator) *AuthHandler {
+	return &AuthHandler{db: db, logger: logger, validator: validator}
+}
+
+func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, r *http.Request, userID, fullName, email string) error {
+	token, err := h.validator.CreateToken(&auth.Claims{
+		ID:    userID,
+		Name:  fullName,
+		Email: email,
+	})
+	if err != nil {
+		return err
+	}
+
+	cookieName := "authjs.session-token"
+	isSecure := false
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		cookieName = "__Secure-authjs.session-token"
+		isSecure = true
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     cookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   isSecure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   30 * 24 * 60 * 60,
+	})
+	return nil
 }
 
 type signupRequest struct {
@@ -117,15 +148,26 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.setSessionCookie(w, r, userID, req.FullName, req.Email); err != nil {
+		h.logger.Error("set session cookie after signup", "error", err)
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]string{"id": userID, "email": req.Email})
 }
 
 func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get("Authorization")
-	if token == "" {
+	user := UserFromContext(r.Context())
+	if user == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
-	token = strings.TrimPrefix(token, "Bearer ")
-	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+	// Return the session cookie value as the ws token.
+	// The WebSocket hub validates it using the same JWTValidator.
+	for _, name := range []string{"__Secure-authjs.session-token", "authjs.session-token"} {
+		if c, err := r.Cookie(name); err == nil && c.Value != "" {
+			writeJSON(w, http.StatusOK, map[string]string{"token": c.Value})
+			return
+		}
+	}
+	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 }

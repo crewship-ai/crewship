@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Bot, Hourglass, Key, Activity, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
@@ -38,15 +39,34 @@ interface Credential {
 }
 
 export default function DashboardPage() {
+  const router = useRouter()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [agents, setAgents] = useState<Agent[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState("All")
+  const [onboardingChecked, setOnboardingChecked] = useState(false)
+
+  // Check onboarding status on mount
+  useEffect(() => {
+    fetch("/api/v1/onboarding/status")
+      .then((res) => {
+        if (!res.ok) return null
+        return res.json()
+      })
+      .then((data) => {
+        if (data && !data.completed) {
+          router.push("/onboarding")
+          return
+        }
+        setOnboardingChecked(true)
+      })
+      .catch(() => setOnboardingChecked(true))
+  }, [router])
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId || !onboardingChecked) return
 
     let cancelled = false
 
@@ -84,7 +104,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [workspaceId])
+  }, [workspaceId, onboardingChecked])
 
   const isLoading = wsLoading || loading
 

@@ -70,8 +70,8 @@ export function SessionsPageClient() {
           if (!cancelled) setError("Failed to load chats")
           return
         }
-        const data: Session[] = await res.json()
-        if (!cancelled) setSessions(data)
+        const data = await res.json()
+        if (!cancelled) setSessions(Array.isArray(data) ? data : [])
       } catch {
         if (!cancelled) setError("Network error. Please try again.")
       } finally {

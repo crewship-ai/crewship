@@ -127,7 +127,7 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT w.id, w.name, w.slug, w.plan, w.created_at, w.updated_at,
+		SELECT w.id, w.name, w.slug, w.created_at, w.updated_at,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count
@@ -143,21 +143,20 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type wsRow struct {
-		ID          string  `json:"id"`
-		Name        string  `json:"name"`
-		Slug        string  `json:"slug"`
-		Plan        *string `json:"plan"`
-		CreatedAt   string  `json:"created_at"`
-		UpdatedAt   string  `json:"updated_at"`
-		MemberCount int     `json:"_count_members"`
-		AgentCount  int     `json:"_count_agents"`
-		CrewCount   int     `json:"_count_crews"`
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Slug        string `json:"slug"`
+		CreatedAt   string `json:"created_at"`
+		UpdatedAt   string `json:"updated_at"`
+		MemberCount int    `json:"_count_members"`
+		AgentCount  int    `json:"_count_agents"`
+		CrewCount   int    `json:"_count_crews"`
 	}
 
 	var result []wsRow
 	for rows.Next() {
 		var ws wsRow
-		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Plan,
+		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug,
 			&ws.CreatedAt, &ws.UpdatedAt,
 			&ws.MemberCount, &ws.AgentCount, &ws.CrewCount); err != nil {
 			h.logger.Error("scan workspace (admin)", "error", err)

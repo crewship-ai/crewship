@@ -141,8 +141,15 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 		email = r.FormValue("email")
 		password = r.FormValue("password")
 		csrfToken = r.FormValue("csrfToken")
-		isJSON = r.FormValue("json") == "true"
 	}
+
+	// Respond with JSON when any of these conditions are met:
+	// - Content-Type is JSON
+	// - form field json=true
+	// - form field redirect=false (next-auth/react SDK convention)
+	wantJSON := isJSON ||
+		r.FormValue("json") == "true" ||
+		r.FormValue("redirect") == "false"
 
 	if subtle.ConstantTimeCompare([]byte(csrfToken), []byte(csrfCookie.Value)) != 1 {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Invalid CSRF token"})
@@ -150,7 +157,7 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 	}
 
 	if email == "" || password == "" {
-		if isJSON {
+		if wantJSON {
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"error": "CredentialsSignin",
 				"ok":    false,
@@ -167,7 +174,7 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 		"SELECT id, full_name, hashed_password FROM users WHERE email = ?", email,
 	).Scan(&userID, &fullName, &hashedPw)
 	if err != nil || bcrypt.CompareHashAndPassword([]byte(hashedPw), []byte(password)) != nil {
-		if isJSON {
+		if wantJSON {
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"error": "CredentialsSignin",
 				"ok":    false,
@@ -207,7 +214,7 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 		callbackUrl = "/"
 	}
 
-	if isJSON || r.FormValue("redirect") == "false" {
+	if wantJSON {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"ok":     true,
 			"url":    callbackUrl,
@@ -242,6 +249,15 @@ func (h *NextAuthHandler) SignOut(w http.ResponseWriter, r *http.Request) {
 	} else {
 		http.Redirect(w, r, "/login", http.StatusFound)
 	}
+}
+
+// SignIn redirects to the login page (GET /api/auth/signin)
+func (h *NextAuthHandler) SignIn(w http.ResponseWriter, r *http.Request) {
+	callbackUrl := r.URL.Query().Get("callbackUrl")
+	if callbackUrl == "" {
+		callbackUrl = "/"
+	}
+	http.Redirect(w, r, "/login?callbackUrl="+callbackUrl, http.StatusFound)
 }
 
 // Error shows auth error (GET /api/auth/error)

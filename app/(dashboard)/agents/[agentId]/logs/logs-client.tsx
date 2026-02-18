@@ -81,8 +81,8 @@ export function LogsPageClient() {
         setError("Failed to load logs")
         return
       }
-      const data: LogEntry[] = await res.json()
-      setLogs(data)
+      const data = await res.json()
+      setLogs(Array.isArray(data) ? data : [])
       setError(null)
     } catch {
       setError("Network error. Is crewshipd running?")

@@ -661,6 +661,55 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	userID := UserFromContext(r.Context()).ID
+
+	var body struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return
+	}
+
+	chatID := body.SessionID
+	if chatID == "" {
+		chatID = generateCUID()
+	}
+
+	// Check agent exists
+	var exists string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&exists); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+
+	// Upsert: if chat already exists, return it
+	var existingID string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT id FROM chats WHERE id = ? AND agent_id = ?",
+		chatID, agentID).Scan(&existingID); err == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"id": existingID})
+		return
+	}
+
+	_, err := h.db.ExecContext(r.Context(),
+		`INSERT INTO chats (id, agent_id, workspace_id, created_by, status)
+		 VALUES (?, ?, ?, ?, 'ACTIVE')`,
+		chatID, agentID, workspaceID, userID)
+	if err != nil {
+		h.logger.Error("create chat", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"id": chatID})
+}
+
 func (h *AgentHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())

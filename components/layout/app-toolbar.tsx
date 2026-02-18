@@ -1,7 +1,7 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { useSession, signOut } from "next-auth/react"
+import { useAuth } from "@/hooks/use-auth"
 import { Search, Bell, BookOpen, ChevronDown, User, HelpCircle, Github, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -41,7 +41,7 @@ export function AppToolbar() {
   const config = pageConfig[pathname] ?? { title: "Crewship" }
   const { workspaceId } = useWorkspace()
   const { status: daemonStatus } = useCrewshipdStatus(workspaceId)
-  const { data: session } = useSession()
+  const { session, signOut } = useAuth()
 
   const userName = session?.user?.name ?? "User"
   const userEmail = session?.user?.email ?? ""
@@ -197,7 +197,7 @@ export function AppToolbar() {
               GitHub
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="gap-3 text-xs text-destructive" onClick={() => signOut({ callbackUrl: "/login" })}>
+            <DropdownMenuItem className="gap-3 text-xs text-destructive" onClick={() => { signOut().then(() => window.location.href = "/login") }}>
               <LogOut className="h-4 w-4" />
               Log out
             </DropdownMenuItem>

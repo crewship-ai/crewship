@@ -124,6 +124,7 @@ func (r *Router) registerRoutes() {
 
 	// Agent chats & runs
 	r.mux.Handle("GET /api/v1/agents/{agentId}/chats", authed(wsCtx(http.HandlerFunc(agents.ListChats))))
+	r.mux.Handle("POST /api/v1/agents/{agentId}/chats", authed(wsCtx(http.HandlerFunc(agents.CreateChat))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/runs", authed(wsCtx(http.HandlerFunc(agents.ListRuns))))
 
 	// Credentials (require workspace context + manage role for create)
@@ -142,17 +143,26 @@ func (r *Router) registerRoutes() {
 	// Audit logs (require workspace context + manage role)
 	r.mux.Handle("GET /api/v1/audit", authed(wsCtx(http.HandlerFunc(audit.List))))
 
+	// Onboarding (require auth, no workspace context needed)
+	onboarding := NewOnboardingHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/onboarding/status", authed(http.HandlerFunc(onboarding.Status)))
+	r.mux.Handle("POST /api/v1/onboarding/complete", authed(http.HandlerFunc(onboarding.Complete)))
+	r.mux.Handle("POST /api/v1/onboarding/setup", authed(http.HandlerFunc(onboarding.Setup)))
+
 	// Auth (no auth required)
-	authH := NewAuthHandler(r.db, r.logger)
+	authH := NewAuthHandler(r.db, r.logger, r.authMw.validator)
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
 	r.mux.Handle("GET /api/v1/ws-token", authed(http.HandlerFunc(authH.WsToken)))
 
-	// NextAuth-compatible endpoints (for next-auth/react client SDK)
+	// Auth endpoints (no RBAC -- public access required for login/signup flow).
+	// These intentionally bypass RequireAuth as they are the authentication
+	// bootstrap endpoints that establish the session cookie.
 	nextAuth := NewNextAuthHandler(r.db, r.logger, r.authMw.validator)
 	r.mux.HandleFunc("GET /api/auth/csrf", nextAuth.CSRF)
 	r.mux.HandleFunc("GET /api/auth/providers", nextAuth.Providers)
 	r.mux.HandleFunc("GET /api/auth/session", nextAuth.Session)
 	r.mux.HandleFunc("POST /api/auth/callback/credentials", nextAuth.CallbackCredentials)
+	r.mux.HandleFunc("GET /api/auth/signin", nextAuth.SignIn)
 	r.mux.HandleFunc("POST /api/auth/signout", nextAuth.SignOut)
 	r.mux.HandleFunc("GET /api/auth/error", nextAuth.Error)
 
