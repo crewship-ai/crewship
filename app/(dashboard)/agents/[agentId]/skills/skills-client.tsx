@@ -55,8 +55,8 @@ export function SkillsPageClient() {
           if (!cancelled) setError("Failed to load skills")
           return
         }
-        const data: AgentSkill[] = await res.json()
-        if (!cancelled) setSkills(data)
+        const data = await res.json()
+        if (!cancelled) setSkills(Array.isArray(data) ? data : [])
       } catch {
         if (!cancelled) setError("Network error. Please try again.")
       } finally {

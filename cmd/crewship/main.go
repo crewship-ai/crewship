@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
@@ -73,50 +74,59 @@ func cmdVersion() {
 }
 
 func cmdDoctor() {
-	fmt.Println("Crewship Doctor")
-	fmt.Println("===============")
-	fmt.Println()
+	logger := logging.New("info", "text", os.Stdout)
 
 	allOK := true
 
-	fmt.Printf("  Version:       %s (%s)\n", version, commit)
-	fmt.Printf("  Go runtime:    %s\n", runtime.Version())
-	fmt.Printf("  OS/Arch:       %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	logger.Info("doctor check",
+		"version", version,
+		"commit", commit,
+		"go_runtime", runtime.Version(),
+		"os_arch", runtime.GOOS+"/"+runtime.GOARCH,
+	)
 
-	if checkDocker() {
-		fmt.Println("  Docker:        OK")
+	doctorCtx, doctorCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer doctorCancel()
+	detected, detectErr := docker.Detect(doctorCtx)
+	if detectErr == nil {
+		logger.Info("container runtime found",
+			"container", detected.Runtime,
+			"version", detected.Version,
+			"socket", detected.Socket,
+		)
 	} else {
-		fmt.Println("  Docker:        NOT FOUND")
-		fmt.Println()
-		fmt.Println("  Docker is required to run AI agents.")
-		fmt.Println("  Install Docker Desktop: https://docs.docker.com/get-docker/")
+		logger.Error("no container runtime found",
+			"error", detectErr,
+			"supported", "Docker, Podman, Colima, OrbStack, Rancher Desktop",
+			"install_docker", "https://docs.docker.com/get-docker/",
+			"install_podman", "https://podman.io/docs/installation",
+		)
 		allOK = false
 	}
 
 	dataDir, err := database.DefaultDataDir()
 	if err != nil {
-		fmt.Printf("  Data dir:      ERROR (%v)\n", err)
+		logger.Error("data directory error", "error", err)
 		allOK = false
 	} else {
-		fmt.Printf("  Data dir:      %s\n", dataDir.Root)
 		dbPath := dataDir.DatabasePath()
-		if _, err := os.Stat(dbPath); err == nil {
-			fmt.Printf("  Database:      %s (exists)\n", dbPath)
-		} else {
-			fmt.Printf("  Database:      %s (will be created on start)\n", dbPath)
-		}
+		_, statErr := os.Stat(dbPath)
+		logger.Info("data directory",
+			"path", dataDir.Root,
+			"database", dbPath,
+			"db_exists", statErr == nil,
+		)
 	}
 
-	fmt.Println()
 	if allOK {
-		fmt.Println("All checks passed. Ready to go!")
+		logger.Info("all checks passed")
 	} else {
-		fmt.Println("Some checks failed. Run 'crewship doctor' after fixing to verify.")
+		logger.Warn("some checks failed, run 'crewship doctor' after fixing to verify")
 	}
 }
 
-func checkDocker() bool {
-	_, err := docker.New(docker.Config{}, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+func checkDocker(ctx context.Context) bool {
+	_, err := docker.Detect(ctx)
 	return err == nil
 }
 
@@ -127,13 +137,18 @@ func cmdStart(args []string) {
 	noDocker := fs.Bool("no-docker", false, "start without Docker (dashboard only, agents cannot run)")
 	fs.Parse(args)
 
-	if !*noDocker && !checkDocker() {
-		fmt.Fprintln(os.Stderr, "Error: Docker is not available.")
+	detectCtx, detectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer detectCancel()
+	if !*noDocker && !checkDocker(detectCtx) {
+		fmt.Fprintln(os.Stderr, "Error: No container runtime found.")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Crewship requires Docker to run AI agents.")
+		fmt.Fprintln(os.Stderr, "Crewship requires a Docker-compatible runtime to run AI agents.")
+		fmt.Fprintln(os.Stderr, "Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop")
+		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Install Docker Desktop: https://docs.docker.com/get-docker/")
+		fmt.Fprintln(os.Stderr, "Install Podman:         https://podman.io/docs/installation")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "To start without Docker (dashboard only, no agents):")
+		fmt.Fprintln(os.Stderr, "To start without containers (dashboard only, no agents):")
 		fmt.Fprintln(os.Stderr, "  crewship start --no-docker")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Run 'crewship doctor' for full diagnostics.")
@@ -208,7 +223,7 @@ func cmdStart(args []string) {
 		cancel()
 	}()
 
-	deps, err := initProviders(cfg, logger, *noDocker)
+	deps, err := initProviders(ctx, cfg, logger, *noDocker)
 	if err != nil {
 		logger.Error("failed to initialize providers", "error", err)
 		os.Exit(1)
@@ -250,7 +265,7 @@ func cmdStart(args []string) {
 	logger.Info("crewship stopped")
 }
 
-func initProviders(cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {
+func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {
 	deps := &server.Deps{}
 
 	switch cfg.Container.Provider {
@@ -259,7 +274,7 @@ func initProviders(cfg *config.Config, logger *slog.Logger, skipDocker bool) (*s
 			logger.Info("docker provider disabled via --no-docker")
 			break
 		}
-		d, err := docker.New(docker.Config{
+		d, err := docker.New(ctx, docker.Config{
 			RuntimeImage:   cfg.Container.RuntimeImage,
 			DefaultRuntime: cfg.Container.DefaultRuntime,
 			Network:        cfg.Container.Network,

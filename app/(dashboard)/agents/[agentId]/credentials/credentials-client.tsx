@@ -10,25 +10,17 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { AssignCredentialDialog } from "@/components/features/credentials/assign-credential-dialog"
 
-interface CredentialData {
-  id: string
-  name: string
-  description: string | null
-  scope: string
-}
-
 interface AgentCredential {
   id: string
   agent_id: string
   credential_id: string
+  credential_name: string
+  credential_type: string
+  credential_provider: string
+  credential_status: string
   env_var_name: string
   priority: number
-  credential: CredentialData
-}
-
-const SCOPE_STYLES: Record<string, string> = {
-  WORKSPACE: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400",
-  TEAM: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
+  created_at: string
 }
 
 export function CredentialsPageClient() {
@@ -48,8 +40,8 @@ export function CredentialsPageClient() {
         setError("Failed to load credentials")
         return
       }
-      const data: AgentCredential[] = await res.json()
-      setCredentials(data)
+      const data = await res.json()
+      setCredentials(Array.isArray(data) ? data : [])
     } catch {
       setError("Network error. Please try again.")
     } finally {
@@ -133,17 +125,14 @@ export function CredentialsPageClient() {
                 <tr key={c.id} className="hover:bg-muted/50">
                   <td className="px-4 sm:px-6 py-3">
                     <div>
-                      <span className="font-medium">{c.credential.name}</span>
-                      {c.credential.description && (
-                        <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[200px]">{c.credential.description}</p>
-                      )}
+                      <span className="font-medium">{c.credential_name}</span>
                     </div>
                   </td>
                   <td className="px-4 sm:px-6 py-3 font-mono text-xs">{c.env_var_name}</td>
                   <td className="px-4 sm:px-6 py-3 text-center font-mono text-xs">{c.priority}</td>
                   <td className="px-4 sm:px-6 py-3 hidden sm:table-cell">
-                    <Badge variant="secondary" className={`text-xs ${SCOPE_STYLES[c.credential.scope] ?? ""}`}>
-                      {c.credential.scope}
+                    <Badge variant="secondary" className="text-xs">
+                      {c.credential_type}
                     </Badge>
                   </td>
                   <td className="px-4 sm:px-6 py-3 text-right">

@@ -60,7 +60,12 @@ type migration struct {
 
 var migrations = []migration{
 	{1, "init", migrationInit},
+	{2, "add_onboarding_completed", migrationAddOnboardingCompleted},
 }
+
+const migrationAddOnboardingCompleted = `
+ALTER TABLE users ADD COLUMN onboarding_completed INTEGER NOT NULL DEFAULT 0;
+`
 
 const migrationInit = `
 -- Users (NextAuth.js compatible)

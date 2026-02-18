@@ -294,7 +294,7 @@ export function AgentOverviewPageClient() {
               <Puzzle className="h-3.5 w-3.5" />
               <span className="text-xs uppercase tracking-wide font-medium">Skills</span>
             </div>
-            <div className="text-2xl font-bold">{agent._count.skills}</div>
+            <div className="text-2xl font-bold">{agent._count?.skills ?? 0}</div>
             <Link href={`/agents/${agentId}/skills`} className="text-xs text-primary hover:underline">
               View skills
             </Link>
@@ -306,7 +306,7 @@ export function AgentOverviewPageClient() {
               <KeyRound className="h-3.5 w-3.5" />
               <span className="text-xs uppercase tracking-wide font-medium">Credentials</span>
             </div>
-            <div className="text-2xl font-bold">{agent._count.credentials}</div>
+            <div className="text-2xl font-bold">{agent._count?.credentials ?? 0}</div>
             <Link href={`/agents/${agentId}/credentials`} className="text-xs text-primary hover:underline">
               View credentials
             </Link>
@@ -318,7 +318,7 @@ export function AgentOverviewPageClient() {
               <MessagesSquare className="h-3.5 w-3.5" />
               <span className="text-xs uppercase tracking-wide font-medium">Chats</span>
             </div>
-            <div className="text-2xl font-bold">{agent._count.chats}</div>
+            <div className="text-2xl font-bold">{agent._count?.chats ?? 0}</div>
             <Link href={`/agents/${agentId}/chats`} className="text-xs text-primary hover:underline">
               View chats
             </Link>

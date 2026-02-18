@@ -69,7 +69,7 @@ export function ChatPanel({ agentId, sessionId }: ChatPanelProps) {
   const [sessionReady, setSessionReady] = useState(false)
 
   useEffect(() => {
-    fetch("/api/v1/ws-token")
+    fetch("/api/v1/ws-token", { credentials: "include" })
       .then((r) => {
         if (r.status === 401) {
           setAuthError(true)
@@ -90,7 +90,7 @@ export function ChatPanel({ agentId, sessionId }: ChatPanelProps) {
   })
 
   useEffect(() => {
-    fetch(`/api/v1/chats/${sessionId}/messages`)
+    fetch(`/api/v1/chats/${sessionId}/messages`, { credentials: "include" })
       .then((r) => r.ok ? r.json() : null)
       .then((data: { messages?: { id: string; role: string; content: string; ts: string }[] } | null) => {
         if (!data?.messages?.length) return
