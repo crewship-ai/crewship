@@ -1,6 +1,6 @@
 # Crewship -- Progress Tracker
 
-**Posledni aktualizace:** 2026-02-17
+**Posledni aktualizace:** 2026-02-18
 **Ucel:** Sledovani stavu implementace po epicich a taskach.
 
 ---
@@ -162,15 +162,15 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 ### 4.3 Agent detail (/agents/[agentId])
 - [x] 4.3.1 Overview tab (API data -- LLM config, system prompt, stats z _count)
-- [x] 4.3.2 Chat tab (real-time WS chat, streaming messages, connection status) — PR #21
+- [x] 4.3.2 Chat tab (split view, file preview panel, delegation blocks, streaming messages) — PR #21 + UI overhaul
 - [x] 4.3.3 Sessions tab (API data -- tabulka)
-- [x] 4.3.4 Files tab (mock + "requires crewshipd" banner)
+- [x] 4.3.4 Files tab (API data -- breadcrumb, fsnotify indicator, NEW badge, copy path, auto-refresh) — UI overhaul
 - [x] 4.3.5 Runs tab (API data -- tabulka se status/trigger/duration)
-- [x] 4.3.6 Logs tab (mock + "requires crewshipd" banner)
+- [x] 4.3.6 Logs tab (API data -- dark terminal, color-coded levels/events, search, stream/pause) — UI overhaul
 - [x] 4.3.7 Settings tab (API data -- editable form + save + delete)
 - [x] 4.3.8 Skills tab (API data -- card grid)
 - [x] 4.3.9 Credentials tab (API data -- tabulka)
-- [x] 4.3.10 History tab (mock + "audit system" banner)
+- [x] 4.3.10 History tab (API data -- timeline layout, diff view, category badges) — UI overhaul
 
 ### 4.4 Crews (/crews)
 - [x] 4.4.1 Crew list napojeny na API (CrewCard grid)
@@ -199,7 +199,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 4.7.1 Workspace name/slug form napojeny na API (PUT)
 - [x] 4.7.2 Members tabulka (fetch z API)
 - [x] 4.7.3 Danger zone s potvrzenim
-- [ ] 4.7.4 Billing/subscription tab
+- [~] 4.7.4 Billing tab (usage stats from API, plan management deferred until Stripe integration)
 
 ### 4.8 Audit (/audit)
 - [x] 4.8.1 Audit log tabulka napojeny na API
@@ -345,19 +345,35 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 ---
 
-## EPIC 8: Testy ✅ ~80%
+## EPIC 8: Testy ✅ ~90%
 
-> Unit testy, integracni testy. Celkem: 149 testu (73 TS + 76 Go).
+> Unit testy, integracni testy. Celkem: 259 testu (183 TS + 76 Go).
 
-- [x] 8.1 Vitest unit testy pro encryption.ts (10 testu)
-- [x] 8.2 Vitest unit testy pro validations.ts (23 testu)
-- [x] 8.3 Vitest unit testy pro abilities.ts (20 testu)
-- [x] 8.4 Vitest unit testy pro slugify.ts (11 testu)
-- [x] 8.5 Vitest unit testy pro cn.ts (9 testu)
-- [ ] 8.6 Vitest unit testy pro api-auth.ts
-- [ ] 8.7 API route integration testy (agents, teams, credentials)
-- [x] 8.8 Go unit testy (76 testu: config, logging, server, ws, bbolt, localfs, fileserver, logcollector, failover, webhook, auth, conversation) — PR #17 + #19 + #21
-- [ ] 8.9 E2E testy (Playwright -- Phase 2)
+### 8.x TypeScript (Vitest) -- 183 testu, 17 test souboru
+- [x] 8.1 encryption.ts (10 testu)
+- [x] 8.2 validations.ts (23 testu)
+- [x] 8.3 abilities.ts (20 testu)
+- [x] 8.4 slugify.ts (11 testu)
+- [x] 8.5 cn.ts (9 testu)
+- [x] 8.6 api-auth.ts (5 testu)
+- [x] 8.7 internal-auth.ts (3 testu)
+- [x] 8.8 crewshipd-client.ts (8 testu)
+- [x] 8.9 middleware.ts (35 testu)
+- [x] 8.10 store.ts (4 testu)
+- [x] 8.11 use-chat hook (7 testu)
+- [x] 8.12 audit.ts (5 testu)
+- [x] 8.13 use-abilities hook (7 testu)
+- [x] 8.14 use-websocket hook (13 testu)
+- [x] 8.15 use-mobile hook (7 testu)
+- [x] 8.16 use-workspace hook (7 testu)
+- [x] 8.17 use-crewshipd-status hook (9 testu)
+- [ ] 8.18 API route integration testy (agents, teams, credentials)
+
+### 8.x Go -- 76 testu
+- [x] 8.20 Go unit testy (76 testu: config, logging, server, ws, bbolt, localfs, fileserver, logcollector, failover, webhook, auth, conversation) — PR #17 + #19 + #21
+
+### 8.x E2E
+- [ ] 8.30 E2E testy (Playwright -- Phase 2)
 
 ---
 
@@ -475,11 +491,11 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 | 1 | Scaffolding | ✅ | ~95% |
 | 2 | Auth a infra | ✅ | ~80% |
 | 3 | Layout a navigace | ✅ | ~90% |
-| 4 | Frontend stranky | ✅ | ~97% |
+| 4 | Frontend stranky | ✅ | ~98% |
 | 5 | REST API | ✅ | ~95% |
 | 6 | Go backend | ✅ | ~85% |
 | 7 | Create/Edit forms | ✅ | 100% |
-| 8 | Testy | ✅ | ~92% (228 testu: 128 Go + 100 TS) |
+| 8 | Testy | ✅ | ~90% (259 testu: 76 Go + 183 TS) |
 | 9 | Seed data | ✅ | ~80% |
 | 10 | Nasazeni | ✅ | ~80% |
 
@@ -513,7 +529,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [ ] Skill detail stranka
 - [ ] API route integration testy
 - [ ] Google OAuth (Phase 2, disabled button uz existuje)
-- [ ] Billing/subscription tab
+- [ ] Billing/subscription tab (Stripe integration)
 
 ### Dalsi kroky
 
@@ -553,6 +569,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 | PR | Nazev | Datum |
 |----|-------|-------|
+| #26 | Agent UI overhaul + remove placeholders + complete test coverage | 2026-02-18 |
 | #22 | Production deployment (Dockerfiles, compose, Prisma migration, SessionResolver) | 2026-02-16 |
 | #21 | E2E chat flow (providers wiring, JWT auth, conversation store, ChatBridge, Chat UI) | 2026-02-16 |
 | #19 | Docker runtime (providers, orchestrator, log collector, file server, webhook) | 2026-02-16 |

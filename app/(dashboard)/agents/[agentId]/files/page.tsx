@@ -147,9 +147,7 @@ export default function FilesPage({ params }: { params: Promise<{ agentId: strin
             <span className="h-1.5 w-1.5 rounded-full bg-[#4ECDC4] animate-pulse" />
             Real-time (fsnotify)
           </div>
-          <Button variant="outline" size="sm" className="gap-2 text-xs" disabled={fileCount === 0}>
-            <Download className="h-3.5 w-3.5" /> Download All (ZIP)
-          </Button>
+
         </div>
       </div>
 

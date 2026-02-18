@@ -3,10 +3,9 @@
 import { use, useState, useEffect } from "react"
 import {
   Plus, Settings, Puzzle, KeyRound, CheckCircle2,
-  AlertCircle, Inbox, RotateCcw,
+  AlertCircle, Inbox,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 
@@ -156,11 +155,7 @@ export default function HistoryPage({ params }: { params: Promise<{ agentId: str
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     {event.user_name && <span>{event.user_name}</span>}
                     <span>{formatDate(event.created_at)}</span>
-                    {!isFirst && category !== "CREATED" && (
-                      <Button variant="outline" size="sm" className="h-6 text-[11px] px-2 gap-1" disabled>
-                        <RotateCcw className="h-3 w-3" /> Restore
-                      </Button>
-                    )}
+
                   </div>
                 </div>
 

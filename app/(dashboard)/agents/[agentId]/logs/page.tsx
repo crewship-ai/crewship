@@ -230,10 +230,8 @@ export default function LogsPage({ params }: { params: Promise<{ agentId: string
         </div>
       )}
 
-      {/* Historical log files bar */}
-      <div className="bg-neutral-900 dark:bg-neutral-950 border-t border-neutral-700 px-4 sm:px-6 py-2 flex items-center gap-4 shrink-0">
-        <span className="text-xs text-neutral-500">Historical:</span>
-        <button className="text-xs text-neutral-400 hover:text-white font-mono">current.jsonl</button>
+      {/* Log status bar */}
+      <div className="bg-neutral-900 dark:bg-neutral-950 border-t border-neutral-700 px-4 sm:px-6 py-2 flex items-center shrink-0">
         <span className="ml-auto text-xs text-neutral-600">
           {filtered.length} entr{filtered.length !== 1 ? "ies" : "y"}
           {filter !== "ALL" ? ` (${filter})` : ""}
