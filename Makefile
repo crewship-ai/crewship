@@ -1,5 +1,10 @@
 .PHONY: up down restart status dev dev\:go dev\:next build test lint
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
+DATE    ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS  = -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)"
+
 # === Quick aliases (recommended) ===
 
 up:
@@ -16,16 +21,12 @@ status:
 
 # === Individual services (advanced) ===
 
-# Start Next.js dev server (port 3001)
 dev\:next:
 	pnpm dev --port 3001
 
-# Start crewshipd with hot-reload (air watches .go files, auto-rebuilds)
-# Requires: go install github.com/air-verse/air@latest
 dev\:go:
 	air
 
-# Start crewshipd without hot-reload (manual restart)
 dev\:go-once:
 	@set -a && . ./.env.local && set +a && \
 	CREWSHIP_NEXTJS_URL=http://localhost:3001 \
@@ -36,13 +37,20 @@ dev\:go-once:
 	CREWSHIP_LOG_LEVEL=debug \
 	go run ./cmd/crewshipd
 
-# Start all services in background (single command)
-dev:
-	@./dev.sh start
+# === Build ===
 
 build:
 	pnpm build
-	go build -o crewshipd ./cmd/crewshipd
+	rm -rf web/out && cp -r out web/out
+	go build $(LDFLAGS) -o crewship ./cmd/crewship
+
+build\:go:
+	go build $(LDFLAGS) -o crewship ./cmd/crewship
+
+build\:legacy:
+	go build $(LDFLAGS) -o crewshipd ./cmd/crewshipd
+
+# === Test & Lint ===
 
 test:
 	pnpm test

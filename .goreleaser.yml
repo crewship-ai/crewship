@@ -1,0 +1,91 @@
+# Crewship GoReleaser Configuration
+# Builds cross-platform single binary with embedded Next.js static export.
+# Requirements: web/out/ must exist before running (built by CI workflow).
+#
+# Usage:
+#   goreleaser release --clean          # Full release (CI only)
+#   goreleaser build --snapshot --clean  # Local test build
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: crewship
+    main: ./cmd/crewship
+    binary: crewship
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^ci:"
+      - "^style:"
+
+brews:
+  - repository:
+      owner: crewship-ai
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    name: crewship
+    homepage: "https://crewship.ai"
+    description: "AI Agent Orchestration Platform -- manage AI virtual employees in crews"
+    license: "MIT"
+    install: |
+      bin.install "crewship"
+    test: |
+      system "#{bin}/crewship", "version"
+    commit_msg_template: "chore: update crewship formula to {{ .Tag }}"
+
+release:
+  github:
+    owner: crewship-ai
+    name: crewship
+  draft: false
+  prerelease: auto
+  name_template: "Crewship {{ .Tag }}"
+  header: |
+    ## What's Changed
+
+    Install with Homebrew:
+    ```bash
+    brew install crewship-ai/tap/crewship
+    ```
+
+    Or download the binary for your platform below.
+
+docker_manifests: []

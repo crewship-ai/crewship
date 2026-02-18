@@ -31,10 +31,12 @@
 ### 1.3 Attack surface
 
 ```
-Internet → [WAF/CDN] → Next.js (REST API) → Prisma → PostgreSQL
-                      → crewshipd (Go) → WebSocket → Browser
-                      → crewshipd (Go) → Docker SDK → Agent kontejner → LLM API
-                      → crewshipd (Go) → Webhook ingress
+Internet → [WAF/CDN] → Go HTTP server (single binary, port 8080)
+                          ├─ REST API → database/sql → SQLite/PostgreSQL
+                          ├─ Auth (NextAuth-compatible JWE)
+                          ├─ WebSocket → Browser
+                          ├─ Docker SDK → Agent kontejner → LLM API
+                          └─ Webhook ingress
 ```
 
 ### 1.4 Trust boundaries
@@ -42,13 +44,12 @@ Internet → [WAF/CDN] → Next.js (REST API) → Prisma → PostgreSQL
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ TRUST ZONE 1: Platforma (plne duveryhodne)                       │
-│  Next.js + crewshipd (Go) + PostgreSQL                           │
+│  Go single binary + SQLite/PostgreSQL                            │
 │  → pristup k DB, credentials vault, audit logum                  │
-│  → crewshipd ma Docker socket                                    │
-│  → komunikace pres Unix socket (file permissions)                │
+│  → Go binary ma Docker socket                                    │
 ├──────────────────────────────────────────────────────────────────┤
 │ TRUST ZONE 2: Autentizovany uzivatel (castecne duveryhodny)      │
-│  → pristup omezen pres CASL RBAC                                 │
+│  → pristup omezen pres Go RBAC middleware                        │
 │  → muze byt insider threat                                       │
 │  → vsechny akce auditovane                                       │
 ├──────────────────────────────────────────────────────────────────┤
@@ -72,26 +73,21 @@ Uzivatel (browser)
   │
   │ HTTPS (TLS 1.3)
   ▼
-Next.js API ──── Prisma ──── PostgreSQL (credentials encrypted)
-  │  │
-  │  │ JWT validation, CASL RBAC, Zod validation
-  │  │ Audit Log (kazda mutace)
-  │  │
-  │  └── Unix socket (/run/crewship/crewship.sock)
-  │           │
-  │           ▼
-  │      crewshipd (Go)
-  │        ├── WebSocket gateway → Browser (WSS)
-  │        ├── Docker SDK → Agent kontejner (--internal network)
-  │        ├── Webhook ingress (X-Webhook-Secret auth)
-  │        ├── Log collector → JSONL soubory
-  │        ├── File server → /output/ (fsnotify)
-  │        └── bbolt WAL (job state)
-  │
-  ▼
+Go HTTP server (single binary, port 8080)
+  ├── Static UI (embedded Next.js build via embed.FS)
+  ├── REST API → database/sql → SQLite/PostgreSQL (credentials encrypted)
+  │   JWT validation, Go RBAC middleware, input validation
+  │   Audit Log (kazda mutace)
+  ├── WebSocket gateway → Browser (WSS)
+  ├── Docker SDK → Agent kontejner (--internal network)
+  ├── Webhook ingress (X-Webhook-Secret auth)
+  ├── Log collector → JSONL soubory
+  ├── File server → /output/ (fsnotify)
+  └── bbolt WAL (job state)
+
 Agent kontejner (crewship-agents sit)
   ├── CLI tool (Claude Code, Codex, Gemini) → LLM API (HTTPS)
-  ├── stdout/stderr → crewshipd (Docker attach)
+  ├── stdout/stderr → Go server (Docker attach)
   ├── /workspace/ (ephemeral) + /output/ (persistent)
   └── NEMUZE: pristup k DB, hostu, jinym kontejnerum
 ```
@@ -126,63 +122,31 @@ crewship-agents (agent kontejnery, --internal) ← bez internetu!
 - Agent NEMUZE pristoupit k cloud metadata (169.254.169.254 blokovany)
 - Agent MUZE pristoupit JEN k LLM API endpointum na explicitnim allowlistu
 
-### 2.3 Vrstva 3: CASL RBAC (aplikacni uroven)
+### 2.3 Vrstva 3: Go RBAC Middleware (aplikacni uroven)
 
 5 roli: OWNER > ADMIN > MANAGER > MEMBER > VIEWER
 
-```typescript
-// lib/permissions/abilities.ts
-export function defineAbilityFor(role: OrgRole, workspaceId: string) {
-  return defineAbility((can, cannot) => {
-    switch (role) {
-      case "OWNER":
-        can("manage", "all");
-        break;
-      case "ADMIN":
-        can("manage", "all");
-        cannot("delete", "Workspace");
-        cannot("manage", "Subscription");
-        break;
-      case "MANAGER":
-        can("read", "Crew", { workspace_id: workspaceId });
-        can("create", "Crew", { workspace_id: workspaceId });
-        can("update", "Crew", { workspace_id: workspaceId });
-        can("manage", "Agent", { workspace_id: workspaceId });
-        can("manage", "AgentSkill", { workspace_id: workspaceId });
-        can("manage", "AgentCredential", { workspace_id: workspaceId });
-        can("create", "Credential", { workspace_id: workspaceId });
-        can("read", "Credential", { workspace_id: workspaceId });
-        can("update", "Credential", { workspace_id: workspaceId });
-        can("read", "Chat", { workspace_id: workspaceId });
-        can("read", "AgentRun", { workspace_id: workspaceId });
-        can("read", "AuditLog", { workspace_id: workspaceId });
-        break;
-      case "MEMBER":
-        can("read", "Crew", { workspace_id: workspaceId });
-        can("read", "Agent", { workspace_id: workspaceId });
-        can("start", "Agent", { workspace_id: workspaceId });
-        can("create", "Chat", { workspace_id: workspaceId });
-        can("read", "Chat", { workspace_id: workspaceId });
-        can("read", "AgentRun", { workspace_id: workspaceId });
-        can("read", "Skill");
-        break;
-      case "VIEWER":
-        can("read", "Crew", { workspace_id: workspaceId });
-        can("read", "Agent", { workspace_id: workspaceId });
-        can("read", "Chat", { workspace_id: workspaceId });
-        can("read", "AgentRun", { workspace_id: workspaceId });
-        can("read", "Skill");
-        break;
+RBAC je implementovano jako Go middleware v `internal/api/middleware.go`.
+Kazdy API endpoint ma explicitni kontrolu role uzivatele.
+
+```go
+// internal/api/middleware.go
+func (s *Server) requireRole(minRole string, next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        member := getWorkspaceMember(r.Context())
+        if !hasMinRole(member.Role, minRole) {
+            http.Error(w, "Forbidden", http.StatusForbidden)
+            return
+        }
+        next(w, r)
     }
-  });
 }
 ```
 
-#### Kde se CASL kontroluje
-1. API middleware (`withRBAC`) — pred kazdym handlerem
-2. Prisma middleware (Phase 2) — `@casl/prisma` filtruje dotazy
-3. Go service — pri WebSocket subscribe overuje crew membership (IPC dotaz na Next.js)
-4. UI — client-side ability pro schovani UI prvku (NE bezpecnostni vrstva!)
+#### Kde se RBAC kontroluje
+1. Go API middleware — pred kazdym handlerem (`internal/api/middleware.go`)
+2. Go WebSocket — pri subscribe overuje crew membership primo v DB
+3. UI — client-side check pro schovani UI prvku (NE bezpecnostni vrstva!)
 
 ### 2.4 Vrstva 4: RLS (Phase 2 — defense-in-depth)
 
@@ -219,12 +183,11 @@ Plaintext → AES-256-GCM(key, iv=random16B) → "v1:" + Base64(IV + AuthTag + C
 
 ```
 1. Uzivatel zada plaintext v UI
-2. HTTPS → Next.js API (TLS terminace)
-3. Server zasifruje (AES-256-GCM) → "v1:" + Base64 → PostgreSQL
-4. Pri startu agenta: Next.js desifrovuje → posle Go service pres Unix socket
-5. Go service preda jako ENV var do Docker exec
-6. Po ukonceni procesu ENV var zmizi
-7. Plaintext NIKDY na disku, NIKDY v logu, NIKDY v API response
+2. HTTPS → Go API (TLS terminace)
+3. Go zasifruje (AES-256-GCM) → "v1:" + Base64 → SQLite/PostgreSQL
+4. Pri startu agenta: Go desifrovuje primo (internal/encryption/) → ENV var do Docker exec
+5. Po ukonceni procesu ENV var zmizi
+6. Plaintext NIKDY na disku, NIKDY v logu, NIKDY v API response
 ```
 
 ### 3.3 Key rotation (Phase 2)
@@ -240,7 +203,7 @@ Plaintext → AES-256-GCM(key, iv=random16B) → "v1:" + Base64(IV + AuthTag + C
 ### 3.4 Credential injection do kontejneru
 
 ```
-Next.js API → desifrovani → Unix socket → crewshipd → Docker exec (ENV vars)
+Go API → desifrovani (internal/encryption/) → Docker exec (ENV vars)
 ```
 
 Go service NIKDY neuklada credentials na disk. Drzi je v pameti jen po dobu exec volani.
@@ -282,22 +245,23 @@ Redakovane patterns: password, token, secret, key, apiKey, api_key,
 
 ## 4. AUTENTIZACE
 
-### 4.1 NextAuth.js (Auth.js v5)
+### 4.1 Auth (Go -- NextAuth-compatible)
 
 | Aspekt | Implementace |
 |---|---|
-| Session typ | JWT (default) |
+| Session typ | JWT (NextAuth-compatible JWE) |
 | JWT expirece | 24h |
-| Password hashing | bcrypt (cost factor 12) |
-| OAuth | Google, GitHub |
-| CSRF | Vestaveny v NextAuth (double-submit cookie) |
+| Password hashing | bcrypt (Go `golang.org/x/crypto/bcrypt`) |
+| OAuth | Google, GitHub (planovano) |
+| CSRF | Double-submit cookie (Go middleware) |
+| Implementation | `internal/api/nextauth.go`, `internal/api/auth.go` |
 
 ### 4.2 WebSocket autentizace
 
 - Short-lived JWT (5 minut) ziskany z REST API
 - Prenaseny v query parametru (WebSocket API omezeni)
-- Go service (`crewshipd`) validuje JWT pri WebSocket handshake
-- Po pripojeni: Go service overuje crew membership pres IPC dotaz na Next.js
+- Go server validuje JWT pri WebSocket handshake
+- Po pripojeni: Go server overuje crew membership primo v DB
 
 ### 4.3 Webhook autentizace
 
@@ -307,7 +271,7 @@ Headers: X-Webhook-Secret: {per-agent-secret}
 ```
 
 - Kazdy agent ma unikatni `webhook_secret` (generovany pri vytvoreni agenta)
-- Secret ulozeny encrypted v PostgreSQL (AES-256-GCM, jako credentials)
+- Secret ulozeny encrypted v DB (AES-256-GCM, jako credentials)
 - Go service validuje secret pri kazdem prichozim webhooku
 - Neplatny secret → 401 Unauthorized + audit log
 
@@ -340,19 +304,11 @@ Zadne vynucene rotace hesla.
 Phase 2: kontrola proti HaveIBeenPwned API.
 ```
 
-### 4.7 Unix socket bezpecnost
+### 4.7 ~~Unix socket bezpecnost~~ (OBSOLETE)
 
-```
-Produkce: /run/crewship/crewship.sock
-  - chmod 0660 (owner + group read/write)
-  - chown crewship:crewship
-  - Adresár /run/crewship/ s chmod 0750
-  - Jen Next.js process a crewshipd mohou komunikovat
-
-Dev: /tmp/crewship.sock
-  - /tmp/ je world-writable — NENI bezpecne pro produkci
-  - Prijatelne pro lokalni vyvoj na Mac/Linux
-```
+> **Poznamka:** Unix socket IPC mezi Next.js a crewshipd jiz neni relevantni.
+> Single Go binary obsluhuje API primo -- zadny IPC, zadny Unix socket.
+> Tato sekce je zachovana pro historicky kontext.
 
 ---
 
@@ -362,9 +318,9 @@ Dev: /tmp/crewship.sock
 
 | OWASP | Riziko | Mitigace |
 |---|---|---|
-| A01 Broken Access Control | Data jine org | CASL + RLS (Phase 2) |
+| A01 Broken Access Control | Data jine org | Go RBAC middleware + RLS (Phase 2) |
 | A02 Cryptographic Failures | Credentials leak | AES-256-GCM, TLS, log redaction |
-| A03 Injection | SQL/command injection | Prisma (parametrizovane), Zod, Docker izolace |
+| A03 Injection | SQL/command injection | Go parametrizovane dotazy (database/sql), input validace, Docker izolace |
 | A04 Insecure Design | Chybejici threat model | Tento dokument |
 | A05 Security Misconfiguration | Default credentials | Hardened Docker, env validation |
 | A06 Vulnerable Components | Supply chain | `pnpm audit`, Dependabot, `go mod verify` |
@@ -631,19 +587,11 @@ NextAuth ma vestaveny CSRF token (double-submit cookie).
 ```bash
 # POVINNE pro produkci
 ENCRYPTION_KEY=           # openssl rand -hex 32 (NIKDY NEZTRARIT)
-NEXTAUTH_SECRET=          # openssl rand -hex 32
-DATABASE_URL=             # s ?sslmode=require
-NODE_ENV=production
-
-# Socket
-CREWSHIPD_SOCKET=/run/crewship/crewship.sock  # s chmod 0660
+NEXTAUTH_SECRET=          # openssl rand -base64 32 (JWT signing)
+CREWSHIP_PORT=8080        # HTTP port (default)
 
 # Doporucene
 CORS_ORIGIN=https://your-domain.com  # explicitni, zadny wildcard
-
-# ZAKAZANO v produkci
-# NODE_ENV=development
-# CREWSHIPD_SOCKET=/tmp/crewship.sock  (world-writable)
 ```
 
 ---

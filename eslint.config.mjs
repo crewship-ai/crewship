@@ -46,6 +46,8 @@ export default [
   {
     ignores: [
       ".next/**",
+      "out/**",
+      "web/out/**",
       "node_modules/**",
       "dist/**",
       "build/**",

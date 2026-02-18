@@ -1,79 +1,33 @@
-# Crewship -- Production Docker Compose
+# Crewship -- Production Docker Compose (single binary)
 # Usage: docker compose -f docker/docker-compose.prod.yml up -d
 # Requires: .env file in project root (see .env.example)
+#
+# Default: SQLite (zero deps, embedded in crewship binary)
+# Optional: Uncomment postgres service for multi-user deployments
 
 services:
-  postgres:
-    image: postgres:18-alpine
-    container_name: crewship-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-crewship}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: ${POSTGRES_DB:-crewship}
-    volumes:
-      - crewship-pgdata:/var/lib/postgresql/data
-    networks:
-      - crewship-internal
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crewship}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  nextjs:
+  crewship:
     build:
       context: ..
       dockerfile: Dockerfile
-    container_name: crewship-nextjs
+    container_name: crewship
     restart: unless-stopped
-    command: ["sh", "/app/docker-entrypoint.sh"]
     ports:
-      - "${NEXTJS_PORT:-3000}:3000"
+      - "${CREWSHIP_PORT:-8080}:8080"
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-crewship}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-crewship}
+      DATABASE_URL: ${DATABASE_URL:-file:/data/crewship.db}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
-      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
-      CREWSHIPD_SOCKET: /tmp/crewship.sock
-    volumes:
-      - crewship-socket:/tmp
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - crewship-internal
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
-  crewshipd:
-    build:
-      context: ..
-      dockerfile: docker/crewshipd/Dockerfile
-    container_name: crewship-crewshipd
-    restart: unless-stopped
-    environment:
-      CREWSHIP_SOCKET_PATH: /tmp/crewship.sock
-      CREWSHIP_PORT: "8080"
       CREWSHIP_CONTAINER_PROVIDER: docker
       CREWSHIP_STORAGE_PROVIDER: localfs
       CREWSHIP_STATE_PROVIDER: bbolt
       CREWSHIP_STORAGE_BASE_PATH: /var/lib/crewship
       CREWSHIP_LOG_PATH: /var/log/crewship
-      CREWSHIP_NEXTJS_URL: http://nextjs:3000
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
     volumes:
-      - crewship-socket:/tmp
       - crewship-data:/var/lib/crewship
       - crewship-logs:/var/log/crewship
+      - crewship-db:/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
     networks:
       - crewship-internal
       - crewship-agents
@@ -84,11 +38,30 @@ services:
       retries: 3
       start_period: 10s
 
+  # Uncomment for PostgreSQL mode:
+  # postgres:
+  #   image: postgres:18-alpine
+  #   container_name: crewship-postgres
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER:-crewship}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+  #     POSTGRES_DB: ${POSTGRES_DB:-crewship}
+  #   volumes:
+  #     - crewship-pgdata:/var/lib/postgresql/data
+  #   networks:
+  #     - crewship-internal
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crewship}"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+
 volumes:
-  crewship-pgdata:
-  crewship-socket:
   crewship-data:
   crewship-logs:
+  crewship-db:
+  # crewship-pgdata:
 
 networks:
   crewship-internal:

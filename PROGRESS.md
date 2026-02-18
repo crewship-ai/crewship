@@ -140,8 +140,10 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 3.5 Mobile responsivita (sheet sidebar, sm: breakpoints)
 - [x] 3.6 Sdilene komponenty (PageHeader, EmptyState, StatCard, FilterBar, AgentTabs)
 - [~] 3.7 Command palette (⌘K -- komponenta existuje, ale neni funkcni)
-- [ ] 3.8 Notifikacni system (bell icon existuje, ale zadna logika)
-- [ ] 3.9 Workspace switcher dropdown (UI existuje, ale neni napojeny)
+- [x] 3.8 Toast system (sonner, Toaster v Providers) — PR #26
+- [ ] 3.9 Notifikacni system (bell icon existuje, ale zadna logika)
+- [ ] 3.10 Workspace switcher dropdown (UI existuje, ale neni napojeny)
+- [x] 3.11 Error boundaries (app/error.tsx, app/global-error.tsx, app/not-found.tsx, dashboard/error.tsx) — PR #26
 
 ---
 
@@ -154,6 +156,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 4.1.2 Agent list s FilterBar (filtr dle statusu funguje)
 - [x] 4.1.3 AgentCard komponenta (status badge, crew, LLM, skills/creds/sessions counts)
 - [x] 4.1.4 Loading skeletons + empty state
+- [x] 4.1.5 Onboarding SetupNudge (3-krokovy progress: crew → agent → credentials) — PR #26
 
 ### 4.2 Agents list (/agents)
 - [x] 4.2.1 Napojeno na GET /api/v1/agents
@@ -173,10 +176,12 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 4.3.10 History tab (API data -- timeline layout, diff view, category badges) — UI overhaul
 
 ### 4.4 Crews (/crews)
-- [x] 4.4.1 Crew list napojeny na API (CrewCard grid)
-- [x] 4.4.2 CrewCard komponenta (barva, ikona, pocty)
-- [x] 4.4.3 Crew detail stranka (/crews/[crewId]) — PR #18
-- [x] 4.4.4 Crew members management — PR #18 (soucasti crew detail)
+- [x] 4.4.1 Crew list napojeny na API (CrewCard grid, search, sort) — PR #26
+- [x] 4.4.2 CrewCard komponenta (barva, ikona, pocty, created_at) — PR #26
+- [x] 4.4.3 Crew detail stranka — refaktorovano do 7 sub-komponent (Header, Stats, EditForm, Agents, Members, AddMemberDialog, DangerZone) — PR #26
+- [x] 4.4.4 Crew members management — PR #18
+- [x] 4.4.5 Container config editing (memory, CPUs, TTL) — PR #26
+- [x] 4.4.6 Credentials warning banner (amber banner kdyz agents existuji ale zadne credentials) — PR #26
 
 ### 4.5 Credentials (/credentials)
 - [x] 4.5.1 Credential list napojeny na API (tabulka)
@@ -198,7 +203,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 ### 4.7 Settings (/settings)
 - [x] 4.7.1 Workspace name/slug form napojeny na API (PUT)
 - [x] 4.7.2 Members tabulka (fetch z API)
-- [x] 4.7.3 Danger zone s potvrzenim
+- [x] 4.7.3 Danger zone s AlertDialog potvrzenim (nahrazeno window.confirm) — PR #26
 - [~] 4.7.4 Billing tab (usage stats from API, plan management deferred until Stripe integration)
 
 ### 4.8 Audit (/audit)
@@ -215,8 +220,8 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 4.10.3 GET /api/v1/admin/users endpoint — PR #18
 - [x] 4.10.4 GET /api/v1/admin/workspaces endpoint — PR #18
 
-### 4.11 Crews (/crews)
-- [x] 4.11.1 Phase 2 placeholder (Coming Soon badge)
+### 4.11 Naming conventions
+- [x] 4.11.1 "Team" → "Crew" terminologie opravena (crews pages, settings billing) — PR #25, #26
 
 ---
 
@@ -347,11 +352,11 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 ## EPIC 8: Testy ✅ ~90%
 
-> Unit testy, integracni testy. Celkem: 259 testu (183 TS + 76 Go).
+> Unit testy, integracni testy. Celkem: 311 testu (183 TS + 128 Go).
 
 ### 8.x TypeScript (Vitest) -- 183 testu, 17 test souboru
 - [x] 8.1 encryption.ts (10 testu)
-- [x] 8.2 validations.ts (23 testu)
+- [x] 8.2 validations.ts (30 testu, vcetne updateCrewSchema + container fields) — PR #26
 - [x] 8.3 abilities.ts (20 testu)
 - [x] 8.4 slugify.ts (11 testu)
 - [x] 8.5 cn.ts (9 testu)
@@ -369,8 +374,8 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 - [x] 8.17 use-crewshipd-status hook (9 testu)
 - [ ] 8.18 API route integration testy (agents, teams, credentials)
 
-### 8.x Go -- 76 testu
-- [x] 8.20 Go unit testy (76 testu: config, logging, server, ws, bbolt, localfs, fileserver, logcollector, failover, webhook, auth, conversation) — PR #17 + #19 + #21
+### 8.x Go -- 128 testu
+- [x] 8.20 Go unit testy (128 testu: config, logging, server, ws, bbolt, localfs, fileserver, logcollector, failover, webhook, auth, conversation, container detect) — PR #17 + #19 + #21 + #28
 
 ### 8.x E2E
 - [ ] 8.30 E2E testy (Playwright -- Phase 2)
@@ -495,7 +500,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 | 5 | REST API | ✅ | ~95% |
 | 6 | Go backend | ✅ | ~85% |
 | 7 | Create/Edit forms | ✅ | 100% |
-| 8 | Testy | ✅ | ~90% (259 testu: 76 Go + 183 TS) |
+| 8 | Testy | ✅ | ~92% (311 testu: 128 Go + 183 TS) |
 | 9 | Seed data | ✅ | ~80% |
 | 10 | Nasazeni | ✅ | ~80% |
 
@@ -569,7 +574,11 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 | PR | Nazev | Datum |
 |----|-------|-------|
-| #26 | Agent UI overhaul + remove placeholders + complete test coverage | 2026-02-18 |
+| #30 | Agent UI overhaul + remove placeholders + complete test coverage | 2026-02-18 |
+| #29 | Crews tab improvements (detail refactor, search/sort, toast, error boundaries, onboarding) | 2026-02-18 |
+| #28 | Auto-detect container runtime (Docker, Podman, Colima, OrbStack, Rancher) | 2026-02-18 |
+| #27 | GoReleaser, Docker enforcement, cleanup legacy code | 2026-02-18 |
+| #26 | Crews improvements (detail refactor, search/sort, toast, error boundaries, AlertDialog, container config, tests) | 2026-02-18 |
 | #22 | Production deployment (Dockerfiles, compose, Prisma migration, SessionResolver) | 2026-02-16 |
 | #21 | E2E chat flow (providers wiring, JWT auth, conversation store, ChatBridge, Chat UI) | 2026-02-16 |
 | #19 | Docker runtime (providers, orchestrator, log collector, file server, webhook) | 2026-02-16 |

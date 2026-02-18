@@ -93,15 +93,15 @@ export function AgentCard({ agent }: { agent: AgentData }) {
           <div className="mt-3 pt-3 border-t flex items-center gap-4 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Cpu className="h-3 w-3" />
-              {agent._count.skills} skills
+              {agent._count?.skills ?? 0} skills
             </span>
             <span className="flex items-center gap-1">
               <Key className="h-3 w-3" />
-              {agent._count.credentials} keys
+              {agent._count?.credentials ?? 0} keys
             </span>
             <span className="flex items-center gap-1">
               <MessageSquare className="h-3 w-3" />
-              {agent._count.chats} sessions
+              {agent._count?.chats ?? 0} sessions
             </span>
           </div>
         </CardContent>
