@@ -389,41 +389,23 @@ export default function SettingsPage() {
         <div className="space-y-5">
           <Card>
             <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h3 className="text-sm font-medium">Current Plan</h3>
-                  <p className="text-xs text-muted-foreground">{org?.name ?? "Workspace"}</p>
-                </div>
-                <Badge className="bg-blue-50 text-blue-700">FREE</Badge>
+              <div className="mb-3">
+                <h3 className="text-sm font-medium">Workspace Usage</h3>
+                <p className="text-xs text-muted-foreground">{org?.name ?? "Workspace"}</p>
               </div>
               <div className="space-y-2 text-xs">
-                <div className="flex justify-between"><span className="text-muted-foreground">Agents</span><span className="font-medium">{org?._count.agents ?? 0} / 5</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Crews</span><span className="font-medium">{org?._count.crews ?? 0} / 2</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Members</span><span className="font-medium">{org?._count.members ?? 0} / 5</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Agents</span><span className="font-medium">{org?._count.agents ?? 0}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Crews</span><span className="font-medium">{org?._count.crews ?? 0}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Members</span><span className="font-medium">{org?._count.members ?? 0}</span></div>
               </div>
             </CardContent>
           </Card>
-          <div className="grid grid-cols-2 gap-2.5">
-            {[
-              { name: "Free", price: "$0", desc: "5 agents, 2 crews", current: true },
-              { name: "Pro", price: "$29", desc: "20 agents, 5 crews" },
-              { name: "Crew", price: "$79", desc: "100 agents, unlimited" },
-              { name: "Enterprise", price: "Custom", desc: "Unlimited everything" },
-            ].map((plan) => (
-              <Card key={plan.name} className={cn(plan.current && "border-primary")}>
-                <CardContent className="p-3">
-                  <div className="text-xs font-semibold">{plan.name}</div>
-                  <div className="text-lg font-bold">{plan.price}<span className="text-xs font-normal text-muted-foreground">/mo</span></div>
-                  <div className="text-[10px] text-muted-foreground mt-1">{plan.desc}</div>
-                  {plan.current ? (
-                    <div className="mt-2 text-[10px] text-primary font-medium">Current plan</div>
-                  ) : (
-                    <Button size="sm" variant="ghost" className="mt-2 h-6 text-[10px]" disabled>Upgrade</Button>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <Card>
+            <CardContent className="p-6 text-center">
+              <CreditCard className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">Billing and plan management will be available in a future release.</p>
+            </CardContent>
+          </Card>
         </div>
       )
     }
