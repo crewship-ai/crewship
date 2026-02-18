@@ -103,19 +103,19 @@ describe("createAgentSchema", () => {
 })
 
 describe("createCrewSchema", () => {
-  const validTeam = {
+  const validCrew = {
     name: "Backend Team",
     slug: "backend-team",
   }
 
   it("valid input passes", () => {
-    const result = createCrewSchema.safeParse(validTeam)
+    const result = createCrewSchema.safeParse(validCrew)
     expect(result.success).toBe(true)
   })
 
   it("slug with uppercase fails", () => {
     const result = createCrewSchema.safeParse({
-      ...validTeam,
+      ...validCrew,
       slug: "Backend-Team",
     })
     expect(result.success).toBe(false)
@@ -123,7 +123,7 @@ describe("createCrewSchema", () => {
 
   it("slug with special chars fails", () => {
     const result = createCrewSchema.safeParse({
-      ...validTeam,
+      ...validCrew,
       slug: "backend_team!",
     })
     expect(result.success).toBe(false)
@@ -131,19 +131,19 @@ describe("createCrewSchema", () => {
 
   it("color must be #hex6", () => {
     const validColor = createCrewSchema.safeParse({
-      ...validTeam,
+      ...validCrew,
       color: "#ff00aa",
     })
     expect(validColor.success).toBe(true)
 
     const invalidColor = createCrewSchema.safeParse({
-      ...validTeam,
+      ...validCrew,
       color: "red",
     })
     expect(invalidColor.success).toBe(false)
 
     const shortHex = createCrewSchema.safeParse({
-      ...validTeam,
+      ...validCrew,
       color: "#fff",
     })
     expect(shortHex.success).toBe(false)
@@ -151,51 +151,51 @@ describe("createCrewSchema", () => {
 
   it("icon max 10 chars", () => {
     const validIcon = createCrewSchema.safeParse({
-      ...validTeam,
+      ...validCrew,
       icon: "🚀",
     })
     expect(validIcon.success).toBe(true)
 
     const tooLong = createCrewSchema.safeParse({
-      ...validTeam,
+      ...validCrew,
       icon: "a".repeat(11),
     })
     expect(tooLong.success).toBe(false)
   })
 
   it("container_memory_mb must be 512-32768", () => {
-    const tooLow = createCrewSchema.safeParse({ ...validTeam, container_memory_mb: 256 })
+    const tooLow = createCrewSchema.safeParse({ ...validCrew, container_memory_mb: 256 })
     expect(tooLow.success).toBe(false)
 
-    const tooHigh = createCrewSchema.safeParse({ ...validTeam, container_memory_mb: 65536 })
+    const tooHigh = createCrewSchema.safeParse({ ...validCrew, container_memory_mb: 65536 })
     expect(tooHigh.success).toBe(false)
 
-    const valid = createCrewSchema.safeParse({ ...validTeam, container_memory_mb: 2048 })
+    const valid = createCrewSchema.safeParse({ ...validCrew, container_memory_mb: 2048 })
     expect(valid.success).toBe(true)
   })
 
   it("container_cpus must be 0.5-16", () => {
-    const tooLow = createCrewSchema.safeParse({ ...validTeam, container_cpus: 0.25 })
+    const tooLow = createCrewSchema.safeParse({ ...validCrew, container_cpus: 0.25 })
     expect(tooLow.success).toBe(false)
 
-    const tooHigh = createCrewSchema.safeParse({ ...validTeam, container_cpus: 32 })
+    const tooHigh = createCrewSchema.safeParse({ ...validCrew, container_cpus: 32 })
     expect(tooHigh.success).toBe(false)
 
-    const valid = createCrewSchema.safeParse({ ...validTeam, container_cpus: 2 })
+    const valid = createCrewSchema.safeParse({ ...validCrew, container_cpus: 2 })
     expect(valid.success).toBe(true)
   })
 
   it("container_ttl_hours must be 1-720 or null", () => {
-    const tooLow = createCrewSchema.safeParse({ ...validTeam, container_ttl_hours: 0 })
+    const tooLow = createCrewSchema.safeParse({ ...validCrew, container_ttl_hours: 0 })
     expect(tooLow.success).toBe(false)
 
-    const tooHigh = createCrewSchema.safeParse({ ...validTeam, container_ttl_hours: 721 })
+    const tooHigh = createCrewSchema.safeParse({ ...validCrew, container_ttl_hours: 721 })
     expect(tooHigh.success).toBe(false)
 
-    const valid = createCrewSchema.safeParse({ ...validTeam, container_ttl_hours: 24 })
+    const valid = createCrewSchema.safeParse({ ...validCrew, container_ttl_hours: 24 })
     expect(valid.success).toBe(true)
 
-    const nullValue = createCrewSchema.safeParse({ ...validTeam, container_ttl_hours: null })
+    const nullValue = createCrewSchema.safeParse({ ...validCrew, container_ttl_hours: null })
     expect(nullValue.success).toBe(true)
   })
 })

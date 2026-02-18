@@ -46,7 +46,7 @@ export function CrewDangerZone({ crewName, onDelete }: CrewDangerZoneProps) {
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction
                 onClick={onDelete}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                variant="destructive"
               >
                 Delete Crew
               </AlertDialogAction>

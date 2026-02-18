@@ -14,6 +14,8 @@ import { CrewMembers } from "@/components/features/crews/crew-members"
 import { CrewDangerZone } from "@/components/features/crews/crew-danger-zone"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
+import { updateCrewSchema } from "@/lib/validations"
+import type { CrewMember } from "@/lib/types/crew"
 import { toast } from "sonner"
 import Link from "next/link"
 
@@ -29,13 +31,6 @@ interface Crew {
   container_cpus: number
   created_at: string
   _count: { agents: number; members: number }
-}
-
-interface CrewMember {
-  id: string
-  user_id: string
-  created_at: string
-  user: { id: string; email: string; full_name: string | null; avatar_url: string | null }
 }
 
 interface Agent {
@@ -62,7 +57,7 @@ export default function CrewDetailPage() {
   const [crew, setCrew] = useState<Crew | null>(null)
   const [members, setMembers] = useState<CrewMember[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
-  const [credentialCount, setCredentialCount] = useState<number>(0)
+  const [credentialCount, setCredentialCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -125,6 +120,8 @@ export default function CrewDetailPage() {
         if (credsRes.ok) {
           const credsData = (await credsRes.json()) as unknown[]
           if (!cancelled) setCredentialCount(credsData.length)
+        } else if (!cancelled) {
+          setCredentialCount(null)
         }
       } catch {
         if (!cancelled) setError("Failed to load crew")
@@ -141,21 +138,29 @@ export default function CrewDetailPage() {
     e.preventDefault()
     if (!workspaceId || !crew) return
 
+    const parsed = updateCrewSchema.safeParse({
+      name: formName,
+      description: formDescription || undefined,
+      color: formColor,
+      icon: formIcon || undefined,
+      container_memory_mb: formMemory ? parseInt(formMemory) : undefined,
+      container_cpus: formCpus ? parseFloat(formCpus) : undefined,
+      container_ttl_hours: formTtl ? parseInt(formTtl) : null,
+    })
+
+    if (!parsed.success) {
+      const msg = parsed.error.issues[0]?.message ?? "Invalid input"
+      toast.error(msg)
+      return
+    }
+
     setSaving(true)
 
     try {
       const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formName,
-          description: formDescription || undefined,
-          color: formColor,
-          icon: formIcon || undefined,
-          container_memory_mb: parseInt(formMemory) || 4096,
-          container_cpus: parseFloat(formCpus) || 2,
-          container_ttl_hours: formTtl ? parseInt(formTtl) : null,
-        }),
+        body: JSON.stringify(parsed.data),
       })
 
       if (!res.ok) {
@@ -274,7 +279,7 @@ export default function CrewDetailPage() {
         canCreate={abilities.can("create", "Agent")}
       />
 
-      {agents.length > 0 && credentialCount === 0 && (
+      {agents.length > 0 && credentialCount !== null && credentialCount === 0 && (
         <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
           <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
           <p className="text-sm text-amber-800 dark:text-amber-200">

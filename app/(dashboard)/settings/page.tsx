@@ -123,6 +123,7 @@ export default function SettingsPage() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle")
   const [saveError, setSaveError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   useEffect(() => {
     if (!workspaceId) return
@@ -205,8 +206,9 @@ export default function SettingsPage() {
   }
 
   async function handleDeleteOrg() {
-    if (!workspaceId) return
+    if (!workspaceId || isDeleting) return
 
+    setIsDeleting(true)
     try {
       const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, { method: "DELETE" })
       if (res.ok) {
@@ -217,6 +219,8 @@ export default function SettingsPage() {
       }
     } catch {
       setSaveError("Failed to delete workspace")
+    } finally {
+      setIsDeleting(false)
     }
   }
 
@@ -460,9 +464,10 @@ export default function SettingsPage() {
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                   <AlertDialogAction
                     onClick={handleDeleteOrg}
-                    className="bg-destructive text-white hover:bg-destructive/90"
+                    variant="destructive"
+                    disabled={isDeleting}
                   >
-                    Delete Workspace
+                    {isDeleting ? "Deleting..." : "Delete Workspace"}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

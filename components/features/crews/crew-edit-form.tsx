@@ -118,9 +118,9 @@ export function CrewEditForm({
               <Input
                 id="crew-ttl"
                 type="number"
-                min={0}
+                min={1}
                 max={720}
-                placeholder="No limit"
+                placeholder="No limit (empty)"
                 value={containerTtlHours}
                 onChange={(e) => onTtlChange(e.target.value)}
               />

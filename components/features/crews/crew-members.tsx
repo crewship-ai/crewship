@@ -25,13 +25,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
 import { AddMemberDialog } from "./add-member-dialog"
-
-interface CrewMember {
-  id: string
-  user_id: string
-  created_at: string
-  user: { id: string; email: string; full_name: string | null; avatar_url: string | null }
-}
+import type { CrewMember } from "@/lib/types/crew"
 
 interface CrewMembersProps {
   members: CrewMember[]
@@ -43,8 +37,10 @@ interface CrewMembersProps {
 
 export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersChange }: CrewMembersProps) {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [removingId, setRemovingId] = useState<string | null>(null)
 
   async function handleRemoveMember(memberId: string, memberName: string) {
+    setRemovingId(memberId)
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/members/${memberId}?workspace_id=${workspaceId}`,
@@ -58,6 +54,8 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
       }
     } catch {
       toast.error("Failed to remove member")
+    } finally {
+      setRemovingId(null)
     }
   }
 
@@ -127,9 +125,10 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                               <AlertDialogCancel>Cancel</AlertDialogCancel>
                               <AlertDialogAction
                                 onClick={() => handleRemoveMember(member.id, member.user.full_name || member.user.email)}
-                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                variant="destructive"
+                                disabled={removingId === member.id}
                               >
-                                Remove
+                                {removingId === member.id ? "Removing..." : "Remove"}
                               </AlertDialogAction>
                             </AlertDialogFooter>
                           </AlertDialogContent>

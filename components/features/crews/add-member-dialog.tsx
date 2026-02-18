@@ -19,18 +19,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { toast } from "sonner"
+import type { CrewMember } from "@/lib/types/crew"
 
 interface WorkspaceUser {
   id: string
   email: string
   full_name: string | null
-}
-
-interface CrewMember {
-  id: string
-  user_id: string
-  created_at: string
-  user: { id: string; email: string; full_name: string | null; avatar_url: string | null }
 }
 
 interface AddMemberDialogProps {
@@ -62,7 +56,10 @@ export function AddMemberDialog({
     setSelectedUserId("")
 
     fetch(`/api/v1/workspaces/${workspaceId}/members`)
-      .then((res) => (res.ok ? res.json() : []))
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch members")
+        return res.json()
+      })
       .then((members: { user: WorkspaceUser }[]) => {
         const available = members
           .map((m) => m.user)

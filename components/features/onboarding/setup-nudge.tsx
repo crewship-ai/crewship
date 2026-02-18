@@ -50,10 +50,11 @@ export function SetupNudge({ crewCount, agentCount, credentialCount }: SetupNudg
               {completedCount} of {steps.length} steps completed
             </p>
           </div>
-          <div className="flex gap-1">
+          <div className="flex gap-1" role="group" aria-label={`${completedCount} of ${steps.length} steps completed`}>
             {steps.map((step, i) => (
               <div
                 key={i}
+                aria-hidden="true"
                 className={`h-1.5 w-6 rounded-full ${
                   step.done ? "bg-primary" : "bg-muted"
                 }`}
