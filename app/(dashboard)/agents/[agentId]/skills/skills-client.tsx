@@ -120,7 +120,11 @@ export function SkillsPageClient() {
       )
       if (res.ok || res.status === 204) {
         await fetchSkills()
+      } else {
+        setError("Failed to remove skill")
       }
+    } catch {
+      setError("Network error removing skill")
     } finally {
       setRemovingId(null)
     }
@@ -251,8 +255,11 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
 
   const unassigned = available.filter((s) => !assignedSkillIds.includes(s.id))
 
+  const [addError, setAddError] = useState<string | null>(null)
+
   const handleAdd = async (skillId: string) => {
     setAdding(skillId)
+    setAddError(null)
     try {
       const res = await fetch(`/api/v1/agents/${agentId}/skills?workspace_id=${workspaceId}`, {
         method: "POST",
@@ -261,8 +268,13 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
       })
       if (res.ok) {
         onAdded()
-        if (unassigned.length <= 1) onOpenChange(false)
+        const remaining = available.filter((s) => !assignedSkillIds.includes(s.id) && s.id !== skillId)
+        if (remaining.length === 0) onOpenChange(false)
+      } else {
+        setAddError("Failed to add skill")
       }
+    } catch {
+      setAddError("Network error adding skill")
     } finally {
       setAdding(null)
     }
@@ -275,6 +287,13 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
           <DialogTitle>Add Skill</DialogTitle>
           <DialogDescription>Select a skill to assign to this agent.</DialogDescription>
         </DialogHeader>
+
+        {addError && (
+          <div className="flex items-center gap-2 text-destructive text-sm">
+            <AlertCircle className="h-4 w-4" />
+            <span>{addError}</span>
+          </div>
+        )}
 
         {loading ? (
           <div className="space-y-3 py-2">
