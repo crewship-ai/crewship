@@ -2,12 +2,16 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
+	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/conversation"
@@ -24,6 +28,7 @@ type Server struct {
 	ipcServer    *http.Server
 	mux          *http.ServeMux
 	ipcMux       *http.ServeMux
+	spaHandler   http.Handler
 	cfg          *config.Config
 	logger       *slog.Logger
 	wsHub        *ws.Hub
@@ -48,6 +53,8 @@ type Deps struct {
 	Storage   provider.StorageProvider
 	State     provider.StateProvider
 	DebugLogs *logging.RingBuffer
+	DB        *sql.DB
+	WebFS     fs.FS
 }
 
 func (d *Deps) Close() {
@@ -149,9 +156,32 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	s.registerRoutes()
 	s.registerIPCRoutes()
 
+	// Mount Go API routes when database is available
+	if deps != nil && deps.DB != nil && cfg.Auth.JWTSecret != "" {
+		var opts []goapi.RouterOption
+		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
+		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
+		if err != nil {
+			logger.Error("failed to create API router", "error", err)
+		} else {
+			mux.Handle("/api/", apiRouter)
+			logger.Info("Go API routes mounted")
+		}
+		// Static UI: wrap mux with SPA handler to avoid ServeMux redirect issues
+		if deps.WebFS != nil {
+			s.spaHandler = goapi.StaticFileHandler(deps.WebFS)
+			logger.Info("serving embedded static UI")
+		}
+	}
+
+	var mainHandler http.Handler = mux
+	if s.spaHandler != nil {
+		mainHandler = s.combinedHandler()
+	}
+
 	s.httpServer = &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      mux,
+		Handler:      mainHandler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -164,6 +194,21 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	}
 
 	return s
+}
+
+// combinedHandler routes /api/, /healthz, /readyz, /metrics, /ws to the mux,
+// and everything else to the SPA static file handler.
+func (s *Server) combinedHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if strings.HasPrefix(path, "/api/") ||
+			path == "/healthz" || path == "/readyz" ||
+			path == "/metrics" || path == "/ws" {
+			s.mux.ServeHTTP(w, r)
+			return
+		}
+		s.spaHandler.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) SetChatHandler(handler ws.ChatHandler) {

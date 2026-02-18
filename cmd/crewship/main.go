@@ -1,0 +1,321 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"runtime"
+	"strconv"
+	"syscall"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/provider/bbolt"
+	"github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/provider/localfs"
+	"github.com/crewship-ai/crewship/internal/server"
+	"github.com/crewship-ai/crewship/web"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+func main() {
+	if len(os.Args) < 2 {
+		printUsage()
+		os.Exit(1)
+	}
+
+	switch os.Args[1] {
+	case "start":
+		cmdStart(os.Args[2:])
+	case "version":
+		cmdVersion()
+	case "doctor":
+		cmdDoctor()
+	case "help", "--help", "-h":
+		printUsage()
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", os.Args[1])
+		printUsage()
+		os.Exit(1)
+	}
+}
+
+func printUsage() {
+	fmt.Println(`Crewship -- AI Agent Orchestration Platform
+
+Usage: crewship <command> [flags]
+
+Commands:
+  start      Start the Crewship server
+  version    Print version information
+  doctor     Check system requirements and health
+
+Flags:
+  -h, --help    Show this help message`)
+}
+
+func cmdVersion() {
+	fmt.Printf("crewship %s\n", version)
+	fmt.Printf("  commit:  %s\n", commit)
+	fmt.Printf("  built:   %s\n", date)
+	fmt.Printf("  go:      %s\n", runtime.Version())
+	fmt.Printf("  os/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+}
+
+func cmdDoctor() {
+	logger := logging.New("info", "text", os.Stdout)
+
+	allOK := true
+
+	logger.Info("doctor check",
+		"version", version,
+		"commit", commit,
+		"go_runtime", runtime.Version(),
+		"os_arch", runtime.GOOS+"/"+runtime.GOARCH,
+	)
+
+	doctorCtx, doctorCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer doctorCancel()
+	detected, detectErr := docker.Detect(doctorCtx)
+	if detectErr == nil {
+		logger.Info("container runtime found",
+			"container", detected.Runtime,
+			"version", detected.Version,
+			"socket", detected.Socket,
+		)
+	} else {
+		logger.Error("no container runtime found",
+			"error", detectErr,
+			"supported", "Docker, Podman, Colima, OrbStack, Rancher Desktop",
+			"install_docker", "https://docs.docker.com/get-docker/",
+			"install_podman", "https://podman.io/docs/installation",
+		)
+		allOK = false
+	}
+
+	dataDir, err := database.DefaultDataDir()
+	if err != nil {
+		logger.Error("data directory error", "error", err)
+		allOK = false
+	} else {
+		dbPath := dataDir.DatabasePath()
+		_, statErr := os.Stat(dbPath)
+		logger.Info("data directory",
+			"path", dataDir.Root,
+			"database", dbPath,
+			"db_exists", statErr == nil,
+		)
+	}
+
+	if allOK {
+		logger.Info("all checks passed")
+	} else {
+		logger.Warn("some checks failed, run 'crewship doctor' after fixing to verify")
+	}
+}
+
+func checkDocker(ctx context.Context) bool {
+	_, err := docker.Detect(ctx)
+	return err == nil
+}
+
+func cmdStart(args []string) {
+	fs := flag.NewFlagSet("start", flag.ExitOnError)
+	configPath := fs.String("config", "", "path to config file (YAML)")
+	dbURL := fs.String("db", "", "database URL (default: ~/.crewship/crewship.db)")
+	noDocker := fs.Bool("no-docker", false, "start without Docker (dashboard only, agents cannot run)")
+	fs.Parse(args)
+
+	detectCtx, detectCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer detectCancel()
+	if !*noDocker && !checkDocker(detectCtx) {
+		fmt.Fprintln(os.Stderr, "Error: No container runtime found.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Crewship requires a Docker-compatible runtime to run AI agents.")
+		fmt.Fprintln(os.Stderr, "Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Install Docker Desktop: https://docs.docker.com/get-docker/")
+		fmt.Fprintln(os.Stderr, "Install Podman:         https://podman.io/docs/installation")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "To start without containers (dashboard only, no agents):")
+		fmt.Fprintln(os.Stderr, "  crewship start --no-docker")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Run 'crewship doctor' for full diagnostics.")
+		os.Exit(1)
+	}
+
+	bootstrapLogger := logging.New("info", "json", os.Stdout)
+	slog.SetDefault(bootstrapLogger)
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
+
+	debugBuffer := logging.NewRingBuffer(500)
+	innerLogger := logging.New(cfg.Logging.Level, "json", os.Stdout)
+	ringHandler := logging.NewRingHandler(innerLogger.Handler(), debugBuffer)
+	logger := slog.New(ringHandler)
+	slog.SetDefault(logger)
+
+	// Resolve database URL
+	databaseURL := *dbURL
+	if databaseURL == "" {
+		databaseURL = os.Getenv("DATABASE_URL")
+	}
+	if databaseURL == "" {
+		dataDir, err := database.DefaultDataDir()
+		if err != nil {
+			logger.Error("failed to create data directory", "error", err)
+			os.Exit(1)
+		}
+		databaseURL = dataDir.DatabaseURL()
+		cfg.Storage.BasePath = dataDir.OutputDir()
+		cfg.Storage.LogPath = dataDir.LogsDir()
+	}
+
+	// Open and migrate SQLite
+	db, err := database.Open(databaseURL)
+	if err != nil {
+		logger.Error("failed to open database", "error", err, "url", databaseURL)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
+		logger.Error("failed to run migrations", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("crewship starting",
+		"version", version,
+		"database", db.Path(),
+		"container_provider", cfg.Container.Provider,
+		"storage_provider", cfg.Storage.Provider,
+		"state_provider", cfg.State.Provider,
+		"http_addr", cfg.Server.Host+":"+strconv.Itoa(cfg.Server.Port),
+		"ipc_socket", cfg.IPC.SocketPath,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ctx = logging.WithContext(ctx, logger)
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sig
+		logger.Info("received shutdown signal")
+		cancel()
+	}()
+
+	deps, err := initProviders(ctx, cfg, logger, *noDocker)
+	if err != nil {
+		logger.Error("failed to initialize providers", "error", err)
+		os.Exit(1)
+	}
+	defer deps.Close()
+	deps.DebugLogs = debugBuffer
+	deps.DB = db.DB
+
+	// Load embedded web UI (static export)
+	webFS, err := web.FS()
+	if err != nil {
+		logger.Warn("embedded web UI not available", "error", err)
+	} else {
+		deps.WebFS = webFS
+	}
+
+	srv := server.New(cfg, logger, deps)
+
+	resolver := chatbridge.NewIPCResolver(cfg.Auth.NextjsURL, cfg.Auth.InternalToken, logger)
+	bridge := chatbridge.New(
+		srv.Orchestrator(),
+		deps.Container,
+		srv.ConversationStore(),
+		srv.LogWriter(),
+		resolver,
+		chatbridge.BridgeConfig{
+			DefaultMemoryMB: cfg.Container.DefaultMemoryMB,
+			DefaultCPUs:     cfg.Container.DefaultCPUs,
+		},
+		logger,
+	)
+	srv.SetChatHandler(bridge)
+
+	if err := srv.Start(ctx); err != nil {
+		logger.Error("server error", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("crewship stopped")
+}
+
+func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {
+	deps := &server.Deps{}
+
+	switch cfg.Container.Provider {
+	case "docker":
+		if skipDocker {
+			logger.Info("docker provider disabled via --no-docker")
+			break
+		}
+		d, err := docker.New(ctx, docker.Config{
+			RuntimeImage:   cfg.Container.RuntimeImage,
+			DefaultRuntime: cfg.Container.DefaultRuntime,
+			Network:        cfg.Container.Network,
+			OutputBasePath: cfg.Storage.BasePath,
+		}, logger)
+		if err != nil {
+			logger.Warn("docker provider unavailable, running without containers", "error", err)
+		} else {
+			deps.Container = d
+		}
+	default:
+		if cfg.Container.Provider != "" {
+			logger.Warn("unknown container provider", "provider", cfg.Container.Provider)
+		}
+	}
+
+	switch cfg.Storage.Provider {
+	case "localfs":
+		fs, err := localfs.New(cfg.Storage.BasePath)
+		if err != nil {
+			return nil, fmt.Errorf("init localfs provider: %w", err)
+		}
+		deps.Storage = fs
+	default:
+		if cfg.Storage.Provider != "" {
+			logger.Warn("unknown storage provider", "provider", cfg.Storage.Provider)
+		}
+	}
+
+	switch cfg.State.Provider {
+	case "bbolt":
+		b, err := bbolt.New(cfg.State.BoltPath)
+		if err != nil {
+			return nil, fmt.Errorf("init bbolt provider: %w", err)
+		}
+		deps.State = b
+	default:
+		if cfg.State.Provider != "" {
+			logger.Warn("unknown state provider", "provider", cfg.State.Provider)
+		}
+	}
+
+	return deps, nil
+}

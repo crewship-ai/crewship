@@ -2,25 +2,21 @@
 
 import { useEffect, useState, type FormEvent } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { Bot, Users, Pencil, Trash2, ArrowLeft, Clock, Cpu, HardDrive } from "lucide-react"
+import { ArrowLeft, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Separator } from "@/components/ui/separator"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { AgentCard } from "@/components/features/agents/agent-card"
+import { CrewHeader } from "@/components/features/crews/crew-header"
+import { CrewStats } from "@/components/features/crews/crew-stats"
+import { CrewEditForm } from "@/components/features/crews/crew-edit-form"
+import { CrewAgents } from "@/components/features/crews/crew-agents"
+import { CrewMembers } from "@/components/features/crews/crew-members"
+import { CrewDangerZone } from "@/components/features/crews/crew-danger-zone"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
+import { updateCrewSchema } from "@/lib/validations"
+import type { CrewMember } from "@/lib/types/crew"
+import { toast } from "sonner"
 import Link from "next/link"
 
 interface Crew {
@@ -35,13 +31,6 @@ interface Crew {
   container_cpus: number
   created_at: string
   _count: { agents: number; members: number }
-}
-
-interface CrewMember {
-  id: string
-  user_id: string
-  created_at: string
-  user: { id: string; email: string; full_name: string | null; avatar_url: string | null }
 }
 
 interface Agent {
@@ -59,7 +48,7 @@ interface Agent {
   _count: { skills: number; credentials: number; chats: number }
 }
 
-export default function TeamDetailPage() {
+export default function CrewDetailPage() {
   const params = useParams<{ crewId: string }>()
   const router = useRouter()
   const { workspaceId, loading: wsLoading } = useWorkspace()
@@ -68,6 +57,7 @@ export default function TeamDetailPage() {
   const [crew, setCrew] = useState<Crew | null>(null)
   const [members, setMembers] = useState<CrewMember[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
+  const [credentialCount, setCredentialCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -76,8 +66,10 @@ export default function TeamDetailPage() {
   const [formDescription, setFormDescription] = useState("")
   const [formColor, setFormColor] = useState("#6b7280")
   const [formIcon, setFormIcon] = useState("")
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle")
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const [formMemory, setFormMemory] = useState("4096")
+  const [formCpus, setFormCpus] = useState("2")
+  const [formTtl, setFormTtl] = useState("")
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!workspaceId) {
@@ -91,10 +83,11 @@ export default function TeamDetailPage() {
       setLoading(true)
       setError(null)
       try {
-        const [crewRes, membersRes, agentsRes] = await Promise.all([
+        const [crewRes, membersRes, agentsRes, credsRes] = await Promise.all([
           fetch(`/api/v1/crews/${params.crewId}?workspace_id=${workspaceId}`),
           fetch(`/api/v1/crews/${params.crewId}/members?workspace_id=${workspaceId}`),
           fetch(`/api/v1/agents?workspace_id=${workspaceId}&crew_id=${params.crewId}`),
+          fetch(`/api/v1/credentials?workspace_id=${workspaceId}`),
         ])
 
         if (!crewRes.ok) {
@@ -109,6 +102,9 @@ export default function TeamDetailPage() {
           setFormDescription(crewData.description ?? "")
           setFormColor(crewData.color ?? "#6b7280")
           setFormIcon(crewData.icon ?? "")
+          setFormMemory(String(crewData.container_memory_mb))
+          setFormCpus(String(crewData.container_cpus))
+          setFormTtl(crewData.container_ttl_hours ? String(crewData.container_ttl_hours) : "")
         }
 
         if (membersRes.ok) {
@@ -119,6 +115,13 @@ export default function TeamDetailPage() {
         if (agentsRes.ok) {
           const agentsData = (await agentsRes.json()) as Agent[]
           if (!cancelled) setAgents(agentsData)
+        }
+
+        if (credsRes.ok) {
+          const credsData = (await credsRes.json()) as unknown[]
+          if (!cancelled) setCredentialCount(credsData.length)
+        } else if (!cancelled) {
+          setCredentialCount(null)
         }
       } catch {
         if (!cancelled) setError("Failed to load crew")
@@ -135,78 +138,64 @@ export default function TeamDetailPage() {
     e.preventDefault()
     if (!workspaceId || !crew) return
 
-    setSaveStatus("saving")
-    setSaveError(null)
+    const parsed = updateCrewSchema.safeParse({
+      name: formName,
+      description: formDescription || undefined,
+      color: formColor,
+      icon: formIcon || undefined,
+      container_memory_mb: formMemory ? parseInt(formMemory) : undefined,
+      container_cpus: formCpus ? parseFloat(formCpus) : undefined,
+      container_ttl_hours: formTtl ? parseInt(formTtl) : null,
+    })
+
+    if (!parsed.success) {
+      const msg = parsed.error.issues[0]?.message ?? "Invalid input"
+      toast.error(msg)
+      return
+    }
+
+    setSaving(true)
 
     try {
       const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formName,
-          description: formDescription || undefined,
-          color: formColor,
-          icon: formIcon || undefined,
-        }),
+        body: JSON.stringify(parsed.data),
       })
 
       if (!res.ok) {
         const body = await res.json().catch(() => null)
         const msg = typeof body?.error === "string" ? body.error : "Failed to save"
-        setSaveStatus("error")
-        setSaveError(msg)
+        toast.error(msg)
         return
       }
 
       const updated = (await res.json()) as Crew
       setCrew(updated)
       setEditing(false)
-      setSaveStatus("success")
-      setTimeout(() => setSaveStatus("idle"), 3000)
+      toast.success("Crew updated successfully")
     } catch {
-      setSaveStatus("error")
-      setSaveError("Failed to save changes")
+      toast.error("Failed to save changes")
+    } finally {
+      setSaving(false)
     }
   }
 
   async function handleDelete() {
     if (!workspaceId || !crew) return
 
-    const confirmed = window.confirm(
-      `Are you sure you want to delete "${crew.name}"? This action cannot be undone.`
-    )
-    if (!confirmed) return
-
     try {
       const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, {
         method: "DELETE",
       })
       if (res.ok) {
+        toast.success(`"${crew.name}" deleted`)
         router.push("/crews")
       } else {
-        setSaveError("Failed to delete crew")
+        toast.error("Failed to delete crew")
       }
     } catch {
-      setSaveError("Failed to delete crew")
-    }
-  }
-
-  async function handleRemoveMember(memberId: string) {
-    if (!workspaceId || !crew) return
-
-    const confirmed = window.confirm("Remove this member from the crew?")
-    if (!confirmed) return
-
-    try {
-      const res = await fetch(
-        `/api/v1/crews/${crew.id}/members/${memberId}?workspace_id=${workspaceId}`,
-        { method: "DELETE" }
-      )
-      if (res.ok) {
-        setMembers((prev) => prev.filter((m) => m.id !== memberId))
-      }
-    } catch {
-      // silently fail
+      toast.error("Failed to delete crew")
     }
   }
 
@@ -233,229 +222,89 @@ export default function TeamDetailPage() {
     )
   }
 
-  if (!crew) return null
+  if (!crew || !workspaceId) return null
 
   const canEdit = abilities.can("update", "Crew")
   const canDelete = abilities.can("delete", "Crew")
 
   return (
     <div className="p-4 sm:p-6 space-y-6 max-w-4xl">
-      {/* Header */}
-      <div>
-        <Button variant="ghost" size="sm" className="mb-3" asChild>
-          <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
-        </Button>
-        <div className="flex items-center gap-4">
-          <div
-            className="flex h-12 w-12 items-center justify-center rounded-lg text-xl shrink-0"
-            style={{ backgroundColor: crew.color ? `${crew.color}20` : undefined }}
-          >
-            {crew.icon ?? (
-              <Users className="h-6 w-6" style={{ color: crew.color ?? "#6b7280" }} />
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-3">
-              <h1 className="text-xl font-semibold truncate">{crew.name}</h1>
-              <span
-                className="h-3 w-3 rounded-full shrink-0"
-                style={{ backgroundColor: crew.color ?? "#6b7280" }}
-              />
-            </div>
-            <p className="text-sm text-muted-foreground font-mono">{crew.slug}</p>
-          </div>
-          {canEdit && (
-            <Button variant="outline" size="sm" onClick={() => setEditing(!editing)}>
-              <Pencil className="mr-2 h-3.5 w-3.5" />
-              {editing ? "Cancel" : "Edit"}
-            </Button>
-          )}
-        </div>
-        {crew.description && !editing && (
-          <p className="text-sm text-muted-foreground mt-2">{crew.description}</p>
-        )}
-      </div>
+      <Button variant="ghost" size="sm" className="mb-3" asChild>
+        <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
+      </Button>
 
-      {/* Edit form */}
+      <CrewHeader
+        name={crew.name}
+        slug={crew.slug}
+        color={crew.color}
+        icon={crew.icon}
+        description={crew.description}
+        editing={editing}
+        canEdit={canEdit}
+        onToggleEdit={() => setEditing(!editing)}
+      />
+
       {editing && canEdit && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Edit Crew</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSave} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="team-name">Name</Label>
-                <Input id="team-name" value={formName} onChange={(e) => setFormName(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="team-desc">Description</Label>
-                <Textarea id="team-desc" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} rows={3} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="team-color">Color</Label>
-                  <div className="flex items-center gap-2">
-                    <input type="color" id="team-color" value={formColor} onChange={(e) => setFormColor(e.target.value)} className="h-9 w-9 rounded border cursor-pointer" />
-                    <Input value={formColor} onChange={(e) => setFormColor(e.target.value)} className="flex-1 font-mono text-sm" />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="team-icon">Icon (emoji)</Label>
-                  <Input id="team-icon" value={formIcon} onChange={(e) => setFormIcon(e.target.value)} placeholder="e.g. 🚀" maxLength={10} />
-                </div>
-              </div>
-
-              {saveStatus === "success" && <p className="text-sm text-emerald-600">Changes saved.</p>}
-              {saveStatus === "error" && saveError && <p className="text-sm text-destructive">{saveError}</p>}
-
-              <Button type="submit" disabled={saveStatus === "saving"}>
-                {saveStatus === "saving" ? "Saving..." : "Save Changes"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+        <CrewEditForm
+          name={formName}
+          description={formDescription}
+          color={formColor}
+          icon={formIcon}
+          containerTtlHours={formTtl}
+          containerMemoryMb={formMemory}
+          containerCpus={formCpus}
+          saving={saving}
+          onNameChange={setFormName}
+          onDescriptionChange={setFormDescription}
+          onColorChange={setFormColor}
+          onIconChange={setFormIcon}
+          onTtlChange={setFormTtl}
+          onMemoryChange={setFormMemory}
+          onCpusChange={setFormCpus}
+          onSubmit={handleSave}
+        />
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Bot className="h-4 w-4" />
-              <span className="text-xs">Agents</span>
-            </div>
-            <p className="text-2xl font-bold mt-1">{crew._count.agents}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Users className="h-4 w-4" />
-              <span className="text-xs">Members</span>
-            </div>
-            <p className="text-2xl font-bold mt-1">{crew._count.members}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <HardDrive className="h-4 w-4" />
-              <span className="text-xs">Memory</span>
-            </div>
-            <p className="text-2xl font-bold mt-1">{crew.container_memory_mb} MB</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Cpu className="h-4 w-4" />
-              <span className="text-xs">CPUs</span>
-            </div>
-            <p className="text-2xl font-bold mt-1">{crew.container_cpus}</p>
-          </CardContent>
-        </Card>
-      </div>
+      <CrewStats
+        agentCount={crew._count.agents}
+        memberCount={crew._count.members}
+        memoryMb={crew.container_memory_mb}
+        cpus={crew.container_cpus}
+        ttlHours={crew.container_ttl_hours}
+      />
 
-      {/* Container config */}
-      {crew.container_ttl_hours && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Clock className="h-4 w-4" />
-          <span>Container TTL: {crew.container_ttl_hours}h</span>
+      <CrewAgents
+        agents={agents}
+        crewId={crew.id}
+        canCreate={abilities.can("create", "Agent")}
+      />
+
+      {agents.length > 0 && credentialCount !== null && credentialCount === 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+          <p className="text-sm text-amber-800 dark:text-amber-200">
+            No credentials configured. Agents need API keys to connect to LLM providers.{" "}
+            <Link href="/credentials" className="font-medium underline underline-offset-2">
+              Add credentials
+            </Link>
+          </p>
         </div>
       )}
-
-      {/* Agents */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold">Agents</h2>
-          {abilities.can("create", "Agent") && (
-            <Button size="sm" asChild>
-              <Link href={`/agents/new?crew_id=${crew.id}`}>New Agent</Link>
-            </Button>
-          )}
-        </div>
-        {agents.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No agents in this crew yet.</p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {agents.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} />
-            ))}
-          </div>
-        )}
-      </div>
 
       <Separator />
 
-      {/* Members */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold">Members</h2>
-        </div>
-        {members.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No crew members yet.</p>
-        ) : (
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Joined</TableHead>
-                    {canEdit && <TableHead className="w-20" />}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {members.map((member) => (
-                    <TableRow key={member.id}>
-                      <TableCell className="text-sm font-medium">
-                        {member.user.full_name ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {member.user.email}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {new Date(member.created_at).toLocaleDateString()}
-                      </TableCell>
-                      {canEdit && (
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleRemoveMember(member.id)}
-                            className="text-destructive hover:text-destructive"
-                          >
-                            Remove
-                          </Button>
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      <CrewMembers
+        members={members}
+        crewId={crew.id}
+        workspaceId={workspaceId}
+        canEdit={canEdit}
+        onMembersChange={setMembers}
+      />
 
-      {/* Danger zone */}
       {canDelete && (
         <>
           <Separator />
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Danger Zone</CardTitle>
-              <CardDescription>Irreversible actions for this crew</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button variant="destructive" onClick={handleDelete}>
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete Crew
-              </Button>
-            </CardContent>
-          </Card>
+          <CrewDangerZone crewName={crew.name} onDelete={handleDelete} />
         </>
       )}
 
