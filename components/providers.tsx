@@ -2,6 +2,11 @@
 
 import { AuthProvider } from "@/hooks/use-auth"
 
-export function Providers({ children }: { children: React.ReactNode }) {
+interface ProvidersProps {
+  children: React.ReactNode
+}
+
+/** App-wide providers wrapper (auth context). */
+export function Providers({ children }: ProvidersProps) {
   return <AuthProvider>{children}</AuthProvider>
 }

@@ -154,7 +154,9 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
 	r.mux.Handle("GET /api/v1/ws-token", authed(http.HandlerFunc(authH.WsToken)))
 
-	// NextAuth-compatible endpoints (for next-auth/react client SDK)
+	// Auth endpoints (no RBAC -- public access required for login/signup flow).
+	// These intentionally bypass RequireAuth as they are the authentication
+	// bootstrap endpoints that establish the session cookie.
 	nextAuth := NewNextAuthHandler(r.db, r.logger, r.authMw.validator)
 	r.mux.HandleFunc("GET /api/auth/csrf", nextAuth.CSRF)
 	r.mux.HandleFunc("GET /api/auth/providers", nextAuth.Providers)

@@ -352,11 +352,19 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	return resp.ID, nil
 }
 
+// shortID returns first 12 chars of a container ID, or the full string if shorter.
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
 // StopCrewRuntime gracefully stops a crew container with a 30-second timeout.
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
 	timeout := 30
 	if err := p.client.ContainerStop(ctx, containerID, container.StopOptions{Timeout: &timeout}); err != nil {
-		return fmt.Errorf("stop crew runtime %s: %w", containerID[:12], err)
+		return fmt.Errorf("stop crew runtime %s: %w", shortID(containerID), err)
 	}
 	return nil
 }
@@ -364,7 +372,7 @@ func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) erro
 // RemoveCrewRuntime forcefully removes a crew container.
 func (p *Provider) RemoveCrewRuntime(ctx context.Context, containerID string) error {
 	if err := p.client.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
-		return fmt.Errorf("remove crew runtime %s: %w", containerID[:12], err)
+		return fmt.Errorf("remove crew runtime %s: %w", shortID(containerID), err)
 	}
 	return nil
 }

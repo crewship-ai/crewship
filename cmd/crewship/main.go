@@ -74,54 +74,54 @@ func cmdVersion() {
 }
 
 func cmdDoctor() {
-	fmt.Println("Crewship Doctor")
-	fmt.Println("===============")
-	fmt.Println()
+	logger := logging.New("info", "text", os.Stdout)
 
 	allOK := true
 
-	fmt.Printf("  Version:       %s (%s)\n", version, commit)
-	fmt.Printf("  Go runtime:    %s\n", runtime.Version())
-	fmt.Printf("  OS/Arch:       %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	logger.Info("doctor check",
+		"version", version,
+		"commit", commit,
+		"go_runtime", runtime.Version(),
+		"os_arch", runtime.GOOS+"/"+runtime.GOARCH,
+	)
 
 	doctorCtx, doctorCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer doctorCancel()
 	detected, detectErr := docker.Detect(doctorCtx)
 	if detectErr == nil {
-		label := detected.Runtime
-		if detected.Version != "" {
-			label += " " + detected.Version
-		}
-		fmt.Printf("  Container:     %s (via %s)\n", label, detected.Socket)
+		logger.Info("container runtime found",
+			"container", detected.Runtime,
+			"version", detected.Version,
+			"socket", detected.Socket,
+		)
 	} else {
-		fmt.Println("  Container:     NOT FOUND")
-		fmt.Println()
-		fmt.Println("  A Docker-compatible runtime is required to run AI agents.")
-		fmt.Println("  Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop")
-		fmt.Println("  Install Docker Desktop: https://docs.docker.com/get-docker/")
-		fmt.Println("  Install Podman:         https://podman.io/docs/installation")
+		logger.Error("no container runtime found",
+			"error", detectErr,
+			"supported", "Docker, Podman, Colima, OrbStack, Rancher Desktop",
+			"install_docker", "https://docs.docker.com/get-docker/",
+			"install_podman", "https://podman.io/docs/installation",
+		)
 		allOK = false
 	}
 
 	dataDir, err := database.DefaultDataDir()
 	if err != nil {
-		fmt.Printf("  Data dir:      ERROR (%v)\n", err)
+		logger.Error("data directory error", "error", err)
 		allOK = false
 	} else {
-		fmt.Printf("  Data dir:      %s\n", dataDir.Root)
 		dbPath := dataDir.DatabasePath()
-		if _, err := os.Stat(dbPath); err == nil {
-			fmt.Printf("  Database:      %s (exists)\n", dbPath)
-		} else {
-			fmt.Printf("  Database:      %s (will be created on start)\n", dbPath)
-		}
+		_, statErr := os.Stat(dbPath)
+		logger.Info("data directory",
+			"path", dataDir.Root,
+			"database", dbPath,
+			"db_exists", statErr == nil,
+		)
 	}
 
-	fmt.Println()
 	if allOK {
-		fmt.Println("All checks passed. Ready to go!")
+		logger.Info("all checks passed")
 	} else {
-		fmt.Println("Some checks failed. Run 'crewship doctor' after fixing to verify.")
+		logger.Warn("some checks failed, run 'crewship doctor' after fixing to verify")
 	}
 }
 

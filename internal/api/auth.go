@@ -163,7 +163,7 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 	}
 	// Return the session cookie value as the ws token.
 	// The WebSocket hub validates it using the same JWTValidator.
-	for _, name := range []string{"authjs.session-token", "__Secure-authjs.session-token"} {
+	for _, name := range []string{"__Secure-authjs.session-token", "authjs.session-token"} {
 		if c, err := r.Cookie(name); err == nil && c.Value != "" {
 			writeJSON(w, http.StatusOK, map[string]string{"token": c.Value})
 			return

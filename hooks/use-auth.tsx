@@ -8,17 +8,22 @@ import {
   useCallback,
   type ReactNode,
 } from "react"
+import { z } from "zod"
 
-interface AuthUser {
-  id: string
-  name: string
-  email: string
-}
+const sessionSchema = z.object({
+  user: z.object({
+    id: z.string(),
+    name: z.string().optional().default(""),
+    email: z.string().optional().default(""),
+  }),
+  expires: z.string(),
+})
 
-interface AuthSession {
-  user: AuthUser
-  expires: string
-}
+const csrfSchema = z.object({
+  csrfToken: z.string(),
+})
+
+type AuthSession = z.infer<typeof sessionSchema>
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated"
 
@@ -37,8 +42,8 @@ async function fetchSession(): Promise<AuthSession | null> {
     const res = await fetch("/api/auth/session")
     if (!res.ok) return null
     const data = await res.json()
-    if (!data?.user?.id) return null
-    return data as AuthSession
+    const parsed = sessionSchema.safeParse(data)
+    return parsed.success ? parsed.data : null
   } catch {
     return null
   }
@@ -49,13 +54,19 @@ async function fetchCsrfToken(): Promise<string | null> {
     const res = await fetch("/api/auth/csrf")
     if (!res.ok) return null
     const data = await res.json()
-    return data.csrfToken ?? null
+    const parsed = csrfSchema.safeParse(data)
+    return parsed.success ? parsed.data.csrfToken : null
   } catch {
     return null
   }
 }
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+interface AuthProviderProps {
+  children: ReactNode
+}
+
+/** Provides auth context (session, signIn, signOut) to the component tree. */
+export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<AuthSession | null>(null)
   const [status, setStatus] = useState<AuthStatus>("loading")
 
@@ -119,6 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
+/** Returns the full auth context (session, status, signIn, signOut, refresh). */
 export function useAuth() {
   const ctx = useContext(AuthContext)
   if (!ctx) {
@@ -127,6 +139,7 @@ export function useAuth() {
   return ctx
 }
 
+/** Returns session data and auth status (drop-in replacement for next-auth useSession). */
 export function useSession() {
   const { session, status } = useAuth()
   return { data: session, status }
