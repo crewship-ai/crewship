@@ -144,6 +144,7 @@ export default function LogsPage({ params }: LogsPageProps) {
           {LEVELS.map((lvl) => (
             <button
               key={lvl}
+              aria-pressed={filter === lvl}
               className={`px-2 py-0.5 rounded text-xs transition-colors ${
                 filter === lvl
                   ? "bg-neutral-700 text-white font-medium"
@@ -177,7 +178,7 @@ export default function LogsPage({ params }: LogsPageProps) {
           {autoRefresh && (
             <div className="flex items-center gap-1.5 text-xs text-[#4ECDC4]">
               <span className="h-1.5 w-1.5 rounded-full bg-[#4ECDC4] animate-pulse" />
-              Auto-scroll {autoScroll ? "ON" : "OFF"}
+              Auto-scroll ON
             </div>
           )}
           <button
