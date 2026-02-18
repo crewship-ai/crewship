@@ -60,7 +60,10 @@ function formatModTime(modTime: string): string {
   if (minutes < 60) return `${minutes} min ago`
   const hours = Math.floor(minutes / 60)
   if (hours < 24) return `${hours}h ago`
-  return "Yesterday"
+  const days = Math.floor(hours / 24)
+  if (days === 1) return "Yesterday"
+  if (days < 7) return `${days} days ago`
+  return new Date(modTime).toLocaleDateString()
 }
 
 interface FilesPageProps {
@@ -125,7 +128,7 @@ export default function FilesPage({ params }: FilesPageProps) {
 
   if (error) {
     return (
-      <div className="p-4 sm:p-6">
+      <div className="p-4 md:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" /><p className="text-sm">{error}</p>
         </div>
@@ -140,7 +143,7 @@ export default function FilesPage({ params }: FilesPageProps) {
   const selectedFile = files.find((f) => f.path === selectedPath)
 
   return (
-    <div className="p-4 sm:p-6 space-y-4">
+    <div className="p-4 md:p-6 space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm">
           <FolderOpen className="h-4 w-4 text-muted-foreground" />
@@ -244,7 +247,7 @@ export default function FilesPage({ params }: FilesPageProps) {
 
 function FilesSkeleton() {
   return (
-    <div className="p-4 sm:p-6 space-y-4">
+    <div className="p-4 md:p-6 space-y-4">
       <div className="flex items-center justify-between">
         <Skeleton className="h-5 w-48" /><Skeleton className="h-8 w-36" />
       </div>

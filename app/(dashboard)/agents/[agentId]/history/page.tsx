@@ -98,7 +98,7 @@ export default function HistoryPage({ params }: { params: Promise<{ agentId: str
 
   if (error) {
     return (
-      <div className="p-4 sm:p-6">
+      <div className="p-4 md:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
           <p className="text-sm">{error}</p>
@@ -109,7 +109,7 @@ export default function HistoryPage({ params }: { params: Promise<{ agentId: str
 
   if (events.length === 0) {
     return (
-      <div className="p-4 sm:p-6">
+      <div className="p-4 md:p-6">
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
           <p className="text-sm font-medium text-muted-foreground">No history yet</p>
@@ -120,7 +120,7 @@ export default function HistoryPage({ params }: { params: Promise<{ agentId: str
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-4xl space-y-0">
+    <div className="p-4 md:p-6 max-w-4xl space-y-0">
       <p className="text-sm text-muted-foreground mb-6">Configuration change history</p>
 
       {/* Timeline */}
@@ -201,7 +201,7 @@ export default function HistoryPage({ params }: { params: Promise<{ agentId: str
 
 function HistorySkeleton() {
   return (
-    <div className="p-4 sm:p-6 max-w-4xl space-y-6">
+    <div className="p-4 md:p-6 max-w-4xl space-y-6">
       <Skeleton className="h-5 w-48" />
       {Array.from({ length: 4 }).map((_, i) => (
         <div key={i} className="flex gap-4">

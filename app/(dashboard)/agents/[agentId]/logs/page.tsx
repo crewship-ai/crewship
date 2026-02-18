@@ -56,7 +56,7 @@ export default function LogsPage({ params }: LogsPageProps) {
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<LogLevel>("ALL")
   const [searchQuery, setSearchQuery] = useState("")
-  const [autoScroll] = useState(true)
+  const autoScroll = true
   const [autoRefresh, setAutoRefresh] = useState(false)
   const logContainerRef = useRef<HTMLDivElement>(null)
 
@@ -121,7 +121,7 @@ export default function LogsPage({ params }: LogsPageProps) {
 
   if (error) {
     return (
-      <div className="p-4 sm:p-6">
+      <div className="p-4 md:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
           <p className="text-sm">{error}</p>
@@ -133,7 +133,7 @@ export default function LogsPage({ params }: LogsPageProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Log controls -- dark bar */}
-      <div className="bg-neutral-900 dark:bg-neutral-950 border-b border-neutral-700 px-4 sm:px-6 py-2 flex flex-wrap items-center gap-3 shrink-0">
+      <div className="bg-neutral-900 dark:bg-neutral-950 border-b border-neutral-700 px-4 md:px-6 py-2 flex flex-wrap items-center gap-3 shrink-0">
         <div className="flex items-center gap-1">
           <span className="text-xs text-neutral-400 mr-1">Level:</span>
           {LEVELS.map((lvl) => (
@@ -210,7 +210,7 @@ export default function LogsPage({ params }: LogsPageProps) {
       ) : (
         <div
           ref={logContainerRef}
-          className="flex-1 bg-neutral-950 overflow-y-auto px-4 sm:px-6 py-4 font-mono text-xs leading-6"
+          className="flex-1 bg-neutral-950 overflow-y-auto px-4 md:px-6 py-4 font-mono text-xs leading-6"
         >
           {filtered.map((log, i) => {
             const level = log.level.toUpperCase()
@@ -237,7 +237,7 @@ export default function LogsPage({ params }: LogsPageProps) {
       )}
 
       {/* Log status bar */}
-      <div className="bg-neutral-900 dark:bg-neutral-950 border-t border-neutral-700 px-4 sm:px-6 py-2 flex items-center shrink-0">
+      <div className="bg-neutral-900 dark:bg-neutral-950 border-t border-neutral-700 px-4 md:px-6 py-2 flex items-center shrink-0">
         <span className="ml-auto text-xs text-neutral-600">
           {filtered.length} entr{filtered.length !== 1 ? "ies" : "y"}
           {filter !== "ALL" ? ` (${filter})` : ""}
@@ -250,7 +250,7 @@ export default function LogsPage({ params }: LogsPageProps) {
 function LogsSkeleton() {
   return (
     <div className="flex flex-col h-full">
-      <div className="bg-neutral-900 px-4 sm:px-6 py-2 flex items-center gap-2">
+      <div className="bg-neutral-900 px-4 md:px-6 py-2 flex items-center gap-2">
         {Array.from({ length: 4 }).map((_, i) => (
           <Skeleton key={i} className="h-6 w-14 bg-neutral-800" />
         ))}
@@ -261,7 +261,7 @@ function LogsSkeleton() {
       </div>
       <div className="flex-1 bg-neutral-950 p-4 space-y-2">
         {Array.from({ length: 12 }).map((_, i) => (
-          <Skeleton key={i} className="h-5 bg-neutral-900" style={{ width: `${60 + Math.random() * 30}%` }} />
+          <Skeleton key={i} className={`h-5 bg-neutral-900 ${["w-3/4", "w-2/3", "w-4/5", "w-3/5", "w-2/3", "w-[70%]", "w-4/5", "w-3/5", "w-[65%]", "w-3/4", "w-2/3", "w-4/5"][i]}`} />
         ))}
       </div>
     </div>

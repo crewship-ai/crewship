@@ -239,6 +239,17 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
     document.addEventListener("mouseup", handleUp)
   }, [splitRatio])
 
+  const handleResizeKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const step = 2
+    if (e.key === "ArrowLeft") {
+      e.preventDefault()
+      setSplitRatio((r) => Math.max(30, r - step))
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault()
+      setSplitRatio((r) => Math.min(80, r + step))
+    }
+  }, [])
+
   const chatStatus = isStreaming ? "streaming" as const : "ready" as const
   const selectedFileEntry = files.find((f) => f.path === previewFile)
 
@@ -247,7 +258,7 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
       {/* LEFT: Chat area */}
       <div className="flex flex-col overflow-hidden" style={{ width: showPreview ? `${splitRatio}%` : "100%" }}>
         {/* Connection status */}
-        <div className="flex items-center gap-2 border-b px-4 sm:px-6 py-1.5 bg-muted/20 shrink-0">
+        <div className="flex items-center gap-2 border-b px-4 md:px-6 py-1.5 bg-muted/20 shrink-0">
           <div className="flex items-center gap-1.5">
             {connectionStatus === "connected" ? (
               <Wifi className="h-3 w-3 text-emerald-500" />
@@ -305,7 +316,7 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
 
         {/* Suggestions */}
         {messages.length === 0 && !authError && (
-          <div className="px-4 sm:px-6 pb-2 shrink-0">
+          <div className="px-4 md:px-6 pb-2 shrink-0">
             <Suggestions>
               {defaultSuggestions.map((s) => (
                 <Suggestion key={s} suggestion={s} onClick={() => handleSuggestionClick(s)}>{s}</Suggestion>
@@ -315,7 +326,7 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
         )}
 
         {/* Input */}
-        <div className="border-t bg-background p-3 sm:px-6 shrink-0">
+        <div className="border-t bg-background p-3 md:px-6 shrink-0">
           <PromptInput className="rounded-xl border" onSubmit={handleSubmit}>
             <PromptInputTextarea
               value={input}
@@ -336,8 +347,13 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
       {/* DRAG HANDLE */}
       {showPreview && (
         <div
-          className="w-1 bg-border hover:bg-primary/40 cursor-col-resize shrink-0 transition-colors"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize chat pane"
+          tabIndex={0}
+          className="w-1 bg-border hover:bg-primary/40 focus-visible:bg-primary/40 cursor-col-resize shrink-0 transition-colors outline-none"
           onMouseDown={handleDragStart}
+          onKeyDown={handleResizeKeyDown}
           title="Drag to resize"
         />
       )}
