@@ -6,6 +6,17 @@ import {
   AlertTriangle, Check, X, Key
 } from "lucide-react"
 import { useSession } from "next-auth/react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -196,11 +207,6 @@ export default function SettingsPage() {
   async function handleDeleteOrg() {
     if (!workspaceId) return
 
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this workspace? This action cannot be undone."
-    )
-    if (!confirmed) return
-
     try {
       const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, { method: "DELETE" })
       if (res.ok) {
@@ -388,7 +394,7 @@ export default function SettingsPage() {
               </div>
               <div className="space-y-2 text-xs">
                 <div className="flex justify-between"><span className="text-muted-foreground">Agents</span><span className="font-medium">{org?._count.agents ?? 0} / 5</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Teams</span><span className="font-medium">{org?._count.crews ?? 0} / 2</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Crews</span><span className="font-medium">{org?._count.crews ?? 0} / 2</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">Members</span><span className="font-medium">{org?._count.members ?? 0} / 5</span></div>
               </div>
             </CardContent>
@@ -439,9 +445,28 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent>
             {saveError && <p className="text-sm text-destructive mb-3">{saveError}</p>}
-            <Button variant="destructive" onClick={handleDeleteOrg}>
-              Delete Workspace
-            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive">Delete Workspace</Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete Workspace</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Are you sure you want to delete this workspace? All crews, agents, credentials, and data will be permanently removed. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDeleteOrg}
+                    className="bg-destructive text-white hover:bg-destructive/90"
+                  >
+                    Delete Workspace
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </CardContent>
         </Card>
       )

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   createAgentSchema,
   createCrewSchema,
+  updateCrewSchema,
   createCredentialSchema,
   inviteMemberSchema,
 } from "@/lib/validations"
@@ -160,6 +161,74 @@ describe("createCrewSchema", () => {
       icon: "a".repeat(11),
     })
     expect(tooLong.success).toBe(false)
+  })
+
+  it("container_memory_mb must be 512-32768", () => {
+    const tooLow = createCrewSchema.safeParse({ ...validTeam, container_memory_mb: 256 })
+    expect(tooLow.success).toBe(false)
+
+    const tooHigh = createCrewSchema.safeParse({ ...validTeam, container_memory_mb: 65536 })
+    expect(tooHigh.success).toBe(false)
+
+    const valid = createCrewSchema.safeParse({ ...validTeam, container_memory_mb: 2048 })
+    expect(valid.success).toBe(true)
+  })
+
+  it("container_cpus must be 0.5-16", () => {
+    const tooLow = createCrewSchema.safeParse({ ...validTeam, container_cpus: 0.25 })
+    expect(tooLow.success).toBe(false)
+
+    const tooHigh = createCrewSchema.safeParse({ ...validTeam, container_cpus: 32 })
+    expect(tooHigh.success).toBe(false)
+
+    const valid = createCrewSchema.safeParse({ ...validTeam, container_cpus: 2 })
+    expect(valid.success).toBe(true)
+  })
+
+  it("container_ttl_hours must be 1-720 or null", () => {
+    const tooLow = createCrewSchema.safeParse({ ...validTeam, container_ttl_hours: 0 })
+    expect(tooLow.success).toBe(false)
+
+    const tooHigh = createCrewSchema.safeParse({ ...validTeam, container_ttl_hours: 721 })
+    expect(tooHigh.success).toBe(false)
+
+    const valid = createCrewSchema.safeParse({ ...validTeam, container_ttl_hours: 24 })
+    expect(valid.success).toBe(true)
+
+    const nullValue = createCrewSchema.safeParse({ ...validTeam, container_ttl_hours: null })
+    expect(nullValue.success).toBe(true)
+  })
+})
+
+describe("updateCrewSchema", () => {
+  it("allows partial updates (empty object)", () => {
+    const result = updateCrewSchema.safeParse({})
+    expect(result.success).toBe(true)
+  })
+
+  it("allows updating only name", () => {
+    const result = updateCrewSchema.safeParse({ name: "New Name" })
+    expect(result.success).toBe(true)
+  })
+
+  it("allows updating only container config", () => {
+    const result = updateCrewSchema.safeParse({
+      container_memory_mb: 4096,
+      container_cpus: 4,
+      container_ttl_hours: 48,
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it("still validates field constraints on partial update", () => {
+    const badMemory = updateCrewSchema.safeParse({ container_memory_mb: 100 })
+    expect(badMemory.success).toBe(false)
+
+    const badCpus = updateCrewSchema.safeParse({ container_cpus: 0.1 })
+    expect(badCpus.success).toBe(false)
+
+    const badName = updateCrewSchema.safeParse({ name: "A" })
+    expect(badName.success).toBe(false)
   })
 })
 

@@ -9,6 +9,7 @@ import { StatCard } from "@/components/layout/stat-card"
 import { FilterBar } from "@/components/layout/filter-bar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AgentCard } from "@/components/features/agents/agent-card"
+import { SetupNudge } from "@/components/features/onboarding/setup-nudge"
 import { useWorkspace } from "@/hooks/use-workspace"
 import Link from "next/link"
 
@@ -41,6 +42,7 @@ export default function DashboardPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [agents, setAgents] = useState<Agent[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
+  const [crewCount, setCrewCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState("All")
@@ -54,9 +56,10 @@ export default function DashboardPage() {
       setLoading(true)
       setError(null)
       try {
-        const [agentsRes, credsRes] = await Promise.all([
+        const [agentsRes, credsRes, crewsRes] = await Promise.all([
           fetch(`/api/v1/agents?workspace_id=${workspaceId}`),
           fetch(`/api/v1/credentials?workspace_id=${workspaceId}`),
+          fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
         ])
 
         if (!agentsRes.ok || !credsRes.ok) {
@@ -69,9 +72,12 @@ export default function DashboardPage() {
           credsRes.json() as Promise<Credential[]>,
         ])
 
+        const crewsData = crewsRes.ok ? ((await crewsRes.json()) as unknown[]) : []
+
         if (!cancelled) {
           setAgents(agentsData)
           setCredentials(credsData)
+          setCrewCount(crewsData.length)
         }
       } catch {
         if (!cancelled) setError("Failed to load dashboard data")
@@ -155,6 +161,14 @@ export default function DashboardPage() {
           </>
         )}
       </div>
+
+      {!isLoading && (
+        <SetupNudge
+          crewCount={crewCount}
+          agentCount={totalAgents}
+          credentialCount={apiKeysActive}
+        />
+      )}
 
       <div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">

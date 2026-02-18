@@ -16,6 +16,7 @@ interface CrewData {
   description: string | null
   color: string | null
   icon: string | null
+  created_at?: string
   _count: TeamCount
 }
 
