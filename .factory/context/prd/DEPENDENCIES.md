@@ -6,7 +6,8 @@
 **Status:** Aktualizovano 2026-02-17: Odstranen Redis/BullMQ/ws/pino, pridany Go deps, SQLite planovany.
 
 **Package manager:** pnpm 10.x
-**Runtime:** Node.js 25.x (engines >=22)
+**Runtime:** Go 1.25 (production runtime)
+**Node.js:** 25.x (build-time only -- Next.js static export, Prisma type generation)
 **Go:** 1.25
 
 ---
@@ -50,8 +51,8 @@
 | `next` | ^16.1.6 | Framework (App Router, RSC, Turbopack) | MIT |
 | `react` | ^19.2.4 | UI knihovna | MIT |
 | `react-dom` | ^19.2.4 | React DOM renderer | MIT |
-| `@prisma/client` | ^7.4.0 | ORM -- JEDINY zpusob pristupu k DB | Apache-2.0 |
-| `@prisma/adapter-pg` | ^7.4.0 | Prisma driver adapter pro `pg` | Apache-2.0 |
+| `@prisma/client` | ^7.4.0 | Type generation only (NOT runtime ORM -- Go accesses DB directly) | Apache-2.0 |
+| `@prisma/adapter-pg` | ^7.4.0 | ~~Runtime dep~~ Build-time only (Prisma type gen) | Apache-2.0 |
 | `zod` | ^4.3.6 | Runtime validace | MIT |
 | `zustand` | ^5.0.11 | Client state management | MIT |
 
@@ -59,11 +60,11 @@
 
 | Balicek | Verze | Ucel | Licence |
 |---|---|---|---|
-| `next-auth` | 5.0.0-beta.30 | Autentizace (Auth.js v5, email+heslo, OAuth) | ISC |
-| `@auth/prisma-adapter` | ^2.11.1 | NextAuth Prisma adapter | ISC |
-| `@casl/ability` | ^6.8.0 | RBAC (role-based access control) | MIT |
-| `@casl/prisma` | ^1.6.1 | CASL Prisma integrace (filtruje dotazy) | MIT |
-| `bcryptjs` | ^3.0.3 | Password hashing (NextAuth) | MIT |
+| `next-auth` | 5.0.0-beta.30 | ~~Runtime auth~~ Client-side session only (auth handled by Go backend) | ISC |
+| `@auth/prisma-adapter` | ^2.11.1 | ~~Runtime~~ No longer used at runtime (Go handles auth directly) | ISC |
+| `@casl/ability` | ^6.8.0 | ~~Runtime RBAC~~ No longer used (Go middleware handles RBAC) | MIT |
+| `@casl/prisma` | ^1.6.1 | ~~Runtime~~ No longer used (Go handles authorization) | MIT |
+| `bcryptjs` | ^3.0.3 | ~~Runtime~~ No longer used at runtime (Go uses bcrypt directly) | MIT |
 
 ### 2.3 UI
 
@@ -116,7 +117,7 @@
 | Balicek | Verze | Ucel | Licence |
 |---|---|---|---|
 | `nanoid` | ^5.1.6 | Kratke unikatni ID (request ID, tokeny) | MIT |
-| `pg` | ^8.18.0 | PostgreSQL klient (Prisma driver adapter) | MIT |
+| `pg` | ^8.18.0 | ~~Runtime~~ No longer used at runtime (Go accesses DB directly) | MIT |
 
 ### 2.8 Business (Phase 2+, zatim neinstalovano)
 
@@ -259,17 +260,17 @@
 
 ---
 
-## 7. BUDOUCI: SINGLE BINARY DEPENDENCIES
+## 7. SINGLE BINARY DEPENDENCIES (IMPLEMENTOVANO)
 
-> Planovano pro Phase 3+ -- crewship jako single binary (bez Docker Compose pro default).
+> Single binary architektura je AKTUALNI stav -- Go binary s embedded Next.js static export.
 
-| Dependency | Verze | Ucel | Typ |
-|---|---|---|---|
-| SQLite driver (Go) | TBD | Default DB misto PostgreSQL (zero-config) | Go modul |
-| `embed.FS` | stdlib | Embedded Next.js export v Go binary | Go stdlib |
-| `goreleaser` | latest | Multi-platform release (macOS, Linux, Windows) | CI tool |
+| Dependency | Verze | Ucel | Typ | Status |
+|---|---|---|---|---|
+| `modernc.org/sqlite` | latest | Pure-Go SQLite driver (no CGO) | Go modul | ✅ Implementovano |
+| `embed.FS` | stdlib | Embedded Next.js export v Go binary | Go stdlib | ✅ Implementovano |
+| `goreleaser` | latest | Multi-platform release (macOS, Linux, Windows) | CI tool | ✅ Konfigurovano |
 
-> **SQLite vs PostgreSQL:**
+> **SQLite je default databaze (implementovano).**
 > Default = SQLite (single binary, zero config, `crewship start` just works).
 > PostgreSQL = optional pro scaling (multi-replica, production).
 > Obe varianty pres provider pattern (`CREWSHIP_DB_PROVIDER=sqlite|postgres`).
@@ -280,7 +281,7 @@
 
 | Komponenta | Vyzadovana verze | Duvod |
 |---|---|---|
-| Node.js | 25.x (engines >=22) | Nativni TS type stripping, stable LTS |
+| Node.js | 25.x (engines >=22) | Build-time only (Next.js static export, Prisma type gen) |
 | pnpm | 10.x | Corepack, workspace podpora |
 | Go | 1.25 | Generics, slog, latest stdlib |
 | Docker Engine | 24+ | Buildx, compose v2, security features |
@@ -359,7 +360,7 @@ govulncheck ./...                     # Go vulnerability database
 | **Sentry** (v MVP) | Pridava slozitost, Go slog + Next.js console staci pro MVP. |
 | **PostHog** (v MVP) | Pridava slozitost, neni kriticke pro launch. |
 | **Turborepo** (monorepo) | Overengineering pro solo dev, jeden repo staci. |
-| **SQLite v MVP** | PostgreSQL pro MVP (uz bezici v Docker Compose). SQLite az pro single-binary distribuce (Phase 3+). |
+| ~~**SQLite v MVP**~~ | ~~Odmitnuto~~ **SQLite je AKTUALNE default databaze** pro single binary. PostgreSQL je opt-in. |
 | **@supabase/ssr** | Nepouzivame Supabase -- Prisma + vlastni PostgreSQL. |
 | **Tailwind 3.x** | Tailwind 4 je CSS-first, lepsi performance, @theme inline. Zadny tailwind.config.ts. |
 

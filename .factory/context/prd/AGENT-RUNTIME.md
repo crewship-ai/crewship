@@ -58,7 +58,7 @@ Klicovy princip: **1 kontejner = 1 crew. Agenti v tymu sdili kontejner.**
    - Vysledky: GET /results/{group}
 7. Agent pise soubory do /output/ → fsnotify → WebSocket → Browser
 8. Kazdy radek stdout → append do JSONL log souboru
-9. Po dokonceni: crewshipd updatne AgentRun status v DB (pres IPC)
+9. Po dokonceni: crewshipd updatne AgentRun status primo v DB (database/sql)
 ```
 
 **Dual runtime — agent_command se vybere dle AgentRuntime:**
