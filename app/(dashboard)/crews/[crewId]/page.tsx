@@ -222,7 +222,7 @@ export default function CrewDetailPage() {
     )
   }
 
-  if (!crew) return null
+  if (!crew || !workspaceId) return null
 
   const canEdit = abilities.can("update", "Crew")
   const canDelete = abilities.can("delete", "Crew")
@@ -296,7 +296,7 @@ export default function CrewDetailPage() {
       <CrewMembers
         members={members}
         crewId={crew.id}
-        workspaceId={workspaceId!}
+        workspaceId={workspaceId}
         canEdit={canEdit}
         onMembersChange={setMembers}
       />

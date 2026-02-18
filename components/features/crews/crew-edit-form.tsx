@@ -71,6 +71,7 @@ export function CrewEditForm({
                   className="h-9 w-9 rounded border cursor-pointer"
                 />
                 <Input
+                  aria-label="Color hex value"
                   value={color}
                   onChange={(e) => onColorChange(e.target.value)}
                   className="flex-1 font-mono text-sm"

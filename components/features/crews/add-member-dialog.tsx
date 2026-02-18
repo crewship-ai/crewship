@@ -123,7 +123,7 @@ export function AddMemberDialog({
           </p>
         ) : (
           <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-            <SelectTrigger>
+            <SelectTrigger aria-label="Select workspace member">
               <SelectValue placeholder="Select a member..." />
             </SelectTrigger>
             <SelectContent>
