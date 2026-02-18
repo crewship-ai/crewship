@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"testing"
 )
 
@@ -39,7 +40,7 @@ func TestContainerNameFormat(t *testing.T) {
 
 func TestNewRequiresDocker(t *testing.T) {
 	// New() will fail without Docker daemon -- expected in CI
-	_, err := New(Config{
+	_, err := New(context.Background(), Config{
 		RuntimeImage: "test:latest",
 		Network:      "test-net",
 	}, nil)

@@ -1,47 +1,46 @@
 # Crewship -- API & Wire Protocol (API.md)
 
-**Verze:** 3.0
+**Verze:** 4.0
 **Datum:** 2026-02-17
-**Runtime:** Next.js API Routes (REST) + crewshipd Go service (WebSocket + Webhooks)
-**Validace:** Zod (vstupy) + RFC 7807 Problem Details (chyby)
-**Auth:** NextAuth.js (Auth.js v5) — JWT session token
-**Autorizace:** CASL (aplikacni uroven)
-**Rate limiting:** In-memory (Go + Next.js middleware)
+**Runtime:** Go single binary (REST API + WebSocket + Webhooks)
+**Validace:** Go validace (vstupy) + RFC 7807 Problem Details (chyby)
+**Auth:** Go (NextAuth-compatible JWE) — JWT session token
+**Autorizace:** Go RBAC middleware (aplikacni uroven)
+**Rate limiting:** Go middleware (in-memory)
 **Verzovani:** URL prefix `/api/v1/`
 
 ---
 
 ## 1. PREHLED
 
-### Dva procesy, dve komunikacni vrstvy
+### Jeden proces, tri komunikacni vrstvy
 
 | Vrstva | Transport | Proces | Ucel |
 |---|---|---|---|
-| **REST API** | HTTPS | Next.js | CRUD, management, auth |
-| **WebSocket** | WSS | crewshipd (Go) | Real-time streaming, chat, file events |
-| **Webhook ingress** | HTTPS | crewshipd (Go) | Externi triggery (Grafana, n8n, atd.) |
-| **IPC** | Unix socket | Next.js ↔ crewshipd | Interni komunikace mezi procesy |
+| **REST API** | HTTPS | Go (`crewship`) | CRUD, management, auth |
+| **WebSocket** | WSS | Go (`crewship`) | Real-time streaming, chat, file events |
+| **Webhook ingress** | HTTPS | Go (`crewship`) | Externi triggery (Grafana, n8n, atd.) |
 
 ### Architektura
 
 ```
-Browser ──── REST API (/api/v1/*) ──── Next.js Route Handlers ──── Prisma → PostgreSQL
+Browser ──── REST API (/api/v1/*) ──── Go HTTP handlers ──── database/sql → SQLite / PostgreSQL
   │                                         │
-  │                                    Unix socket (/run/crewship/crewship.sock)
-  │                                         │
-  └──── WebSocket (wss://) ──── crewshipd (Go)
+  │                                    Embedded static UI (Next.js static export via embed.FS)
+  │
+  └──── WebSocket (wss://) ──── Go (ws gateway)
                                     ├── Docker SDK → Agent kontejner
                                     ├── Log collector → JSONL soubory
                                     ├── File server → /output/ (fsnotify)
                                     ├── Webhook handler
                                     └── bbolt WAL (job state)
 
-External ──── Webhook (/api/v1/webhooks/*) ──── crewshipd (Go) → Agent trigger
+External ──── Webhook (/api/v1/webhooks/*) ──── Go → Agent trigger
 ```
 
 ### Konvence
 
-- Vsechny endpointy vyzaduji autentizaci (krome `/auth/*`, healthcheck, webhooks)
+- Vsechny endpointy vyzaduji autentizaci (krome `/api/auth/*`, healthcheck, webhooks)
 - Vsechny mutace se loguji do audit logu (middleware)
 - Vsechny odpovedi: `Content-Type: application/json`
 - Vsechny chyby: RFC 7807 Problem Details
@@ -55,197 +54,228 @@ External ──── Webhook (/api/v1/webhooks/*) ──── crewshipd (Go) �
 
 ## 2. AUTENTIZACE
 
-### 2.1 NextAuth.js session (REST API)
+### 2.1 NextAuth-compatible session (Go)
 
-```typescript
-// lib/auth.ts
-import { auth } from '@/auth'
+Go implementuje NextAuth-compatible endpointy v `internal/api/nextauth.go`, takze
+frontend next-auth/react SDK funguje bez zmeny. Autentizace probiha pres JWE token
+(NextAuth format) validovany v Go (`internal/auth/`).
 
-export async function requireAuth(): Promise<User> {
-  const session = await auth()
-  if (!session?.user?.id) {
-    throw new ProblemDetailsError({
-      type: "https://crewship.ai/errors/unauthorized",
-      title: "Unauthorized",
-      status: 401,
-      code: "AUTH_REQUIRED",
+```go
+// internal/api/middleware.go — RequireAuth middleware
+// Extrahuje JWT z cookie/header, validuje, a vlozi user do contextu
+func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        user, err := m.validator.ValidateRequest(r)
+        if err != nil {
+            writeError(w, http.StatusUnauthorized, "AUTH_REQUIRED", "Authentication required")
+            return
+        }
+        ctx := context.WithValue(r.Context(), userContextKey, user)
+        next.ServeHTTP(w, r.WithContext(ctx))
     })
-  }
-  return prisma.user.findUniqueOrThrow({ where: { id: session.user.id } })
 }
 ```
 
-### 2.2 WebSocket autentizace (Go service)
+### 2.2 WebSocket autentizace
 
 ```
-1. Browser pozada Next.js API o short-lived WS token (5min, JWT)
+1. Browser pozada Go API o short-lived WS token (5min, JWT) — GET /api/v1/ws-token
 2. Browser se pripoji na wss://host/ws?token=<jwt>
-3. crewshipd validuje JWT pri handshake
-4. crewshipd overi crew membership pres IPC dotaz na Next.js
+3. Go validuje JWT pri handshake
+4. Go overi crew membership z DB
 5. Po pripojeni: token neni dale potreba (connection = authenticated)
 ```
 
-### 2.3 Webhook autentizace (Go service)
+### 2.3 Webhook autentizace
 
 ```
 POST /api/v1/webhooks/{crew-id}/{agent-id}/trigger
 Headers: X-Webhook-Secret: <per-agent-secret>
 
-crewshipd:
+Go handler:
 1. Extrahuje crew-id a agent-id z URL
-2. Nacte agent.webhook_secret z DB (pres IPC na Next.js)
+2. Nacte agent.webhook_secret z DB
 3. Porovna s X-Webhook-Secret headerem (constant-time comparison)
 4. Neplatny secret → 401 + audit log
 ```
 
-### 2.4 Auth endpointy (NextAuth.js)
+### 2.4 Auth endpointy
 
 | Metoda | Path | Auth | Popis |
 |---|---|---|---|
-| `*` | `/api/auth/*` | Ne | NextAuth.js handler (login, callback, session) |
-| `POST` | `/api/v1/auth/register` | Ne | Registrace (email + heslo) |
+| `GET` | `/api/auth/csrf` | Ne | CSRF token |
+| `GET` | `/api/auth/providers` | Ne | Seznam auth providers |
+| `GET` | `/api/auth/session` | Ne | Aktualni session |
+| `POST` | `/api/auth/callback/credentials` | Ne | Login (email + heslo) |
+| `POST` | `/api/auth/signout` | Ne | Odhlaseni |
+| `GET` | `/api/auth/error` | Ne | Auth error page |
+| `POST` | `/api/v1/auth/signup` | Ne | Registrace (email + heslo, bcrypt) |
 
 ---
 
-## 3. REST API ENDPOINTY (Next.js)
+## 3. REST API ENDPOINTY (Go)
 
-### 3.1 Organizations
+Vsechny REST endpointy jsou registrovany v `internal/api/router.go`.
+Handlery jsou implementovany v odpovidajicich Go souborech (`workspaces.go`, `crews.go`, `agents.go`, atd.).
+DB pristup pres `database/sql` (zadny ORM).
+
+### 3.1 Workspaces
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/orgs` | Auth | Seznam org uzivatele |
-| `POST` | `/api/v1/orgs` | Auth | Vytvorit organizaci |
-| `GET` | `/api/v1/workspaces/{workspaceId}` | Member | Detail organizace |
-| `PATCH` | `/api/v1/workspaces/{workspaceId}` | ADMIN+ | Upravit organizaci |
-| `DELETE` | `/api/v1/workspaces/{workspaceId}` | OWNER | Smazat organizaci (soft delete) |
+| `GET` | `/api/v1/workspaces` | Auth | Seznam workspaces uzivatele |
+| `POST` | `/api/v1/workspaces` | Auth | Vytvorit workspace |
+| `GET` | `/api/v1/workspaces/{workspaceId}` | Member | Detail workspace |
+| `PATCH` | `/api/v1/workspaces/{workspaceId}` | ADMIN+ | Upravit workspace |
 
 ### 3.2 Workspace Members
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
 | `GET` | `/api/v1/workspaces/{workspaceId}/members` | Member | Seznam clenu |
-| `POST` | `/api/v1/workspaces/{workspaceId}/members/invite` | ADMIN+ | Pozvat clena (email) |
-| `PATCH` | `/api/v1/workspaces/{workspaceId}/members/{memberId}` | ADMIN+ | Zmenit roli |
+| `POST` | `/api/v1/workspaces/{workspaceId}/members` | ADMIN+ | Pridat clena |
 | `DELETE` | `/api/v1/workspaces/{workspaceId}/members/{memberId}` | ADMIN+ | Odebrat clena |
 
-### 3.3 Crews
+### 3.3 Workspace Invitations
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/workspaces/{workspaceId}/crews` | Member | Seznam crews (RBAC filtered) |
-| `POST` | `/api/v1/workspaces/{workspaceId}/crews` | MANAGER+ | Vytvorit crew |
-| `GET` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}` | CrewMember | Detail crew |
-| `PATCH` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}` | MANAGER+ | Upravit crew |
-| `DELETE` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}` | ADMIN+ | Smazat crew (soft delete) |
+| `GET` | `/api/v1/workspaces/{workspaceId}/invitations` | Member | Seznam pozvanek |
+| `POST` | `/api/v1/workspaces/{workspaceId}/invitations` | ADMIN+ | Vytvorit pozvanku |
 
-### 3.4 Crew Members
+### 3.4 Crews
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/members` | CrewMember | Seznam clenu crew |
-| `POST` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/members` | MANAGER+ | Pridat clena do crew |
-| `DELETE` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/members/{memberId}` | MANAGER+ | Odebrat z crew |
+| `GET` | `/api/v1/crews` | Member | Seznam crews (RBAC filtered) |
+| `POST` | `/api/v1/crews` | MANAGER+ | Vytvorit crew |
+| `GET` | `/api/v1/crews/{crewId}` | CrewMember | Detail crew |
+| `PATCH` | `/api/v1/crews/{crewId}` | MANAGER+ | Upravit crew |
+| `DELETE` | `/api/v1/crews/{crewId}` | ADMIN+ | Smazat crew (soft delete) |
 
-### 3.5 Agents
-
-| Metoda | Path | Role | Popis |
-|---|---|---|---|
-| `GET` | `/api/v1/workspaces/{workspaceId}/agents` | Member | Seznam agentu (RBAC filtered) |
-| `POST` | `/api/v1/workspaces/{workspaceId}/agents` | MANAGER+ | Vytvorit agenta |
-| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}` | CrewMember | Detail agenta |
-| `PATCH` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}` | MANAGER+ | Upravit agenta |
-| `DELETE` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}` | ADMIN+ | Smazat agenta (soft delete) |
-| `POST` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/start` | MEMBER+ | Spustit agenta (IPC → Go) |
-| `POST` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/stop` | MEMBER+ | Zastavit agenta (IPC → Go) |
-| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/status` | CrewMember | Live status (IPC → Go) |
-
-### 3.6 Agent Skills
+### 3.5 Crew Members
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/skills` | CrewMember | Prirazene skills |
-| `POST` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/skills` | MANAGER+ | Priradit skill |
-| `DELETE` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/skills/{skillId}` | MANAGER+ | Odebrat skill |
+| `GET` | `/api/v1/crews/{crewId}/members` | CrewMember | Seznam clenu crew |
+| `POST` | `/api/v1/crews/{crewId}/members` | MANAGER+ | Pridat clena do crew |
+| `DELETE` | `/api/v1/crews/{crewId}/members/{memberId}` | MANAGER+ | Odebrat z crew |
 
-### 3.7 Agent Credentials
+### 3.6 Agents
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/credentials` | MANAGER+ | Prirazene credentials (masked) |
-| `POST` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/credentials` | MANAGER+ | Priradit credential |
-| `DELETE` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/credentials/{credId}` | MANAGER+ | Odebrat credential |
+| `GET` | `/api/v1/agents` | Member | Seznam agentu (RBAC filtered) |
+| `POST` | `/api/v1/agents` | MANAGER+ | Vytvorit agenta |
+| `GET` | `/api/v1/agents/{agentId}` | CrewMember | Detail agenta |
+| `PATCH` | `/api/v1/agents/{agentId}` | MANAGER+ | Upravit agenta |
+| `DELETE` | `/api/v1/agents/{agentId}` | ADMIN+ | Smazat agenta (soft delete) |
 
-### 3.8 Skills (catalog)
+### 3.7 Agent Skills
+
+| Metoda | Path | Role | Popis |
+|---|---|---|---|
+| `GET` | `/api/v1/agents/{agentId}/skills` | CrewMember | Prirazene skills |
+| `POST` | `/api/v1/agents/{agentId}/skills` | MANAGER+ | Priradit skill |
+
+### 3.8 Agent Credentials
+
+| Metoda | Path | Role | Popis |
+|---|---|---|---|
+| `GET` | `/api/v1/agents/{agentId}/credentials` | MANAGER+ | Prirazene credentials (masked) |
+| `POST` | `/api/v1/agents/{agentId}/credentials` | MANAGER+ | Priradit credential |
+| `DELETE` | `/api/v1/agents/{agentId}/credentials/{assignmentId}` | MANAGER+ | Odebrat credential |
+
+### 3.9 Agent Chats & Runs
+
+| Metoda | Path | Role | Popis |
+|---|---|---|---|
+| `GET` | `/api/v1/agents/{agentId}/chats` | CrewMember | Seznam chat sessions |
+| `GET` | `/api/v1/agents/{agentId}/runs` | CrewMember | Historie behu |
+
+### 3.10 Credentials (vault)
+
+| Metoda | Path | Role | Popis |
+|---|---|---|---|
+| `GET` | `/api/v1/credentials` | MANAGER+ | Seznam credentials (masked values) |
+| `POST` | `/api/v1/credentials` | MANAGER+ | Vytvorit credential (AES-256-GCM encrypt + store) |
+| `GET` | `/api/v1/credentials/{credentialId}` | MANAGER+ | Detail credential (masked) |
+| `PATCH` | `/api/v1/credentials/{credentialId}` | MANAGER+ | Upravit (re-encrypt value) |
+| `DELETE` | `/api/v1/credentials/{credentialId}` | ADMIN+ | Smazat credential (soft delete) |
+
+### 3.11 Skills (catalog)
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
 | `GET` | `/api/v1/skills` | Auth | Seznam dostupnych skills |
-| `GET` | `/api/v1/skills/{skillId}` | Auth | Detail skillu |
 
-### 3.9 Credentials (vault)
-
-| Metoda | Path | Role | Popis |
-|---|---|---|---|
-| `GET` | `/api/v1/workspaces/{workspaceId}/credentials` | MANAGER+ | Seznam credentials (masked values) |
-| `POST` | `/api/v1/workspaces/{workspaceId}/credentials` | MANAGER+ | Vytvorit credential (encrypt + store) |
-| `PATCH` | `/api/v1/workspaces/{workspaceId}/credentials/{credId}` | MANAGER+ | Upravit (re-encrypt value) |
-| `DELETE` | `/api/v1/workspaces/{workspaceId}/credentials/{credId}` | ADMIN+ | Smazat credential (soft delete) |
-
-### 3.10 Conversation Sessions (metadata)
+### 3.12 Runs
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/sessions` | CrewMember | Seznam sessions (metadata) |
-| `GET` | `/api/v1/workspaces/{workspaceId}/sessions/{sessionId}` | CrewMember | Detail session + zpravy (IPC → Go cte JSONL) |
-| `POST` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/sessions` | MEMBER+ | Vytvorit session |
-
-### 3.11 Agent Runs
-
-| Metoda | Path | Role | Popis |
-|---|---|---|---|
-| `GET` | `/api/v1/workspaces/{workspaceId}/agents/{agentId}/runs` | CrewMember | Historie behu |
-| `GET` | `/api/v1/workspaces/{workspaceId}/runs/{runId}` | CrewMember | Detail behu |
-
-### 3.12 Files (agent output)
-
-| Metoda | Path | Role | Popis |
-|---|---|---|---|
-| `GET` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/files` | CrewMember | Seznam souboru (IPC → Go, fsnotify) |
-| `GET` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/files/{path}` | CrewMember | Stahnout soubor (IPC → Go) |
-| `GET` | `/api/v1/workspaces/{workspaceId}/crews/{crewId}/files/{path}/preview` | CrewMember | Preview (PDF, MD, image) |
+| `GET` | `/api/v1/runs` | Member | Seznam behu (paginated) |
 
 ### 3.13 Audit Log
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/workspaces/{workspaceId}/audit-logs` | ADMIN+ | Audit log (cursor paginated) |
+| `GET` | `/api/v1/audit` | ADMIN+ | Audit log (cursor paginated) |
 
 ### 3.14 WebSocket Token
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `POST` | `/api/v1/ws/token` | Auth | Ziskat short-lived WS token (5min JWT) |
+| `GET` | `/api/v1/ws-token` | Auth | Ziskat short-lived WS token (5min JWT) |
 
 ### 3.15 Health
 
 | Metoda | Path | Auth | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/health` | Ne | Healthcheck |
+| `GET` | `/api/health` | Ne | Healthcheck |
 
 ```json
 {
-  "status": "ok",
-  "version": "1.0.0",
-  "checks": {
-    "database": "ok",
-    "crewshipd": "ok"
-  }
+  "status": "ok"
 }
 ```
 
+### 3.16 Admin
+
+| Metoda | Path | Role | Popis |
+|---|---|---|---|
+| `GET` | `/api/v1/admin/stats` | OWNER | Systemove statistiky |
+| `GET` | `/api/v1/admin/users` | OWNER | Seznam uzivatelu |
+| `GET` | `/api/v1/admin/workspaces` | OWNER | Seznam vsech workspaces |
+
+### 3.17 Crewshipd Proxy (agent runtime)
+
+Proxy endpointy pro komunikaci s crewshipd daemonem pres Unix socket (IPC).
+Pouzivaji se pro runtime operace nad agenty (debug, soubory, logy, stop).
+
+| Metoda | Path | Role | Popis |
+|---|---|---|---|
+| `GET` | `/api/v1/crewshipd` | Auth | Crewshipd healthcheck |
+| `GET` | `/api/v1/agents/{agentId}/debug` | CrewMember | Agent debug info |
+| `GET` | `/api/v1/agents/{agentId}/files` | CrewMember | Seznam souboru agenta |
+| `GET` | `/api/v1/agents/{agentId}/files/download` | CrewMember | Stahnout soubor |
+| `GET` | `/api/v1/agents/{agentId}/logs` | CrewMember | Agent logy |
+| `POST` | `/api/v1/agents/{agentId}/stop` | CrewMember | Zastavit agenta |
+| `GET` | `/api/v1/chats/{chatId}/messages` | Auth | Zpravy chatu (JSONL) |
+
+### 3.18 Internal Routes (crewshipd IPC)
+
+Interni endpointy pro crewshipd daemon. Autorizace pres `X-Internal-Token` header.
+
+| Metoda | Path | Auth | Popis |
+|---|---|---|---|
+| `GET` | `/api/v1/internal/credentials` | Internal | Decrypted credentials pro agenta |
+| `PATCH` | `/api/v1/internal/credentials/{credentialId}` | Internal | Update credential status |
+| `POST` | `/api/v1/internal/chats` | Internal | Vytvorit chat session |
+| `GET` | `/api/v1/internal/chats/{chatId}/resolve` | Internal | Resolve chat metadata |
+
 ---
 
-## 4. WEBHOOK API (Go service)
+## 4. WEBHOOK API
 
 ### 4.1 Webhook trigger
 
@@ -271,17 +301,17 @@ Body:
 ### 4.2 Webhook flow
 
 ```
-1. External system → POST webhook → crewshipd (Go)
-2. crewshipd validates X-Webhook-Secret (IPC → Next.js → DB)
-3. crewshipd creates AgentRun (trigger_type=WEBHOOK) via IPC
-4. crewshipd starts Docker exec with webhook payload as input
-5. Agent processes webhook data, writes output
-6. Result available in /output/ + session JSONL
+1. External system → POST webhook → Go handler
+2. Go validuje X-Webhook-Secret z DB
+3. Go vytvofi AgentRun (trigger_type=WEBHOOK)
+4. Go spusti Docker exec s webhook payload jako vstup
+5. Agent zpracuje webhook data, zapise output
+6. Vysledek dostupny v /output/ + session JSONL
 ```
 
 ---
 
-## 5. WEBSOCKET PROTOCOL (Go service)
+## 5. WEBSOCKET PROTOCOL
 
 ### 5.1 Connection
 
@@ -343,60 +373,14 @@ interface WSServerMessage {
 ### 5.6 Bezpecnost
 
 - Auth: JWT validated pri handshake, connection = authenticated
-- Channel subscription: Go service overuje crew membership (IPC → Next.js)
+- Channel subscription: Go overuje crew membership z DB
 - Rate limiting: 60 messages/min per connection
 - Heartbeat: ping/pong kazdych 30s, timeout 60s
 - Max connections per user: 10
 
 ---
 
-## 6. IPC PROTOKOL (Next.js ↔ crewshipd)
-
-### 6.1 Transport
-
-```
-Local: Unix socket (/run/crewship/crewship.sock)
-K8s (Phase 3): gRPC
-```
-
-### 6.2 Protocol (MVP: HTTP over Unix socket)
-
-Next.js posila HTTP requesty na Unix socket. crewshipd bezi jako HTTP server na socketu.
-
-```typescript
-// lib/crewshipd-client.ts
-import http from 'http'
-
-export async function crewshipdRequest(path: string, options?: RequestInit) {
-  return fetch(`http://unix:${CREWSHIPD_SOCKET}:${path}`, options)
-}
-
-// Priklady:
-await crewshipdRequest('/agents/uuid/start', { method: 'POST', body: JSON.stringify({...}) })
-await crewshipdRequest('/agents/uuid/status')
-await crewshipdRequest('/crews/uuid/files')
-await crewshipdRequest('/sessions/uuid/messages?offset=0&limit=50')
-```
-
-### 6.3 IPC endpointy (Go service)
-
-| Metoda | Path | Popis |
-|---|---|---|
-| `POST` | `/agents/{id}/start` | Spustit agenta (Docker exec) |
-| `POST` | `/agents/{id}/stop` | Zastavit agenta |
-| `GET` | `/agents/{id}/status` | Live status |
-| `GET` | `/sessions/{id}/messages` | Cist JSONL zpravy |
-| `GET` | `/crews/{id}/files` | Seznam souboru v /output/ |
-| `GET` | `/crews/{id}/files/{path}` | Stahnout soubor |
-| `POST` | `/crews/{id}/container/start` | Spustit kontejner crew |
-| `POST` | `/crews/{id}/container/stop` | Zastavit kontejner crew |
-| `GET` | `/crews/{id}/container/status` | Status kontejneru |
-| `GET` | `/metrics` | Prometheus metriky |
-| `GET` | `/health` | Healthcheck Go service |
-
----
-
-## 7. CHYBOVE ODPOVEDI (RFC 7807)
+## 6. CHYBOVE ODPOVEDI (RFC 7807)
 
 ```json
 {
@@ -405,7 +389,7 @@ await crewshipdRequest('/sessions/uuid/messages?offset=0&limit=50')
   "status": 404,
   "detail": "Agent with ID 'abc123' was not found",
   "code": "AGENT_NOT_FOUND",
-  "instance": "/api/v1/orgs/org-uuid/agents/abc123"
+  "instance": "/api/v1/agents/abc123"
 }
 ```
 
@@ -413,22 +397,22 @@ await crewshipdRequest('/sessions/uuid/messages?offset=0&limit=50')
 
 | Status | Code | Popis |
 |---|---|---|
-| 400 | `VALIDATION_ERROR` | Neplatny vstup (Zod) |
+| 400 | `VALIDATION_ERROR` | Neplatny vstup |
 | 401 | `AUTH_REQUIRED` | Chybejici nebo neplatny token |
-| 403 | `FORBIDDEN` | Nedostatecna opravneni (CASL) |
+| 403 | `FORBIDDEN` | Nedostatecna opravneni (RBAC) |
 | 404 | `NOT_FOUND` | Entita nenalezena |
 | 409 | `CONFLICT` | Duplicitni slug, uz existuje |
 | 422 | `UNPROCESSABLE` | Validni format, ale nelogicky (napr. prirazeni credential z jineho tymu) |
 | 429 | `RATE_LIMIT` | Prekrocen rate limit |
 | 500 | `INTERNAL_ERROR` | Neocekavana chyba serveru |
-| 503 | `SERVICE_UNAVAILABLE` | DB nebo crewshipd nedostupne |
+| 503 | `SERVICE_UNAVAILABLE` | DB nedostupne |
 
 ---
 
-## 8. PAGINATION (cursor-based)
+## 7. PAGINATION (cursor-based)
 
 ```
-GET /api/v1/workspaces/{workspaceId}/agents?cursor=abc123&limit=20
+GET /api/v1/agents?cursor=abc123&limit=20
 
 Response:
 {
@@ -445,28 +429,25 @@ Cursor = opaque string (base64 encoded `created_at` + `id`).
 
 ---
 
-## 9. RATE LIMITING
+## 8. RATE LIMITING
 
-### Next.js middleware (in-memory Map)
+### Go middleware (in-memory)
 
-```typescript
-// middleware.ts — per-process in-memory
-const rateLimits = new Map<string, { count: number, resetAt: number }>()
+```go
+// internal/api/middleware.go — rate limiting
+// Token bucket per-IP a per-user (golang.org/x/time/rate)
+// Konfigurace v config/rate-limits.yml
 ```
-
-### Go service (`golang.org/x/time/rate`)
-
-Token bucket per-IP a per-user. Viz SECURITY.md sekce 5.3.
 
 > **Omezeni MVP:** In-memory, neskaluje pres vice instanci.
 > Phase 2: distribuovany rate limiter.
 
 ---
 
-## 10. DOCKER NETWORKING (agent izolace)
+## 9. DOCKER NETWORKING (agent izolace)
 
 ```
-crewship-internal (platforma: Next.js + crewshipd + PostgreSQL)
+crewship-internal (platforma: Go binary + PostgreSQL)
   ↳ Agent kontejner NEMA pristup
 
 crewship-agents (--internal, bez default route)
@@ -488,11 +469,11 @@ iptables -A DOCKER-USER -s crewship-agents -j DROP
 
 ---
 
-## 11. CLI commands (single binary mode)
+## 10. CLI commands (single binary)
 
 | Command | Popis |
 |---|---|
-| `crewship start [--port N] [--db URL]` | Spusti platformu (default: SQLite, port 3001) |
+| `crewship start [--port N] [--db URL]` | Spusti platformu (default: SQLite, port 8080) |
 | `crewship stop` | Zastavi platformu |
 | `crewship status` | Status sluzeb (web, engine, Docker) |
 | `crewship logs [--follow]` | Tail logy |
@@ -506,7 +487,7 @@ iptables -A DOCKER-USER -s crewship-agents -j DROP
 
 ---
 
-## 12. Skill Marketplace API (planovane)
+## 11. Skill Marketplace API (planovane)
 
 ### Endpoints
 - `GET /api/v1/marketplace/skills` -- browse skills (search, category, badge filter)
@@ -518,7 +499,7 @@ iptables -A DOCKER-USER -s crewship-agents -j DROP
 
 ---
 
-## 13. Per-Agent Network Control API (planovane)
+## 12. Per-Agent Network Control API (planovane)
 
 ### Endpoints
 - `GET /api/v1/agents/:id/network` -- current network config
@@ -534,7 +515,7 @@ iptables -A DOCKER-USER -s crewship-agents -j DROP
 
 ---
 
-## 14. OTEVRENE OTAZKY
+## 13. OTEVRENE OTAZKY
 
 1. **API versioning** — jak budeme delat v2 endpointy? Novy prefix `/api/v2/`?
 2. **Rate limit storage** — per-process Map staci pro single instance, ale ne pro multi-instance. Phase 2 reseni?

@@ -76,6 +76,40 @@ func (v *JWTValidator) Validate(tokenStr string) (*Claims, error) {
 	return &claims, nil
 }
 
+// CreateToken creates a NextAuth-compatible JWE token from claims.
+func (v *JWTValidator) CreateToken(claims *Claims) (string, error) {
+	if claims.Iat == 0 {
+		claims.Iat = time.Now().Unix()
+	}
+	if claims.Exp == 0 {
+		claims.Exp = time.Now().Add(30 * 24 * time.Hour).Unix()
+	}
+	if claims.Jti == "" {
+		claims.Jti = fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		return "", fmt.Errorf("marshal claims: %w", err)
+	}
+
+	encrypter, err := jose.NewEncrypter(
+		jose.A256CBC_HS512,
+		jose.Recipient{Algorithm: jose.DIRECT, Key: v.encryptionKey},
+		(&jose.EncrypterOptions{}).WithContentType("JWT"),
+	)
+	if err != nil {
+		return "", fmt.Errorf("create encrypter: %w", err)
+	}
+
+	jwe, err := encrypter.Encrypt(payload)
+	if err != nil {
+		return "", fmt.Errorf("encrypt: %w", err)
+	}
+
+	return jwe.CompactSerialize()
+}
+
 // deriveEncryptionKey replicates NextAuth's getDerivedEncryptionKey.
 // HKDF-SHA256 with info="Auth.js Generated Encryption Key ({salt})"
 func deriveEncryptionKey(secret, salt string, length int) ([]byte, error) {

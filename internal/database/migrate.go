@@ -1,0 +1,478 @@
+package database
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"log/slog"
+)
+
+func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
+	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _migrations (
+		version INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+	)`); err != nil {
+		return fmt.Errorf("create migrations table: %w", err)
+	}
+
+	for _, m := range migrations {
+		var exists bool
+		err := db.QueryRowContext(ctx, "SELECT 1 FROM _migrations WHERE version = ?", m.version).Scan(&exists)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("check migration %d (%s): %w", m.version, m.name, err)
+		}
+
+		logger.Info("applying migration", "version", m.version, "name", m.name)
+
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin migration %d (%s): %w", m.version, m.name, err)
+		}
+
+		if _, err := tx.ExecContext(ctx, m.sql); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migration %d (%s): %w", m.version, m.name, err)
+		}
+
+		if _, err := tx.ExecContext(ctx, "INSERT INTO _migrations (version, name) VALUES (?, ?)", m.version, m.name); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("record migration %d (%s): %w", m.version, m.name, err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %d (%s): %w", m.version, m.name, err)
+		}
+	}
+
+	return nil
+}
+
+type migration struct {
+	version int
+	name    string
+	sql     string
+}
+
+var migrations = []migration{
+	{1, "init", migrationInit},
+	{2, "add_onboarding_completed", migrationAddOnboardingCompleted},
+}
+
+const migrationAddOnboardingCompleted = `
+ALTER TABLE users ADD COLUMN onboarding_completed INTEGER NOT NULL DEFAULT 0;
+`
+
+const migrationInit = `
+-- Users (NextAuth.js compatible)
+CREATE TABLE IF NOT EXISTS users (
+	id TEXT PRIMARY KEY,
+	email TEXT NOT NULL UNIQUE,
+	full_name TEXT,
+	avatar_url TEXT,
+	hashed_password TEXT,
+	email_verified TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- NextAuth accounts
+CREATE TABLE IF NOT EXISTS accounts (
+	id TEXT PRIMARY KEY,
+	userId TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	type TEXT NOT NULL,
+	provider TEXT NOT NULL,
+	providerAccountId TEXT NOT NULL,
+	refresh_token TEXT,
+	access_token TEXT,
+	expires_at INTEGER,
+	token_type TEXT,
+	scope TEXT,
+	id_token TEXT,
+	session_state TEXT,
+	UNIQUE(provider, providerAccountId)
+);
+
+-- NextAuth sessions
+CREATE TABLE IF NOT EXISTS sessions (
+	id TEXT PRIMARY KEY,
+	sessionToken TEXT NOT NULL UNIQUE,
+	userId TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	expires TEXT NOT NULL
+);
+
+-- NextAuth verification tokens
+CREATE TABLE IF NOT EXISTS verification_tokens (
+	identifier TEXT NOT NULL,
+	token TEXT NOT NULL UNIQUE,
+	expires TEXT NOT NULL,
+	UNIQUE(identifier, token)
+);
+
+-- Workspaces
+CREATE TABLE IF NOT EXISTS workspaces (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	slug TEXT NOT NULL UNIQUE,
+	logo_url TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	deleted_at TEXT,
+	default_container_ttl_hours INTEGER
+);
+
+-- Workspace members
+CREATE TABLE IF NOT EXISTS workspace_members (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	role TEXT NOT NULL DEFAULT 'MEMBER',
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(workspace_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_member_workspace ON workspace_members(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_member_user ON workspace_members(user_id);
+
+-- Workspace invitations
+CREATE TABLE IF NOT EXISTS workspace_invitations (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	email TEXT NOT NULL,
+	role TEXT NOT NULL DEFAULT 'MEMBER',
+	invited_by TEXT NOT NULL REFERENCES users(id),
+	token TEXT NOT NULL UNIQUE,
+	expires_at TEXT NOT NULL,
+	accepted_at TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_invitation_workspace ON workspace_invitations(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_invitation_token ON workspace_invitations(token);
+CREATE INDEX IF NOT EXISTS idx_invitation_email_workspace ON workspace_invitations(email, workspace_id);
+
+-- Crews
+CREATE TABLE IF NOT EXISTS crews (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	name TEXT NOT NULL,
+	slug TEXT NOT NULL,
+	description TEXT,
+	color TEXT,
+	icon TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	deleted_at TEXT,
+	container_ttl_hours INTEGER,
+	container_memory_mb INTEGER NOT NULL DEFAULT 4096,
+	container_cpus REAL NOT NULL DEFAULT 2.0,
+	UNIQUE(workspace_id, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_crew_workspace ON crews(workspace_id);
+
+-- Crew members
+CREATE TABLE IF NOT EXISTS crew_members (
+	id TEXT PRIMARY KEY,
+	crew_id TEXT NOT NULL REFERENCES crews(id) ON DELETE CASCADE,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(crew_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_crew_member_crew ON crew_members(crew_id);
+CREATE INDEX IF NOT EXISTS idx_crew_member_user ON crew_members(user_id);
+
+-- Agents
+CREATE TABLE IF NOT EXISTS agents (
+	id TEXT PRIMARY KEY,
+	crew_id TEXT REFERENCES crews(id) ON DELETE CASCADE,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	name TEXT NOT NULL,
+	slug TEXT NOT NULL,
+	description TEXT,
+	role_title TEXT,
+	agent_role TEXT NOT NULL DEFAULT 'AGENT',
+	status TEXT NOT NULL DEFAULT 'IDLE',
+	cli_adapter TEXT NOT NULL DEFAULT 'CLAUDE_CODE',
+	llm_provider TEXT,
+	llm_model TEXT,
+	system_prompt TEXT,
+	temperature REAL NOT NULL DEFAULT 0.7,
+	max_tokens INTEGER,
+	timeout_seconds INTEGER NOT NULL DEFAULT 1800,
+	tool_profile TEXT NOT NULL DEFAULT 'CODING',
+	memory_enabled INTEGER NOT NULL DEFAULT 0,
+	webhook_secret TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	deleted_at TEXT,
+	delegation_timeout_s INTEGER,
+	max_delegation_depth INTEGER DEFAULT 3,
+	max_parallel_delegates INTEGER DEFAULT 5,
+	UNIQUE(workspace_id, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_workspace ON agents(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_agent_crew ON agents(crew_id);
+CREATE INDEX IF NOT EXISTS idx_agent_status ON agents(status);
+CREATE INDEX IF NOT EXISTS idx_agent_role ON agents(agent_role);
+
+-- Chats (metadata only)
+CREATE TABLE IF NOT EXISTS chats (
+	id TEXT PRIMARY KEY,
+	agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	created_by TEXT REFERENCES users(id),
+	title TEXT,
+	mode TEXT NOT NULL DEFAULT 'CHAT',
+	status TEXT NOT NULL DEFAULT 'ACTIVE',
+	message_count INTEGER NOT NULL DEFAULT 0,
+	jsonl_path TEXT,
+	started_at TEXT NOT NULL DEFAULT (datetime('now')),
+	ended_at TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chat_agent ON chats(agent_id);
+CREATE INDEX IF NOT EXISTS idx_chat_workspace ON chats(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_chat_created ON chats(created_at);
+
+-- Assignments
+CREATE TABLE IF NOT EXISTS assignments (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	chat_id TEXT NOT NULL REFERENCES chats(id),
+	assigned_by_id TEXT NOT NULL REFERENCES agents(id),
+	assigned_to_id TEXT NOT NULL REFERENCES agents(id),
+	task TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'PENDING',
+	started_at TEXT,
+	finished_at TEXT,
+	result_summary TEXT,
+	error_message TEXT,
+	group_id TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_assignment_chat ON assignments(chat_id);
+CREATE INDEX IF NOT EXISTS idx_assignment_by ON assignments(assigned_by_id);
+CREATE INDEX IF NOT EXISTS idx_assignment_to ON assignments(assigned_to_id);
+CREATE INDEX IF NOT EXISTS idx_assignment_group ON assignments(group_id);
+
+-- Skills
+CREATE TABLE IF NOT EXISTS skills (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL UNIQUE,
+	slug TEXT NOT NULL UNIQUE,
+	display_name TEXT NOT NULL,
+	description TEXT,
+	version TEXT NOT NULL DEFAULT '1.0.0',
+	author TEXT,
+	license TEXT DEFAULT 'MIT',
+	category TEXT NOT NULL DEFAULT 'CUSTOM',
+	source TEXT NOT NULL DEFAULT 'CUSTOM',
+	config_schema TEXT,
+	tool_definitions TEXT,
+	content TEXT,
+	icon TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	mcp_server_command TEXT,
+	mcp_server_image TEXT,
+	mcp_transport TEXT DEFAULT 'stdio',
+	credential_requirements TEXT,
+	dependencies TEXT,
+	tool_count INTEGER,
+	defer_loading INTEGER NOT NULL DEFAULT 0,
+	verification TEXT NOT NULL DEFAULT 'UNVERIFIED',
+	security_score INTEGER,
+	security_report TEXT,
+	downloads INTEGER NOT NULL DEFAULT 0,
+	rating_avg REAL,
+	rating_count INTEGER NOT NULL DEFAULT 0,
+	tags TEXT DEFAULT '[]',
+	featured INTEGER NOT NULL DEFAULT 0,
+	oci_image TEXT,
+	oci_digest TEXT,
+	sbom_url TEXT,
+	allowed_domains TEXT DEFAULT '[]',
+	pricing_tier TEXT NOT NULL DEFAULT 'FREE',
+	price_monthly INTEGER,
+	author_id TEXT REFERENCES users(id),
+	revenue_share_pct INTEGER DEFAULT 70,
+	changelog TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_skill_category ON skills(category);
+CREATE INDEX IF NOT EXISTS idx_skill_source ON skills(source);
+CREATE INDEX IF NOT EXISTS idx_skill_verification ON skills(verification);
+CREATE INDEX IF NOT EXISTS idx_skill_featured ON skills(featured);
+
+-- Skill reviews
+CREATE TABLE IF NOT EXISTS skill_reviews (
+	id TEXT PRIMARY KEY,
+	skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+	user_id TEXT NOT NULL REFERENCES users(id),
+	rating INTEGER NOT NULL,
+	title TEXT,
+	body TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(skill_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_review_skill ON skill_reviews(skill_id);
+
+-- Agent skills (M:N)
+CREATE TABLE IF NOT EXISTS agent_skills (
+	id TEXT PRIMARY KEY,
+	agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+	config TEXT,
+	enabled INTEGER NOT NULL DEFAULT 1,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(agent_id, skill_id)
+);
+
+-- Credentials
+CREATE TABLE IF NOT EXISTS credentials (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	crew_id TEXT REFERENCES crews(id) ON DELETE SET NULL,
+	name TEXT NOT NULL,
+	description TEXT,
+	encrypted_value TEXT NOT NULL,
+	scope TEXT NOT NULL DEFAULT 'WORKSPACE',
+	type TEXT NOT NULL DEFAULT 'SECRET',
+	provider TEXT NOT NULL DEFAULT 'NONE',
+	status TEXT NOT NULL DEFAULT 'ACTIVE',
+	encrypted_refresh_token TEXT,
+	token_expires_at TEXT,
+	account_label TEXT,
+	account_email TEXT,
+	last_checked_at TEXT,
+	last_error TEXT,
+	created_by TEXT NOT NULL REFERENCES users(id),
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	deleted_at TEXT,
+	UNIQUE(workspace_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_credential_workspace ON credentials(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_credential_crew ON credentials(crew_id);
+CREATE INDEX IF NOT EXISTS idx_credential_type_provider ON credentials(workspace_id, type, provider);
+
+-- Agent credentials (M:N, credential pool)
+CREATE TABLE IF NOT EXISTS agent_credentials (
+	id TEXT PRIMARY KEY,
+	agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	credential_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+	env_var_name TEXT NOT NULL,
+	priority INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(agent_id, credential_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_credential_env ON agent_credentials(agent_id, env_var_name);
+
+-- Agent runs
+CREATE TABLE IF NOT EXISTS agent_runs (
+	id TEXT PRIMARY KEY,
+	agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	chat_id TEXT REFERENCES chats(id),
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	triggered_by TEXT REFERENCES users(id),
+	trigger_type TEXT NOT NULL DEFAULT 'USER',
+	status TEXT NOT NULL DEFAULT 'PENDING',
+	started_at TEXT,
+	finished_at TEXT,
+	error_message TEXT,
+	exit_code INTEGER,
+	metadata TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_run_agent_time ON agent_runs(agent_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_run_workspace ON agent_runs(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_run_status ON agent_runs(status);
+
+-- Audit logs
+CREATE TABLE IF NOT EXISTS audit_logs (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	user_id TEXT REFERENCES users(id),
+	action TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	entity_id TEXT,
+	metadata TEXT,
+	ip_address TEXT,
+	user_agent TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_workspace_time ON audit_logs(workspace_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+
+-- Subscriptions
+CREATE TABLE IF NOT EXISTS subscriptions (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL UNIQUE REFERENCES workspaces(id) ON DELETE CASCADE,
+	plan_id TEXT NOT NULL REFERENCES plans(id),
+	stripe_customer_id TEXT UNIQUE,
+	stripe_subscription_id TEXT UNIQUE,
+	status TEXT NOT NULL DEFAULT 'ACTIVE',
+	current_period_start TEXT,
+	current_period_end TEXT,
+	cancel_at TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Plans
+CREATE TABLE IF NOT EXISTS plans (
+	id TEXT PRIMARY KEY,
+	tier TEXT NOT NULL UNIQUE,
+	display_name TEXT NOT NULL,
+	stripe_price_id TEXT UNIQUE,
+	max_agents INTEGER NOT NULL,
+	max_crews INTEGER NOT NULL,
+	max_skills INTEGER NOT NULL,
+	max_credentials INTEGER NOT NULL,
+	max_members INTEGER NOT NULL,
+	features TEXT,
+	price_monthly INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Feature flags
+CREATE TABLE IF NOT EXISTS feature_flags (
+	id TEXT PRIMARY KEY,
+	key TEXT NOT NULL UNIQUE,
+	description TEXT,
+	enabled INTEGER NOT NULL DEFAULT 0,
+	percentage INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Feature flag overrides
+CREATE TABLE IF NOT EXISTS feature_flag_overrides (
+	id TEXT PRIMARY KEY,
+	flag_id TEXT NOT NULL REFERENCES feature_flags(id) ON DELETE CASCADE,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	enabled INTEGER NOT NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(flag_id, workspace_id)
+);
+
+-- Agent config history
+CREATE TABLE IF NOT EXISTS agent_config_history (
+	id TEXT PRIMARY KEY,
+	agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+	changed_by TEXT NOT NULL REFERENCES users(id),
+	version INTEGER NOT NULL,
+	changes TEXT NOT NULL,
+	snapshot TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(agent_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_config_history_agent_time ON agent_config_history(agent_id, created_at);
+`

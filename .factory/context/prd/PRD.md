@@ -374,7 +374,7 @@ Crewship resi **KAZDY** zasadni bezpecnostni problem OpenClaw:
 | GO-02 | Docker orchestrator | P0 | Container lifecycle pres Docker SDK for Go |
 | GO-03 | Log collector | P0 | Docker stdout → JSONL soubory + logrotate |
 | GO-04 | bbolt WAL | P0 | Durable job state, prezije crash Go service |
-| GO-05 | Unix socket IPC | P0 | Komunikace s Next.js pres /tmp/crewship.sock |
+| GO-05 | ~~Unix socket IPC~~ | ~~P0~~ | ~~Nahrazeno: Go binary obsluhuje API primo, zadny IPC~~ |
 | GO-06 | Graceful shutdown | P0 | SIGTERM handling, flush logy, stop kontejnery |
 | GO-07 | Config YAML | P1 | Jeden konfiguracni soubor misto env vars |
 
@@ -630,7 +630,7 @@ crewshipd (Go service)
 
 **Acceptance criteria:**
 1. `brew install crewship` nainstaluje single binary
-2. `crewship start` spusti platformu (SQLite, localhost:3001)
+2. `crewship start` spusti platformu (SQLite, localhost:8080)
 3. Prohlizec se otevre s onboarding wizardem
 4. Do 60 sekund od prvniho prikazu je agent pripraveny na chat
 5. `crewship stop` ciste zastavi vse
@@ -829,13 +829,14 @@ crewshipd (Go service)
 Crewship je **dvoujazycny projekt** -- TypeScript (Next.js) pro UI, API a auth + Go (crewshipd) pro runtime, WebSocket, Docker orchestraci, logy a soubory.
 
 ```
-TypeScript (Next.js):  UI, CRUD API routes, auth (NextAuth.js), Prisma ORM
-Go (crewshipd):        WebSocket gateway, Docker orchestrace, log collector,
-                       file server (fsnotify), webhook ingress, bbolt WAL,
-                       per-agent network policies, skill sandbox enforcement
+Go (crewship binary):  HTTP API, auth, DB, WebSocket, Docker orchestrace,
+                       log collector, file server (fsnotify), webhook ingress,
+                       bbolt WAL, per-agent network policies, skill sandbox enforcement,
+                       embedded Next.js static UI
+TypeScript (Next.js):  UI only (static export -- HTML/CSS/JS, NO server, NO API routes)
 ```
 
-Komunikace: Unix socket `/tmp/crewship.sock` (lokalni dev), gRPC (K8s).
+Single Go binary embeds Next.js static build via `embed.FS` and serves everything from one process.
 
 ### Proc dva jazyky
 
@@ -848,32 +849,35 @@ Komunikace: Unix socket `/tmp/crewship.sock` (lokalni dev), gRPC (K8s).
 | Bottleneck neni jazyk | LLM latence a CLI startup >> runtime overhead |
 
 ### Frontend
-- **Next.js** (App Router, RSC) -- frontend + REST API routes
+- **Next.js** (static export only) -- UI only, NO server, NO API routes
 - **React** -- latest stable
 - **Tailwind CSS 4** -- CSS-first konfigurace, `@theme inline` v `app/globals.css`, oklch tokens
 - **shadcn/ui** (new-york) -- jedina povolena UI knihovna
 - **Zustand** -- client state management
 - **lucide-react** -- jedina povolena ikona knihovna
 
-### Backend (TypeScript)
-- **NextAuth.js v5** (Auth.js) -- auth s Prisma adapterem (email+heslo, Google OAuth, GitHub OAuth)
-- **Prisma** -- ORM, schema = source of truth. Podporuje PostgreSQL i SQLite.
-- **Zod** -- runtime validace
-- **CASL** -- RBAC (jedina autorizacni vrstva v MVP, RLS az Phase 2)
+### Backend (Go -- single binary)
+- **Go HTTP server** -- REST API, auth (NextAuth-compatible JWE), RBAC middleware
+- **database/sql** -- direct DB access (NO ORM at runtime)
+- **Prisma** -- schema used ONLY for TypeScript type generation (NOT runtime ORM)
+- **Zod** -- client-side validation only
+- **Go middleware** -- RBAC (aplikacni uroven, Go middleware v `internal/api/`)
 
-### Backend (Go -- crewshipd)
+### Backend (Go -- runtime infrastructure)
 - **Go stdlib** + minimalni zavislosti (zadne frameworky)
 - **Nativni WebSocket** -- goroutines, typed protokol (req/res/event)
 - **Docker SDK for Go** -- container lifecycle, network policies
 - **bbolt** -- embedded KV store, WAL pro durable job state
 - **fsnotify** -- file watching, real-time notifikace
 - **slog** -- strukturovane logovani (JSON stdout)
+- **modernc.org/sqlite** -- pure-Go SQLite driver (no CGO)
 - **Provider pattern**: ContainerProvider (Docker/K8s), StorageProvider (LocalFS/S3), StateProvider (bbolt/PG)
 
 ### Databaze
-- **SQLite** (default) -- zero deps, `~/.crewship/crewship.db`. Vhodne pro single binary, solo dev, maly tym.
+- **SQLite** (default) -- zero deps, `~/.crewship/crewship.db`. Pure-Go driver (modernc.org/sqlite).
 - **PostgreSQL 16** (opt-in) -- `crewship start --db postgres://...`. Vhodne pro Crew/Enterprise.
-- Prisma podporuje oba providery. Prepinani pres `DB_PROVIDER` env var.
+- Go pristupuje k DB primo pres `database/sql` (NO ORM at runtime).
+- Prisma schema se pouziva POUZE pro TypeScript type generation (`pnpm db:generate`).
 
 ### Distribuce
 - **GoReleaser** -- cross-platform build (linux/darwin/windows, amd64/arm64)
@@ -912,27 +916,23 @@ Komunikace: Unix socket `/tmp/crewship.sock` (lokalni dev), gRPC (K8s).
 ### System diagram
 
 ```
-User → Browser (Next.js UI) → HTTP API (Next.js routes)
-                                    ↓
-                              Prisma ORM → PostgreSQL/SQLite
-                                    ↓
-              Unix socket (/tmp/crewship.sock)
-                                    ↓
-User → Browser (WebSocket) → crewshipd (Go) → Docker SDK
-                                    ↓                ↓
-                              bbolt WAL      Docker kontejner
-                                              ↓         ↓
-                                         CLI agent   /output/
-                                              ↓
-                                         LLM API
+User → Browser → Go HTTP server (port 8080)
+                   ├─ Static UI (embedded Next.js build via embed.FS)
+                   ├─ REST API (/api/v1/*) → SQLite/PostgreSQL (database/sql)
+                   ├─ Auth (/api/auth/*) → JWT (NextAuth-compatible JWE)
+                   └─ WebSocket → Docker exec → CLI session → LLM API
+                                        ↓
+                                stdout → JSONL logs
+                                        ↓
+                                /output/ → persistent files
 
-External → Webhook (crewshipd) → Agent trigger → same flow
+External → Webhook (Go) → Agent trigger → same flow
 ```
 
 ### Datove toky
 ```
-UI (React) ←→ Next.js API routes ←→ Prisma ←→ DB (PostgreSQL/SQLite)
-UI (React) ←→ WebSocket ←→ crewshipd (Go) ←→ Docker ←→ Agent CLI ←→ LLM
+UI (React) ←→ Go REST API ←→ database/sql ←→ DB (SQLite/PostgreSQL)
+UI (React) ←→ Go WebSocket ←→ Docker ←→ Agent CLI ←→ LLM
 ```
 
 ### Storage model
@@ -961,7 +961,7 @@ crewship (Go binary, ~50-80 MB)
   │     ├── SQLite (default) -- ~/.crewship/crewship.db
   │     └── PostgreSQL (opt-in: --db postgres://...)
   └── CLI:
-        ├── crewship start [--port 3001] [--db sqlite|postgres://...]
+        ├── crewship start [--port 8080] [--db sqlite|postgres://...]
         ├── crewship stop
         ├── crewship status
         ├── crewship logs [--follow]
@@ -1090,7 +1090,7 @@ Pri prvnim turnu nove session Crewship injektuje obsah bootstrap souboru do agen
 ### Single Binary: Guided Wizard
 ```
 1. `brew install crewship && crewship start`
-2. Prohlizec se otevre na localhost:3001
+2. Prohlizec se otevre na localhost:8080
 3. Registrace (email+heslo nebo OAuth)
 4. "Vitejte v Crewship! Pojdme vytvorit vas prvni workspace."
    → Nazev workspace, slug

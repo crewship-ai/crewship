@@ -39,7 +39,7 @@ interface Credential {
   last_error: string | null
   created_at: string
   updated_at: string
-  _count: { agent_credentials: number }
+  _count_agent_credentials: number
 }
 
 interface Org {
@@ -82,7 +82,7 @@ export default function CredentialsPage() {
     try {
       const res = await fetch("/api/v1/workspaces")
       if (!res.ok) return null
-      const orgs: Org[] = await res.json()
+      const orgs: Org[] = await res.json() ?? []
       if (orgs.length > 0) {
         setWorkspaceId(orgs[0].id)
         return orgs[0].id
@@ -97,8 +97,8 @@ export default function CredentialsPage() {
     try {
       const res = await fetch(`/api/v1/credentials?workspace_id=${oid}`)
       if (!res.ok) return
-      const data: Credential[] = await res.json()
-      setCredentials(data)
+      const data = await res.json()
+      setCredentials(Array.isArray(data) ? data : [])
     } catch {
       // silently fail
     }
@@ -256,7 +256,7 @@ export default function CredentialsPage() {
                     </TableCell>
                     <TableCell>
                       <span className="text-muted-foreground">
-                        {cred._count.agent_credentials} {cred._count.agent_credentials === 1 ? "agent" : "agents"}
+                        {cred._count_agent_credentials ?? 0} {(cred._count_agent_credentials ?? 0) === 1 ? "agent" : "agents"}
                       </span>
                     </TableCell>
                     <TableCell>

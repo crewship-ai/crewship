@@ -5,6 +5,7 @@ node_modules/
 # Next.js
 .next/
 out/
+web/out/
 build/
 dist/
 next-env.d.ts
@@ -32,7 +33,11 @@ coverage/
 # Prisma
 lib/generated/
 
+# SQLite
+*.db
+
 # Go
+/crewship
 /crewshipd
 *.exe
 *.dll
@@ -58,3 +63,5 @@ ehthumbs.db
 # Misc
 *.pem
 *.key
+*.db-shm
+*.db-wal

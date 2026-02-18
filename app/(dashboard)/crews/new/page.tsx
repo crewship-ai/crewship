@@ -12,15 +12,14 @@ import { Label } from "@/components/ui/label"
 import { PageHeader } from "@/components/layout/page-header"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { slugify } from "@/lib/utils/slugify"
+import { toast } from "sonner"
 
-export default function NewTeamPage() {
+export default function NewCrewPage() {
   const router = useRouter()
   const { workspaceId, loading: wsLoading } = useWorkspace()
 
   const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
-  // Form fields
   const [name, setName] = useState("")
   const [slug, setSlug] = useState("")
   const [slugManual, setSlugManual] = useState(false)
@@ -28,7 +27,6 @@ export default function NewTeamPage() {
   const [color, setColor] = useState("#3B82F6")
   const [icon, setIcon] = useState("")
 
-  // Auto-generate slug from name
   useEffect(() => {
     if (!slugManual) {
       setSlug(slugify(name))
@@ -41,7 +39,6 @@ export default function NewTeamPage() {
       if (!workspaceId) return
 
       setSubmitting(true)
-      setError(null)
 
       const body: Record<string, unknown> = {
         name,
@@ -65,14 +62,15 @@ export default function NewTeamPage() {
             typeof data.error === "string"
               ? data.error
               : "Failed to create crew. Please check your input."
-          setError(message)
+          toast.error(message)
           setSubmitting(false)
           return
         }
 
+        toast.success("Crew created successfully")
         router.push("/crews")
       } catch {
-        setError("Network error. Please try again.")
+        toast.error("Network error. Please try again.")
         setSubmitting(false)
       }
     },
@@ -99,10 +97,9 @@ export default function NewTeamPage() {
       </PageHeader>
 
       <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
-        {/* Team Details */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Team Details</CardTitle>
+            <CardTitle className="text-base">Crew Details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -137,14 +134,13 @@ export default function NewTeamPage() {
                 id="description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="What is this team responsible for?"
+                placeholder="What is this crew responsible for?"
                 rows={3}
               />
             </div>
           </CardContent>
         </Card>
 
-        {/* Appearance */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Appearance</CardTitle>
@@ -183,12 +179,6 @@ export default function NewTeamPage() {
           </CardContent>
         </Card>
 
-        {/* Error message */}
-        {error && (
-          <p className="text-sm text-destructive">{error}</p>
-        )}
-
-        {/* Actions */}
         <div className="flex items-center gap-3 pt-2">
           <Button type="submit" disabled={submitting || !workspaceId} className="gap-2">
             {submitting ? (
@@ -196,7 +186,7 @@ export default function NewTeamPage() {
             ) : (
               <Users className="h-4 w-4" />
             )}
-            Create Team
+            Create Crew
           </Button>
           <Button type="button" variant="outline" asChild>
             <Link href="/crews">Cancel</Link>
