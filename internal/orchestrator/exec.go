@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -217,16 +218,15 @@ func setupSystemPromptFiles(
 	logger *slog.Logger,
 ) error {
 	systemPrompt := crewshipSystemPreamble + req.SystemPrompt
-	if systemPrompt == "" {
-		return nil
-	}
 
 	var script string
 
 	switch req.CLIAdapter {
 	case "OPENCODE":
 		// OpenCode reads AGENTS.md from the project root / CWD for instructions.
-		script = fmt.Sprintf("cat > AGENTS.md << 'PROMPTEOF'\n%s\nPROMPTEOF", systemPrompt)
+		// Use base64 encoding to avoid heredoc delimiter injection.
+		encoded := base64.StdEncoding.EncodeToString([]byte(systemPrompt))
+		script = fmt.Sprintf("echo %s | base64 -d > AGENTS.md", encoded)
 
 	default:
 		return nil

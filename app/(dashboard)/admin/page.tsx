@@ -101,7 +101,10 @@ export default function AdminPage() {
     setRuntimeChecking(true)
     try {
       const res = await fetch("/api/v1/system/runtime")
-      if (!res.ok) return
+      if (!res.ok) {
+        setRuntimeAvailable(false)
+        return
+      }
       const data = await res.json()
       setRuntimeAvailable(data.available)
       if (data.available) {

@@ -103,7 +103,10 @@ export function SkillsPageClient() {
   }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setLoading(false)
+      return
+    }
     fetchSkills()
   }, [workspaceId, fetchSkills])
 
@@ -265,7 +268,7 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="md:max-w-md">
         <DialogHeader>
           <DialogTitle>Add Skill</DialogTitle>
           <DialogDescription>Select a skill to assign to this agent.</DialogDescription>

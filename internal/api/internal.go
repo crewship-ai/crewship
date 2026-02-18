@@ -367,6 +367,11 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 			}
 			skillParts = append(skillParts, fmt.Sprintf("--- Skill: %s ---\n%s", name, content))
 		}
+		if err := skillRows.Err(); err != nil {
+			h.logger.Error("rows iteration (resolve skills)", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 		if len(skillParts) > 0 {
 			promptParts = append(promptParts, "[ACTIVE SKILLS]\n"+strings.Join(skillParts, "\n\n"))
 		}
@@ -444,8 +449,13 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	query := "UPDATE agent_runs SET status = ?, finished_at = ?"
-	args := []interface{}{body.Status, now}
+	terminal := map[string]bool{"COMPLETED": true, "FAILED": true, "CANCELLED": true}
+	query := "UPDATE agent_runs SET status = ?"
+	args := []interface{}{body.Status}
+	if terminal[body.Status] {
+		query += ", finished_at = ?"
+		args = append(args, now)
+	}
 
 	if body.ExitCode != nil {
 		query += ", exit_code = ?"

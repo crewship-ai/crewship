@@ -409,7 +409,7 @@ function StepSystemCheck({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {Object.entries(installLinks).map(([key, url]) => (
                 <a
                   key={key}
