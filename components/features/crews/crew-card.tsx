@@ -4,6 +4,11 @@ import Link from "next/link"
 import { Bot, Users } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 
+interface TeamCount {
+  agents: number
+  members: number
+}
+
 interface CrewData {
   id: string
   name: string
@@ -11,24 +16,29 @@ interface CrewData {
   description: string | null
   color: string | null
   icon: string | null
-  _count_agents: number
-  _count_members: number
+  created_at?: string
+  _count: TeamCount
 }
 
 export function CrewCard({ crew }: { crew: CrewData }) {
+  const crewColor = crew.color ?? "#6b7280"
+
   return (
     <Link href={`/crews/${crew.id}`}>
-      <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
+      <Card
+        className="hover:border-primary/50 transition-colors cursor-pointer h-full"
+        style={{ "--crew-color": crewColor } as React.CSSProperties}
+      >
         <CardContent className="p-4 sm:p-5">
           <div className="flex items-start gap-3">
             <div
               className="flex h-10 w-10 items-center justify-center rounded-lg text-lg shrink-0"
-              style={{ backgroundColor: crew.color ? `${crew.color}20` : undefined }}
+              style={{ backgroundColor: `color-mix(in srgb, var(--crew-color) 12%, transparent)` }}
             >
               {crew.icon ?? (
                 <Users
                   className="h-5 w-5"
-                  style={{ color: crew.color ?? "#6b7280" }}
+                  style={{ color: "var(--crew-color)" }}
                 />
               )}
             </div>
@@ -36,7 +46,7 @@ export function CrewCard({ crew }: { crew: CrewData }) {
               <div className="flex items-center gap-2">
                 <span
                   className="h-2.5 w-2.5 rounded-full shrink-0"
-                  style={{ backgroundColor: crew.color ?? "#6b7280" }}
+                  style={{ backgroundColor: "var(--crew-color)" }}
                 />
                 <h3 className="text-sm font-semibold truncate">{crew.name}</h3>
               </div>
@@ -51,11 +61,11 @@ export function CrewCard({ crew }: { crew: CrewData }) {
           <div className="mt-3 pt-3 border-t flex items-center gap-4 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Bot className="h-3 w-3" />
-              {crew._count_agents ?? 0} agents
+              {crew._count.agents} agents
             </span>
             <span className="flex items-center gap-1">
               <Users className="h-3 w-3" />
-              {crew._count_members ?? 0} members
+              {crew._count.members} members
             </span>
           </div>
         </CardContent>
