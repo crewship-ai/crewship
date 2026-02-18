@@ -1,7 +1,7 @@
 "use client"
 
 import { use, useState, useEffect, useCallback } from "react"
-import { Download, AlertCircle, Inbox, FolderOpen, Copy, Check } from "lucide-react"
+import { Download, AlertCircle, Inbox, FolderOpen, Copy, Check, FileIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -178,10 +178,7 @@ export default function FilesPage({ params }: { params: Promise<{ agentId: strin
                 onClick={() => handleFileSelect(f.path)}
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <svg className="h-4 w-4 text-muted-foreground shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
-                    <path d="M14 2v4a2 2 0 0 0 2 2h4" />
-                  </svg>
+                  <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
                   <div className="min-w-0">
                     <div className="text-sm font-medium flex items-center gap-2">
                       <span className="truncate">{f.name}</span>

@@ -154,6 +154,7 @@ export default function LogsPage({ params }: { params: Promise<{ agentId: string
         <div className="relative flex-1 max-w-xs ml-2">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-neutral-500" />
           <input
+            aria-label="Search logs"
             type="text"
             placeholder="Search logs..."
             value={searchQuery}

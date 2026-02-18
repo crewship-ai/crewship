@@ -45,18 +45,18 @@ class MockWebSocket {
   }
 }
 
-vi.stubGlobal("WebSocket", MockWebSocket)
-
 import { useWebSocket } from "@/hooks/use-websocket"
 
 describe("useWebSocket", () => {
   beforeEach(() => {
     mockInstances = []
     vi.useFakeTimers()
+    vi.stubGlobal("WebSocket", MockWebSocket)
   })
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.stubGlobal("WebSocket", undefined)
   })
 
   it("starts disconnected without a token", () => {

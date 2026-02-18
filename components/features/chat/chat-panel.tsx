@@ -112,6 +112,7 @@ function formatTimestamp(date: Date): string {
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
 }
 
+/** Chat panel with split view: conversation on the left, file preview on the right. */
 export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
   const { workspaceId } = useWorkspace()
   const [token, setToken] = useState<string | null>(null)
@@ -205,8 +206,10 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
       .finally(() => setLoadingPreview(false))
   }, [agentId, workspaceId, files])
 
-  const handleFileClick = useCallback((fileName: string) => {
-    const file = files.find((f) => f.name === fileName)
+  const handleFileClick = useCallback((fileRef: string) => {
+    const file = files.find((f) =>
+      f.name === fileRef || f.path === fileRef || f.path.endsWith(`/${fileRef}`),
+    )
     if (file) {
       setShowPreview(true)
       handleFileSelect(file.path)

@@ -27,9 +27,10 @@ const CATEGORY_CONFIG: Record<string, { label: string; icon: typeof Settings; cl
 }
 
 function categorizeEvent(event: AuditEvent): keyof typeof CATEGORY_CONFIG {
-  if (event.action === "CREATE") return "CREATED"
-  if (event.entity_type === "SKILL" || event.action.includes("skill")) return "SKILL"
-  if (event.entity_type === "CREDENTIAL" || event.action.includes("credential")) return "CRED"
+  const action = event.action.toUpperCase()
+  if (action === "CREATE") return "CREATED"
+  if (event.entity_type === "SKILL" || action.includes("SKILL")) return "SKILL"
+  if (event.entity_type === "CREDENTIAL" || action.includes("CREDENTIAL")) return "CRED"
   return "CONFIG"
 }
 
@@ -51,6 +52,7 @@ function formatDate(dateStr: string): string {
     " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
 }
 
+/** Agent configuration change history timeline. */
 export default function HistoryPage({ params }: { params: Promise<{ agentId: string }> }) {
   const { agentId } = use(params)
   const { workspaceId, loading: wsLoading } = useWorkspace()
@@ -63,6 +65,10 @@ export default function HistoryPage({ params }: { params: Promise<{ agentId: str
     let cancelled = false
 
     async function fetchHistory() {
+      if (!cancelled) {
+        setLoading(true)
+        setError(null)
+      }
       try {
         const res = await fetch(`/api/v1/audit?workspace_id=${workspaceId}&entity_id=${agentId}&limit=50`)
         if (!res.ok) {

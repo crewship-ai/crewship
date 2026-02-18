@@ -35,6 +35,7 @@ export default function ChatPage({ params, searchParams }: {
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string>(sessionParam ?? "")
   const [showSessionList, setShowSessionList] = useState(false)
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
 
   useEffect(() => {
     if (!workspaceId) return
@@ -50,7 +51,7 @@ export default function ChatPage({ params, searchParams }: {
           tool_profile: data.tool_profile,
         })
       })
-      .catch(() => {})
+      .catch((err) => console.error("Failed to fetch agent:", err))
   }, [agentId, workspaceId])
 
   useEffect(() => {
@@ -64,15 +65,19 @@ export default function ChatPage({ params, searchParams }: {
             setActiveSessionId(data[0].id)
           }
         }
+        setSessionsLoaded(true)
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error("Failed to fetch sessions:", err)
+        setSessionsLoaded(true)
+      })
   }, [agentId, workspaceId, activeSessionId])
 
   useEffect(() => {
-    if (!activeSessionId) {
+    if (sessionsLoaded && !activeSessionId) {
       setActiveSessionId(crypto.randomUUID())
     }
-  }, [activeSessionId])
+  }, [sessionsLoaded, activeSessionId])
 
   const currentSession = sessions.find((s) => s.id === activeSessionId)
   const handleNewSession = useCallback(() => {
@@ -133,7 +138,7 @@ export default function ChatPage({ params, searchParams }: {
         <div className="hidden sm:flex items-center gap-4 ml-auto text-xs text-muted-foreground">
           {agent && (
             <>
-              <span>CLI: <strong className="text-foreground">{agent.cli_adapter.replace("_", " ")}</strong></span>
+              <span>CLI: <strong className="text-foreground">{agent.cli_adapter.replaceAll("_", " ")}</strong></span>
               {agent.llm_model && (
                 <span>Model: <strong className="text-foreground">{agent.llm_model}</strong></span>
               )}
