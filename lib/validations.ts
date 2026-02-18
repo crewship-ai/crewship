@@ -13,6 +13,9 @@ export const createCrewSchema = z.object({
   description: z.string().max(500).optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   icon: z.string().max(10).optional(),
+  container_ttl_hours: z.number().int().min(1).max(720).nullable().optional(),
+  container_memory_mb: z.number().int().min(512).max(32768).optional(),
+  container_cpus: z.number().min(0.5).max(16).optional(),
 })
 
 export const updateCrewSchema = createCrewSchema.partial()

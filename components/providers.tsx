@@ -1,12 +1,13 @@
 "use client"
 
-import { AuthProvider } from "@/hooks/use-auth"
+import { SessionProvider } from "next-auth/react"
+import { Toaster } from "@/components/ui/sonner"
 
-interface ProvidersProps {
-  children: React.ReactNode
-}
-
-/** App-wide providers wrapper (auth context). */
-export function Providers({ children }: ProvidersProps) {
-  return <AuthProvider>{children}</AuthProvider>
+export function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    <SessionProvider>
+      {children}
+      <Toaster />
+    </SessionProvider>
+  )
 }
