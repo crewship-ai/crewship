@@ -17,6 +17,7 @@ interface UseRuntimeReturn {
   refresh: () => Promise<void>
 }
 
+/** Fetches container runtime status and exposes a refresh helper. */
 export function useRuntime(): UseRuntimeReturn {
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null)
   const [loading, setLoading] = useState(true)

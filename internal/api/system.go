@@ -26,8 +26,14 @@ var installLinks = map[string]string{
 
 // Runtime probes for a Docker-compatible container runtime and returns its status.
 // GET /api/v1/system/runtime
-func (h *SystemHandler) Runtime(w http.ResponseWriter, _ *http.Request) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
 	result, err := docker.Detect(ctx)

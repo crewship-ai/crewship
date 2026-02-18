@@ -15,6 +15,12 @@ export const test = base.extend({
       return data.csrfToken
     })
 
+    const email = process.env.E2E_EMAIL
+    const password = process.env.E2E_PASSWORD
+    if (!email || !password) {
+      throw new Error("E2E_EMAIL and E2E_PASSWORD environment variables must be set")
+    }
+
     const loginResult = await page.evaluate(
       async ({ email, password, csrf }) => {
         const res = await fetch("/api/auth/callback/credentials", {
@@ -24,11 +30,7 @@ export const test = base.extend({
         })
         return res.json()
       },
-      {
-        email: process.env.E2E_EMAIL ?? "pablosrbino@gmail.com",
-        password: process.env.E2E_PASSWORD ?? "Srbino1993!",
-        csrf: csrfToken,
-      }
+      { email, password, csrf: csrfToken }
     )
 
     if (loginResult.error) {

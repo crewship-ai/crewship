@@ -24,13 +24,13 @@ export interface CLIAdapterConfig {
 const ANTHROPIC_MODELS: ModelOption[] = [
   { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
   { value: "claude-opus-4-20250514", label: "Claude Opus 4" },
-  { value: "claude-haiku-3-20250514", label: "Claude Haiku 3" },
+  { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
 ]
 
 const OPENAI_MODELS: ModelOption[] = [
   { value: "o3", label: "o3" },
   { value: "o4-mini", label: "o4-mini" },
-  { value: "gpt-4.1", label: "GPT-4.1" },
+  { value: "gpt-4o", label: "GPT-4o" },
 ]
 
 const GOOGLE_MODELS: ModelOption[] = [

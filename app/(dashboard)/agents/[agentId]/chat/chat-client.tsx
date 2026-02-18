@@ -53,7 +53,7 @@ export function ChatPageClient() {
           tool_profile: data.tool_profile,
         })
       })
-      .catch((err) => console.error("Failed to fetch agent:", err))
+      .catch(() => {})
   }, [agentId, workspaceId])
 
   const refreshSessions = useCallback(async () => {
@@ -79,8 +79,7 @@ export function ChatPageClient() {
         }
         setSessionsLoaded(true)
       })
-      .catch((err) => {
-        console.error("Failed to fetch sessions:", err)
+      .catch(() => {
         setSessionsLoaded(true)
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps -- activeSessionId intentionally excluded to avoid refetch loop

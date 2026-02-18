@@ -124,6 +124,11 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
   const [authError, setAuthError] = useState(false)
   const [input, setInput] = useState("")
   const [sessionReady, setSessionReady] = useState(false)
+
+  useEffect(() => {
+    setSessionReady(false)
+  }, [sessionId])
+
   const [showPreview, setShowPreview] = useState(true)
   const [previewFile, setPreviewFile] = useState<string | null>(null)
   const [previewContent, setPreviewContent] = useState<string | null>(null)

@@ -16,6 +16,31 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { z } from "zod"
+
+const SkillDataSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  display_name: z.string().nullable(),
+  description: z.string().nullable(),
+  category: z.string().nullable(),
+  source: z.string(),
+  icon: z.string().nullable(),
+  version: z.string().nullable(),
+})
+
+const AgentSkillSchema = z.object({
+  id: z.string(),
+  agent_id: z.string(),
+  skill_id: z.string(),
+  enabled: z.boolean(),
+  config: z.record(z.string(), z.unknown()).nullable(),
+  skill: SkillDataSchema,
+})
+
+const AgentSkillListSchema = z.array(AgentSkillSchema)
+const SkillDataListSchema = z.array(SkillDataSchema)
 
 interface SkillData {
   id: string
@@ -62,8 +87,13 @@ export function SkillsPageClient() {
         setError("Failed to load skills")
         return
       }
-      const data = await res.json()
-      setSkills(Array.isArray(data) ? data : [])
+      const parsed = AgentSkillListSchema.safeParse(await res.json())
+      if (!parsed.success) {
+        setError("Invalid skills response")
+        setSkills([])
+        return
+      }
+      setSkills(parsed.data)
       setError(null)
     } catch {
       setError("Network error. Please try again.")
@@ -206,7 +236,10 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
     setLoading(true)
     fetch(`/api/v1/skills?workspace_id=${workspaceId}`)
       .then((res) => (res.ok ? res.json() : []))
-      .then((data: SkillData[]) => setAvailable(Array.isArray(data) ? data : []))
+      .then((data) => {
+        const parsed = SkillDataListSchema.safeParse(data)
+        setAvailable(parsed.success ? parsed.data : [])
+      })
       .catch(() => setAvailable([]))
       .finally(() => setLoading(false))
   }, [open, workspaceId])

@@ -226,8 +226,7 @@ func setupSystemPromptFiles(
 	switch req.CLIAdapter {
 	case "OPENCODE":
 		// OpenCode reads AGENTS.md from the project root / CWD for instructions.
-		escaped := strings.ReplaceAll(systemPrompt, "'", "'\\''")
-		script = fmt.Sprintf("cat > %s/AGENTS.md << 'PROMPTEOF'\n%s\nPROMPTEOF", workDir, escaped)
+		script = fmt.Sprintf("cat > AGENTS.md << 'PROMPTEOF'\n%s\nPROMPTEOF", systemPrompt)
 
 	default:
 		return nil
@@ -236,6 +235,7 @@ func setupSystemPromptFiles(
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,
 		Cmd:         []string{"sh", "-c", script},
+		WorkingDir:  workDir,
 		User:        "1001:1001",
 	}
 

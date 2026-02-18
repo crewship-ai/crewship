@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
@@ -434,6 +435,14 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	validStatuses := map[string]bool{
+		"RUNNING": true, "COMPLETED": true, "FAILED": true, "CANCELLED": true,
+	}
+	if !validStatuses[body.Status] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid status"})
+		return
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	query := "UPDATE agent_runs SET status = ?, finished_at = ?"
 	args := []interface{}{body.Status, now}
@@ -462,7 +471,7 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": body.Status})
 }
 
-func WriteAuditLog(ctx interface{ Value(any) any }, db *sql.DB, action, entityType, entityID, userID, workspaceID string, metadata map[string]interface{}) {
+func WriteAuditLog(ctx context.Context, db *sql.DB, action, entityType, entityID, userID, workspaceID string, metadata map[string]interface{}) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	metaJSON := "{}"
 	if metadata != nil {
@@ -470,8 +479,11 @@ func WriteAuditLog(ctx interface{ Value(any) any }, db *sql.DB, action, entityTy
 			metaJSON = string(b)
 		}
 	}
-	_, _ = db.Exec(`
+	_, err := db.ExecContext(ctx, `
 		INSERT INTO audit_logs (id, workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
 		VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)`,
 		workspaceID, userID, action, entityType, entityID, metaJSON, now)
+	if err != nil {
+		slog.Debug("audit log write failed", "error", err, "action", action)
+	}
 }

@@ -42,7 +42,10 @@ test("Agent overview has no critical a11y violations", async ({ page }, testInfo
   const card = page.locator("a[href^='/agents/']").filter({ hasText: /Idle|Running|Stopped|Error/ }).first()
   await expect(card).toBeVisible({ timeout: 10_000 })
   const href = await card.getAttribute("href")
-  await page.goto(href!)
+  if (!href) {
+    throw new Error("Agent card missing href attribute")
+  }
+  await page.goto(href)
   await page.waitForLoadState("networkidle")
 
   const results = await new AxeBuilder({ page })
