@@ -145,7 +145,7 @@ export function SkillsPageClient() {
         <p className="text-sm text-muted-foreground">
           {skills.length} skill{skills.length !== 1 ? "s" : ""} assigned
         </p>
-        <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)}>
+        <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)} disabled={!workspaceId}>
           <Plus className="h-4 w-4 mr-1" />
           Add Skill
         </Button>
@@ -208,14 +208,16 @@ export function SkillsPageClient() {
         </div>
       )}
 
-      <AddSkillDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        agentId={agentId}
-        workspaceId={workspaceId ?? ""}
-        assignedSkillIds={skills.map((s) => s.skill_id)}
-        onAdded={fetchSkills}
-      />
+      {workspaceId && (
+        <AddSkillDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          agentId={agentId}
+          workspaceId={workspaceId}
+          assignedSkillIds={skills.map((s) => s.skill_id)}
+          onAdded={fetchSkills}
+        />
+      )}
     </div>
   )
 }
