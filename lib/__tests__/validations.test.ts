@@ -236,7 +236,7 @@ describe("createCredentialSchema", () => {
   it("valid workspace scope (no crew_id)", () => {
     const result = createCredentialSchema.safeParse({
       name: "OPENAI_API_KEY",
-      value: "sk-1234567890",
+      value: "test-token-value",
       scope: "WORKSPACE",
     })
     expect(result.success).toBe(true)
@@ -245,7 +245,7 @@ describe("createCredentialSchema", () => {
   it("valid crew scope (with crew_id)", () => {
     const result = createCredentialSchema.safeParse({
       name: "OPENAI_API_KEY",
-      value: "sk-1234567890",
+      value: "test-token-value",
       scope: "CREW",
       crew_id: randomUUID(),
     })
@@ -255,7 +255,7 @@ describe("createCredentialSchema", () => {
   it("crew scope without crew_id fails", () => {
     const result = createCredentialSchema.safeParse({
       name: "OPENAI_API_KEY",
-      value: "sk-1234567890",
+      value: "test-token-value",
       scope: "CREW",
     })
     expect(result.success).toBe(false)
@@ -264,7 +264,7 @@ describe("createCredentialSchema", () => {
   it("workspace scope with crew_id fails", () => {
     const result = createCredentialSchema.safeParse({
       name: "OPENAI_API_KEY",
-      value: "sk-1234567890",
+      value: "test-token-value",
       scope: "WORKSPACE",
       crew_id: randomUUID(),
     })

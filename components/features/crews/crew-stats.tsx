@@ -53,7 +53,7 @@ export function CrewStats({ agentCount, memberCount, memoryMb, cpus, ttlHours }:
         </Card>
       </div>
 
-      {ttlHours && (
+      {ttlHours != null && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Clock className="h-4 w-4" />
           <span>Container TTL: {ttlHours}h</span>

@@ -352,7 +352,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 ## EPIC 8: Testy ✅ ~80%
 
-> Unit testy, integracni testy. Celkem: 149 testu (73 TS + 76 Go).
+> Unit testy, integracni testy. Celkem: 270 testu (142 TS + 128 Go).
 
 - [x] 8.1 Vitest unit testy pro encryption.ts (10 testu)
 - [x] 8.2 Vitest unit testy pro validations.ts (30 testu, vcetne updateCrewSchema + container fields) — PR #26

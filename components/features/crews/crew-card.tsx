@@ -21,19 +21,24 @@ interface CrewData {
 }
 
 export function CrewCard({ crew }: { crew: CrewData }) {
+  const crewColor = crew.color ?? "#6b7280"
+
   return (
     <Link href={`/crews/${crew.id}`}>
-      <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
+      <Card
+        className="hover:border-primary/50 transition-colors cursor-pointer h-full"
+        style={{ "--crew-color": crewColor } as React.CSSProperties}
+      >
         <CardContent className="p-4 sm:p-5">
           <div className="flex items-start gap-3">
             <div
               className="flex h-10 w-10 items-center justify-center rounded-lg text-lg shrink-0"
-              style={{ backgroundColor: crew.color ? `${crew.color}20` : undefined }}
+              style={{ backgroundColor: `color-mix(in srgb, var(--crew-color) 12%, transparent)` }}
             >
               {crew.icon ?? (
                 <Users
                   className="h-5 w-5"
-                  style={{ color: crew.color ?? "#6b7280" }}
+                  style={{ color: "var(--crew-color)" }}
                 />
               )}
             </div>
@@ -41,7 +46,7 @@ export function CrewCard({ crew }: { crew: CrewData }) {
               <div className="flex items-center gap-2">
                 <span
                   className="h-2.5 w-2.5 rounded-full shrink-0"
-                  style={{ backgroundColor: crew.color ?? "#6b7280" }}
+                  style={{ backgroundColor: "var(--crew-color)" }}
                 />
                 <h3 className="text-sm font-semibold truncate">{crew.name}</h3>
               </div>
