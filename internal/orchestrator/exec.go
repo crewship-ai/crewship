@@ -15,8 +15,8 @@ import (
 )
 
 const crewshipSystemPreamble = `You are running inside a Crewship agent container.
-Working directory: your current directory is your private workspace.
-Output directory: save all deliverables (files the user should see/download) to the path in $CREWSHIP_OUTPUT_DIR.
+Your working directory IS the output directory -- files you create or edit here are immediately visible to the user in the Files panel.
+Scratch space is available at /workspace/ for temporary files that don't need to be visible.
 Do NOT attempt to write outside /workspace or /output -- the filesystem is read-only elsewhere.
 `
 
@@ -34,7 +34,8 @@ func BuildCLICommand(req AgentRunRequest) []string {
 		if req.ToolProfile == "MINIMAL" {
 			cmd = append(cmd, "--tools", "Read,Search,Grep")
 		}
-		cmd = append(cmd, req.UserMessage)
+		// Use -- separator to prevent variadic flags (--tools) from consuming the user message
+		cmd = append(cmd, "--", req.UserMessage)
 		return cmd
 
 	case "CODEX_CLI":
@@ -46,9 +47,17 @@ func BuildCLICommand(req AgentRunRequest) []string {
 		return cmd
 
 	case "GEMINI_CLI":
-		return []string{"gemini", "-p", req.UserMessage}
+		cmd := []string{"gemini"}
+		systemPrompt := crewshipSystemPreamble + req.SystemPrompt
+		if systemPrompt != "" {
+			cmd = append(cmd, "--system-instruction", systemPrompt)
+		}
+		cmd = append(cmd, "-p", req.UserMessage)
+		return cmd
 
 	case "OPENCODE":
+		// OpenCode reads AGENTS.md from CWD for system instructions.
+		// We write it via setupSystemPromptFiles() before exec.
 		return []string{"opencode", "run", req.UserMessage}
 
 	default:
@@ -58,6 +67,8 @@ func BuildCLICommand(req AgentRunRequest) []string {
 
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	env := []string{
+		"HOME=/home/agent",
+		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
 		"CREWSHIP_AGENT_ID=" + req.AgentID,
 		"CREWSHIP_CREW_ID=" + req.CrewID,
 		"CREWSHIP_CHAT_ID=" + req.ChatID,
@@ -191,6 +202,51 @@ chmod 600 /home/agent/.claude/.credentials.json /home/agent/.claude.json`,
 	result.Reader.Close()
 
 	logger.Debug("claude credentials injected", "container_id", containerID[:min(12, len(containerID))])
+	return nil
+}
+
+// setupSystemPromptFiles writes CLI-specific system prompt files into the container.
+// OpenCode reads AGENTS.md from the working directory for system instructions.
+// This ensures all CLI adapters receive the system prompt, not just Claude Code.
+func setupSystemPromptFiles(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	req AgentRunRequest,
+	workDir string,
+	logger *slog.Logger,
+) error {
+	systemPrompt := crewshipSystemPreamble + req.SystemPrompt
+	if systemPrompt == "" {
+		return nil
+	}
+
+	var script string
+
+	switch req.CLIAdapter {
+	case "OPENCODE":
+		// OpenCode reads AGENTS.md from the project root / CWD for instructions.
+		escaped := strings.ReplaceAll(systemPrompt, "'", "'\\''")
+		script = fmt.Sprintf("cat > %s/AGENTS.md << 'PROMPTEOF'\n%s\nPROMPTEOF", workDir, escaped)
+
+	default:
+		return nil
+	}
+
+	cfg := provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", script},
+		User:        "1001:1001",
+	}
+
+	result, err := container.Exec(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("write system prompt files for %s: %w", req.CLIAdapter, err)
+	}
+	io.Copy(io.Discard, result.Reader)
+	result.Reader.Close()
+
+	logger.Debug("system prompt files written", "cli_adapter", req.CLIAdapter, "container_id", containerID[:min(12, len(containerID))])
 	return nil
 }
 

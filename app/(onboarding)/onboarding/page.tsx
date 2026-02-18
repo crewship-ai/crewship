@@ -13,6 +13,11 @@ import {
   Loader2,
   Check,
   SkipForward,
+  Container,
+  RefreshCw,
+  ExternalLink,
+  AlertTriangle,
+  CheckCircle2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -26,9 +31,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
+import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
 
 const STEPS = [
   { id: "welcome", label: "Welcome", icon: Ship },
+  { id: "system", label: "System", icon: Container },
   { id: "crew", label: "Create Crew", icon: Users },
   { id: "agent", label: "Add Agent", icon: Bot },
   { id: "credential", label: "API Key", icon: KeyRound },
@@ -49,6 +56,12 @@ export default function OnboardingPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [checkingStatus, setCheckingStatus] = useState(true)
+
+  // Runtime detection state
+  const [runtimeAvailable, setRuntimeAvailable] = useState<boolean | null>(null)
+  const [runtimeInfo, setRuntimeInfo] = useState<{ runtime: string; version: string } | null>(null)
+  const [runtimeChecking, setRuntimeChecking] = useState(false)
+  const [installLinks, setInstallLinks] = useState<Record<string, string>>({})
 
   // Form state
   const [workspaceName, setWorkspaceName] = useState("")
@@ -79,33 +92,42 @@ export default function OnboardingPage() {
 
   // Set defaults based on CLI adapter
   useEffect(() => {
-    if (cliAdapter === "CLAUDE_CODE") {
-      setLlmProvider("ANTHROPIC")
-      setCredentialName("ANTHROPIC_API_KEY")
-    } else if (cliAdapter === "CODEX_CLI") {
-      setLlmProvider("OPENAI")
-      setCredentialName("OPENAI_API_KEY")
-    } else if (cliAdapter === "GEMINI_CLI") {
-      setLlmProvider("GOOGLE")
-      setCredentialName("GOOGLE_API_KEY")
-    } else if (cliAdapter === "OPENCODE") {
-      setLlmProvider("ANTHROPIC")
-      setCredentialName("ANTHROPIC_API_KEY")
-    } else {
-      setLlmProvider("ANTHROPIC")
-      setCredentialName("ANTHROPIC_API_KEY")
+    const cfg = CLI_ADAPTERS[cliAdapter]
+    if (cfg) {
+      setLlmProvider(cfg.provider)
+      setCredentialName(cfg.envVar)
     }
   }, [cliAdapter])
 
   const progress = ((currentStep + 1) / STEPS.length) * 100
 
+  const checkRuntime = useCallback(async () => {
+    setRuntimeChecking(true)
+    try {
+      const res = await fetch("/api/v1/system/runtime")
+      if (!res.ok) return
+      const data = await res.json()
+      setRuntimeAvailable(data.available)
+      if (data.available) {
+        setRuntimeInfo({ runtime: data.runtime, version: data.version })
+      } else {
+        setInstallLinks(data.install_links ?? {})
+      }
+    } catch {
+      setRuntimeAvailable(false)
+    } finally {
+      setRuntimeChecking(false)
+    }
+  }, [])
+
   const canGoNext = useCallback((): boolean => {
     const step = STEPS[currentStep].id
+    if (step === "system") return runtimeAvailable !== null // checked at least once
     if (step === "crew") return crewName.trim().length >= 2
     if (step === "agent") return agentName.trim().length >= 2
     if (step === "credential") return true // credential is optional
     return true
-  }, [currentStep, crewName, agentName])
+  }, [currentStep, crewName, agentName, runtimeAvailable])
 
   function goNext() {
     if (currentStep < STEPS.length - 1) {
@@ -231,6 +253,15 @@ export default function OnboardingPage() {
                 onWorkspaceNameChange={setWorkspaceName}
               />
             )}
+            {stepId === "system" && (
+              <StepSystemCheck
+                available={runtimeAvailable}
+                info={runtimeInfo}
+                checking={runtimeChecking}
+                installLinks={installLinks}
+                onCheck={checkRuntime}
+              />
+            )}
             {stepId === "crew" && (
               <StepCrew crewName={crewName} onCrewNameChange={setCrewName} />
             )}
@@ -300,6 +331,112 @@ export default function OnboardingPage() {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+const RUNTIME_LABELS: Record<string, string> = {
+  docker: "Docker",
+  podman: "Podman",
+  colima: "Colima",
+  orbstack: "OrbStack",
+  rancher: "Rancher Desktop",
+  nerdctl: "nerdctl",
+}
+
+function StepSystemCheck({
+  available,
+  info,
+  checking,
+  installLinks,
+  onCheck,
+}: {
+  available: boolean | null
+  info: { runtime: string; version: string } | null
+  checking: boolean
+  installLinks: Record<string, string>
+  onCheck: () => void
+}) {
+  useEffect(() => {
+    if (available === null) onCheck()
+  }, [available, onCheck])
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <h2 className="text-lg font-semibold">System Check</h2>
+        <p className="text-sm text-muted-foreground">
+          Crewship runs AI agents in isolated containers. A Docker-compatible runtime is required.
+        </p>
+      </div>
+
+      <div className="rounded-lg border p-4">
+        {checking && (
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <span className="text-sm">Detecting container runtime...</span>
+          </div>
+        )}
+
+        {!checking && available === true && info && (
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+            <div>
+              <div className="text-sm font-medium text-emerald-700">
+                {RUNTIME_LABELS[info.runtime] ?? info.runtime} {info.version} detected
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Container runtime is ready. Agents will run in isolated containers.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!checking && available === false && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              <div>
+                <div className="text-sm font-medium text-amber-700">
+                  No container runtime found
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Install one of the supported runtimes to run AI agents.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              {Object.entries(installLinks).map(([key, url]) => (
+                <a
+                  key={key}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 rounded-lg border p-3 hover:bg-accent transition-colors"
+                >
+                  <Container className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">{RUNTIME_LABELS[key] ?? key}</span>
+                  <ExternalLink className="h-3 w-3 text-muted-foreground ml-auto" />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {!checking && (
+        <Button variant="outline" size="sm" onClick={onCheck}>
+          <RefreshCw className="mr-2 h-3.5 w-3.5" />
+          Re-check
+        </Button>
+      )}
+
+      {!checking && available === false && (
+        <p className="text-xs text-muted-foreground">
+          You can continue without a runtime, but agents will not be able to run until one is installed.
+        </p>
+      )}
     </div>
   )
 }
@@ -396,6 +533,28 @@ function StepAgent({
   llmModel: string
   onLlmModelChange: (v: string) => void
 }) {
+  const adapterCfg = CLI_ADAPTERS[cliAdapter]
+  const models = adapterCfg?.models ?? []
+  const isCustomModel = llmModel !== "" && !models.some((m) => m.value === llmModel)
+  const [showCustom, setShowCustom] = useState(isCustomModel)
+
+  function handleAdapterChange(key: string) {
+    onCliAdapterChange(key)
+    const cfg = CLI_ADAPTERS[key]
+    if (cfg) onLlmModelChange(cfg.defaultModel)
+    setShowCustom(false)
+  }
+
+  function handleModelSelect(value: string) {
+    if (value === "__custom__") {
+      setShowCustom(true)
+      onLlmModelChange("")
+    } else {
+      setShowCustom(false)
+      onLlmModelChange(value)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="space-y-1">
@@ -413,31 +572,66 @@ function StepAgent({
           placeholder="e.g. Claude — Developer"
         />
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="cli_adapter">CLI Adapter</Label>
-          <Select value={cliAdapter} onValueChange={onCliAdapterChange}>
-            <SelectTrigger id="cli_adapter" className="w-full">
-              <SelectValue />
+      <div className="space-y-2">
+        <Label>CLI Adapter</Label>
+        <div className="grid grid-cols-2 gap-2">
+          {CLI_ADAPTER_KEYS.map((key) => {
+            const cfg = CLI_ADAPTERS[key]
+            const Icon = cfg.icon
+            const isActive = cliAdapter === key
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => handleAdapterChange(key)}
+                className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                  isActive ? "border-primary bg-primary/5" : "border-border hover:bg-muted"
+                }`}
+              >
+                <Icon className={`h-5 w-5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">{cfg.label}</div>
+                  <div className="text-[10px] text-muted-foreground">{cfg.description}</div>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label>Model</Label>
+        {showCustom ? (
+          <div className="flex gap-2">
+            <Input
+              value={llmModel}
+              onChange={(e) => onLlmModelChange(e.target.value)}
+              placeholder="Enter model name"
+              className="font-mono text-xs"
+            />
+            <Button type="button" variant="outline" size="sm" onClick={() => {
+              setShowCustom(false)
+              if (adapterCfg) onLlmModelChange(adapterCfg.defaultModel)
+            }}>
+              Back
+            </Button>
+          </div>
+        ) : (
+          <Select value={llmModel} onValueChange={handleModelSelect}>
+            <SelectTrigger className="w-full font-mono text-xs">
+              <SelectValue placeholder="Select model" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="CLAUDE_CODE">Claude Code</SelectItem>
-              <SelectItem value="OPENCODE">OpenCode</SelectItem>
-              <SelectItem value="CODEX_CLI">Codex CLI</SelectItem>
-              <SelectItem value="GEMINI_CLI">Gemini CLI</SelectItem>
+              {models.map((m) => (
+                <SelectItem key={m.value} value={m.value} className="font-mono text-xs">
+                  {m.label}
+                </SelectItem>
+              ))}
+              <SelectItem value="__custom__" className="text-muted-foreground">
+                Custom...
+              </SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="llm_model">LLM Model</Label>
-          <Input
-            id="llm_model"
-            value={llmModel}
-            onChange={(e) => onLlmModelChange(e.target.value)}
-            placeholder="e.g. claude-sonnet-4-20250514"
-            className="font-mono text-xs"
-          />
-        </div>
+        )}
       </div>
     </div>
   )

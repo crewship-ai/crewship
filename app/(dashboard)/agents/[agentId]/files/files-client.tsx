@@ -91,8 +91,8 @@ export function FilesPageClient() {
       try {
         const res = await fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
         if (!res.ok) { if (!cancelled) setError("Failed to load files"); return }
-        const data: FileEntry[] = await res.json()
-        if (!cancelled) { setFiles(data); setError(null) }
+        const data: FileEntry[] | null = await res.json()
+        if (!cancelled) { setFiles(data ?? []); setError(null) }
       } catch { if (!cancelled) setError("Network error. Is crewshipd running?") }
       finally { if (!cancelled) setLoading(false) }
     }
@@ -102,7 +102,7 @@ export function FilesPageClient() {
   }, [agentId, workspaceId, wsLoading])
 
   const handleFileSelect = useCallback((path: string) => {
-    const file = files.find((f) => f.path === path)
+    const file = (files ?? []).find((f) => f.path === path)
     if (!file || file.is_dir) return
     setSelectedPath(path)
     setLoadingContent(true)
@@ -138,11 +138,12 @@ export function FilesPageClient() {
     )
   }
 
-  const fileCount = files.filter((f) => !f.is_dir).length
-  const dirCount = files.filter((f) => f.is_dir).length
-  const dirs = files.filter((f) => f.is_dir)
-  const plainFiles = files.filter((f) => !f.is_dir)
-  const selectedFile = files.find((f) => f.path === selectedPath)
+  const safeFiles = files ?? []
+  const fileCount = safeFiles.filter((f) => !f.is_dir).length
+  const dirCount = safeFiles.filter((f) => f.is_dir).length
+  const dirs = safeFiles.filter((f) => f.is_dir)
+  const plainFiles = safeFiles.filter((f) => !f.is_dir)
+  const selectedFile = safeFiles.find((f) => f.path === selectedPath)
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -173,7 +174,7 @@ export function FilesPageClient() {
               <FolderOpen className="h-4 w-4 text-amber-500" />
               <span className="text-sm font-medium">{d.name}/</span>
               <span className="text-xs text-muted-foreground">
-                {files.filter((f) => !f.is_dir && f.path.startsWith(d.path + "/")).length} files
+                {safeFiles.filter((f) => !f.is_dir && f.path.startsWith(d.path + "/")).length} files
               </span>
             </div>
           ))}

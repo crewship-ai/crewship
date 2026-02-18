@@ -59,6 +59,7 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	action := r.URL.Query().Get("action")
 	entityType := r.URL.Query().Get("entity_type")
+	entityID := r.URL.Query().Get("entity_id")
 	userID := r.URL.Query().Get("user_id")
 	dateFrom := r.URL.Query().Get("date_from")
 	dateTo := r.URL.Query().Get("date_to")
@@ -85,6 +86,12 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		countQuery += " AND entity_type = ?"
 		args = append(args, entityType)
 		countArgs = append(countArgs, entityType)
+	}
+	if entityID != "" {
+		query += " AND a.entity_id = ?"
+		countQuery += " AND entity_id = ?"
+		args = append(args, entityID)
+		countArgs = append(countArgs, entityID)
 	}
 	if userID != "" {
 		query += " AND a.user_id = ?"

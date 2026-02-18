@@ -56,6 +56,16 @@ export function ChatPageClient() {
       .catch((err) => console.error("Failed to fetch agent:", err))
   }, [agentId, workspaceId])
 
+  const refreshSessions = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const r = await fetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
+      if (!r.ok) return
+      const data: SessionInfo[] | null = await r.json()
+      if (data) setSessions(data)
+    } catch { /* ignore */ }
+  }, [agentId, workspaceId])
+
   useEffect(() => {
     if (!workspaceId) return
     fetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
@@ -81,6 +91,13 @@ export function ChatPageClient() {
       setActiveSessionId(crypto.randomUUID())
     }
   }, [sessionsLoaded, activeSessionId])
+
+  // Periodically refresh sessions to pick up newly created ones
+  useEffect(() => {
+    if (!sessionsLoaded || !workspaceId) return
+    const interval = setInterval(refreshSessions, 5000)
+    return () => clearInterval(interval)
+  }, [sessionsLoaded, workspaceId, refreshSessions])
 
   const currentSession = sessions.find((s) => s.id === activeSessionId)
   const handleNewSession = useCallback(() => {
@@ -166,11 +183,17 @@ export function ChatPageClient() {
 
       {/* Chat panel with split view */}
       <div className="flex-1 overflow-hidden">
-        <ChatPanel
-          agentId={agentId}
-          sessionId={activeSessionId}
-          agentName={agent?.name}
-        />
+        {activeSessionId ? (
+          <ChatPanel
+            agentId={agentId}
+            sessionId={activeSessionId}
+            agentName={agent?.name}
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+            Loading session...
+          </div>
+        )}
       </div>
     </div>
   )

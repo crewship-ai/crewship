@@ -1,4 +1,4 @@
-.PHONY: up down restart status dev dev\:go dev\:next build test lint
+.PHONY: up down restart status dev dev\:go dev\:next build test lint e2e e2e\:ui
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -59,3 +59,9 @@ test:
 lint:
 	pnpm lint
 	go vet ./...
+
+e2e:
+	pnpm test:e2e
+
+e2e\:ui:
+	pnpm test:e2e:ui
