@@ -3,6 +3,10 @@ import { AgentTabs } from "@/components/layout/agent-tabs"
 import { MoreHorizontal } from "lucide-react"
 import Link from "next/link"
 
+export function generateStaticParams() {
+  return [{ agentId: "_" }]
+}
+
 export default function AgentDetailLayout({
   children,
   params,

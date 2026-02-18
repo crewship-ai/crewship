@@ -2,12 +2,13 @@
 
 **Verze:** 3.0
 **Datum:** 2026-02-17
-**ORM:** Prisma (JEDINY zpusob pristupu k DB z Next.js)
-**Databaze:** PostgreSQL 16+ (plain PostgreSQL, RDS, Cloud SQL — jakykoli provider)
-**Auth:** NextAuth.js (Auth.js v5) s Prisma adapterem
-**Autorizace (MVP):** CASL (aplikacni uroven) -- zadne RLS v MVP
-**Autorizace (Phase 2):** CASL + RLS jako defense-in-depth (`current_setting()` pattern)
-**Multi-tenancy:** workspace_id sloupec + CASL (MVP), + RLS (Phase 2)
+**DB pristup:** Go `database/sql` (primy pristup, NO ORM at runtime)
+**Prisma:** Schema pouzivano POUZE pro TypeScript type generation (`pnpm db:generate`)
+**Databaze:** SQLite (default, embedded) nebo PostgreSQL 16+ (opt-in)
+**Auth:** Go (NextAuth-compatible JWE endpoints v `internal/api/`)
+**Autorizace (MVP):** Go RBAC middleware (`internal/api/middleware.go`) -- zadne RLS v MVP
+**Autorizace (Phase 2):** Go middleware + RLS jako defense-in-depth (`current_setting()` pattern)
+**Multi-tenancy:** workspace_id sloupec + Go middleware (MVP), + RLS (Phase 2)
 **Mody:** Community (1 workspace, free) | Enterprise (multi-workspace, placeny)
 
 ---
@@ -16,12 +17,12 @@
 
 | Data | Kde | Duvod |
 |---|---|---|
-| Uzivatele, workspaces, crews, agenti | PostgreSQL | Strukturovana data, relace, RBAC |
-| Credentials (sifrovane) | PostgreSQL | AES-256-GCM, pristup pres Prisma |
-| Skills, plany, feature flags | PostgreSQL | Konfigurace platformy |
-| Audit log | PostgreSQL | Immutable, queryable, GDPR |
-| Subscription (Stripe) | PostgreSQL | Billing stav |
-| **Session metadata** | **PostgreSQL** | ID, agent, title, status, cas — queryable |
+| Uzivatele, workspaces, crews, agenti | SQLite/PostgreSQL | Strukturovana data, relace, RBAC |
+| Credentials (sifrovane) | SQLite/PostgreSQL | AES-256-GCM, pristup pres Go database/sql |
+| Skills, plany, feature flags | SQLite/PostgreSQL | Konfigurace platformy |
+| Audit log | SQLite/PostgreSQL | Immutable, queryable, GDPR |
+| Subscription (Stripe) | SQLite/PostgreSQL | Billing stav |
+| **Session metadata** | **SQLite/PostgreSQL** | ID, agent, title, status, cas — queryable |
 | **Konverzacni zpravy** | **JSONL soubory** | /var/lib/crewship/conversations/{workspace}/{agent}/{session}.jsonl |
 | **Logy agentu** | **JSONL soubory** | /var/log/crewship/crews/{crew}/agents/{agent}/current.jsonl |
 | **Agent live status** | **Go pamet + bbolt** | crewshipd drzi v pameti, persistuje do bbolt WAL |
@@ -1069,30 +1070,29 @@ INSERT INTO feature_flags (key, description, enabled) VALUES
 
 ---
 
-## 10. AUTENTIZACE (NextAuth.js)
+## 10. AUTENTIZACE (Go -- NextAuth-compatible)
 
-### MVP: NextAuth.js (Auth.js v5) s Prisma adapterem
+### MVP: Go auth endpoints (NextAuth-compatible JWE)
 
-- Email + heslo (CredentialsProvider, hashed_password v User tabulce)
-- OAuth (Google, GitHub)
-- Session management (JWT)
-- Funguje s jakoukoli PostgreSQL
+- Email + heslo (bcrypt hashing v Go, `internal/api/auth.go`)
+- OAuth (Google, GitHub -- planovano)
+- Session management (JWT/JWE, `internal/auth/`)
+- NextAuth-compatible endpoints: `/api/auth/csrf`, `/api/auth/session`, `/api/auth/signin`, `/api/auth/signout`
+- Funguje se SQLite (default) i PostgreSQL
 
 ### Pouziti v kodu
-```typescript
-// lib/auth.ts
-import { auth } from '@/auth'
-
-export async function getCurrentUser() {
-  const session = await auth()
-  if (!session?.user?.id) return null
-  return prisma.user.findUnique({ where: { id: session.user.id } })
-}
-
-export async function requireAuth() {
-  const user = await getCurrentUser()
-  if (!user) throw new Error('Unauthorized')
-  return user
+```go
+// internal/api/middleware.go
+func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        token, err := s.auth.ValidateRequest(r)
+        if err != nil {
+            http.Error(w, "Unauthorized", http.StatusUnauthorized)
+            return
+        }
+        ctx := context.WithValue(r.Context(), userKey, token.UserID)
+        next(w, r.WithContext(ctx))
+    }
 }
 ```
 
@@ -1123,9 +1123,9 @@ docker compose -f docker/docker-compose.yml up -d
 
 ## 13. MIGRACNI STRATEGIE
 
-- **Prisma** = source of truth pro schema
-- `prisma db push` pro development
-- `prisma migrate` pro production
+- **Go migration system** (`internal/database/migrate.go`) = manages actual DB schema (20 tables)
+- **Prisma schema** = used ONLY for TypeScript type generation, NOT for migrations
+- Go migration system handles both SQLite and PostgreSQL
 - **SQL skripty** pro RLS politiky a triggers (Phase 2)
 - **Triggers:** `update_updated_at()` na vsech tabulkach s `updated_at`
 

@@ -62,7 +62,7 @@ func main() {
 		cancel()
 	}()
 
-	deps, err := initProviders(cfg, logger)
+	deps, err := initProviders(ctx, cfg, logger)
 	if err != nil {
 		logger.Error("failed to initialize providers", "error", err)
 		os.Exit(1)
@@ -95,12 +95,12 @@ func main() {
 	logger.Info("crewshipd stopped")
 }
 
-func initProviders(cfg *config.Config, logger *slog.Logger) (*server.Deps, error) {
+func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*server.Deps, error) {
 	deps := &server.Deps{}
 
 	switch cfg.Container.Provider {
 	case "docker":
-		d, err := docker.New(docker.Config{
+		d, err := docker.New(ctx, docker.Config{
 			RuntimeImage:   cfg.Container.RuntimeImage,
 			DefaultRuntime: cfg.Container.DefaultRuntime,
 			Network:        cfg.Container.Network,

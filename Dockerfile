@@ -1,49 +1,44 @@
-# Crewship -- Next.js Production Dockerfile
-# Multi-stage build: deps → builder → runner
+# Crewship -- Single Binary Production Dockerfile
+# Multi-stage: Go build + Next.js static export → minimal Alpine image
 # Image: ghcr.io/crewship-ai/crewship:latest
 
-FROM node:24-alpine AS base
+FROM node:24-alpine AS frontend
 RUN corepack enable pnpm
-
-# -- Dependencies --
-FROM base AS deps
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
-
-# -- Build --
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-
-ARG DATABASE_URL="postgresql://build:build@localhost:5432/build"
-ENV DATABASE_URL=${DATABASE_URL}
-
 RUN pnpm prisma generate
 RUN pnpm build
 
-# -- Runner --
-FROM base AS runner
+FROM golang:1.26-alpine AS backend
 WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+COPY web/ ./web/
+COPY --from=frontend /app/out ./web/out
+ARG VERSION=dev
+ARG COMMIT=none
+ARG DATE=unknown
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+    -o /crewship ./cmd/crewship
 
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
+# -- Runner --
+FROM alpine:3.23
 
-RUN addgroup --system --gid 1001 crewship && \
-    adduser --system --uid 1001 crewship
+RUN apk --no-cache add ca-certificates && \
+    addgroup -g 1001 -S crewship && adduser -u 1001 -S crewship -G crewship
 
-COPY --from=builder /app/public ./public
-COPY --from=builder --chown=crewship:crewship /app/.next/standalone ./
-COPY --from=builder --chown=crewship:crewship /app/.next/static ./.next/static
-COPY --from=builder /app/lib/generated/prisma ./lib/generated/prisma
-COPY --from=builder /app/prisma ./prisma
-COPY docker/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN mkdir -p /var/lib/crewship /var/log/crewship /data && \
+    chown -R crewship:crewship /var/lib/crewship /var/log/crewship /data
+
+COPY --from=backend /crewship /usr/local/bin/crewship
 
 USER crewship
 
-EXPOSE 3000
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
+EXPOSE 8080
 
-CMD ["node", "server.js"]
+ENTRYPOINT ["crewship", "start"]

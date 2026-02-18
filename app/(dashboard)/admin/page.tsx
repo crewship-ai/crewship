@@ -67,7 +67,9 @@ interface AdminOrg {
   name: string
   slug: string
   created_at: string
-  _count: { members: number; agents: number; crews: number }
+  _count_members: number
+  _count_agents: number
+  _count_crews: number
 }
 
 interface AdminUser {
@@ -213,9 +215,9 @@ export default function AdminPage() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-center text-xs">{o._count.members}</TableCell>
-                      <TableCell className="text-center text-xs">{o._count.agents}</TableCell>
-                      <TableCell className="text-center text-xs">{o._count.crews}</TableCell>
+                      <TableCell className="text-center text-xs">{o._count_members ?? 0}</TableCell>
+                      <TableCell className="text-center text-xs">{o._count_agents ?? 0}</TableCell>
+                      <TableCell className="text-center text-xs">{o._count_crews ?? 0}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {new Date(o.created_at).toLocaleDateString()}
                       </TableCell>

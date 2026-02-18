@@ -412,14 +412,12 @@ korelaci sessions, delegačních logů, a JSONL konverzací across agentů.
 
 ## ADR-013: Credential decryption v Go service
 
-**Status:** Proposed
+**Status:** Accepted (implementovano -- Go desifruje primo v `internal/encryption/`)
 **Datum:** 2026-02-15
-**Kontext:** Aktuálně Next.js dešifruje credentials a posílá plaintext
-přes Unix socket do Go. Plaintext existuje v paměti DVOU procesů.
-Node.js GC negarantuje okamžité smazání z paměti.
+**Kontext:** Puvodni navrh pocital s Next.js desifrovani a preposilani pres Unix socket.
+Single binary architektura toto zjednodusila -- Go desifruje primo.
 
-**Rozhodnutí:** Go service dostane vlastní `ENCRYPTION_KEY` a dešifruje sám.
-Next.js posílá jen encrypted blob + credential ID přes Unix socket.
+**Rozhodnutí:** Go service dešifruje credentials přímo (internal/encryption/).
 Plaintext existuje jen v Go paměti po dobu Docker exec.
 
 **Důsledky:**
@@ -817,7 +815,7 @@ v crew kontejneru (Docker-in-Docker nebo bind-mounted socket).
 ---
 
 ### ADR-022: SQLite jako default databaze
-- **Status:** Proposed
+- **Status:** Accepted
 - **Kontext:** Single binary distribuce vyzaduje zero-deps setup. PostgreSQL vyzaduje Docker nebo externi server.
 - **Rozhodnuti:** SQLite jako default pro `crewship start`, PostgreSQL jako opt-in pro tymy/enterprise.
 - **Prisma:** multi-provider (sqlite + postgresql), schema sdilene.
@@ -825,7 +823,7 @@ v crew kontejneru (Docker-in-Docker nebo bind-mounted socket).
 - **Inspirace:** Gitea (50k+ stars) pouziva SQLite default, PostgreSQL opt-in.
 
 ### ADR-023: Single binary distribuce (Ollama model)
-- **Status:** Proposed
+- **Status:** Accepted
 - **Kontext:** OpenClaw ma slozitou instalaci (npm + config + messaging). Ollama ukazal, ze single binary je optimalni UX.
 - **Rozhodnuti:** Go binary s embedded Next.js (embed.FS), SQLite, CLI (start/stop/status/logs).
 - **Build:** GoReleaser (linux/darwin/windows, amd64/arm64), brew tap, curl installer.
@@ -872,7 +870,7 @@ v crew kontejneru (Docker-in-Docker nebo bind-mounted socket).
 | ADR-010 | Landlock per-agent | Accepted | AGENT-RUNTIME.md 16.2 |
 | ADR-011 | Meilisearch search | Proposed | architecture.md (Conversation Search) |
 | ADR-012 | Trace ID | Accepted | ORCHESTRATION.md 5.10, AssignmentLog |
-| ADR-013 | Credential decrypt v Go | Proposed | SECURITY.md, architecture.md |
+| ADR-013 | Credential decrypt v Go | Accepted | SECURITY.md, architecture.md |
 | ADR-014 | Sidecar = MCP Gateway | Accepted | AGENT-RUNTIME.md 6A, architecture.md, ORCHESTRATION.md 7.2 |
 | ADR-015 | Credential-less agent | Accepted | AGENT-RUNTIME.md 3.3, 6A.6, architecture.md |
 | ADR-016 | Tool search on-demand | Accepted | AGENT-RUNTIME.md 6A.4, architecture.md |
@@ -881,8 +879,8 @@ v crew kontejneru (Docker-in-Docker nebo bind-mounted socket).
 | ADR-019 | Crewship Skill Hub (Marketplace) | Accepted | DATABASE.md, AGENT-RUNTIME.md 6A.10, architecture.md |
 | ADR-020 | Skill Security Pipeline | Accepted | AGENT-RUNTIME.md 6A.10, architecture.md |
 | ADR-021 | Skill Distribution via OCI | Accepted | AGENT-RUNTIME.md 6A.10, architecture.md |
-| ADR-022 | SQLite jako default databaze | Proposed | DATABASE.md, architecture.md |
-| ADR-023 | Single binary distribuce (Ollama model) | Proposed | architecture.md, DEPLOYMENT.md |
+| ADR-022 | SQLite jako default databaze | Accepted | DATABASE.md, architecture.md |
+| ADR-023 | Single binary distribuce (Ollama model) | Accepted | architecture.md, DEPLOYMENT.md |
 | ADR-024 | Per-agent network control | Proposed | SECURITY.md, AGENT-RUNTIME.md |
 | ADR-025 | Skill sandbox enforcement | Proposed | SECURITY.md, AGENT-RUNTIME.md |
 | ADR-026 | 3-tier monetizacni model | Proposed | business.md, DATABASE.md |
