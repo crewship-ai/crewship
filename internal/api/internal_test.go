@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -12,10 +14,17 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
+func setTestEncryptionKey(t *testing.T) {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	t.Setenv("ENCRYPTION_KEY", hex.EncodeToString(key))
+}
+
 func TestResolveChat_MemoryEnabled(t *testing.T) {
-	// Set required encryption key for credential encryption
-	os.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-	defer os.Unsetenv("ENCRYPTION_KEY")
+	setTestEncryptionKey(t)
 
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
@@ -80,8 +89,7 @@ func TestResolveChat_MemoryEnabled(t *testing.T) {
 }
 
 func TestResolveChat_MemoryDisabled(t *testing.T) {
-	os.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-	defer os.Unsetenv("ENCRYPTION_KEY")
+	setTestEncryptionKey(t)
 
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
@@ -135,8 +143,7 @@ func TestResolveChat_MemoryDisabled(t *testing.T) {
 }
 
 func TestResolveChat_WithCredentials(t *testing.T) {
-	os.Setenv("ENCRYPTION_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-	defer os.Unsetenv("ENCRYPTION_KEY")
+	setTestEncryptionKey(t)
 
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
@@ -158,7 +165,7 @@ func TestResolveChat_WithCredentials(t *testing.T) {
 	}
 
 	// Add a credential
-	encValue, err := encryption.Encrypt("sk-ant-test-key")
+	encValue, err := encryption.Encrypt("test-credential-value")
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}

@@ -129,6 +129,9 @@ func (e *Engine) Close() error {
 }
 
 // computeDirSize walks a directory and returns total size in bytes.
+// Note: Direct filesystem access is intentional here — the memory engine runs
+// inside the sidecar container process, not on the host. Provider interfaces
+// are for host-level abstraction (Docker/K8s/S3), not container-internal ops.
 func computeDirSize(dir string) int64 {
 	var total int64
 	filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {

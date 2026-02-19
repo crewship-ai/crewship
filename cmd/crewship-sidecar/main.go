@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -38,8 +39,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Try new object format first
-	if err := json.Unmarshal(rawBytes, &input); err != nil || len(input.Credentials) == 0 {
+	// Try new object format first; fall back to legacy array only on parse error.
+	// Empty credentials is valid (e.g. memory-only startup with no API keys).
+	if err := json.Unmarshal(rawBytes, &input); err != nil {
 		// Fall back to legacy array format
 		var creds []sidecar.Credential
 		if err := json.Unmarshal(rawBytes, &creds); err != nil {
@@ -97,8 +99,11 @@ func readStdin() ([]byte, error) {
 		if n > 0 {
 			buf = append(buf, tmp[:n]...)
 		}
-		if err != nil {
+		if err == io.EOF {
 			break
+		}
+		if err != nil {
+			return buf, err
 		}
 	}
 	return buf, nil

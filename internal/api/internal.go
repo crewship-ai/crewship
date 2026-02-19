@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -265,7 +266,12 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		&toolProfile, &timeoutSecs, &memoryEnabled,
 		&crewID, &crewSlug, &crewName, &wsID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found"})
+			return
+		}
+		h.logger.Error("resolve chat", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 

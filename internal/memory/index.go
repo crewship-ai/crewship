@@ -10,6 +10,7 @@ import (
 
 // Reindex scans all markdown files in the memory directory and rebuilds
 // the FTS5 index. This is called periodically or on-demand by the sidecar.
+// Note: Direct filesystem access is intentional — see engine.go for rationale.
 func (e *Engine) Reindex() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()

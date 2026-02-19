@@ -18,8 +18,9 @@ const (
 )
 
 // buildMemoryContext reads agent memory files from the container and returns
-// a formatted block for system prompt injection. Returns empty string if
-// memory is disabled or no memory files exist.
+// a formatted block for system prompt injection. Caller should gate on
+// req.MemoryEnabled. When no memory files exist, returns only the
+// memory instructions block.
 func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunRequest) string {
 	memoryDir := path.Join("/output", req.AgentSlug, ".memory")
 	agentMDPath := path.Join(memoryDir, "AGENT.md")

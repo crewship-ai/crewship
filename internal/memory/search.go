@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -17,7 +18,7 @@ type SearchResult struct {
 // Search performs a BM25-ranked FTS5 search over indexed memory chunks.
 // The query supports FTS5 query syntax (e.g. "foo AND bar", "foo OR bar",
 // prefix queries "foo*").
-func (e *Engine) Search(query string, limit int) ([]SearchResult, error) {
+func (e *Engine) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
 	if !e.config.SearchEnabled {
 		return nil, fmt.Errorf("search is disabled")
 	}
@@ -38,7 +39,7 @@ func (e *Engine) Search(query string, limit int) ([]SearchResult, error) {
 		return nil, nil
 	}
 
-	rows, err := e.db.Query(`
+	rows, err := e.db.QueryContext(ctx, `
 		SELECT file, content, rank
 		FROM memory_chunks
 		WHERE memory_chunks MATCH ?

@@ -137,6 +137,9 @@ func TestMigrateMemoryConfigColumn(t *testing.T) {
 			break
 		}
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows err: %v", err)
+	}
 	if !found {
 		t.Error("memory_config column not found on agents table after migration")
 	}

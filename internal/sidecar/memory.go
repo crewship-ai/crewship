@@ -38,7 +38,7 @@ func (s *Server) handleMemorySearch(w http.ResponseWriter, r *http.Request) {
 		req.Limit = 10
 	}
 
-	results, err := s.memoryEngine.Search(req.Query, req.Limit)
+	results, err := s.memoryEngine.Search(r.Context(), req.Query, req.Limit)
 	if err != nil {
 		s.logger.Error("memory search failed", "error", err, "query", req.Query)
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{

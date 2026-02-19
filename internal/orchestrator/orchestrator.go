@@ -141,16 +141,17 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	}
 
+	// Validate slug BEFORE using it in path construction (memory context, output dirs)
+	if !validSlugRe.MatchString(req.AgentSlug) || req.AgentSlug != path.Base(req.AgentSlug) {
+		return fmt.Errorf("invalid agent slug: %q", req.AgentSlug)
+	}
+
 	// Inject agent memory context into system prompt (after conversation history)
 	if req.MemoryEnabled {
 		memoryCtx := o.buildMemoryContext(ctx, req)
 		if memoryCtx != "" {
 			req.SystemPrompt = req.SystemPrompt + "\n\n" + memoryCtx
 		}
-	}
-
-	if !validSlugRe.MatchString(req.AgentSlug) || req.AgentSlug != path.Base(req.AgentSlug) {
-		return fmt.Errorf("invalid agent slug: %q", req.AgentSlug)
 	}
 
 	o.mu.Lock()
