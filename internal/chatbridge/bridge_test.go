@@ -23,6 +23,12 @@ func (m *mockResolver) ResolveChat(_ context.Context, _ string) (*ChatInfo, erro
 	return m.info, m.err
 }
 
+func (m *mockResolver) CreateRun(_ context.Context, _, _, _, _, _ string) error { return nil }
+
+func (m *mockResolver) UpdateRun(_ context.Context, _, _ string, _ *int, _ *string) error {
+	return nil
+}
+
 func testBridge(t *testing.T, resolver ChatResolver) (*Bridge, string) {
 	t.Helper()
 	dir := t.TempDir()

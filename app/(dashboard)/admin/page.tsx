@@ -1,14 +1,16 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import {
   LayoutDashboard, ScrollText, Building, Users, Server, Gauge,
-  Globe, Archive, Brain, Lock, Key, ToggleRight, Activity, Shield
+  Globe, Archive, Brain, Lock, Key, ToggleRight, Activity, Shield,
+  RefreshCw, CheckCircle2, AlertTriangle, Container, ExternalLink,
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Button } from "@/components/ui/button"
 import {
   Table,
   TableBody,
@@ -53,7 +55,7 @@ const sections: TabDef[] = [
   { key: "ratelimits", label: "Rate Limits", icon: Activity },
 ]
 
-const realTabs: TabKey[] = ["overview", "workspaces", "users"]
+const realTabs: TabKey[] = ["overview", "workspaces", "users", "providers"]
 
 interface Stats {
   workspaces: number
@@ -90,6 +92,33 @@ export default function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [loading, setLoading] = useState(true)
 
+  const [runtimeAvailable, setRuntimeAvailable] = useState<boolean | null>(null)
+  const [runtimeInfo, setRuntimeInfo] = useState<{ runtime: string; version: string; socket: string } | null>(null)
+  const [runtimeInstallLinks, setRuntimeInstallLinks] = useState<Record<string, string>>({})
+  const [runtimeChecking, setRuntimeChecking] = useState(false)
+
+  const checkRuntime = useCallback(async () => {
+    setRuntimeChecking(true)
+    try {
+      const res = await fetch("/api/v1/system/runtime")
+      if (!res.ok) {
+        setRuntimeAvailable(false)
+        return
+      }
+      const data = await res.json()
+      setRuntimeAvailable(data.available)
+      if (data.available) {
+        setRuntimeInfo({ runtime: data.runtime, version: data.version, socket: data.socket })
+      } else {
+        setRuntimeInstallLinks(data.install_links ?? {})
+      }
+    } catch {
+      setRuntimeAvailable(false)
+    } finally {
+      setRuntimeChecking(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (wsLoading) return
     if (role !== "OWNER") {
@@ -125,6 +154,10 @@ export default function AdminPage() {
     fetchData()
     return () => { cancelled = true }
   }, [workspaceId, role])
+
+  useEffect(() => {
+    if (role === "OWNER") checkRuntime()
+  }, [role, checkRuntime])
 
   if (wsLoading || role !== "OWNER") {
     return (
@@ -163,13 +196,19 @@ export default function AdminPage() {
               <div className="text-xs font-medium">System Status</div>
               <div className="space-y-3">
                 {[
-                  { name: "PostgreSQL", status: true, desc: "Connected" },
-                  { name: "crewshipd", status: false, desc: "Not running (MVP)" },
-                  { name: "Docker Engine", status: false, desc: "Not configured (MVP)" },
+                  { name: "Database", status: true, desc: "SQLite (connected)" },
+                  { name: "crewshipd", status: true, desc: "Running" },
+                  {
+                    name: "Container Runtime",
+                    status: runtimeAvailable === true,
+                    desc: runtimeAvailable === null ? "Checking..."
+                      : runtimeAvailable ? `${runtimeInfo?.runtime ?? "Unknown"} ${runtimeInfo?.version ?? ""}`
+                      : "Not detected",
+                  },
                 ].map((s) => (
                   <div key={s.name} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className={cn("w-2 h-2 rounded-full", s.status ? "bg-emerald-500" : "bg-muted-foreground/30")} />
+                      <span className={cn("w-2 h-2 rounded-full", s.status ? "bg-emerald-500" : "bg-amber-400")} />
                       <span className="text-xs">{s.name}</span>
                     </div>
                     <span className="text-xs text-muted-foreground">{s.desc}</span>
@@ -277,13 +316,88 @@ export default function AdminPage() {
       )
     }
 
+    if (tab === "providers") {
+      return (
+        <div className="space-y-5">
+          <div className="pb-3 border-b">
+            <h3 className="text-sm font-medium">Container Runtime</h3>
+            <p className="text-xs text-muted-foreground">
+              Manage the container runtime used to run AI agents.
+            </p>
+          </div>
+
+          <Card>
+            <CardContent className="p-5 space-y-4">
+              {runtimeChecking && (
+                <div className="flex items-center gap-3">
+                  <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />
+                  <span className="text-sm">Detecting runtime...</span>
+                </div>
+              )}
+
+              {!runtimeChecking && runtimeAvailable && runtimeInfo && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                    <div>
+                      <div className="text-sm font-medium">
+                        {runtimeInfo.runtime.charAt(0).toUpperCase() + runtimeInfo.runtime.slice(1)} {runtimeInfo.version}
+                      </div>
+                      <p className="text-xs text-muted-foreground font-mono">{runtimeInfo.socket}</p>
+                    </div>
+                    <Badge variant="outline" className="ml-auto bg-emerald-50 text-emerald-700 border-emerald-200">
+                      Connected
+                    </Badge>
+                  </div>
+                </div>
+              )}
+
+              {!runtimeChecking && !runtimeAvailable && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="h-5 w-5 text-amber-500" />
+                    <div>
+                      <div className="text-sm font-medium text-amber-700">No runtime detected</div>
+                      <p className="text-xs text-muted-foreground">
+                        Install a Docker-compatible runtime to enable agent containers.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {Object.entries(runtimeInstallLinks).map(([key, url]) => (
+                      <a
+                        key={key}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 rounded-lg border p-3 hover:bg-accent transition-colors text-sm"
+                      >
+                        <Container className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium">{key.charAt(0).toUpperCase() + key.slice(1)}</span>
+                        <ExternalLink className="h-3 w-3 text-muted-foreground ml-auto" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <Button variant="outline" size="sm" onClick={checkRuntime} disabled={runtimeChecking}>
+                <RefreshCw className={cn("mr-2 h-3.5 w-3.5", runtimeChecking && "animate-spin")} />
+                Re-detect Runtime
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )
+    }
+
     // Placeholder for infrastructure/security tabs
     return (
       <Card>
         <CardContent className="p-6 text-center space-y-2">
-          <Badge variant="outline">Requires crewshipd</Badge>
+          <Badge variant="outline">Coming Soon</Badge>
           <p className="text-sm text-muted-foreground">
-            This section will be available after the Go backend (crewshipd) is implemented.
+            This section will be available in a future release.
           </p>
         </CardContent>
       </Card>

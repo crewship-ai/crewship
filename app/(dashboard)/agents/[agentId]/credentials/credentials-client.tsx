@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { PROVIDER_ICONS } from "@/components/icons/provider-icons"
 import { AssignCredentialDialog } from "@/components/features/credentials/assign-credential-dialog"
 
 interface AgentCredential {
@@ -124,7 +125,11 @@ export function CredentialsPageClient() {
               {credentials.map((c) => (
                 <tr key={c.id} className="hover:bg-muted/50">
                   <td className="px-4 sm:px-6 py-3">
-                    <div>
+                    <div className="flex items-center gap-2">
+                      {(() => {
+                        const Icon = PROVIDER_ICONS[c.credential_provider]
+                        return Icon ? <Icon className="h-4 w-4 shrink-0 text-muted-foreground" /> : null
+                      })()}
                       <span className="font-medium">{c.credential_name}</span>
                     </div>
                   </td>

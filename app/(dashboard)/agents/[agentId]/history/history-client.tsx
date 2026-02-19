@@ -80,7 +80,7 @@ export function HistoryPageClient() {
           return
         }
         const data = await res.json()
-        const items = Array.isArray(data) ? data : (data.items ?? [])
+        const items = Array.isArray(data) ? data : (data.data ?? [])
         if (!cancelled) setEvents(items)
       } catch {
         if (!cancelled) setError("Network error")

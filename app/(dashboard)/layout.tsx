@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { Loader2 } from "lucide-react"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { AppToolbar } from "@/components/layout/app-toolbar"
+import { RuntimeBanner } from "@/components/layout/runtime-banner"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 
 export default function DashboardLayout({
@@ -35,6 +36,7 @@ export default function DashboardLayout({
       <AppSidebar />
       <SidebarInset>
         <AppToolbar />
+        <RuntimeBanner />
         <main className="flex-1 overflow-y-auto">
           {children}
         </main>
