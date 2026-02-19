@@ -171,12 +171,22 @@ func TestScrubEmptyString(t *testing.T) {
 
 func TestScrubWithCustomPatterns(t *testing.T) {
 	s := New()
-	s.AddPattern("custom_token", `ctk_[a-zA-Z0-9]{20,}`)
+	if err := s.AddPattern("custom_token", `ctk_[a-zA-Z0-9]{20,}`); err != nil {
+		t.Fatalf("AddPattern failed: %v", err)
+	}
 
 	input := "my token: ctk_abc123def456ghi789jkl0"
 	got := s.Scrub(input)
 	if !strings.Contains(got, "[REDACTED:custom_token]") {
 		t.Errorf("custom pattern not applied: %q", got)
+	}
+}
+
+func TestAddPatternInvalidRegex(t *testing.T) {
+	s := New()
+	err := s.AddPattern("bad", `[invalid`)
+	if err == nil {
+		t.Error("expected error for invalid regex")
 	}
 }
 

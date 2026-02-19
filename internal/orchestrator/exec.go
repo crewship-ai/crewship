@@ -216,7 +216,11 @@ func startSidecar(
 	result.Reader.Close()
 
 	// Check if the health check script exited with an error
-	if running, exitCode, inspErr := container.ExecInspect(ctx, result.ExecID); inspErr == nil && !running && exitCode != 0 {
+	running, exitCode, inspErr := container.ExecInspect(ctx, result.ExecID)
+	if inspErr != nil {
+		return fmt.Errorf("inspect sidecar exec: %w", inspErr)
+	}
+	if !running && exitCode != 0 {
 		return fmt.Errorf("sidecar health check failed (exit %d): %s", exitCode, strings.TrimSpace(string(output)))
 	}
 

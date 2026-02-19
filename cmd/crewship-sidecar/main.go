@@ -49,12 +49,15 @@ func main() {
 		cancel()
 	}()
 
-	// Signal readiness on stdout so the orchestrator knows we're listening.
-	// If this write fails, the orchestrator will hang waiting indefinitely.
-	if _, err := os.Stdout.WriteString("SIDECAR_READY\n"); err != nil {
-		logger.Error("failed to write readiness signal", "error", err)
-		os.Exit(1)
-	}
+	// Wait for the listener to be bound before signaling readiness.
+	// This prevents the race where SIDECAR_READY is sent before Start() binds the port.
+	go func() {
+		<-srv.Ready()
+		if _, err := os.Stdout.WriteString("SIDECAR_READY\n"); err != nil {
+			logger.Error("failed to write readiness signal", "error", err)
+			os.Exit(1)
+		}
+	}()
 
 	if err := srv.Start(ctx); err != nil {
 		logger.Error("sidecar error", "error", err)

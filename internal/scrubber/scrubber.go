@@ -1,6 +1,7 @@
 package scrubber
 
 import (
+	"fmt"
 	"regexp"
 	"sync"
 )
@@ -89,13 +90,19 @@ func New() *Scrubber {
 }
 
 // AddPattern registers a custom credential pattern.
-func (s *Scrubber) AddPattern(name, regex string) {
+// Returns an error if the regex is invalid instead of panicking.
+func (s *Scrubber) AddPattern(name, regex string) error {
+	re, err := regexp.Compile(regex)
+	if err != nil {
+		return fmt.Errorf("invalid scrubber pattern %q: %w", name, err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.patterns = append(s.patterns, pattern{
 		name: name,
-		re:   regexp.MustCompile(regex),
+		re:   re,
 	})
+	return nil
 }
 
 // Scrub replaces all detected credential patterns with [REDACTED] markers.

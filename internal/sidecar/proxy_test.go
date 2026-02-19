@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -180,9 +181,10 @@ func TestProxyForwardsToUpstream(t *testing.T) {
 }
 
 func TestProxyE2EWithCredentialInjection(t *testing.T) {
-	// Fake Anthropic API that checks for injected key
+	// Fake Anthropic API that captures the injected key
+	var receivedKey string
 	fakeAnthropic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.Header.Get("x-api-key")
+		receivedKey = r.Header.Get("x-api-key")
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"type":"message","content":[{"type":"text","text":"Hello"}]}`))
 	}))
@@ -196,28 +198,41 @@ func TestProxyE2EWithCredentialInjection(t *testing.T) {
 	cs := NewCredStore()
 	cs.Load(creds)
 
-	// Create proxy that maps the fake host as anthropic provider
-	al := NewDomainAllowlist([]string{fakeHost})
+	al := NewDomainAllowlist([]string{"api.anthropic.com"})
 	proxy := NewProxy(ProxyConfig{
 		CredStore: cs,
 		Allowlist: al,
 		Scrubber:  scrubber.New(),
 		Logger:    slog.Default(),
 	})
+	// Redirect api.anthropic.com to our fake upstream
+	proxy.transport = &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if strings.HasPrefix(addr, "api.anthropic.com") {
+				addr = fakeHost
+			}
+			return net.Dial(network, addr)
+		},
+	}
 
 	// Start proxy server
 	proxyServer := httptest.NewServer(proxy)
 	defer proxyServer.Close()
 
-	// Agent makes request through proxy to the fake upstream
-	// Simulating: ANTHROPIC_BASE_URL pointing to our fake
-	req, _ := http.NewRequest("POST", fakeAnthropic.URL+"/v1/messages",
+	// Route request through the proxy using HTTP_PROXY
+	proxyURL, _ := url.Parse(proxyServer.URL)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		},
+	}
+
+	req, _ := http.NewRequest("POST", "http://api.anthropic.com/v1/messages",
 		strings.NewReader(`{"model":"claude-3-5-sonnet-20241022","max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}`))
 	req.Header.Set("Content-Type", "application/json")
-	// Agent sends dummy key (or no key) -- proxy injects the real one
 	req.Header.Set("x-api-key", "dummy-key-from-agent")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
@@ -227,12 +242,12 @@ func TestProxyE2EWithCredentialInjection(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", resp.StatusCode, body)
 	}
-
-	// Note: in this test the request goes directly to fakeAnthropic, not through the proxy.
-	// The real E2E test with HTTP_PROXY is in TestServerE2E.
-	// Here we just verify the fake server works.
 	if !strings.Contains(string(body), "Hello") {
 		t.Errorf("expected Hello in response, got %s", body)
+	}
+	// Verify the proxy injected the real credential, overwriting the dummy
+	if receivedKey != "sk-ant-secret-injected" {
+		t.Errorf("expected injected key, got %q", receivedKey)
 	}
 }
 

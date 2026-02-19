@@ -29,6 +29,7 @@ type Server struct {
 	allowlist  *DomainAllowlist
 	proxy      *Proxy
 	logger     *slog.Logger
+	readyCh    chan struct{} // closed when the TCP listener is bound
 }
 
 // NewServer creates a sidecar server ready to start.
@@ -68,6 +69,7 @@ func NewServer(cfg ServerConfig) *Server {
 		allowlist: allowlist,
 		proxy:     proxy,
 		logger:    cfg.Logger,
+		readyCh:   make(chan struct{}),
 	}
 }
 
@@ -81,6 +83,12 @@ func (s *Server) Allowlist() *DomainAllowlist {
 	return s.allowlist
 }
 
+// Ready returns a channel that is closed once the TCP listener is bound
+// and the server is accepting connections. Use this to gate readiness signals.
+func (s *Server) Ready() <-chan struct{} {
+	return s.readyCh
+}
+
 // Start begins listening. Blocks until context is cancelled or an error occurs.
 // The listener is always closed: either via Shutdown (context cancel) or on Serve error.
 func (s *Server) Start(ctx context.Context) error {
@@ -91,6 +99,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Update Addr to reflect the actual port (useful when Addr was ":0")
 	s.httpServer.Addr = ln.Addr().String()
+
+	// Signal that the listener is bound and we're ready to accept connections.
+	close(s.readyCh)
 
 	s.logger.Info("sidecar proxy started",
 		"addr", s.httpServer.Addr,
