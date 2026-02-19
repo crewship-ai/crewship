@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -38,6 +40,7 @@ type ContainerConfig struct {
 	Network        string `yaml:"network"`
 	DefaultMemoryMB int   `yaml:"default_memory_mb"`
 	DefaultCPUs    float64 `yaml:"default_cpus"`
+	SidecarEnabled bool   `yaml:"sidecar_enabled"` // enable sidecar proxy for credential injection
 }
 
 type StorageConfig struct {
@@ -127,6 +130,17 @@ func Load(path string) (*Config, error) {
 	// In single binary mode, the internal resolver calls itself on the same port.
 	if os.Getenv("CREWSHIP_NEXTJS_URL") == "" {
 		cfg.Auth.NextjsURL = fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
+	}
+
+	// Auto-generate a cryptographically random internal token if none was
+	// configured. This eliminates the hardcoded "crewshipd" default that
+	// anyone knowing the source code could use to access decrypted credentials.
+	if cfg.Auth.InternalToken == "" {
+		token, err := generateRandomToken(32)
+		if err != nil {
+			return nil, fmt.Errorf("generate internal token: %w", err)
+		}
+		cfg.Auth.InternalToken = token
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -225,10 +239,21 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CREWSHIP_RUNTIME_IMAGE"); v != "" {
 		cfg.Container.RuntimeImage = v
 	}
+	if v := os.Getenv("CREWSHIP_SIDECAR_ENABLED"); v == "true" || v == "1" {
+		cfg.Container.SidecarEnabled = true
+	}
 	if v := os.Getenv("CREWSHIP_NEXTJS_URL"); v != "" {
 		cfg.Auth.NextjsURL = v
 	}
 	if v := os.Getenv("CREWSHIP_INTERNAL_TOKEN"); v != "" {
 		cfg.Auth.InternalToken = v
 	}
+}
+
+func generateRandomToken(bytes int) (string, error) {
+	b := make([]byte, bytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

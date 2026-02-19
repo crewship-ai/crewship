@@ -94,7 +94,8 @@ PID files: `/tmp/crewship-{next,go}.pid` -- Logs: `/tmp/crewship-{next,go}.log`
 
 ```
 cmd/
-  └─ crewship/main.go         ✅ Single binary entry point (start/version/doctor)
+  ├─ crewship/main.go         ✅ Single binary entry point (start/version/doctor)
+  └─ crewship-sidecar/main.go ✅ Standalone sidecar binary (HTTP proxy, credential injection)
 internal/                      ✅ Go internal packages
   ├─ api/                      ✅ HTTP API layer (50+ routes)
   │   ├─ router.go             ✅ Route registration with auth middleware
@@ -124,7 +125,9 @@ internal/                      ✅ Go internal packages
   │   ├─ localfs/              ✅ Local filesystem implementation
   │   └─ bbolt/                ✅ bbolt WAL implementation
   ├─ ws/                       ✅ WebSocket gateway
-  ├─ orchestrator/             ✅ Agent job orchestration
+  ├─ orchestrator/             ✅ Agent job orchestration (sidecar-aware, scrubber integration)
+  ├─ scrubber/                 ✅ Credential pattern detection + redaction (13+ patterns)
+  ├─ sidecar/                  ✅ HTTP forward proxy with credential injection (credstore, allowlist, proxy, server)
   ├─ webhook/                  ✅ Webhook ingress handler
   └─ logcollector/             ✅ JSONL log collection
 web/
@@ -248,6 +251,10 @@ DATABASE:                  ~/.crewship/crewship.db  ← SQLite (default)
 - Credentials ALWAYS encrypted with AES-256-GCM (key versioning: `v1:base64data`)
 - Encryption/decryption in Go (`internal/encryption/`)
 - Agent containers: non-root (UID 1001), --internal network, no internet (except LLM allowlist)
+- **Sidecar proxy** (`internal/sidecar/`): agent NEVER sees real API keys. Sidecar (UID 1002) injects credentials per-request. See `prd/SIDECAR.md`.
+- **Stdout scrubbing** (`internal/scrubber/`): 13+ credential patterns redacted before WebSocket/JSONL output
+- **UID isolation**: Sidecar UID 1002 vs agent UID 1001 -- kernel blocks /proc cross-UID reads
+- **Internal token auto-gen**: crypto/rand 32B (no hardcoded defaults)
 - Agent CANNOT escape container, CANNOT escalate to root
 - RBAC check on EVERY API endpoint (Go middleware)
 - CSRF token validation with cookie (login flow)
@@ -335,6 +342,9 @@ CREWSHIP_CONTAINER_PROVIDER=docker    # docker | k8s
 CREWSHIP_STORAGE_PROVIDER=localfs     # localfs | s3
 CREWSHIP_STATE_PROVIDER=bbolt         # bbolt | postgres
 
+# Sidecar proxy (credential injection)
+CREWSHIP_SIDECAR_ENABLED=true          # Enable sidecar proxy (recommended, default: false)
+
 # Container runtime (auto-detected: Docker, Podman, Colima, OrbStack, Rancher Desktop)
 DOCKER_HOST=                           # Override socket (e.g. unix:///run/user/1000/podman/podman.sock)
 CREWSHIP_RUNTIME=runc                  # OCI runtime: runc | runsc (gVisor) | kata-runtime | sysbox-runc
@@ -352,12 +362,13 @@ CREWSHIP_RUNTIME_IMAGE=ghcr.io/crewship-ai/agent-runtime:latest
 | Document | What's in it |
 |---|---|
 | `prd/DATABASE.md` | Full schema (20 tables), credential pool pattern, JSONL format |
-| `prd/SECURITY.md` | Threat model, isolation layers, OWASP, credential encryption |
+| `prd/SECURITY.md` | Threat model, isolation layers, OWASP, credential encryption, sidecar security |
+| `prd/SIDECAR.md` | **Sidecar proxy**: architecture, credstore, allowlist, proxy, scrubber, UID isolation, pentest results |
 | `prd/AGENT-RUNTIME.md` | Container lifecycle, Docker exec, key failover, loop modes, mission runtime |
 | `prd/ORCHESTRATION.md` | **Lead + Coordinator**: 3-level hierarchy, assignment protocol, industry context |
 | `prd/API.md` | REST API (Go routes), WebSocket, webhook API |
 | `prd/DEPLOYMENT.md` | Single binary distribution, Docker image, GoReleaser |
-| `architecture.md` | Single binary arch, data flows, container model, RBAC |
+| `architecture.md` | Single binary arch, data flows, container model, RBAC, sidecar |
 | `business.md` | Positioning, competition (vs OpenClaw, n8n, CrewAI), mission differentiator |
 | `TODO.md` | Product summary, OpenClaw comparison, phased task list |
 | `K8S-READINESS.md` | Provider interfaces, K8s manifests, migration path Docker->K8s |
