@@ -212,6 +212,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CREWSHIP_CONTAINER_PROVIDER"); v != "" {
 		cfg.Container.Provider = v
 	}
+	if v := os.Getenv("CREWSHIP_CONTAINER_NETWORK"); v != "" {
+		cfg.Container.Network = v
+	}
 	if v := os.Getenv("CREWSHIP_STORAGE_PROVIDER"); v != "" {
 		cfg.Storage.Provider = v
 	}
