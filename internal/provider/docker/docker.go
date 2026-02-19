@@ -248,6 +248,13 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 // It applies security isolation (non-root UID, cap-drop ALL, read-only rootfs)
 // and resource limits (memory, CPU, PID). Returns the container ID.
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (string, error) {
+	// Ensure network exists (auto-recreate if deleted at runtime)
+	if p.cfg.Network != "" {
+		if err := p.ensureNetwork(ctx, p.cfg.Network); err != nil {
+			return "", fmt.Errorf("ensure network: %w", err)
+		}
+	}
+
 	containerName := "crewship-team-" + team.Slug
 
 	// Check if container already exists
@@ -295,6 +302,13 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		return "", fmt.Errorf("create output dir: %w", err)
 	}
 
+	workspacePath := filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID)
+	if err := os.MkdirAll(workspacePath, 0750); err != nil {
+		return "", fmt.Errorf("create workspace dir: %w", err)
+	}
+	// Best-effort chown so container user (1001:1001) can write
+	_ = os.Chown(workspacePath, 1001, 1001)
+
 	pidsLimit := int64(200)
 	resp, err := p.client.ContainerCreate(ctx,
 		&container.Config{
@@ -322,7 +336,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				PidsLimit: &pidsLimit,
 			},
 			Mounts: []mount.Mount{
-				{Type: mount.TypeVolume, Source: "workspace-" + team.ID, Target: "/workspace"},
+				{Type: mount.TypeBind, Source: workspacePath, Target: "/workspace"},
 				{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
 			},
 			Tmpfs: map[string]string{
