@@ -21,7 +21,35 @@ make build                      # pnpm build + go build -> ./crewship
 crewship start                  # SQLite on :8080
 crewship start --port 9090      # Custom port
 crewship start --no-docker      # Without Docker requirement
+crewship doctor                 # Check Docker, data dirs, connectivity
+crewship version                # Show version, commit, build date
 ```
+
+## Workflow: Verify First, Then Implement
+
+**Before starting any work**, describe your verification plan in a short summary:
+- What tests will you write or update?
+- What commands will you run to confirm correctness?
+- What could go wrong and how will you catch it?
+
+**Test-first development (TDD):** Always design and write tests BEFORE implementing a feature. Think through how to verify the entire solution, define the test cases, then write the implementation to make them pass. This applies to both Go and frontend code.
+
+**After every change**, run the verification loop until green:
+
+```bash
+# Go — MUST pass before considering work done
+go test ./... -count=1                  # All tests (no cache)
+go vet ./...                            # Static analysis
+
+# Frontend — MUST pass for UI/frontend changes
+pnpm lint                               # ESLint
+pnpm build                              # Static export builds
+
+# Full build — for cross-cutting or release changes
+make build                              # pnpm build + go build -> ./crewship
+```
+
+If any step fails, fix it and re-run. Do NOT move on with failures.
 
 ## Testing
 
@@ -51,6 +79,7 @@ internal/api/         -- HTTP API (stdlib http.ServeMux, 50+ endpoints)
 internal/auth/        -- JWE token validation (NextAuth v5 compatible)
 internal/orchestrator/ -- Agent execution engine (container exec + streaming)
 internal/sidecar/     -- Credential-injecting forward proxy
+internal/memory/      -- Agent memory FTS5 engine (search, chunk, reindex)
 internal/provider/    -- Infrastructure abstraction (Container, Storage, State)
 internal/database/    -- SQLite via database/sql (pure Go, no CGO)
 internal/ws/          -- WebSocket hub (pub/sub channels)
@@ -137,7 +166,7 @@ Credential type `AI_CLI_TOKEN` maps to `CLAUDE_CODE_OAUTH_TOKEN` (OAuth tokens, 
 - **No ORM**: `database/sql` with direct SQL queries
 - **Provider pattern**: All infra through interfaces (`ContainerProvider`, `StorageProvider`, `StateProvider`)
 - **Error format**: RFC 7807 Problem Details
-- **Naming**: `snake_case` for DB tables/columns, plural table names, UUID v4 IDs
+- **Naming**: `snake_case` for DB tables/columns, plural table names, CUID IDs (see `internal/api/cuid.go`)
 - **Imports**: stdlib first, then external, then internal
 - **Tests**: Table-driven, `t.Skip()` for optional deps (Docker)
 
@@ -148,6 +177,7 @@ Credential type `AI_CLI_TOKEN` maps to `CLAUDE_CODE_OAUTH_TOKEN` (OAuth tokens, 
 - **State**: React hooks for local state, custom hooks for shared state
 - **Validation**: Zod schemas
 - **RBAC**: CASL (`lib/permissions/abilities.ts`)
+- **Runtime**: Node.js >= 22, pnpm only (not npm/yarn)
 - **Path alias**: `@/*` maps to project root
 
 ### Auth Flow
@@ -176,9 +206,25 @@ CREWSHIP_LOG_LEVEL=info
 DATABASE_URL=                       # Optional PostgreSQL connection string
 ```
 
-## Git Conventions
+## NEVER DO (learned from past mistakes)
 
-- Branch from `main`
-- Conventional commits: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`
-- Never commit `.env.local` or real credentials
-- Do NOT add `Co-Authored-By` lines to commit messages
+- **Never skip the verification loop.** Every change must pass `go test` + `go vet` before it's done.
+- **Never implement without tests.** Write tests first, then code. No exceptions.
+- **Never edit `.factory/context/`** — it's legacy reference only. Edit `.claude/context/` instead.
+- **Never add `Co-Authored-By`** lines to commit messages.
+- **Never commit secrets** (`.env.local`, real API keys, credentials).
+- **Never use `require()` / CommonJS** in frontend code — ES modules only.
+- **Never guess URLs or API endpoints** — read the router (`internal/api/router.go`) or code.
+- **Never add GitLab remotes** — this project uses GitHub only.
+- **Never use `interface{}` slices** when a typed slice is expected in Go (causes compile errors).
+- **Never amend commits** after pre-commit hook failure — create a new commit instead.
+- **Never use `"sqlite3"` as driver name** — `modernc.org/sqlite` registers as `"sqlite"`.
+- **Never add API routes to `app/`** — static export silently excludes them. They work in dev, break in prod.
+- **Never run `prisma migrate`** — Prisma is for TS type generation only. Migrations are Go-only in `migrate.go`.
+- **Never change GCM byte layout** in `internal/encryption/` — the custom `IV||AuthTag||Ciphertext` order is for Go/TS compatibility. Changing it makes all stored credentials undecryptable.
+- **Never change sidecar UID (1002) or agent UID (1001)** — the UID separation is a security boundary preventing the agent from reading sidecar memory.
+- **Never use `npm` or `yarn`** — `pnpm` only. pnpm-specific config will break with other package managers.
+
+When you make a new mistake, add it here so it never happens again. This file is a living document — updating it is part of every significant PR.
+
+Commit style: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:` (conventional commits). Branch from `main`.
