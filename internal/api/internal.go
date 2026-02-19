@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -16,23 +15,22 @@ import (
 )
 
 type InternalHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db            *sql.DB
+	logger        *slog.Logger
+	internalToken string
 }
 
-func NewInternalHandler(db *sql.DB, logger *slog.Logger) *InternalHandler {
-	return &InternalHandler{db: db, logger: logger}
+func NewInternalHandler(db *sql.DB, internalToken string, logger *slog.Logger) *InternalHandler {
+	return &InternalHandler{db: db, internalToken: internalToken, logger: logger}
 }
 
 func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
-	expected := os.Getenv("CREWSHIP_INTERNAL_TOKEN")
-	if expected == "" {
-		h.logger.Warn("CREWSHIP_INTERNAL_TOKEN not set, using insecure default")
-		expected = "crewshipd"
+	if h.internalToken == "" {
+		h.logger.Error("internal token is empty -- all internal API calls will be rejected")
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get("X-Internal-Token")
-		if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
+		if h.internalToken == "" || token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(h.internalToken)) != 1 {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 			return
 		}

@@ -31,6 +31,15 @@ a community feedbacku z unora 2026.
 | Docker check | `crewship start` odmitne bez Dockeru (s `--no-docker` escape hatch) |
 | CI pipeline | Lint, typecheck, build, test (pnpm + Go) na kazdem PR |
 | E2E testy | 25 test cases, vsechny passing |
+| **Sidecar proxy** | HTTP forward proxy (127.0.0.1:9119, UID 1002) injects LLM API keys per-request. Agent gets ONLY dummy keys. Domain allowlist. `internal/sidecar/` (4 files). `cmd/crewship-sidecar/`. 80+ tests, 12/12 pentest PASS. |
+| **Credential scrubber** | 13+ regex patterns (Anthropic, OpenAI, Google, GitHub, Slack, AWS, JWT, SSH keys, passwords). Wraps agent output before WebSocket/JSONL. `internal/scrubber/` (2 files). ~2.8us/op. |
+| **UID isolation** | Sidecar UID 1002 vs agent UID 1001. Kernel blocks /proc cross-UID reads. |
+| **Internal token auto-gen** | crypto/rand 32B hex token at startup (replaced hardcoded "crewshipd") |
+| **Claude config safety** | setupClaudeConfig() writes ONLY non-secret data. No credentials on disk. |
+| **Shell injection prevention** | Base64-encode credentials before piping through shell in startSidecar() |
+| **Hop-by-hop header stripping** | 8 headers stripped per RFC 2616 (Proxy-Authorization = exfiltration vector) |
+| **NO_PROXY config** | Prevents infinite proxy loops for localhost communication |
+| **Request body size limit** | 10 MB MaxBytesReader on sidecar proxy (OOM prevention) |
 
 ### PLANOVANO (zatim neexistuje, neni implementovano)
 

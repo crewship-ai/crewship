@@ -152,8 +152,9 @@ func TestRunAgentSuccess(t *testing.T) {
 
 	mc := &mockContainer{
 		execResults: []*provider.ExecResult{
-			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
-			{ExecID: "exec-1", Reader: r},
+			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},   // createAgentDirs
+			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},  // setupClaudeConfig
+			{ExecID: "exec-1", Reader: r},                                      // agent exec
 		},
 		inspectResult: struct {
 			running  bool
@@ -342,4 +343,108 @@ func TestRecoverFromCrashNoExecID(t *testing.T) {
 	if recovered.Status != "error" {
 		t.Errorf("expected error for run without exec ID, got %q", recovered.Status)
 	}
+}
+
+func TestRunAgentScrubsCredentials(t *testing.T) {
+	r, w := io.Pipe()
+	go func() {
+		// Agent outputs a line containing an Anthropic API key
+		w.Write([]byte("Found key: sk-ant-api03-secretkey1234567890\n"))
+		w.Close()
+	}()
+
+	mc := &mockContainer{
+		execResults: []*provider.ExecResult{
+			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
+			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
+			{ExecID: "exec-1", Reader: r},
+		},
+		inspectResult: struct {
+			running  bool
+			exitCode int
+		}{false, 0},
+	}
+
+	state := newMemState()
+	o := New(mc, state, slog.Default())
+
+	var events []AgentEvent
+	handler := func(e AgentEvent) { events = append(events, e) }
+
+	err := o.RunAgent(context.Background(), AgentRunRequest{
+		AgentID:     "a1",
+		AgentSlug:   "test-agent",
+		ChatID:      "s1",
+		ContainerID: "c1",
+		CLIAdapter:  "CODEX_CLI", // non-JSON output for simplicity
+		UserMessage: "test",
+		TimeoutSecs: 30,
+	}, handler)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected at least one event")
+	}
+
+	for _, e := range events {
+		if strings.Contains(e.Content, "sk-ant-") {
+			t.Errorf("credential leaked in event content: %q", e.Content)
+		}
+		if !strings.Contains(e.Content, "[REDACTED:anthropic_key]") {
+			t.Errorf("expected redacted marker in content, got: %q", e.Content)
+		}
+	}
+}
+
+func TestRunAgentWithSidecar(t *testing.T) {
+	r, w := io.Pipe()
+	go func() {
+		w.Write([]byte("agent output via sidecar\n"))
+		w.Close()
+	}()
+
+	mc := &mockContainer{
+		execResults: []*provider.ExecResult{
+			{ExecID: "sidecar-1", Reader: io.NopCloser(strings.NewReader(""))},  // startSidecar
+			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},    // createAgentDirs
+			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},   // setupClaudeConfig
+			{ExecID: "exec-1", Reader: r},                                       // agent exec
+		},
+		inspectResult: struct {
+			running  bool
+			exitCode int
+		}{false, 0},
+	}
+
+	state := newMemState()
+	o := New(mc, state, slog.Default())
+	o.SetSidecarEnabled(true)
+
+	var events []AgentEvent
+	handler := func(e AgentEvent) { events = append(events, e) }
+
+	err := o.RunAgent(context.Background(), AgentRunRequest{
+		AgentID:     "a1",
+		AgentSlug:   "test-agent",
+		ChatID:      "s1",
+		ContainerID: "c1",
+		CLIAdapter:  "CODEX_CLI",
+		UserMessage: "test",
+		TimeoutSecs: 30,
+		Credentials: []Credential{
+			{ID: "c1", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "sk-ant-real-secret", Priority: 1},
+		},
+	}, handler)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected at least one event")
+	}
+
+	// Verify the exec was called with proxy env vars (not real credentials)
+	// The mock doesn't capture env vars directly, but we verify the flow works
+	// and that BuildEnvVarsSidecar is used (tested separately in failover_test.go)
 }

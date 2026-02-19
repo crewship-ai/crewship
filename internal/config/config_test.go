@@ -208,3 +208,44 @@ func TestInvalidYAML(t *testing.T) {
 		t.Error("expected error for invalid YAML")
 	}
 }
+
+func TestAutoGenerateInternalToken(t *testing.T) {
+	os.Unsetenv("CREWSHIP_INTERNAL_TOKEN")
+	defer os.Unsetenv("CREWSHIP_INTERNAL_TOKEN")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.InternalToken == "" {
+		t.Fatal("expected auto-generated internal token, got empty")
+	}
+	if cfg.Auth.InternalToken == "crewshipd" {
+		t.Fatal("internal token must not be the old hardcoded default")
+	}
+	if len(cfg.Auth.InternalToken) < 32 {
+		t.Errorf("expected token >= 32 chars, got %d", len(cfg.Auth.InternalToken))
+	}
+
+	// Ensure each Load generates a different token
+	cfg2, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.InternalToken == cfg2.Auth.InternalToken {
+		t.Error("two separate loads should generate different tokens")
+	}
+}
+
+func TestExplicitInternalToken(t *testing.T) {
+	os.Setenv("CREWSHIP_INTERNAL_TOKEN", "my-custom-token-12345")
+	defer os.Unsetenv("CREWSHIP_INTERNAL_TOKEN")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Auth.InternalToken != "my-custom-token-12345" {
+		t.Errorf("expected explicit token, got %q", cfg.Auth.InternalToken)
+	}
+}

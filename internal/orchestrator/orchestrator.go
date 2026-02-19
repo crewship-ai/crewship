@@ -14,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
@@ -63,13 +64,15 @@ type AgentEvent struct {
 type EventHandler func(event AgentEvent)
 
 type Orchestrator struct {
-	container provider.ContainerProvider
-	state     provider.StateProvider
-	convStore *conversation.Store
-	logger    *slog.Logger
-	cooldown  *CooldownManager
-	mu        sync.Mutex
-	accepting bool
+	container      provider.ContainerProvider
+	state          provider.StateProvider
+	convStore      *conversation.Store
+	scrubber       *scrubber.Scrubber
+	logger         *slog.Logger
+	cooldown       *CooldownManager
+	sidecarEnabled bool
+	mu             sync.Mutex
+	accepting      bool
 }
 
 func New(
@@ -80,10 +83,21 @@ func New(
 	return &Orchestrator{
 		container: container,
 		state:     state,
+		scrubber:  scrubber.New(),
 		logger:    logger,
 		cooldown:  NewCooldownManager(),
 		accepting: true,
 	}
+}
+
+// SetSidecarEnabled enables the sidecar proxy for credential injection.
+// When enabled, credentials are NOT passed via env vars. Instead, a sidecar
+// proxy is started inside the container that intercepts HTTP requests and
+// injects the appropriate API keys.
+func (o *Orchestrator) SetSidecarEnabled(enabled bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sidecarEnabled = enabled
 }
 
 // SetConversationStore sets the conversation store for reading session history.
@@ -130,7 +144,22 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("invalid agent slug: %q", req.AgentSlug)
 	}
 
-	env := BuildEnvVars(req, cred)
+	o.mu.Lock()
+	sidecarEnabled := o.sidecarEnabled
+	o.mu.Unlock()
+
+	var env []string
+	if sidecarEnabled {
+		env = BuildEnvVarsSidecar(req)
+		if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, o.logger); err != nil {
+			o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
+			o.updateRunStatus(ctx, runState.ID, "error")
+			return fmt.Errorf("start sidecar: %w", err)
+		}
+	} else {
+		env = BuildEnvVars(req, cred)
+	}
+
 	cmd := BuildCLICommand(req)
 
 	scratchDir := path.Join("/workspace", req.AgentSlug)
@@ -153,9 +182,10 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
 
-	// Inject Claude OAuth credential files into the container
-	if err := setupClaudeCredentials(ctx, o.container, req.ContainerID, cred, o.logger); err != nil {
-		o.logger.Warn("failed to inject claude credentials", "error", err, "agent_id", req.AgentID)
+	// Write non-secret Claude config (skip onboarding). Credentials are
+	// passed ONLY via env vars -- never written to disk in the container.
+	if err := setupClaudeConfig(ctx, o.container, req.ContainerID, o.logger); err != nil {
+		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
 	}
 
 	// Write CLI-specific system prompt files (e.g. AGENTS.md for OpenCode)
@@ -191,7 +221,10 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("exec agent: %w", err)
 	}
 
-	o.streamOutput(execCtx, result, req, handler)
+	// Wrap handler with credential scrubbing to prevent secret leakage
+	// in agent output (prompt injection defense).
+	scrubHandler := o.wrapScrubHandler(handler)
+	o.streamOutput(execCtx, result, req, scrubHandler)
 
 	running, exitCode, _ := o.container.ExecInspect(ctx, result.ExecID)
 	o.logger.Info("exec finished", "agent_id", req.AgentID, "running", running, "exit_code", exitCode)
@@ -245,6 +278,18 @@ func (o *Orchestrator) RecoverFromCrash(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// wrapScrubHandler returns a handler that scrubs credential patterns from
+// event content before forwarding to the real handler.
+func (o *Orchestrator) wrapScrubHandler(handler EventHandler) EventHandler {
+	if handler == nil || o.scrubber == nil {
+		return handler
+	}
+	return func(event AgentEvent) {
+		event.Content = o.scrubber.Scrub(event.Content)
+		handler(event)
+	}
 }
 
 func (o *Orchestrator) selectCredential(creds []Credential) *Credential {
