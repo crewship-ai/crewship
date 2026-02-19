@@ -91,12 +91,16 @@ func (r *IPCResolver) CreateChat(ctx context.Context, req CreateChatRequest) err
 	return nil
 }
 
-func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string) error {
+func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/runs", r.baseURL)
-	body, _ := json.Marshal(map[string]string{
+	payload := map[string]interface{}{
 		"id": runID, "agent_id": agentID, "chat_id": chatID,
 		"workspace_id": workspaceID, "trigger_type": triggerType,
-	})
+	}
+	if metadata != nil {
+		payload["metadata"] = metadata
+	}
+	body, _ := json.Marshal(payload)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -108,11 +112,14 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		return fmt.Errorf("create run: %w", err)
 	}
 	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("create run: server returned %d: %s", resp.StatusCode, respBody)
+	}
 	return nil
 }
 
-func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string) error {
+func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/runs/%s", r.baseURL, url.PathEscape(runID))
 	payload := map[string]interface{}{"status": status}
 	if exitCode != nil {
@@ -120,6 +127,9 @@ func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitC
 	}
 	if errorMsg != nil {
 		payload["error_message"] = *errorMsg
+	}
+	if metadata != nil {
+		payload["metadata"] = metadata
 	}
 	body, _ := json.Marshal(payload)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, reqURL, bytes.NewReader(body))
@@ -133,7 +143,10 @@ func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitC
 		return fmt.Errorf("update run: %w", err)
 	}
 	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("update run: server returned %d: %s", resp.StatusCode, respBody)
+	}
 	return nil
 }
 

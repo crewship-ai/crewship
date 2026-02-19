@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -29,11 +30,12 @@ type runResponse struct {
 	StartedAt    *string `json:"started_at"`
 	FinishedAt   *string `json:"finished_at"`
 	ErrorMessage *string `json:"error_message"`
-	ExitCode     *int    `json:"exit_code"`
-	CreatedAt    string  `json:"created_at"`
-	AgentName    *string `json:"agent_name,omitempty"`
-	AgentSlug    *string `json:"agent_slug,omitempty"`
-	CrewName     *string `json:"crew_name,omitempty"`
+	ExitCode     *int             `json:"exit_code"`
+	Metadata     json.RawMessage  `json:"metadata"`
+	CreatedAt    string           `json:"created_at"`
+	AgentName    *string          `json:"agent_name,omitempty"`
+	AgentSlug    *string          `json:"agent_slug,omitempty"`
+	CrewName     *string          `json:"crew_name,omitempty"`
 }
 
 type runListResponse struct {
@@ -72,10 +74,12 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	agentID := r.URL.Query().Get("agent_id")
 	trigger := r.URL.Query().Get("trigger")
 
+	tag := r.URL.Query().Get("tag")
+
 	query := `
 		SELECT r.id, r.agent_id, r.chat_id, r.workspace_id, r.triggered_by,
 			r.trigger_type, r.status, r.started_at, r.finished_at,
-			r.error_message, r.exit_code, r.created_at,
+			r.error_message, r.exit_code, r.metadata, r.created_at,
 			a.name, a.slug,
 			c.name
 		FROM agent_runs r
@@ -104,6 +108,13 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 		args = append(args, trigger)
 		countArgs = append(countArgs, trigger)
 	}
+	if tag != "" {
+		// Use json_each to match exact tag values in the tags array
+		query += " AND EXISTS (SELECT 1 FROM json_each(r.metadata, '$.tags') j WHERE j.value = ?)"
+		countQuery += " AND EXISTS (SELECT 1 FROM json_each(metadata, '$.tags') j WHERE j.value = ?)"
+		args = append(args, tag)
+		countArgs = append(countArgs, tag)
+	}
 
 	query += fmt.Sprintf(" ORDER BY r.created_at DESC LIMIT %d OFFSET %d", limit, offset)
 
@@ -118,13 +129,17 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	var runs []runResponse
 	for rows.Next() {
 		var run runResponse
+		var metadataStr sql.NullString
 		if err := rows.Scan(&run.ID, &run.AgentID, &run.ChatID, &run.WorkspaceID,
 			&run.TriggeredBy, &run.TriggerType, &run.Status,
 			&run.StartedAt, &run.FinishedAt, &run.ErrorMessage, &run.ExitCode,
-			&run.CreatedAt, &run.AgentName, &run.AgentSlug, &run.CrewName); err != nil {
+			&metadataStr, &run.CreatedAt, &run.AgentName, &run.AgentSlug, &run.CrewName); err != nil {
 			h.logger.Error("scan run", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
+		}
+		if metadataStr.Valid {
+			run.Metadata = json.RawMessage(metadataStr.String)
 		}
 		runs = append(runs, run)
 	}

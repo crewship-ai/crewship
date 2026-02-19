@@ -1,6 +1,7 @@
 import type { NextConfig } from "next"
 
 const isDev = process.env.NODE_ENV === "development"
+const goPort = process.env.NEXT_PUBLIC_GO_PORT || "8080"
 
 const nextConfig: NextConfig = {
   ...(isDev ? {} : { output: "export" }),
@@ -12,7 +13,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: "http://localhost:8080/api/:path*",
+        destination: `http://localhost:${goPort}/api/:path*`,
       },
     ]
   },

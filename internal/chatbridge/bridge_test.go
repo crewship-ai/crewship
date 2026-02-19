@@ -23,9 +23,11 @@ func (m *mockResolver) ResolveChat(_ context.Context, _ string) (*ChatInfo, erro
 	return m.info, m.err
 }
 
-func (m *mockResolver) CreateRun(_ context.Context, _, _, _, _, _ string) error { return nil }
+func (m *mockResolver) CreateRun(_ context.Context, _, _, _, _, _ string, _ map[string]interface{}) error {
+	return nil
+}
 
-func (m *mockResolver) UpdateRun(_ context.Context, _, _ string, _ *int, _ *string) error {
+func (m *mockResolver) UpdateRun(_ context.Context, _, _ string, _ *int, _ *string, _ map[string]interface{}) error {
 	return nil
 }
 

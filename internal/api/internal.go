@@ -394,11 +394,12 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 
 func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ID          string `json:"id"`
-		AgentID     string `json:"agent_id"`
-		ChatID      string `json:"chat_id"`
-		WorkspaceID string `json:"workspace_id"`
-		TriggerType string `json:"trigger_type"`
+		ID          string          `json:"id"`
+		AgentID     string          `json:"agent_id"`
+		ChatID      string          `json:"chat_id"`
+		WorkspaceID string          `json:"workspace_id"`
+		TriggerType string          `json:"trigger_type"`
+		Metadata    json.RawMessage `json:"metadata"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
@@ -413,10 +414,14 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	var metadataVal interface{}
+	if body.Metadata != nil {
+		metadataVal = string(body.Metadata)
+	}
 	_, err := h.db.ExecContext(r.Context(), `
-		INSERT INTO agent_runs (id, agent_id, chat_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?)`,
-		body.ID, body.AgentID, body.ChatID, body.WorkspaceID, body.TriggerType, now, now)
+		INSERT INTO agent_runs (id, agent_id, chat_id, workspace_id, trigger_type, status, metadata, started_at, created_at)
+		VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?, ?)`,
+		body.ID, body.AgentID, body.ChatID, body.WorkspaceID, body.TriggerType, metadataVal, now, now)
 	if err != nil {
 		h.logger.Error("create run", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
