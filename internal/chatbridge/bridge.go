@@ -184,17 +184,21 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	runErr := b.orch.RunAgent(ctx, req, handler)
 	if runErr != nil {
 		errMsg := runErr.Error()
-		_ = b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, map[string]interface{}{
+		if err := b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, map[string]interface{}{
 			"duration_ms": time.Since(startedAt).Milliseconds(),
-		})
+		}); err != nil {
+			b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
+		}
 		streamFn(ws.ChatEvent{Type: "error", Content: runErr.Error()})
 		return fmt.Errorf("run agent: %w", runErr)
 	}
 
 	exitCode := 0
-	_ = b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, map[string]interface{}{
+	if err := b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, map[string]interface{}{
 		"duration_ms": time.Since(startedAt).Milliseconds(),
-	})
+	}); err != nil {
+		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
+	}
 
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:        generateMsgID(),

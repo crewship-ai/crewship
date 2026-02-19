@@ -307,7 +307,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		return "", fmt.Errorf("create workspace dir: %w", err)
 	}
 	// Best-effort chown so container user (1001:1001) can write
-	_ = os.Chown(workspacePath, 1001, 1001)
+	if err := os.Chown(workspacePath, 1001, 1001); err != nil {
+		p.logger.Debug("chown workspace (non-fatal)", "path", workspacePath, "error", err)
+	}
 
 	pidsLimit := int64(200)
 	resp, err := p.client.ContainerCreate(ctx,
