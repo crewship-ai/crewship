@@ -109,12 +109,11 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 		countArgs = append(countArgs, trigger)
 	}
 	if tag != "" {
-		// Search for tag in JSON metadata: {"tags":["tag1","tag2"]}
-		tagPattern := fmt.Sprintf("%%\"%s\"%%", tag)
-		query += " AND r.metadata LIKE ?"
-		countQuery += " AND metadata LIKE ?"
-		args = append(args, tagPattern)
-		countArgs = append(countArgs, tagPattern)
+		// Use json_each to match exact tag values in the tags array
+		query += " AND EXISTS (SELECT 1 FROM json_each(r.metadata, '$.tags') j WHERE j.value = ?)"
+		countQuery += " AND EXISTS (SELECT 1 FROM json_each(metadata, '$.tags') j WHERE j.value = ?)"
+		args = append(args, tag)
+		countArgs = append(countArgs, tag)
 	}
 
 	query += fmt.Sprintf(" ORDER BY r.created_at DESC LIMIT %d OFFSET %d", limit, offset)
