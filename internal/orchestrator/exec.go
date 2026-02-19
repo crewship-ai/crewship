@@ -102,6 +102,37 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	return env
 }
 
+// BuildEnvVarsSidecar builds env vars for the agent when sidecar mode is active.
+// Credentials are NOT included -- the sidecar proxy injects them into HTTP requests.
+// The agent gets dummy/empty API keys and proxy configuration pointing to the sidecar.
+func BuildEnvVarsSidecar(req AgentRunRequest) []string {
+	env := []string{
+		"HOME=/home/agent",
+		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
+		"CREWSHIP_AGENT_ID=" + req.AgentID,
+		"CREWSHIP_CREW_ID=" + req.CrewID,
+		"CREWSHIP_CHAT_ID=" + req.ChatID,
+		// Proxy config -- all outbound HTTP goes through the sidecar
+		"HTTP_PROXY=http://127.0.0.1:9119",
+		"HTTPS_PROXY=http://127.0.0.1:9119",
+		"http_proxy=http://127.0.0.1:9119",
+		"https_proxy=http://127.0.0.1:9119",
+		// SECURITY: NO_PROXY prevents infinite proxy loops for localhost health checks
+		// and internal sidecar communication. Without this, curl/wget/Python requests
+		// would try to proxy requests to 127.0.0.1 through the proxy itself.
+		"NO_PROXY=127.0.0.1,localhost,::1",
+		"no_proxy=127.0.0.1,localhost,::1",
+		// Claude Code: point base URL to sidecar so it uses HTTP (not HTTPS)
+		// and the proxy can inject the real API key
+		"ANTHROPIC_BASE_URL=http://127.0.0.1:9119",
+		// Dummy keys -- the sidecar replaces them with real ones per-request
+		"ANTHROPIC_API_KEY=sk-ant-dummy-crewship-sidecar",
+		"OPENAI_API_KEY=sk-dummy-crewship-sidecar",
+		"GOOGLE_API_KEY=dummy-crewship-sidecar",
+	}
+	return env
+}
+
 // resolveEnvVar returns the correct env var name for a credential.
 // AI_CLI_TOKEN (OAuth setup tokens) use CLAUDE_CODE_OAUTH_TOKEN for Claude Code.
 func resolveEnvVar(cred *Credential) string {
@@ -111,83 +142,129 @@ func resolveEnvVar(cred *Credential) string {
 	return cred.EnvVarName
 }
 
-// credentialsJSON is the format Claude CLI expects at ~/.claude/.credentials.json
-type credentialsJSON struct {
-	ClaudeAiOauth oauthEntry `json:"claudeAiOauth"`
-}
-
-type oauthEntry struct {
-	AccessToken  string   `json:"accessToken"`
-	RefreshToken string   `json:"refreshToken"`
-	ExpiresAt    string   `json:"expiresAt"`
-	Scopes       []string `json:"scopes"`
-}
-
-// claudeConfigJSON is ~/.claude.json -- skips onboarding in the container.
-type claudeConfigJSON struct {
-	HasCompletedOnboarding   bool `json:"hasCompletedOnboarding"`
-	HasAvailableSubscription bool `json:"hasAvailableSubscription"`
-	AutoUpdates              bool `json:"autoUpdates"`
-}
-
-// setupClaudeCredentials writes OAuth credential files into the agent container
-// so that `claude --print` can authenticate with a Pro/Max subscription token.
-// This follows the pattern from cabinlab/claude-code-sdk-docker.
-func setupClaudeCredentials(
+// startSidecar launches the crewship-sidecar proxy inside the container.
+// It pipes credentials via stdin JSON and waits for the "SIDECAR_READY" signal.
+// The sidecar runs as a background process and intercepts all agent HTTP traffic.
+func startSidecar(
 	ctx context.Context,
 	container provider.ContainerProvider,
 	containerID string,
-	cred *Credential,
+	creds []Credential,
 	logger *slog.Logger,
 ) error {
-	if cred == nil || cred.PlainValue == "" {
-		return nil
-	}
-	if cred.Type != "AI_CLI_TOKEN" {
-		return nil // only inject files for OAuth setup tokens
+	type sidecarCred struct {
+		ID       string `json:"id"`
+		Provider string `json:"provider"`
+		Token    string `json:"token"`
+		Priority int    `json:"priority"`
 	}
 
-	token := cred.PlainValue
+	var sc []sidecarCred
+	for _, c := range creds {
+		prov := credTypeToProvider(c)
+		if prov == "" {
+			continue
+		}
+		sc = append(sc, sidecarCred{
+			ID:       c.ID,
+			Provider: prov,
+			Token:    c.PlainValue,
+			Priority: c.Priority,
+		})
+	}
+	if len(sc) == 0 {
+		sc = []sidecarCred{}
+	}
 
-	credsData, err := json.Marshal(credentialsJSON{
-		ClaudeAiOauth: oauthEntry{
-			AccessToken:  token,
-			RefreshToken: token,
-			ExpiresAt:    "2099-12-31T23:59:59.999Z",
-			Scopes:       []string{"user:inference", "user:profile"},
-		},
-	})
+	credsJSON, err := json.Marshal(sc)
 	if err != nil {
-		return fmt.Errorf("marshal credentials.json: %w", err)
+		return fmt.Errorf("marshal sidecar credentials: %w", err)
 	}
 
-	configData, err := json.Marshal(claudeConfigJSON{
-		HasCompletedOnboarding:   true,
-		HasAvailableSubscription: true,
-		AutoUpdates:              false,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal claude.json: %w", err)
-	}
+	// SECURITY: Base64-encode the credentials JSON to prevent shell injection.
+	// Raw JSON piped through `echo '...'` is vulnerable to shell metacharacter
+	// injection if a credential token contains single quotes or other shell chars.
+	credsB64 := base64.StdEncoding.EncodeToString(credsJSON)
 
-	// Write credentials file and patch .claude.json (merge if exists, create if not).
-	// Uses jq if available for merging, falls back to overwrite.
+	// Start sidecar as a background process.
+	// Pipe credentials JSON via base64-decoded stdin to avoid shell injection.
+	// Health check: verify sidecar is responding, exit 1 on failure so orchestrator knows.
 	script := fmt.Sprintf(
-		`mkdir -p /home/agent/.claude && `+
-			`cat > /home/agent/.claude/.credentials.json << 'CREDEOF'
-%s
-CREDEOF
-if command -v jq >/dev/null 2>&1 && [ -f /home/agent/.claude.json ]; then
-  jq '. + {"hasCompletedOnboarding":true,"hasAvailableSubscription":true,"autoUpdates":false}' /home/agent/.claude.json > /tmp/.claude.json.tmp && mv /tmp/.claude.json.tmp /home/agent/.claude.json
-else
-  cat > /home/agent/.claude.json << 'CFGEOF'
-%s
-CFGEOF
-fi
-chmod 600 /home/agent/.claude/.credentials.json /home/agent/.claude.json`,
-		strings.ReplaceAll(string(credsData), "'", "'\\''"),
-		strings.ReplaceAll(string(configData), "'", "'\\''"),
+		`echo '%s' | base64 -d | crewship-sidecar --addr 127.0.0.1:9119 &`+
+			"\n"+`sleep 0.5`+"\n"+
+			`if wget -q -O /dev/null http://127.0.0.1:9119/health 2>/dev/null; then exit 0; `+
+			`elif curl -sf http://127.0.0.1:9119/health >/dev/null 2>&1; then exit 0; `+
+			`else echo "sidecar health check failed" >&2; exit 1; fi`,
+		credsB64,
 	)
+
+	// SECURITY: Run sidecar as UID 1002 (not 1001) so the agent process
+	// cannot read /proc/<sidecar_pid>/mem to extract credentials from heap.
+	// Linux kernel restricts /proc/PID/mem access to same-UID processes.
+	cfg := provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", script},
+		User:        "1002:1002",
+	}
+
+	result, err := container.Exec(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("start sidecar: %w", err)
+	}
+
+	output, readErr := io.ReadAll(result.Reader)
+	result.Reader.Close()
+
+	// Check if the health check script exited with an error
+	running, exitCode, inspErr := container.ExecInspect(ctx, result.ExecID)
+	if inspErr != nil {
+		return fmt.Errorf("inspect sidecar exec: %w", inspErr)
+	}
+	if !running && exitCode != 0 {
+		msg := strings.TrimSpace(string(output))
+		if readErr != nil {
+			msg += fmt.Sprintf(" (read error: %v)", readErr)
+		}
+		return fmt.Errorf("sidecar health check failed (exit %d): %s", exitCode, msg)
+	}
+
+	logger.Info("sidecar started",
+		"container_id", containerID[:min(12, len(containerID))],
+		"credentials", len(sc),
+		"output_bytes", len(output),
+	)
+	return nil
+}
+
+// credTypeToProvider maps orchestrator credential types to sidecar provider types.
+func credTypeToProvider(c Credential) string {
+	switch {
+	case c.EnvVarName == "ANTHROPIC_API_KEY" || c.Type == "AI_CLI_TOKEN":
+		return "ANTHROPIC"
+	case c.EnvVarName == "OPENAI_API_KEY":
+		return "OPENAI"
+	case c.EnvVarName == "GOOGLE_API_KEY":
+		return "GOOGLE"
+	default:
+		return ""
+	}
+}
+
+// setupClaudeConfig writes only the non-secret Claude Code configuration
+// into the container to skip onboarding prompts. Credentials are passed
+// ONLY via env vars (CLAUDE_CODE_OAUTH_TOKEN) -- never written to disk.
+// This prevents credential theft via prompt injection reading filesystem.
+func setupClaudeConfig(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	logger *slog.Logger,
+) error {
+	script := `mkdir -p /home/agent/.claude && ` +
+		`cat > /home/agent/.claude.json << 'CFGEOF'
+{"hasCompletedOnboarding":true,"hasAvailableSubscription":true,"autoUpdates":false}
+CFGEOF
+chmod 600 /home/agent/.claude.json`
 
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,
@@ -197,12 +274,12 @@ chmod 600 /home/agent/.claude/.credentials.json /home/agent/.claude.json`,
 
 	result, err := container.Exec(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("write claude credentials: %w", err)
+		return fmt.Errorf("write claude config: %w", err)
 	}
 	io.Copy(io.Discard, result.Reader)
 	result.Reader.Close()
 
-	logger.Debug("claude credentials injected", "container_id", containerID[:min(12, len(containerID))])
+	logger.Debug("claude config injected (no credentials on disk)", "container_id", containerID[:min(12, len(containerID))])
 	return nil
 }
 

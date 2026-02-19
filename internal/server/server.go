@@ -83,6 +83,10 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	}
 
 	orch := orchestrator.New(ctr, sta, logger)
+	if cfg.Container.SidecarEnabled {
+		orch.SetSidecarEnabled(true)
+		logger.Info("sidecar proxy enabled for credential injection")
+	}
 	logW := logcollector.NewWriter(cfg.Storage.LogPath, logger)
 	logR := logcollector.NewReader(cfg.Storage.LogPath)
 	convStore := conversation.NewStore(cfg.Storage.BasePath, logger)
@@ -160,6 +164,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	if deps != nil && deps.DB != nil && cfg.Auth.JWTSecret != "" {
 		var opts []goapi.RouterOption
 		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
+		opts = append(opts, goapi.WithInternalToken(cfg.Auth.InternalToken))
 		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 		if err != nil {
 			logger.Error("failed to create API router", "error", err)

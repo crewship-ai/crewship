@@ -42,6 +42,7 @@ lib/generated/
 # Go
 /crewship
 /crewshipd
+/crewship-sidecar
 *.exe
 *.dll
 *.so

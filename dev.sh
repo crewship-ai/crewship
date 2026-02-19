@@ -117,7 +117,7 @@ start_go() {
     cd "$PROJECT_DIR"
     set -a && . ./.env.local && set +a
     export CREWSHIP_NEXTJS_URL="http://localhost:$NEXT_PORT"
-    export CREWSHIP_INTERNAL_TOKEN=crewshipd
+    # CREWSHIP_INTERNAL_TOKEN auto-generated at startup if not set
     export CREWSHIP_STORAGE_BASE_PATH=/tmp/crewship-data
     export CREWSHIP_LOG_PATH=/tmp/crewship-logs
     export CREWSHIP_BOLT_PATH=/tmp/crewship-state/state.db

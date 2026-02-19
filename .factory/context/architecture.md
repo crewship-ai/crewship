@@ -76,9 +76,10 @@ External → Webhook (Go) → Agent trigger → same flow as above
 - **Crew** = department (isolation boundary, maps to Docker container or K8s Pod)
 - **Agent** = virtual employee (CLI session inside container, has LLM, skills, credentials)
 - **Skill** = MCP Server wrapper (tools + resources + system prompt + credential requirements)
-- **Credential** = encrypted secret (AES-256-GCM, injected by sidecar into MCP servers at runtime)
-- **Assignment** = lead/coordinator deleguje ukol na podrizeneho agenta (auditovano)
-- **Sidecar** = crewship-sidecar Go binary running inside crew container (localhost:9119)
+- **Credential** = encrypted secret (AES-256-GCM, injected by sidecar proxy into HTTP headers at runtime)
+- **Assignment** = lead/coordinator deleguje ukol na podrizeneho agenta (auditovano, Phase 2)
+- **Sidecar** = crewship-sidecar Go binary running inside crew container (localhost:9119, UID 1002). HTTP forward proxy that injects credentials per-request. Agent NEVER sees real API keys. See `prd/SIDECAR.md`.
+- **Scrubber** = credential pattern detector/redactor (`internal/scrubber/`). Scrubs 13+ patterns from agent stdout before WebSocket/JSONL output.
 - **Runtime** = CLI mode (Claude Code, OpenCode) or API-direct mode (crewship-agent binary)
 
 ### Agent Hierarchy (3-level orchestration, Phase 2)
@@ -187,6 +188,23 @@ Everything runs in one process:
 - Go `database/sql` direct queries (NO ORM, NO Prisma at runtime)
 - Migration system (`internal/database/migrate.go`, 20 tables)
 
+**Sidecar (crewship-sidecar, inside container, IMPLEMENTED):**
+- HTTP forward proxy on 127.0.0.1:9119 (UID 1002)
+- In-memory credential store (CredStore) -- loaded from stdin JSON at startup
+- Domain allowlist (api.anthropic.com, api.openai.com, googleapis, api.factory.ai)
+- Credential injection per-request (x-api-key for Anthropic, Bearer for OpenAI, ?key= for Google)
+- Hop-by-hop header stripping (RFC 2616)
+- Request body size limit (10 MB)
+- Health endpoint (/health)
+- See `prd/SIDECAR.md` for full specification
+
+**Credential Scrubber (internal/scrubber/, IMPLEMENTED):**
+- 13+ regex patterns for credential detection
+- Wraps agent EventHandler to scrub output before WebSocket/JSONL
+- Covers: Anthropic, OpenAI, Google, GitHub, Slack, AWS, JWT, SSH keys, generic passwords
+- Custom patterns via AddPattern()
+- ~2.8 us/op per line
+
 Phase 2 additions:
 - **Channel Gateway** (opt-in module) -- persistent messaging sessions
   - Discord (discordgo), Telegram (go-telegram-bot-api), Slack (slack-go)
@@ -245,8 +263,15 @@ Agent start request arrives at crewship:
      → Query credentials pool (sorted by priority ASC)
      → Skip credentials in cooldown (recent 429)
      → Select first available credential
+
+  Sidecar mode (CREWSHIP_SIDECAR_ENABLED=true):
+  2. All credentials piped to sidecar via base64-encoded JSON stdin
+  3. Sidecar CredStore does round-robin selection per provider
+  4. Agent gets ONLY dummy keys (sk-ant-dummy-crewship-sidecar)
+
+  Legacy mode (without sidecar):
   2. Inject selected credentials as ENV vars into Docker exec
-  3. Agent runs with selected API key
+  3. Agent runs with real API key in env
 
 If agent fails with 429 (rate limit):
   1. crewship detects rate limit error in stderr
@@ -354,11 +379,11 @@ Every crew gets ONE Docker container:
   - Network: crewship-agents (--internal, no internet by default)
   - Explicit allowlist for LLM API endpoints only
   - Contains:
-    - crewship-sidecar (Go binary, localhost:9119, MCP Gateway + assignment proxy)
+    - crewship-sidecar (IMPL: Go binary, localhost:9119 as UID 1002, HTTP proxy + credential injection)
+    - CLI tools (Claude Code, OpenCode, Codex -- for CLI mode, UID 1001)
     - crewship-agent (Go binary, API-direct runtime, Phase 2)
-    - CLI tools (Claude Code, OpenCode, Codex -- for CLI mode)
     - landrun (Landlock wrapper, per-agent filesystem isolation, Phase 2)
-    - MCP servers (stdio processes, started by sidecar, 1 per skill)
+    - MCP servers (stdio processes, started by sidecar, 1 per skill, Phase 2)
   - Mounts:
     - /workspace (ephemeral Docker volume)
     - /output (persistent bind mount to host, includes .memory/ and .skills/)
@@ -376,23 +401,34 @@ Container = jail. Agent cannot:
 
 ## Security Layers
 
+### Implemented (working, tested)
 1. **Auth**: Go (NextAuth-compatible JWE endpoints in `internal/api/`)
 2. **JWT validation**: Go validates JWT on every API/WS/webhook request
 3. **RBAC**: Go middleware (`internal/api/middleware.go`) -- Owner/Admin/Manager/Member/Viewer
 4. **Encryption**: AES-256-GCM for all credentials at rest (`internal/encryption/`)
-5. **Container isolation**: non-root, --internal network, resource limits
-6. **Network allowlist**: only LLM API endpoints reachable from containers
-7. **Audit trail**: append-only JSONL (chattr +a), immutable
-8. **Webhook auth**: per-agent secret token for external triggers
-9. **Control channel**: loopback HTTP sidecar (localhost:9119, session token auth)
-10. **Per-agent isolation**: Landlock LSM (filesystem isolation within shared container)
-11. **Credential isolation**: Agent has NO tool credentials; sidecar injects into MCP servers
-12. **MCP RBAC**: Sidecar validates per-tool permissions before proxying MCP calls
-13. **Tool call audit**: Every MCP tool call logged with agent, tool, credential_id, timestamp
-14. **srt sandbox per-MCP-server**: Each MCP server wrapped in Anthropic Sandbox Runtime — FS deny + network allowlist per-skill (ADR-017)
-15. **Skill security pipeline**: 6-step automated audit before VERIFIED status — source verification, static analysis, CVE scan, sandbox test (ADR-020)
-16. **OCI digest verification**: Marketplace skill images verified by SHA256 digest at pull time (ADR-021)
-17. **Runtime (optional)**: gVisor/runsc for syscall interception (multi-tenant SaaS)
+5. **Container isolation**: non-root (UID 1001), --internal network, resource limits
+6. **Webhook auth**: per-agent secret token for external triggers
+7. **Sidecar proxy** (IMPL): HTTP forward proxy (127.0.0.1:9119) injects LLM credentials per-request. Agent gets DUMMY keys only. See `prd/SIDECAR.md`.
+8. **Domain allowlist** (IMPL): Sidecar blocks all domains except api.anthropic.com, api.openai.com, googleapis.com, api.factory.ai
+9. **UID isolation** (IMPL): Sidecar UID 1002, agent UID 1001 -- kernel blocks /proc cross-UID memory reads
+10. **Stdout scrubbing** (IMPL): 13+ credential patterns redacted before WebSocket/JSONL (`internal/scrubber/`)
+11. **Hop-by-hop stripping** (IMPL): Proxy-Authorization + 7 hop-by-hop headers stripped per RFC 2616
+12. **Body size limit** (IMPL): 10 MB MaxBytesReader on proxy requests (OOM prevention)
+13. **Shell injection prevention** (IMPL): Base64-encode credentials before shell piping
+14. **Internal token auto-gen** (IMPL): crypto/rand 32-byte token (no hardcoded "crewshipd" default)
+15. **Claude config safety** (IMPL): setupClaudeConfig() writes ONLY non-secret data; no credentials on disk
+
+### Planned (not yet implemented)
+16. **Network allowlist (iptables)**: Granular per-agent LLM API allowlists
+17. **Audit trail**: append-only JSONL (chattr +a), immutable
+18. **Control channel**: loopback HTTP sidecar for delegation (localhost:9119)
+19. **Per-agent isolation**: Landlock LSM (filesystem isolation within shared container)
+20. **Credential isolation (Phase 2)**: Agent has NO tool credentials; sidecar injects into MCP servers
+21. **MCP RBAC**: Sidecar validates per-tool permissions before proxying MCP calls
+22. **Tool call audit**: Every MCP tool call logged with agent, tool, credential_id, timestamp
+23. **srt sandbox per-MCP-server**: Each MCP server wrapped in Anthropic Sandbox Runtime
+24. **Skill security pipeline**: 6-step automated audit before VERIFIED status
+25. **Runtime (optional)**: gVisor/runsc for syscall interception (multi-tenant SaaS)
 
 ## Messaging Architecture (ADR-002)
 
