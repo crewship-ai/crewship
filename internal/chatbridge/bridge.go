@@ -17,6 +17,8 @@ import (
 
 type ChatResolver interface {
 	ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error)
+	CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string) error
+	UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string) error
 }
 
 type ChatInfo struct {
@@ -30,6 +32,7 @@ type ChatInfo struct {
 	ToolProfile  string
 	Credentials  []orchestrator.Credential
 	TimeoutSecs  int
+	WorkspaceID  string
 }
 
 type Bridge struct {
@@ -155,10 +158,21 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 	}
 
-	if err := b.orch.RunAgent(ctx, req, handler); err != nil {
-		streamFn(ws.ChatEvent{Type: "error", Content: err.Error()})
-		return fmt.Errorf("run agent: %w", err)
+	runID := generateMsgID()
+	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER"); err != nil {
+		b.logger.Warn("failed to create run record", "error", err)
 	}
+
+	runErr := b.orch.RunAgent(ctx, req, handler)
+	if runErr != nil {
+		errMsg := runErr.Error()
+		_ = b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg)
+		streamFn(ws.ChatEvent{Type: "error", Content: runErr.Error()})
+		return fmt.Errorf("run agent: %w", runErr)
+	}
+
+	exitCode := 0
+	_ = b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil)
 
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:        generateMsgID(),

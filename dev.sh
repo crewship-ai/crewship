@@ -122,7 +122,12 @@ start_go() {
     export CREWSHIP_LOG_PATH=/tmp/crewship-logs
     export CREWSHIP_BOLT_PATH=/tmp/crewship-state/state.db
     export CREWSHIP_LOG_LEVEL=debug
-    exec go run ./cmd/crewship start --no-docker
+    # Auto-detect container runtime; fall back to --no-docker if none found
+    if docker info &>/dev/null || podman info &>/dev/null; then
+      exec go run ./cmd/crewship start
+    else
+      exec go run ./cmd/crewship start --no-docker
+    fi
   ) > "$GO_LOG" 2>&1 &
 
   echo $! > "$GO_PID_FILE"

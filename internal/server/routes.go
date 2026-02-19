@@ -313,7 +313,7 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If agent_slug is provided, list only that agent's output namespace
+	// If agent_slug is provided, list agent's output namespace + root-level crew files
 	dir := crewID
 	if agentSlug != "" {
 		clean := filepath.Base(agentSlug)
@@ -329,6 +329,19 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("file list failed", "crew_id", crewID, "agent_slug", agentSlug, "error", err)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": []interface{}{}})
 		return
+	}
+
+	// When listing an agent's namespace, also include root-level crew files
+	// (files the agent saved to /output/ instead of /output/<agent-slug>/)
+	if agentSlug != "" {
+		rootFiles, err := s.storage.List(r.Context(), crewID)
+		if err == nil {
+			for _, f := range rootFiles {
+				if !f.IsDir {
+					files = append(files, f)
+				}
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": files})
@@ -350,13 +363,18 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate the path belongs to this crew (path from List is crew_id/agent/file)
+	if !strings.HasPrefix(cleanPath, crewID+"/") {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
 	if s.storage == nil {
 		http.Error(w, "storage not configured", http.StatusServiceUnavailable)
 		return
 	}
 
-	fullPath := filepath.Join(crewID, cleanPath)
-	reader, err := s.storage.Read(r.Context(), fullPath)
+	reader, err := s.storage.Read(r.Context(), cleanPath)
 	if err != nil {
 		http.Error(w, "file not found", http.StatusNotFound)
 		return

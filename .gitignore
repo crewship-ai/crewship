@@ -29,6 +29,9 @@ Thumbs.db
 
 # Testing
 coverage/
+test-results/
+playwright-report/
+blob-report/
 
 # Prisma
 lib/generated/
