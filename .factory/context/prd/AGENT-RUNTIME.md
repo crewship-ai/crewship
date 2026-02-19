@@ -245,54 +245,59 @@ func (o *Orchestrator) buildCLICommand(req AgentRunRequest) []string {
 }
 ```
 
-### 3.3 Credential injection (Phase 1 → Phase 2 evoluce)
+### 3.3 Credential injection (IMPLEMENTOVANO: Sidecar proxy)
 
-**Phase 1 (MVP) — ENV var injection:**
+> **Kompletni specifikace: `prd/SIDECAR.md`**
+
+**Sidecar mode (IMPLEMENTOVANO, doporuceno, `CREWSHIP_SIDECAR_ENABLED=true`):**
+
+Agent NIKDY nedostane realne API klice. Sidecar proxy (Go binary, UID 1002)
+bezi uvnitr kontejneru na `127.0.0.1:9119` a interceptuje vsechny outbound
+HTTP requesty:
 
 ```go
-func (o *Orchestrator) buildEnvVars(req AgentRunRequest) []string {
-    env := []string{
-        "CREWSHIP_AGENT_ID=" + req.AgentID,
-        "CREWSHIP_CREW_ID=" + req.CrewID,
-        "CREWSHIP_SESSION_ID=" + req.ChatID,
-        "CREWSHIP_SIDECAR=http://localhost:9119",
+// internal/orchestrator/exec.go -- BuildEnvVarsSidecar()
+func BuildEnvVarsSidecar(req AgentRunRequest) []string {
+    return []string{
+        // Proxy config -- all outbound HTTP goes through sidecar
+        "HTTP_PROXY=http://127.0.0.1:9119",
+        "HTTPS_PROXY=http://127.0.0.1:9119",
+        "NO_PROXY=127.0.0.1,localhost,::1",
+        // Claude Code: point to sidecar (HTTP, not HTTPS)
+        "ANTHROPIC_BASE_URL=http://127.0.0.1:9119",
+        // Dummy keys -- sidecar replaces with real ones
+        "ANTHROPIC_API_KEY=sk-ant-dummy-crewship-sidecar",
+        "OPENAI_API_KEY=sk-dummy-crewship-sidecar",
+        // ... crewship metadata
     }
-
-    // Phase 1: LLM API klice jako env vars (CLI tools je MUSI mit)
-    for _, cred := range req.LLMCredentials {
-        env = append(env, cred.EnvVarName+"="+cred.PlaintextValue)
-    }
-
-    // Phase 1: Tool credentials NEdava agentovi — sidecar je drzi
-    // Agent vola tools pres MCP → sidecar prida credentials
-
-    return env
 }
 ```
 
-> **KRITICKE:** Credentials se NIKDY neukladaji na disk. Existuji jen jako ENV vars
-> po dobu behu exec procesu. Po skonceni procesu zmizi.
+Credentials se predavaji do sidecaru pres base64-encoded JSON na stdin
+pri startu sidecar procesu. Sidecar je drzi JEN v pameti (CredStore).
 
-**Phase 2 (credential-less agent, ADR-015):**
+**Legacy mode (bez sidecaru, fallback):**
 
+```go
+// internal/orchestrator/exec.go -- BuildEnvVars()
+// Agent dostane realne klice jako ENV vars (puvodni chovani)
+env = append(env, "ANTHROPIC_API_KEY="+cred.PlainValue)
 ```
-Phase 1:  Agent dostane ANTHROPIC_API_KEY jako env var (nutne pro CLI tools)
-Phase 2:  Agent NEDOSTANE zadne API klice
-          → crewship-agent (API-direct) vola sidecar: GET /credentials/{env_var}
-          → sidecar vrati klic per-request, agent ho drzi JEN po dobu API callu
-          → sidecar muze klic zrotovat mid-session bez restartu agenta
-          → prompt injection NEMUZE extrahovat klic (agent ho nema v env)
-```
+
+> **KRITICKE:** V sidecar modu se credentials NIKDY neukladaji na disk,
+> NIKDY se nepreduji jako ENV vars, a agent je NIKDY nevidi.
+> Existuji jen v heap pameti sidecar procesu (UID 1002).
 
 **Rozdeleni credentials dle typu:**
 
-| Typ credentials | Phase 1 | Phase 2 |
-|---|---|---|
-| LLM API klice (ANTHROPIC_API_KEY) | ENV var (CLI tools vyzaduji) | Sidecar per-request (API-direct only) |
-| Tool credentials (GITHUB_TOKEN) | Sidecar drzi, agent nevidi | Sidecar drzi, agent nevidi |
-| MCP server credentials | Sidecar injektuje do MCP serveru | Sidecar injektuje do MCP serveru |
+| Typ credentials | Legacy (bez sidecaru) | Sidecar mode (implementovano) | Phase 2 (planovano) |
+|---|---|---|---|
+| LLM API klice | ENV var (agent vidi) | Sidecar injects per-request (agent vidi jen dummy) | Sidecar per-request |
+| Tool credentials | ENV var | Planovano: sidecar MCP Gateway | Sidecar MCP Gateway |
+| MCP server credentials | N/A | N/A | Sidecar injektuje do MCP serveru |
 
-> Viz sekce 6A (MCP a Skills) pro detailni credential flow.
+> Viz `prd/SIDECAR.md` pro kompletni sidecar specifikaci.
+> Viz sekce 6A (MCP a Skills) pro detailni credential flow (Phase 2).
 
 ---
 
@@ -1109,10 +1114,13 @@ COPY --from=builder /crewship-agent /usr/local/bin/crewship-agent
 # Landlock (per-agent filesystem izolace, Linux >=5.13)
 COPY --from=builder /landrun /usr/local/bin/landrun
 
-# Non-root user
+# Non-root user (agent)
 RUN groupadd -g 1001 agent && useradd -u 1001 -g agent -m agent
 
-# Coordinatories
+# Sidecar user (UID 1002) — separate from agent for /proc isolation
+RUN groupadd -g 1002 sidecar && useradd -u 1002 -g sidecar -s /usr/sbin/nologin sidecar
+
+# Directories
 RUN mkdir -p /workspace /output && \
     chown agent:agent /workspace /output
 
@@ -1582,7 +1590,12 @@ Layer 9: PID limit            --pids-limit=200 (fork bomb protection)
 Layer 10: Resource limits      --memory, --cpus (per crew konfigurovatelne)
 Layer 11: RBAC                sidecar + crewshipd validuji kazdy prikaz
 Layer 12: Sidecar auth        localhost-only (127.0.0.1:9119), session token
-Layer 13: Credential isolation Go service desifruje (ne Next.js), ENV var per-exec
+Layer 13: Credential isolation **Sidecar mode (IMPL):** agent NEMA klice, sidecar inject per-request
+Layer 14: UID isolation        **Sidecar UID 1002** — kernel blokuje /proc cross-UID read
+Layer 15: Stdout scrubbing     **Scrubber (IMPL):** 13+ credential patterns redaktovany pred output
+Layer 16: Hop-by-hop stripping **Proxy (IMPL):** Proxy-Authorization + 7 dalsich headeru stripnuto
+Layer 17: Body size limit      **Proxy (IMPL):** 10 MB MaxBytesReader (OOM prevence)
+Layer 18: Shell injection prev **Base64 encode (IMPL):** creds base64 pred echo do shellu
 ```
 
 ### 16.3a Per-agent network control (planovane)

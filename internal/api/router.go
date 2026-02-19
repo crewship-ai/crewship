@@ -10,11 +10,12 @@ import (
 )
 
 type Router struct {
-	mux        *http.ServeMux
-	db         *sql.DB
-	logger     *slog.Logger
-	authMw     *AuthMiddleware
-	socketPath string
+	mux           *http.ServeMux
+	db            *sql.DB
+	logger        *slog.Logger
+	authMw        *AuthMiddleware
+	socketPath    string
+	internalToken string
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -32,11 +33,13 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 		authMw: authMw,
 	}
 
-	r.registerRoutes()
-
+	// Apply options before registering routes so that internalToken,
+	// socketPath etc. are available during route setup.
 	for _, opt := range opts {
 		opt(r)
 	}
+
+	r.registerRoutes()
 
 	return r, nil
 }
@@ -53,6 +56,12 @@ func WithStaticFS(webFS fs.FS) RouterOption {
 func WithSocketPath(path string) RouterOption {
 	return func(r *Router) {
 		r.socketPath = path
+	}
+}
+
+func WithInternalToken(token string) RouterOption {
+	return func(r *Router) {
+		r.internalToken = token
 	}
 }
 
@@ -192,7 +201,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/chats/{chatId}/messages", authed(http.HandlerFunc(proxy.ChatMessages)))
 
 	// Internal routes (for crewshipd IPC, X-Internal-Token auth)
-	internal := NewInternalHandler(r.db, r.logger)
+	internal := NewInternalHandler(r.db, r.internalToken, r.logger)
 	internalAuth := internal.requireInternal
 	r.mux.Handle("GET /api/v1/internal/credentials", internalAuth(http.HandlerFunc(internal.ListCredentials)))
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
