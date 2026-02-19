@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test"
 
+const nextPort = process.env.NEXT_PORT || "3001"
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -9,7 +11,7 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "html",
 
   use: {
-    baseURL: "http://localhost:3001",
+    baseURL: `http://localhost:${nextPort}`,
     screenshot: "only-on-failure",
     trace: "on-first-retry",
   },
@@ -29,8 +31,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "pnpm dev --port 3001",
-    url: "http://localhost:3001",
+    command: `pnpm dev --port ${nextPort}`,
+    url: `http://localhost:${nextPort}`,
     reuseExistingServer: true,
     timeout: 60_000,
     stdout: "ignore",

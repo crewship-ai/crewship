@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -794,7 +795,7 @@ func (h *AgentHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT id, agent_id, chat_id, workspace_id, triggered_by,
 			trigger_type, status, started_at, finished_at,
-			error_message, exit_code, created_at
+			error_message, exit_code, metadata, created_at
 		FROM agent_runs
 		WHERE agent_id = ? AND workspace_id = ?
 		ORDER BY created_at DESC
@@ -810,13 +811,17 @@ func (h *AgentHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	var result []runResponse
 	for rows.Next() {
 		var run runResponse
+		var metadataStr sql.NullString
 		if err := rows.Scan(&run.ID, &run.AgentID, &run.ChatID, &run.WorkspaceID,
 			&run.TriggeredBy, &run.TriggerType, &run.Status,
 			&run.StartedAt, &run.FinishedAt, &run.ErrorMessage, &run.ExitCode,
-			&run.CreatedAt); err != nil {
+			&metadataStr, &run.CreatedAt); err != nil {
 			h.logger.Error("scan run", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
+		}
+		if metadataStr.Valid {
+			run.Metadata = json.RawMessage(metadataStr.String)
 		}
 		result = append(result, run)
 	}

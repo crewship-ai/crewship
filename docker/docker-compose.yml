@@ -4,10 +4,9 @@
 services:
   postgres:
     image: postgres:18-alpine
-    container_name: crewship-postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "${CREWSHIP_PG_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: crewship
       POSTGRES_PASSWORD: crewship
@@ -27,8 +26,6 @@ volumes:
 
 networks:
   crewship-internal:
-    name: crewship-internal
     internal: true
   crewship-agents:
-    name: crewship-agents
     internal: true
