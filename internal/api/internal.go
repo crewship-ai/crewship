@@ -249,20 +249,20 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 
 	var agentID, agentSlug, agentName, cliAdapter, toolProfile, wsID string
-	var systemPrompt, roleTitle sql.NullString
+	var systemPrompt, roleTitle, agentRole sql.NullString
 	var timeoutSecs int
 	var memoryEnabled bool
 	var crewID, crewSlug, crewName sql.NullString
 
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT a.id, a.slug, a.name, a.role_title, a.cli_adapter, a.system_prompt,
+		SELECT a.id, a.slug, a.name, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt,
 			a.tool_profile, a.timeout_seconds, a.memory_enabled,
 			c2.id, c2.slug, c2.name, c.workspace_id
 		FROM chats c
 		JOIN agents a ON a.id = c.agent_id
 		LEFT JOIN crews c2 ON c2.id = a.crew_id
 		WHERE c.id = ?
-	`, chatID).Scan(&agentID, &agentSlug, &agentName, &roleTitle, &cliAdapter, &systemPrompt,
+	`, chatID).Scan(&agentID, &agentSlug, &agentName, &roleTitle, &agentRole, &cliAdapter, &systemPrompt,
 		&toolProfile, &timeoutSecs, &memoryEnabled,
 		&crewID, &crewSlug, &crewName, &wsID)
 	if err != nil {
@@ -332,8 +332,17 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		crewSlugStr = crewSlug.String
 	}
 
-	// Build structured system prompt: identity → persona → skills
+	// Build structured system prompt: ethos → identity → crew context → persona → skills
 	var promptParts []string
+
+	// Resolve agent_role (default to AGENT if unset)
+	roleStr := "AGENT"
+	if agentRole.Valid && agentRole.String != "" {
+		roleStr = agentRole.String
+	}
+
+	// [CREWSHIP ETHOS] section — non-overridable, injected for every agent
+	promptParts = append(promptParts, buildEthosBlock(roleStr))
 
 	// [AGENT IDENTITY] section
 	identityLines := []string{"[AGENT IDENTITY]"}
@@ -382,11 +391,46 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Query crew members for LEAD agents
+	type crewMemberEntry struct {
+		Name        string `json:"name"`
+		Slug        string `json:"slug"`
+		RoleTitle   string `json:"role_title"`
+		Description string `json:"description"`
+		Status      string `json:"status"`
+	}
+	var crewMembers []crewMemberEntry
+	if roleStr == "LEAD" && crewID.Valid {
+		memberRows, err := h.db.QueryContext(r.Context(), `
+			SELECT name, slug, COALESCE(role_title, ''), COALESCE(description, ''), status
+			FROM agents
+			WHERE crew_id = ? AND deleted_at IS NULL AND id != ?
+			ORDER BY name
+		`, crewID.String, agentID)
+		if err != nil {
+			h.logger.Error("query crew members for lead", "error", err)
+		} else {
+			defer memberRows.Close()
+			for memberRows.Next() {
+				var m crewMemberEntry
+				if err := memberRows.Scan(&m.Name, &m.Slug, &m.RoleTitle, &m.Description, &m.Status); err != nil {
+					h.logger.Error("scan crew member", "error", err)
+					continue
+				}
+				crewMembers = append(crewMembers, m)
+			}
+			if err := memberRows.Err(); err != nil {
+				h.logger.Error("rows iteration (crew members)", "error", err)
+			}
+		}
+	}
+
 	sysPrompt := strings.Join(promptParts, "\n\n")
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"agent_id":        agentID,
 		"agent_slug":      agentSlug,
+		"agent_role":      roleStr,
 		"crew_id":         crewIDStr,
 		"crew_slug":       crewSlugStr,
 		"container_id":    "",
@@ -397,6 +441,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		"timeout_seconds": timeoutSecs,
 		"workspace_id":    wsID,
 		"memory_enabled":  memoryEnabled,
+		"crew_members":    crewMembers,
 	})
 }
 
@@ -490,6 +535,30 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": body.Status})
+}
+
+// buildEthosBlock returns the [CREWSHIP ETHOS] system prompt block.
+// This block is non-overridable and injected for every agent, with role-specific variations.
+func buildEthosBlock(agentRole string) string {
+	var roleText string
+	switch agentRole {
+	case "LEAD":
+		roleText = `You are a crew member with orchestration responsibility on the Crewship -- ` +
+			`an expedition with a shared purpose. You are not a boss -- you are an equal ` +
+			`colleague who carries the soul and mission of the expedition to the whole team, ` +
+			`and that is how the ship sails towards adventure. Your crew trusts you because ` +
+			`you are one of them, just with a different task.`
+	case "COORDINATOR":
+		roleText = `You are a workspace member with coordination responsibility on the Crewship -- ` +
+			`connecting the expeditions of all crews towards one shared goal. You are not above ` +
+			`anyone -- you are an equal who sees the bigger picture and helps crews align ` +
+			`their efforts towards the common adventure.`
+	default: // AGENT
+		roleText = `You are part of a crew on the Crewship -- an expedition with a shared purpose ` +
+			`that transcends any individual. Your work matters because it contributes to ` +
+			`something greater than yourself.`
+	}
+	return "[CREWSHIP ETHOS]\n" + roleText
 }
 
 func WriteAuditLog(ctx context.Context, db *sql.DB, action, entityType, entityID, userID, workspaceID string, metadata map[string]interface{}) {

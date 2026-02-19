@@ -35,6 +35,7 @@ func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCRe
 type chatResolveResponse struct {
 	AgentID       string               `json:"agent_id"`
 	AgentSlug     string               `json:"agent_slug"`
+	AgentRole     string               `json:"agent_role"`
 	CrewID        string               `json:"crew_id"`
 	CrewSlug      string               `json:"crew_slug"`
 	ContainerID   string               `json:"container_id"`
@@ -45,6 +46,15 @@ type chatResolveResponse struct {
 	TimeoutSecs   int                  `json:"timeout_seconds"`
 	WorkspaceID   string               `json:"workspace_id"`
 	MemoryEnabled bool                 `json:"memory_enabled"`
+	CrewMembers   []crewMemberResponse `json:"crew_members"`
+}
+
+type crewMemberResponse struct {
+	Name        string `json:"name"`
+	Slug        string `json:"slug"`
+	RoleTitle   string `json:"role_title"`
+	Description string `json:"description"`
+	Status      string `json:"status"`
 }
 
 type credentialResponse struct {
@@ -192,9 +202,21 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 		}
 	}
 
+	var crewMembers []orchestrator.CrewMember
+	for _, m := range data.CrewMembers {
+		crewMembers = append(crewMembers, orchestrator.CrewMember{
+			Name:        m.Name,
+			Slug:        m.Slug,
+			RoleTitle:   m.RoleTitle,
+			Description: m.Description,
+			Status:      m.Status,
+		})
+	}
+
 	return &ChatInfo{
 		AgentID:       data.AgentID,
 		AgentSlug:     data.AgentSlug,
+		AgentRole:     data.AgentRole,
 		CrewID:        data.CrewID,
 		CrewSlug:      data.CrewSlug,
 		ContainerID:   data.ContainerID,
@@ -205,5 +227,6 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 		TimeoutSecs:   data.TimeoutSecs,
 		WorkspaceID:   data.WorkspaceID,
 		MemoryEnabled: data.MemoryEnabled,
+		CrewMembers:   crewMembers,
 	}, nil
 }

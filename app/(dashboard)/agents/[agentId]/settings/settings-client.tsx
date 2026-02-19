@@ -26,6 +26,7 @@ interface AgentDetail {
   description: string | null
   role_title: string | null
   agent_role: string
+  lead_mode: string | null
   status: string
   cli_adapter: string
   llm_provider: string | null
@@ -72,6 +73,7 @@ export function SettingsPageClient() {
   const [maxTokens, setMaxTokens] = useState("")
   const [timeoutSeconds, setTimeoutSeconds] = useState("1800")
   const [toolProfile, setToolProfile] = useState("CODING")
+  const [leadMode, setLeadMode] = useState("active")
   const [crewId, setTeamId] = useState("")
   const [showCustomModel, setShowCustomModel] = useState(false)
 
@@ -119,6 +121,7 @@ export function SettingsPageClient() {
           setDescription(agentData.description ?? "")
           setRoleTitle(agentData.role_title ?? "")
           setAgentRole(agentData.agent_role)
+          setLeadMode(agentData.lead_mode ?? "active")
           setCliAdapter(agentData.cli_adapter)
           setLlmProvider(agentData.llm_provider ?? "")
           setLlmModel(agentData.llm_model ?? "")
@@ -168,6 +171,7 @@ export function SettingsPageClient() {
 
     if (description) body.description = description
     if (roleTitle) body.role_title = roleTitle
+    if (agentRole === "LEAD") body.lead_mode = leadMode
     if (llmProvider) body.llm_provider = llmProvider
     if (llmModel) body.llm_model = llmModel
     if (systemPrompt) body.system_prompt = systemPrompt
@@ -193,7 +197,7 @@ export function SettingsPageClient() {
     } finally {
       setSubmitting(false)
     }
-  }, [workspaceId, agentId, name, description, roleTitle, agentRole, cliAdapter, llmProvider, llmModel, systemPrompt, temperature, maxTokens, timeoutSeconds, toolProfile, crewId])
+  }, [workspaceId, agentId, name, description, roleTitle, agentRole, leadMode, cliAdapter, llmProvider, llmModel, systemPrompt, temperature, maxTokens, timeoutSeconds, toolProfile, crewId])
 
   const handleDelete = useCallback(async () => {
     if (!workspaceId) return
@@ -314,6 +318,23 @@ export function SettingsPageClient() {
                 </Select>
               </div>
             </div>
+            {agentRole === "LEAD" && (
+              <div className="space-y-2">
+                <Label htmlFor="lead_mode">Lead Mode</Label>
+                <Select value={leadMode} onValueChange={setLeadMode}>
+                  <SelectTrigger id="lead_mode" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="passive" disabled>Passive (Phase 2)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Active: Lead receives crew context and can orchestrate tasks.
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 

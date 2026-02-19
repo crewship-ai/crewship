@@ -12,6 +12,10 @@
 
 ## 1. VIZE PRODUKTU
 
+> **Filozofie:** Viz `PHILOSOPHY.md` -- The Crewship Adventure, rovnost v hierarchii,
+> externi agent jako profik se svobodnou mysli. Tyto principy jsou fundamentalni
+> a neprepisitelne -- projevuji se v `[CREWSHIP ETHOS]` bloku system promptu kazdeho agenta.
+
 ### Co stavime
 Open-source (FSL licence) platforma pro orchestraci AI agentu prezentovanych jako **"virtualni zamestnanci"**. Cil: umoznit firmam i jednotlivcum vytvorit virtualni oddeleni (obchod, vyvoj, zakaznicka podpora) kde AI agenti plni ulohy autonomne nebo v konverzaci s lidskymi kolegy.
 
