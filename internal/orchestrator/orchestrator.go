@@ -151,10 +151,30 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	var env []string
 	if sidecarEnabled {
 		env = BuildEnvVarsSidecar(req)
+		if handler != nil {
+			handler(AgentEvent{
+				Type:      "system",
+				Content:   "[security] Sidecar proxy starting -- credentials will be injected per-request, agent cannot see real API keys",
+				Timestamp: time.Now(),
+			})
+		}
 		if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, o.logger); err != nil {
 			o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
 			o.updateRunStatus(ctx, runState.ID, "error")
 			return fmt.Errorf("start sidecar: %w", err)
+		}
+		if handler != nil {
+			credCount := 0
+			for _, c := range req.Credentials {
+				if credTypeToProvider(c) != "" {
+					credCount++
+				}
+			}
+			handler(AgentEvent{
+				Type:      "system",
+				Content:   fmt.Sprintf("[security] Sidecar ready -- %d credentials loaded, outbound traffic filtered, stdout scrubbing active", credCount),
+				Timestamp: time.Now(),
+			})
 		}
 	} else {
 		env = BuildEnvVars(req, cred)
@@ -282,12 +302,25 @@ func (o *Orchestrator) RecoverFromCrash(ctx context.Context) error {
 
 // wrapScrubHandler returns a handler that scrubs credential patterns from
 // event content before forwarding to the real handler.
+// When a credential pattern is detected and redacted, a system event is emitted
+// so the user can see that the scrubber is active and protecting their secrets.
 func (o *Orchestrator) wrapScrubHandler(handler EventHandler) EventHandler {
 	if handler == nil || o.scrubber == nil {
 		return handler
 	}
+	var scrubNotified bool
 	return func(event AgentEvent) {
+		original := event.Content
 		event.Content = o.scrubber.Scrub(event.Content)
+		if !scrubNotified && event.Content != original {
+			scrubNotified = true
+			handler(AgentEvent{
+				Type:      "system",
+				Content:   "[security] Credential pattern detected in agent output -- redacted by stdout scrubber",
+				Timestamp: time.Now(),
+			})
+			o.logger.Warn("scrubber redacted credential in agent output")
+		}
 		handler(event)
 	}
 }
