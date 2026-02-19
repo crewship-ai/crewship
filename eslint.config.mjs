@@ -56,6 +56,7 @@ export default [
       "public/**",
       "lib/generated/**",
       ".factory/**",
+      "e2e/**",
     ],
   },
 ];

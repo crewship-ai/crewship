@@ -198,6 +198,9 @@ func cmdStart(args []string) {
 		logger.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}
+	if err := database.SeedBundledSkills(context.Background(), db.DB, logger); err != nil {
+		logger.Warn("failed to seed bundled skills", "error", err)
+	}
 
 	logger.Info("crewship starting",
 		"version", version,

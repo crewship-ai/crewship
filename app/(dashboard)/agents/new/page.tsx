@@ -19,6 +19,7 @@ import {
 import { PageHeader } from "@/components/layout/page-header"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { slugify } from "@/lib/utils/slugify"
+import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
 
 interface TeamOption {
   id: string
@@ -49,6 +50,7 @@ export default function NewAgentPage() {
   const [systemPrompt, setSystemPrompt] = useState("")
   const [temperature, setTemperature] = useState("0.7")
   const [toolProfile, setToolProfile] = useState("CODING")
+  const [showCustomModel, setShowCustomModel] = useState(false)
 
   // Auto-generate slug from name
   useEffect(() => {
@@ -56,6 +58,26 @@ export default function NewAgentPage() {
       setSlug(slugify(name))
     }
   }, [name, slugManual])
+
+  function handleAdapterChange(key: string) {
+    setCliAdapter(key)
+    const cfg = CLI_ADAPTERS[key]
+    if (cfg) {
+      setLlmProvider(cfg.provider)
+      setLlmModel(cfg.defaultModel)
+      setShowCustomModel(false)
+    }
+  }
+
+  function handleModelSelect(value: string) {
+    if (value === "__custom__") {
+      setShowCustomModel(true)
+      setLlmModel("")
+    } else {
+      setShowCustomModel(false)
+      setLlmModel(value)
+    }
+  }
 
   // Fetch crews when workspaceId is available
   useEffect(() => {
@@ -257,20 +279,68 @@ export default function NewAgentPage() {
             <CardTitle className="text-base">Runtime</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>CLI Adapter</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {CLI_ADAPTER_KEYS.map((key) => {
+                  const cfg = CLI_ADAPTERS[key]
+                  const Icon = cfg.icon
+                  const isActive = cliAdapter === key
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => handleAdapterChange(key)}
+                      className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                        isActive ? "border-primary bg-primary/5" : "border-border hover:bg-muted"
+                      }`}
+                    >
+                      <Icon className={`h-5 w-5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium">{cfg.label}</div>
+                        <div className="text-[10px] text-muted-foreground">{cfg.description}</div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="cli_adapter">CLI Adapter</Label>
-                <Select value={cliAdapter} onValueChange={setCliAdapter}>
-                  <SelectTrigger id="cli_adapter" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="CLAUDE_CODE">Claude Code</SelectItem>
-                    <SelectItem value="OPENCODE">OpenCode</SelectItem>
-                    <SelectItem value="CODEX_CLI">Codex CLI</SelectItem>
-                    <SelectItem value="GEMINI_CLI">Gemini CLI</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>Model</Label>
+                {showCustomModel ? (
+                  <div className="flex gap-2">
+                    <Input
+                      value={llmModel}
+                      onChange={(e) => setLlmModel(e.target.value)}
+                      placeholder="Enter model name"
+                      className="font-mono text-xs"
+                    />
+                    <Button type="button" variant="outline" size="sm" onClick={() => {
+                      setShowCustomModel(false)
+                      const cfg = CLI_ADAPTERS[cliAdapter]
+                      if (cfg) setLlmModel(cfg.defaultModel)
+                    }}>
+                      Back
+                    </Button>
+                  </div>
+                ) : (
+                  <Select value={llmModel} onValueChange={handleModelSelect}>
+                    <SelectTrigger className="w-full font-mono text-xs">
+                      <SelectValue placeholder="Select model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(CLI_ADAPTERS[cliAdapter]?.models ?? []).map((m) => (
+                        <SelectItem key={m.value} value={m.value} className="font-mono text-xs">
+                          {m.label}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="__custom__" className="text-muted-foreground">
+                        Custom...
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="tool_profile">Tool Profile</Label>
@@ -285,32 +355,6 @@ export default function NewAgentPage() {
                     <SelectItem value="FULL">Full</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="llm_provider">LLM Provider</Label>
-                <Select value={llmProvider} onValueChange={setLlmProvider}>
-                  <SelectTrigger id="llm_provider" className="w-full">
-                    <SelectValue placeholder="Select provider (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ANTHROPIC">Anthropic</SelectItem>
-                    <SelectItem value="OPENAI">OpenAI</SelectItem>
-                    <SelectItem value="GOOGLE">Google</SelectItem>
-                    <SelectItem value="OLLAMA">Ollama</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="llm_model">LLM Model</Label>
-                <Input
-                  id="llm_model"
-                  value={llmModel}
-                  onChange={(e) => setLlmModel(e.target.value)}
-                  placeholder="e.g. claude-sonnet-4-20250514"
-                  className="font-mono text-sm"
-                />
               </div>
             </div>
             <div className="space-y-2">

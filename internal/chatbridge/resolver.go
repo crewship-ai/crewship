@@ -43,6 +43,7 @@ type chatResolveResponse struct {
 	ToolProfile  string               `json:"tool_profile"`
 	Credentials  []credentialResponse `json:"credentials"`
 	TimeoutSecs  int                  `json:"timeout_seconds"`
+	WorkspaceID  string               `json:"workspace_id"`
 }
 
 type credentialResponse struct {
@@ -87,6 +88,52 @@ func (r *IPCResolver) CreateChat(ctx context.Context, req CreateChatRequest) err
 		return fmt.Errorf("chat create returned %d", resp.StatusCode)
 	}
 
+	return nil
+}
+
+func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string) error {
+	reqURL := fmt.Sprintf("%s/api/v1/internal/runs", r.baseURL)
+	body, _ := json.Marshal(map[string]string{
+		"id": runID, "agent_id": agentID, "chat_id": chatID,
+		"workspace_id": workspaceID, "trigger_type": triggerType,
+	})
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Internal-Token", r.internalToken)
+	resp, err := r.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("create run: %w", err)
+	}
+	defer resp.Body.Close()
+	io.ReadAll(resp.Body)
+	return nil
+}
+
+func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string) error {
+	reqURL := fmt.Sprintf("%s/api/v1/internal/runs/%s", r.baseURL, url.PathEscape(runID))
+	payload := map[string]interface{}{"status": status}
+	if exitCode != nil {
+		payload["exit_code"] = *exitCode
+	}
+	if errorMsg != nil {
+		payload["error_message"] = *errorMsg
+	}
+	body, _ := json.Marshal(payload)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, reqURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Internal-Token", r.internalToken)
+	resp, err := r.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("update run: %w", err)
+	}
+	defer resp.Body.Close()
+	io.ReadAll(resp.Body)
 	return nil
 }
 
@@ -142,5 +189,6 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 		ToolProfile:  data.ToolProfile,
 		Credentials:  creds,
 		TimeoutSecs:  data.TimeoutSecs,
+		WorkspaceID:  data.WorkspaceID,
 	}, nil
 }
