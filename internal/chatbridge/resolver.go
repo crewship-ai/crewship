@@ -33,17 +33,18 @@ func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCRe
 }
 
 type chatResolveResponse struct {
-	AgentID      string               `json:"agent_id"`
-	AgentSlug    string               `json:"agent_slug"`
-	CrewID       string               `json:"crew_id"`
-	CrewSlug     string               `json:"crew_slug"`
-	ContainerID  string               `json:"container_id"`
-	CLIAdapter   string               `json:"cli_adapter"`
-	SystemPrompt string               `json:"system_prompt"`
-	ToolProfile  string               `json:"tool_profile"`
-	Credentials  []credentialResponse `json:"credentials"`
-	TimeoutSecs  int                  `json:"timeout_seconds"`
-	WorkspaceID  string               `json:"workspace_id"`
+	AgentID       string               `json:"agent_id"`
+	AgentSlug     string               `json:"agent_slug"`
+	CrewID        string               `json:"crew_id"`
+	CrewSlug      string               `json:"crew_slug"`
+	ContainerID   string               `json:"container_id"`
+	CLIAdapter    string               `json:"cli_adapter"`
+	SystemPrompt  string               `json:"system_prompt"`
+	ToolProfile   string               `json:"tool_profile"`
+	Credentials   []credentialResponse `json:"credentials"`
+	TimeoutSecs   int                  `json:"timeout_seconds"`
+	WorkspaceID   string               `json:"workspace_id"`
+	MemoryEnabled bool                 `json:"memory_enabled"`
 }
 
 type credentialResponse struct {
@@ -192,16 +193,17 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 	}
 
 	return &ChatInfo{
-		AgentID:      data.AgentID,
-		AgentSlug:    data.AgentSlug,
-		CrewID:       data.CrewID,
-		CrewSlug:     data.CrewSlug,
-		ContainerID:  data.ContainerID,
-		CLIAdapter:   data.CLIAdapter,
-		SystemPrompt: data.SystemPrompt,
-		ToolProfile:  data.ToolProfile,
-		Credentials:  creds,
-		TimeoutSecs:  data.TimeoutSecs,
-		WorkspaceID:  data.WorkspaceID,
+		AgentID:       data.AgentID,
+		AgentSlug:     data.AgentSlug,
+		CrewID:        data.CrewID,
+		CrewSlug:      data.CrewSlug,
+		ContainerID:   data.ContainerID,
+		CLIAdapter:    data.CLIAdapter,
+		SystemPrompt:  data.SystemPrompt,
+		ToolProfile:   data.ToolProfile,
+		Credentials:   creds,
+		TimeoutSecs:   data.TimeoutSecs,
+		WorkspaceID:   data.WorkspaceID,
+		MemoryEnabled: data.MemoryEnabled,
 	}, nil
 }

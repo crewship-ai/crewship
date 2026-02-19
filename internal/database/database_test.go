@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -99,6 +100,87 @@ func TestMigrate(t *testing.T) {
 	// Run again -- should be idempotent
 	if err := Migrate(context.Background(), db.DB, logger); err != nil {
 		t.Fatalf("Migrate (idempotent): %v", err)
+	}
+}
+
+func TestMigrateMemoryConfigColumn(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open("file:" + filepath.Join(dir, "memory.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	if err := Migrate(context.Background(), db.DB, logger); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// Verify memory_config column exists on agents table
+	var cid int
+	var colName, colType string
+	var notNull, dfltValue, pk interface{}
+	found := false
+	rows, err := db.Query("PRAGMA table_info(agents)")
+	if err != nil {
+		t.Fatalf("pragma: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err := rows.Scan(&cid, &colName, &colType, &notNull, &dfltValue, &pk); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if colName == "memory_config" {
+			found = true
+			if colType != "TEXT" {
+				t.Errorf("memory_config type = %q, want TEXT", colType)
+			}
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows err: %v", err)
+	}
+	if !found {
+		t.Error("memory_config column not found on agents table after migration")
+	}
+
+	// Verify migration 3 is recorded
+	var version int
+	err = db.QueryRow("SELECT version FROM _migrations WHERE version = 3").Scan(&version)
+	if err == sql.ErrNoRows {
+		t.Errorf("migration 3 not recorded")
+	} else if err != nil {
+		t.Fatalf("query migration 3: %v", err)
+	}
+
+	// Verify memory_config is nullable (can insert agent without it)
+	_, err = db.Exec(`INSERT INTO users (id, email) VALUES ('u1', 'test@example.com')`)
+	if err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('w1', 'Test', 'test')`)
+	if err != nil {
+		t.Fatalf("insert workspace: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO agents (id, workspace_id, name, slug) VALUES ('a1', 'w1', 'Agent', 'agent')`)
+	if err != nil {
+		t.Fatalf("insert agent without memory_config: %v", err)
+	}
+
+	// Verify we can set memory_config
+	_, err = db.Exec(`UPDATE agents SET memory_config = '{"max_size_mb": 10}' WHERE id = 'a1'`)
+	if err != nil {
+		t.Fatalf("update memory_config: %v", err)
+	}
+
+	var memCfg *string
+	err = db.QueryRow("SELECT memory_config FROM agents WHERE id = 'a1'").Scan(&memCfg)
+	if err != nil {
+		t.Fatalf("read memory_config: %v", err)
+	}
+	if memCfg == nil || *memCfg != `{"max_size_mb": 10}` {
+		t.Errorf("unexpected memory_config: %v", memCfg)
 	}
 }
 

@@ -1,8 +1,8 @@
 # Crewship -- Agent Memory System (MEMORY.md)
 
-**Verze:** 1.0
-**Datum:** 2026-02-18
-**Status:** Architekturni navrh + reserse (implementace Phase 1 → Phase 3)
+**Verze:** 1.1
+**Datum:** 2026-02-19
+**Status:** Phase 1 MVP IMPLEMENTED (file-first + FTS5 search)
 **Zavislosti:** AGENT-RUNTIME.md (sidecar, kontejnery, /output/ storage),
 ORCHESTRATION.md (leader/crew/agent hierarchie, sidecar API),
 SECURITY.md (izolace, encryption, RBAC),
