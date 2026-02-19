@@ -30,7 +30,7 @@ dev\:go:
 dev\:go-once:
 	@set -a && . ./.env.local && set +a && \
 	CREWSHIP_NEXTJS_URL=http://localhost:3001 \
-	CREWSHIP_INTERNAL_TOKEN=crewshipd \
+	
 	CREWSHIP_STORAGE_BASE_PATH=/tmp/crewship-data \
 	CREWSHIP_LOG_PATH=/tmp/crewship-logs \
 	CREWSHIP_BOLT_PATH=/tmp/crewship-state/state.db \

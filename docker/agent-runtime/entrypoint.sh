@@ -11,3 +11,7 @@ touch /workspace/.ready
 
 # PID 1: keep container alive for Docker exec pattern
 exec sleep infinity
+
+# NOTE: The sidecar binary is started via Docker exec (by the orchestrator)
+# as UID 1002 (sidecar group), NOT as the agent user (UID 1001).
+# This prevents the agent from reading sidecar memory via /proc/<pid>/mem.

@@ -1,8 +1,7 @@
 package orchestrator
 
 import (
-	"context"
-	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -234,17 +233,69 @@ func TestResolveEnvVar(t *testing.T) {
 	}
 }
 
-func TestSetupClaudeCredentialsNilCred(t *testing.T) {
-	err := setupClaudeCredentials(context.Background(), nil, "container-1", nil, slog.Default())
-	if err != nil {
-		t.Fatalf("expected nil error for nil cred, got: %v", err)
+func TestBuildEnvVarsSidecar(t *testing.T) {
+	req := AgentRunRequest{
+		AgentID: "agent-1",
+		CrewID:  "crew-1",
+		ChatID:  "chat-1",
+		Credentials: []Credential{
+			{ID: "c1", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "sk-ant-real-secret"},
+		},
+	}
+
+	env := BuildEnvVarsSidecar(req)
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	// Must have proxy config
+	if envMap["HTTP_PROXY"] != "http://127.0.0.1:9119" {
+		t.Errorf("expected HTTP_PROXY=http://127.0.0.1:9119, got %q", envMap["HTTP_PROXY"])
+	}
+	if envMap["ANTHROPIC_BASE_URL"] != "http://127.0.0.1:9119" {
+		t.Errorf("expected ANTHROPIC_BASE_URL pointing to sidecar")
+	}
+
+	// Must have dummy API key, NOT the real one
+	if envMap["ANTHROPIC_API_KEY"] == "sk-ant-real-secret" {
+		t.Fatal("real credential MUST NOT appear in sidecar env vars")
+	}
+	if envMap["ANTHROPIC_API_KEY"] == "" {
+		t.Fatal("dummy ANTHROPIC_API_KEY must be set for Claude Code")
+	}
+
+	// Must NOT have the plaintext credential anywhere
+	for _, e := range env {
+		if strings.Contains(e, "sk-ant-real-secret") {
+			t.Fatalf("real credential leaked in env var: %s", e)
+		}
 	}
 }
 
-func TestSetupClaudeCredentialsNonOAuthType(t *testing.T) {
-	cred := &Credential{Type: "API_KEY", PlainValue: "sk-test"}
-	err := setupClaudeCredentials(context.Background(), nil, "container-1", cred, slog.Default())
-	if err != nil {
-		t.Fatalf("expected nil error for non-OAuth type, got: %v", err)
+func TestCredTypeToProvider(t *testing.T) {
+	tests := []struct {
+		name     string
+		cred     Credential
+		expected string
+	}{
+		{"anthropic key", Credential{EnvVarName: "ANTHROPIC_API_KEY"}, "ANTHROPIC"},
+		{"oauth token", Credential{Type: "AI_CLI_TOKEN", EnvVarName: "FOO"}, "ANTHROPIC"},
+		{"openai key", Credential{EnvVarName: "OPENAI_API_KEY"}, "OPENAI"},
+		{"google key", Credential{EnvVarName: "GOOGLE_API_KEY"}, "GOOGLE"},
+		{"unknown", Credential{EnvVarName: "MY_CUSTOM_KEY"}, ""},
+		{"github token", Credential{EnvVarName: "GITHUB_TOKEN"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := credTypeToProvider(tt.cred)
+			if got != tt.expected {
+				t.Errorf("credTypeToProvider(%+v) = %q, want %q", tt.cred, got, tt.expected)
+			}
+		})
 	}
 }

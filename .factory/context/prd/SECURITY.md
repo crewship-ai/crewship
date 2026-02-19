@@ -1,7 +1,10 @@
 # Crewship -- Security (SECURITY.md)
 
-**Verze:** 3.0
-**Datum:** 2026-02-17
+**Verze:** 4.0
+**Datum:** 2026-02-18
+**Zmeny v4.0:** Sidecar proxy implementovan (credential isolation, stdout scrubbing,
+UID izolace, shell injection fix, hop-by-hop stripping, body size limit).
+Viz `prd/SIDECAR.md` pro kompletni specifikaci.
 
 ---
 
@@ -108,6 +111,22 @@ Agent kontejner (crewship-agents sit)
 | Non-root user | `USER agent` (UID 1001) v Dockerfile |
 | Tmpfs pro /tmp | `--tmpfs /tmp:rw,size=500m` |
 
+### 2.1a Vrstva 1a: Sidecar proxy (IMPLEMENTOVANO)
+
+> **Viz `prd/SIDECAR.md` pro kompletni specifikaci.**
+
+| Opatreni | Implementace |
+|---|---|
+| Credential isolation | Agent dostane DUMMY API klice, sidecar injektuje realne per-request |
+| Domain allowlist | Jen api.anthropic.com, api.openai.com, googleapis, api.factory.ai |
+| In-memory credentials | CredStore drzi klice JEN v pameti, NIKDY na disku |
+| UID izolace | Sidecar UID 1002, agent UID 1001 (kernel blokuje /proc cross-UID) |
+| Stdout scrubbing | Vsechny agent eventy prochazi pres Scrubber pred WebSocket/JSONL |
+| Hop-by-hop stripping | 8 headeru stripnuto per RFC 2616 (Proxy-Authorization = exfiltrace) |
+| Request body limit | 10 MB (http.MaxBytesReader) -- OOM prevence |
+| Shell injection prevence | Base64-encode creds pred pipnutim do shellu |
+| Internal token | crypto/rand 32B auto-generovany (ne hardcoded "crewshipd") |
+
 ### 2.2 Vrstva 2: Network izolace
 
 ```
@@ -202,11 +221,22 @@ Plaintext → AES-256-GCM(key, iv=random16B) → "v1:" + Base64(IV + AuthTag + C
 
 ### 3.4 Credential injection do kontejneru
 
+**Sidecar mode (IMPLEMENTOVANO, doporuceno):**
+```
+Go orchestrator → desifrovani → JSON → base64 → pipe stdin do sidecar (UID 1002)
+Sidecar → in-memory CredStore → injektuje do HTTP headeru per-request
+Agent → dostane JEN dummy klice (sk-ant-dummy-crewship-sidecar)
+```
+
+**Legacy mode (bez sidecaru):**
 ```
 Go API → desifrovani (internal/encryption/) → Docker exec (ENV vars)
 ```
 
-Go service NIKDY neuklada credentials na disk. Drzi je v pameti jen po dobu exec volani.
+V sidecar modu Go service NIKDY neuklada credentials na disk a agent je
+NIKDY nevidi. Credentials existuji jen v heap pameti sidecar procesu (UID 1002).
+
+> Viz `prd/SIDECAR.md` sekce 2.1 pro kompletni credential flow diagram.
 
 ### 3.5 Credential pool bezpecnost
 
@@ -225,8 +255,19 @@ Kdyz agent ma vice klicu pro stejny env var (credential pool):
 
 ### 3.6 Log redaction
 
-Strukturovane logovani (JSON) s redakci citlivych poli:
+**Agent stdout scrubbing (IMPLEMENTOVANO):**
+Kazdy radek agent stdout prochazi pres `internal/scrubber/Scrubber` pred
+odeslanim na WebSocket nebo JSONL log. Detekovane patterns:
+- Anthropic keys (`sk-ant-*`), OpenAI keys (`sk-proj-*`, `sk-{20+}`),
+  Google keys (`AIzaSy...`)
+- GitHub tokens (`ghp_`, `gho_`, `ghs_`, `ghr_`, `github_pat_`)
+- Slack tokens (`xoxb-`, `xoxp-`, `xoxa-`, `xoxr-`)
+- AWS keys (`AKIA*`), JWT Bearer tokens
+- SSH/RSA/EC private keys (multiline)
+- JSON `"password":"value"`, ENV `SECRET_KEY=value`
+- Custom patterns via `AddPattern()`
 
+**Server-side structured log redaction:**
 ```
 Redakovane patterns: password, token, secret, key, apiKey, api_key,
   encrypted_value, ENCRYPTION_KEY, NEXTAUTH_SECRET, *_API_KEY,
@@ -417,9 +458,12 @@ NextAuth ma vestaveny CSRF token (double-submit cookie).
 |---|---|
 | Primy ("ignoruj instrukce") | Docker izolace — agent nema kam data poslat krome stdout |
 | Neprimy (z webu) | Tool profiles (MINIMAL = zadny exec), timeout |
-| Data exfiltrace pres HTTP | --internal network, jen LLM allowlist |
+| Data exfiltrace pres HTTP | --internal network + sidecar domain allowlist (HTTP 403) |
 | Data exfiltrace pres DNS | Phase 2: CoreDNS logging |
-| Credential theft (ENV vars) | Agent je legitimne potrebuje, network izolace brani odeslani |
+| Credential theft (ENV vars) | **Sidecar mode: agent NEMA realne klice** (jen dummy), sidecar injektuje per-request |
+| Credential theft (/proc/self/environ) | **Sidecar mode: env obsahuje jen dummy klice**, realne klice jen v heap UID 1002 |
+| Credential theft (stdout) | **Scrubber redaktuje 13+ credential patterns** pred WebSocket/JSONL |
+| Credential theft (filesystem) | **setupClaudeConfig() nezapisuje credentials**, read-only rootfs |
 
 ### 6.2 Container escape
 
@@ -553,6 +597,12 @@ NextAuth ma vestaveny CSRF token (double-submit cookie).
 - RBAC: KAZDY endpoint × KAZDA role
 - Encryption: encrypt/decrypt, wrong key, tampered data, key versioning
 - Validation: SQL injection, path traversal, XSS, max lengths
+- Sidecar: 25 security testu (allowlist bypass, host header attack, cred leak,
+  hop-by-hop, /proc izolace, concurrent safety) -- internal/sidecar/security_test.go
+- Scrubber: 12 security testu (Google key, multi-cred, nested JSON, base64, ReDoS,
+  unicode, concurrent) -- internal/scrubber/security_test.go
+- Orchestrator: 8 security testu (fuzz creds, sidecar env isolation, NO_PROXY,
+  shell injection, stream scrubbing) -- internal/orchestrator/security_test.go
 ```
 
 ### 10.3 Integracni testy
@@ -568,14 +618,34 @@ NextAuth ma vestaveny CSRF token (double-submit cookie).
 - Webhook secret validation
 ```
 
+### 10.3a Docker penetracni testy (PROVEDENO, 12/12 PASS)
+
+```
+Provedeno v zivem kontejneru s sidecarem na UID 1002:
+1. /proc/self/environ neobsahuje API klice ✅
+2. Sidecar bezi jako UID 1002 (ne 1001) ✅
+3. /proc/<sidecar>/mem → Permission denied ✅
+4. /proc/<sidecar>/cmdline neobsahuje credentials ✅
+5. Filesystem scan nenajde zadne credentials ✅
+6. Root filesystem je read-only ✅
+7. Agent ma nulove capabilities ✅
+8. Sidecar binary je stripped ✅
+9. Proxy blokuje evil.com (403) ✅
+10. Proxy povoluje api.anthropic.com (405 = reached API) ✅
+11. Health endpoint vraci ok ✅
+12. Health endpoint neukazuje credential hodnoty ✅
+```
+
 ### 10.4 Manualni (pred launchem)
 
 ```
 - RBAC review: kazdy route.ts ma withRBAC
-- Credential flow: create → encrypt → inject → verify no leak
+- Credential flow: create → encrypt → sidecar inject → verify no leak
 - Agent escape: docker exec → curl localhost:5432 (musi selhat)
 - Network izolace: nmap z kontejneru (musi selhat)
 - Prompt injection: 10 znamych vzoru
+- Sidecar bypass: agent pokusi o pristup k /proc/<sidecar>/mem (musi selhat)
+- Domain allowlist: agent curl evil.com (musi dostat 403)
 - Audit log integrity: UPDATE/DELETE musi selhat
 - Security headers: curl -I
 ```
