@@ -125,10 +125,10 @@ func BuildEnvVarsSidecar(req AgentRunRequest) []string {
 		// Claude Code: point base URL to sidecar so it uses HTTP (not HTTPS)
 		// and the proxy can inject the real API key
 		"ANTHROPIC_BASE_URL=http://127.0.0.1:9119",
-		// Dummy key -- the sidecar replaces it with the real one
+		// Dummy keys -- the sidecar replaces them with real ones per-request
 		"ANTHROPIC_API_KEY=sk-ant-dummy-crewship-sidecar",
-		// OpenAI dummy key for Codex CLI
 		"OPENAI_API_KEY=sk-dummy-crewship-sidecar",
+		"GOOGLE_API_KEY=dummy-crewship-sidecar",
 	}
 	return env
 }
@@ -231,7 +231,7 @@ func startSidecar(
 	logger.Info("sidecar started",
 		"container_id", containerID[:min(12, len(containerID))],
 		"credentials", len(sc),
-		"output", string(output),
+		"output_bytes", len(output),
 	)
 	return nil
 }
