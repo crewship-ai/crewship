@@ -250,18 +250,19 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	var agentID, agentSlug, agentName, cliAdapter, toolProfile, wsID string
 	var systemPrompt, roleTitle sql.NullString
 	var timeoutSecs int
+	var memoryEnabled bool
 	var crewID, crewSlug, crewName sql.NullString
 
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.slug, a.name, a.role_title, a.cli_adapter, a.system_prompt,
-			a.tool_profile, a.timeout_seconds,
+			a.tool_profile, a.timeout_seconds, a.memory_enabled,
 			c2.id, c2.slug, c2.name, c.workspace_id
 		FROM chats c
 		JOIN agents a ON a.id = c.agent_id
 		LEFT JOIN crews c2 ON c2.id = a.crew_id
 		WHERE c.id = ?
 	`, chatID).Scan(&agentID, &agentSlug, &agentName, &roleTitle, &cliAdapter, &systemPrompt,
-		&toolProfile, &timeoutSecs,
+		&toolProfile, &timeoutSecs, &memoryEnabled,
 		&crewID, &crewSlug, &crewName, &wsID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found"})
@@ -389,6 +390,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		"credentials":     creds,
 		"timeout_seconds": timeoutSecs,
 		"workspace_id":    wsID,
+		"memory_enabled":  memoryEnabled,
 	})
 }
 

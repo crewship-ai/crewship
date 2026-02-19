@@ -22,17 +22,18 @@ type ChatResolver interface {
 }
 
 type ChatInfo struct {
-	AgentID      string
-	AgentSlug    string
-	CrewID       string
-	CrewSlug     string
-	ContainerID  string
-	CLIAdapter   string
-	SystemPrompt string
-	ToolProfile  string
-	Credentials  []orchestrator.Credential
-	TimeoutSecs  int
-	WorkspaceID  string
+	AgentID       string
+	AgentSlug     string
+	CrewID        string
+	CrewSlug      string
+	ContainerID   string
+	CLIAdapter    string
+	SystemPrompt  string
+	ToolProfile   string
+	Credentials   []orchestrator.Credential
+	TimeoutSecs   int
+	WorkspaceID   string
+	MemoryEnabled bool
 }
 
 type Bridge struct {
@@ -136,18 +137,19 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	var fullResponse string
 
 	req := orchestrator.AgentRunRequest{
-		AgentID:      info.AgentID,
-		AgentSlug:    info.AgentSlug,
-		CrewID:       info.CrewID,
-		CrewSlug:     info.CrewSlug,
-		ChatID:    chatID,
-		ContainerID:  containerID,
-		CLIAdapter:   info.CLIAdapter,
-		SystemPrompt: info.SystemPrompt,
-		UserMessage:  content,
-		ToolProfile:  info.ToolProfile,
-		Credentials:  info.Credentials,
-		TimeoutSecs:  info.TimeoutSecs,
+		AgentID:       info.AgentID,
+		AgentSlug:     info.AgentSlug,
+		CrewID:        info.CrewID,
+		CrewSlug:      info.CrewSlug,
+		ChatID:        chatID,
+		ContainerID:   containerID,
+		CLIAdapter:    info.CLIAdapter,
+		SystemPrompt:  info.SystemPrompt,
+		UserMessage:   content,
+		ToolProfile:   info.ToolProfile,
+		Credentials:   info.Credentials,
+		TimeoutSecs:   info.TimeoutSecs,
+		MemoryEnabled: info.MemoryEnabled,
 	}
 
 	handler := func(event orchestrator.AgentEvent) {

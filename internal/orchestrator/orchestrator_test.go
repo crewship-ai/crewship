@@ -57,6 +57,7 @@ type mockContainer struct {
 	execResults   []*provider.ExecResult
 	execErr       error
 	execCallIdx   int
+	execFn        func(cfg provider.ExecConfig) (*provider.ExecResult, error) // callback-based mock
 	inspectResult struct {
 		running  bool
 		exitCode int
@@ -72,7 +73,11 @@ func (m *mockContainer) RemoveCrewRuntime(_ context.Context, _ string) error  { 
 func (m *mockContainer) ContainerStatus(_ context.Context, _ string) (*provider.ContainerStatus, error) {
 	return &provider.ContainerStatus{State: "running"}, nil
 }
-func (m *mockContainer) Exec(_ context.Context, _ provider.ExecConfig) (*provider.ExecResult, error) {
+func (m *mockContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	// Callback-based mock takes priority
+	if m.execFn != nil {
+		return m.execFn(cfg)
+	}
 	if m.execErr != nil {
 		return nil, m.execErr
 	}

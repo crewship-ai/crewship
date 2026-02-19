@@ -12,29 +12,53 @@ import (
 	"github.com/crewship-ai/crewship/internal/sidecar"
 )
 
+// sidecarInput is the JSON payload piped via stdin from the orchestrator.
+// It carries credentials and optional memory configuration.
+type sidecarInput struct {
+	Credentials []sidecar.Credential  `json:"credentials"`
+	Memory      *sidecar.MemoryConfig `json:"memory,omitempty"`
+}
+
 func main() {
 	addr := flag.String("addr", sidecar.DefaultAddr, "listen address")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	// Read credentials from stdin as JSON array.
-	// The orchestrator pipes them at startup to avoid putting secrets
-	// in env vars, command args, or files on disk.
-	var creds []sidecar.Credential
-	if err := json.NewDecoder(os.Stdin).Decode(&creds); err != nil {
-		logger.Error("failed to read credentials from stdin", "error", err)
+	// Read configuration from stdin as JSON.
+	// The orchestrator pipes credentials and memory config at startup to
+	// avoid putting secrets in env vars, command args, or files on disk.
+	//
+	// Backwards compatible: accepts both the new object format and the
+	// legacy array-of-credentials format.
+	var input sidecarInput
+	rawBytes, err := readStdin()
+	if err != nil {
+		logger.Error("failed to read stdin", "error", err)
 		os.Exit(1)
+	}
+
+	// Try new object format first
+	if err := json.Unmarshal(rawBytes, &input); err != nil || len(input.Credentials) == 0 {
+		// Fall back to legacy array format
+		var creds []sidecar.Credential
+		if err := json.Unmarshal(rawBytes, &creds); err != nil {
+			logger.Error("failed to parse stdin as credentials", "error", err)
+			os.Exit(1)
+		}
+		input.Credentials = creds
 	}
 
 	logger.Info("sidecar starting",
 		"addr", *addr,
-		"credentials", len(creds),
+		"credentials", len(input.Credentials),
+		"memory_enabled", input.Memory != nil && input.Memory.Enabled,
 	)
 
 	srv := sidecar.NewServer(sidecar.ServerConfig{
 		Addr:        *addr,
-		Credentials: creds,
+		Credentials: input.Credentials,
+		Memory:      input.Memory,
 		Logger:      logger,
 	})
 
@@ -63,4 +87,19 @@ func main() {
 		logger.Error("sidecar error", "error", err)
 		os.Exit(1)
 	}
+}
+
+func readStdin() ([]byte, error) {
+	var buf []byte
+	tmp := make([]byte, 4096)
+	for {
+		n, err := os.Stdin.Read(tmp)
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+		}
+		if err != nil {
+			break
+		}
+	}
+	return buf, nil
 }

@@ -20,18 +20,19 @@ import (
 var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 type AgentRunRequest struct {
-	AgentID      string
-	AgentSlug    string
-	CrewID       string
-	CrewSlug     string
-	ChatID    string
-	ContainerID  string
-	CLIAdapter   string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI
-	SystemPrompt string
-	UserMessage  string
-	ToolProfile  string // MINIMAL, CODING, MESSAGING, FULL
-	Credentials  []Credential
-	TimeoutSecs  int
+	AgentID       string
+	AgentSlug     string
+	CrewID        string
+	CrewSlug      string
+	ChatID        string
+	ContainerID   string
+	CLIAdapter    string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI
+	SystemPrompt  string
+	UserMessage   string
+	ToolProfile   string // MINIMAL, CODING, MESSAGING, FULL
+	Credentials   []Credential
+	TimeoutSecs   int
+	MemoryEnabled bool
 }
 
 type Credential struct {
@@ -140,6 +141,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	}
 
+	// Inject agent memory context into system prompt (after conversation history)
+	if req.MemoryEnabled {
+		memoryCtx := o.buildMemoryContext(ctx, req)
+		if memoryCtx != "" {
+			req.SystemPrompt = req.SystemPrompt + "\n\n" + memoryCtx
+		}
+	}
+
 	if !validSlugRe.MatchString(req.AgentSlug) || req.AgentSlug != path.Base(req.AgentSlug) {
 		return fmt.Errorf("invalid agent slug: %q", req.AgentSlug)
 	}
@@ -158,7 +167,15 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				Timestamp: time.Now(),
 			})
 		}
-		if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, o.logger); err != nil {
+		var memoryCfg *SidecarMemoryConfig
+		if req.MemoryEnabled {
+			memoryCfg = &SidecarMemoryConfig{
+				Enabled:   true,
+				BasePath:  path.Join("/output", req.AgentSlug, ".memory"),
+				AgentSlug: req.AgentSlug,
+			}
+		}
+		if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, o.logger); err != nil {
 			o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
 			o.updateRunStatus(ctx, runState.ID, "error")
 			return fmt.Errorf("start sidecar: %w", err)
@@ -198,6 +215,25 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	} else {
 		io.Copy(io.Discard, mkResult.Reader)
 		mkResult.Reader.Close()
+	}
+
+	// Create .memory/ directories for persistent agent memory
+	if req.MemoryEnabled {
+		memoryDir := path.Join(outputDir, ".memory")
+		memoryDailyDir := path.Join(memoryDir, "daily")
+		memorySnapshotsDir := path.Join(memoryDir, ".snapshots")
+		mkMemCfg := provider.ExecConfig{
+			ContainerID: req.ContainerID,
+			Cmd:         []string{"mkdir", "-p", memoryDir, memoryDailyDir, memorySnapshotsDir},
+			User:        "1001:1001",
+		}
+		mkMemResult, err := o.container.Exec(ctx, mkMemCfg)
+		if err != nil {
+			o.logger.Warn("failed to create memory dirs", "error", err)
+		} else {
+			io.Copy(io.Discard, mkMemResult.Reader)
+			mkMemResult.Reader.Close()
+		}
 	}
 
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
