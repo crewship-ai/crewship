@@ -181,3 +181,4 @@ DATABASE_URL=                       # Optional PostgreSQL connection string
 - Branch from `main`
 - Conventional commits: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`
 - Never commit `.env.local` or real credentials
+- Do NOT add `Co-Authored-By` lines to commit messages
