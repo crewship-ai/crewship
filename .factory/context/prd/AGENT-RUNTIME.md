@@ -895,6 +895,97 @@ importujeme verified Docker MCP images a re-scanujeme nasim pipeline.
 
 ---
 
+## 6B. CONCURRENT FILE ACCESS
+
+### 6B.1 Problem
+
+Kdyz 2+ agenti v crew pracuji paralelne (Phase 2 paralelni assignments),
+mohou zapisovat do stejneho souboru soucasne. Bez koordinace dochazi
+k datove ztrate (posledni zapis vyhrava) nebo ke korupci souboru.
+
+### 6B.2 Fazovani
+
+**Phase 1 (MVP): Zadny locking neni treba.**
+- `claude --print` je jednorazovy run (ne long-running session)
+- crewshipd spousti agenty sekvencne v ramci jedne crew (1 exec naraz)
+- Dva agenti nepisou do stejneho souboru soucasne
+- Kazdy agent ma vlastni output adresar (`/output/{agent_slug}/`)
+- Sdileny `_shared/` adresar neni v MVP implementovan
+
+**Phase 2 (paralelni assignments): Advisory file locking pres sidecar.**
+
+Sidecar (localhost:9119) implementuje jednoduchy advisory lock manager:
+
+```
+POST /locks/acquire   — ziskej lock na soubor (blocking, timeout)
+DELETE /locks/release  — uvolni lock
+GET /locks             — seznam aktivnich locku (debug)
+```
+
+```json
+POST http://localhost:9119/locks/acquire
+{
+  "path": "/output/_shared/report.md",
+  "agent": "bob",
+  "timeout_s": 30
+}
+
+Response (200 OK):
+{"lock_id": "uuid", "acquired": true}
+
+Response (409 Conflict):
+{"acquired": false, "holder": "alice", "retry_after_s": 5}
+```
+
+Vlastnosti:
+- **Advisory** — agent MUSI aktivne ziskat lock pred zapisem (neenforcovane na FS urovni)
+- **Timeout-based auto-release** — lock se automaticky uvolni po 30s (ochrana pred dead agenty)
+- **Per-file granularita** — lock je na konkretni cestu, ne na cely adresar
+- **In-memory** — locky ziji v sidecar pameti, nepreziji restart kontejneru (ok pro ephemeral sessions)
+- Agent system prompt bude instruovat: "Before writing to _shared/, acquire a lock via sidecar"
+
+**Phase 2 alternativa: Copy-on-write pattern.**
+
+Misto lockingu kazdy agent pracuje na vlastni kopii sdileneho souboru:
+1. Agent zkopiruje `/output/_shared/report.md` do `/output/{agent}/report-draft.md`
+2. Agent upravi svou kopii
+3. Lead merguje kopie do finalni verze v `_shared/`
+
+Vyhoda: zadny locking, zadny contention. Nevyhoda: lead musi mergovat (vic LLM tokenu).
+
+**Phase 3: OT/CRDT pro real-time kolaboraci.**
+
+Pro scenare kde 2+ agenti musi editovat stejny soubor v realnem case
+(napr. spolecny kod), zvazit:
+- Operational Transformation (OT) — Google Docs pattern
+- CRDT (Conflict-free Replicated Data Types) — Yjs/Automerge
+- Toto je pravdepodobne overkill pro vetsinu use cases
+
+### 6B.3 Working directory vs Output directory
+
+```
+/workspace/{agent_slug}/   ← SCRATCH SPACE (Docker volume, ephemeral)
+  ├── .claude/             ← Claude Code session state
+  ├── scratch/             ← docasne soubory
+  └── ...
+
+/output/{agent_slug}/      ← AGENT CWD + OUTPUT (bind mount, persistent, user-visible)
+  ├── report.pdf           ← deliverables (viditelne v Files panelu)
+  ├── data.csv
+  ├── .memory/             ← agent long-term memory
+  └── .skills/             ← persistent skill data
+
+/output/_shared/           ← CREW SHARED (Phase 2, bind mount, persistent)
+  ├── project-brief.md     ← spolecne soubory pro celou crew
+  └── ...
+```
+
+Agent CWD je nastaven na `/output/{agent_slug}/` — vsechno co agent vytvori
+nebo upravi se okamzite objevi v Files panelu. `/workspace/` slouzi jako
+scratch space pro docasne soubory a CLI state (`.claude/`).
+
+---
+
 ## 7. JOB STATE (bbolt WAL)
 
 ### 7.1 Proc bbolt
@@ -1563,3 +1654,4 @@ Pro Phase 3+ zvazit Firecracker pro scenare kde gVisor nestaci
 19. **Externi MCP servery** — Phase 3: sdilene MCP servery across crews. Streamable HTTP transport.
 20. **MCP server resource limits** — Max MCP serveru per kontejner? Memory/CPU limity per server?
 21. **Per-agent cost tracking** — Sledovani nakladu per agent/crew/workspace (LLM tokeny, compute time). ADR planovane.
+22. **Concurrent file access** — Kdyz 2+ agenti v crew zapisuji do stejneho souboru soucasne (Phase 2 paralelni assignments), jak zabranit datove ztrate? Advisory locking pres sidecar? Copy-on-write s lead merge? Viz sekce 6B.

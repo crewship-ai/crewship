@@ -318,9 +318,10 @@ Admin can purge archives (GDPR).
 - **UI** = File browser displays content via crewship HTTP API (GET /api/v1/crews/{id}/files/)
 
 **Per-agent vs per-crew isolation:**
-- `/output/{crew}/{agent}/` = per-agent (default, isolated)
-- `/output/{crew}/_shared/` = shared across agents in crew (for collaboration)
+- `/output/{crew}/{agent}/` = per-agent (default, isolated). Agent CWD is set here so files are immediately visible in UI.
+- `/output/{crew}/_shared/` = shared across agents in crew (for collaboration, Phase 2)
 - Landlock (Phase 2) = agent "bob" sees only `/output/{crew}/bob/` and `/output/{crew}/_shared/`, NOT `/output/{crew}/alice/`
+- Concurrent write safety for `_shared/`: advisory file locking via sidecar (Phase 2). See AGENT-RUNTIME.md section 6B.
 
 ### Logs
 

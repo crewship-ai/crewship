@@ -90,17 +90,17 @@ func TestBuildCLICommand(t *testing.T) {
 		{
 			"claude code default",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble, "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble, "--", "hello"},
 		},
 		{
 			"claude code with system prompt",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", SystemPrompt: "be helpful", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble + "be helpful", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble + "be helpful", "--", "hello"},
 		},
 		{
 			"claude code minimal profile",
 			AgentRunRequest{CLIAdapter: "CLAUDE_CODE", ToolProfile: "MINIMAL", UserMessage: "hello"},
-			[]string{"claude", "--print", "--output-format", "stream-json", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Search,Grep", "hello"},
+			[]string{"claude", "--print", "--output-format", "stream-json", "--dangerously-skip-permissions", "--verbose", "--system-prompt", crewshipSystemPreamble, "--tools", "Read,Search,Grep", "--", "hello"},
 		},
 		{
 			"codex cli",
@@ -110,7 +110,12 @@ func TestBuildCLICommand(t *testing.T) {
 		{
 			"gemini cli",
 			AgentRunRequest{CLIAdapter: "GEMINI_CLI", UserMessage: "hello"},
-			[]string{"gemini", "-p", "hello"},
+			[]string{"gemini", "--system-instruction", crewshipSystemPreamble, "-p", "hello"},
+		},
+		{
+			"gemini cli with system prompt",
+			AgentRunRequest{CLIAdapter: "GEMINI_CLI", SystemPrompt: "be helpful", UserMessage: "hello"},
+			[]string{"gemini", "--system-instruction", crewshipSystemPreamble + "be helpful", "-p", "hello"},
 		},
 		{
 			"opencode",

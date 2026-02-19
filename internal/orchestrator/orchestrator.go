@@ -133,13 +133,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	env := BuildEnvVars(req, cred)
 	cmd := BuildCLICommand(req)
 
-	workDir := path.Join("/workspace", req.AgentSlug)
+	scratchDir := path.Join("/workspace", req.AgentSlug)
 	outputDir := path.Join("/output", req.AgentSlug)
+	workDir := outputDir // CWD = output dir so files are immediately visible to user
 
-	// Create both workspace and output directories for the agent
+	// Create scratch and output directories for the agent
 	mkdirCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,
-		Cmd:         []string{"mkdir", "-p", workDir, outputDir},
+		Cmd:         []string{"mkdir", "-p", scratchDir, outputDir},
 		User:        "1001:1001",
 	}
 	mkResult, err := o.container.Exec(ctx, mkdirCfg)
@@ -155,6 +156,11 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// Inject Claude OAuth credential files into the container
 	if err := setupClaudeCredentials(ctx, o.container, req.ContainerID, cred, o.logger); err != nil {
 		o.logger.Warn("failed to inject claude credentials", "error", err, "agent_id", req.AgentID)
+	}
+
+	// Write CLI-specific system prompt files (e.g. AGENTS.md for OpenCode)
+	if err := setupSystemPromptFiles(ctx, o.container, req.ContainerID, req, workDir, o.logger); err != nil {
+		o.logger.Warn("failed to write system prompt files", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
 	}
 
 	execCfg := provider.ExecConfig{

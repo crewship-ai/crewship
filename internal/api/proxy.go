@@ -207,8 +207,7 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	agentFilePath := fmt.Sprintf("%s/%s", slug.String, cleanPath)
-	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID.String, url.QueryEscape(agentFilePath))
+	ipcPath := fmt.Sprintf("/crews/%s/files/download?path=%s", crewID.String, url.QueryEscape(cleanPath))
 
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
@@ -244,9 +243,10 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var crewID sql.NullString
+	var slug string
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&crewID)
+		"SELECT crew_id, slug FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&crewID, &slug)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
@@ -256,7 +256,7 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=%s&limit=%s", agentID, crewID.String, offset, limit)
+	path := fmt.Sprintf("/agents/%s/logs?crew_id=%s&offset=%s&limit=%s", slug, crewID.String, offset, limit)
 	resp, err := h.ipcGet(r.Context(), path)
 	if err != nil {
 		writeJSON(w, http.StatusOK, []interface{}{})

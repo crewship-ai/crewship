@@ -5,7 +5,7 @@ import {
   User, Palette, Bell, Shield, Building, Users, CreditCard,
   AlertTriangle, Check, X, Key
 } from "lucide-react"
-import { useSession } from "next-auth/react"
+import { useSession } from "@/hooks/use-auth"
 import {
   AlertDialog,
   AlertDialogAction,

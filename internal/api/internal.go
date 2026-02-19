@@ -1,11 +1,15 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -245,20 +249,22 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 
-	var agentID, agentSlug, cliAdapter, toolProfile string
-	var systemPrompt sql.NullString
+	var agentID, agentSlug, agentName, cliAdapter, toolProfile, wsID string
+	var systemPrompt, roleTitle sql.NullString
 	var timeoutSecs int
-	var crewID, crewSlug sql.NullString
+	var crewID, crewSlug, crewName sql.NullString
 
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT a.id, a.slug, a.cli_adapter, a.system_prompt, a.tool_profile, a.timeout_seconds,
-			c2.id, c2.slug
+		SELECT a.id, a.slug, a.name, a.role_title, a.cli_adapter, a.system_prompt,
+			a.tool_profile, a.timeout_seconds,
+			c2.id, c2.slug, c2.name, c.workspace_id
 		FROM chats c
 		JOIN agents a ON a.id = c.agent_id
 		LEFT JOIN crews c2 ON c2.id = a.crew_id
 		WHERE c.id = ?
-	`, chatID).Scan(&agentID, &agentSlug, &cliAdapter, &systemPrompt, &toolProfile, &timeoutSecs,
-		&crewID, &crewSlug)
+	`, chatID).Scan(&agentID, &agentSlug, &agentName, &roleTitle, &cliAdapter, &systemPrompt,
+		&toolProfile, &timeoutSecs,
+		&crewID, &crewSlug, &crewName, &wsID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found"})
 		return
@@ -321,10 +327,57 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		crewSlugStr = crewSlug.String
 	}
 
-	sysPrompt := ""
-	if systemPrompt.Valid {
-		sysPrompt = systemPrompt.String
+	// Build structured system prompt: identity → persona → skills
+	var promptParts []string
+
+	// [AGENT IDENTITY] section
+	identityLines := []string{"[AGENT IDENTITY]"}
+	identityLines = append(identityLines, fmt.Sprintf("Name: %s", agentName))
+	if roleTitle.Valid && roleTitle.String != "" {
+		identityLines = append(identityLines, fmt.Sprintf("Role: %s", roleTitle.String))
 	}
+	if crewName.Valid && crewName.String != "" {
+		identityLines = append(identityLines, fmt.Sprintf("Crew: %s", crewName.String))
+	}
+	promptParts = append(promptParts, strings.Join(identityLines, "\n"))
+
+	// [PERSONA] section -- user-defined system prompt
+	if systemPrompt.Valid && systemPrompt.String != "" {
+		promptParts = append(promptParts, "[PERSONA]\n"+systemPrompt.String)
+	}
+
+	// [ACTIVE SKILLS] section
+	skillRows, err := h.db.QueryContext(r.Context(), `
+		SELECT s.name, s.content
+		FROM agent_skills as2
+		JOIN skills s ON s.id = as2.skill_id
+		WHERE as2.agent_id = ? AND as2.enabled = 1 AND s.content IS NOT NULL AND s.content != ''
+		ORDER BY s.name
+	`, agentID)
+	if err != nil {
+		h.logger.Error("resolve chat skills", "error", err)
+	} else {
+		defer skillRows.Close()
+		var skillParts []string
+		for skillRows.Next() {
+			var name, content string
+			if err := skillRows.Scan(&name, &content); err != nil {
+				h.logger.Error("scan skill for resolve", "error", err)
+				continue
+			}
+			skillParts = append(skillParts, fmt.Sprintf("--- Skill: %s ---\n%s", name, content))
+		}
+		if err := skillRows.Err(); err != nil {
+			h.logger.Error("rows iteration (resolve skills)", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		if len(skillParts) > 0 {
+			promptParts = append(promptParts, "[ACTIVE SKILLS]\n"+strings.Join(skillParts, "\n\n"))
+		}
+	}
+
+	sysPrompt := strings.Join(promptParts, "\n\n")
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"agent_id":        agentID,
@@ -337,5 +390,110 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		"tool_profile":    toolProfile,
 		"credentials":     creds,
 		"timeout_seconds": timeoutSecs,
+		"workspace_id":    wsID,
 	})
+}
+
+func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ID          string `json:"id"`
+		AgentID     string `json:"agent_id"`
+		ChatID      string `json:"chat_id"`
+		WorkspaceID string `json:"workspace_id"`
+		TriggerType string `json:"trigger_type"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		return
+	}
+	if body.ID == "" || body.AgentID == "" || body.WorkspaceID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id, agent_id, workspace_id required"})
+		return
+	}
+	if body.TriggerType == "" {
+		body.TriggerType = "USER"
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := h.db.ExecContext(r.Context(), `
+		INSERT INTO agent_runs (id, agent_id, chat_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, ?)`,
+		body.ID, body.AgentID, body.ChatID, body.WorkspaceID, body.TriggerType, now, now)
+	if err != nil {
+		h.logger.Error("create run", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"id": body.ID, "status": "RUNNING"})
+}
+
+func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("runId")
+	var body struct {
+		Status       string          `json:"status"`
+		ExitCode     *int            `json:"exit_code"`
+		ErrorMessage *string         `json:"error_message"`
+		Metadata     json.RawMessage `json:"metadata"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		return
+	}
+
+	validStatuses := map[string]bool{
+		"RUNNING": true, "COMPLETED": true, "FAILED": true, "CANCELLED": true,
+	}
+	if !validStatuses[body.Status] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid status"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	terminal := map[string]bool{"COMPLETED": true, "FAILED": true, "CANCELLED": true}
+	query := "UPDATE agent_runs SET status = ?"
+	args := []interface{}{body.Status}
+	if terminal[body.Status] {
+		query += ", finished_at = ?"
+		args = append(args, now)
+	}
+
+	if body.ExitCode != nil {
+		query += ", exit_code = ?"
+		args = append(args, *body.ExitCode)
+	}
+	if body.ErrorMessage != nil {
+		query += ", error_message = ?"
+		args = append(args, *body.ErrorMessage)
+	}
+	if body.Metadata != nil {
+		query += ", metadata = ?"
+		args = append(args, string(body.Metadata))
+	}
+	query += " WHERE id = ?"
+	args = append(args, runID)
+
+	_, err := h.db.ExecContext(r.Context(), query, args...)
+	if err != nil {
+		h.logger.Error("update run", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": body.Status})
+}
+
+func WriteAuditLog(ctx context.Context, db *sql.DB, action, entityType, entityID, userID, workspaceID string, metadata map[string]interface{}) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	metaJSON := "{}"
+	if metadata != nil {
+		if b, err := json.Marshal(metadata); err == nil {
+			metaJSON = string(b)
+		}
+	}
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO audit_logs (id, workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
+		VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)`,
+		workspaceID, userID, action, entityType, entityID, metaJSON, now)
+	if err != nil {
+		slog.Debug("audit log write failed", "error", err, "action", action)
+	}
 }
