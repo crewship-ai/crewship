@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"sort"
 	"sync"
 )
 
@@ -45,7 +46,9 @@ func (cs *CredStore) Load(creds []Credential) {
 	cs.idx = make(map[ProviderType]int)
 }
 
-// Select picks the next active credential for a provider using round-robin.
+// Select picks the next active credential for a provider.
+// Credentials are grouped by Priority (lower = higher priority).
+// Within the highest-priority tier, round-robin rotation is used.
 // Returns nil if no credential is available.
 func (cs *CredStore) Select(provider ProviderType) *Credential {
 	cs.mu.Lock()
@@ -61,10 +64,29 @@ func (cs *CredStore) Select(provider ProviderType) *Credential {
 		return nil
 	}
 
-	idx := cs.idx[provider] % len(candidates)
-	cs.idx[provider] = idx + 1
+	// Find the highest priority (lowest numeric value) among candidates
+	bestPriority := cs.creds[candidates[0]].Priority
+	for _, idx := range candidates[1:] {
+		if cs.creds[idx].Priority < bestPriority {
+			bestPriority = cs.creds[idx].Priority
+		}
+	}
 
-	result := cs.creds[candidates[idx]]
+	// Filter to only the top-priority tier
+	var topTier []int
+	for _, idx := range candidates {
+		if cs.creds[idx].Priority == bestPriority {
+			topTier = append(topTier, idx)
+		}
+	}
+
+	// Stable ordering within tier for deterministic round-robin
+	sort.Ints(topTier)
+
+	rrIdx := cs.idx[provider] % len(topTier)
+	cs.idx[provider] = rrIdx + 1
+
+	result := cs.creds[topTier[rrIdx]]
 	return &result
 }
 

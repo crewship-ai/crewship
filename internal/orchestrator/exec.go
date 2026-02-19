@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -106,6 +107,8 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 // The agent gets dummy/empty API keys and proxy configuration pointing to the sidecar.
 func BuildEnvVarsSidecar(req AgentRunRequest) []string {
 	env := []string{
+		"HOME=/home/agent",
+		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
 		"CREWSHIP_AGENT_ID=" + req.AgentID,
 		"CREWSHIP_CREW_ID=" + req.CrewID,
 		"CREWSHIP_CHAT_ID=" + req.ChatID,
@@ -185,9 +188,13 @@ func startSidecar(
 
 	// Start sidecar as a background process.
 	// Pipe credentials JSON via base64-decoded stdin to avoid shell injection.
+	// Health check: verify sidecar is responding, exit 1 on failure so orchestrator knows.
 	script := fmt.Sprintf(
 		`echo '%s' | base64 -d | crewship-sidecar --addr 127.0.0.1:9119 &`+
-			"\n"+`sleep 0.5`+"\n"+`wget -q -O /dev/null http://127.0.0.1:9119/health 2>/dev/null || curl -sf http://127.0.0.1:9119/health >/dev/null 2>&1`,
+			"\n"+`sleep 0.5`+"\n"+
+			`if wget -q -O /dev/null http://127.0.0.1:9119/health 2>/dev/null; then exit 0; `+
+			`elif curl -sf http://127.0.0.1:9119/health >/dev/null 2>&1; then exit 0; `+
+			`else echo "sidecar health check failed" >&2; exit 1; fi`,
 		credsB64,
 	)
 
@@ -207,6 +214,11 @@ func startSidecar(
 
 	output, _ := io.ReadAll(result.Reader)
 	result.Reader.Close()
+
+	// Check if the health check script exited with an error
+	if running, exitCode, inspErr := container.ExecInspect(ctx, result.ExecID); inspErr == nil && !running && exitCode != 0 {
+		return fmt.Errorf("sidecar health check failed (exit %d): %s", exitCode, strings.TrimSpace(string(output)))
+	}
 
 	logger.Info("sidecar started",
 		"container_id", containerID[:min(12, len(containerID))],

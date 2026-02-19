@@ -102,6 +102,48 @@ func TestCredStoreLoadReplacesAll(t *testing.T) {
 	}
 }
 
+func TestCredStoreSelectPriorityAware(t *testing.T) {
+	cs := NewCredStore()
+	cs.Load([]Credential{
+		{ID: "low", Provider: ProviderAnthropic, Token: "sk-low", Priority: 2},
+		{ID: "high1", Provider: ProviderAnthropic, Token: "sk-high1", Priority: 1},
+		{ID: "high2", Provider: ProviderAnthropic, Token: "sk-high2", Priority: 1},
+	})
+
+	// Should only round-robin within the highest-priority (Priority=1) tier
+	first := cs.Select(ProviderAnthropic)
+	if first == nil || first.Priority != 1 {
+		t.Fatalf("expected priority 1 cred, got %v", first)
+	}
+	second := cs.Select(ProviderAnthropic)
+	if second == nil || second.Priority != 1 {
+		t.Fatalf("expected priority 1 cred, got %v", second)
+	}
+	// Both selects should be from {high1, high2}
+	if first.ID == second.ID {
+		t.Errorf("expected round-robin between high1/high2, got same: %s", first.ID)
+	}
+	// Third call wraps around
+	third := cs.Select(ProviderAnthropic)
+	if third == nil || third.ID != first.ID {
+		t.Errorf("expected wrap-around to %s, got %v", first.ID, third)
+	}
+}
+
+func TestCredStoreSelectSinglePriority(t *testing.T) {
+	cs := NewCredStore()
+	cs.Load([]Credential{
+		{ID: "c1", Provider: ProviderAnthropic, Token: "sk-1", Priority: 5},
+		{ID: "c2", Provider: ProviderAnthropic, Token: "sk-2", Priority: 5},
+	})
+	// Same priority: normal round-robin
+	first := cs.Select(ProviderAnthropic)
+	second := cs.Select(ProviderAnthropic)
+	if first.ID == second.ID {
+		t.Error("expected round-robin between c1/c2")
+	}
+}
+
 func TestCredStoreConcurrentAccess(t *testing.T) {
 	cs := NewCredStore()
 	cs.Load([]Credential{

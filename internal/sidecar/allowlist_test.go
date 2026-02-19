@@ -26,6 +26,25 @@ func TestDomainAllowlist(t *testing.T) {
 	}
 }
 
+func TestDomainAllowlistIPv6(t *testing.T) {
+	al := NewDomainAllowlist([]string{"::1", "api.anthropic.com"})
+	tests := []struct {
+		host    string
+		allowed bool
+	}{
+		{"[::1]:443", true},
+		{"[::1]:9119", true},
+		{"::1", true},
+		{"api.anthropic.com:443", true},
+		{"[::2]:443", false},
+	}
+	for _, tt := range tests {
+		if al.IsAllowed(tt.host) != tt.allowed {
+			t.Errorf("IsAllowed(%q) = %v, want %v", tt.host, !tt.allowed, tt.allowed)
+		}
+	}
+}
+
 func TestDomainAllowlistAdd(t *testing.T) {
 	al := NewDomainAllowlist(nil)
 	if al.IsAllowed("custom.api.com") {

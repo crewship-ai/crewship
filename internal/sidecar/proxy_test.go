@@ -236,6 +236,23 @@ func TestProxyE2EWithCredentialInjection(t *testing.T) {
 	}
 }
 
+func TestInjectCredentialOverwritesExistingOpenAI(t *testing.T) {
+	req := httptest.NewRequest("POST", "https://api.openai.com/v1/chat/completions", nil)
+	req.Header.Set("Authorization", "Bearer sk-agent-fake-key")
+	injectCredential(req, ProviderOpenAI, "sk-real-openai-key")
+	if req.Header.Get("Authorization") != "Bearer sk-real-openai-key" {
+		t.Errorf("expected real key to overwrite agent key, got %q", req.Header.Get("Authorization"))
+	}
+}
+
+func TestInjectCredentialOverwritesExistingGoogle(t *testing.T) {
+	req := httptest.NewRequest("POST", "https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=agent-fake-key", nil)
+	injectCredential(req, ProviderGoogle, "AIzaSy-real-key")
+	if req.URL.Query().Get("key") != "AIzaSy-real-key" {
+		t.Errorf("expected real key to overwrite agent key, got %q", req.URL.Query().Get("key"))
+	}
+}
+
 func TestIsLocalhost(t *testing.T) {
 	tests := []struct {
 		host     string

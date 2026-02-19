@@ -95,6 +95,8 @@ func New(
 // proxy is started inside the container that intercepts HTTP requests and
 // injects the appropriate API keys.
 func (o *Orchestrator) SetSidecarEnabled(enabled bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	o.sidecarEnabled = enabled
 }
 
@@ -142,8 +144,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("invalid agent slug: %q", req.AgentSlug)
 	}
 
+	o.mu.Lock()
+	sidecarEnabled := o.sidecarEnabled
+	o.mu.Unlock()
+
 	var env []string
-	if o.sidecarEnabled {
+	if sidecarEnabled {
 		env = BuildEnvVarsSidecar(req)
 		if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, o.logger); err != nil {
 			o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)

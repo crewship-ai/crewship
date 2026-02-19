@@ -166,18 +166,21 @@ func TestSecurityContainsSecretTruePositives(t *testing.T) {
 
 func TestSecurityConcurrentScrub(t *testing.T) {
 	s := New()
-	done := make(chan bool, 100)
+	errCh := make(chan string, 100)
 	for i := 0; i < 100; i++ {
 		go func() {
 			input := "key: sk-ant-api03-concurrent-secret-test1234"
 			got := s.Scrub(input)
 			if strings.Contains(got, "sk-ant-") {
-				t.Errorf("concurrent scrub failed: %q", got)
+				errCh <- got
+			} else {
+				errCh <- ""
 			}
-			done <- true
 		}()
 	}
 	for i := 0; i < 100; i++ {
-		<-done
+		if msg := <-errCh; msg != "" {
+			t.Errorf("concurrent scrub failed: %q", msg)
+		}
 	}
 }

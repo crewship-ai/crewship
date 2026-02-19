@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"net"
 	"strings"
 	"sync"
 )
@@ -33,17 +34,13 @@ func NewDomainAllowlist(domains []string) *DomainAllowlist {
 }
 
 // IsAllowed returns true if the host (with optional :port) is on the allowlist.
+// Handles IPv6 addresses correctly (e.g. [::1]:443).
 func (al *DomainAllowlist) IsAllowed(host string) bool {
 	al.mu.RLock()
 	defer al.mu.RUnlock()
 
-	// Strip port if present
-	h := strings.ToLower(host)
-	if idx := strings.LastIndex(h, ":"); idx != -1 {
-		h = h[:idx]
-	}
-
-	return al.domains[h]
+	h := stripPort(host)
+	return al.domains[strings.ToLower(h)]
 }
 
 // Add adds a domain to the allowlist.
@@ -53,12 +50,19 @@ func (al *DomainAllowlist) Add(domain string) {
 	al.domains[strings.ToLower(domain)] = true
 }
 
+// stripPort removes the port from a host string, handling IPv6 bracket notation.
+func stripPort(host string) string {
+	// Try net.SplitHostPort first (handles [::1]:443, host:port, etc.)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		return h
+	}
+	// No port present -- strip brackets if bare IPv6
+	return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+}
+
 // providerForHost returns the LLM provider type for a given host, or empty string.
 func providerForHost(host string) ProviderType {
-	h := strings.ToLower(host)
-	if idx := strings.LastIndex(h, ":"); idx != -1 {
-		h = h[:idx]
-	}
+	h := strings.ToLower(stripPort(host))
 	switch h {
 	case "api.anthropic.com":
 		return ProviderAnthropic

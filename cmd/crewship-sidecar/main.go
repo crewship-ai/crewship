@@ -49,8 +49,12 @@ func main() {
 		cancel()
 	}()
 
-	// Signal readiness on stdout so the orchestrator knows we're listening
-	os.Stdout.WriteString("SIDECAR_READY\n")
+	// Signal readiness on stdout so the orchestrator knows we're listening.
+	// If this write fails, the orchestrator will hang waiting indefinitely.
+	if _, err := os.Stdout.WriteString("SIDECAR_READY\n"); err != nil {
+		logger.Error("failed to write readiness signal", "error", err)
+		os.Exit(1)
+	}
 
 	if err := srv.Start(ctx); err != nil {
 		logger.Error("sidecar error", "error", err)

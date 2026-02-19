@@ -130,7 +130,13 @@ var (
 )
 
 // scrubGeneric handles patterns like "password": "value" -> "password": "[REDACTED]"
-// and PASSWORD=value -> PASSWORD=[REDACTED]
+// and PASSWORD=value -> PASSWORD=[REDACTED].
+//
+// NOTE: The `re` parameter is used for match detection, but the replacement logic
+// uses the package-level jsonKVRe/envKVRe regexes for submatch extraction. These
+// must stay in sync with the generic patterns registered in New(). This coupling
+// is intentional: the detection patterns are broad, while the replacement patterns
+// capture the key name to preserve it in the redacted output.
 func (s *Scrubber) scrubGeneric(input string, re *regexp.Regexp) string {
 	return re.ReplaceAllStringFunc(input, func(match string) string {
 		if m := jsonKVRe.FindStringSubmatch(match); len(m) > 1 {

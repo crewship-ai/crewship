@@ -82,11 +82,15 @@ func (s *Server) Allowlist() *DomainAllowlist {
 }
 
 // Start begins listening. Blocks until context is cancelled or an error occurs.
+// The listener is always closed: either via Shutdown (context cancel) or on Serve error.
 func (s *Server) Start(ctx context.Context) error {
 	ln, err := net.Listen("tcp", s.httpServer.Addr)
 	if err != nil {
 		return fmt.Errorf("sidecar listen: %w", err)
 	}
+
+	// Update Addr to reflect the actual port (useful when Addr was ":0")
+	s.httpServer.Addr = ln.Addr().String()
 
 	s.logger.Info("sidecar proxy started",
 		"addr", s.httpServer.Addr,
@@ -106,7 +110,11 @@ func (s *Server) Start(ctx context.Context) error {
 	case <-ctx.Done():
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		s.httpServer.Shutdown(shutCtx)
+		if err := s.httpServer.Shutdown(shutCtx); err != nil {
+			// Shutdown failed; force close to release the listener
+			s.httpServer.Close()
+			return fmt.Errorf("sidecar shutdown: %w", err)
+		}
 		return nil
 	case err := <-errCh:
 		return err
