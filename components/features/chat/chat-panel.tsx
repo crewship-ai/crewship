@@ -68,8 +68,13 @@ import type { BundledLanguage } from "shiki"
 function getWsUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL
   if (typeof window === "undefined") return "ws://localhost:8080/ws"
+  // In dev mode (Next.js on :3001), WebSocket runs on Go server (:8080).
+  // In production (single binary), both API and WS are on the same host.
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  return `${proto}//${window.location.host}/ws`
+  const host = window.location.port === "3001"
+    ? window.location.hostname + ":8080"
+    : window.location.host
+  return `${proto}//${host}/ws`
 }
 
 interface ChatPanelProps {
