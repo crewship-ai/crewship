@@ -8,53 +8,62 @@ import (
 func TestScrubAnthropicAPIKey(t *testing.T) {
 	s := New()
 	tests := []struct {
+		name  string
 		input string
 		want  string
 	}{
-		{"my key is sk-ant-api03-abc123def456", "my key is [REDACTED:anthropic_key]"},
-		{"sk-ant-test-key-abc123", "[REDACTED:anthropic_key]"},
-		{"no key here", "no key here"},
+		{"with_context", "my key is sk-ant-api03-abc123def456", "my key is [REDACTED:anthropic_key]"},
+		{"bare_key", "sk-ant-test-key-abc123", "[REDACTED:anthropic_key]"},
+		{"no_secret", "no key here", "no key here"},
 	}
 	for _, tt := range tests {
-		got := s.Scrub(tt.input)
-		if got != tt.want {
-			t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.Scrub(tt.input)
+			if got != tt.want {
+				t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
 func TestScrubOpenAIKey(t *testing.T) {
 	s := New()
 	tests := []struct {
+		name  string
 		input string
 		want  string
 	}{
-		{"key: sk-proj-abcdefghijklmnopqrst", "key: [REDACTED:openai_key]"},
-		{"sk-abcdefghijklmnopqrstuvwxyz1234567890abcdefghijkl", "[REDACTED:openai_key]"},
+		{"sk_proj", "key: sk-proj-abcdefghijklmnopqrst", "key: [REDACTED:openai_key]"},
+		{"long_sk", "sk-abcdefghijklmnopqrstuvwxyz1234567890abcdefghijkl", "[REDACTED:openai_key]"},
 	}
 	for _, tt := range tests {
-		got := s.Scrub(tt.input)
-		if got != tt.want {
-			t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.Scrub(tt.input)
+			if got != tt.want {
+				t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
 func TestScrubGitHubToken(t *testing.T) {
 	s := New()
 	tests := []struct {
+		name  string
 		input string
 		want  string
 	}{
-		{"GITHUB_TOKEN=ghp_abc123def456ghi789jkl012mno345pqrst", "GITHUB_TOKEN=[REDACTED:github_token]"},
-		{"token: gho_abc123def456ghi789jkl012mno345pqrst", "token: [REDACTED:github_token]"},
-		{"ghs_abc123def456ghi789jkl012mno345pqrst", "[REDACTED:github_token]"},
+		{"ghp_envvar", "GITHUB_TOKEN=ghp_abc123def456ghi789jkl012mno345pqrst", "GITHUB_TOKEN=[REDACTED:github_token]"},
+		{"gho", "token: gho_abc123def456ghi789jkl012mno345pqrst", "token: [REDACTED:github_token]"},
+		{"ghs", "ghs_abc123def456ghi789jkl012mno345pqrst", "[REDACTED:github_token]"},
 	}
 	for _, tt := range tests {
-		got := s.Scrub(tt.input)
-		if got != tt.want {
-			t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.Scrub(tt.input)
+			if got != tt.want {
+				t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -98,18 +107,21 @@ MIIEowIBAAKCAQEA2a2rwplBQLOCNGzyYCMqU
 func TestScrubSlackToken(t *testing.T) {
 	s := New()
 	tests := []struct {
+		name  string
 		input string
 		want  string
 	}{
-		{"xoxb-123456789-abcdefghijklmnop", "[REDACTED:slack_token]"},
-		{"xoxp-1234-5678-abcd", "[REDACTED:slack_token]"},
-		{"xoxa-1234-abcd", "[REDACTED:slack_token]"},
+		{"xoxb", "xoxb-123456789-abcdefghijklmnop", "[REDACTED:slack_token]"},
+		{"xoxp", "xoxp-1234-5678-abcd", "[REDACTED:slack_token]"},
+		{"xoxa", "xoxa-1234-abcd", "[REDACTED:slack_token]"},
 	}
 	for _, tt := range tests {
-		got := s.Scrub(tt.input)
-		if got != tt.want {
-			t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.Scrub(tt.input)
+			if got != tt.want {
+				t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -125,19 +137,22 @@ func TestScrubAWSKey(t *testing.T) {
 func TestScrubGenericPassword(t *testing.T) {
 	s := New()
 	tests := []struct {
+		name  string
 		input string
 		want  string
 	}{
-		{`"password": "mysecretpass123"`, `"password": "[REDACTED]"`},
-		{`"password":"short"`, `"password":"[REDACTED]"`},
-		{`PASSWORD=mysecretvalue123`, `PASSWORD=[REDACTED]`},
-		{`SECRET_KEY=abcdef123456`, `SECRET_KEY=[REDACTED]`},
+		{"json_password", `"password": "mysecretpass123"`, `"password": "[REDACTED]"`},
+		{"json_no_space", `"password":"short"`, `"password":"[REDACTED]"`},
+		{"env_password", `PASSWORD=mysecretvalue123`, `PASSWORD=[REDACTED]`},
+		{"env_secret_key", `SECRET_KEY=abcdef123456`, `SECRET_KEY=[REDACTED]`},
 	}
 	for _, tt := range tests {
-		got := s.Scrub(tt.input)
-		if got != tt.want {
-			t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.Scrub(tt.input)
+			if got != tt.want {
+				t.Errorf("Scrub(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 

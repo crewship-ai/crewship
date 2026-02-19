@@ -212,7 +212,7 @@ func startSidecar(
 		return fmt.Errorf("start sidecar: %w", err)
 	}
 
-	output, _ := io.ReadAll(result.Reader)
+	output, readErr := io.ReadAll(result.Reader)
 	result.Reader.Close()
 
 	// Check if the health check script exited with an error
@@ -221,7 +221,11 @@ func startSidecar(
 		return fmt.Errorf("inspect sidecar exec: %w", inspErr)
 	}
 	if !running && exitCode != 0 {
-		return fmt.Errorf("sidecar health check failed (exit %d): %s", exitCode, strings.TrimSpace(string(output)))
+		msg := strings.TrimSpace(string(output))
+		if readErr != nil {
+			msg += fmt.Sprintf(" (read error: %v)", readErr)
+		}
+		return fmt.Errorf("sidecar health check failed (exit %d): %s", exitCode, msg)
 	}
 
 	logger.Info("sidecar started",
