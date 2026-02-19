@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func TestConfigDefaults(t *testing.T) {
@@ -39,12 +40,14 @@ func TestContainerNameFormat(t *testing.T) {
 }
 
 func TestNewRequiresDocker(t *testing.T) {
-	// New() will fail without Docker daemon -- expected in CI
-	_, err := New(context.Background(), Config{
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := New(ctx, Config{
 		RuntimeImage: "test:latest",
 		Network:      "test-net",
 	}, nil)
-	// We accept both success (Docker running) and error (Docker not running)
-	// This test just ensures no panic
-	_ = err
+	if err != nil {
+		t.Skipf("Docker daemon not available, skipping: %v", err)
+	}
 }
