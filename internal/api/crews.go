@@ -16,20 +16,24 @@ func NewCrewHandler(db *sql.DB, logger *slog.Logger) *CrewHandler {
 	return &CrewHandler{db: db, logger: logger}
 }
 
+type crewCountResponse struct {
+	Agents  int `json:"agents"`
+	Members int `json:"members"`
+}
+
 type crewResponse struct {
-	ID                string  `json:"id"`
-	WorkspaceID       string  `json:"workspace_id"`
-	Name              string  `json:"name"`
-	Slug              string  `json:"slug"`
-	Description       *string `json:"description"`
-	Color             *string `json:"color"`
-	Icon              *string `json:"icon"`
-	ContainerMemoryMB int     `json:"container_memory_mb"`
-	ContainerCPUs     float64 `json:"container_cpus"`
-	CreatedAt         string  `json:"created_at"`
-	UpdatedAt         string  `json:"updated_at"`
-	AgentCount        int     `json:"_count_agents"`
-	MemberCount       int     `json:"_count_members"`
+	ID                string           `json:"id"`
+	WorkspaceID       string           `json:"workspace_id"`
+	Name              string           `json:"name"`
+	Slug              string           `json:"slug"`
+	Description       *string          `json:"description"`
+	Color             *string          `json:"color"`
+	Icon              *string          `json:"icon"`
+	ContainerMemoryMB int              `json:"container_memory_mb"`
+	ContainerCPUs     float64          `json:"container_cpus"`
+	CreatedAt         string           `json:"created_at"`
+	UpdatedAt         string           `json:"updated_at"`
+	Count             crewCountResponse `json:"_count"`
 }
 
 func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +64,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		var c crewResponse
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 			&c.Color, &c.Icon, &c.ContainerMemoryMB, &c.ContainerCPUs,
-			&c.CreatedAt, &c.UpdatedAt, &c.AgentCount, &c.MemberCount); err != nil {
+			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
 			h.logger.Error("scan crew", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
@@ -172,7 +176,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
 	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.CreatedAt, &c.UpdatedAt, &c.AgentCount, &c.MemberCount)
+		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
@@ -313,7 +317,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		WHERE c.id = ? AND c.deleted_at IS NULL
 	`, crewID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.CreatedAt, &c.UpdatedAt, &c.AgentCount, &c.MemberCount)
+		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		h.logger.Error("get crew after update", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})

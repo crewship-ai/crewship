@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { CLI_ADAPTERS } from "@/lib/cli-adapters"
 
 interface AgentCrew {
   name: string
@@ -46,12 +47,7 @@ interface AgentDetail {
   }
 }
 
-const CLI_ADAPTER_LABELS: Record<string, string> = {
-  CLAUDE_CODE: "Claude Code",
-  OPENCODE: "OpenCode",
-  CODEX_CLI: "Codex CLI",
-  GEMINI_CLI: "Gemini CLI",
-}
+
 
 const AGENT_ROLE_COLORS: Record<string, string> = {
   AGENT: "text-blue-600 border-blue-300",
@@ -234,7 +230,14 @@ export function AgentOverviewPageClient() {
             <div className="space-y-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">CLI Adapter</span>
-                <span className="font-medium">{CLI_ADAPTER_LABELS[agent.cli_adapter] ?? agent.cli_adapter}</span>
+                <span className="flex items-center gap-1.5 font-medium">
+                  {(() => {
+                    const cfg = CLI_ADAPTERS[agent.cli_adapter]
+                    if (!cfg) return agent.cli_adapter
+                    const Icon = cfg.icon
+                    return <><Icon className="h-4 w-4" />{cfg.label}</>
+                  })()}
+                </span>
               </div>
               {agent.llm_provider && (
                 <div className="flex items-center justify-between">

@@ -6,14 +6,13 @@ import { cn } from "@/lib/utils"
 
 const tabs = [
   { label: "Overview", href: "" },
-  { label: "Chat", href: "/chat" },
-  { label: "Chats", href: "/chats" },
+  { label: "Sessions", href: "/chat" },
   { label: "Files", href: "/files" },
   { label: "Runs", href: "/runs" },
   { label: "Logs", href: "/logs" },
-  { label: "Settings", href: "/settings" },
   { label: "Skills", href: "/skills" },
   { label: "Credentials", href: "/credentials" },
+  { label: "Settings", href: "/settings" },
   { label: "Debug", href: "/debug" },
   { label: "History", href: "/history" },
 ]

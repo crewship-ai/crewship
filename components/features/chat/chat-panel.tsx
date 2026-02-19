@@ -124,6 +124,11 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
   const [authError, setAuthError] = useState(false)
   const [input, setInput] = useState("")
   const [sessionReady, setSessionReady] = useState(false)
+
+  useEffect(() => {
+    setSessionReady(false)
+  }, [sessionId])
+
   const [showPreview, setShowPreview] = useState(true)
   const [previewFile, setPreviewFile] = useState<string | null>(null)
   const [previewContent, setPreviewContent] = useState<string | null>(null)
@@ -151,6 +156,7 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
   })
 
   useEffect(() => {
+    if (!sessionId) return
     fetch(`/api/v1/chats/${sessionId}/messages`, { credentials: "include" })
       .then((r) => r.ok ? r.json() : null)
       .then((data: { messages?: { id: string; role: string; content: string; ts: string }[] } | null) => {
@@ -165,41 +171,46 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
       .catch(() => {})
   }, [sessionId, loadHistory])
 
-  useEffect(() => {
-    if (sessionReady || !workspaceId) return
-    fetch(
-      `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId }) },
-    ).then((res) => { if (res.ok) setSessionReady(true) }).catch(() => {})
+  const ensureSession = useCallback(async () => {
+    if (sessionReady || !workspaceId || !sessionId) return
+    try {
+      const res = await fetch(
+        `/api/v1/agents/${agentId}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId }) },
+      )
+      if (res.ok) setSessionReady(true)
+    } catch { /* ignore */ }
   }, [agentId, workspaceId, sessionId, sessionReady])
 
   // Fetch files for the preview panel
   useEffect(() => {
-    if (!workspaceId || !showPreview) return
+    if (!workspaceId || !showPreview || !sessionId) return
     fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : [])
-      .then((data: FileEntry[]) => setFiles(data))
+      .then((data: FileEntry[] | null) => setFiles(data ?? []))
       .catch(() => {})
-  }, [agentId, workspaceId, showPreview])
+  }, [agentId, workspaceId, showPreview, sessionId])
 
-  const handleSubmit = useCallback((message: PromptInputMessage) => {
+  const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const text = message.text?.trim()
     if (!text || isStreaming) return
+    await ensureSession()
     sendMessage(text)
     setInput("")
-  }, [isStreaming, sendMessage])
+  }, [isStreaming, sendMessage, ensureSession])
 
-  const handleSuggestionClick = useCallback((suggestion: string) => {
+  const handleSuggestionClick = useCallback(async (suggestion: string) => {
     if (isStreaming) return
+    await ensureSession()
     sendMessage(suggestion)
-  }, [isStreaming, sendMessage])
+  }, [isStreaming, sendMessage, ensureSession])
 
   const handleCopy = useCallback((content: string) => {
     navigator.clipboard.writeText(content).catch(() => {})
   }, [])
 
   const handleFileSelect = useCallback((path: string) => {
-    const file = files.find((f) => f.path === path)
+    const file = (files ?? []).find((f) => f.path === path)
     if (!file || file.is_dir) return
     setPreviewFile(path)
     setLoadingPreview(true)
@@ -212,7 +223,7 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
   }, [agentId, workspaceId, files])
 
   const handleFileClick = useCallback((fileRef: string) => {
-    const file = files.find((f) =>
+    const file = (files ?? []).find((f) =>
       f.name === fileRef || f.path === fileRef || f.path.endsWith(`/${fileRef}`),
     )
     if (file) {
@@ -256,7 +267,7 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
   }, [])
 
   const chatStatus = isStreaming ? "streaming" as const : "ready" as const
-  const selectedFileEntry = files.find((f) => f.path === previewFile)
+  const selectedFileEntry = (files ?? []).find((f) => f.path === previewFile)
 
   return (
     <div ref={containerRef} className="flex h-full">

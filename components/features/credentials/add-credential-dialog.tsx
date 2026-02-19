@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { Eye, EyeOff, Loader2, Bot, Key, Lock } from "lucide-react"
+import { AnthropicIcon, OpenAIIcon, GeminiIcon } from "@/components/icons/provider-icons"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -228,9 +229,15 @@ export function AddCredentialDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ANTHROPIC">Anthropic (Claude)</SelectItem>
-                  <SelectItem value="OPENAI">OpenAI (GPT / Codex)</SelectItem>
-                  <SelectItem value="GOOGLE">Google (Gemini)</SelectItem>
+                  <SelectItem value="ANTHROPIC">
+                    <span className="flex items-center gap-2"><AnthropicIcon className="h-4 w-4" /> Anthropic (Claude)</span>
+                  </SelectItem>
+                  <SelectItem value="OPENAI">
+                    <span className="flex items-center gap-2"><OpenAIIcon className="h-4 w-4" /> OpenAI (GPT / Codex)</span>
+                  </SelectItem>
+                  <SelectItem value="GOOGLE">
+                    <span className="flex items-center gap-2"><GeminiIcon className="h-4 w-4" /> Google (Gemini)</span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
