@@ -17,8 +17,8 @@ import (
 
 type ChatResolver interface {
 	ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error)
-	CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string) error
-	UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string) error
+	CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error
+	UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error
 }
 
 type ChatInfo struct {
@@ -105,6 +105,16 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	streamFn(ws.ChatEvent{Type: "thinking", Content: "Processing..."})
 
 	containerID := info.ContainerID
+
+	// Verify cached container still exists (may have been deleted at runtime)
+	if containerID != "" && b.container != nil {
+		if _, err := b.container.ContainerStatus(ctx, containerID); err != nil {
+			b.logger.Warn("cached container gone, will recreate",
+				"container_id", containerID[:12], "error", err)
+			containerID = ""
+		}
+	}
+
 	if containerID == "" && b.container != nil {
 		cID, err := b.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
 			ID:       info.CrewID,
@@ -159,20 +169,32 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	runID := generateMsgID()
-	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER"); err != nil {
+	runMeta := map[string]interface{}{
+		"cli_adapter": info.CLIAdapter,
+		"crew_id":     info.CrewID,
+		"crew_slug":   info.CrewSlug,
+		"agent_slug":  info.AgentSlug,
+		"tags":        []string{"chat", info.CLIAdapter},
+	}
+	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER", runMeta); err != nil {
 		b.logger.Warn("failed to create run record", "error", err)
 	}
 
+	startedAt := time.Now()
 	runErr := b.orch.RunAgent(ctx, req, handler)
 	if runErr != nil {
 		errMsg := runErr.Error()
-		_ = b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg)
+		_ = b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, map[string]interface{}{
+			"duration_ms": time.Since(startedAt).Milliseconds(),
+		})
 		streamFn(ws.ChatEvent{Type: "error", Content: runErr.Error()})
 		return fmt.Errorf("run agent: %w", runErr)
 	}
 
 	exitCode := 0
-	_ = b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil)
+	_ = b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, map[string]interface{}{
+		"duration_ms": time.Since(startedAt).Milliseconds(),
+	})
 
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:        generateMsgID(),
