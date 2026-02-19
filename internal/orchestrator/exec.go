@@ -145,11 +145,19 @@ func resolveEnvVar(cred *Credential) string {
 // startSidecar launches the crewship-sidecar proxy inside the container.
 // It pipes credentials via stdin JSON and waits for the "SIDECAR_READY" signal.
 // The sidecar runs as a background process and intercepts all agent HTTP traffic.
+// SidecarMemoryConfig is passed to the sidecar binary via stdin when memory is enabled.
+type SidecarMemoryConfig struct {
+	Enabled   bool   `json:"enabled"`
+	BasePath  string `json:"base_path"`
+	AgentSlug string `json:"agent_slug"`
+}
+
 func startSidecar(
 	ctx context.Context,
 	container provider.ContainerProvider,
 	containerID string,
 	creds []Credential,
+	memoryCfg *SidecarMemoryConfig,
 	logger *slog.Logger,
 ) error {
 	type sidecarCred struct {
@@ -176,9 +184,19 @@ func startSidecar(
 		sc = []sidecarCred{}
 	}
 
-	credsJSON, err := json.Marshal(sc)
+	// Build the input payload (new object format that includes memory config)
+	type sidecarInput struct {
+		Credentials []sidecarCred        `json:"credentials"`
+		Memory      *SidecarMemoryConfig `json:"memory,omitempty"`
+	}
+	input := sidecarInput{
+		Credentials: sc,
+		Memory:      memoryCfg,
+	}
+
+	credsJSON, err := json.Marshal(input)
 	if err != nil {
-		return fmt.Errorf("marshal sidecar credentials: %w", err)
+		return fmt.Errorf("marshal sidecar input: %w", err)
 	}
 
 	// SECURITY: Base64-encode the credentials JSON to prevent shell injection.

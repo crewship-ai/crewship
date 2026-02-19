@@ -2,34 +2,46 @@ package sidecar
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
 const DefaultAddr = "127.0.0.1:9119"
 
+// MemoryConfig configures the sidecar memory engine.
+type MemoryConfig struct {
+	Enabled   bool   `json:"enabled"`
+	BasePath  string `json:"base_path"`
+	AgentSlug string `json:"agent_slug"`
+}
+
 // ServerConfig configures the sidecar server.
 type ServerConfig struct {
-	Addr             string   // listen address (default: 127.0.0.1:9119)
-	AllowedDomains   []string // extra allowed domains beyond defaults
-	Credentials      []Credential
-	Logger           *slog.Logger
+	Addr           string   // listen address (default: 127.0.0.1:9119)
+	AllowedDomains []string // extra allowed domains beyond defaults
+	Credentials    []Credential
+	Memory         *MemoryConfig
+	Logger         *slog.Logger
 }
 
 // Server is the crewship sidecar that runs inside agent containers.
-// It provides an HTTP forward proxy with credential injection.
+// It provides an HTTP forward proxy with credential injection and
+// optional memory search API.
 type Server struct {
-	httpServer *http.Server
-	credStore  *CredStore
-	allowlist  *DomainAllowlist
-	proxy      *Proxy
-	logger     *slog.Logger
-	readyCh    chan struct{} // closed when the TCP listener is bound
+	httpServer   *http.Server
+	credStore    *CredStore
+	allowlist    *DomainAllowlist
+	proxy        *Proxy
+	memoryEngine *memory.Engine
+	logger       *slog.Logger
+	readyCh      chan struct{} // closed when the TCP listener is bound
 }
 
 // NewServer creates a sidecar server ready to start.
@@ -58,19 +70,72 @@ func NewServer(cfg ServerConfig) *Server {
 		Logger:    cfg.Logger,
 	})
 
-	return &Server{
-		httpServer: &http.Server{
-			Addr:              cfg.Addr,
-			Handler:           proxy,
-			ReadHeaderTimeout: 10 * time.Second,
-			IdleTimeout:       120 * time.Second,
-		},
+	s := &Server{
 		credStore: credStore,
 		allowlist: allowlist,
 		proxy:     proxy,
 		logger:    cfg.Logger,
 		readyCh:   make(chan struct{}),
 	}
+
+	// Initialize memory engine if configured
+	if cfg.Memory != nil && cfg.Memory.Enabled && cfg.Memory.BasePath != "" {
+		engine, err := memory.New(cfg.Memory.BasePath, memory.DefaultConfig())
+		if err != nil {
+			cfg.Logger.Error("failed to init memory engine", "error", err, "path", cfg.Memory.BasePath)
+		} else {
+			s.memoryEngine = engine
+			// Index existing memory files on startup
+			if err := engine.Reindex(); err != nil {
+				cfg.Logger.Warn("initial memory reindex failed", "error", err)
+			}
+			cfg.Logger.Info("memory engine initialized", "path", cfg.Memory.BasePath)
+		}
+	}
+
+	// Use ServeMux to route local API requests while keeping the
+	// forward proxy as the default handler for external traffic.
+	// The proxy's handleLocal already handles /health, but we register
+	// explicit routes here for the memory API.
+	s.httpServer = &http.Server{
+		Addr:              cfg.Addr,
+		Handler:           s.buildHandler(proxy),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	return s
+}
+
+// buildHandler creates the HTTP handler that routes memory API requests
+// to dedicated handlers while passing everything else to the forward proxy.
+func (s *Server) buildHandler(proxy *Proxy) http.Handler {
+	// The forward proxy must remain the top-level handler because it handles
+	// both regular HTTP requests (with absolute URLs) and CONNECT tunnels.
+	// We intercept only localhost requests to specific paths.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Memory API routes are only accessible from localhost
+		if isLocalhost(r.Host) || isLocalhost(r.URL.Host) {
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/memory/search":
+				s.handleMemorySearch(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/memory/status":
+				s.handleMemoryStatus(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/memory/reindex":
+				s.handleMemoryReindex(w, r)
+				return
+			}
+		}
+		proxy.ServeHTTP(w, r)
+	})
+}
+
+func writeJSONResponse(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
 }
 
 // CredStore returns the credential store for external updates.
@@ -121,6 +186,9 @@ func (s *Server) Start(ctx context.Context) error {
 	case <-ctx.Done():
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		if s.memoryEngine != nil {
+			s.memoryEngine.Close()
+		}
 		if err := s.httpServer.Shutdown(shutCtx); err != nil {
 			// Shutdown failed; force close to release the listener
 			s.httpServer.Close()
@@ -128,6 +196,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		return nil
 	case err := <-errCh:
+		if s.memoryEngine != nil {
+			s.memoryEngine.Close()
+		}
 		return err
 	}
 }

@@ -70,6 +70,64 @@ func TestIPCResolverResolveSession(t *testing.T) {
 	}
 }
 
+func TestIPCResolverResolveChat_MemoryEnabled(t *testing.T) {
+	mockResp := chatResolveResponse{
+		AgentID:       "agent-mem-1",
+		AgentSlug:     "jarmila",
+		CrewID:        "crew-1",
+		CrewSlug:      "ops",
+		CLIAdapter:    "CLAUDE_CODE",
+		SystemPrompt:  "You are Jarmila.",
+		ToolProfile:   "CODING",
+		TimeoutSecs:   1800,
+		MemoryEnabled: true,
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(mockResp)
+	}))
+	defer ts.Close()
+
+	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
+	info, err := resolver.ResolveChat(context.Background(), "chat-mem")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !info.MemoryEnabled {
+		t.Error("expected MemoryEnabled=true")
+	}
+	if info.AgentSlug != "jarmila" {
+		t.Errorf("expected agent_slug 'jarmila', got %q", info.AgentSlug)
+	}
+}
+
+func TestIPCResolverResolveChat_MemoryDisabled(t *testing.T) {
+	mockResp := chatResolveResponse{
+		AgentID:       "agent-nomem",
+		AgentSlug:     "basic",
+		CLIAdapter:    "CODEX_CLI",
+		MemoryEnabled: false,
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(mockResp)
+	}))
+	defer ts.Close()
+
+	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
+	info, err := resolver.ResolveChat(context.Background(), "chat-nomem")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if info.MemoryEnabled {
+		t.Error("expected MemoryEnabled=false")
+	}
+}
+
 func TestIPCResolverResolveSessionNotFound(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
