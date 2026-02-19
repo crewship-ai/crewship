@@ -1,7 +1,9 @@
 package memory
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -89,22 +91,24 @@ func initSchema(db *sql.DB) error {
 }
 
 // Status returns information about the memory index state.
-func (e *Engine) Status() (*Status, error) {
+func (e *Engine) Status(ctx context.Context) (*Status, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
 	var totalChunks int
-	if err := e.db.QueryRow("SELECT count(*) FROM memory_chunks").Scan(&totalChunks); err != nil {
+	if err := e.db.QueryRowContext(ctx, "SELECT count(*) FROM memory_chunks").Scan(&totalChunks); err != nil {
 		return nil, fmt.Errorf("count chunks: %w", err)
 	}
 
 	var totalFiles int
-	if err := e.db.QueryRow("SELECT count(DISTINCT file) FROM memory_chunks").Scan(&totalFiles); err != nil {
+	if err := e.db.QueryRowContext(ctx, "SELECT count(DISTINCT file) FROM memory_chunks").Scan(&totalFiles); err != nil {
 		return nil, fmt.Errorf("count files: %w", err)
 	}
 
 	var indexedAtStr sql.NullString
-	_ = e.db.QueryRow("SELECT value FROM memory_meta WHERE key = 'last_indexed'").Scan(&indexedAtStr)
+	if err := e.db.QueryRowContext(ctx, "SELECT value FROM memory_meta WHERE key = 'last_indexed'").Scan(&indexedAtStr); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("read last_indexed: %w", err)
+	}
 	var indexedAt time.Time
 	if indexedAtStr.Valid {
 		indexedAt, _ = time.Parse(time.RFC3339, indexedAtStr.String)

@@ -71,7 +71,7 @@ func (s *Server) handleMemoryStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err := s.memoryEngine.Status()
+	status, err := s.memoryEngine.Status(r.Context())
 	if err != nil {
 		s.logger.Error("memory status failed", "error", err)
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{
@@ -101,7 +101,7 @@ func (s *Server) handleMemoryReindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	status, err := s.memoryEngine.Status()
+	status, err := s.memoryEngine.Status(r.Context())
 	if err != nil {
 		writeJSONResponse(w, http.StatusOK, map[string]string{"status": "reindexed"})
 		return

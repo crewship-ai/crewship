@@ -131,7 +131,9 @@ func TestResolveChat_MemoryDisabled(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 
 	memEnabled, ok := resp["memory_enabled"]
 	if !ok {
@@ -203,7 +205,9 @@ func TestResolveChat_WithCredentials(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 
 	// Verify memory is enabled
 	if resp["memory_enabled"] != true {

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -147,8 +148,10 @@ func TestMigrateMemoryConfigColumn(t *testing.T) {
 	// Verify migration 3 is recorded
 	var version int
 	err = db.QueryRow("SELECT version FROM _migrations WHERE version = 3").Scan(&version)
-	if err != nil {
-		t.Errorf("migration 3 not recorded: %v", err)
+	if err == sql.ErrNoRows {
+		t.Errorf("migration 3 not recorded")
+	} else if err != nil {
+		t.Fatalf("query migration 3: %v", err)
 	}
 
 	// Verify memory_config is nullable (can insert agent without it)

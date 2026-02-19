@@ -34,7 +34,7 @@ func TestNewEngine(t *testing.T) {
 		t.Errorf("index.sqlite not created: %v", err)
 	}
 
-	status, err := engine.Status()
+	status, err := engine.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ I am Jarmila, a Czech-speaking AI assistant.
 	}
 
 	// Check status
-	status, err := engine.Status()
+	status, err := engine.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestReindexSkipsHiddenDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, err := engine.Status()
+	status, err := engine.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestReindexWithDailyLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, err := engine.Status()
+	status, err := engine.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestStatusAfterReindex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status, err := engine.Status()
+	status, err := engine.Status(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
