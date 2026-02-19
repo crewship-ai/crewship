@@ -227,4 +227,4 @@ DATABASE_URL=                       # Optional PostgreSQL connection string
 
 When you make a new mistake, add it here so it never happens again. This file is a living document — updating it is part of every significant PR.
 
-Commit style: `feat:`, `fix:`, `test:`, `docs:`, `refactor:` (conventional commits). Branch from `main`.
+Commit style: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:` (conventional commits). Branch from `main`.
