@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Agent: Claude — SEO Writer / Chat</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  theme: { extend: {
+    fontFamily: { sans: ['Inter','sans-serif'], mono: ['JetBrains Mono','monospace'] },
+    colors: {
+      primary: {50:'#F0F6FF',100:'#E7F3FF',200:'#C5DCFC',300:'#9DC5FA',400:'#6BAAF7',500:'#4293F5',600:'#1877F2',700:'#1877C2',800:'#1565A8',900:'#0D4F8B',950:'#003366'},
+      neutral: {50:'#F7F8FA',100:'#F0F2F5',200:'#E4E6EA',300:'#CED0D4',400:'#ADB1B5',500:'#8A8D91',600:'#65676B',700:'#4B4F54',800:'#373A3F',900:'#242628',950:'#1C1E21'},
+      success: {50:'#E6F5EA',500:'#31A24C',700:'#1B7D36'},
+      warning: {50:'#FFF8E6',500:'#F7B928',700:'#B06D00'},
+      error: {50:'#FDE8E8',500:'#E34234',700:'#B32D1B'},
+      brand: {gold:'#D4A853',teal:'#4ECDC4',navy:'#1A3C5E'},
+      team: {marketing:'#E16B3A',devops:'#7C3AED',content:'#0891B2',support:'#D946A8'},
+    }
+  }}
+}
+</script>
+<style>
+  body{font-size:14px}
+  @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+  .pulse-dot{animation:pulse-dot 2s ease-in-out infinite}
+  .tab-active{border-bottom:2px solid #1877F2;color:#1877F2;font-weight:500}
+  .tab-inactive{border-bottom:2px solid transparent;color:#65676B}
+  .tab-inactive:hover{color:#1C1E21;border-color:#CED0D4}
+</style>
+</head>
+<body class="bg-neutral-100 font-sans text-neutral-950 antialiased">
+<div class="flex h-screen">
+
+  <!-- SIDEBAR -->
+
+  <!-- MAIN -->
+  <main class="flex-1 flex flex-col overflow-hidden">
+    <div class="bg-white border-b border-neutral-200">
+      <div class="h-12 flex items-center justify-between px-6">
+        <div class="flex items-center gap-2">
+          <button class="px-3 py-1.5 text-sm border border-error-300 text-error-700 rounded-md hover:bg-error-50">Stop</button>
+          <a href="09-agent-settings.html" class="px-3 py-1.5 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">Edit</a>
+          <button class="p-1.5 hover:bg-neutral-100 rounded-md"><svg class="w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button>
+        </div>
+      </div>
+      <div class="px-6 flex gap-6 text-sm">
+        <a href="03-agent-overview.html" class="pb-3 pt-1 tab-inactive">Overview</a>
+        <a href="04-agent-chat.html" class="pb-3 pt-1 tab-active">Chat</a>
+        <a href="05-agent-sessions.html" class="pb-3 pt-1 tab-inactive">Sessions</a>
+        <a href="06-agent-files.html" class="pb-3 pt-1 tab-inactive">Files</a>
+        <a href="07-agent-runs.html" class="pb-3 pt-1 tab-inactive">Runs</a>
+        <a href="08-agent-logs.html" class="pb-3 pt-1 tab-inactive">Logs</a>
+        <a href="09-agent-settings.html" class="pb-3 pt-1 tab-inactive">Settings</a>
+        <a href="10-agent-skills.html" class="pb-3 pt-1 tab-inactive">Skills <span class="text-xs text-neutral-400 ml-0.5">4</span></a>
+        <a href="11-agent-credentials.html" class="pb-3 pt-1 tab-inactive">Credentials <span class="text-xs text-neutral-400 ml-0.5">3</span></a>
+        <a href="12-agent-history.html" class="pb-3 pt-1 tab-inactive">History</a>
+      </div>
+    </div>
+    <!-- Header + Tabs -->
+<!-- Session selector bar -->
+    <div class="bg-white border-b border-neutral-200 px-6 py-2 flex items-center gap-3 flex-shrink-0">
+      <span class="text-xs text-neutral-500">Session:</span>
+      <select class="text-sm border border-neutral-300 rounded-md px-2 py-1 bg-white text-neutral-700">
+        <option>#4 — "AI employee blog post" (active)</option>
+        <option>#3 — "SEO audit for homepage"</option>
+        <option>#2 — "Meta descriptions batch"</option>
+        <option>#1 — "Keyword research Q1"</option>
+      </select>
+      <button class="text-xs text-primary-600 font-medium hover:underline ml-2">+ New Session</button>
+      <div class="ml-auto flex items-center gap-4 text-xs text-neutral-500">
+        <span>CLI: Claude Code</span>
+        <span>Model: claude-sonnet-4</span>
+        <span>Key: ANTHROPIC_KEY_1</span>
+        <span>Profile: Coding</span>
+        <span>12 messages</span>
+      </div>
+    </div>
+
+    <!-- ===== SPLIT VIEW: Chat Left + Preview Right ===== -->
+    <div class="flex-1 flex overflow-hidden">
+
+      <!-- LEFT: Chat (60%) -->
+      <div class="w-3/5 flex flex-col border-r border-neutral-200">
+        <!-- Messages -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-4">
+          <!-- User message -->
+          <div class="flex gap-3">
+            <div class="w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0 mt-0.5">PS</div>
+            <div class="bg-white border border-neutral-300 rounded-lg px-4 py-3 max-w-xl">
+              <p class="text-sm">Write an SEO-optimized blog post about AI agent orchestration platforms. Target keyword: "AI employee management". Include meta description and header tags.</p>
+            </div>
+          </div>
+
+          <!-- Thinking -->
+          <div class="flex gap-3">
+            <div class="w-7 h-7 rounded-full bg-neutral-200 flex items-center justify-center flex-shrink-0 mt-0.5"><svg class="w-4 h-4 text-neutral-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></div>
+            <div class="max-w-xl">
+              <div class="bg-neutral-50 border border-neutral-200 rounded-lg px-4 py-3">
+                <div class="text-xs text-neutral-500 font-medium mb-1 flex items-center gap-1.5">
+                  <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>Thinking
+                </div>
+                <p class="text-sm text-neutral-600">I'll research current SEO trends for AI management platforms, then structure the article with proper H1/H2 tags and keyword density around 1.5%...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tool call -->
+          <div class="flex gap-3">
+            <div class="w-7 h-7 rounded-full bg-neutral-200 flex items-center justify-center flex-shrink-0 mt-0.5"><svg class="w-4 h-4 text-neutral-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></div>
+            <div class="max-w-xl">
+              <div class="bg-primary-50 border border-primary-200 rounded-lg px-4 py-3">
+                <div class="text-xs text-primary-700 font-medium mb-1 flex items-center gap-1.5">
+                  <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Tool: web-search
+                </div>
+                <p class="text-sm font-mono text-primary-800">{"query": "AI employee management platform SEO 2026"}</p>
+              </div>
+              <!-- Tool result -->
+              <div class="mt-2 bg-success-50 border border-green-200 rounded-lg px-4 py-3">
+                <div class="text-xs text-success-700 font-medium mb-1 flex items-center gap-1.5">
+                  <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Result
+                </div>
+                <p class="text-sm text-neutral-700">Found 12 relevant articles. Top results: "2026 Guide to AI Workforce", "Enterprise AI Agent Platforms Comparison"...</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Text response -->
+          <div class="flex gap-3">
+            <div class="w-7 h-7 rounded-full bg-neutral-200 flex items-center justify-center flex-shrink-0 mt-0.5"><svg class="w-4 h-4 text-neutral-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></div>
+            <div class="bg-white border border-neutral-300 rounded-lg px-4 py-3 max-w-xl">
+              <p class="text-sm leading-relaxed">I'm writing the blog post now. Here's the structure:<br><br><strong>Meta Description:</strong> "Discover how AI employee management platforms revolutionize workforce automation. Learn about AI agent orchestration, virtual teams, and 24/7 productivity."<br><br><strong>H1:</strong> AI Employee Management: The Future of Automated Workforce<br><strong>H2:</strong> What Are AI Employees?<br><strong>H2:</strong> Key Benefits of AI Agent Orchestration<br><strong>H2:</strong> Choosing the Right Platform</p>
+            </div>
+          </div>
+
+          <!-- Delegation: Leader delegating to worker -->
+          <div class="max-w-xl ml-10">
+            <div class="bg-primary-50 border border-primary-200 border-l-4 border-l-brand-teal rounded-lg overflow-hidden">
+              <div class="px-4 py-3">
+                <div class="flex items-center gap-2 text-xs">
+                  <svg class="w-3.5 h-3.5 text-brand-gold" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg>
+                  <span class="font-medium text-neutral-700">Delegated to</span>
+                  <span class="font-semibold text-neutral-900">Claude — Social Media</span>
+                  <span class="text-neutral-400">(Social Media Manager)</span>
+                </div>
+                <div class="mt-1.5 text-xs text-neutral-600 bg-white rounded px-2.5 py-1.5 border border-neutral-200">
+                  "Najdi relevantni statistiky o AI employee management z nasich socialnich siti za posledni mesic"
+                </div>
+                <div class="mt-2 flex items-center gap-2">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-success-50 text-success-700">
+                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+                    Completed in 4m 12s
+                  </span>
+                </div>
+              </div>
+              <!-- Worker result (collapsed by default, expanded here) -->
+              <div class="px-4 py-2.5 bg-white border-t border-primary-200">
+                <div class="flex items-center gap-2 text-[10px] text-neutral-400 mb-1.5">
+                  <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/></svg>
+                  Result from Claude — Social Media:
+                </div>
+                <p class="text-xs text-neutral-600 leading-relaxed">Nalezeno 3,240 interakci na LinkedIn, 1,890 na Twitteru. Engagement rate 4.2% (nadprumerne). Top post: "AI employees vs RPA" s 890 reakcemi.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Delegation: Leader delegating to another worker (still running) -->
+          <div class="max-w-xl ml-10">
+            <div class="bg-primary-50 border border-primary-200 border-l-4 border-l-brand-teal rounded-lg overflow-hidden">
+              <div class="px-4 py-3">
+                <div class="flex items-center gap-2 text-xs">
+                  <svg class="w-3.5 h-3.5 text-brand-gold" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5.5 21h13"/></svg>
+                  <span class="font-medium text-neutral-700">Delegated to</span>
+                  <span class="font-semibold text-neutral-900">web-search tool</span>
+                  <span class="text-neutral-400">(parallel with Social Media)</span>
+                </div>
+                <div class="mt-1.5 text-xs text-neutral-600 bg-white rounded px-2.5 py-1.5 border border-neutral-200">
+                  "SEO keyword trends for AI employee management 2026"
+                </div>
+                <div class="mt-2 flex items-center gap-2">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-success-50 text-success-700">
+                    <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+                    Completed in 8s
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- File notification (clickable to preview) -->
+          <div class="flex items-center gap-2 px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg text-xs text-primary-700 max-w-md cursor-pointer hover:bg-primary-100">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+            <span>File created: <span class="font-mono font-medium">blog-post-ai-employees.md</span></span>
+            <button class="ml-auto text-primary-600 font-medium hover:underline">Preview &rarr;</button>
+          </div>
+
+          <!-- Rate limit warning -->
+          <div class="flex items-center gap-2 px-3 py-2 bg-warning-50 border border-warning-500/30 rounded-lg text-xs text-warning-700 max-w-md">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+            <span>API rate limit reached. Switching to backup key <span class="font-mono font-medium">ANTHROPIC_KEY_2</span>... Context preserved.</span>
+          </div>
+
+          <!-- Continued text -->
+          <div class="flex gap-3">
+            <div class="w-7 h-7 rounded-full bg-neutral-200 flex items-center justify-center flex-shrink-0 mt-0.5"><svg class="w-4 h-4 text-neutral-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></div>
+            <div class="bg-white border border-neutral-300 rounded-lg px-4 py-3 max-w-xl">
+              <p class="text-sm leading-relaxed">Continuing with the article. The blog post is now complete at 2,400 words. I've saved it to <code class="bg-neutral-100 px-1 py-0.5 rounded text-xs font-mono">blog-post-ai-employees.md</code> with proper H1/H2/H3 structure and a keyword density of 1.4%.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat input -->
+        <div class="p-4 bg-white border-t border-neutral-300 flex-shrink-0">
+          <div class="flex items-end gap-3">
+            <div class="flex-1 relative">
+              <textarea rows="1" placeholder="Send a message..." class="w-full px-4 py-2.5 text-sm border border-neutral-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-500"></textarea>
+            </div>
+            <button class="px-4 py-2.5 bg-primary-600 text-white rounded-lg hover:bg-primary-700">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- DRAG HANDLE -->
+      <div class="w-1 bg-neutral-200 hover:bg-primary-400 cursor-col-resize flex-shrink-0" title="Drag to resize"></div>
+
+      <!-- RIGHT: File Preview (40%) -->
+      <div class="w-2/5 flex flex-col bg-white">
+        <!-- File tree header -->
+        <div class="px-4 py-3 border-b border-neutral-200 flex items-center justify-between flex-shrink-0">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+            <span class="text-sm font-medium">Files</span>
+            <span class="text-xs text-neutral-400">/output/claude-seo-writer/</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="text-xs text-primary-600 hover:underline">Download</button>
+            <button class="text-xs text-neutral-500 hover:text-neutral-700">Copy path</button>
+          </div>
+        </div>
+
+        <!-- File tree -->
+        <div class="border-b border-neutral-200 px-4 py-2 space-y-0.5 flex-shrink-0 bg-neutral-50 max-h-40 overflow-y-auto">
+          <div class="flex items-center gap-2 px-2 py-1 rounded bg-primary-100 text-primary-700 text-xs cursor-pointer">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+            <span class="font-medium">blog-post-ai-employees.md</span>
+            <span class="ml-auto text-neutral-400">4.2 KB</span>
+          </div>
+          <div class="flex items-center gap-2 px-2 py-1 rounded hover:bg-neutral-100 text-xs cursor-pointer text-neutral-600">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+            <span>meta-descriptions-batch.csv</span>
+            <span class="ml-auto text-neutral-400">1.8 KB</span>
+          </div>
+          <div class="flex items-center gap-2 px-2 py-1 rounded hover:bg-neutral-100 text-xs cursor-pointer text-neutral-600">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+            <span>seo-audit-report.pdf</span>
+            <span class="ml-auto text-neutral-400">245 KB</span>
+          </div>
+          <div class="flex items-center gap-2 px-2 py-1 rounded hover:bg-neutral-100 text-xs cursor-pointer text-neutral-600">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+            <span>keyword-research-q1.json</span>
+            <span class="ml-auto text-neutral-400">12.4 KB</span>
+          </div>
+        </div>
+
+        <!-- Preview area (rendered markdown) -->
+        <div class="flex-1 overflow-y-auto p-6">
+          <div class="prose prose-sm max-w-none">
+            <div class="flex items-center gap-2 mb-4 text-xs text-neutral-500 bg-neutral-50 rounded-lg px-3 py-2">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>
+              <span class="font-mono">blog-post-ai-employees.md</span>
+              <span class="ml-auto">4.2 KB &middot; Modified 23 min ago</span>
+            </div>
+
+            <h1 class="text-xl font-bold mb-2">AI Employee Management: The Future of Automated Workforce</h1>
+            <p class="text-xs text-neutral-500 mb-4"><em>Meta Description: Discover how AI employee management platforms revolutionize workforce automation. Learn about AI agent orchestration, virtual teams, and 24/7 productivity.</em></p>
+
+            <h2 class="text-lg font-semibold mt-6 mb-2">What Are AI Employees?</h2>
+            <p class="text-sm text-neutral-700 leading-relaxed">AI employees are autonomous software agents that perform tasks traditionally done by human workers. Unlike simple chatbots or RPA scripts, AI employees can reason, use tools, and adapt to complex situations...</p>
+
+            <h2 class="text-lg font-semibold mt-6 mb-2">Key Benefits of AI Agent Orchestration</h2>
+            <p class="text-sm text-neutral-700 leading-relaxed">Modern <strong>AI employee management</strong> platforms provide several advantages:</p>
+            <ul class="text-sm text-neutral-700 list-disc list-inside space-y-1 ml-2">
+              <li>24/7 availability without overtime costs</li>
+              <li>Consistent quality with auditable outputs</li>
+              <li>Scalable: add agents in minutes, not months</li>
+              <li>Credential isolation and enterprise security</li>
+            </ul>
+
+            <h2 class="text-lg font-semibold mt-6 mb-2">Choosing the Right Platform</h2>
+            <p class="text-sm text-neutral-700 leading-relaxed">When evaluating AI employee management platforms, consider: team isolation, RBAC, credential encryption, audit logging, and the ability to use multiple LLM providers (BYOK model)...</p>
+
+            <div class="mt-6 p-3 bg-neutral-100 rounded-lg">
+              <p class="text-xs text-neutral-500 text-center">Preview rendered from Markdown. <a href="#" class="text-primary-600 hover:underline">View raw</a></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="_shared.js"></script>
+</body>
+</html>

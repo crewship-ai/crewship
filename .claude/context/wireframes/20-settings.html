@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Settings</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['JetBrains Mono','monospace']},colors:{primary:{50:'#F0F6FF',100:'#E7F3FF',200:'#C5DCFC',300:'#9DC5FA',400:'#6BAAF7',500:'#4293F5',600:'#1877F2',700:'#1877C2',800:'#1565A8',900:'#0D4F8B',950:'#003366'},neutral:{50:'#F7F8FA',100:'#F0F2F5',200:'#E4E6EA',300:'#CED0D4',400:'#ADB1B5',500:'#8A8D91',600:'#65676B',700:'#4B4F54',800:'#373A3F',900:'#242628',950:'#1C1E21'},success:{50:'#E6F5EA',500:'#31A24C',700:'#1B7D36'},warning:{50:'#FFF8E6',500:'#F7B928',700:'#B06D00'},error:{50:'#FDE8E8',500:'#E34234',700:'#B32D1B'},'brand-teal':{'DEFAULT':'#4ECDC4'}}}}}
+</script>
+<style>
+  body { font-size: 14px; }
+  .stab { transition: background .1s, color .1s; cursor: pointer; }
+  .stab:hover { background: #F0F2F5; }
+  .stab-active { background: #E7F3FF !important; color: #1877F2 !important; font-weight: 500; }
+  .scope-btn { transition: background .15s, color .15s, box-shadow .15s; }
+</style>
+</head>
+<body class="bg-neutral-100 font-sans text-neutral-950 antialiased">
+<div class="flex h-screen">
+
+  <main class="flex-1 overflow-y-auto">
+    <div class="h-full flex">
+
+      <!-- Settings left nav -->
+      <div class="w-56 bg-white border-r border-neutral-200 flex flex-col flex-shrink-0 overflow-y-auto">
+
+        <!-- Scope switcher -->
+        <div class="p-3 border-b border-neutral-100">
+          <div class="flex gap-1 p-0.5 bg-neutral-100 rounded-lg">
+            <button id="scope-user" class="scope-btn flex-1 text-xs py-1.5 rounded-md font-medium bg-white text-neutral-900 shadow-sm">User</button>
+            <button id="scope-org" class="scope-btn flex-1 text-xs py-1.5 rounded-md font-medium text-neutral-500 hover:text-neutral-700">Organization</button>
+          </div>
+          <div id="org-badge" class="hidden flex items-center gap-2 mt-2 px-1">
+            <div class="w-5 h-5 rounded bg-primary-600 flex items-center justify-center text-white text-[8px] font-bold">U</div>
+            <span class="text-[10px] text-neutral-500">Unify Technology</span>
+          </div>
+        </div>
+
+        <!-- Tab list (dynamically populated) -->
+        <nav id="settings-tabs" class="flex-1 p-2 space-y-0.5"></nav>
+      </div>
+
+      <!-- Settings content -->
+      <div class="flex-1 overflow-y-auto">
+        <div id="settings-content" class="max-w-2xl mx-auto px-8 py-6"></div>
+      </div>
+
+    </div>
+  </main>
+
+</div>
+<script src="_shared.js"></script>
+<script>
+(function () {
+  var S = CrewshipSettings;
+  var scope = 'user';
+  var tab = 'profile';
+
+  var userTabs = S.userTabs;
+  var orgTabs = S.orgTabs;
+
+  function render() {
+    var tabs = scope === 'user' ? userTabs : orgTabs;
+    // Scope buttons
+    var su = document.getElementById('scope-user');
+    var so = document.getElementById('scope-org');
+    su.className = 'scope-btn flex-1 text-xs py-1.5 rounded-md font-medium ' + (scope === 'user' ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500 hover:text-neutral-700');
+    so.className = 'scope-btn flex-1 text-xs py-1.5 rounded-md font-medium ' + (scope === 'org' ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500 hover:text-neutral-700');
+    document.getElementById('org-badge').className = scope === 'org' ? 'flex items-center gap-2 mt-2 px-1' : 'hidden';
+
+    // Tabs with section headers
+    var tabNav = document.getElementById('settings-tabs');
+    var html = '';
+    tabs.forEach(function (t) {
+      if (t.type === 'section') {
+        html += '<div class="text-[9px] font-semibold text-neutral-400 uppercase tracking-wider px-3 pt-3 pb-1">' + t.label + '</div>';
+        return;
+      }
+      var isActive = t.key === tab;
+      var badgeHtml = '';
+      if (t.badge === 'P2') badgeHtml = '<span class="ml-auto text-[8px] bg-neutral-100 text-neutral-400 px-1.5 py-0.5 rounded font-medium">Phase 2</span>';
+      else if (t.badge === 'OWNER') badgeHtml = '<span class="ml-auto text-[8px] bg-warning-50 text-warning-700 px-1.5 py-0.5 rounded font-medium">Owner</span>';
+      html += '<button data-tab="' + t.key + '" class="flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-xs stab ' +
+        (isActive ? 'stab-active' : 'text-neutral-600') + '">' +
+        '<span class="flex-shrink-0">' + (S.sIcons[t.icon] || '') + '</span>' +
+        '<span class="truncate">' + t.label + '</span>' +
+        badgeHtml +
+      '</button>';
+    });
+    tabNav.innerHTML = html;
+
+    // Content
+    var content = document.getElementById('settings-content');
+    content.innerHTML = S.tabContent[tab] ? S.tabContent[tab]() : '<div class="text-sm text-neutral-400">Coming soon.</div>';
+
+    // Bind tab clicks
+    tabNav.querySelectorAll('[data-tab]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        tab = btn.getAttribute('data-tab');
+        render();
+      });
+    });
+  }
+
+  document.getElementById('scope-user').addEventListener('click', function () {
+    if (scope !== 'user') { scope = 'user'; tab = 'profile'; render(); }
+  });
+  document.getElementById('scope-org').addEventListener('click', function () {
+    if (scope !== 'org') { scope = 'org'; tab = 'general'; render(); }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
