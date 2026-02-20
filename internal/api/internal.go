@@ -361,26 +361,88 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		promptParts = append(promptParts, "[PERSONA]\n"+systemPrompt.String)
 	}
 
-	// [ACTIVE SKILLS] section
+	// [SKILLS AVAILABLE] section
+	const maxSkillsContextChars = 20000
+	const skillHeader = "[SKILLS AVAILABLE]\nYou have access to the following skill playbooks. Activate them when the user's\nrequest matches each skill's \"When to Activate\" criteria.\n\n"
+	const skillFooter = "\n[END SKILLS AVAILABLE]"
+	const skillSeparator = "\n\n"
+	// Budget for skill parts only — excludes header/footer overhead
+	skillBudget := maxSkillsContextChars - len(skillHeader) - len(skillFooter)
+	if skillBudget < 0 {
+		skillBudget = 0
+	}
 	skillRows, err := h.db.QueryContext(r.Context(), `
-		SELECT s.name, s.content
+		SELECT s.display_name, s.category, COALESCE(s.credential_requirements, '[]'), s.content
 		FROM agent_skills as2
 		JOIN skills s ON s.id = as2.skill_id
 		WHERE as2.agent_id = ? AND as2.enabled = 1 AND s.content IS NOT NULL AND s.content != ''
-		ORDER BY s.name
+		ORDER BY s.display_name
 	`, agentID)
 	if err != nil {
 		h.logger.Error("resolve chat skills", "error", err)
 	} else {
 		defer skillRows.Close()
+
+		// Build a set of configured env var names for credential status checks
+		configuredEnvVars := make(map[string]bool, len(creds))
+		for _, c := range creds {
+			configuredEnvVars[c.EnvVar] = true
+		}
+
 		var skillParts []string
+		totalSkillChars := 0
 		for skillRows.Next() {
-			var name, content string
-			if err := skillRows.Scan(&name, &content); err != nil {
+			var displayName, category, credReqJSON, content string
+			if err := skillRows.Scan(&displayName, &category, &credReqJSON, &content); err != nil {
 				h.logger.Error("scan skill for resolve", "error", err)
 				continue
 			}
-			skillParts = append(skillParts, fmt.Sprintf("--- Skill: %s ---\n%s", name, content))
+
+			// Build credential status lines
+			var credLines []string
+			var credReqs []string
+			if err := json.Unmarshal([]byte(credReqJSON), &credReqs); err == nil && len(credReqs) > 0 {
+				for _, envVar := range credReqs {
+					if configuredEnvVars[envVar] {
+						credLines = append(credLines, fmt.Sprintf("  - %s: configured ✓", envVar))
+					} else {
+						credLines = append(credLines, fmt.Sprintf("  - %s: NOT CONFIGURED (skill may not work)", envVar))
+					}
+				}
+			}
+
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("<skill name=%q category=%q>\n", displayName, category))
+			if len(credLines) > 0 {
+				sb.WriteString("Credentials:\n")
+				for _, cl := range credLines {
+					sb.WriteString(cl + "\n")
+				}
+				sb.WriteString("\n")
+			}
+			sb.WriteString(content)
+			sb.WriteString("\n</skill>")
+
+			part := sb.String()
+			sepLen := 0
+			if len(skillParts) > 0 {
+				sepLen = len(skillSeparator)
+			}
+			if totalSkillChars+sepLen+len(part) > skillBudget {
+				// Truncate this skill to fit within budget
+				remaining := skillBudget - totalSkillChars - sepLen
+				suffix := "\n...(truncated)\n</skill>"
+				if remaining > len(suffix)+20 {
+					part = part[:remaining-len(suffix)] + suffix
+					skillParts = append(skillParts, part)
+					h.logger.Warn("skill truncated due to context budget", "skill", displayName, "budget", maxSkillsContextChars)
+				} else {
+					h.logger.Warn("skill omitted due to context budget", "skill", displayName, "budget", maxSkillsContextChars)
+				}
+				break
+			}
+			skillParts = append(skillParts, part)
+			totalSkillChars += sepLen + len(part)
 		}
 		if err := skillRows.Err(); err != nil {
 			h.logger.Error("rows iteration (resolve skills)", "error", err)
@@ -388,7 +450,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(skillParts) > 0 {
-			promptParts = append(promptParts, "[ACTIVE SKILLS]\n"+strings.Join(skillParts, "\n\n"))
+			promptParts = append(promptParts, skillHeader+strings.Join(skillParts, skillSeparator)+skillFooter)
 		}
 	}
 

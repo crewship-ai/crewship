@@ -217,6 +217,36 @@ DB pristup pres `database/sql` (zadny ORM).
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
 | `GET` | `/api/v1/skills` | Auth | Seznam dostupnych skills |
+| `POST` | `/api/v1/workspaces/{workspaceId}/skills/import` | MANAGER+ | Importovat skill z URL nebo obsahu SKILL.md |
+
+#### Import endpointu
+
+```json
+// POST /api/v1/workspaces/{workspaceId}/skills/import
+// Body (jeden z poli je povinny):
+{ "url": "https://github.com/org/skills/blob/main/SKILL.md" }
+// nebo
+{ "content": "---\nname: my-skill\n---\n# My Skill..." }
+
+// Response 201:
+{
+  "skill_id": "sk_abc123",
+  "name": "My Skill",
+  "slug": "my-skill",
+  "created": true   // false = aktualizovan existujici skill
+}
+```
+
+Podporovane URL formaty:
+- `https://github.com/owner/repo/blob/branch/path.md` → automaticky konvertovano na raw URL
+- `owner/repo/path.md` → `https://raw.githubusercontent.com/owner/repo/main/path.md`
+- Jakekoliv jina HTTPS URL → beze zmeny
+
+Bezpecnostni omezeni (SSRF ochrana):
+- Povoleny POUZE HTTPS URL (HTTP je odmitnuto)
+- Blokovany: localhost, 127.0.0.0/8, privatni IP (10.x, 172.16.x, 192.168.x), link-local (169.254.x)
+- Klient obdrzi 400 Bad Request s RFC 7807 detail pro zakazane URL
+- Omezeni se tykaji pouze `url` pole; `content` pole neni ovlivneno
 
 ### 3.12 Runs
 

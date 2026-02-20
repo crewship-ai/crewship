@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -218,5 +220,203 @@ func TestResolveChat_WithCredentials(t *testing.T) {
 	creds, ok := resp["credentials"].([]interface{})
 	if !ok || len(creds) == 0 {
 		t.Error("expected at least one credential in response")
+	}
+}
+
+// seedTestSkill inserts a skill and returns its ID.
+func seedTestSkill(t *testing.T, db interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}, id, name, slug, displayName, category, content, credReqs string) {
+	t.Helper()
+	_, err := db.ExecContext(context.Background(),
+		`INSERT INTO skills (id, name, slug, display_name, category, source, content, credential_requirements)
+		VALUES (?, ?, ?, ?, ?, 'CUSTOM', ?, ?)`,
+		id, name, slug, displayName, category, content, credReqs)
+	if err != nil {
+		t.Fatalf("insert skill %q: %v", id, err)
+	}
+}
+
+// seedTestAgentSkill links a skill to an agent.
+func seedTestAgentSkill(t *testing.T, db interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}, asID, agentID, skillID string, enabled int) {
+	t.Helper()
+	_, err := db.ExecContext(context.Background(),
+		`INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES (?, ?, ?, ?)`,
+		asID, agentID, skillID, enabled)
+	if err != nil {
+		t.Fatalf("insert agent_skill: %v", err)
+	}
+}
+
+func TestResolveChat_Skills(t *testing.T) {
+	tests := []struct {
+		name   string
+		seed   func(t *testing.T, db *sql.DB, wsID, userID string)
+		assert func(t *testing.T, sysPrompt string)
+	}{
+		{
+			name: "WithSkills",
+			seed: func(t *testing.T, db *sql.DB, wsID, userID string) {
+				seedTestSkill(t, db, "sk1", "GitHub Integration", "github-integration",
+					"GitHub Integration", "DEVELOPMENT",
+					"# GitHub Integration\n\n## Instructions\nUse GitHub API.", "[]")
+				seedTestAgentSkill(t, db, "as1", "agent1", "sk1", 1)
+			},
+			assert: func(t *testing.T, sysPrompt string) {
+				if !strings.Contains(sysPrompt, "[SKILLS AVAILABLE]") {
+					t.Error("system_prompt missing [SKILLS AVAILABLE] header")
+				}
+				if !strings.Contains(sysPrompt, `<skill name="GitHub Integration"`) {
+					t.Error("system_prompt missing skill XML tag")
+				}
+				if !strings.Contains(sysPrompt, "# GitHub Integration") {
+					t.Error("system_prompt missing skill content")
+				}
+				if !strings.Contains(sysPrompt, "[END SKILLS AVAILABLE]") {
+					t.Error("system_prompt missing [END SKILLS AVAILABLE] footer")
+				}
+			},
+		},
+		{
+			name: "SkillDisabled",
+			seed: func(t *testing.T, db *sql.DB, wsID, userID string) {
+				seedTestSkill(t, db, "sk1", "Disabled Skill", "disabled-skill",
+					"Disabled Skill", "CUSTOM", "# Disabled Skill", "[]")
+				seedTestAgentSkill(t, db, "as1", "agent1", "sk1", 0) // enabled=0
+			},
+			assert: func(t *testing.T, sysPrompt string) {
+				if strings.Contains(sysPrompt, "[SKILLS AVAILABLE]") {
+					t.Error("disabled skill should not produce [SKILLS AVAILABLE] block")
+				}
+			},
+		},
+		{
+			name: "SkillNoContent",
+			seed: func(t *testing.T, db *sql.DB, wsID, userID string) {
+				if _, err := db.ExecContext(context.Background(),
+					`INSERT INTO skills (id, name, slug, display_name, category, source, content)
+					VALUES ('sk1', 'Empty Skill', 'empty-skill', 'Empty Skill', 'CUSTOM', 'CUSTOM', NULL)`); err != nil {
+					t.Fatalf("insert skill: %v", err)
+				}
+				seedTestAgentSkill(t, db, "as1", "agent1", "sk1", 1)
+			},
+			assert: func(t *testing.T, sysPrompt string) {
+				if strings.Contains(sysPrompt, "[SKILLS AVAILABLE]") {
+					t.Error("skill with NULL content should not produce [SKILLS AVAILABLE] block")
+				}
+			},
+		},
+		{
+			name: "MultipleSkills",
+			seed: func(t *testing.T, db *sql.DB, wsID, userID string) {
+				seedTestSkill(t, db, "sk1", "Alpha Skill", "alpha-skill",
+					"Alpha Skill", "CODING", "# Alpha Skill", "[]")
+				seedTestSkill(t, db, "sk2", "Zeta Skill", "zeta-skill",
+					"Zeta Skill", "RESEARCH", "# Zeta Skill", "[]")
+				seedTestAgentSkill(t, db, "as1", "agent1", "sk1", 1)
+				seedTestAgentSkill(t, db, "as2", "agent1", "sk2", 1)
+			},
+			assert: func(t *testing.T, sysPrompt string) {
+				if !strings.Contains(sysPrompt, `<skill name="Alpha Skill"`) {
+					t.Error("missing Alpha Skill in prompt")
+				}
+				if !strings.Contains(sysPrompt, `<skill name="Zeta Skill"`) {
+					t.Error("missing Zeta Skill in prompt")
+				}
+				alphaIdx := strings.Index(sysPrompt, `<skill name="Alpha Skill"`)
+				zetaIdx := strings.Index(sysPrompt, `<skill name="Zeta Skill"`)
+				if alphaIdx > zetaIdx {
+					t.Error("skills should be in alphabetical order: Alpha before Zeta")
+				}
+			},
+		},
+		{
+			name: "ZeroSkills",
+			seed: func(t *testing.T, db *sql.DB, wsID, userID string) {
+				// No skills assigned to agent
+			},
+			assert: func(t *testing.T, sysPrompt string) {
+				if strings.Contains(sysPrompt, "[SKILLS AVAILABLE]") {
+					t.Error("agent with no skills should not have [SKILLS AVAILABLE] block")
+				}
+			},
+		},
+		{
+			name: "SkillCredentialStatus",
+			seed: func(t *testing.T, db *sql.DB, wsID, userID string) {
+				seedTestSkill(t, db, "sk1", "GitHub Skill", "github-skill",
+					"GitHub Skill", "DEVELOPMENT", "# GitHub Skill",
+					`["GITHUB_TOKEN","SLACK_TOKEN"]`)
+				seedTestAgentSkill(t, db, "as1", "agent1", "sk1", 1)
+
+				encValue, _ := encryption.Encrypt("ghp_test")
+				if _, err := db.ExecContext(context.Background(),
+					`INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, created_by)
+					VALUES ('cred1', ?, 'GitHub Token', ?, 'API_KEY', 'NONE', ?)`, wsID, encValue, userID); err != nil {
+					t.Fatalf("insert credential: %v", err)
+				}
+				if _, err := db.ExecContext(context.Background(),
+					`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority)
+					VALUES ('ac1', 'agent1', 'cred1', 'GITHUB_TOKEN', 1)`); err != nil {
+					t.Fatalf("insert agent_credential: %v", err)
+				}
+			},
+			assert: func(t *testing.T, sysPrompt string) {
+				if !strings.Contains(sysPrompt, "GITHUB_TOKEN: configured") {
+					t.Errorf("expected GITHUB_TOKEN configured status, got prompt: %s", sysPrompt)
+				}
+				if !strings.Contains(sysPrompt, "SLACK_TOKEN: NOT CONFIGURED") {
+					t.Errorf("expected SLACK_TOKEN not configured status, got prompt: %s", sysPrompt)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setTestEncryptionKey(t)
+			db := setupTestDB(t)
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+			userID := seedTestUser(t, db)
+			wsID := seedTestWorkspace(t, db, userID)
+
+			if _, err := db.ExecContext(context.Background(),
+				`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Test Crew', 'test-crew')`, wsID); err != nil {
+				t.Fatalf("insert crew: %v", err)
+			}
+			if _, err := db.ExecContext(context.Background(),
+				`INSERT INTO agents (id, crew_id, workspace_id, name, slug)
+				VALUES ('agent1', 'crew1', ?, 'Test Agent', 'test-agent')`, wsID); err != nil {
+				t.Fatalf("insert agent: %v", err)
+			}
+			if _, err := db.ExecContext(context.Background(),
+				`INSERT INTO chats (id, agent_id, workspace_id, mode, status)
+				VALUES ('chat1', 'agent1', ?, 'CHAT', 'ACTIVE')`, wsID); err != nil {
+				t.Fatalf("insert chat: %v", err)
+			}
+
+			tt.seed(t, db, wsID, userID)
+
+			handler := NewInternalHandler(db, "test-token", logger)
+			req := httptest.NewRequest("GET", "/api/v1/internal/chats/chat1/resolve", nil)
+			req.SetPathValue("chatId", "chat1")
+			w := httptest.NewRecorder()
+			handler.ResolveChat(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var resp map[string]interface{}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			sysPrompt, _ := resp["system_prompt"].(string)
+
+			tt.assert(t, sysPrompt)
+		})
 	}
 }

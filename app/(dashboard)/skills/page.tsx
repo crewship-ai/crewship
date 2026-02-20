@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { z } from "zod"
 import { Blocks } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -9,29 +10,32 @@ import { FilterBar } from "@/components/layout/filter-bar"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { ImportSkillDialog } from "@/components/skills/import-dialog"
 
-interface Skill {
-  id: string
-  name: string
-  slug: string
-  display_name: string | null
-  description: string | null
-  version: string | null
-  author: string | null
-  category: string
-  source: string
-  icon: string | null
-  verification: string | null
-  downloads: number | null
-  rating_avg: number | null
-  rating_count: number | null
-  tags: string[]
-  featured: boolean
-  pricing_tier: string | null
-  tool_count: number | null
-  created_at: string
-  updated_at: string
-}
+const SkillSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  display_name: z.string().nullable(),
+  description: z.string().nullable(),
+  version: z.string().nullable(),
+  author: z.string().nullable(),
+  category: z.string(),
+  source: z.string(),
+  icon: z.string().nullable(),
+  verification: z.string().nullable(),
+  downloads: z.number().nullable(),
+  rating_avg: z.number().nullable(),
+  rating_count: z.number().nullable(),
+  tags: z.unknown().nullable(),
+  featured: z.boolean(),
+  pricing_tier: z.string().nullable(),
+  tool_count: z.number().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+})
+const SkillsArraySchema = z.array(SkillSchema)
+type Skill = z.infer<typeof SkillSchema>
 
 export default function SkillsPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
@@ -57,7 +61,8 @@ export default function SkillsPage() {
           setError("Failed to load skills")
           return
         }
-        const data = (await res.json()) as Skill[]
+        const json = await res.json()
+        const data = SkillsArraySchema.parse(json)
         if (!cancelled) setSkills(data)
       } catch {
         if (!cancelled) setError("Failed to load skills")
@@ -81,9 +86,28 @@ export default function SkillsPage() {
       ? skills
       : skills.filter((s) => s.source === activeFilter.toUpperCase())
 
+  function handleImported() {
+    // Refresh skills list after a successful import
+    if (!workspaceId) return
+    setLoading(true)
+    setError(null)
+    fetch(`/api/v1/skills?workspace_id=${workspaceId}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((json) => {
+        const data = SkillsArraySchema.parse(json)
+        setSkills(data)
+      })
+      .catch(() => setError("Failed to reload skills"))
+      .finally(() => setLoading(false))
+  }
+
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <PageHeader title="Skills" description="Browse and manage agent skills" />
+      <PageHeader title="Skills" description="Browse and manage agent skills">
+        {workspaceId && (
+          <ImportSkillDialog workspaceId={workspaceId} onImported={handleImported} />
+        )}
+      </PageHeader>
 
       <FilterBar
         filters={sourceFilters}
