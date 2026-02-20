@@ -5,7 +5,7 @@
  * respond correctly to basic requests.
  *
  * Usage:
- *   node _assignment-api-test.cjs
+ *   node tests/assignment-api-test.cjs
  *
  * Environment:
  *   PORT              Go server port. Defaults to 8081

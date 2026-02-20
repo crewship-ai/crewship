@@ -2,11 +2,17 @@ package sidecar
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
+
+// ipcClient is used for all IPC HTTP calls with a reasonable timeout
+// to prevent indefinite blocking if crewshipd hangs.
+var ipcClient = &http.Client{Timeout: 30 * time.Second}
 
 type assignRequest struct {
 	Target string `json:"target"`
@@ -60,7 +66,10 @@ func (s *Server) handleAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		s.ipc.BaseURL+"/api/v1/internal/assignments", bytes.NewReader(bodyJSON))
 	if err != nil {
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
@@ -69,7 +78,7 @@ func (s *Server) handleAssign(w http.ResponseWriter, r *http.Request) {
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
 
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := ipcClient.Do(httpReq)
 	if err != nil {
 		writeJSONResponse(w, http.StatusBadGateway, map[string]string{
 			"error": fmt.Sprintf("assignment request failed: %v", err),
@@ -96,12 +105,15 @@ func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
 	}
 
 	assignmentID := strings.TrimPrefix(r.URL.Path, "/results/")
-	if assignmentID == "" {
+	if assignmentID == "" || strings.Contains(assignmentID, "/") || strings.Contains(assignmentID, "..") {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "assignment_id required"})
 		return
 	}
 
-	httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet,
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		s.ipc.BaseURL+"/api/v1/internal/assignments/"+assignmentID, nil)
 	if err != nil {
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
@@ -109,7 +121,7 @@ func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
 	}
 	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
 
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := ipcClient.Do(httpReq)
 	if err != nil {
 		writeJSONResponse(w, http.StatusBadGateway, map[string]string{
 			"error": fmt.Sprintf("results request failed: %v", err),

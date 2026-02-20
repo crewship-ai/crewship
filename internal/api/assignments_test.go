@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,10 +13,12 @@ import (
 	"testing"
 )
 
-func seedAssignmentFixtures(t *testing.T, db interface {
-	ExecContext(ctx context.Context, query string, args ...interface{}) (interface{ RowsAffected() (int64, error) }, error)
-}) {
+// execOrFatal is a helper that fails the test if a DB exec fails.
+func execOrFatal(t *testing.T, db *sql.DB, query string, args ...interface{}) {
 	t.Helper()
+	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
+		t.Fatalf("exec %q: %v", query[:min(len(query), 60)], err)
+	}
 }
 
 func TestAssignmentGet_NotFound(t *testing.T) {
@@ -103,7 +106,7 @@ func TestAssignmentList_Empty(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Crew', 'crew')`, wsID)
 
 	h := NewAssignmentHandler(db, nil, nil, "token", logger)
@@ -136,34 +139,34 @@ func TestAssignmentList_ReturnsCrewAssignments(t *testing.T) {
 	wsID := seedTestWorkspace(t, db, userID)
 
 	// Seed two crews
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Alpha', 'alpha')`, wsID)
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew2', ?, 'Beta', 'beta')`, wsID)
 
 	// Agents in crew1
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Lead', 'lead')`, wsID)
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag2', 'crew1', ?, 'Worker', 'worker')`, wsID)
 
 	// Agent in crew2
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag3', 'crew2', ?, 'Other', 'other')`, wsID)
 
 	// Chats
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('chat1', 'ag1', ?, 'CHAT', 'ACTIVE')`, wsID)
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('chat2', 'ag3', ?, 'CHAT', 'ACTIVE')`, wsID)
 
 	// Assignment in crew1
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at)
 		 VALUES ('a1', ?, 'chat1', 'ag1', 'ag2', 'write tests', 'COMPLETED', '2025-01-01T00:00:00Z')`, wsID)
 
 	// Assignment in crew2 (should NOT appear for crew1)
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at)
 		 VALUES ('a2', ?, 'chat2', 'ag3', 'ag3', 'other task', 'PENDING', '2025-01-02T00:00:00Z')`, wsID)
 
@@ -208,18 +211,18 @@ func TestAssignmentList_Pagination(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'C', 'c')`, wsID)
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'A1', 'a1')`, wsID)
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag2', 'crew1', ?, 'A2', 'a2')`, wsID)
-	db.ExecContext(context.Background(),
+	execOrFatal(t, db,
 		`INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('chat1', 'ag1', ?, 'CHAT', 'ACTIVE')`, wsID)
 
 	// Insert 3 assignments
 	for i := 1; i <= 3; i++ {
-		db.ExecContext(context.Background(),
+		execOrFatal(t, db,
 			`INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at)
 			 VALUES (?, ?, 'chat1', 'ag1', 'ag2', ?, 'PENDING', ?)`,
 			fmt.Sprintf("pa%d", i), wsID, fmt.Sprintf("task %d", i),

@@ -5,10 +5,10 @@
  * via the sidecar assignment API and that WS assignment events are received.
  *
  * Usage:
- *   WS_TOKEN=$(go run ./tools/gen-ws-token) node _lead-assignment-test.cjs
+ *   WS_TOKEN=$(go run ./tools/gen-ws-token) node tests/lead-assignment-test.cjs
  *
  * Or with a specific lead chat:
- *   WS_TOKEN=<token> LEAD_CHAT_ID=<chat-id> node _lead-assignment-test.cjs
+ *   WS_TOKEN=<token> LEAD_CHAT_ID=<chat-id> node tests/lead-assignment-test.cjs
  *
  * The script sends a message to the lead agent instructing it to assign a task
  * to Viktor, then monitors for:
@@ -33,7 +33,7 @@ const TIMEOUT_MS = parseInt(process.env.TIMEOUT_MS || '180000', 10);
 
 if (!TOKEN) {
   console.error('ERROR: WS_TOKEN is required.');
-  console.error('Run: WS_TOKEN=$(go run ./tools/gen-ws-token) node _lead-assignment-test.cjs');
+  console.error('Run: WS_TOKEN=$(go run ./tools/gen-ws-token) node tests/lead-assignment-test.cjs');
   process.exit(1);
 }
 

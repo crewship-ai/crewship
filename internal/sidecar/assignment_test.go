@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -91,9 +92,8 @@ func TestHandleAssign_ForwardsToCrewshipd(t *testing.T) {
 			return
 		}
 		receivedToken = r.Header.Get("X-Internal-Token")
-		bodyBytes := make([]byte, 4096)
-		n, _ := r.Body.Read(bodyBytes)
-		receivedBody = string(bodyBytes[:n])
+		bodyBytes, _ := io.ReadAll(r.Body)
+		receivedBody = string(bodyBytes)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte(`{"assignment_id":"test-123","status":"PENDING"}`))
