@@ -435,8 +435,10 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 				if remaining > len(suffix)+20 {
 					part = part[:remaining-len(suffix)] + suffix
 					skillParts = append(skillParts, part)
+					h.logger.Warn("skill truncated due to context budget", "skill", displayName, "budget", maxSkillsContextChars)
+				} else {
+					h.logger.Warn("skill omitted due to context budget", "skill", displayName, "budget", maxSkillsContextChars)
 				}
-				h.logger.Warn("skill truncated due to context budget", "skill", displayName, "budget", maxSkillsContextChars)
 				break
 			}
 			skillParts = append(skillParts, part)

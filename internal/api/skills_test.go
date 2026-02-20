@@ -99,7 +99,7 @@ func TestSkillsImport_SSRFBlocked(t *testing.T) {
 
 	tests := []struct {
 		name string
-		url  string
+		body string
 	}{
 		{"localhost", `{"url": "https://localhost/SKILL.md"}`},
 		{"private_ip", `{"url": "https://10.0.0.1/SKILL.md"}`},
@@ -110,7 +110,7 @@ func TestSkillsImport_SSRFBlocked(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body := bytes.NewBufferString(tt.url)
+			body := bytes.NewBufferString(tt.body)
 			req := httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/skills/import", body)
 			req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
 			req = req.WithContext(withWorkspace(req.Context(), wsID, "MANAGER"))
