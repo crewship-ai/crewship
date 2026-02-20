@@ -125,6 +125,29 @@ func TestSkillsImport_SSRFBlocked(t *testing.T) {
 	}
 }
 
+func TestSkillsImport_BothFieldsProvided(t *testing.T) {
+	setTestEncryptionKey(t)
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	handler := NewSkillHandler(db, logger)
+
+	body := bytes.NewBufferString(`{"url": "https://example.com/SKILL.md", "content": "` + jsonEscape(validSkillMDForAPI) + `"}`)
+	req := httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/skills/import", body)
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+	req = req.WithContext(withWorkspace(req.Context(), wsID, "MANAGER"))
+	rr := httptest.NewRecorder()
+
+	handler.Import(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+}
+
 func TestSkillsImport_MissingBothFields(t *testing.T) {
 	setTestEncryptionKey(t)
 	db := setupTestDB(t)

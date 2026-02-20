@@ -122,22 +122,26 @@ display_name: Missing Name Skill
 
 func TestParseSKILLMD_SlugGeneration(t *testing.T) {
 	tests := []struct {
+		name  string
 		input string
 		want  string
 	}{
-		{"my skill", "my-skill"},
-		{"My Skill", "my-skill"},
-		{"GitHub Integration", "github-integration"},
-		{"my-skill", "my-skill"},
-		{"my_skill", "my_skill"},
-		{"  hello world  ", "hello-world"},
-		{"hello--world", "hello-world"},
+		{"spaces_to_hyphens", "my skill", "my-skill"},
+		{"uppercase_lowered", "My Skill", "my-skill"},
+		{"camel_case", "GitHub Integration", "github-integration"},
+		{"already_slug", "my-skill", "my-skill"},
+		{"underscores_kept", "my_skill", "my_skill"},
+		{"trim_whitespace", "  hello world  ", "hello-world"},
+		{"collapse_hyphens", "hello--world", "hello-world"},
 	}
 	for _, tt := range tests {
-		got := skills.Slugify(tt.input)
-		if got != tt.want {
-			t.Errorf("Slugify(%q) = %q, want %q", tt.input, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := skills.Slugify(tt.input)
+			if got != tt.want {
+				t.Fatalf("Slugify(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 

@@ -35,6 +35,8 @@ type Importer struct {
 	db     *sql.DB
 	logger *slog.Logger
 	client *http.Client
+	// SkipURLValidation disables SSRF checks (testing only).
+	SkipURLValidation bool
 }
 
 // NewImporter creates an Importer with a 30-second HTTP timeout.
@@ -54,9 +56,16 @@ func (imp *Importer) Import(ctx context.Context, _, _ string, req ImportRequest)
 	var content string
 
 	switch {
+	case req.URL != "" && req.Content != "":
+		return nil, fmt.Errorf("provide either url or content, not both")
 	case req.Content != "":
 		content = req.Content
 	case req.URL != "":
+		if !imp.SkipURLValidation {
+			if err := ValidateImportURL(ctx, req.URL); err != nil {
+				return nil, err
+			}
+		}
 		normalised, err := NormalizeSkillURL(req.URL)
 		if err != nil {
 			return nil, err
@@ -94,9 +103,14 @@ func (imp *Importer) fetchURL(ctx context.Context, url string) (string, error) {
 		return "", fmt.Errorf("fetch url %q: status %d", url, resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024)) // 512 KB limit
+	const limit = int64(512 * 1024)
+	lr := &io.LimitedReader{R: resp.Body, N: limit + 1}
+	body, err := io.ReadAll(lr)
 	if err != nil {
 		return "", fmt.Errorf("read response body: %w", err)
+	}
+	if int64(len(body)) > limit {
+		return "", fmt.Errorf("response body exceeds 512 KB limit")
 	}
 	return string(body), nil
 }

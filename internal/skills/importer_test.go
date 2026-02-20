@@ -97,6 +97,7 @@ func TestImporter_FromURL_MockHTTPServer(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	imp := skills.NewImporter(db, logger)
+	imp.SkipURLValidation = true // allow localhost for test
 
 	result, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
 		URL: srv.URL + "/SKILL.md",
@@ -125,6 +126,7 @@ func TestImporter_FromURL_PathPreserved(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	imp := skills.NewImporter(db, logger)
+	imp.SkipURLValidation = true // allow localhost for test
 
 	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
 		URL: srv.URL + "/path/to/SKILL.md",
@@ -159,6 +161,7 @@ func TestImporter_URLFetchError(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	imp := skills.NewImporter(db, logger)
+	imp.SkipURLValidation = true // allow localhost for test
 
 	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
 		URL: srv.URL + "/missing.md",
@@ -257,6 +260,48 @@ func TestImporter_DuplicateDisplayName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("error = %q, want to contain 'already exists'", err.Error())
+	}
+}
+
+func TestImporter_BothURLAndContent_Rejected(t *testing.T) {
+	db := setupSkillTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	imp := skills.NewImporter(db, logger)
+
+	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
+		URL:     "https://example.com/SKILL.md",
+		Content: validSkillMD,
+	})
+	if err == nil {
+		t.Fatal("expected error when both url and content are set")
+	}
+	if !strings.Contains(err.Error(), "not both") {
+		t.Errorf("error = %q, want to contain 'not both'", err.Error())
+	}
+}
+
+func TestImporter_OversizedResponse_Rejected(t *testing.T) {
+	// Serve a response larger than 512 KB
+	bigContent := strings.Repeat("x", 513*1024)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(bigContent))
+	}))
+	defer srv.Close()
+
+	db := setupSkillTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	imp := skills.NewImporter(db, logger)
+	imp.SkipURLValidation = true // allow localhost for test
+
+	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
+		URL: srv.URL + "/SKILL.md",
+	})
+	if err == nil {
+		t.Fatal("expected error for oversized response")
+	}
+	if !strings.Contains(err.Error(), "512 KB") {
+		t.Errorf("error = %q, want to mention 512 KB limit", err.Error())
 	}
 }
 

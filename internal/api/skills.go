@@ -145,6 +145,10 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 		writeProblem(http.StatusBadRequest, "url or content is required")
 		return
 	}
+	if req.URL != "" && req.Content != "" {
+		writeProblem(http.StatusBadRequest, "provide either url or content, not both")
+		return
+	}
 
 	// SSRF protection: validate URL before fetching
 	if req.URL != "" && !h.SkipURLValidation {
@@ -155,6 +159,7 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 
 	imp := skills.NewImporter(h.db, h.logger)
+	imp.SkipURLValidation = h.SkipURLValidation
 	result, err := imp.Import(r.Context(), wsID, user.ID, skills.ImportRequest{
 		URL:     req.URL,
 		Content: req.Content,
