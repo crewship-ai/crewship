@@ -113,9 +113,20 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 // Import handles POST /api/v1/workspaces/{workspaceId}/skills/import.
 // Accepts either a URL or raw SKILL.md content. Requires MANAGER role or above.
 func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
+	// RFC 7807 Problem Details error helper
+	writeProblem := func(status int, detail string) {
+		writeJSON(w, status, map[string]interface{}{
+			"type":     "about:blank",
+			"title":    http.StatusText(status),
+			"status":   status,
+			"detail":   detail,
+			"instance": r.URL.Path,
+		})
+	}
+
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		writeProblem(http.StatusForbidden, "Forbidden")
 		return
 	}
 
@@ -127,18 +138,18 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 		Content string `json:"content"`
 	}
 	if err := readJSON(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		writeProblem(http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if req.URL == "" && req.Content == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url or content is required"})
+		writeProblem(http.StatusBadRequest, "url or content is required")
 		return
 	}
 
 	// SSRF protection: validate URL before fetching
 	if req.URL != "" && !h.SkipURLValidation {
 		if err := skills.ValidateImportURL(req.URL); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			writeProblem(http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -150,7 +161,7 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.Info("skill import failed", "error", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeProblem(http.StatusBadRequest, err.Error())
 		return
 	}
 

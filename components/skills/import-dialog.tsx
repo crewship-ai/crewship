@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { z } from "zod"
 import { Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -17,12 +18,13 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 
-interface ImportResult {
-  skill_id: string
-  name: string
-  slug: string
-  created: boolean
-}
+const ImportResultSchema = z.object({
+  skill_id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  created: z.boolean(),
+})
+type ImportResult = z.infer<typeof ImportResultSchema>
 
 interface ImportSkillDialogProps {
   workspaceId: string
@@ -57,12 +59,12 @@ export function ImportSkillDialog({ workspaceId, onImported }: ImportSkillDialog
       )
 
       if (!res.ok) {
-        const data = (await res.json()) as { error?: string }
-        setError(data.error ?? "Import failed")
+        const data = await res.json()
+        setError(data.detail ?? data.error ?? "Import failed")
         return
       }
 
-      const result = (await res.json()) as ImportResult
+      const result = ImportResultSchema.parse(await res.json())
       setOpen(false)
       setUrl("")
       setContent("")

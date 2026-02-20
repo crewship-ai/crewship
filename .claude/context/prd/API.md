@@ -242,6 +242,12 @@ Podporovane URL formaty:
 - `owner/repo/path.md` → `https://raw.githubusercontent.com/owner/repo/main/path.md`
 - Jakekoliv jina HTTPS URL → beze zmeny
 
+Bezpecnostni omezeni (SSRF ochrana):
+- Povoleny POUZE HTTPS URL (HTTP je odmitnuto)
+- Blokovany: localhost, 127.0.0.0/8, privatni IP (10.x, 172.16.x, 192.168.x), link-local (169.254.x)
+- Klient obdrzi 400 Bad Request s RFC 7807 detail pro zakazane URL
+- Omezeni se tykaji pouze `url` pole; `content` pole neni ovlivneno
+
 ### 3.12 Runs
 
 | Metoda | Path | Role | Popis |

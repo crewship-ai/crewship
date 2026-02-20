@@ -448,7 +448,7 @@ that is not justified until multi-node scaling is needed.
 
 ## Skills + MCP Architecture (ADR-014, ADR-015, ADR-016)
 
-Skill = MCP Server wrapper. crewship-sidecar = MCP Gateway inside container.
+Skill = playbook injected into agent system prompt (parsed from SKILL.md), which may optionally wrap an MCP Server. crewship-sidecar = MCP Gateway inside container. See "Core Concepts" section for the Skill definition.
 
 ```
 Skill Definition (DB):
