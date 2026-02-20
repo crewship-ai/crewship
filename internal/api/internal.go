@@ -332,7 +332,8 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		crewSlugStr = crewSlug.String
 	}
 
-	// Build structured system prompt: ethos → identity → crew context → persona → skills
+	// Build structured system prompt: ethos → identity → persona → skills
+	// Note: crew context for LEADs is added later by the orchestrator
 	var promptParts []string
 
 	// Resolve agent_role (default to AGENT if unset)

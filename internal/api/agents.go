@@ -196,6 +196,11 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "Crew already has a lead agent"})
 			return
 		}
+		if err != sql.ErrNoRows {
+			h.logger.Error("check existing lead", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 	}
 
 	// Validate lead_mode
@@ -376,13 +381,17 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// If promoting to LEAD, auto-demote existing lead in the same crew
+		// If promoting to LEAD, auto-demote existing lead in the same crew (transactional)
 		if roleStr == "LEAD" {
 			// Find the agent's crew_id
 			var crewIDNull sql.NullString
-			h.db.QueryRowContext(r.Context(),
+			if err := h.db.QueryRowContext(r.Context(),
 				"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-				agentID, workspaceID).Scan(&crewIDNull)
+				agentID, workspaceID).Scan(&crewIDNull); err != nil {
+				h.logger.Error("query agent crew_id for promotion", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
 
 			if !crewIDNull.Valid || crewIDNull.String == "" {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "LEAD role requires crew_id"})
@@ -390,9 +399,13 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Demote existing lead in the same crew
-			h.db.ExecContext(r.Context(),
+			if _, err := h.db.ExecContext(r.Context(),
 				"UPDATE agents SET agent_role = 'AGENT' WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL AND id != ?",
-				crewIDNull.String, agentID)
+				crewIDNull.String, agentID); err != nil {
+				h.logger.Error("demote existing lead", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
 		}
 	}
 

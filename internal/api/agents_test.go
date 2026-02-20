@@ -20,27 +20,60 @@ func seedTestCrew(t *testing.T, db interface{ Exec(string, ...interface{}) (inte
 	return crewID
 }
 
-func TestCreateAgent_LeadRole_RequiresCrewID(t *testing.T) {
+func TestCreateAgent_RoleValidation(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
+	crewID := "crew-1"
+	db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'Devs', 'devs')`, crewID, wsID)
+
 	handler := NewAgentHandler(db, logger)
 
-	// LEAD without crew_id should fail
-	body := bytes.NewBufferString(`{"name":"Lead Bot","slug":"lead-bot","agent_role":"LEAD"}`)
-	req := httptest.NewRequest("POST", "/api/v1/agents?workspace_id="+wsID, body)
-	ctx := withUser(req.Context(), &AuthUser{ID: userID})
-	ctx = withWorkspace(ctx, wsID, "OWNER")
-	req = req.WithContext(ctx)
-	rr := httptest.NewRecorder()
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "LEAD without crew_id returns 400",
+			body:       `{"name":"Lead Bot","slug":"lead-bot","agent_role":"LEAD"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "COORDINATOR with crew_id returns 400",
+			body:       `{"name":"CEO","slug":"ceo","agent_role":"COORDINATOR","crew_id":"` + crewID + `"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "invalid agent_role returns 400",
+			body:       `{"name":"Bot","slug":"bot","agent_role":"INVALID_ROLE"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "LEAD with crew_id and active lead_mode succeeds",
+			body:       `{"name":"Lead","slug":"lead","agent_role":"LEAD","crew_id":"` + crewID + `","lead_mode":"active"}`,
+			wantStatus: http.StatusCreated,
+		},
+	}
 
-	handler.Create(rr, req)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := bytes.NewBufferString(tt.body)
+			req := httptest.NewRequest("POST", "/api/v1/agents?workspace_id="+wsID, body)
+			ctx := withUser(req.Context(), &AuthUser{ID: userID})
+			ctx = withWorkspace(ctx, wsID, "OWNER")
+			req = req.WithContext(ctx)
+			rr := httptest.NewRecorder()
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
+			handler.Create(rr, req)
+
+			if rr.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d; body: %s", rr.Code, tt.wantStatus, rr.Body.String())
+			}
+		})
 	}
 }
 
@@ -51,7 +84,6 @@ func TestCreateAgent_LeadRole_OnlyOnePerCrew(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
-	// Create crew
 	crewID := "crew-1"
 	db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'Devs', 'devs')`, crewID, wsID)
 
@@ -83,56 +115,6 @@ func TestCreateAgent_LeadRole_OnlyOnePerCrew(t *testing.T) {
 
 	if rr.Code != http.StatusConflict {
 		t.Errorf("second lead: status = %d, want %d; body: %s", rr.Code, http.StatusConflict, rr.Body.String())
-	}
-}
-
-func TestCreateAgent_CoordinatorRequiresNoCrew(t *testing.T) {
-	db := setupTestDB(t)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-
-	crewID := "crew-1"
-	db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'Devs', 'devs')`, crewID, wsID)
-
-	handler := NewAgentHandler(db, logger)
-
-	// COORDINATOR with crew_id should fail
-	body := bytes.NewBufferString(`{"name":"CEO","slug":"ceo","agent_role":"COORDINATOR","crew_id":"` + crewID + `"}`)
-	req := httptest.NewRequest("POST", "/api/v1/agents?workspace_id="+wsID, body)
-	ctx := withUser(req.Context(), &AuthUser{ID: userID})
-	ctx = withWorkspace(ctx, wsID, "OWNER")
-	req = req.WithContext(ctx)
-	rr := httptest.NewRecorder()
-
-	handler.Create(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
-	}
-}
-
-func TestCreateAgent_InvalidAgentRole(t *testing.T) {
-	db := setupTestDB(t)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-
-	handler := NewAgentHandler(db, logger)
-
-	body := bytes.NewBufferString(`{"name":"Bot","slug":"bot","agent_role":"INVALID_ROLE"}`)
-	req := httptest.NewRequest("POST", "/api/v1/agents?workspace_id="+wsID, body)
-	ctx := withUser(req.Context(), &AuthUser{ID: userID})
-	ctx = withWorkspace(ctx, wsID, "OWNER")
-	req = req.WithContext(ctx)
-	rr := httptest.NewRecorder()
-
-	handler.Create(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
 	}
 }
 

@@ -90,7 +90,7 @@ Koncept "povidam si se sefem crew" je prirozeny pro netechnicke uzivatele.
 > **POZOR:** Pred timto blokem se vzdy injektuje `[CREWSHIP ETHOS]` -- viz `PHILOSOPHY.md`.
 > Lead se prezentuje jako "clen crew s orchestracni zodpovednosti", ne jako "sef".
 
-```
+```text
 [CREWSHIP ETHOS]
 You are a crew member with orchestration responsibility on the Crewship...
 
