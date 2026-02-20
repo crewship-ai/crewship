@@ -31,6 +31,7 @@ async function main() {
     console.warn("  → Deleting all data for a fresh seed...")
     // Delete in dependency order
     await prisma.auditLog.deleteMany()
+    await prisma.assignment.deleteMany()
     await prisma.agentCredential.deleteMany()
     await prisma.agentSkill.deleteMany()
     await prisma.agentRun.deleteMany()

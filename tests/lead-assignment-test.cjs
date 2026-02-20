@@ -175,7 +175,8 @@ ws.on('error', (e) => {
 
 ws.on('close', () => {
   clearTimeout(timeout);
-  process.exit(0);
+  const success = expectedEvents.every(e => receivedEvents.has(e));
+  process.exit(success ? 0 : 1);
 });
 
 process.on('SIGINT', () => {

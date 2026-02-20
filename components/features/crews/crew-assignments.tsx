@@ -174,8 +174,17 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                       <Fragment key={a.id}>
                         <TableRow
                           className={hasDetail ? "cursor-pointer" : ""}
+                          role={hasDetail ? "button" : undefined}
+                          tabIndex={hasDetail ? 0 : -1}
                           onClick={() => {
                             if (hasDetail) setExpandedId(isExpanded ? null : a.id)
+                          }}
+                          onKeyDown={(e) => {
+                            if (!hasDetail) return
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault()
+                              setExpandedId(isExpanded ? null : a.id)
+                            }
                           }}
                         >
                           <TableCell>
