@@ -1,6 +1,7 @@
 package skills_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -279,7 +280,7 @@ func TestParseSKILLMD_EmptyCategory_NoError(t *testing.T) {
 // --- SSRF / URL validation tests ---
 
 func TestValidateImportURL_HTTPBlocked(t *testing.T) {
-	err := skills.ValidateImportURL("http://example.com/SKILL.md")
+	err := skills.ValidateImportURL(context.Background(),"http://example.com/SKILL.md")
 	if err == nil {
 		t.Fatal("expected error for HTTP URL")
 	}
@@ -289,7 +290,7 @@ func TestValidateImportURL_HTTPBlocked(t *testing.T) {
 }
 
 func TestValidateImportURL_LocalhostBlocked(t *testing.T) {
-	err := skills.ValidateImportURL("https://localhost/SKILL.md")
+	err := skills.ValidateImportURL(context.Background(),"https://localhost/SKILL.md")
 	if err == nil {
 		t.Fatal("expected error for localhost URL")
 	}
@@ -304,7 +305,7 @@ func TestValidateImportURL_PrivateIPsBlocked(t *testing.T) {
 		"https://169.254.169.254/latest/meta-data",
 	}
 	for _, url := range tests {
-		if err := skills.ValidateImportURL(url); err == nil {
+		if err := skills.ValidateImportURL(context.Background(),url); err == nil {
 			t.Errorf("expected error for %q, got nil", url)
 		}
 	}
@@ -316,7 +317,7 @@ func TestValidateImportURL_ValidGitHub(t *testing.T) {
 		"https://example.com/skills/my-skill.md",
 	}
 	for _, url := range tests {
-		if err := skills.ValidateImportURL(url); err != nil {
+		if err := skills.ValidateImportURL(context.Background(),url); err != nil {
 			t.Errorf("unexpected error for %q: %v", url, err)
 		}
 	}
@@ -324,7 +325,7 @@ func TestValidateImportURL_ValidGitHub(t *testing.T) {
 
 func TestValidateImportURL_GitHubBlobConverted(t *testing.T) {
 	// GitHub blob URL gets normalized to raw.githubusercontent.com (HTTPS)
-	err := skills.ValidateImportURL("https://github.com/org/repo/blob/main/SKILL.md")
+	err := skills.ValidateImportURL(context.Background(),"https://github.com/org/repo/blob/main/SKILL.md")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -332,7 +333,7 @@ func TestValidateImportURL_GitHubBlobConverted(t *testing.T) {
 
 func TestValidateImportURL_ShorthandConverted(t *testing.T) {
 	// Shorthand gets normalized to raw.githubusercontent.com (HTTPS)
-	err := skills.ValidateImportURL("org/repo/SKILL.md")
+	err := skills.ValidateImportURL(context.Background(),"org/repo/SKILL.md")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
@@ -160,7 +161,12 @@ func NormalizeSkillURL(rawURL string) (string, error) {
 
 // ValidateImportURL checks that a skill URL is safe to fetch (SSRF protection).
 // Blocks HTTP, localhost, private IPs, and link-local addresses.
-func ValidateImportURL(rawURL string) error {
+//
+// Note: this validates the hostname at call time. A DNS rebinding attack could
+// resolve the hostname to a private IP during the actual fetch. For MVP this
+// protection level is acceptable; future hardening should resolve the hostname
+// at fetch time and re-check the IP.
+func ValidateImportURL(_ context.Context, rawURL string) error {
 	if rawURL == "" {
 		return fmt.Errorf("url is required")
 	}

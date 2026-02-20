@@ -148,7 +148,7 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 	// SSRF protection: validate URL before fetching
 	if req.URL != "" && !h.SkipURLValidation {
-		if err := skills.ValidateImportURL(req.URL); err != nil {
+		if err := skills.ValidateImportURL(r.Context(), req.URL); err != nil {
 			writeProblem(http.StatusBadRequest, err.Error())
 			return
 		}

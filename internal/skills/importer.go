@@ -47,6 +47,9 @@ func NewImporter(db *sql.DB, logger *slog.Logger) *Importer {
 }
 
 // Import imports a skill from the given request and upserts it into the database.
+// The workspaceID and userID parameters are accepted for API handler compatibility
+// but currently unused — skills are global platform-wide resources (no workspace_id
+// column in the skills table). They may be used for audit logging in the future.
 func (imp *Importer) Import(ctx context.Context, _, _ string, req ImportRequest) (*ImportResult, error) {
 	var content string
 
@@ -204,7 +207,7 @@ func nullableStr(s string) interface{} {
 func generateSkillID() string {
 	b := make([]byte, 12)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback: use timestamp-based entropy
+		// Fallback: use timestamp-based entropy to fill all 12 bytes
 		ts := time.Now().UnixNano()
 		b[0] = byte(ts >> 56)
 		b[1] = byte(ts >> 48)
@@ -214,6 +217,11 @@ func generateSkillID() string {
 		b[5] = byte(ts >> 16)
 		b[6] = byte(ts >> 8)
 		b[7] = byte(ts)
+		ts2 := time.Now().UnixNano()
+		b[8] = byte(ts2 >> 24)
+		b[9] = byte(ts2 >> 16)
+		b[10] = byte(ts2 >> 8)
+		b[11] = byte(ts2)
 	}
 	return "sk_" + hex.EncodeToString(b)
 }
