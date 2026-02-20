@@ -9,9 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -135,13 +135,19 @@ func (imp *Importer) upsert(ctx context.Context, parsed *ParsedSkill) (*ImportRe
 
 	credReqJSON := "[]"
 	if len(parsed.Meta.CredentialRequirements) > 0 {
-		b, _ := json.Marshal(parsed.Meta.CredentialRequirements)
+		b, err := json.Marshal(parsed.Meta.CredentialRequirements)
+		if err != nil {
+			return nil, fmt.Errorf("marshal credential_requirements: %w", err)
+		}
 		credReqJSON = string(b)
 	}
 
 	tagsJSON := "[]"
 	if len(parsed.Meta.Tags) > 0 {
-		b, _ := json.Marshal(parsed.Meta.Tags)
+		b, err := json.Marshal(parsed.Meta.Tags)
+		if err != nil {
+			return nil, fmt.Errorf("marshal tags: %w", err)
+		}
 		tagsJSON = string(b)
 	}
 
