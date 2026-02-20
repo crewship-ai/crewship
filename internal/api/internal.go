@@ -400,7 +400,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		Description string `json:"description"`
 		Status      string `json:"status"`
 	}
-	var crewMembers []crewMemberEntry
+	crewMembers := []crewMemberEntry{}
 	if roleStr == "LEAD" && crewID.Valid {
 		memberRows, err := h.db.QueryContext(r.Context(), `
 			SELECT name, slug, COALESCE(role_title, ''), COALESCE(description, ''), status
