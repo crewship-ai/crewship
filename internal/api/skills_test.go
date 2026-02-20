@@ -125,7 +125,7 @@ func TestSkillsImport_SSRFBlocked(t *testing.T) {
 	}
 }
 
-func TestSkillsImport_BothFieldsProvided(t *testing.T) {
+func TestSkillsImport_ErrorCases(t *testing.T) {
 	setTestEncryptionKey(t)
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
@@ -135,85 +135,31 @@ func TestSkillsImport_BothFieldsProvided(t *testing.T) {
 
 	handler := NewSkillHandler(db, logger)
 
-	body := bytes.NewBufferString(`{"url": "https://example.com/SKILL.md", "content": "` + jsonEscape(validSkillMDForAPI) + `"}`)
-	req := httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/skills/import", body)
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "MANAGER"))
-	rr := httptest.NewRecorder()
-
-	handler.Import(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
+	tests := []struct {
+		name       string
+		body       string
+		role       string
+		wantStatus int
+	}{
+		{"both_fields_provided", `{"url": "https://example.com/SKILL.md", "content": "` + jsonEscape(validSkillMDForAPI) + `"}`, "MANAGER", http.StatusBadRequest},
+		{"missing_both_fields", `{}`, "OWNER", http.StatusBadRequest},
+		{"forbidden_role", `{"content": "` + jsonEscape(validSkillMDForAPI) + `"}`, "VIEWER", http.StatusForbidden},
+		{"invalid_skillmd", `{"content": "not a valid SKILL.md"}`, "MANAGER", http.StatusBadRequest},
 	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := bytes.NewBufferString(tt.body)
+			req := httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/skills/import", body)
+			req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
+			req = req.WithContext(withWorkspace(req.Context(), wsID, tt.role))
+			rr := httptest.NewRecorder()
 
-func TestSkillsImport_MissingBothFields(t *testing.T) {
-	setTestEncryptionKey(t)
-	db := setupTestDB(t)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+			handler.Import(rr, req)
 
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-
-	handler := NewSkillHandler(db, logger)
-
-	body := bytes.NewBufferString(`{}`)
-	req := httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/skills/import", body)
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
-	rr := httptest.NewRecorder()
-
-	handler.Import(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
-	}
-}
-
-func TestSkillsImport_ForbiddenRole(t *testing.T) {
-	setTestEncryptionKey(t)
-	db := setupTestDB(t)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-
-	handler := NewSkillHandler(db, logger)
-
-	body := bytes.NewBufferString(`{"content": "` + jsonEscape(validSkillMDForAPI) + `"}`)
-	req := httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/skills/import", body)
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "VIEWER"))
-	rr := httptest.NewRecorder()
-
-	handler.Import(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusForbidden, rr.Body.String())
-	}
-}
-
-func TestSkillsImport_InvalidSKILLMD(t *testing.T) {
-	setTestEncryptionKey(t)
-	db := setupTestDB(t)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-
-	handler := NewSkillHandler(db, logger)
-
-	body := bytes.NewBufferString(`{"content": "not a valid SKILL.md"}`)
-	req := httptest.NewRequest("POST", "/api/v1/workspaces/"+wsID+"/skills/import", body)
-	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "MANAGER"))
-	rr := httptest.NewRecorder()
-
-	handler.Import(rr, req)
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d; body: %s", rr.Code, http.StatusBadRequest, rr.Body.String())
+			if rr.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d; body: %s", rr.Code, tt.wantStatus, rr.Body.String())
+			}
+		})
 	}
 }
 

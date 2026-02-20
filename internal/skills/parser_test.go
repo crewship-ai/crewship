@@ -196,149 +196,101 @@ More content.
 	}
 }
 
-func TestNormalizeSkillURL_GitHubBlobURL(t *testing.T) {
-	input := "https://github.com/crewship-ai/skills/blob/main/github/SKILL.md"
-	want := "https://raw.githubusercontent.com/crewship-ai/skills/main/github/SKILL.md"
-
-	got, err := skills.NormalizeSkillURL(input)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestNormalizeSkillURL(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"github_blob", "https://github.com/crewship-ai/skills/blob/main/github/SKILL.md", "https://raw.githubusercontent.com/crewship-ai/skills/main/github/SKILL.md"},
+		{"github_shorthand", "crewship-ai/skills/github/SKILL.md", "https://raw.githubusercontent.com/crewship-ai/skills/main/github/SKILL.md"},
+		{"raw_url_passthrough", "https://raw.githubusercontent.com/crewship-ai/skills/main/SKILL.md", "https://raw.githubusercontent.com/crewship-ai/skills/main/SKILL.md"},
+		{"arbitrary_https_passthrough", "https://example.com/my-skill.md", "https://example.com/my-skill.md"},
 	}
-	if got != want {
-		t.Errorf("NormalizeSkillURL(%q) = %q, want %q", input, got, want)
-	}
-}
-
-func TestNormalizeSkillURL_GitHubShorthand(t *testing.T) {
-	input := "crewship-ai/skills/github/SKILL.md"
-	want := "https://raw.githubusercontent.com/crewship-ai/skills/main/github/SKILL.md"
-
-	got, err := skills.NormalizeSkillURL(input)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != want {
-		t.Errorf("NormalizeSkillURL(%q) = %q, want %q", input, got, want)
-	}
-}
-
-func TestNormalizeSkillURL_RawURL(t *testing.T) {
-	input := "https://raw.githubusercontent.com/crewship-ai/skills/main/SKILL.md"
-
-	got, err := skills.NormalizeSkillURL(input)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != input {
-		t.Errorf("NormalizeSkillURL(%q) = %q, want unchanged %q", input, got, input)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := skills.NormalizeSkillURL(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("NormalizeSkillURL(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
-func TestNormalizeSkillURL_ArbitraryHTTPS(t *testing.T) {
-	input := "https://example.com/my-skill.md"
-
-	got, err := skills.NormalizeSkillURL(input)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestParseSKILLMD_Category(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantErr      bool
+		wantContains string
+		wantCategory string
+	}{
+		{"invalid_category", "---\nname: test-skill\ncategory: INVALID\n---\n# Test", true, "invalid category", ""},
+		{"normalization", "---\nname: test-skill\ncategory: coding\n---\n# Test", false, "", "CODING"},
+		{"empty_allowed", "---\nname: test-skill\n---\n# Test", false, "", ""},
 	}
-	if got != input {
-		t.Errorf("NormalizeSkillURL(%q) = %q, want unchanged %q", input, got, input)
-	}
-}
-
-// --- Category validation tests ---
-
-func TestParseSKILLMD_InvalidCategory(t *testing.T) {
-	input := "---\nname: test-skill\ncategory: INVALID\n---\n# Test"
-	_, err := skills.ParseSKILLMD(input)
-	if err == nil {
-		t.Fatal("expected error for invalid category")
-	}
-	if !strings.Contains(err.Error(), "invalid category") {
-		t.Errorf("error = %q, want to contain 'invalid category'", err.Error())
-	}
-}
-
-func TestParseSKILLMD_CategoryNormalization(t *testing.T) {
-	input := "---\nname: test-skill\ncategory: coding\n---\n# Test"
-	parsed, err := skills.ParseSKILLMD(input)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if parsed.Meta.Category != "CODING" {
-		t.Errorf("category = %q, want %q", parsed.Meta.Category, "CODING")
-	}
-}
-
-func TestParseSKILLMD_EmptyCategory_NoError(t *testing.T) {
-	input := "---\nname: test-skill\n---\n# Test"
-	parsed, err := skills.ParseSKILLMD(input)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if parsed.Meta.Category != "" {
-		t.Errorf("category = %q, want empty", parsed.Meta.Category)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			parsed, err := skills.ParseSKILLMD(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.wantContains != "" && !strings.Contains(err.Error(), tt.wantContains) {
+					t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if parsed.Meta.Category != tt.wantCategory {
+				t.Errorf("category = %q, want %q", parsed.Meta.Category, tt.wantCategory)
+			}
+		})
 	}
 }
 
-// --- SSRF / URL validation tests ---
-
-func TestValidateImportURL_HTTPBlocked(t *testing.T) {
-	err := skills.ValidateImportURL(context.Background(),"http://example.com/SKILL.md")
-	if err == nil {
-		t.Fatal("expected error for HTTP URL")
+func TestValidateImportURL(t *testing.T) {
+	tests := []struct {
+		name         string
+		url          string
+		wantErr      bool
+		wantContains string
+	}{
+		{"http_blocked", "http://example.com/SKILL.md", true, "HTTPS"},
+		{"localhost_blocked", "https://localhost/SKILL.md", true, "localhost"},
+		{"loopback_blocked", "https://127.0.0.1/SKILL.md", true, "private"},
+		{"private_10_blocked", "https://10.0.0.1/SKILL.md", true, "private"},
+		{"private_172_blocked", "https://172.16.0.1/SKILL.md", true, "private"},
+		{"private_192_blocked", "https://192.168.1.1/SKILL.md", true, "private"},
+		{"link_local_blocked", "https://169.254.169.254/latest/meta-data", true, "private"},
+		{"valid_raw_github", "https://raw.githubusercontent.com/org/repo/main/SKILL.md", false, ""},
+		{"valid_arbitrary", "https://example.com/skills/my-skill.md", false, ""},
+		{"github_blob_converted", "https://github.com/org/repo/blob/main/SKILL.md", false, ""},
+		{"shorthand_converted", "org/repo/SKILL.md", false, ""},
 	}
-	if !strings.Contains(err.Error(), "HTTPS") {
-		t.Errorf("error = %q, want to mention HTTPS", err.Error())
-	}
-}
-
-func TestValidateImportURL_LocalhostBlocked(t *testing.T) {
-	err := skills.ValidateImportURL(context.Background(),"https://localhost/SKILL.md")
-	if err == nil {
-		t.Fatal("expected error for localhost URL")
-	}
-}
-
-func TestValidateImportURL_PrivateIPsBlocked(t *testing.T) {
-	tests := []string{
-		"https://127.0.0.1/SKILL.md",
-		"https://10.0.0.1/SKILL.md",
-		"https://172.16.0.1/SKILL.md",
-		"https://192.168.1.1/SKILL.md",
-		"https://169.254.169.254/latest/meta-data",
-	}
-	for _, url := range tests {
-		if err := skills.ValidateImportURL(context.Background(),url); err == nil {
-			t.Errorf("expected error for %q, got nil", url)
-		}
-	}
-}
-
-func TestValidateImportURL_ValidGitHub(t *testing.T) {
-	tests := []string{
-		"https://raw.githubusercontent.com/org/repo/main/SKILL.md",
-		"https://example.com/skills/my-skill.md",
-	}
-	for _, url := range tests {
-		if err := skills.ValidateImportURL(context.Background(),url); err != nil {
-			t.Errorf("unexpected error for %q: %v", url, err)
-		}
-	}
-}
-
-func TestValidateImportURL_GitHubBlobConverted(t *testing.T) {
-	// GitHub blob URL gets normalized to raw.githubusercontent.com (HTTPS)
-	err := skills.ValidateImportURL(context.Background(),"https://github.com/org/repo/blob/main/SKILL.md")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestValidateImportURL_ShorthandConverted(t *testing.T) {
-	// Shorthand gets normalized to raw.githubusercontent.com (HTTPS)
-	err := skills.ValidateImportURL(context.Background(),"org/repo/SKILL.md")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := skills.ValidateImportURL(context.Background(), tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q, got nil", tt.url)
+				}
+				if tt.wantContains != "" && !strings.Contains(err.Error(), tt.wantContains) {
+					t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tt.url, err)
+			}
+		})
 	}
 }

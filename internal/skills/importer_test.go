@@ -171,6 +171,32 @@ func TestImporter_URLFetchError(t *testing.T) {
 	}
 }
 
+func TestImporter_ValidationErrors(t *testing.T) {
+	db := setupSkillTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	imp := skills.NewImporter(db, logger)
+
+	tests := []struct {
+		name         string
+		req          skills.ImportRequest
+		wantContains string
+	}{
+		{"both_url_and_content", skills.ImportRequest{URL: "https://example.com/SKILL.md", Content: validSkillMD}, "not both"},
+		{"missing_both", skills.ImportRequest{}, "required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := imp.Import(context.Background(), "ws1", "user1", tt.req)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantContains) {
+				t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantContains)
+			}
+		})
+	}
+}
+
 func TestImporter_DuplicateSlug(t *testing.T) {
 	db := setupSkillTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
@@ -263,23 +289,6 @@ func TestImporter_DuplicateDisplayName(t *testing.T) {
 	}
 }
 
-func TestImporter_BothURLAndContent_Rejected(t *testing.T) {
-	db := setupSkillTestDB(t)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	imp := skills.NewImporter(db, logger)
-
-	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{
-		URL:     "https://example.com/SKILL.md",
-		Content: validSkillMD,
-	})
-	if err == nil {
-		t.Fatal("expected error when both url and content are set")
-	}
-	if !strings.Contains(err.Error(), "not both") {
-		t.Errorf("error = %q, want to contain 'not both'", err.Error())
-	}
-}
-
 func TestImporter_OversizedResponse_Rejected(t *testing.T) {
 	// Serve a response larger than 512 KB
 	bigContent := strings.Repeat("x", 513*1024)
@@ -305,13 +314,3 @@ func TestImporter_OversizedResponse_Rejected(t *testing.T) {
 	}
 }
 
-func TestImporter_MissingBothURLAndContent(t *testing.T) {
-	db := setupSkillTestDB(t)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	imp := skills.NewImporter(db, logger)
-
-	_, err := imp.Import(context.Background(), "ws1", "user1", skills.ImportRequest{})
-	if err == nil {
-		t.Fatal("expected error when both url and content are empty")
-	}
-}

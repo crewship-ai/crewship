@@ -40,12 +40,25 @@ type Importer struct {
 }
 
 // NewImporter creates an Importer with a 30-second HTTP timeout.
+// The HTTP client validates redirect targets against SSRF checks.
 func NewImporter(db *sql.DB, logger *slog.Logger) *Importer {
-	return &Importer{
+	imp := &Importer{
 		db:     db,
 		logger: logger,
-		client: &http.Client{Timeout: 30 * time.Second},
 	}
+	imp.client = &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			if imp.SkipURLValidation {
+				return nil
+			}
+			return ValidateImportURL(req.Context(), req.URL.String())
+		},
+	}
+	return imp
 }
 
 // Import imports a skill from the given request and upserts it into the database.
@@ -63,12 +76,12 @@ func (imp *Importer) Import(ctx context.Context, _, _ string, req ImportRequest)
 	case req.URL != "":
 		if !imp.SkipURLValidation {
 			if err := ValidateImportURL(ctx, req.URL); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("validate import URL: %w", err)
 			}
 		}
 		normalised, err := NormalizeSkillURL(req.URL)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("normalize skill URL: %w", err)
 		}
 		fetched, err := imp.fetchURL(ctx, normalised)
 		if err != nil {
@@ -204,6 +217,9 @@ func (imp *Importer) upsert(ctx context.Context, parsed *ParsedSkill) (*ImportRe
 		now, existingID,
 	)
 	if updateErr != nil {
+		if strings.Contains(updateErr.Error(), "UNIQUE constraint failed: skills.name") {
+			return nil, fmt.Errorf("a skill with name %q already exists", displayName)
+		}
 		return nil, fmt.Errorf("update skill: %w", updateErr)
 	}
 
