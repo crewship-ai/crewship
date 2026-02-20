@@ -363,6 +363,14 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 
 	// [SKILLS AVAILABLE] section
 	const maxSkillsContextChars = 20000
+	const skillHeader = "[SKILLS AVAILABLE]\nYou have access to the following skill playbooks. Activate them when the user's\nrequest matches each skill's \"When to Activate\" criteria.\n\n"
+	const skillFooter = "\n[END SKILLS AVAILABLE]"
+	const skillSeparator = "\n\n"
+	// Budget for skill parts only — excludes header/footer overhead
+	skillBudget := maxSkillsContextChars - len(skillHeader) - len(skillFooter)
+	if skillBudget < 0 {
+		skillBudget = 0
+	}
 	skillRows, err := h.db.QueryContext(r.Context(), `
 		SELECT s.display_name, s.category, COALESCE(s.credential_requirements, '[]'), s.content
 		FROM agent_skills as2
@@ -416,9 +424,13 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 			sb.WriteString("\n</skill>")
 
 			part := sb.String()
-			if totalSkillChars+len(part) > maxSkillsContextChars {
+			sepLen := 0
+			if len(skillParts) > 0 {
+				sepLen = len(skillSeparator)
+			}
+			if totalSkillChars+sepLen+len(part) > skillBudget {
 				// Truncate this skill to fit within budget
-				remaining := maxSkillsContextChars - totalSkillChars
+				remaining := skillBudget - totalSkillChars - sepLen
 				suffix := "\n...(truncated)\n</skill>"
 				if remaining > len(suffix)+20 {
 					part = part[:remaining-len(suffix)] + suffix
@@ -428,7 +440,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			skillParts = append(skillParts, part)
-			totalSkillChars += len(part)
+			totalSkillChars += sepLen + len(part)
 		}
 		if err := skillRows.Err(); err != nil {
 			h.logger.Error("rows iteration (resolve skills)", "error", err)
@@ -436,9 +448,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(skillParts) > 0 {
-			header := "[SKILLS AVAILABLE]\nYou have access to the following skill playbooks. Activate them when the user's\nrequest matches each skill's \"When to Activate\" criteria.\n\n"
-			footer := "\n[END SKILLS AVAILABLE]"
-			promptParts = append(promptParts, header+strings.Join(skillParts, "\n\n")+footer)
+			promptParts = append(promptParts, skillHeader+strings.Join(skillParts, skillSeparator)+skillFooter)
 		}
 	}
 
