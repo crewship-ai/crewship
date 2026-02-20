@@ -9,7 +9,7 @@
  *
  * Environment:
  *   PORT              Go server port. Defaults to 8081
- *   INTERNAL_TOKEN    Optional. Read from crewship config if not set.
+ *   INTERNAL_TOKEN    Required. The X-Internal-Token from the running crewship instance.
  */
 
 'use strict';
@@ -108,7 +108,12 @@ async function run() {
     `got ${wrongToken.status}`);
 
   // 5. GET assignment with valid token but nonexistent ID → 404
-  const DEV_TOKEN = process.env.INTERNAL_TOKEN || 'crewship-dev-internal-token-for-testing';
+  const DEV_TOKEN = process.env.INTERNAL_TOKEN;
+  if (!DEV_TOKEN) {
+    console.error('ERROR: INTERNAL_TOKEN env var is required.');
+    console.error('Set it to the value from your running crewship instance.');
+    process.exit(1);
+  }
   console.log('\n5. Assignment GET with valid token, nonexistent ID (expect 404)');
   const validNotFound = await request('GET', '/api/v1/internal/assignments/does-not-exist', null, {
     'X-Internal-Token': DEV_TOKEN,
