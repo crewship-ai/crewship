@@ -27,6 +27,7 @@ export const createAgentSchema = z.object({
   description: z.string().max(1000).optional(),
   role_title: z.string().max(100).optional(),
   agent_role: z.enum(["AGENT", "LEAD", "COORDINATOR"]).default("AGENT"),
+  lead_mode: z.enum(["active", "passive"]).default("active").optional(),
   cli_adapter: z.enum(["CLAUDE_CODE", "OPENCODE", "CODEX_CLI", "GEMINI_CLI"]).default("CLAUDE_CODE"),
   llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "OLLAMA"]).optional(),
   llm_model: z.string().max(100).optional(),

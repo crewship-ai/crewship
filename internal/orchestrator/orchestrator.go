@@ -22,6 +22,7 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 type AgentRunRequest struct {
 	AgentID       string
 	AgentSlug     string
+	AgentRole     string // AGENT, LEAD, COORDINATOR
 	CrewID        string
 	CrewSlug      string
 	ChatID        string
@@ -33,6 +34,7 @@ type AgentRunRequest struct {
 	Credentials   []Credential
 	TimeoutSecs   int
 	MemoryEnabled bool
+	CrewMembers   []CrewMember // Populated by bridge for LEAD agents
 }
 
 type Credential struct {
@@ -144,6 +146,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// Validate slug BEFORE using it in path construction (memory context, output dirs)
 	if !validSlugRe.MatchString(req.AgentSlug) || req.AgentSlug != path.Base(req.AgentSlug) {
 		return fmt.Errorf("invalid agent slug: %q", req.AgentSlug)
+	}
+
+	// Inject lead crew context into system prompt (before memory, after conversation history)
+	if req.AgentRole == "LEAD" && len(req.CrewMembers) > 0 {
+		leadCtx := BuildLeadContext(req.CrewMembers)
+		if leadCtx != "" {
+			req.SystemPrompt = req.SystemPrompt + "\n\n" + leadCtx
+		}
 	}
 
 	// Inject agent memory context into system prompt (after conversation history)
