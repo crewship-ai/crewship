@@ -1,7 +1,7 @@
 # Crewship -- API & Wire Protocol (API.md)
 
-**Verze:** 4.0
-**Datum:** 2026-02-17
+**Verze:** 4.1
+**Datum:** 2026-02-20
 **Runtime:** Go single binary (REST API + WebSocket + Webhooks)
 **Validace:** Go validace (vstupy) + RFC 7807 Problem Details (chyby)
 **Auth:** Go (NextAuth-compatible JWE) — JWT session token
@@ -107,6 +107,7 @@ Go handler:
 | `GET` | `/api/auth/providers` | Ne | Seznam auth providers |
 | `GET` | `/api/auth/session` | Ne | Aktualni session |
 | `POST` | `/api/auth/callback/credentials` | Ne | Login (email + heslo) |
+| `GET` | `/api/auth/signin` | Ne | Sign-in page redirect |
 | `POST` | `/api/auth/signout` | Ne | Odhlaseni |
 | `GET` | `/api/auth/error` | Ne | Auth error page |
 | `POST` | `/api/v1/auth/signup` | Ne | Registrace (email + heslo, bcrypt) |
@@ -119,7 +120,13 @@ Vsechny REST endpointy jsou registrovany v `internal/api/router.go`.
 Handlery jsou implementovany v odpovidajicich Go souborech (`workspaces.go`, `crews.go`, `agents.go`, atd.).
 DB pristup pres `database/sql` (zadny ORM).
 
-### 3.1 Workspaces
+### 3.1 System
+
+| Metoda | Path | Role | Popis |
+|---|---|---|---|
+| `GET` | `/api/v1/system/runtime` | Auth | Runtime info (verze, build, Go version) |
+
+### 3.2 Workspaces
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
@@ -177,6 +184,7 @@ DB pristup pres `database/sql` (zadny ORM).
 |---|---|---|---|
 | `GET` | `/api/v1/agents/{agentId}/skills` | CrewMember | Prirazene skills |
 | `POST` | `/api/v1/agents/{agentId}/skills` | MANAGER+ | Priradit skill |
+| `DELETE` | `/api/v1/agents/{agentId}/skills/{skillId}` | MANAGER+ | Odebrat skill |
 
 ### 3.8 Agent Credentials
 
@@ -191,6 +199,7 @@ DB pristup pres `database/sql` (zadny ORM).
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
 | `GET` | `/api/v1/agents/{agentId}/chats` | CrewMember | Seznam chat sessions |
+| `POST` | `/api/v1/agents/{agentId}/chats` | CrewMember | Vytvorit novou chat session |
 | `GET` | `/api/v1/agents/{agentId}/runs` | CrewMember | Historie behu |
 
 ### 3.10 Credentials (vault)
@@ -272,6 +281,16 @@ Interni endpointy pro crewshipd daemon. Autorizace pres `X-Internal-Token` heade
 | `PATCH` | `/api/v1/internal/credentials/{credentialId}` | Internal | Update credential status |
 | `POST` | `/api/v1/internal/chats` | Internal | Vytvorit chat session |
 | `GET` | `/api/v1/internal/chats/{chatId}/resolve` | Internal | Resolve chat metadata |
+| `POST` | `/api/v1/internal/runs` | Internal | Vytvorit agent run zaznam |
+| `PATCH` | `/api/v1/internal/runs/{runId}` | Internal | Update run status (started, finished, error) |
+
+### 3.19 Onboarding
+
+| Metoda | Path | Role | Popis |
+|---|---|---|---|
+| `GET` | `/api/v1/onboarding/status` | Auth | Stav onboardingu (completed/pending) |
+| `POST` | `/api/v1/onboarding/complete` | Auth | Oznacit onboarding jako dokonceny |
+| `POST` | `/api/v1/onboarding/setup` | Auth | Provest pocatecni setup (workspace + crew) |
 
 ---
 
@@ -487,38 +506,23 @@ iptables -A DOCKER-USER -s crewship-agents -j DROP
 
 ---
 
-## 11. Skill Marketplace API (planovane)
+## 11. PLANOVANE API (Phase 2+)
 
-### Endpoints
-- `GET /api/v1/marketplace/skills` -- browse skills (search, category, badge filter)
-- `GET /api/v1/marketplace/skills/:slug` -- skill detail (permissions, rating, install count)
-- `POST /api/v1/marketplace/skills/:slug/install` -- install skill to agent
-- `DELETE /api/v1/marketplace/skills/:slug/uninstall` -- uninstall skill
-- `POST /api/v1/marketplace/skills` -- publish skill (community)
-- `GET /api/v1/marketplace/categories` -- skill categories
+> Nasledujici API endpointy jsou v plánu, ale NEJSOU implementovany.
 
----
+### Skill Marketplace API
+- `GET /api/v1/marketplace/skills` -- browse skills
+- `GET /api/v1/marketplace/skills/:slug` -- skill detail
+- `POST /api/v1/marketplace/skills/:slug/install` -- install
+- `DELETE /api/v1/marketplace/skills/:slug/uninstall` -- uninstall
+- `POST /api/v1/marketplace/skills` -- publish
+- `GET /api/v1/marketplace/categories` -- categories
 
-## 12. Per-Agent Network Control API (planovane)
-
-### Endpoints
+### Per-Agent Network Control API
 - `GET /api/v1/agents/:id/network` -- current network config
 - `PUT /api/v1/agents/:id/network` -- update network config
-  ```json
-  {
-    "internet_enabled": true,
-    "domain_whitelist": ["github.com", "api.openai.com"],
-    "local_network_enabled": false,
-    "local_network_cidr": null
-  }
-  ```
 
----
-
-## 13. OTEVRENE OTAZKY
-
-1. **API versioning** — jak budeme delat v2 endpointy? Novy prefix `/api/v2/`?
-2. **Rate limit storage** — per-process Map staci pro single instance, ale ne pro multi-instance. Phase 2 reseni?
-3. **WebSocket horizontal scaling** — jak predavat connections mezi Go instancemi? (Phase 3, K8s)
-4. **File streaming** — velke soubory (>100MB) streamovat nebo chunked download?
-5. **Webhook retry** — pokud agent neni dostupny, jak opakovat webhook? Persistent queue v bbolt?
+### Agent Memory Management API
+- `GET /api/v1/agents/:id/memory` -- memory status
+- `GET /api/v1/agents/:id/memory/files` -- list memory files
+- `PUT /api/v1/agents/:id/memory/config` -- update memory config

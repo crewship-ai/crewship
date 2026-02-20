@@ -1,8 +1,8 @@
 # Crewship -- Sidecar Proxy (SIDECAR.md)
 
-**Verze:** 1.0
-**Datum:** 2026-02-18
-**Status:** IMPLEMENTOVANO (Phase 1B) -- sidecar HTTP proxy s credential injection, scrubber, orchestrator integrace.
+**Verze:** 1.1
+**Datum:** 2026-02-20
+**Status:** IMPLEMENTOVANO (Phase 1B) -- sidecar HTTP proxy s credential injection, scrubber, orchestrator integrace + memory engine.
 
 ---
 
@@ -99,9 +99,12 @@ Container (--network none equivalent, --internal Docker network)
 
 3. Sidecar start:
    → cte base64-encoded JSON ze stdin → decode → parse
+   → NOVY FORMAT: objekt `{credentials: [...], memory: {...}}` (backwards-compatible s legacy array)
    → ulozi klice DO PAMETI (CredStore)
+   → pokud memory config pritomny, inicializuje FTS5 memory engine
    → posle "SIDECAR_READY" na stdout
    → zacne naslouchat na 127.0.0.1:9119
+   → registruje endpointy: /health, /memory/search, /memory/status, /memory/reindex
 
 4. Agent start (Docker exec, UID 1001):
    → dostane HTTP_PROXY=http://127.0.0.1:9119
@@ -133,7 +136,8 @@ Container (--network none equivalent, --internal Docker network)
 | `internal/sidecar/credstore.go` | `sidecar` | In-memory credential store, round-robin selection |
 | `internal/sidecar/allowlist.go` | `sidecar` | Domain allowlist, provider-to-host mapping |
 | `internal/sidecar/proxy.go` | `sidecar` | HTTP forward proxy, credential injection, CONNECT tunnel |
-| `internal/sidecar/server.go` | `sidecar` | Server lifecycle, graceful shutdown |
+| `internal/sidecar/server.go` | `sidecar` | Server lifecycle, graceful shutdown, route registration |
+| `internal/sidecar/memory.go` | `sidecar` | Memory API handlers (`/memory/search`, `/memory/status`, `/memory/reindex`) |
 | `internal/scrubber/scrubber.go` | `scrubber` | Credential pattern detection + redaction |
 | `internal/orchestrator/exec.go` | `orchestrator` | `BuildEnvVarsSidecar()`, `startSidecar()`, UID izolace |
 | `internal/orchestrator/orchestrator.go` | `orchestrator` | `SetSidecarEnabled()`, `wrapScrubHandler()` |
@@ -152,7 +156,7 @@ type Credential struct {
     ID       string       // unikatni identifikator
     Provider ProviderType // ANTHROPIC, OPENAI, GOOGLE
     Token    string       // plaintext API klic (jen v pameti)
-    Priority int          // pro budouci failover
+    Priority int          // plne implementovano: priority-based selection s round-robin v ramci tier
 }
 
 type CredStore struct {
@@ -304,7 +308,29 @@ Response:
 Health endpoint NEUKAZUJE hodnoty credentials -- jen pocty per provider.
 Toto je low-risk info disclosure (agent vi ze ma 1 Anthropic klic, ale ne jaky).
 
-### 5.5 Error responses
+### 5.5 Memory API (Phase 1 MVP)
+
+Pokud je memory config pritomny ve stdin, sidecar inicializuje FTS5 memory engine
+a registruje nasledujici endpointy (localhost only, viz MEMORY.md pro detaily):
+
+| Metoda | Path | Popis |
+|---|---|---|
+| `POST` | `/memory/search` | BM25 fulltext search pres memory soubory |
+| `GET` | `/memory/status` | Stav memory indexu (pocet souboru, chunku, velikost) |
+| `POST` | `/memory/reindex` | Manualni reindex vsech `.md` souboru |
+
+**Stdin format (novy objekt):**
+```json
+{
+  "credentials": [{"id": "...", "provider": "ANTHROPIC", "token": "sk-ant-...", "priority": 0}],
+  "memory": {"enabled": true, "base_path": "/output/agent-slug/.memory", "agent_slug": "agent-slug"}
+}
+```
+
+**Backward compatibility:** Pokud JSON parsing jako objekt selze, sidecar se pokusi parsovat
+jako legacy array credentials (pro starsi verze orchestratoru).
+
+### 5.6 Error responses
 
 502 a 503 error zpravy jsou genericke ("upstream request failed",
 "no credential available for ANTHROPIC") a NIKDY neobsahuji credential hodnoty.
@@ -554,6 +580,7 @@ Sidecar uzivatel ma `/usr/sbin/nologin` shell -- nelze se do nej prihlasit.
 | `internal/sidecar/allowlist_test.go` | 5+ | IsAllowed, Add, providerForHost |
 | `internal/sidecar/proxy_test.go` | 10+ | HTTP forward, CONNECT, credential injection, blocked domains |
 | `internal/sidecar/server_test.go` | 4+ | Start, shutdown, health endpoint |
+| `internal/sidecar/memory_test.go` | 3+ | Memory search, status, reindex handlers |
 | `internal/sidecar/security_test.go` | 25 | Allowlist bypass, host header attacks, credential leak, hop-by-hop, /proc, concurrent safety |
 | `internal/sidecar/bench_test.go` | 5 | Performance benchmarky |
 | `internal/scrubber/scrubber_test.go` | 13 | Vsechny patterns, edge cases |
