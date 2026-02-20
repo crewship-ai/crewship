@@ -261,7 +261,9 @@ func TestAssignmentList_Pagination(t *testing.T) {
 	h.List(w2, req2)
 
 	var result2 []map[string]interface{}
-	json.NewDecoder(w2.Body).Decode(&result2)
+	if err := json.NewDecoder(w2.Body).Decode(&result2); err != nil {
+		t.Fatalf("decode offset response: %v", err)
+	}
 	if len(result2) != 1 {
 		t.Errorf("expected 1 assignment with offset=2, got %d", len(result2))
 	}

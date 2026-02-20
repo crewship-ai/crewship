@@ -622,8 +622,8 @@ NEVER ACCEPTABLE:
 
   // Step 9: Credentials
   // Use real key from SEED_ANTHROPIC_API_KEY env var if available, otherwise demo placeholder
-  const anthropicApiKey = process.env.SEED_ANTHROPIC_API_KEY || "sk-ant-demo-key-placeholder"
   const isRealKey = !!process.env.SEED_ANTHROPIC_API_KEY
+  const anthropicApiKey = process.env.SEED_ANTHROPIC_API_KEY || `demo-placeholder-${crypto.randomUUID()}`
   // Detect OAuth token (sk-ant-oat01-*) vs API key (sk-ant-api03-* or other)
   const isOAuthToken = anthropicApiKey.startsWith("sk-ant-oat")
   const credType = isOAuthToken ? "AI_CLI_TOKEN" : "API_KEY"
