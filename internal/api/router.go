@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 type Router struct {
@@ -16,6 +18,8 @@ type Router struct {
 	authMw        *AuthMiddleware
 	socketPath    string
 	internalToken string
+	hub           *ws.Hub
+	orch          *orchestrator.Orchestrator
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -62,6 +66,18 @@ func WithSocketPath(path string) RouterOption {
 func WithInternalToken(token string) RouterOption {
 	return func(r *Router) {
 		r.internalToken = token
+	}
+}
+
+func WithHub(hub *ws.Hub) RouterOption {
+	return func(r *Router) {
+		r.hub = hub
+	}
+}
+
+func WithOrchestrator(orch *orchestrator.Orchestrator) RouterOption {
+	return func(r *Router) {
+		r.orch = orch
 	}
 }
 
@@ -209,4 +225,13 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/internal/chats/{chatId}/resolve", internalAuth(http.HandlerFunc(internal.ResolveChat)))
 	r.mux.Handle("POST /api/v1/internal/runs", internalAuth(http.HandlerFunc(internal.CreateRun)))
 	r.mux.Handle("PATCH /api/v1/internal/runs/{runId}", internalAuth(http.HandlerFunc(internal.UpdateRun)))
+	r.mux.Handle("PATCH /api/v1/internal/chats/{chatId}/message-count", internalAuth(http.HandlerFunc(internal.IncrementMessageCount)))
+
+	// Assignment routes (internal auth, called by sidecar on behalf of lead agents)
+	assign := NewAssignmentHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
+	r.mux.Handle("POST /api/v1/internal/assignments", internalAuth(http.HandlerFunc(assign.Create)))
+	r.mux.Handle("GET /api/v1/internal/assignments/{assignmentId}", internalAuth(http.HandlerFunc(assign.Get)))
+
+	// Crew assignments (public, authenticated)
+	r.mux.Handle("GET /api/v1/crews/{crewId}/assignments", authed(wsCtx(http.HandlerFunc(assign.List))))
 }

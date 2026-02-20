@@ -11,6 +11,7 @@ RUN go mod download
 COPY cmd/crewship-sidecar/ cmd/crewship-sidecar/
 COPY internal/sidecar/ internal/sidecar/
 COPY internal/scrubber/ internal/scrubber/
+COPY internal/memory/ internal/memory/
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /crewship-sidecar ./cmd/crewship-sidecar/
 
 # Stage 2: Agent runtime

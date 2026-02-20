@@ -40,6 +40,7 @@ type chatResolveResponse struct {
 	CrewSlug      string               `json:"crew_slug"`
 	ContainerID   string               `json:"container_id"`
 	CLIAdapter    string               `json:"cli_adapter"`
+	LLMModel      string               `json:"llm_model"`
 	SystemPrompt  string               `json:"system_prompt"`
 	ToolProfile   string               `json:"tool_profile"`
 	Credentials   []credentialResponse `json:"credentials"`
@@ -161,6 +162,26 @@ func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitC
 	return nil
 }
 
+func (r *IPCResolver) IncrementMessageCount(ctx context.Context, chatID string, delta int) error {
+	reqURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/message-count", r.baseURL, url.PathEscape(chatID))
+	body, _ := json.Marshal(map[string]int{"delta": delta})
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, reqURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Internal-Token", r.internalToken)
+	resp, err := r.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("increment message count: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("increment message count: server returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error) {
 	resolveURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/resolve", r.baseURL, url.PathEscape(chatID))
 
@@ -221,6 +242,7 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 		CrewSlug:      data.CrewSlug,
 		ContainerID:   data.ContainerID,
 		CLIAdapter:    data.CLIAdapter,
+		LLMModel:      data.LLMModel,
 		SystemPrompt:  data.SystemPrompt,
 		ToolProfile:   data.ToolProfile,
 		Credentials:   creds,

@@ -30,28 +30,42 @@ var validLeadModes = map[string]bool{
 	"passive": true,
 }
 
+type agentCrewInfo struct {
+	Name  string  `json:"name"`
+	Slug  string  `json:"slug"`
+	Color *string `json:"color"`
+}
+
+type agentCounts struct {
+	Skills      int `json:"skills"`
+	Credentials int `json:"credentials"`
+	Chats       int `json:"chats"`
+}
+
 type agentResponse struct {
-	ID              string  `json:"id"`
-	CrewID          *string `json:"crew_id"`
-	WorkspaceID     string  `json:"workspace_id"`
-	Name            string  `json:"name"`
-	Slug            string  `json:"slug"`
-	Description     *string `json:"description"`
-	RoleTitle       *string `json:"role_title"`
-	AgentRole       string  `json:"agent_role"`
-	LeadMode        *string `json:"lead_mode"`
-	Status          string  `json:"status"`
-	CLIAdapter      string  `json:"cli_adapter"`
-	LLMProvider     *string `json:"llm_provider"`
-	LLMModel        *string `json:"llm_model"`
-	SystemPrompt    *string `json:"system_prompt"`
-	Temperature     float64 `json:"temperature"`
-	MaxTokens       *int    `json:"max_tokens"`
-	TimeoutSeconds  int     `json:"timeout_seconds"`
-	ToolProfile     string  `json:"tool_profile"`
-	MemoryEnabled   bool    `json:"memory_enabled"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
+	ID              string         `json:"id"`
+	CrewID          *string        `json:"crew_id"`
+	WorkspaceID     string         `json:"workspace_id"`
+	Name            string         `json:"name"`
+	Slug            string         `json:"slug"`
+	Description     *string        `json:"description"`
+	RoleTitle       *string        `json:"role_title"`
+	AgentRole       string         `json:"agent_role"`
+	LeadMode        *string        `json:"lead_mode"`
+	Status          string         `json:"status"`
+	CLIAdapter      string         `json:"cli_adapter"`
+	LLMProvider     *string        `json:"llm_provider"`
+	LLMModel        *string        `json:"llm_model"`
+	SystemPrompt    *string        `json:"system_prompt"`
+	Temperature     float64        `json:"temperature"`
+	MaxTokens       *int           `json:"max_tokens"`
+	TimeoutSeconds  int            `json:"timeout_seconds"`
+	ToolProfile     string         `json:"tool_profile"`
+	MemoryEnabled   bool           `json:"memory_enabled"`
+	CreatedAt       string         `json:"created_at"`
+	UpdatedAt       string         `json:"updated_at"`
+	Crew            *agentCrewInfo `json:"crew"`
+	Count           agentCounts    `json:"_count"`
 }
 
 func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -63,29 +77,27 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	crewID := r.URL.Query().Get("crew_id")
 
+	const listQuery = `
+		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
+			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
+			a.system_prompt, a.temperature, a.max_tokens, a.timeout_seconds,
+			a.tool_profile, a.memory_enabled, a.created_at, a.updated_at,
+			c.name, c.slug, c.color,
+			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
+			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
+			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id)
+		FROM agents a
+		LEFT JOIN crews c ON c.id = a.crew_id
+		WHERE a.workspace_id = ? AND a.deleted_at IS NULL
+	`
+
 	var rows *sql.Rows
 	var err error
 
 	if crewID != "" {
-		rows, err = h.db.QueryContext(r.Context(), `
-			SELECT id, crew_id, workspace_id, name, slug, description, role_title,
-				agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model,
-				system_prompt, temperature, max_tokens, timeout_seconds,
-				tool_profile, memory_enabled, created_at, updated_at
-			FROM agents
-			WHERE workspace_id = ? AND crew_id = ? AND deleted_at IS NULL
-			ORDER BY created_at DESC
-		`, workspaceID, crewID)
+		rows, err = h.db.QueryContext(r.Context(), listQuery+" AND a.crew_id = ? ORDER BY a.created_at DESC", workspaceID, crewID)
 	} else {
-		rows, err = h.db.QueryContext(r.Context(), `
-			SELECT id, crew_id, workspace_id, name, slug, description, role_title,
-				agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model,
-				system_prompt, temperature, max_tokens, timeout_seconds,
-				tool_profile, memory_enabled, created_at, updated_at
-			FROM agents
-			WHERE workspace_id = ? AND deleted_at IS NULL
-			ORDER BY created_at DESC
-		`, workspaceID)
+		rows, err = h.db.QueryContext(r.Context(), listQuery+" ORDER BY a.created_at DESC", workspaceID)
 	}
 
 	if err != nil {
@@ -99,16 +111,22 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a agentResponse
 		var memEnabled int
+		var crewName, crewSlug, crewColor *string
 		if err := rows.Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 			&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.Temperature,
 			&a.MaxTokens, &a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
-			&a.CreatedAt, &a.UpdatedAt); err != nil {
+			&a.CreatedAt, &a.UpdatedAt,
+			&crewName, &crewSlug, &crewColor,
+			&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats); err != nil {
 			h.logger.Error("scan agent", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
 		a.MemoryEnabled = memEnabled == 1
+		if crewName != nil {
+			a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor}
+		}
 		result = append(result, a)
 	}
 	if err := rows.Err(); err != nil {
@@ -312,18 +330,26 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	var a agentResponse
 	var memEnabled int
+	var crewName, crewSlug, crewColor *string
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT id, crew_id, workspace_id, name, slug, description, role_title,
-			agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model,
-			system_prompt, temperature, max_tokens, timeout_seconds,
-			tool_profile, memory_enabled, created_at, updated_at
-		FROM agents
-		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
+		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
+			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
+			a.system_prompt, a.temperature, a.max_tokens, a.timeout_seconds,
+			a.tool_profile, a.memory_enabled, a.created_at, a.updated_at,
+			c.name, c.slug, c.color,
+			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
+			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
+			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id)
+		FROM agents a
+		LEFT JOIN crews c ON c.id = a.crew_id
+		WHERE a.id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
 	`, agentID, workspaceID).Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 		&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.Temperature,
 		&a.MaxTokens, &a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
-		&a.CreatedAt, &a.UpdatedAt)
+		&a.CreatedAt, &a.UpdatedAt,
+		&crewName, &crewSlug, &crewColor,
+		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
@@ -334,6 +360,9 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.MemoryEnabled = memEnabled == 1
+	if crewName != nil {
+		a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor}
+	}
 
 	writeJSON(w, http.StatusOK, a)
 }

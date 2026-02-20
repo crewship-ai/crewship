@@ -284,7 +284,9 @@ func TestCredTypeToProvider(t *testing.T) {
 		expected string
 	}{
 		{"anthropic key", Credential{EnvVarName: "ANTHROPIC_API_KEY"}, "ANTHROPIC"},
-		{"oauth token", Credential{Type: "AI_CLI_TOKEN", EnvVarName: "FOO"}, "ANTHROPIC"},
+		// AI_CLI_TOKEN (OAuth) is injected as CLAUDE_CODE_OAUTH_TOKEN env var directly,
+		// not via sidecar CredStore (which only supports x-api-key injection).
+		{"oauth token", Credential{Type: "AI_CLI_TOKEN", EnvVarName: "FOO"}, ""},
 		{"openai key", Credential{EnvVarName: "OPENAI_API_KEY"}, "OPENAI"},
 		{"google key", Credential{EnvVarName: "GOOGLE_API_KEY"}, "GOOGLE"},
 		{"unknown", Credential{EnvVarName: "MY_CUSTOM_KEY"}, ""},

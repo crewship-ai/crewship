@@ -38,7 +38,7 @@ type Proxy struct {
 	allowlist *DomainAllowlist
 	scrubber  *scrubber.Scrubber
 	logger    *slog.Logger
-	transport *http.Transport
+	transport http.RoundTripper
 }
 
 // ProxyConfig configures the sidecar proxy.
@@ -193,19 +193,72 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	go transfer(clientConn, targetConn)
 }
 
-// handleLocal handles requests to localhost (health check, status).
+// handleLocal handles requests to localhost (health check, Anthropic reverse proxy).
 func (p *Proxy) handleLocal(w http.ResponseWriter, r *http.Request) {
-	switch r.URL.Path {
-	case "/health", "/healthz":
+	switch {
+	case r.URL.Path == "/health" || r.URL.Path == "/healthz":
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","anthropic_creds":%d,"openai_creds":%d,"google_creds":%d}`,
 			p.credStore.Count(ProviderAnthropic),
 			p.credStore.Count(ProviderOpenAI),
 			p.credStore.Count(ProviderGoogle),
 		)
+	case strings.HasPrefix(r.URL.Path, "/v1/"):
+		// Reverse-proxy to api.anthropic.com.
+		// This handles the ANTHROPIC_BASE_URL=http://127.0.0.1:9119 mode where
+		// Claude Code sends API requests directly to the sidecar over plain HTTP.
+		// For OAuth tokens the request already carries Authorization: Bearer;
+		// for API keys we inject x-api-key from the CredStore.
+		p.handleReverseProxy(w, r)
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
+}
+
+// handleReverseProxy reverse-proxies a request to api.anthropic.com.
+// It injects an API key from the CredStore when available (API key mode).
+// For OAuth token mode, CLAUDE_CODE_OAUTH_TOKEN is already set in the container env
+// so the request already carries Authorization: Bearer — no injection needed.
+func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
+	// Inject API key from CredStore if present (overwrites any dummy key from agent env).
+	// If CredStore is empty the request is forwarded as-is (OAuth Bearer auth path).
+	cred := p.credStore.Select(ProviderAnthropic)
+	if cred != nil {
+		injectCredential(r, ProviderAnthropic, cred.Token)
+		p.logger.Debug("api key injected for reverse proxy",
+			"credential_id", cred.ID,
+			"path", r.URL.Path,
+		)
+	}
+
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	}
+
+	outReq := r.Clone(r.Context())
+	outReq.RequestURI = ""
+	outReq.URL.Scheme = "https"
+	outReq.URL.Host = "api.anthropic.com"
+
+	for _, h := range hopByHopHeaders {
+		outReq.Header.Del(h)
+	}
+
+	resp, err := p.transport.RoundTrip(outReq)
+	if err != nil {
+		p.logger.Error("reverse proxy upstream failed", "path", r.URL.Path, "error", err)
+		http.Error(w, "upstream request failed", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	for k, vv := range resp.Header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 // injectCredential adds the appropriate authentication header for the LLM provider.

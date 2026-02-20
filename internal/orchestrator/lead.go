@@ -37,6 +37,15 @@ func BuildLeadContext(members []CrewMember) string {
 		b.WriteString("\n")
 	}
 
+	b.WriteString("\n")
+	b.WriteString("To assign a task to a crew member, use your bash tool:\n")
+	b.WriteString("  curl -s -X POST http://localhost:9119/assign \\\n")
+	b.WriteString("    -H \"Content-Type: application/json\" \\\n")
+	b.WriteString("    -d '{\"target\":\"<slug>\",\"task\":\"<description>\"}'\n")
+	b.WriteString("To wait for and get the result:\n")
+	b.WriteString("  curl -s http://localhost:9119/results/<assignment_id>\n")
+	b.WriteString("(Poll /results/<id> until status is COMPLETED or FAILED.)\n")
+
 	b.WriteString("[END CREW CONTEXT]")
 	return b.String()
 }

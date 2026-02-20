@@ -304,7 +304,12 @@ func (c *Client) unsubscribe(channel string) {
 	c.hub.mu.Unlock()
 }
 
-func (c *Client) safeSend(data []byte) bool {
+func (c *Client) safeSend(data []byte) (sent bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			sent = false
+		}
+	}()
 	select {
 	case c.send <- data:
 		return true
