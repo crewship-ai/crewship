@@ -1,8 +1,8 @@
 # Crewship -- Agent Memory System (MEMORY.md)
 
-**Verze:** 1.1
-**Datum:** 2026-02-19
-**Status:** Phase 1 MVP IMPLEMENTED (file-first + FTS5 search)
+**Verze:** 1.2
+**Datum:** 2026-02-20
+**Status:** Phase 1 MVP ~70% IMPLEMENTED (file-first + FTS5 search + system prompt injection)
 **Zavislosti:** AGENT-RUNTIME.md (sidecar, kontejnery, /output/ storage),
 ORCHESTRATION.md (leader/crew/agent hierarchie, sidecar API),
 SECURITY.md (izolace, encryption, RBAC),
@@ -308,37 +308,56 @@ ale inspirace pro Phase 3 cross-agent knowledge sharing.
 
 ---
 
-## 4. SOUCASNY STAV CREWSHIP MEMORY
+## 4. IMPLEMENTACNI STAV (Phase 1 MVP)
 
-### 4.1 Co uz mame
+> **Posledni aktualizace:** 2026-02-20. Phase 1 MVP je ~70% implementovano.
 
-| Komponent | Stav | Popis |
+### 4.1 IMPLEMENTOVANO (v kodu, otestovano)
+
+| Komponent | Kde v kodu | Popis |
 |---|---|---|
-| `memory_enabled` flag | ✅ Implementovano | Boolean per agent v DB (Agent model) |
-| `/output/{agent}/.memory/` | ✅ Navrzeno (AGENT-RUNTIME.md v5.0) | Persistent bind mount na hostu |
-| `context.jsonl` | ✅ Navrzeno (AGENT-RUNTIME.md 6.4) | Structured memory entries v /output/ |
-| JSONL konverzace | ✅ Implementovano | `/var/lib/crewship/conversations/` |
-| JSONL logy | ✅ Implementovano | `/var/log/crewship/crews/` |
-| crewship-sidecar | ✅ Navrzeno (AGENT-RUNTIME.md 6A) | Go binary v kontejneru, localhost:9119 |
-| SQLite (modernc.org/sqlite) | ✅ V stacku | Pure Go, no CGO, WAL mode |
-| Landlock per-agent izolace | ✅ Navrzeno (ADR-010) | Per-agent filesystem izolace |
+| **File structure** (.memory/AGENT.md, daily/) | `internal/orchestrator/memory.go` | Orchestrator cte AGENT.md + daily/{today}.md + daily/{yesterday}.md z kontejneru |
+| **BM25 FTS5 search engine** | `internal/memory/` (engine.go, search.go, index.go, chunk.go) | Plny memory engine: SQLite FTS5 index, markdown chunker, BM25 search, reindex |
+| **System prompt injection** (`buildMemoryContext`) | `internal/orchestrator/memory.go` | Nacte memory soubory pri session start, injektuje `[AGENT MEMORY]` blok do system promptu (max 15k chars, truncation) |
+| **Memory instructions block** | `internal/orchestrator/memory.go` (`buildMemoryInstructions`) | Instruuje agenta jak psat do .memory/AGENT.md a .memory/daily/ |
+| **DB migration 3** (`memory_config`) | `internal/database/migrate.go` | `ALTER TABLE agents ADD COLUMN memory_config TEXT` |
+| **`memory_enabled` flag** (full flow) | `internal/api/agents.go` → `internal/chatbridge/resolver.go` → `internal/chatbridge/bridge.go` → `internal/orchestrator/orchestrator.go` | Boolean per agent, flows z DB pres API az do orchestratoru |
+| **Sidecar memory endpoints** | `internal/sidecar/memory.go` + `internal/sidecar/server.go` | `POST /memory/search`, `GET /memory/status`, `POST /memory/reindex` |
+| **Sidecar stdin object format** | `cmd/crewship-sidecar/main.go` + `internal/sidecar/credstore.go` | Stdin akceptuje object `{credentials, memory}` s backwards-compat pro array format |
+| **Memory engine testy** | `internal/memory/engine_test.go`, `internal/sidecar/memory_test.go`, `internal/orchestrator/memory_test.go` | Unit testy pro engine, sidecar handlery, orchestrator memory loading |
 
-### 4.2 Co CHYBI
+### 4.2 NENI IMPLEMENTOVANO (Phase 1 remaining)
 
-| Komponent | Stav | Kriticnost |
+| Komponent | Kriticnost | Popis |
 |---|---|---|
-| **Memory retrieval (search)** | ❌ Neexistuje | KRITICKE — agent nema jak hledat v pameti |
-| **Memory MCP tools** | ❌ Neexistuje | KRITICKE — agent nema jak cist/psat pamet |
-| **FTS5 index** | ❌ Neexistuje | VYSOKE — bez indexu jen raw file reading |
-| **Memory flush** | ❌ Neexistuje | VYSOKE — ztrata kontextu pri compaction |
-| **Memory loading pri session start** | ❌ Neexistuje | VYSOKE — agent nezna svoji historii |
-| **Vector search** | ❌ Neexistuje | STREDNI — BM25 postacuje pro MVP |
-| **Crew shared memory** | ❌ Neexistuje | STREDNI — differentiator |
-| **Memory encryption at rest** | ❌ Neexistuje | NIZKE pro MVP, VYSOKE pro enterprise |
-| **Embedding cache** | ❌ Neexistuje | NIZKE — az pri vector search |
-| **Temporal decay** | ❌ Neexistuje | NIZKE — nice-to-have |
+| **Sidecar write endpoint** (`POST /memory/write`) | VYSOKE | Agent nema jak zapisovat pamet pres sidecar API — ted pise primo do FS pres CLI |
+| **Sidecar read endpoint** (`GET /memory/read`) | VYSOKE | Agent nema jak cist jednotlive soubory pres sidecar API |
+| **MCP tools** (`memory_write`, `memory_read`, `memory_search`) | VYSOKE | MCP skill definice + sidecar MCP tool handlery neexistuji |
+| **REST API pro UI** (`/api/v1/agents/{id}/memory/*`) | STREDNI | Endpointy pro memory viewer/manager v UI neexistuji |
+| **File watcher + auto-reindex** (fsnotify) | STREDNI | Zmeny v .md souborech nevyvolaji automaticky reindex — jen manualni `POST /memory/reindex` |
+| **Input validace/sanitizace** | STREDNI | Sidecar nevaliduje velikost, obsah ani rate limit memory zapisu |
+| **Audit logging** (memory operaci) | NIZKE | Zadny audit log pro memory read/write/search operace |
+| **Rate limiting** (memory zapisu) | NIZKE | Bez rate limitu na sidecar memory endpoints |
+| **RBAC pro memory** (sidecar-level) | NIZKE | Sidecar nekontroluje session-id / agent oprávnění pro memory pristup |
 
-### 4.3 Pozitivni zaklad
+### 4.3 NENI IMPLEMENTOVANO (Phase 2+)
+
+| Komponent | Phase | Popis |
+|---|---|---|
+| **Vector search** (sqlite-vec, hybrid BM25+vector) | Phase 2 | BM25 postacuje pro MVP |
+| **Local embeddings** (GGUF model) | Phase 2 | Zero cost, privacy-first — ale az pri vector search |
+| **Session memory** (transcript indexing) | Phase 2 | Opt-in indexovani JSONL session transkriptu |
+| **Memory flush** (pre-compaction) | Phase 2 | CLI mode = system prompt instrukce (uz implementovano); API-direct mode = presna token detekce |
+| **Temporal decay + MMR** | Phase 2 | Exponential decay, diversity re-ranking |
+| **Embedding cache** | Phase 2 | Per-chunk hash, skip unchanged |
+| **Crew shared memory** | Phase 2B | `/output/.crew-memory/`, CREW.md + topics/, sidecar `/memory/crew` endpoint |
+| **Workspace memory** (Coordinator) | Phase 3 | crewshipd spravuje, ne sidecar |
+| **Memory encryption at rest** | Phase 3 | AES-256-GCM s ENCRYPTION_KEY |
+| **LLM-driven compaction** | Phase 3 | Daily logy → AGENT.md sumarizace |
+| **Memory export/import** | Phase 3 | Encrypted ZIP, agent onboarding |
+| **Memory analytics** (dashboard widget) | Phase 3 | Recall quality metriky |
+
+### 4.4 Pozitivni zaklad
 
 - **Container izolace** — memory per agent je prirozene izolovana Dockerem + Landlock
 - **Persistent storage** — `/output/` je bind mount, prezije restart kontejneru
@@ -591,6 +610,8 @@ crewship-sidecar (Go binary, uz bezi v kontejneru)
 
 ### 6.5 Memory jako MCP Skill (konzistence s ADR-014)
 
+> **Status: NENI IMPLEMENTOVANO** — MCP skill definice a MCP tools (`memory_write`, `memory_read`, `memory_search`) neexistuji. Planovane pro Phase 2A (plny MCP server). Phase 1 pouziva system prompt instrukce + primo FS zapis.
+
 Memory se implementuje jako **bundled MCP skill** (AGENT-RUNTIME.md 6A.7):
 
 ```yaml
@@ -671,6 +692,8 @@ Agent vola memory tools pres standardni MCP protocol.
 
 ### 7.1 Session Start (automaticky memory loading)
 
+> **Status: IMPLEMENTOVANO** — `buildMemoryContext()` v `internal/orchestrator/memory.go` cte AGENT.md + today/yesterday daily logy a injektuje je do system promptu.
+
 ```
 1. crewshipd spusti Docker exec pro agenta
 2. crewshipd sestavi system prompt:
@@ -706,6 +729,8 @@ Use memory_search to recall past events and decisions.
 
 ### 7.2 Memory Write Flow
 
+> **Status: NENI IMPLEMENTOVANO** — sidecar `POST /memory/write` endpoint a MCP `memory_write` tool neexistuji. Agent ted pise primo do FS pres CLI (`echo >> .memory/AGENT.md`).
+
 ```
 1. Agent: memory_write({content: "User prefers Czech reports", target: "agent"})
 
@@ -731,6 +756,8 @@ Use memory_search to recall past events and decisions.
 ```
 
 ### 7.3 Memory Search Flow
+
+> **Status: CASTECNE IMPLEMENTOVANO** — sidecar `POST /memory/search` endpoint je implementovany (BM25 FTS5). Chybi: MCP `memory_search` tool (agent musi ted volat sidecar primo pres HTTP). Phase 2 hybrid search (vector + BM25) neni implementovan.
 
 ```
 1. Agent: memory_search({query: "deployment process", limit: 5})
@@ -776,6 +803,8 @@ Use memory_search to recall past events and decisions.
 
 ### 7.4 Memory Flush (Pre-Compaction)
 
+> **Status: CASTECNE IMPLEMENTOVANO** — system prompt instrukce pro CLI mode jsou implementovane v `buildMemoryInstructions()`. API-direct mode (crewship-agent token detection) je planovany pro Phase 2.
+
 **CLI mode (Phase 1 — Claude Code, OpenCode, Codex):**
 
 CLI tools maji vlastni compaction mechanismus. Crewship NEMUZE detekovat
@@ -810,6 +839,8 @@ func (a *Agent) checkMemoryFlush(totalTokens, contextWindow int) {
 
 ### 7.5 Indexing Pipeline
 
+> **Status: CASTECNE IMPLEMENTOVANO** — markdown chunker a FTS5 indexer jsou implementovane v `internal/memory/`. Chybi: fsnotify file watcher (auto-reindex), vector index (Phase 2). Reindex se ted spousti manualne pres `POST /memory/reindex`.
+
 ```
 .md soubory zmena (fsnotify)
   │
@@ -843,6 +874,8 @@ Index ready — search requests served
 ## 8. SIDECAR API ROZSIRENI
 
 ### 8.1 Nove endpointy (doplneni k existujicim z ORCHESTRATION.md 5.1)
+
+> **Status:** `POST /memory/search`, `GET /memory/status`, `POST /memory/reindex` — IMPLEMENTOVANO v `internal/sidecar/memory.go`. Ostatni endpointy (`POST /memory/write`, `GET /memory/read`, `GET /memory/crew`, `DELETE /memory/daily/{date}`) — NENI IMPLEMENTOVANO.
 
 ```
 MEMORY ENDPOINTS (localhost:9119):
@@ -889,6 +922,8 @@ MEMORY ENDPOINTS (localhost:9119):
 ```
 
 ### 8.2 REST API (nove endpointy na crewshipd)
+
+> **Status: NENI IMPLEMENTOVANO** — zadne REST API endpointy pro memory management v UI. Planovane pro Phase 1 remaining.
 
 ```
 MEMORY MANAGEMENT API (/api/v1/):
@@ -956,6 +991,8 @@ Toto je akceptovatelne protoze:
 
 ### 9.3 RBAC pro Memory
 
+> **Status: NENI IMPLEMENTOVANO** — sidecar nekontroluje RBAC pro memory operace. Planovane pro Phase 1 remaining.
+
 | Akce | Agent | Lead | Coordinator | MEMBER | MANAGER | ADMIN | OWNER |
 |---|---|---|---|---|---|---|---|
 | Read vlastni memory | ✅ | ✅ | — | — | — | — | — |
@@ -970,6 +1007,8 @@ Toto je akceptovatelne protoze:
 | View memory in UI | ❌ | ❌ | ❌ | ❌ | ✅ (crew) | ✅ | ✅ |
 
 ### 9.4 Audit Log
+
+> **Status: NENI IMPLEMENTOVANO** — zadny audit log pro memory operace. Planovane pro Phase 1 remaining.
 
 Vsechny memory operace se loguji do audit logu:
 
@@ -987,6 +1026,8 @@ Vsechny memory operace se loguji do audit logu:
 ## 10. DATABASE IMPACT
 
 ### 10.1 Schema zmeny (minimalni)
+
+> **Status: IMPLEMENTOVANO** — `memory_config TEXT` sloupec pridan v migraci 3. `memory_enabled` flag uz existoval v init migraci.
 
 **ZADNE nove tabulky pro Phase 1.** Pouze rozsireni Agent modelu:
 
@@ -1011,12 +1052,11 @@ Konzistentni s principem "zadne logy/zpravy v DB" (DATABASE.md sekce 1).
 
 ### 10.2 Go migrace (internal/database/migrate.go)
 
+> **Status: IMPLEMENTOVANO** — migrace je v kodu jako migrace cislo 3 (ne 21 jak puvodni navrh). Viz `internal/database/migrate.go`: `{3, "add_memory_config", migrationAddMemoryConfig}`.
+
 ```go
-// Migration 21: Add memory_config to agents
-{
-    Version: 21,
-    SQL: `ALTER TABLE agents ADD COLUMN memory_config TEXT;`,
-},
+// Migration 3: Add memory_config to agents (IMPLEMENTOVANO)
+{3, "add_memory_config", `ALTER TABLE agents ADD COLUMN memory_config TEXT;`},
 ```
 
 ---
@@ -1025,15 +1065,17 @@ Konzistentni s principem "zadne logy/zpravy v DB" (DATABASE.md sekce 1).
 
 ### 11.1 Kde je Crewship HORSI nez OpenClaw (ted)
 
+> **Poznamka (2026-02-20):** Od verze 1.1 bylo implementovano BM25 FTS5 search, file structure (.memory/AGENT.md + daily/), a system prompt injection. Zbyvajici mezery viz nize.
+
 | Oblast | OpenClaw | Crewship (ted) | Severity |
 |---|---|---|---|
-| **Memory retrieval** | Hybrid BM25 + Vector search, sqlite-vec | Zadny search | KRITICKE |
-| **Memory flush** | Pre-compaction auto-flush, configurable | Neexistuje | VYSOKE |
-| **Long-term memory** | MEMORY.md (curated) + daily logs | Flat context.jsonl | VYSOKE |
-| **Memory search tools** | `memory_search` + `memory_get` MCP tools | Zadne | VYSOKE |
-| **Embedding cache** | SQLite cache, reuse unchanged chunks | Neexistuje | STREDNI |
-| **Temporal decay** | Exponential decay, configurable halflife | Neexistuje | STREDNI |
-| **Session memory** | Opt-in transcript indexing | Neexistuje | STREDNI |
+| **Memory retrieval** | Hybrid BM25 + Vector search, sqlite-vec | BM25 FTS5 search (implementovano), vector search chybi | STREDNI (Phase 2) |
+| **Memory flush** | Pre-compaction auto-flush, configurable | System prompt instrukce (implementovano), API-direct mode chybi | NIZKE (Phase 2) |
+| **Long-term memory** | MEMORY.md (curated) + daily logs | AGENT.md + daily/ (implementovano, file structure shodna) | ✅ VYRESENO |
+| **Memory search tools** | `memory_search` + `memory_get` MCP tools | Sidecar `POST /memory/search` (implementovano), MCP tools chybi | STREDNI (Phase 2A) |
+| **Embedding cache** | SQLite cache, reuse unchanged chunks | Neexistuje | NIZKE — az pri vector search |
+| **Temporal decay** | Exponential decay, configurable halflife | Neexistuje | NIZKE — nice-to-have |
+| **Session memory** | Opt-in transcript indexing | Neexistuje | NIZKE — Phase 2 |
 
 ### 11.2 Kde je Crewship LEPSI nez OpenClaw (uz ted nebo po implementaci)
 
@@ -1070,6 +1112,8 @@ Konzistentni s principem "zadne logy/zpravy v DB" (DATABASE.md sekce 1).
 ## 12. GO IMPLEMENTACE
 
 ### 12.1 Memory Engine v sidecaru
+
+> **Status: IMPLEMENTOVANO** — skutecna implementace je v `internal/memory/engine.go`. Kod nize je referencni navrh z PRD — realna implementace se muze lisit v detailech (napr. chybi fsnotify watcher, jina signatura metod).
 
 ```go
 // cmd/crewship-sidecar/memory.go
@@ -1140,6 +1184,8 @@ func NewMemoryEngine(basePath, agentSlug string, config MemoryConfig) (*MemoryEn
 ```
 
 ### 12.2 Memory Write
+
+> **Status: NENI IMPLEMENTOVANO** — Write metoda na MemoryEngine neexistuje. Planovano pro Phase 1 remaining (sidecar `POST /memory/write`).
 
 ```go
 func (e *MemoryEngine) Write(content, target string) (string, int, error) {
@@ -1214,6 +1260,8 @@ func sanitizeMemoryContent(content string) string {
 
 ### 12.3 Memory Search (BM25 — Phase 1)
 
+> **Status: IMPLEMENTOVANO** — skutecna implementace je v `internal/memory/search.go`. Kod nize je referencni navrh.
+
 ```go
 func (e *MemoryEngine) Search(query string, limit int) ([]MemorySearchResult, error) {
     e.mu.RLock()
@@ -1277,6 +1325,8 @@ type MemorySearchResult struct {
 ```
 
 ### 12.4 Reindex Pipeline
+
+> **Status: IMPLEMENTOVANO** — skutecna implementace je v `internal/memory/index.go` (Reindex) a `internal/memory/chunk.go` (chunker). Kod nize je referencni navrh.
 
 ```go
 func (e *MemoryEngine) reindex() error {
@@ -1370,6 +1420,8 @@ func chunkMarkdown(content, filePath string, targetSize, overlap int) []MemoryCh
 
 ### 12.5 File Watcher (debounced reindex)
 
+> **Status: NENI IMPLEMENTOVANO** — fsnotify file watcher neexistuje. Reindex se spousti manualne pres `POST /memory/reindex`. Planovano pro Phase 1 remaining.
+
 ```go
 func (e *MemoryEngine) watchFiles() {
     debounceTimer := time.NewTimer(0)
@@ -1401,6 +1453,8 @@ func (e *MemoryEngine) watchFiles() {
 ---
 
 ## 13. PHASE 2: VECTOR SEARCH
+
+> **Status: NENI IMPLEMENTOVANO** — cela sekce popisuje planovane Phase 2 features.
 
 ### 13.1 sqlite-vec Integration
 
@@ -1503,6 +1557,8 @@ func (e *MemoryEngine) cacheEmbedding(chunkHash string, embedding []float32) {
 
 ## 14. PHASE 2B: CREW SHARED MEMORY
 
+> **Status: NENI IMPLEMENTOVANO** — cela sekce popisuje planovane Phase 2B features.
+
 ### 14.1 Architektura
 
 ```
@@ -1540,6 +1596,8 @@ func (e *MissionEngine) onMissionComplete(mission *Mission) {
 ---
 
 ## 15. PHASE 3: WORKSPACE MEMORY + ADVANCED
+
+> **Status: NENI IMPLEMENTOVANO** — cela sekce popisuje planovane Phase 3 features.
 
 ### 15.1 Workspace Memory (Coordinator)
 
@@ -1616,16 +1674,21 @@ POST /api/v1/agents/{id}/memory/import
 
 ### Phase 1: MVP Memory (3-5 dnu effort)
 
-| # | Feature | Effort | Popis |
-|---|---|---|---|
-| 1 | Memory file structure | 0.5d | Vytvorit `/output/{agent}/.memory/` s AGENT.md + daily/ |
-| 2 | Sidecar memory endpoints | 2d | POST /write, GET /read, POST /search, GET /status |
-| 3 | SQLite FTS5 index | 1.5d | Chunker, indexer, BM25 search v sidecaru |
-| 4 | System prompt injection | 0.5d | AGENT.md + today/yesterday daily pri session start |
-| 5 | Agent model: memory_config | 0.5d | DB migration, JSON config column |
-| 6 | REST API: memory endpoints | 0.5d | Status/files/content pro UI, RBAC enforced |
+| # | Feature | Effort | Stav | Popis |
+|---|---|---|---|---|
+| 1 | Memory file structure | 0.5d | ✅ HOTOVO | `.memory/AGENT.md` + `daily/`, orchestrator cte z kontejneru |
+| 2 | Sidecar memory endpoints (search/status/reindex) | 1d | ✅ HOTOVO | `POST /memory/search`, `GET /memory/status`, `POST /memory/reindex` |
+| 3 | SQLite FTS5 index + chunker | 1.5d | ✅ HOTOVO | `internal/memory/` — engine, chunker, index, BM25 search |
+| 4 | System prompt injection | 0.5d | ✅ HOTOVO | `buildMemoryContext` + `buildMemoryInstructions` v orchestratoru |
+| 5 | Agent model: memory_config | 0.5d | ✅ HOTOVO | DB migration 3, `memory_enabled` full flow |
+| 6 | Sidecar stdin object format | 0.5d | ✅ HOTOVO | `{credentials, memory}` s backwards-compat pro array |
+| 7 | Sidecar write/read endpoints | 1d | ❌ TODO | `POST /memory/write`, `GET /memory/read` |
+| 8 | MCP tools (memory_write/read/search) | 1d | ❌ TODO | MCP skill definice + sidecar tool handlery |
+| 9 | REST API: memory endpoints | 0.5d | ❌ TODO | `/api/v1/agents/{id}/memory/*` pro UI |
+| 10 | File watcher + auto-reindex | 0.5d | ❌ TODO | fsnotify, debounced reindex |
+| 11 | Input validace/sanitizace/rate limiting | 0.5d | ❌ TODO | Size limity, sanitization, rate limit na sidecar |
 
-**Vysledek:** Agent si pamatuje across sessions. BM25 search. Zero external deps.
+**Vysledek po dokonceni:** Agent si pamatuje across sessions. BM25 search. Zero external deps.
 Zero cost. Secure by default.
 
 ### Phase 2: Vector Search + Session Memory (5-7 dnu)

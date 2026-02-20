@@ -1,7 +1,7 @@
 # Crewship -- Database Schema (DATABASE.md)
 
-**Verze:** 3.0
-**Datum:** 2026-02-17
+**Verze:** 3.1
+**Datum:** 2026-02-20
 **DB pristup:** Go `database/sql` (primy pristup, NO ORM at runtime)
 **Prisma:** Schema pouzivano POUZE pro TypeScript type generation (`pnpm db:generate`)
 **Databaze:** SQLite (default, embedded) nebo PostgreSQL 16+ (opt-in)
@@ -58,10 +58,11 @@ V single binary mode (`crewship start`) pouzivame SQLite jako default databazi.
 
 ## 2. PREHLED ENTIT
 
-**20 tabulek** rozdelenychdo 6 domen:
+**24 tabulek** rozdelenychdo 7 domen:
 
 | Domena | Tabulky | Popis |
 |---|---|---|
+| **NextAuth** | Account, Session, VerificationToken | OAuth adapter, session tokens, email verifikace |
 | **Uzivatele & Workspace** | User, Workspace, WorkspaceMember, WorkspaceInvitation | Multi-tenant zaklad |
 | **Crews** | Crew, CrewMember | Izolacni boundary (1 kontejner = 1 crew) |
 | **Agenti** | Agent, AgentSkill, AgentCredential, AgentConfigHistory, Assignment | Virtualni zamestnanci + orchestrace |
@@ -73,6 +74,12 @@ V single binary mode (`crewship start`) pouzivame SQLite jako default databazi.
 
 ### Entity Relationship Diagram (textovy)
 ```
+                                                   User
+                                                    │
+                                              ┌─────┼──────┐
+                                          (*) Account  (*) Session
+                                              VerificationToken (standalone)
+
 Workspace (1) ──── (*) WorkspaceMember (*) ──── (1) User
      │                         │
      │                    WorkspaceInvitation
@@ -280,15 +287,18 @@ enum CredentialScope {
 // email_verified: pro NextAuth email verification flow
 
 model User {
-  id              String    @id @db.Uuid
-  email           String    @unique
-  full_name       String?
-  avatar_url      String?
-  hashed_password String?
-  email_verified  DateTime? @db.Timestamptz
-  created_at      DateTime  @default(now()) @db.Timestamptz
-  updated_at      DateTime  @default(now()) @updatedAt @db.Timestamptz
+  id                    String    @id @db.Uuid
+  email                 String    @unique
+  full_name             String?
+  avatar_url            String?
+  hashed_password       String?
+  email_verified        DateTime? @db.Timestamptz
+  onboarding_completed  Boolean   @default(false)  // migration 2: onboarding wizard done
+  created_at            DateTime  @default(now()) @db.Timestamptz
+  updated_at            DateTime  @default(now()) @updatedAt @db.Timestamptz
 
+  accounts              Account[]
+  sessions              Session[]
   workspace_memberships WorkspaceMember[]
   crew_memberships      CrewMember[]
   sent_invitations      WorkspaceInvitation[] @relation("InvitedBy")
@@ -301,6 +311,52 @@ model User {
   skill_reviews         SkillReview[]
 
   @@map("users")
+}
+
+// ============================================================
+// 1a. NEXTAUTH ADAPTER TABLES
+// ============================================================
+// Tyto tabulky jsou vyzadovany NextAuth.js Prisma adapterem.
+// V Go runtime slouzi pro OAuth provider storage a session management.
+
+model Account {
+  id                String  @id @db.Uuid
+  userId            String  @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @db.Uuid
+  sessionToken String   @unique
+  userId       String   @db.Uuid
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
 }
 
 // ============================================================
@@ -449,15 +505,17 @@ model Agent {
   timeout_seconds Int             @default(1800)
   tool_profile    ToolProfile     @default(CODING)
   memory_enabled  Boolean         @default(false)
+  memory_config   String?         @db.Text  // migration 3: JSON config for agent memory system
   webhook_secret  String?         // per-agent webhook auth token (generated, stored encrypted)
   created_at      DateTime        @default(now()) @db.Timestamptz
   updated_at      DateTime        @default(now()) @updatedAt @db.Timestamptz
   deleted_at      DateTime?       @db.Timestamptz
 
   // Orchestrace — lead/coordinator specificke
-  assignment_timeout_s   Int?     // override timeout pro assignments (default: 2x agent timeout)
-  max_assignment_depth   Int?     @default(3)   // max hloubka assignments (coordinator→lead→agent)
-  max_parallel_assignees Int?     @default(5)   // max paralelne bezicich assignments
+  // POZN: DB sloupce pouzivaji "delegation" naming (delegation_timeout_s, max_delegation_depth, max_parallel_delegates)
+  delegation_timeout_s   Int?     // override timeout pro delegations (default: 2x agent timeout)
+  max_delegation_depth   Int?     @default(3)   // max hloubka delegations (coordinator→lead→agent)
+  max_parallel_delegates Int?     @default(5)   // max paralelne bezicich delegations
 
   crew             Crew?                 @relation(fields: [crew_id], references: [id], onDelete: Cascade)
   workspace        Workspace             @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
@@ -469,7 +527,7 @@ model Agent {
   assignments_sent Assignment[]          @relation("AssignedBy")
   assignments_recv Assignment[]          @relation("AssignedTo")
 
-  @@unique([crew_id, slug], name: "uq_agent_slug")
+  @@unique([workspace_id, slug], name: "uq_agent_slug")  // POZN: unique per workspace, NE per crew
   @@index([workspace_id], name: "idx_agent_workspace")
   @@index([crew_id], name: "idx_agent_crew")
   @@index([status], name: "idx_agent_status")
@@ -514,8 +572,8 @@ model Assignment {
   assigned_to  Agent     @relation("AssignedTo", fields: [assigned_to_id], references: [id])
 
   @@index([chat_id], name: "idx_assignment_chat")
-  @@index([assigned_by_id], name: "idx_assignment_source")
-  @@index([assigned_to_id], name: "idx_assignment_target")
+  @@index([assigned_by_id], name: "idx_assignment_by")
+  @@index([assigned_to_id], name: "idx_assignment_to")
   @@index([group_id], name: "idx_assignment_group")
   @@map("assignments")
 }
@@ -639,17 +697,26 @@ model AgentSkill {
 // To umoznuje budouci key rotation bez ztraceni starych credentials.
 
 model Credential {
-  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  workspace_id    String          @db.Uuid
-  crew_id         String?         @db.Uuid  // null = workspace-wide
-  name            String
-  description     String?
-  encrypted_value String          @db.Text  // "v1:" + AES-256-GCM sifrovana hodnota
-  scope           CredentialScope @default(WORKSPACE)
-  created_by      String          @db.Uuid
-  created_at      DateTime        @default(now()) @db.Timestamptz
-  updated_at      DateTime        @default(now()) @updatedAt @db.Timestamptz
-  deleted_at      DateTime?       @db.Timestamptz
+  id                      String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspace_id            String          @db.Uuid
+  crew_id                 String?         @db.Uuid  // null = workspace-wide
+  name                    String
+  description             String?
+  encrypted_value         String          @db.Text  // "v1:" + AES-256-GCM sifrovana hodnota
+  scope                   CredentialScope @default(WORKSPACE)
+  type                    String          @default("SECRET")   // SECRET | API_KEY | OAUTH_TOKEN | AI_CLI_TOKEN
+  provider                String          @default("NONE")     // NONE | ANTHROPIC | OPENAI | GOOGLE | GITHUB | CUSTOM
+  status                  String          @default("ACTIVE")   // ACTIVE | EXPIRED | REVOKED | ERROR
+  encrypted_refresh_token String?         @db.Text  // OAuth refresh token (encrypted)
+  token_expires_at        DateTime?       @db.Timestamptz      // OAuth token expiry
+  account_label           String?         // user-friendly label ("Personal Anthropic")
+  account_email           String?         // associated account email
+  last_checked_at         DateTime?       @db.Timestamptz      // last health check
+  last_error              String?         @db.Text             // last error message from health check
+  created_by              String          @db.Uuid
+  created_at              DateTime        @default(now()) @db.Timestamptz
+  updated_at              DateTime        @default(now()) @updatedAt @db.Timestamptz
+  deleted_at              DateTime?       @db.Timestamptz
 
   workspace        Workspace        @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   creator          User             @relation("CreatedBy", fields: [created_by], references: [id])
@@ -658,6 +725,7 @@ model Credential {
   @@unique([workspace_id, name], name: "uq_credential_name")
   @@index([workspace_id], name: "idx_credential_workspace")
   @@index([crew_id], name: "idx_credential_crew")
+  @@index([workspace_id, type, provider], name: "idx_credential_type_provider")
   @@map("credentials")
 }
 
@@ -1123,7 +1191,7 @@ docker compose -f docker/docker-compose.yml up -d
 
 ## 13. MIGRACNI STRATEGIE
 
-- **Go migration system** (`internal/database/migrate.go`) = manages actual DB schema (20 tables)
+- **Go migration system** (`internal/database/migrate.go`) = manages actual DB schema (24 tables, 3 migrations)
 - **Prisma schema** = used ONLY for TypeScript type generation, NOT for migrations
 - Go migration system handles both SQLite and PostgreSQL
 - **SQL skripty** pro RLS politiky a triggers (Phase 2)

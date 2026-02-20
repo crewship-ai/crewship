@@ -1,13 +1,56 @@
 # Crewship -- Orchestrace: Crew Lead + Coordinator
 
-**Verze:** 2.0
-**Datum:** 2026-02-15
-**Status:** Architekturni navrh (implementace Phase 2)
-**Zmeny v3.0:** Loopback HTTP sidecar (nahrazuje named pipe jako primarni),
+**Verze:** 2.1
+**Datum:** 2026-02-20
+**Status:** Phase 1 implementovana; Phase 2A v navrhu (neimplementovana)
+**Zmeny v2.1:** Aktualizace stavu implementace — jasne rozliseni Phase 1 (hotovo) vs Phase 2A (plan).
+**Zmeny v2.0:** Loopback HTTP sidecar (nahrazuje named pipe jako primarni),
 dual runtime (CLI + API direct), Landlock per-agent izolace,
 lead modes (active/passive), agent output compression, circuit breaker,
 Meilisearch conversation search, trace ID across assignments, NATS odlozen na Phase 3.
 Viz `ADR.md` pro zduvodneni rozhodnuti.
+
+---
+
+## STAV IMPLEMENTACE (2026-02-20)
+
+Vetsina tohoto dokumentu popisuje **planovane Phase 2A/2B featury**, ktere NEJSOU implementovane.
+Pouze zakladni Phase 1 orchestrace funguje. Nize je prehled:
+
+### IMPLEMENTOVANO (Phase 1)
+
+| Feature | Stav | Detail |
+|---|---|---|
+| CLI adaptery (4) | HOTOVO | CLAUDE_CODE, CODEX_CLI, GEMINI_CLI, OPENCODE (`internal/orchestrator/exec.go`) |
+| Credential vyber | HOTOVO | Priority-based s round-robin v ramci tier (`internal/orchestrator/failover.go`) |
+| Cooldown management | HOTOVO | 5min cooldown po 429 rate limit (`CooldownManager` ve `failover.go`) |
+| Conversation history | HOTOVO | Poslednich 10 zprav, max 20k chars, injekce do system promptu |
+| Agent memory | HOTOVO | File-first (AGENT.md + daily logs), FTS5 search pres sidecar (`internal/memory/`) |
+| Container exec | HOTOVO | Jeden kontejner per crew, UID 1001 agent / UID 1002 sidecar |
+| Sidecar — credential proxy | HOTOVO | Forward HTTP proxy s credential injection na `127.0.0.1:9119` |
+| Sidecar — memory endpointy | HOTOVO | `POST /memory/search`, `GET /memory/status`, `POST /memory/reindex` |
+
+### NENI IMPLEMENTOVANO (Phase 2A — plan)
+
+| Feature | Stav | Detail |
+|---|---|---|
+| Assignment API (sidecar) | NENI | Endpointy `/assign`, `/ask`, `/broadcast`, `/results` NEexistuji v sidecar |
+| AssignmentEngine | NENI | `internal/orchestrator/assignment.go` neexistuje |
+| Lead execution context | NENI | Auto-generated lead system prompt neni implementovan |
+| Lead modes (Active/Passive) | NENI | Zadna logika v orchestratoru |
+| Coordinator lightweight exec | NENI | `RunCoordinator` neexistuje |
+| Circuit breaker (CLOSED/OPEN/HALF) | NENI | Existuje pouze `CooldownManager` pro credential failover, NE circuit breaker pro agenty |
+| Agent output compression | NENI | Zadna sumarizace vystupu |
+| Trace ID across assignments | NENI | Zadna trace korelace |
+| Assignment tabulka v UI | NENI | UI neexistuje |
+| Human-in-the-loop approval | NENI | Zadny approval flow |
+| Channel Gateway (messaging) | NENI | Discord/Telegram/Slack integrace neexistuje |
+
+### Poznamka k terminologii DB vs dokument
+
+DB schema pouziva **"delegation"** naming (`delegation_timeout_s`, `max_delegation_depth`, `max_parallel_delegates`),
+zatimco tento dokument pouziva **"assignment"** (`assignment_timeout_s`, `max_assignment_depth`, `max_parallel_assignments`).
+Tato nekonzistence je znama — DB schema je autoritativni. Tabulka `assignments` v DB existuje, ale neni vyuzivana zadnou logikou.
 
 ---
 
@@ -233,6 +276,8 @@ Toto jde bud:
 
 ### 5.1 Jak lead prideluje ukoly (technicka vrstva)
 
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2A. Sidecar existuje, ale pouze jako credential proxy a memory endpoint. Assignment endpointy (`/assign`, `/ask`, `/broadcast`, `/results`) neexistuji.
+
 > **Rozhodnuti (ADR-001 v2):** Assignments jdou pres **loopback HTTP sidecar**
 > (`crewship-sidecar`), ktery bezi uvnitr kazdeho crew kontejneru.
 > CLI tools i vlastni API-direct runtime komunikuji pres `localhost:9119`.
@@ -311,6 +356,8 @@ MCP GATEWAY (Phase 2, viz AGENT-RUNTIME.md 6A):
 
 ### 5.2 Jak coordinator prideluje ukoly (technicka vrstva)
 
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2B. `RunCoordinator` neexistuje, zadna lightweight LLM call logika.
+
 **Varianta C (doporucena): Coordinator jako lightweight agent**
 
 Coordinator **nepotrebuje Docker kontejner** — nepise kod, jen prideluje a agreguje.
@@ -343,6 +390,8 @@ Bezi jako cisty LLM call v crewshipd (Go):
 - Bez tools = omezeny → MVP postacujici, Phase 3 prida kontejner
 
 ### 5.3 Assignment protokol (Sidecar HTTP API)
+
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2A. DB schema pro `assignments` tabulku existuje, ale logika chybi. Sidecar nema zadne assignment endpointy.
 
 > **Rozhodnuti (ADR-001 v2):** Assignments pres loopback HTTP na crewship-sidecar.
 > Standardni HTTP — funguje s CLI tools (curl) i API-direct runtime (nativni HTTP).
@@ -461,6 +510,8 @@ skonci (`wait_group`), a pak spusti Claudii s vysledky obou.
 
 ### 5.6 Lead Modes (ADR-004)
 
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2B. Zadna logika pro active/passive mody.
+
 Lead muze bezet ve dvou modech — uzivatel voli per-lead konfiguraci:
 
 **Active mode (default):**
@@ -509,6 +560,8 @@ Mezi tim crewshipd orchestruje agenty sam (deterministicky).
 
 ### 5.7 Agent Output Compression (ADR-005)
 
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2B. Zadna sumarizace vystupu.
+
 **Problem:** Agent vraci 50k tokens output. Lead musi tento output precist
 → lead context = system prompt + user msg + 50k agent output = drahé.
 
@@ -554,6 +607,8 @@ ale ve vetsine pripadu mu sumarizace staci pro agregaci.
 - Pri 5 agentech: 5 × Haiku call (~$0.01) vs 5 × 50k tokens v lead contextu (~$0.50)
 
 ### 5.8 Circuit Breaker pro assignments (ADR-006)
+
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2A. Existuje pouze `CooldownManager` v `internal/orchestrator/failover.go` pro credential cooldown po 429, NE circuit breaker pro agenty. Kod v teto sekci (CircuitBreaker struct) je navrh, ne existujici implementace.
 
 **Problem:** Agent opakovane selhava (bug, spatny prompt, nedostupna sluzba).
 Bez circuit breakeru lead porad zkouší pridelit → plytva tokeny a casem.
@@ -693,6 +748,8 @@ enum AgentRuntime {
 
 ### 5.10 Trace ID across assignments (ADR-012)
 
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2B. Zadna trace korelace.
+
 Kazda mission dostane unikatni `trace_id` ktery propojuje:
 - Lead session
 - Vsechny agent sessions
@@ -716,6 +773,8 @@ a prokliknout se do libovolne agent session.
 ---
 
 ## 6. DATOVY MODEL — ZMENY
+
+> **Status: DB SCHEMA EXISTUJE, LOGIKA NENI** — Tabulka `assignments` a sloupce `agent_role`, `delegation_timeout_s`, `max_delegation_depth`, `max_parallel_delegates` existuji v DB (migrace 2 v `migrate.go`), ale zadna Go logika je nevyuziva. Pozor: DB pouziva "delegation" naming (viz poznamka v STAV IMPLEMENTACE nahore).
 
 ### 6.1 Novy enum: AgentRole
 
@@ -801,6 +860,8 @@ enum AssignmentStatus {
 
 ### 7.1 AssignmentEngine (novy modul v crewshipd)
 
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2A. Soubor `internal/orchestrator/assignment.go` neexistuje.
+
 ```go
 // internal/orchestrator/assignment.go
 
@@ -829,6 +890,8 @@ type AssignmentResult struct {
 ```
 
 ### 7.2 crewship-sidecar (Go binary v kontejneru)
+
+> **Status: CASTECNE IMPLEMENTOVANO** — Sidecar existuje a funguje jako credential proxy + memory endpoint. Assignment handling (`HandleAssign`, `HandleResults`, `CircuitBreaker`, `MCPServerProcess`) popsany nize NENI implementovan.
 
 ```go
 // cmd/crewship-sidecar/main.go
@@ -907,6 +970,8 @@ func (s *Sidecar) HandleResults(w http.ResponseWriter, r *http.Request) {
 
 ### 7.3 crewship-agent (API-direct runtime, Phase 2)
 
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2B. `cmd/crewship-agent/` neexistuje.
+
 ```go
 // cmd/crewship-agent/main.go
 // Vlastni agent runtime — vola LLM API primo, tool use nativne.
@@ -954,6 +1019,8 @@ func (d *AssignTool) Execute(ctx context.Context, args AssignArgs) (*ToolResult,
 - Podpora vsech LLM provideru z jednoho binary
 
 ### 7.4 Coordinator execution (lightweight, bez Docker)
+
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2B. `internal/orchestrator/coordinator.go` neexistuje.
 
 ```go
 // internal/orchestrator/coordinator.go
@@ -1213,6 +1280,8 @@ Coordinator (neni — mala firma)
 
 ## 14. HUMAN-IN-THE-LOOP (APPROVAL FLOW)
 
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2B+. Zadny approval flow, trust levels, ani approval routing.
+
 ### 14.1 Trust Levels
 
 Kazdy agent ma konfigurovatelny **Trust Level** ktery urcuje kdy se musi ptat na schvaleni:
@@ -1292,6 +1361,8 @@ model Agent {
 
 ## 15. CHANNEL GATEWAY (MESSAGING)
 
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 2B+. Discord/Telegram/Slack/WhatsApp integrace neexistuje.
+
 ### 15.1 Architektura
 
 Messaging kanaly jsou **opt-in modul v crewshipd**, NE skills.
@@ -1359,6 +1430,8 @@ Uzivatel odpovi /approve → propagace do crewshipd → Bob pokracuje
 
 ## 16. CREWSHIP CONNECT (CROSS-WORKSPACE, Phase 3)
 
+> **Status: NENI IMPLEMENTOVANO** — planovane pro Phase 3.
+
 ### 16.1 Vize
 
 Workspaces mohou komunikovat navzajem pres zabezpecene webhooky.
@@ -1389,4 +1462,5 @@ Trust vyzaduje:
 
 ---
 
-*Tento dokument je zivý — bude se aktualizovat s kazdou novou iteraci implementace.*
+*Tento dokument je zivy — bude se aktualizovat s kazdou novou iteraci implementace.*
+*Posledni aktualizace stavu implementace: 2026-02-20.*

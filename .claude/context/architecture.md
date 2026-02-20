@@ -24,7 +24,7 @@ Node.js server, zadne API routes v Next.js, zadny Unix socket IPC.
 |  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐  |
 |  │ REST API     │  │ Auth         │  │ WebSocket Gateway     │  |
 |  │ /api/v1/*    │  │ /api/auth/*  │  │ (native goroutines)   │  |
-|  │ (50+ routes) │  │ NextAuth JWE │  │                       │  |
+|  │ (70+ routes) │  │ NextAuth JWE │  │                       │  |
 |  └──────┬───────┘  └──────┬───────┘  └───────────┬───────────┘  |
 |         │                 │                       │              |
 |  ┌──────┴─────────────────┴───────────────────────┴───────────┐  |
@@ -162,7 +162,7 @@ Everything runs in one process:
 - SPA-aware file server (`internal/api/static.go`)
 
 **API (internal/api/):**
-- REST API for all CRUD operations (`/api/v1/*`, 50+ routes)
+- REST API for all CRUD operations (`/api/v1/*`, 70+ routes)
 - NextAuth-compatible auth endpoints (`/api/auth/*` -- csrf, session, login, signout)
 - Signup with bcrypt, JWT signing/validation (JWE compatible)
 - RBAC middleware on every endpoint
@@ -186,7 +186,7 @@ Everything runs in one process:
 **Database:**
 - SQLite (default, embedded, zero deps) or PostgreSQL (opt-in)
 - Go `database/sql` direct queries (NO ORM, NO Prisma at runtime)
-- Migration system (`internal/database/migrate.go`, 20 tables)
+- Migration system (`internal/database/migrate.go`, 24 tables, 3 migrations)
 
 **Sidecar (crewship-sidecar, inside container, IMPLEMENTED):**
 - HTTP forward proxy on 127.0.0.1:9119 (UID 1002)
