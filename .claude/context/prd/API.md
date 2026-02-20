@@ -217,6 +217,30 @@ DB pristup pres `database/sql` (zadny ORM).
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
 | `GET` | `/api/v1/skills` | Auth | Seznam dostupnych skills |
+| `POST` | `/api/v1/workspaces/{workspaceId}/skills/import` | MANAGER+ | Importovat skill z URL nebo obsahu SKILL.md |
+
+#### Import endpointu
+
+```json
+// POST /api/v1/workspaces/{workspaceId}/skills/import
+// Body (jeden z poli je povinny):
+{ "url": "https://github.com/org/skills/blob/main/SKILL.md" }
+// nebo
+{ "content": "---\nname: my-skill\n---\n# My Skill..." }
+
+// Response 201:
+{
+  "skill_id": "sk_abc123",
+  "name": "My Skill",
+  "slug": "my-skill",
+  "created": true   // false = aktualizovan existujici skill
+}
+```
+
+Podporovane URL formaty:
+- `https://github.com/owner/repo/blob/branch/path.md` → automaticky konvertovano na raw URL
+- `owner/repo/path.md` → `https://raw.githubusercontent.com/owner/repo/main/path.md`
+- Jakekoliv jina HTTPS URL → beze zmeny
 
 ### 3.12 Runs
 

@@ -5,11 +5,15 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/skills"
 )
 
 type SkillHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
+	// SkipURLValidation disables SSRF checks on import URLs (testing only).
+	SkipURLValidation bool
 }
 
 func NewSkillHandler(db *sql.DB, logger *slog.Logger) *SkillHandler {
@@ -104,4 +108,51 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = []skillResponse{}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// Import handles POST /api/v1/workspaces/{workspaceId}/skills/import.
+// Accepts either a URL or raw SKILL.md content. Requires MANAGER role or above.
+func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	user := UserFromContext(r.Context())
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	var req struct {
+		URL     string `json:"url"`
+		Content string `json:"content"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		return
+	}
+	if req.URL == "" && req.Content == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url or content is required"})
+		return
+	}
+
+	// SSRF protection: validate URL before fetching
+	if req.URL != "" && !h.SkipURLValidation {
+		if err := skills.ValidateImportURL(req.URL); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+
+	imp := skills.NewImporter(h.db, h.logger)
+	result, err := imp.Import(r.Context(), wsID, user.ID, skills.ImportRequest{
+		URL:     req.URL,
+		Content: req.Content,
+	})
+	if err != nil {
+		h.logger.Info("skill import failed", "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
 }

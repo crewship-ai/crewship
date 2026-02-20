@@ -150,6 +150,7 @@ func (r *Router) registerRoutes() {
 
 	// Skills (require auth)
 	r.mux.Handle("GET /api/v1/skills", authed(wsCtx(http.HandlerFunc(skills.List))))
+	r.mux.Handle("POST /api/v1/workspaces/{workspaceId}/skills/import", authed(wsCtx(http.HandlerFunc(skills.Import))))
 
 	// Runs (require workspace context)
 	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))

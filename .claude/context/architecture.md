@@ -75,7 +75,7 @@ External → Webhook (Go) → Agent trigger → same flow as above
 - **Workspace** = company (multi-tenant root)
 - **Crew** = department (isolation boundary, maps to Docker container or K8s Pod)
 - **Agent** = virtual employee (CLI session inside container, has LLM, skills, credentials)
-- **Skill** = MCP Server wrapper (tools + resources + system prompt + credential requirements)
+- **Skill** = playbook injected into agent system prompt; parsed from SKILL.md format; supports credential requirements and category metadata. Parser + importer in `internal/skills/`.
 - **Credential** = encrypted secret (AES-256-GCM, injected by sidecar proxy into HTTP headers at runtime)
 - **Assignment** = lead/coordinator deleguje ukol na podrizeneho agenta (auditovano, Phase 2)
 - **Sidecar** = crewship-sidecar Go binary running inside crew container (localhost:9119, UID 1002). HTTP forward proxy that injects credentials per-request. Agent NEVER sees real API keys. See `prd/SIDECAR.md`.

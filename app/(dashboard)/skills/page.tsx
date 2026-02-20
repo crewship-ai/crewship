@@ -9,6 +9,7 @@ import { FilterBar } from "@/components/layout/filter-bar"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { ImportSkillDialog } from "@/components/skills/import-dialog"
 
 interface Skill {
   id: string
@@ -81,9 +82,25 @@ export default function SkillsPage() {
       ? skills
       : skills.filter((s) => s.source === activeFilter.toUpperCase())
 
+  function handleImported() {
+    // Refresh skills list after a successful import
+    if (!workspaceId) return
+    setLoading(true)
+    setError(null)
+    fetch(`/api/v1/skills?workspace_id=${workspaceId}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data: Skill[]) => setSkills(data))
+      .catch(() => setError("Failed to reload skills"))
+      .finally(() => setLoading(false))
+  }
+
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <PageHeader title="Skills" description="Browse and manage agent skills" />
+      <PageHeader title="Skills" description="Browse and manage agent skills">
+        {workspaceId && (
+          <ImportSkillDialog workspaceId={workspaceId} onImported={handleImported} />
+        )}
+      </PageHeader>
 
       <FilterBar
         filters={sourceFilters}
