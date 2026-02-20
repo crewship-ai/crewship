@@ -5,11 +5,15 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/skills"
 )
 
 type SkillHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
+	// SkipURLValidation disables SSRF checks on import URLs (testing only).
+	SkipURLValidation bool
 }
 
 func NewSkillHandler(db *sql.DB, logger *slog.Logger) *SkillHandler {
@@ -104,4 +108,67 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = []skillResponse{}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// Import handles POST /api/v1/workspaces/{workspaceId}/skills/import.
+// Accepts either a URL or raw SKILL.md content. Requires MANAGER role or above.
+func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
+	// RFC 7807 Problem Details error helper
+	writeProblem := func(status int, detail string) {
+		writeJSON(w, status, map[string]interface{}{
+			"type":     "about:blank",
+			"title":    http.StatusText(status),
+			"status":   status,
+			"detail":   detail,
+			"instance": r.URL.Path,
+		})
+	}
+
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	user := UserFromContext(r.Context())
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	var req struct {
+		URL     string `json:"url"`
+		Content string `json:"content"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeProblem(http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if req.URL == "" && req.Content == "" {
+		writeProblem(http.StatusBadRequest, "url or content is required")
+		return
+	}
+	if req.URL != "" && req.Content != "" {
+		writeProblem(http.StatusBadRequest, "provide either url or content, not both")
+		return
+	}
+
+	// SSRF protection: validate URL before fetching
+	if req.URL != "" && !h.SkipURLValidation {
+		if err := skills.ValidateImportURL(r.Context(), req.URL); err != nil {
+			writeProblem(http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	imp := skills.NewImporter(h.db, h.logger)
+	imp.SkipURLValidation = h.SkipURLValidation
+	result, err := imp.Import(r.Context(), wsID, user.ID, skills.ImportRequest{
+		URL:     req.URL,
+		Content: req.Content,
+	})
+	if err != nil {
+		h.logger.Info("skill import failed", "error", err)
+		writeProblem(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
 }
