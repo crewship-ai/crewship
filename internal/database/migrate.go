@@ -62,6 +62,7 @@ var migrations = []migration{
 	{1, "init", migrationInit},
 	{2, "add_onboarding_completed", migrationAddOnboardingCompleted},
 	{3, "add_memory_config", migrationAddMemoryConfig},
+	{4, "add_lead_mode", migrationAddLeadMode},
 }
 
 const migrationAddOnboardingCompleted = `
@@ -70,6 +71,10 @@ ALTER TABLE users ADD COLUMN onboarding_completed INTEGER NOT NULL DEFAULT 0;
 
 const migrationAddMemoryConfig = `
 ALTER TABLE agents ADD COLUMN memory_config TEXT;
+`
+
+const migrationAddLeadMode = `
+ALTER TABLE agents ADD COLUMN lead_mode TEXT DEFAULT 'active';
 `
 
 const migrationInit = `

@@ -19,6 +19,17 @@ func NewAgentHandler(db *sql.DB, logger *slog.Logger) *AgentHandler {
 	return &AgentHandler{db: db, logger: logger}
 }
 
+var validAgentRoles = map[string]bool{
+	"AGENT":       true,
+	"LEAD":        true,
+	"COORDINATOR": true,
+}
+
+var validLeadModes = map[string]bool{
+	"active":  true,
+	"passive": true,
+}
+
 type agentResponse struct {
 	ID              string  `json:"id"`
 	CrewID          *string `json:"crew_id"`
@@ -28,6 +39,7 @@ type agentResponse struct {
 	Description     *string `json:"description"`
 	RoleTitle       *string `json:"role_title"`
 	AgentRole       string  `json:"agent_role"`
+	LeadMode        *string `json:"lead_mode"`
 	Status          string  `json:"status"`
 	CLIAdapter      string  `json:"cli_adapter"`
 	LLMProvider     *string `json:"llm_provider"`
@@ -57,7 +69,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	if crewID != "" {
 		rows, err = h.db.QueryContext(r.Context(), `
 			SELECT id, crew_id, workspace_id, name, slug, description, role_title,
-				agent_role, status, cli_adapter, llm_provider, llm_model,
+				agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model,
 				system_prompt, temperature, max_tokens, timeout_seconds,
 				tool_profile, memory_enabled, created_at, updated_at
 			FROM agents
@@ -67,7 +79,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rows, err = h.db.QueryContext(r.Context(), `
 			SELECT id, crew_id, workspace_id, name, slug, description, role_title,
-				agent_role, status, cli_adapter, llm_provider, llm_model,
+				agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model,
 				system_prompt, temperature, max_tokens, timeout_seconds,
 				tool_profile, memory_enabled, created_at, updated_at
 			FROM agents
@@ -88,7 +100,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		var a agentResponse
 		var memEnabled int
 		if err := rows.Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
-			&a.Description, &a.RoleTitle, &a.AgentRole, &a.Status, &a.CLIAdapter,
+			&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.Temperature,
 			&a.MaxTokens, &a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
 			&a.CreatedAt, &a.UpdatedAt); err != nil {
@@ -119,6 +131,7 @@ type createAgentRequest struct {
 	Description    *string `json:"description"`
 	RoleTitle      *string `json:"role_title"`
 	AgentRole      string  `json:"agent_role"`
+	LeadMode       *string `json:"lead_mode"`
 	CLIAdapter     string  `json:"cli_adapter"`
 	LLMProvider    *string `json:"llm_provider"`
 	LLMModel       *string `json:"llm_model"`
@@ -157,6 +170,47 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.AgentRole == "" {
 		req.AgentRole = "AGENT"
 	}
+	if !validAgentRoles[req.AgentRole] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_role must be AGENT, LEAD, or COORDINATOR"})
+		return
+	}
+
+	// LEAD requires crew_id
+	if req.AgentRole == "LEAD" && (req.CrewID == nil || *req.CrewID == "") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "LEAD role requires crew_id"})
+		return
+	}
+	// COORDINATOR must NOT have crew_id
+	if req.AgentRole == "COORDINATOR" && req.CrewID != nil && *req.CrewID != "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "COORDINATOR role must not have crew_id"})
+		return
+	}
+
+	// Max 1 LEAD per crew
+	if req.AgentRole == "LEAD" && req.CrewID != nil {
+		var existingLeadID string
+		err := h.db.QueryRowContext(r.Context(),
+			"SELECT id FROM agents WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL",
+			*req.CrewID).Scan(&existingLeadID)
+		if err == nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "Crew already has a lead agent"})
+			return
+		}
+		if err != sql.ErrNoRows {
+			h.logger.Error("check existing lead", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+	}
+
+	// Validate lead_mode
+	if req.LeadMode != nil && *req.LeadMode != "" {
+		if !validLeadModes[*req.LeadMode] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "lead_mode must be 'active' or 'passive'"})
+			return
+		}
+	}
+
 	if req.CLIAdapter == "" {
 		req.CLIAdapter = "CLAUDE_CODE"
 	}
@@ -190,14 +244,21 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		memEnabled = 1
 	}
 
+	// Default lead_mode for LEAD
+	leadMode := req.LeadMode
+	if req.AgentRole == "LEAD" && (leadMode == nil || *leadMode == "") {
+		defaultMode := "active"
+		leadMode = &defaultMode
+	}
+
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO agents (id, crew_id, workspace_id, name, slug, description, role_title,
-			agent_role, status, cli_adapter, llm_provider, llm_model, system_prompt,
+			agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model, system_prompt,
 			temperature, max_tokens, timeout_seconds, tool_profile, memory_enabled,
 			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'IDLE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IDLE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		agentID, req.CrewID, workspaceID, req.Name, req.Slug, req.Description, req.RoleTitle,
-		req.AgentRole, req.CLIAdapter, req.LLMProvider, req.LLMModel, req.SystemPrompt,
+		req.AgentRole, leadMode, req.CLIAdapter, req.LLMProvider, req.LLMModel, req.SystemPrompt,
 		req.Temperature, req.MaxTokens, req.TimeoutSeconds, req.ToolProfile, memEnabled,
 		now, now)
 	if err != nil {
@@ -224,6 +285,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description:    req.Description,
 		RoleTitle:      req.RoleTitle,
 		AgentRole:      req.AgentRole,
+		LeadMode:       leadMode,
 		Status:         "IDLE",
 		CLIAdapter:     req.CLIAdapter,
 		LLMProvider:    req.LLMProvider,
@@ -252,13 +314,13 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var memEnabled int
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT id, crew_id, workspace_id, name, slug, description, role_title,
-			agent_role, status, cli_adapter, llm_provider, llm_model,
+			agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model,
 			system_prompt, temperature, max_tokens, timeout_seconds,
 			tool_profile, memory_enabled, created_at, updated_at
 		FROM agents
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL
 	`, agentID, workspaceID).Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
-		&a.Description, &a.RoleTitle, &a.AgentRole, &a.Status, &a.CLIAdapter,
+		&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.Temperature,
 		&a.MaxTokens, &a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
 		&a.CreatedAt, &a.UpdatedAt)
@@ -303,11 +365,57 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	allowed := map[string]string{
 		"name": "name", "slug": "slug", "description": "description",
 		"role_title": "role_title", "agent_role": "agent_role",
+		"lead_mode": "lead_mode",
 		"cli_adapter": "cli_adapter", "llm_provider": "llm_provider",
 		"llm_model": "llm_model", "system_prompt": "system_prompt",
 		"temperature": "temperature", "max_tokens": "max_tokens",
 		"timeout_seconds": "timeout_seconds", "tool_profile": "tool_profile",
 		"memory_enabled": "memory_enabled", "crew_id": "crew_id",
+	}
+
+	// Validate agent_role if being updated
+	if roleVal, ok := body["agent_role"]; ok {
+		roleStr, _ := roleVal.(string)
+		if !validAgentRoles[roleStr] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_role must be AGENT, LEAD, or COORDINATOR"})
+			return
+		}
+
+		// If promoting to LEAD, auto-demote existing lead in the same crew (transactional)
+		if roleStr == "LEAD" {
+			// Find the agent's crew_id
+			var crewIDNull sql.NullString
+			if err := h.db.QueryRowContext(r.Context(),
+				"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+				agentID, workspaceID).Scan(&crewIDNull); err != nil {
+				h.logger.Error("query agent crew_id for promotion", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
+
+			if !crewIDNull.Valid || crewIDNull.String == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "LEAD role requires crew_id"})
+				return
+			}
+
+			// Demote existing lead in the same crew
+			if _, err := h.db.ExecContext(r.Context(),
+				"UPDATE agents SET agent_role = 'AGENT' WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL AND id != ?",
+				crewIDNull.String, agentID); err != nil {
+				h.logger.Error("demote existing lead", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
+		}
+	}
+
+	// Validate lead_mode if being updated
+	if modeVal, ok := body["lead_mode"]; ok {
+		modeStr, _ := modeVal.(string)
+		if modeStr != "" && !validLeadModes[modeStr] {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "lead_mode must be 'active' or 'passive'"})
+			return
+		}
 	}
 
 	var setClauses []string

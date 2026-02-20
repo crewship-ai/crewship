@@ -24,6 +24,7 @@ type ChatResolver interface {
 type ChatInfo struct {
 	AgentID       string
 	AgentSlug     string
+	AgentRole     string
 	CrewID        string
 	CrewSlug      string
 	ContainerID   string
@@ -34,6 +35,7 @@ type ChatInfo struct {
 	TimeoutSecs   int
 	WorkspaceID   string
 	MemoryEnabled bool
+	CrewMembers   []orchestrator.CrewMember
 }
 
 type Bridge struct {
@@ -139,6 +141,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	req := orchestrator.AgentRunRequest{
 		AgentID:       info.AgentID,
 		AgentSlug:     info.AgentSlug,
+		AgentRole:     info.AgentRole,
 		CrewID:        info.CrewID,
 		CrewSlug:      info.CrewSlug,
 		ChatID:        chatID,
@@ -150,6 +153,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		Credentials:   info.Credentials,
 		TimeoutSecs:   info.TimeoutSecs,
 		MemoryEnabled: info.MemoryEnabled,
+		CrewMembers:   info.CrewMembers,
 	}
 
 	handler := func(event orchestrator.AgentEvent) {

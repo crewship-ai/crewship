@@ -1,0 +1,96 @@
+package orchestrator
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestBuildLeadContext(t *testing.T) {
+	tests := []struct {
+		name           string
+		members        []CrewMember
+		wantEmpty      bool
+		wantContains   []string
+		wantNotContain []string
+		wantMemberLines int
+	}{
+		{
+			name:      "nil members returns empty",
+			members:   nil,
+			wantEmpty: true,
+		},
+		{
+			name:      "empty slice returns empty",
+			members:   []CrewMember{},
+			wantEmpty: true,
+		},
+		{
+			name: "includes all fields",
+			members: []CrewMember{
+				{Name: "Charlie", Slug: "charlie", RoleTitle: "DevOps Engineer", Description: "Manages infrastructure", Status: "IDLE"},
+			},
+			wantContains:    []string{"[CREW CONTEXT]", "[END CREW CONTEXT]", "Charlie", "charlie", "DevOps Engineer", "Manages infrastructure"},
+			wantMemberLines: 1,
+		},
+		{
+			name: "multiple members with equality phrasing",
+			members: []CrewMember{
+				{Name: "Alice", Slug: "alice", RoleTitle: "Backend Developer", Description: "Handles API development", Status: "IDLE"},
+				{Name: "Bob", Slug: "bob", RoleTitle: "Frontend Developer", Description: "Builds UI components", Status: "BUSY"},
+			},
+			wantContains:    []string{"[CREW CONTEXT]", "[END CREW CONTEXT]", "Alice", "Bob", "Backend Developer", "crew member"},
+			wantNotContain:  []string{"subordinate", "report to"},
+			wantMemberLines: 2,
+		},
+		{
+			name: "member without role_title",
+			members: []CrewMember{
+				{Name: "Bob", Slug: "bob", RoleTitle: "", Description: "Does stuff", Status: "IDLE"},
+			},
+			wantContains:    []string{"Bob", "bob"},
+			wantMemberLines: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := BuildLeadContext(tt.members)
+
+			if tt.wantEmpty {
+				if result != "" {
+					t.Errorf("expected empty string, got %q", result)
+				}
+				return
+			}
+
+			if result == "" {
+				t.Fatal("expected non-empty context, got empty")
+			}
+
+			for _, s := range tt.wantContains {
+				if !strings.Contains(result, s) {
+					t.Errorf("result missing %q", s)
+				}
+			}
+
+			for _, s := range tt.wantNotContain {
+				if strings.Contains(result, s) {
+					t.Errorf("result should not contain %q", s)
+				}
+			}
+
+			if tt.wantMemberLines > 0 {
+				lines := strings.Split(result, "\n")
+				memberLines := 0
+				for _, line := range lines {
+					if strings.HasPrefix(strings.TrimSpace(line), "- ") {
+						memberLines++
+					}
+				}
+				if memberLines != tt.wantMemberLines {
+					t.Errorf("expected %d member lines, got %d", tt.wantMemberLines, memberLines)
+				}
+			}
+		})
+	}
+}
