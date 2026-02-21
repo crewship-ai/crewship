@@ -66,6 +66,7 @@ var migrations = []migration{
 	{5, "add_preferred_language", migrationAddPreferredLanguage},
 	{6, "add_peer_conversations", migrationAddPeerConversations},
 	{7, "add_escalations", migrationAddEscalations},
+	{8, "add_missions", migrationAddMissions},
 }
 
 const migrationAddOnboardingCompleted = `
@@ -125,6 +126,58 @@ CREATE INDEX IF NOT EXISTS idx_escalation_crew ON escalations(crew_id);
 CREATE INDEX IF NOT EXISTS idx_escalation_from ON escalations(from_agent_id);
 CREATE INDEX IF NOT EXISTS idx_escalation_status ON escalations(status);
 CREATE INDEX IF NOT EXISTS idx_escalation_created ON escalations(created_at);
+`
+
+const migrationAddMissions = `
+CREATE TABLE IF NOT EXISTS missions (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+	crew_id TEXT NOT NULL REFERENCES crews(id),
+	lead_agent_id TEXT NOT NULL REFERENCES agents(id),
+	trace_id TEXT NOT NULL UNIQUE,
+	title TEXT NOT NULL,
+	description TEXT,
+	status TEXT NOT NULL DEFAULT 'PLANNING',
+	plan TEXT,
+	workflow_template TEXT,
+	total_token_count INTEGER,
+	total_estimated_cost REAL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mission_workspace ON missions(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_mission_crew ON missions(crew_id);
+CREATE INDEX IF NOT EXISTS idx_mission_lead ON missions(lead_agent_id);
+CREATE INDEX IF NOT EXISTS idx_mission_status ON missions(status);
+CREATE INDEX IF NOT EXISTS idx_mission_created ON missions(created_at);
+
+CREATE TABLE IF NOT EXISTS mission_tasks (
+	id TEXT PRIMARY KEY,
+	mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+	assigned_agent_id TEXT REFERENCES agents(id),
+	title TEXT NOT NULL,
+	description TEXT,
+	status TEXT NOT NULL DEFAULT 'PENDING',
+	task_order INTEGER NOT NULL DEFAULT 0,
+	depends_on TEXT DEFAULT '[]',
+	iteration INTEGER DEFAULT 1,
+	max_iterations INTEGER,
+	result_summary TEXT,
+	output_path TEXT,
+	error_message TEXT,
+	assignment_id TEXT REFERENCES assignments(id),
+	token_count INTEGER,
+	estimated_cost REAL,
+	started_at TEXT,
+	completed_at TEXT,
+	duration_ms INTEGER,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mission_task_mission ON mission_tasks(mission_id);
+CREATE INDEX IF NOT EXISTS idx_mission_task_agent ON mission_tasks(assigned_agent_id);
+CREATE INDEX IF NOT EXISTS idx_mission_task_status ON mission_tasks(status);
 `
 
 const migrationInit = `

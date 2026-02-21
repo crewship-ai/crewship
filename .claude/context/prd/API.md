@@ -216,7 +216,8 @@ DB pristup pres `database/sql` (zadny ORM).
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/skills` | Auth | Seznam dostupnych skills |
+| `GET` | `/api/v1/skills` | Auth | Seznam dostupnych skills (supports `?search=`, `?category=`) |
+| `GET` | `/api/v1/skills/{skillId}` | Auth | Detail skillu (includes content, agent_count, credential_requirements) |
 | `POST` | `/api/v1/workspaces/{workspaceId}/skills/import` | MANAGER+ | Importovat skill z URL nebo obsahu SKILL.md |
 
 #### Import endpointu
@@ -248,25 +249,54 @@ Bezpecnostni omezeni (SSRF ochrana):
 - Klient obdrzi 400 Bad Request s RFC 7807 detail pro zakazane URL
 - Omezeni se tykaji pouze `url` pole; `content` pole neni ovlivneno
 
-### 3.12 Runs
+### 3.12 Missions
+
+| Metoda | Path | Role | Popis |
+|---|---|---|---|
+| `GET` | `/api/v1/missions` | Member | Seznam vsech missi v workspace (supports `?status=`) |
+| `GET` | `/api/v1/crews/{crewId}/missions` | Member | Seznam missi crew (supports `?status=`, `?limit=`, `?offset=`) |
+| `POST` | `/api/v1/crews/{crewId}/missions` | MANAGER+ | Vytvorit missi (requires lead_agent_id with LEAD role) |
+| `GET` | `/api/v1/crews/{crewId}/missions/{missionId}` | Member | Detail misse (includes tasks array) |
+| `PATCH` | `/api/v1/crews/{crewId}/missions/{missionId}` | MANAGER+ | Upravit missi (status transitions validated) |
+| `DELETE` | `/api/v1/crews/{crewId}/missions/{missionId}` | MANAGER+ | Smazat missi (only PLANNING or CANCELLED) |
+| `POST` | `/api/v1/crews/{crewId}/missions/{missionId}/tasks` | MANAGER+ | Vytvorit task (auto-BLOCKED if deps incomplete) |
+| `PATCH` | `/api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}` | MANAGER+ | Upravit task (auto-unblocks dependents on COMPLETED) |
+
+#### Mission status transitions
+- PLANNING → IN_PROGRESS, CANCELLED
+- IN_PROGRESS → REVIEW, FAILED, CANCELLED
+- REVIEW → COMPLETED, IN_PROGRESS, FAILED, CANCELLED
+
+#### Task status transitions
+- PENDING → IN_PROGRESS, SKIPPED
+- BLOCKED → PENDING, SKIPPED
+- IN_PROGRESS → COMPLETED, FAILED, SKIPPED
+
+#### WebSocket events (mission channels)
+- `mission.created` → broadcast to `crew:{crewId}`
+- `mission.status` → broadcast to `mission:{missionId}`
+- `task.created` → broadcast to `mission:{missionId}`
+- `task.status` → broadcast to `mission:{missionId}`
+
+### 3.13 Runs
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
 | `GET` | `/api/v1/runs` | Member | Seznam behu (paginated) |
 
-### 3.13 Audit Log
+### 3.14 Audit Log
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
 | `GET` | `/api/v1/audit` | ADMIN+ | Audit log (cursor paginated) |
 
-### 3.14 WebSocket Token
+### 3.15 WebSocket Token
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
 | `GET` | `/api/v1/ws-token` | Auth | Ziskat short-lived WS token (5min JWT) |
 
-### 3.15 Health
+### 3.16 Health
 
 | Metoda | Path | Auth | Popis |
 |---|---|---|---|
@@ -278,7 +308,7 @@ Bezpecnostni omezeni (SSRF ochrana):
 }
 ```
 
-### 3.16 Admin
+### 3.17 Admin
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
@@ -286,7 +316,7 @@ Bezpecnostni omezeni (SSRF ochrana):
 | `GET` | `/api/v1/admin/users` | OWNER | Seznam uzivatelu |
 | `GET` | `/api/v1/admin/workspaces` | OWNER | Seznam vsech workspaces |
 
-### 3.17 Crewshipd Proxy (agent runtime)
+### 3.18 Crewshipd Proxy (agent runtime)
 
 Proxy endpointy pro komunikaci s crewshipd daemonem pres Unix socket (IPC).
 Pouzivaji se pro runtime operace nad agenty (debug, soubory, logy, stop).
@@ -301,7 +331,7 @@ Pouzivaji se pro runtime operace nad agenty (debug, soubory, logy, stop).
 | `POST` | `/api/v1/agents/{agentId}/stop` | CrewMember | Zastavit agenta |
 | `GET` | `/api/v1/chats/{chatId}/messages` | Auth | Zpravy chatu (JSONL) |
 
-### 3.18 Internal Routes (crewshipd IPC)
+### 3.19 Internal Routes (crewshipd IPC)
 
 Interni endpointy pro crewshipd daemon. Autorizace pres `X-Internal-Token` header.
 
@@ -314,7 +344,7 @@ Interni endpointy pro crewshipd daemon. Autorizace pres `X-Internal-Token` heade
 | `POST` | `/api/v1/internal/runs` | Internal | Vytvorit agent run zaznam |
 | `PATCH` | `/api/v1/internal/runs/{runId}` | Internal | Update run status (started, finished, error) |
 
-### 3.19 Onboarding
+### 3.20 Onboarding
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
@@ -394,7 +424,8 @@ interface WSServerMessage {
 | Kanal | Format | Eventy |
 |---|---|---|
 | `agent:{agentId}` | Agent streaming | `thinking`, `text`, `tool_call`, `tool_result`, `status_change` |
-| `crew:{crewId}` | Crew events | `agent_started`, `agent_stopped`, `container_status` |
+| `crew:{crewId}` | Crew events | `agent_started`, `agent_stopped`, `container_status`, `mission.created` |
+| `mission:{missionId}` | Mission events | `mission.status`, `task.created`, `task.status` |
 | `files:{crewId}` | File events (fsnotify) | `file_created`, `file_modified`, `file_deleted` |
 
 ### 5.4 Agent streaming events
