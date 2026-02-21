@@ -223,7 +223,7 @@ export function DebugPageClient() {
             )}
             {!engineOk && (
               <p className="text-xs text-destructive">
-                Cannot connect to the engine. Make sure crewshipd is running.
+                Cannot connect to the Engine. Make sure it is running.
               </p>
             )}
           </CardContent>

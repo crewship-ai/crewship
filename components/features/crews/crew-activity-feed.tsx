@@ -198,11 +198,14 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
                           {item.to_slug ? `@${item.to_slug}` : "—"}
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-1.5">
+                          <div
+                            className="flex items-center gap-1.5"
+                            style={item.crew_color ? { ["--crew-color" as string]: item.crew_color } : undefined}
+                          >
                             {item.crew_color && (
                               <span
                                 className="inline-block h-2 w-2 rounded-full shrink-0"
-                                style={{ backgroundColor: item.crew_color }}
+                                style={{ backgroundColor: "var(--crew-color)" }}
                               />
                             )}
                             <span className="text-sm text-muted-foreground truncate">

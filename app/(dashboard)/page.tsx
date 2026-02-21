@@ -173,10 +173,17 @@ export default function DashboardPage() {
   const runningNow = agents.filter((a) => a.status === "RUNNING").length
   const apiKeysActive = credentials.length
 
-  // Build agent → last run map
+  // Build agent → last run map (keep most recent per agent)
   const agentLastRun = new Map<string, RunEntry>()
   for (const run of runsData?.data ?? []) {
-    if (!agentLastRun.has(run.agent_id)) agentLastRun.set(run.agent_id, run)
+    const existing = agentLastRun.get(run.agent_id)
+    if (!existing) {
+      agentLastRun.set(run.agent_id, run)
+      continue
+    }
+    const tsExisting = new Date(existing.started_at ?? existing.created_at).getTime()
+    const tsNew = new Date(run.started_at ?? run.created_at).getTime()
+    if (tsNew > tsExisting) agentLastRun.set(run.agent_id, run)
   }
 
   // Filter agents
