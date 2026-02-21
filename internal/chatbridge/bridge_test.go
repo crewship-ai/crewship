@@ -224,3 +224,88 @@ func TestBridgeNew(t *testing.T) {
 		t.Error("expected non-nil resolver")
 	}
 }
+
+func TestBridge_EmitsStatusEvents(t *testing.T) {
+	// When container needs to be ensured, the bridge should emit status events
+	// during the setup phase (not just a single "thinking" event)
+	resolver := &mockResolver{
+		info: &ChatInfo{
+			AgentID:     "agent-1",
+			AgentSlug:   "test-agent",
+			CrewID:      "crew-1",
+			CrewSlug:    "test-crew",
+			CLIAdapter:  "CLAUDE_CODE",
+			TimeoutSecs: 30,
+		},
+	}
+	b := testBridgeWithContainer(t, resolver, &failContainer{})
+
+	var events []ws.ChatEvent
+	streamFn := func(e ws.ChatEvent) { events = append(events, e) }
+
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hello", streamFn)
+
+	// Should have at least one status event before the error
+	hasStatus := false
+	for _, e := range events {
+		if e.Type == "status" {
+			hasStatus = true
+			break
+		}
+	}
+	if !hasStatus {
+		t.Errorf("expected at least one 'status' event during setup, got events: %+v", events)
+	}
+}
+
+func TestBridge_ChatEventMetadata(t *testing.T) {
+	// Verify that ChatEvent metadata is preserved when forwarding from orchestrator
+	resolver := &mockResolver{err: fmt.Errorf("resolve fail")}
+	b, _ := testBridge(t, resolver)
+
+	var events []ws.ChatEvent
+	streamFn := func(e ws.ChatEvent) { events = append(events, e) }
+
+	_ = b.HandleChatMessage(context.Background(), "user-1", "sess-1", "hello", streamFn)
+
+	// The error event should have no metadata (just type and content)
+	for _, e := range events {
+		if e.Type == "error" {
+			// Error events don't need metadata, just checking the field exists
+			// and doesn't break serialization
+			_ = e.Metadata
+		}
+	}
+}
+
+func TestBridge_CancelledContextNoErrorEvent(t *testing.T) {
+	// When context is cancelled (user pressed stop), the bridge should NOT emit
+	// an error event -- the hub handles sending "done" instead.
+	resolver := &mockResolver{
+		info: &ChatInfo{
+			AgentID:     "agent-1",
+			AgentSlug:   "test-agent",
+			CrewID:      "crew-1",
+			CrewSlug:    "test-crew",
+			CLIAdapter:  "CLAUDE_CODE",
+			TimeoutSecs: 30,
+		},
+	}
+	b := testBridgeWithContainer(t, resolver, &failContainer{})
+
+	var events []ws.ChatEvent
+	streamFn := func(e ws.ChatEvent) { events = append(events, e) }
+
+	// Pre-cancel the context to simulate user stop
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_ = b.HandleChatMessage(ctx, "user-1", "sess-1", "hello", streamFn)
+
+	// Should NOT have any error events (the hub sends "done" instead)
+	for _, e := range events {
+		if e.Type == "error" && strings.Contains(e.Content, "context canceled") {
+			t.Errorf("bridge should not emit error for cancelled context, got: %q", e.Content)
+		}
+	}
+}

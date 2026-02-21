@@ -321,7 +321,8 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT workspace_id FROM chats WHERE id = ?", chatID).Scan(&chatWSID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
+		// Chat doesn't exist yet (new session before first message) — return empty messages
+		writeJSON(w, http.StatusOK, map[string]interface{}{"messages": []interface{}{}})
 		return
 	}
 

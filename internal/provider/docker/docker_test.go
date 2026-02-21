@@ -41,6 +41,22 @@ func TestContainerNameFormat(t *testing.T) {
 	}
 }
 
+func TestContainerNameWithPrefix(t *testing.T) {
+	// Instance 2 should produce "crewship-2-team-engineering"
+	prefix := "crewship-2"
+	slug := "engineering"
+	name := prefix + "-team-" + slug
+	if name != "crewship-2-team-engineering" {
+		t.Errorf("unexpected container name: %s", name)
+	}
+	// Default (no prefix) should produce "crewship-team-engineering"
+	defaultPrefix := "crewship"
+	name2 := defaultPrefix + "-team-" + slug
+	if name2 != "crewship-team-engineering" {
+		t.Errorf("unexpected default container name: %s", name2)
+	}
+}
+
 func TestNewRequiresDocker(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

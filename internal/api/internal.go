@@ -332,7 +332,12 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		crewSlugStr = crewSlug.String
 	}
 
-	// Build structured system prompt: ethos → identity → persona → skills
+	// Query workspace preferred_language
+	var preferredLanguage sql.NullString
+	_ = h.db.QueryRowContext(r.Context(),
+		"SELECT preferred_language FROM workspaces WHERE id = ?", wsID).Scan(&preferredLanguage)
+
+	// Build structured system prompt: ethos → language → identity → persona → skills
 	// Note: crew context for LEADs is added later by the orchestrator
 	var promptParts []string
 
@@ -344,6 +349,14 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 
 	// [CREWSHIP ETHOS] section — non-overridable, injected for every agent
 	promptParts = append(promptParts, buildEthosBlock(roleStr))
+
+	// [LANGUAGE PREFERENCE] section — injected when workspace has a preferred language
+	if preferredLanguage.Valid && preferredLanguage.String != "" {
+		lang := preferredLanguage.String
+		promptParts = append(promptParts, fmt.Sprintf(
+			"[LANGUAGE PREFERENCE]\nAlways respond in: %s\nAll output, thinking, and communication must be in %s.\nIf the user writes in a different language, still respond in %s unless explicitly asked otherwise.\n[END LANGUAGE PREFERENCE]",
+			lang, lang, lang))
+	}
 
 	// [AGENT IDENTITY] section
 	identityLines := []string{"[AGENT IDENTITY]"}

@@ -224,6 +224,7 @@ DATABASE_URL=                       # Optional PostgreSQL connection string
 - **Never change GCM byte layout** in `internal/encryption/` — the custom `IV||AuthTag||Ciphertext` order is for Go/TS compatibility. Changing it makes all stored credentials undecryptable.
 - **Never change sidecar UID (1002) or agent UID (1001)** — the UID separation is a security boundary preventing the agent from reading sidecar memory.
 - **Never use `npm` or `yarn`** — `pnpm` only. pnpm-specific config will break with other package managers.
+- **Never discard or lose developed work.** Always `git stash` before switching branches. Never `git checkout .`, `git restore .`, or `git clean` on work-in-progress. If you need a clean branch, stash first, then pop after.
 
 When you make a new mistake, add it here so it never happens again. This file is a living document — updating it is part of every significant PR.
 

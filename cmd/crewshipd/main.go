@@ -101,10 +101,11 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger)
 	switch cfg.Container.Provider {
 	case "docker":
 		d, err := docker.New(ctx, docker.Config{
-			RuntimeImage:   cfg.Container.RuntimeImage,
-			DefaultRuntime: cfg.Container.DefaultRuntime,
-			Network:        cfg.Container.Network,
-			OutputBasePath: cfg.Storage.BasePath,
+			RuntimeImage:    cfg.Container.RuntimeImage,
+			DefaultRuntime:  cfg.Container.DefaultRuntime,
+			Network:         cfg.Container.Network,
+			OutputBasePath:  cfg.Storage.BasePath,
+			ContainerPrefix: cfg.Container.ContainerPrefix,
 		}, logger)
 		if err != nil {
 			logger.Warn("docker provider unavailable, running without containers", "error", err)

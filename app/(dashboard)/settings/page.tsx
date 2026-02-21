@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react"
 import {
   User, Palette, Bell, Shield, Building, Users, CreditCard,
-  AlertTriangle, Check, X, Key
+  AlertTriangle, Check, X, Key, ChevronsUpDown, Languages
 } from "lucide-react"
 import { useSession } from "@/hooks/use-auth"
 import {
@@ -31,10 +31,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { InviteMemberDialog } from "@/components/features/members/invite-member-dialog"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
+import { LANGUAGES } from "@/lib/languages"
 
 type Scope = "user" | "org"
 
@@ -72,6 +75,7 @@ interface Org {
   id: string
   name: string
   slug: string
+  preferred_language: string | null
   _count: { crews: number; agents: number; members: number }
 }
 
@@ -120,6 +124,9 @@ export default function SettingsPage() {
 
   const [formName, setFormName] = useState("")
   const [formSlug, setFormSlug] = useState("")
+  const [formLanguage, setFormLanguage] = useState<string | null>(null)
+  const [langOpen, setLangOpen] = useState(false)
+  const [langSaving, setLangSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle")
   const [saveError, setSaveError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -149,6 +156,7 @@ export default function SettingsPage() {
           setOrg(orgData)
           setFormName(orgData.name)
           setFormSlug(orgData.slug)
+          setFormLanguage(orgData.preferred_language)
         }
 
         if (membersRes.ok) {
@@ -180,7 +188,7 @@ export default function SettingsPage() {
 
     try {
       const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: formName, slug: formSlug }),
       })
@@ -221,6 +229,31 @@ export default function SettingsPage() {
       setSaveError("Failed to delete workspace")
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  async function handleLanguageChange(code: string | null) {
+    setFormLanguage(code)
+    setLangOpen(false)
+    if (!workspaceId) return
+
+    setLangSaving(true)
+    try {
+      const res = await fetch(`/api/v1/workspaces/${workspaceId}?workspace_id=${workspaceId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferred_language: code ?? "" }),
+      })
+      if (res.ok) {
+        const updated = (await res.json()) as Org
+        setOrg(updated)
+        setFormLanguage(updated.preferred_language)
+      }
+    } catch {
+      // Revert on error
+      setFormLanguage(org?.preferred_language ?? null)
+    } finally {
+      setLangSaving(false)
     }
   }
 
@@ -289,6 +322,71 @@ export default function SettingsPage() {
               {saveStatus === "saving" ? "Saving..." : "Save Changes"}
             </Button>
           </form>
+
+          <div className="pt-4 border-t">
+            <h3 className="text-sm font-medium flex items-center gap-2">
+              <Languages className="h-4 w-4" />
+              Agent Language
+            </h3>
+            <p className="text-xs text-muted-foreground mt-1 mb-3">
+              Set a preferred language for all agents in this workspace. Agents will respond in the selected language.
+            </p>
+            <Popover open={langOpen} onOpenChange={setLangOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={langOpen}
+                  className="w-64 justify-between font-normal"
+                  disabled={langSaving}
+                >
+                  {formLanguage ? (
+                    (() => {
+                      const lang = LANGUAGES.find((l) => l.name === formLanguage)
+                      return lang ? `${lang.flag} ${lang.name}` : formLanguage
+                    })()
+                  ) : (
+                    <span className="text-muted-foreground">Select language...</span>
+                  )}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-0" align="start">
+                <Command filter={(value, search) => {
+                  const lang = LANGUAGES.find((l) => l.name === value)
+                  if (!lang) return 0
+                  const s = search.toLowerCase()
+                  if (lang.name.toLowerCase().includes(s) || lang.native.toLowerCase().includes(s) || lang.code.toLowerCase().includes(s)) return 1
+                  return 0
+                }}>
+                  <CommandInput placeholder="Search language..." />
+                  <CommandList>
+                    <CommandEmpty>No language found.</CommandEmpty>
+                    <CommandGroup>
+                      {formLanguage && (
+                        <CommandItem value="__clear__" onSelect={() => handleLanguageChange(null)}>
+                          <X className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-muted-foreground">Clear selection</span>
+                        </CommandItem>
+                      )}
+                      {LANGUAGES.map((lang) => (
+                        <CommandItem
+                          key={lang.code}
+                          value={lang.name}
+                          onSelect={() => handleLanguageChange(lang.name)}
+                        >
+                          <span className="mr-2">{lang.flag}</span>
+                          <span>{lang.name}</span>
+                          <span className="ml-auto text-xs text-muted-foreground">{lang.native}</span>
+                          {formLanguage === lang.name && <Check className="ml-1 h-3.5 w-3.5 text-primary" />}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
       )
     }

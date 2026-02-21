@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/conversation"
@@ -48,6 +49,11 @@ type Bridge struct {
 	resolver  ChatResolver
 	cfg       BridgeConfig
 	logger    *slog.Logger
+
+	// containerCache maps crewID → containerID so subsequent messages
+	// skip the "Starting container..." status events (container is warm).
+	containerMu    sync.RWMutex
+	containerCache map[string]string
 }
 
 type BridgeConfig struct {
@@ -71,13 +77,14 @@ func New(
 		cfg.DefaultCPUs = 1.0
 	}
 	return &Bridge{
-		orch:      orch,
-		container: container,
-		convStore: convStore,
-		logWriter: logWriter,
-		resolver:  resolver,
-		cfg:       cfg,
-		logger:    logger,
+		orch:           orch,
+		container:      container,
+		convStore:      convStore,
+		logWriter:      logWriter,
+		resolver:       resolver,
+		cfg:            cfg,
+		logger:         logger,
+		containerCache: make(map[string]string),
 	}
 }
 
@@ -107,9 +114,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("resolve chat: %w", err)
 	}
 
-	streamFn(ws.ChatEvent{Type: "thinking", Content: "Processing..."})
-
-	containerID := info.ContainerID
+	// Look up cached container ID for this crew (avoids status noise on repeat messages)
+	b.containerMu.RLock()
+	containerID := b.containerCache[info.CrewID]
+	b.containerMu.RUnlock()
 
 	// Verify cached container still exists (may have been deleted at runtime)
 	if containerID != "" && b.container != nil {
@@ -117,10 +125,16 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			b.logger.Warn("cached container gone, will recreate",
 				"container_id", containerID[:12], "error", err)
 			containerID = ""
+			b.containerMu.Lock()
+			delete(b.containerCache, info.CrewID)
+			b.containerMu.Unlock()
 		}
 	}
 
+	coldStart := containerID == ""
+
 	if containerID == "" && b.container != nil {
+		streamFn(ws.ChatEvent{Type: "status", Content: "Starting container..."})
 		cID, err := b.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
 			ID:       info.CrewID,
 			Slug:     info.CrewSlug,
@@ -132,6 +146,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			return fmt.Errorf("ensure team runtime: %w", err)
 		}
 		containerID = cID
+		b.containerMu.Lock()
+		b.containerCache[info.CrewID] = containerID
+		b.containerMu.Unlock()
+		streamFn(ws.ChatEvent{Type: "status", Content: "Container ready"})
 		b.logger.Info("team container ensured", "crew_id", info.CrewID, "container_id", containerID[:12])
 	} else if containerID == "" {
 		streamFn(ws.ChatEvent{Type: "error", Content: "container provider not configured"})
@@ -160,10 +178,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		CrewMembers:   info.CrewMembers,
 	}
 
+	// Only show "Starting agent..." on cold start (first message, container freshly created).
+	// On subsequent messages the container is warm — no progress noise.
+	if coldStart {
+		streamFn(ws.ChatEvent{Type: "status", Content: "Starting agent..."})
+	}
+
 	handler := func(event orchestrator.AgentEvent) {
 		streamFn(ws.ChatEvent{
-			Type:    event.Type,
-			Content: event.Content,
+			Type:     event.Type,
+			Content:  event.Content,
+			Metadata: event.Metadata,
 		})
 		// Only accumulate actual text content for the persisted assistant message.
 		// System events (sidecar security logs, etc.) and thinking events should not
@@ -198,6 +223,27 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	startedAt := time.Now()
 	runErr := b.orch.RunAgent(ctx, req, handler)
 	if runErr != nil {
+		// If context was cancelled (user pressed stop), don't emit error -- the hub
+		// sends a clean "done" event. Emitting error here would cause an error flash.
+		if ctx.Err() == context.Canceled {
+			b.logger.Info("run cancelled by user", "chat_id", chatID, "duration_ms", time.Since(startedAt).Milliseconds())
+			cancelMsg := "cancelled"
+			_ = b.resolver.UpdateRun(ctx, runID, "CANCELLED", nil, &cancelMsg, map[string]interface{}{
+				"duration_ms": time.Since(startedAt).Milliseconds(),
+			})
+			// Persist partial response if any
+			if fullResponse != "" {
+				_ = b.convStore.Append(context.Background(), chatID, conversation.Message{
+					ID:        generateMsgID(),
+					Role:      conversation.RoleAssistant,
+					Content:   fullResponse,
+					Timestamp: time.Now().UTC(),
+				})
+				_ = b.resolver.IncrementMessageCount(context.Background(), chatID, 2)
+			}
+			return fmt.Errorf("run agent: %w", runErr)
+		}
+
 		errMsg := runErr.Error()
 		if err := b.resolver.UpdateRun(ctx, runID, "FAILED", nil, &errMsg, map[string]interface{}{
 			"duration_ms": time.Since(startedAt).Milliseconds(),
