@@ -7,16 +7,9 @@ import {
   Wifi,
   WifiOff,
   Loader2,
-  Copy,
-  ThumbsUp,
-  ThumbsDown,
   PanelRightOpen,
   PanelRightClose,
   FileText,
-  AlertTriangle,
-  Crown,
-  CheckCircle2,
-  Clock,
   Download,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -30,9 +23,6 @@ import {
 import {
   Message,
   MessageContent,
-  MessageResponse,
-  MessageActions,
-  MessageAction,
 } from "@/components/ai-elements/message"
 import {
   PromptInput,
@@ -41,12 +31,6 @@ import {
   PromptInputSubmit,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input"
-import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "@/components/ai-elements/reasoning"
-import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool"
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion"
 import {
   Artifact,
@@ -61,15 +45,14 @@ import {
   FileTreeFolder,
   FileTreeFile,
 } from "@/components/ai-elements/file-tree"
-import { useChat, type ChatMessage } from "@/hooks/use-chat"
+import { useChat, type ChatTurn } from "@/hooks/use-chat"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { AssistantTurn } from "./assistant-turn"
 import type { BundledLanguage } from "shiki"
 
 function getWsUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL
   if (typeof window === "undefined") return "ws://localhost:8080/ws"
-  // In dev mode (Next.js on :3001), WebSocket runs on Go server (:8080).
-  // In production (single binary), both API and WS are on the same host.
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
   const host = window.location.port === "3001"
     ? window.location.hostname + ":8080"
@@ -122,6 +105,43 @@ function formatTimestamp(date: Date): string {
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
 }
 
+/** Render a single turn (user, assistant, or system). */
+function TurnRenderer({ turn, onCopy, onFileClick }: { turn: ChatTurn; onCopy: (s: string) => void; onFileClick: (s: string) => void }) {
+  if (turn.role === "user") {
+    const textContent = turn.parts.find((p) => p.type === "text")?.content ?? ""
+    return (
+      <Message from="user">
+        <MessageContent>
+          <div className="flex items-start gap-2">
+            <span>{textContent}</span>
+          </div>
+        </MessageContent>
+        <div className="text-[10px] text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+          {formatTimestamp(turn.timestamp)}
+        </div>
+      </Message>
+    )
+  }
+
+  if (turn.role === "system") {
+    const content = turn.parts[0]?.content ?? ""
+    const isError = turn.parts[0]?.type === "error"
+    return (
+      <Message from="assistant">
+        <MessageContent className={isError ? "border-destructive/50 bg-destructive/5 rounded-lg px-4 py-3" : ""}>
+          <div className={`flex items-center gap-2 text-sm ${isError ? "text-destructive" : "text-muted-foreground"}`}>
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {content}
+          </div>
+        </MessageContent>
+      </Message>
+    )
+  }
+
+  // Assistant turn - use the new grouped component
+  return <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} />
+}
+
 /** Chat panel with split view: conversation on the left, file preview on the right. */
 export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
   const { workspaceId } = useWorkspace()
@@ -154,7 +174,7 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
       .catch(() => {})
   }, [])
 
-  const { messages, sendMessage, loadHistory, isStreaming, connectionStatus } = useChat({
+  const { turns, sendMessage, stopGeneration, loadHistory, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     token,
     sessionId,
@@ -166,6 +186,7 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
       .then((r) => r.ok ? r.json() : null)
       .then((data: { messages?: { id: string; role: string; content: string; ts: string }[] } | null) => {
         if (!data?.messages?.length) return
+        setSessionReady(true)
         loadHistory(data.messages.map((m) => ({
           id: m.id,
           role: m.role as "user" | "assistant" | "system" | "tool",
@@ -304,7 +325,7 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
           </Button>
         </div>
 
-        {/* Messages */}
+        {/* Turns */}
         <div className="flex-1 overflow-hidden">
           {authError ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
@@ -314,17 +335,17 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
           ) : (
             <Conversation>
               <ConversationContent>
-                {messages.length === 0 && (
+                {turns.length === 0 && (
                   <ConversationEmptyState
                     icon={<Bot className="h-12 w-12" />}
                     title="Start a conversation"
                     description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
                   />
                 )}
-                {messages.map((msg) => (
-                  <MessageBubble
-                    key={msg.id}
-                    msg={msg}
+                {turns.map((turn) => (
+                  <TurnRenderer
+                    key={turn.id}
+                    turn={turn}
                     onCopy={handleCopy}
                     onFileClick={handleFileClick}
                   />
@@ -336,7 +357,7 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
         </div>
 
         {/* Suggestions */}
-        {messages.length === 0 && !authError && (
+        {turns.length === 0 && !authError && (
           <div className="px-4 md:px-6 pb-2 shrink-0">
             <Suggestions>
               {defaultSuggestions.map((s) => (
@@ -357,8 +378,9 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
             />
             <PromptInputFooter className="justify-end p-2">
               <PromptInputSubmit
-                disabled={!input.trim() || connectionStatus !== "connected"}
+                disabled={!isStreaming && (!input.trim() || connectionStatus !== "connected")}
                 status={chatStatus}
+                onStop={stopGeneration}
               />
             </PromptInputFooter>
           </PromptInput>
@@ -456,183 +478,6 @@ export function ChatPanel({ agentId, sessionId, agentName }: ChatPanelProps) {
           )}
         </div>
       )}
-    </div>
-  )
-}
-
-interface MessageBubbleProps {
-  msg: ChatMessage
-  onCopy: (content: string) => void
-  onFileClick: (fileName: string) => void
-}
-
-function MessageBubble({ msg, onCopy, onFileClick }: MessageBubbleProps) {
-  // Thinking block
-  if (msg.eventType === "thinking") {
-    return (
-      <Message from="assistant">
-        <Reasoning isStreaming={msg.isStreaming} duration={0}>
-          <ReasoningTrigger />
-          <ReasoningContent>{msg.content}</ReasoningContent>
-        </Reasoning>
-      </Message>
-    )
-  }
-
-  // Tool call / result
-  if (msg.role === "tool" || msg.eventType === "tool_call" || msg.eventType === "tool_result") {
-    const isResult = msg.eventType === "tool_result"
-    return (
-      <Message from="assistant">
-        <Tool defaultOpen={false}>
-          <ToolHeader
-            title={msg.toolName ?? (isResult ? "Tool Result" : "Tool Call")}
-            type="tool-invocation"
-            state={isResult ? "output-available" : "input-streaming"}
-          />
-          <ToolContent>
-            <pre className="text-xs whitespace-pre-wrap break-all">{msg.content}</pre>
-          </ToolContent>
-        </Tool>
-      </Message>
-    )
-  }
-
-  // Error / system
-  if (msg.eventType === "error" || msg.role === "system") {
-    // Rate limit warning
-    if (msg.content.toLowerCase().includes("rate limit") || msg.content.toLowerCase().includes("429")) {
-      return (
-        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-700 dark:text-amber-400 max-w-md">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>{msg.content}</span>
-        </div>
-      )
-    }
-    return (
-      <Message from="assistant">
-        <MessageContent className="border-destructive/50 bg-destructive/5 rounded-lg px-4 py-3">
-          <div className="flex items-center gap-2 text-destructive text-sm">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            {msg.content}
-          </div>
-        </MessageContent>
-      </Message>
-    )
-  }
-
-  // Delegation block detection
-  if (msg.role === "assistant" && msg.content.startsWith("[DELEGATED")) {
-    return <DelegationBlock content={msg.content} />
-  }
-
-  // File creation notification detection
-  if (msg.role === "assistant" && /file (created|written|saved)/i.test(msg.content)) {
-    const fileMatch = msg.content.match(/[`"]?([a-zA-Z0-9_\-/.]+\.[a-zA-Z0-9]+)[`"]?/)
-    if (fileMatch) {
-      return (
-        <Message from="assistant">
-          <MessageContent>
-            <MessageResponse>{msg.isStreaming ? msg.content + " " : msg.content}</MessageResponse>
-          </MessageContent>
-          <button
-            onClick={() => onFileClick(fileMatch[1])}
-            className="flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-lg text-xs text-primary hover:bg-primary/10 max-w-md transition-colors"
-          >
-            <FileText className="h-4 w-4" />
-            <span>File created: <span className="font-mono font-medium">{fileMatch[1]}</span></span>
-            <span className="ml-auto font-medium">Preview &rarr;</span>
-          </button>
-        </Message>
-      )
-    }
-  }
-
-  // User message
-  if (msg.role === "user") {
-    return (
-      <Message from="user">
-        <MessageContent>
-          <div className="flex items-start gap-2">
-            <span>{msg.content}</span>
-          </div>
-        </MessageContent>
-        <div className="text-[10px] text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-          {formatTimestamp(msg.timestamp)}
-        </div>
-      </Message>
-    )
-  }
-
-  // Assistant message with markdown
-  return (
-    <Message from="assistant">
-      <MessageContent>
-        <MessageResponse>
-          {msg.isStreaming ? msg.content + " " : msg.content}
-        </MessageResponse>
-      </MessageContent>
-      {!msg.isStreaming && msg.content && (
-        <>
-          <MessageActions>
-            <MessageAction tooltip="Copy" onClick={() => onCopy(msg.content)}>
-              <Copy className="h-3.5 w-3.5" />
-            </MessageAction>
-            <MessageAction tooltip="Good response">
-              <ThumbsUp className="h-3.5 w-3.5" />
-            </MessageAction>
-            <MessageAction tooltip="Bad response">
-              <ThumbsDown className="h-3.5 w-3.5" />
-            </MessageAction>
-          </MessageActions>
-          <div className="text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-            {formatTimestamp(msg.timestamp)}
-          </div>
-        </>
-      )}
-    </Message>
-  )
-}
-
-interface DelegationBlockProps {
-  content: string
-}
-
-function DelegationBlock({ content }: DelegationBlockProps) {
-  const targetMatch = content.match(/to\s+([^]]+?)(?:\s*\(|$)/)
-  const taskMatch = content.match(/"([^"]+)"/)
-  const completedMatch = content.match(/Completed in (.+)/)
-  const isCompleted = !!completedMatch
-
-  return (
-    <div className="max-w-xl ml-8">
-      <div className="bg-primary/5 border border-primary/20 border-l-4 border-l-[#4ECDC4] rounded-lg overflow-hidden">
-        <div className="px-4 py-3">
-          <div className="flex items-center gap-2 text-xs">
-            <Crown className="h-3.5 w-3.5 text-amber-500" />
-            <span className="font-medium text-muted-foreground">Delegated to</span>
-            <span className="font-semibold">{targetMatch?.[1] ?? "Agent"}</span>
-          </div>
-          {taskMatch && (
-            <div className="mt-1.5 text-xs text-muted-foreground bg-background rounded px-2.5 py-1.5 border">
-              {taskMatch[1]}
-            </div>
-          )}
-          <div className="mt-2 flex items-center gap-2">
-            {isCompleted ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400">
-                <CheckCircle2 className="h-3 w-3" />
-                Completed in {completedMatch[1]}
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400">
-                <Clock className="h-3 w-3 animate-spin" />
-                In progress...
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
     </div>
   )
 }

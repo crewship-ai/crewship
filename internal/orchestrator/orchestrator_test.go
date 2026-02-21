@@ -457,3 +457,64 @@ func TestRunAgentWithSidecar(t *testing.T) {
 	// The mock doesn't capture env vars directly, but we verify the flow works
 	// and that BuildEnvVarsSidecar is used (tested separately in failover_test.go)
 }
+
+func TestRunAgentCancelledContext(t *testing.T) {
+	// When the context is cancelled (user pressed stop), RunAgent should:
+	// 1. Return an error containing "run cancelled"
+	// 2. Update run state to "cancelled"
+	r, w := io.Pipe()
+
+	mc := &mockContainer{
+		execResults: []*provider.ExecResult{
+			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
+			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
+			{ExecID: "exec-1", Reader: r},
+		},
+		inspectResult: struct {
+			running  bool
+			exitCode int
+		}{false, 0},
+	}
+
+	state := newMemState()
+	o := New(mc, state, slog.Default())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Close the writer when the context is cancelled to unblock readers
+	go func() {
+		<-ctx.Done()
+		_ = w.Close()
+	}()
+	// Cancel immediately to simulate user pressing stop
+	go func() {
+		// Small delay to let RunAgent start the exec
+		cancel()
+	}()
+
+	err := o.RunAgent(ctx, AgentRunRequest{
+		AgentID:     "a1",
+		AgentSlug:   "test-agent",
+		ChatID:      "s1",
+		ContainerID: "c1",
+		CLIAdapter:  "CLAUDE_CODE",
+		UserMessage: "test",
+		TimeoutSecs: 30,
+	}, nil)
+
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+	if !strings.Contains(err.Error(), "cancelled") {
+		t.Errorf("expected 'cancelled' in error, got: %v", err)
+	}
+
+	// Verify run state is "cancelled"
+	data, _ := state.Get(context.Background(), "agent_runs", "s1")
+	if data != nil {
+		var run RunState
+		json.Unmarshal(data, &run)
+		if run.Status != "cancelled" {
+			t.Errorf("expected cancelled status, got %q", run.Status)
+		}
+	}
+}

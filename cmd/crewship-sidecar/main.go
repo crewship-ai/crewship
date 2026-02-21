@@ -26,6 +26,11 @@ func main() {
 	addr := flag.String("addr", sidecar.DefaultAddr, "listen address")
 	flag.Parse()
 
+	// Ignore SIGPIPE so writes to closed stdout/stderr (after Docker exec
+	// stream closes) return EPIPE errors instead of killing the process.
+	// Without this, the sidecar dies as soon as the shell wrapper exits.
+	signal.Ignore(syscall.SIGPIPE)
+
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	// Read configuration from stdin as JSON.
@@ -83,11 +88,12 @@ func main() {
 
 	// Wait for the listener to be bound before signaling readiness.
 	// This prevents the race where SIDECAR_READY is sent before Start() binds the port.
+	// The write is non-fatal: stdout may already be closed if Docker exec stream ended
+	// before the goroutine runs. Health check via wget/curl is the primary mechanism.
 	go func() {
 		<-srv.Ready()
 		if _, err := os.Stdout.WriteString("SIDECAR_READY\n"); err != nil {
-			logger.Error("failed to write readiness signal", "error", err)
-			os.Exit(1)
+			logger.Warn("readiness signal not delivered (stdout closed)", "error", err)
 		}
 	}()
 

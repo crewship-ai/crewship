@@ -18,8 +18,9 @@ type ChatHandler interface {
 }
 
 type ChatEvent struct {
-	Type    string `json:"type"` // "text", "tool_call", "thinking", "done", "error"
-	Content string `json:"content"`
+	Type     string `json:"type"`                // "text", "tool_call", "tool_result", "thinking", "status", "done", "error"
+	Content  string `json:"content"`
+	Metadata any    `json:"metadata,omitempty"`   // structured data for tool calls, etc.
 }
 
 type Hub struct {
@@ -33,6 +34,8 @@ type Hub struct {
 	broadcast   chan ChannelMessage
 	mu          sync.RWMutex
 	connCount   atomic.Int64
+	cancelFns   map[string]context.CancelFunc // session_id -> cancel function for active runs
+	cancelMu    sync.Mutex
 }
 
 type Client struct {
@@ -72,6 +75,7 @@ func NewHub(logger *slog.Logger, chatHandler ChatHandler, deps ...interface{}) *
 		register:    make(chan *Client),
 		unregister:  make(chan *Client),
 		broadcast:   make(chan ChannelMessage, 256),
+		cancelFns:   make(map[string]context.CancelFunc),
 	}
 	for _, d := range deps {
 		if v, ok := d.(*auth.JWTValidator); ok {
@@ -238,6 +242,9 @@ func (c *Client) readPump() {
 		case "send_message":
 			c.hub.logger.Debug("message received", "user_id", c.userID, "channel", msg.Channel)
 			c.handleSendMessage(msg)
+		case "cancel_message":
+			c.hub.logger.Debug("cancel requested", "user_id", c.userID)
+			c.handleCancelMessage(msg)
 		}
 	}
 }
@@ -323,6 +330,30 @@ type sendMessagePayload struct {
 	Content   string `json:"content"`
 }
 
+func (c *Client) handleCancelMessage(msg ClientMessage) {
+	var payload sendMessagePayload
+	raw := msg.Payload
+	if len(raw) > 0 && raw[0] == '"' {
+		var unwrapped string
+		if err := json.Unmarshal(raw, &unwrapped); err == nil {
+			raw = json.RawMessage(unwrapped)
+		}
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChatID == "" {
+		return
+	}
+
+	cancelKey := c.userID + ":" + payload.ChatID
+	c.hub.cancelMu.Lock()
+	cancel, ok := c.hub.cancelFns[cancelKey]
+	c.hub.cancelMu.Unlock()
+
+	if ok {
+		c.hub.logger.Info("cancelling run", "session_id", payload.ChatID, "user_id", c.userID)
+		cancel()
+	}
+}
+
 func (c *Client) handleSendMessage(msg ClientMessage) {
 	if c.hub.chatHandler == nil {
 		resp, _ := json.Marshal(ServerMessage{
@@ -367,6 +398,31 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 	go func() {
 		channel := "session:" + payload.ChatID
 
+		// Create a cancellable context for this run
+		runCtx, runCancel := context.WithCancel(c.ctx)
+		defer runCancel()
+
+		// Reject if a run is already in progress for this user+session
+		cancelKey := c.userID + ":" + payload.ChatID
+		c.hub.cancelMu.Lock()
+		if _, exists := c.hub.cancelFns[cancelKey]; exists {
+			c.hub.cancelMu.Unlock()
+			errResp, _ := json.Marshal(ServerMessage{
+				Type:    "error",
+				Channel: channel,
+				Payload: map[string]string{"error": "a message is already being processed"},
+			})
+			c.safeSend(errResp)
+			return
+		}
+		c.hub.cancelFns[cancelKey] = runCancel
+		c.hub.cancelMu.Unlock()
+		defer func() {
+			c.hub.cancelMu.Lock()
+			delete(c.hub.cancelFns, cancelKey)
+			c.hub.cancelMu.Unlock()
+		}()
+
 		streamFn := func(event ChatEvent) {
 			msg := ServerMessage{
 				Type:    "chat_event",
@@ -380,13 +436,18 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		}
 
 		err := c.hub.chatHandler.HandleChatMessage(
-			c.ctx,
+			runCtx,
 			c.userID,
 			payload.ChatID,
 			payload.Content,
 			streamFn,
 		)
 		if err != nil {
+			// Don't emit error if context was cancelled (user requested stop)
+			if runCtx.Err() == context.Canceled {
+				streamFn(ChatEvent{Type: "done", Content: ""})
+				return
+			}
 			c.hub.logger.Error("chat message error", "error", err, "session_id", payload.ChatID)
 			errResp, _ := json.Marshal(ServerMessage{
 				Type:    "chat_event",

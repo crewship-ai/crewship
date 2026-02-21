@@ -288,6 +288,140 @@ func TestAgentList(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGet_PreferredLanguage(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	// Set preferred_language
+	_, err := db.Exec("UPDATE workspaces SET preferred_language = 'Czech' WHERE id = ?", wsID)
+	if err != nil {
+		t.Fatalf("update preferred_language: %v", err)
+	}
+
+	handler := NewWorkspaceHandler(db, logger)
+
+	req := httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID, nil)
+	ctx := withWorkspace(req.Context(), wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.Get(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var ws workspaceResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &ws); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ws.PreferredLanguage == nil || *ws.PreferredLanguage != "Czech" {
+		t.Errorf("preferred_language = %v, want 'Czech'", ws.PreferredLanguage)
+	}
+}
+
+func TestWorkspaceGet_NoPreferredLanguage(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	handler := NewWorkspaceHandler(db, logger)
+
+	req := httptest.NewRequest("GET", "/api/v1/workspaces/"+wsID, nil)
+	ctx := withWorkspace(req.Context(), wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.Get(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var ws workspaceResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &ws); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ws.PreferredLanguage != nil {
+		t.Errorf("preferred_language = %v, want nil", ws.PreferredLanguage)
+	}
+}
+
+func TestWorkspaceUpdate_PreferredLanguage(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	handler := NewWorkspaceHandler(db, logger)
+
+	body := bytes.NewBufferString(`{"preferred_language":"Czech"}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/workspaces/"+wsID, body)
+	ctx := withWorkspace(req.Context(), wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.Update(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var ws workspaceResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &ws); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if ws.PreferredLanguage == nil || *ws.PreferredLanguage != "Czech" {
+		t.Errorf("preferred_language = %v, want 'Czech'", ws.PreferredLanguage)
+	}
+
+	// Verify in DB
+	var lang sql.NullString
+	db.QueryRow("SELECT preferred_language FROM workspaces WHERE id = ?", wsID).Scan(&lang)
+	if !lang.Valid || lang.String != "Czech" {
+		t.Errorf("DB preferred_language = %v, want 'Czech'", lang)
+	}
+}
+
+func TestWorkspaceUpdate_ClearPreferredLanguage(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	// Set it first
+	db.Exec("UPDATE workspaces SET preferred_language = 'Czech' WHERE id = ?", wsID)
+
+	handler := NewWorkspaceHandler(db, logger)
+
+	// Clear with empty string
+	body := bytes.NewBufferString(`{"preferred_language":""}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/workspaces/"+wsID, body)
+	ctx := withWorkspace(req.Context(), wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.Update(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	// Verify cleared in DB
+	var lang sql.NullString
+	db.QueryRow("SELECT preferred_language FROM workspaces WHERE id = ?", wsID).Scan(&lang)
+	if lang.Valid {
+		t.Errorf("DB preferred_language should be NULL after clearing, got %v", lang.String)
+	}
+}
+
 func TestCRUDFlow(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))

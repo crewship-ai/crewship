@@ -4,8 +4,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 const mockSend = vi.fn()
 const mockStatus = { current: "connected" as string }
 
+interface UseWebSocketArgs {
+  onMessage?: (msg: unknown) => void
+}
+
 vi.mock("@/hooks/use-websocket", () => ({
-  useWebSocket: vi.fn(({ onMessage }: { onMessage?: (msg: unknown) => void }) => {
+  useWebSocket: vi.fn(({ onMessage }: UseWebSocketArgs) => {
     // Expose onMessage for testing
     if (onMessage) {
       ;(globalThis as Record<string, unknown>).__testOnMessage = onMessage
@@ -37,15 +41,16 @@ describe("useChat", () => {
     return (globalThis as Record<string, unknown>).__testOnMessage as (msg: unknown) => void
   }
 
-  it("starts with empty messages and not streaming", () => {
+  it("starts with empty turns and not streaming", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
     )
+    expect(result.current.turns).toHaveLength(0)
     expect(result.current.messages).toHaveLength(0)
     expect(result.current.isStreaming).toBe(false)
   })
 
-  it("sendMessage adds user message and calls ws send", () => {
+  it("sendMessage adds user turn and calls ws send", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
     )
@@ -54,9 +59,9 @@ describe("useChat", () => {
       result.current.sendMessage("hello")
     })
 
-    expect(result.current.messages).toHaveLength(1)
-    expect(result.current.messages[0].role).toBe("user")
-    expect(result.current.messages[0].content).toBe("hello")
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].role).toBe("user")
+    expect(result.current.turns[0].parts[0].content).toBe("hello")
     expect(result.current.isStreaming).toBe(true)
     expect(mockSend).toHaveBeenCalledWith(
       expect.objectContaining({ type: "send_message" }),
@@ -72,11 +77,11 @@ describe("useChat", () => {
       result.current.sendMessage("")
     })
 
-    expect(result.current.messages).toHaveLength(0)
+    expect(result.current.turns).toHaveLength(0)
     expect(mockSend).not.toHaveBeenCalled()
   })
 
-  it("handles text event by creating/updating streaming message", () => {
+  it("groups text events into single assistant turn", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
     )
@@ -90,12 +95,179 @@ describe("useChat", () => {
       })
     })
 
-    expect(result.current.messages).toHaveLength(1)
-    expect(result.current.messages[0].role).toBe("assistant")
-    expect(result.current.messages[0].isStreaming).toBe(true)
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "text", content: "world" },
+      })
+    })
+
+    // Should be ONE assistant turn with ONE text part (accumulated)
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].role).toBe("assistant")
+    expect(result.current.turns[0].parts).toHaveLength(1)
+    expect(result.current.turns[0].parts[0].type).toBe("text")
+    expect(result.current.turns[0].parts[0].content).toBe("Hello world")
+    expect(result.current.turns[0].isStreaming).toBe(true)
   })
 
-  it("handles done event by finalizing stream", () => {
+  it("groups thinking + text into one assistant turn", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+
+    // First: thinking event
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "thinking", content: "Let me analyze..." },
+      })
+    })
+
+    // Then: text event
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "text", content: "Here is the answer" },
+      })
+    })
+
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].role).toBe("assistant")
+    expect(result.current.turns[0].parts).toHaveLength(2)
+    expect(result.current.turns[0].parts[0].type).toBe("thinking")
+    expect(result.current.turns[0].parts[0].content).toBe("Let me analyze...")
+    expect(result.current.turns[0].parts[1].type).toBe("text")
+    expect(result.current.turns[0].parts[1].content).toBe("Here is the answer")
+  })
+
+  it("separates multiple complete thinking blocks into distinct parts", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+
+    // First complete thinking block (no streaming metadata = complete)
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "thinking", content: "First thinking block" },
+      })
+    })
+
+    // Second complete thinking block
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "thinking", content: "Second thinking block" },
+      })
+    })
+
+    // Should have ONE turn with TWO separate thinking parts
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].parts).toHaveLength(2)
+    expect(result.current.turns[0].parts[0].type).toBe("thinking")
+    expect(result.current.turns[0].parts[0].content).toBe("First thinking block")
+    expect(result.current.turns[0].parts[1].type).toBe("thinking")
+    expect(result.current.turns[0].parts[1].content).toBe("Second thinking block")
+  })
+
+  it("accumulates streaming thinking deltas into one part", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+
+    // Streaming delta (metadata.streaming = true)
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "thinking", content: "analyzing", metadata: { streaming: true } },
+      })
+    })
+
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "thinking", content: " the code", metadata: { streaming: true } },
+      })
+    })
+
+    // Should be ONE part with accumulated content
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].parts).toHaveLength(1)
+    expect(result.current.turns[0].parts[0].content).toBe("analyzing the code")
+  })
+
+  it("handles tool_call + tool_result parts in one turn", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "tool_call", content: "Read", metadata: { tool_name: "Read", tool_id: "t1" } },
+      })
+    })
+
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "tool_result", content: "file contents", metadata: { tool_use_id: "t1" } },
+      })
+    })
+
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].parts).toHaveLength(2)
+    expect(result.current.turns[0].parts[0].type).toBe("tool_call")
+    expect(result.current.turns[0].parts[1].type).toBe("tool_result")
+  })
+
+  it("status events appear before text", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+    const onMessage = getOnMessage()
+
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "status", content: "Starting container..." },
+      })
+    })
+
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].parts[0].type).toBe("status")
+    expect(result.current.turns[0].parts[0].content).toBe("Starting container...")
+
+    act(() => {
+      onMessage({
+        type: "chat_event",
+        channel: "session:s1",
+        payload: { type: "text", content: "Response" },
+      })
+    })
+
+    // Status part is removed when text arrives (transient indicator)
+    expect(result.current.turns).toHaveLength(1)
+    expect(result.current.turns[0].parts).toHaveLength(1)
+    expect(result.current.turns[0].parts[0].type).toBe("text")
+  })
+
+  it("done event marks turn as not streaming and removes status parts", () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
     )
@@ -103,6 +275,10 @@ describe("useChat", () => {
 
     act(() => {
       result.current.sendMessage("hello")
+    })
+
+    act(() => {
+      onMessage({ type: "chat_event", channel: "session:s1", payload: { type: "status", content: "Setting up..." } })
     })
 
     act(() => {
@@ -114,8 +290,11 @@ describe("useChat", () => {
     })
 
     expect(result.current.isStreaming).toBe(false)
-    const lastMsg = result.current.messages[result.current.messages.length - 1]
-    expect(lastMsg.isStreaming).toBeFalsy()
+    const assistantTurn = result.current.turns[result.current.turns.length - 1]
+    expect(assistantTurn.isStreaming).toBe(false)
+    // Status parts should be removed after done
+    const statusParts = assistantTurn.parts.filter((p) => p.type === "status")
+    expect(statusParts).toHaveLength(0)
   })
 
   it("handles error event", () => {
@@ -132,10 +311,11 @@ describe("useChat", () => {
       })
     })
 
-    const errorMsg = result.current.messages.find((m) => m.eventType === "error")
-    expect(errorMsg).toBeDefined()
-    expect(errorMsg?.content).toBe("Something went wrong")
-    expect(errorMsg?.role).toBe("system")
+    // Error creates a system turn
+    const lastTurn = result.current.turns[result.current.turns.length - 1]
+    expect(lastTurn).toBeDefined()
+    expect(lastTurn.parts[0].type).toBe("error")
+    expect(lastTurn.parts[0].content).toBe("Something went wrong")
   })
 
   it("ignores events for different session", () => {
@@ -152,6 +332,39 @@ describe("useChat", () => {
       })
     })
 
-    expect(result.current.messages).toHaveLength(0)
+    expect(result.current.turns).toHaveLength(0)
+  })
+
+  it("stopGeneration sends cancel_message", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+
+    act(() => {
+      result.current.stopGeneration()
+    })
+
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "cancel_message" }),
+    )
+  })
+
+  it("loadHistory converts flat messages to turns", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", token: "test", sessionId: "s1" }),
+    )
+
+    act(() => {
+      result.current.loadHistory([
+        { id: "1", role: "user", content: "hello", timestamp: new Date() },
+        { id: "2", role: "assistant", content: "hi there", timestamp: new Date() },
+      ])
+    })
+
+    expect(result.current.turns).toHaveLength(2)
+    expect(result.current.turns[0].role).toBe("user")
+    expect(result.current.turns[1].role).toBe("assistant")
+    // flat messages should also work
+    expect(result.current.messages).toHaveLength(2)
   })
 })

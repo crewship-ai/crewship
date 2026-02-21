@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -20,16 +21,17 @@ func NewWorkspaceHandler(db *sql.DB, logger *slog.Logger) *WorkspaceHandler {
 }
 
 type workspaceResponse struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	Slug            string  `json:"slug"`
-	LogoURL         *string `json:"logo_url"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
-	CurrentUserRole *string `json:"currentUserRole,omitempty"`
-	CrewCount       int     `json:"_count_crews,omitempty"`
-	AgentCount      int     `json:"_count_agents,omitempty"`
-	MemberCount     int     `json:"_count_members,omitempty"`
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	Slug              string  `json:"slug"`
+	LogoURL           *string `json:"logo_url"`
+	PreferredLanguage *string `json:"preferred_language"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
+	CurrentUserRole   *string `json:"currentUserRole,omitempty"`
+	CrewCount         int     `json:"_count_crews,omitempty"`
+	AgentCount        int     `json:"_count_agents,omitempty"`
+	MemberCount       int     `json:"_count_members,omitempty"`
 }
 
 func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +42,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT w.id, w.name, w.slug, w.logo_url, w.created_at, w.updated_at,
+		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			wm.role,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
@@ -60,7 +62,7 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	var result []workspaceResponse
 	for rows.Next() {
 		var ws workspaceResponse
-		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL,
+		if err := rows.Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
 			&ws.CreatedAt, &ws.UpdatedAt, &ws.CurrentUserRole,
 			&ws.CrewCount, &ws.AgentCount, &ws.MemberCount); err != nil {
 			h.logger.Error("scan workspace", "error", err)
@@ -172,13 +174,13 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	var ws workspaceResponse
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT w.id, w.name, w.slug, w.logo_url, w.created_at, w.updated_at,
+		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
 		FROM workspaces w
 		WHERE w.id = ? AND w.deleted_at IS NULL
-	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL,
+	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -195,8 +197,9 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateWorkspaceRequest struct {
-	Name *string `json:"name"`
-	Slug *string `json:"slug"`
+	Name              *string `json:"name"`
+	Slug              *string `json:"slug"`
+	PreferredLanguage *string `json:"preferred_language"`
 }
 
 func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -240,29 +243,30 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	if req.Name != nil && req.Slug != nil {
-		_, err := h.db.ExecContext(r.Context(),
-			"UPDATE workspaces SET name = ?, slug = ?, updated_at = ? WHERE id = ?",
-			*req.Name, *req.Slug, now, workspaceID)
-		if err != nil {
-			h.logger.Error("update workspace", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-			return
+	var setClauses []string
+	var args []interface{}
+	if req.Name != nil {
+		setClauses = append(setClauses, "name = ?")
+		args = append(args, *req.Name)
+	}
+	if req.Slug != nil {
+		setClauses = append(setClauses, "slug = ?")
+		args = append(args, *req.Slug)
+	}
+	if req.PreferredLanguage != nil {
+		if *req.PreferredLanguage == "" {
+			setClauses = append(setClauses, "preferred_language = NULL")
+		} else {
+			setClauses = append(setClauses, "preferred_language = ?")
+			args = append(args, *req.PreferredLanguage)
 		}
-	} else if req.Name != nil {
-		_, err := h.db.ExecContext(r.Context(),
-			"UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ?",
-			*req.Name, now, workspaceID)
-		if err != nil {
-			h.logger.Error("update workspace", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-			return
-		}
-	} else if req.Slug != nil {
-		_, err := h.db.ExecContext(r.Context(),
-			"UPDATE workspaces SET slug = ?, updated_at = ? WHERE id = ?",
-			*req.Slug, now, workspaceID)
-		if err != nil {
+	}
+	if len(setClauses) > 0 {
+		setClauses = append(setClauses, "updated_at = ?")
+		args = append(args, now)
+		args = append(args, workspaceID)
+		query := "UPDATE workspaces SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 			h.logger.Error("update workspace", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
@@ -271,13 +275,13 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	var ws workspaceResponse
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT w.id, w.name, w.slug, w.logo_url, w.created_at, w.updated_at,
+		SELECT w.id, w.name, w.slug, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
 		FROM workspaces w
 		WHERE w.id = ? AND w.deleted_at IS NULL
-	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL,
+	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		h.logger.Error("get workspace after update", "error", err)
