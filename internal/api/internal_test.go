@@ -223,6 +223,109 @@ func TestResolveChat_WithCredentials(t *testing.T) {
 	}
 }
 
+func TestResolveChat_LanguagePreference(t *testing.T) {
+	tests := []struct {
+		name     string
+		lang     *string
+		wantBlock bool
+		wantLang  string
+	}{
+		{
+			name:      "WithLanguage",
+			lang:      strPtr("Czech"),
+			wantBlock: true,
+			wantLang:  "Czech",
+		},
+		{
+			name:      "NoLanguage",
+			lang:      nil,
+			wantBlock: false,
+		},
+		{
+			name:      "EmptyLanguage",
+			lang:      strPtr(""),
+			wantBlock: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setTestEncryptionKey(t)
+			db := setupTestDB(t)
+			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+			userID := seedTestUser(t, db)
+			wsID := seedTestWorkspace(t, db, userID)
+
+			if tt.lang != nil {
+				if *tt.lang == "" {
+					if _, err := db.ExecContext(context.Background(),
+						"UPDATE workspaces SET preferred_language = NULL WHERE id = ?", wsID); err != nil {
+						t.Fatalf("update preferred_language: %v", err)
+					}
+				} else {
+					if _, err := db.ExecContext(context.Background(),
+						"UPDATE workspaces SET preferred_language = ? WHERE id = ?", *tt.lang, wsID); err != nil {
+						t.Fatalf("update preferred_language: %v", err)
+					}
+				}
+			}
+
+			_, err := db.ExecContext(context.Background(),
+				`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Test Crew', 'test-crew')`, wsID)
+			if err != nil {
+				t.Fatalf("insert crew: %v", err)
+			}
+			_, err = db.ExecContext(context.Background(),
+				`INSERT INTO agents (id, crew_id, workspace_id, name, slug)
+				VALUES ('agent1', 'crew1', ?, 'Test Agent', 'test-agent')`, wsID)
+			if err != nil {
+				t.Fatalf("insert agent: %v", err)
+			}
+			_, err = db.ExecContext(context.Background(),
+				`INSERT INTO chats (id, agent_id, workspace_id, mode, status)
+				VALUES ('chat1', 'agent1', ?, 'CHAT', 'ACTIVE')`, wsID)
+			if err != nil {
+				t.Fatalf("insert chat: %v", err)
+			}
+
+			handler := NewInternalHandler(db, "test-token", logger)
+			req := httptest.NewRequest("GET", "/api/v1/internal/chats/chat1/resolve", nil)
+			req.SetPathValue("chatId", "chat1")
+			w := httptest.NewRecorder()
+			handler.ResolveChat(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var resp map[string]interface{}
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			sysPrompt, _ := resp["system_prompt"].(string)
+
+			if tt.wantBlock {
+				if !strings.Contains(sysPrompt, "[LANGUAGE PREFERENCE]") {
+					t.Error("system_prompt missing [LANGUAGE PREFERENCE] block")
+				}
+				if !strings.Contains(sysPrompt, "Always respond in: "+tt.wantLang) {
+					t.Errorf("system_prompt missing language directive for %s", tt.wantLang)
+				}
+				if !strings.Contains(sysPrompt, "[END LANGUAGE PREFERENCE]") {
+					t.Error("system_prompt missing [END LANGUAGE PREFERENCE]")
+				}
+			} else {
+				if strings.Contains(sysPrompt, "[LANGUAGE PREFERENCE]") {
+					t.Error("system_prompt should not contain [LANGUAGE PREFERENCE] when language is not set")
+				}
+			}
+		})
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
 // seedTestSkill inserts a skill and returns its ID.
 func seedTestSkill(t *testing.T, db interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)

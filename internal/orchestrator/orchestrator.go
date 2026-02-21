@@ -210,13 +210,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	var env []string
 	if sidecarEnabled {
 		env = BuildEnvVarsSidecar(req)
-		if handler != nil {
-			handler(AgentEvent{
-				Type:      "system",
-				Content:   "[security] Sidecar proxy starting -- credentials will be injected per-request, agent cannot see real API keys",
-				Timestamp: time.Now(),
-			})
-		}
+		o.logger.Info("sidecar proxy starting", "agent_id", req.AgentID)
 		var memoryCfg *SidecarMemoryConfig
 		if req.MemoryEnabled {
 			memoryCfg = &SidecarMemoryConfig{
@@ -250,19 +244,13 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			o.updateRunStatus(ctx, runState.ID, "error")
 			return fmt.Errorf("start sidecar: %w", err)
 		}
-		if handler != nil {
-			credCount := 0
-			for _, c := range req.Credentials {
-				if credTypeToProvider(c) != "" {
-					credCount++
-				}
+		credCount := 0
+		for _, c := range req.Credentials {
+			if credTypeToProvider(c) != "" {
+				credCount++
 			}
-			handler(AgentEvent{
-				Type:      "system",
-				Content:   fmt.Sprintf("[security] Sidecar ready -- %d credentials loaded, outbound traffic filtered, stdout scrubbing active", credCount),
-				Timestamp: time.Now(),
-			})
 		}
+		o.logger.Info("sidecar ready", "agent_id", req.AgentID, "credentials", credCount)
 	} else {
 		env = BuildEnvVars(req, cred)
 	}
@@ -351,6 +339,16 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// in agent output (prompt injection defense).
 	scrubHandler := o.wrapScrubHandler(handler)
 	o.streamOutput(execCtx, result, req, scrubHandler)
+
+	// If context was cancelled (user pressed stop), clean up with a fresh
+	// context and return a cancellation error. The reader close in streamOutput
+	// sends SIGPIPE to the exec process, which should terminate it.
+	if ctx.Err() != nil {
+		cleanCtx := context.Background()
+		o.updateRunStatus(cleanCtx, runState.ID, "cancelled")
+		o.logger.Info("run cancelled", "agent_id", req.AgentID, "exec_id", result.ExecID)
+		return fmt.Errorf("run cancelled: %w", ctx.Err())
+	}
 
 	running, exitCode, _ := o.container.ExecInspect(ctx, result.ExecID)
 	o.logger.Info("exec finished", "agent_id", req.AgentID, "running", running, "exit_code", exitCode)

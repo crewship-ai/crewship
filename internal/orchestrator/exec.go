@@ -27,6 +27,7 @@ func BuildCLICommand(req AgentRunRequest) []string {
 		cmd := []string{
 			"claude", "--print",
 			"--output-format", "stream-json",
+			"--include-partial-messages",
 			"--dangerously-skip-permissions",
 			"--verbose",
 		}
@@ -264,9 +265,11 @@ func startSidecar(
 
 	// Start sidecar as a background process.
 	// Pipe credentials JSON via base64-decoded stdin to avoid shell injection.
+	// Redirect stdout/stderr to files so the sidecar survives after Docker exec
+	// stream closes (writes to closed pipes cause SIGPIPE which kills the process).
 	// Health check: verify sidecar is responding, exit 1 on failure so orchestrator knows.
 	script := fmt.Sprintf(
-		`echo '%s' | base64 -d | crewship-sidecar --addr 127.0.0.1:9119 &`+
+		`echo '%s' | base64 -d | crewship-sidecar --addr 127.0.0.1:9119 >/dev/null 2>>/tmp/sidecar.log &`+
 			"\n"+`sleep 0.5`+"\n"+
 			`if wget -q -O /dev/null http://127.0.0.1:9119/health 2>/dev/null; then exit 0; `+
 			`elif curl -sf http://127.0.0.1:9119/health >/dev/null 2>&1; then exit 0; `+
@@ -421,10 +424,13 @@ type streamJSONMessage struct {
 }
 
 type contentBlock struct {
-	Type  string `json:"type"`
-	Text  string `json:"text,omitempty"`
-	Name  string `json:"name,omitempty"`
-	Input any    `json:"input,omitempty"`
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	Thinking  string `json:"thinking,omitempty"`
+	Name      string `json:"name,omitempty"`
+	ID        string `json:"id,omitempty"`
+	Input     any    `json:"input,omitempty"`
+	ToolUseID string `json:"tool_use_id,omitempty"`
 }
 
 type streamEvent struct {
@@ -433,8 +439,9 @@ type streamEvent struct {
 }
 
 type eventDelta struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
 }
 
 func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecResult, req AgentRunRequest, handler EventHandler) {
@@ -495,14 +502,26 @@ func (o *Orchestrator) handleStreamJSONLine(line string, handler EventHandler) {
 	switch msg.Type {
 	case "stream_event":
 		// Token-level streaming (when --include-partial-messages is used)
-		if msg.Event != nil && msg.Event.Delta != nil && msg.Event.Delta.Type == "text_delta" {
-			handler(AgentEvent{Type: "text", Content: msg.Event.Delta.Text, Timestamp: time.Now()})
+		if msg.Event != nil && msg.Event.Delta != nil {
+			switch msg.Event.Delta.Type {
+			case "text_delta":
+				handler(AgentEvent{Type: "text", Content: msg.Event.Delta.Text, Timestamp: time.Now()})
+			case "thinking_delta":
+				handler(AgentEvent{
+					Type:      "thinking",
+					Content:   msg.Event.Delta.Thinking,
+					Metadata:  map[string]interface{}{"streaming": true},
+					Timestamp: time.Now(),
+				})
+			}
 		}
 
 	case "assistant":
 		// Complete assistant message with content blocks
 		for _, block := range msg.Content {
 			switch block.Type {
+			case "thinking":
+				handler(AgentEvent{Type: "thinking", Content: block.Thinking, Timestamp: time.Now()})
 			case "text":
 				handler(AgentEvent{Type: "text", Content: block.Text, Timestamp: time.Now()})
 			case "tool_use":
@@ -511,13 +530,44 @@ func (o *Orchestrator) handleStreamJSONLine(line string, handler EventHandler) {
 					name = "tool"
 				}
 				handler(AgentEvent{
-					Type:      "tool_call",
-					Content:   fmt.Sprintf("Using tool: %s", name),
-					Metadata:  block.Input,
+					Type:    "tool_call",
+					Content: name,
+					Metadata: map[string]interface{}{
+						"tool_name": name,
+						"tool_id":   block.ID,
+						"input":     block.Input,
+					},
 					Timestamp: time.Now(),
 				})
 			case "tool_result":
-				handler(AgentEvent{Type: "tool_result", Content: block.Text, Timestamp: time.Now()})
+				meta := map[string]interface{}{}
+				if block.ToolUseID != "" {
+					meta["tool_use_id"] = block.ToolUseID
+				}
+				handler(AgentEvent{
+					Type:      "tool_result",
+					Content:   block.Text,
+					Metadata:  meta,
+					Timestamp: time.Now(),
+				})
+			}
+		}
+
+	case "tool":
+		// Claude Code emits tool results as top-level "tool" type messages
+		for _, block := range msg.Content {
+			switch block.Type {
+			case "tool_result":
+				meta := map[string]interface{}{}
+				if block.ToolUseID != "" {
+					meta["tool_use_id"] = block.ToolUseID
+				}
+				handler(AgentEvent{
+					Type:      "tool_result",
+					Content:   block.Text,
+					Metadata:  meta,
+					Timestamp: time.Now(),
+				})
 			}
 		}
 

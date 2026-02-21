@@ -63,6 +63,7 @@ var migrations = []migration{
 	{2, "add_onboarding_completed", migrationAddOnboardingCompleted},
 	{3, "add_memory_config", migrationAddMemoryConfig},
 	{4, "add_lead_mode", migrationAddLeadMode},
+	{5, "add_preferred_language", migrationAddPreferredLanguage},
 }
 
 const migrationAddOnboardingCompleted = `
@@ -75,6 +76,10 @@ ALTER TABLE agents ADD COLUMN memory_config TEXT;
 
 const migrationAddLeadMode = `
 ALTER TABLE agents ADD COLUMN lead_mode TEXT DEFAULT 'active';
+`
+
+const migrationAddPreferredLanguage = `
+ALTER TABLE workspaces ADD COLUMN preferred_language TEXT;
 `
 
 const migrationInit = `

@@ -24,10 +24,11 @@ var _ provider.ContainerProvider = (*Provider)(nil)
 
 // Config holds Docker provider configuration for container creation and runtime selection.
 type Config struct {
-	RuntimeImage   string
-	DefaultRuntime string // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
-	Network        string
-	OutputBasePath string
+	RuntimeImage    string
+	DefaultRuntime  string // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
+	Network         string
+	OutputBasePath  string
+	ContainerPrefix string // Container name prefix (e.g. "crewship" -> "crewship-team-{slug}"). Allows multi-instance isolation.
 }
 
 // DetectResult contains info about the detected container runtime.
@@ -266,7 +267,11 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	containerName := "crewship-team-" + team.Slug
+	prefix := p.cfg.ContainerPrefix
+	if prefix == "" {
+		prefix = "crewship"
+	}
+	containerName := prefix + "-team-" + team.Slug
 
 	// Check if container already exists
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})

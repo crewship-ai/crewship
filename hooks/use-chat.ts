@@ -3,8 +3,31 @@
 import { useCallback, useRef, useState } from "react"
 import { useWebSocket, type WSStatus } from "@/hooks/use-websocket"
 
+// --- Turn-based model types ---
+
+export type TurnPartType = "text" | "thinking" | "tool_call" | "tool_result" | "status" | "error"
+
+export interface TurnPart {
+  id: string
+  type: TurnPartType
+  content: string
+  isStreaming?: boolean
+  metadata?: Record<string, unknown>
+  timestamp: Date
+}
+
+export interface ChatTurn {
+  id: string
+  role: "user" | "assistant" | "system"
+  parts: TurnPart[]
+  isStreaming: boolean
+  timestamp: Date
+}
+
+// --- Legacy types (kept for history loading compatibility) ---
+
 export type MessageRole = "user" | "assistant" | "system" | "tool"
-export type StreamEventType = "text" | "tool_call" | "tool_result" | "thinking" | "done" | "error"
+export type StreamEventType = "text" | "tool_call" | "tool_result" | "thinking" | "status" | "done" | "error" | "system"
 export type AssignmentEventType = "assignment_created" | "assignment_running" | "assignment_completed" | "assignment_failed"
 
 export interface ChatMessage {
@@ -15,6 +38,7 @@ export interface ChatMessage {
   eventType?: StreamEventType
   timestamp: Date
   isStreaming?: boolean
+  metadata?: Record<string, unknown>
 }
 
 interface UseChatOptions {
@@ -23,14 +47,70 @@ interface UseChatOptions {
   sessionId: string
 }
 
+/** Convert flat ChatMessage history into turns for display */
+function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
+  const turns: ChatTurn[] = []
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      turns.push({
+        id: msg.id,
+        role: "user",
+        parts: [{ id: msg.id, type: "text", content: msg.content, timestamp: msg.timestamp }],
+        isStreaming: false,
+        timestamp: msg.timestamp,
+      })
+    } else if (msg.role === "system") {
+      turns.push({
+        id: msg.id,
+        role: "system",
+        parts: [{ id: msg.id, type: msg.eventType === "error" ? "error" : "text", content: msg.content, timestamp: msg.timestamp }],
+        isStreaming: false,
+        timestamp: msg.timestamp,
+      })
+    } else {
+      // assistant/tool messages: group consecutive ones into a single turn
+      const lastTurn = turns[turns.length - 1]
+      const partType: TurnPartType = (msg.eventType === "tool_call" || msg.eventType === "tool_result")
+        ? msg.eventType
+        : msg.eventType === "thinking" ? "thinking" : "text"
+
+      if (lastTurn?.role === "assistant" && !lastTurn.isStreaming) {
+        lastTurn.parts.push({
+          id: msg.id,
+          type: partType,
+          content: msg.content,
+          metadata: msg.metadata,
+          timestamp: msg.timestamp,
+        })
+      } else {
+        turns.push({
+          id: msg.id,
+          role: "assistant",
+          parts: [{
+            id: msg.id,
+            type: partType,
+            content: msg.content,
+            metadata: msg.metadata,
+            timestamp: msg.timestamp,
+          }],
+          isStreaming: false,
+          timestamp: msg.timestamp,
+        })
+      }
+    }
+  }
+  return turns
+}
+
 export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [turns, setTurns] = useState<ChatTurn[]>([])
   const [isStreaming, setIsStreaming] = useState(false)
-  const streamBufferRef = useRef("")
+  const textBufferRef = useRef("")
+  const thinkingBufferRef = useRef("")
 
   const handleMessage = useCallback(
     (msg: { type: string; payload?: string | Record<string, unknown>; channel?: string; [key: string]: unknown }) => {
-      // Handle assignment lifecycle events (broadcast directly to session channel)
+      // Handle assignment lifecycle events
       const assignmentTypes: AssignmentEventType[] = ["assignment_created", "assignment_running", "assignment_completed", "assignment_failed"]
       if (assignmentTypes.includes(msg.type as AssignmentEventType)) {
         const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
@@ -54,13 +134,13 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             content = `[Assignment] @${payload.target} failed: ${payload.error}`
             break
         }
-        setMessages((prev) => [
+        setTurns((prev) => [
           ...prev,
           {
             id: crypto.randomUUID(),
-            role: "system" as MessageRole,
-            content,
-            eventType: undefined,
+            role: "system",
+            parts: [{ id: crypto.randomUUID(), type: "text", content, timestamp: new Date() }],
+            isStreaming: false,
             timestamp: new Date(),
           },
         ])
@@ -69,95 +149,304 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
 
       if (msg.type !== "chat_event") return
 
-      // Server sends: { type: "chat_event", channel: "session:xxx", payload: { type, content } }
       const payload = (typeof msg.payload === "object" && msg.payload !== null)
         ? msg.payload as Record<string, unknown>
         : {}
 
       const eventType = (payload.type as StreamEventType) ?? undefined
       const content = (payload.content as string) ?? ""
+      const metadata = (payload.metadata as Record<string, unknown>) ?? undefined
 
-      // Filter by session from channel (format: "session:{id}")
+      // Filter by session
       const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
       if (channelSessionId && channelSessionId !== sessionId) return
 
       switch (eventType) {
-        case "text":
-          streamBufferRef.current += content
-          setMessages((prev) => {
+        case "status":
+          setTurns((prev) => {
             const last = prev[prev.length - 1]
-            if (last?.isStreaming) {
+            if (last?.role === "assistant" && last.isStreaming) {
+              // Add status part to current assistant turn
               return [
                 ...prev.slice(0, -1),
-                { ...last, content: streamBufferRef.current },
+                {
+                  ...last,
+                  parts: [
+                    ...last.parts,
+                    { id: crypto.randomUUID(), type: "status" as TurnPartType, content, timestamp: new Date() },
+                  ],
+                },
               ]
             }
-            streamBufferRef.current = content
+            // Create new assistant turn with status part
             return [
               ...prev,
               {
                 id: crypto.randomUUID(),
                 role: "assistant",
-                content: streamBufferRef.current,
-                eventType: "text",
-                timestamp: new Date(),
+                parts: [{ id: crypto.randomUUID(), type: "status" as TurnPartType, content, timestamp: new Date() }],
                 isStreaming: true,
+                timestamp: new Date(),
               },
             ]
           })
           break
 
-        case "thinking":
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: "assistant",
-              content: content || "Thinking...",
-              eventType: "thinking",
-              timestamp: new Date(),
-            },
-          ])
+        case "thinking": {
+          // Streaming deltas (thinking_delta from backend) accumulate into one part.
+          // Complete thinking blocks create separate parts.
+          const isStreamingDelta = metadata?.streaming === true
+          if (isStreamingDelta) {
+            thinkingBufferRef.current += content
+          }
+          setTurns((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.role === "assistant" && last.isStreaming) {
+              if (isStreamingDelta) {
+                // Find existing streaming thinking part to accumulate into
+                const thinkingIdx = last.parts.findLastIndex(
+                  (p) => p.type === "thinking" && p.isStreaming
+                )
+                if (thinkingIdx >= 0) {
+                  const updatedParts = [...last.parts]
+                  updatedParts[thinkingIdx] = {
+                    ...updatedParts[thinkingIdx],
+                    content: thinkingBufferRef.current,
+                  }
+                  return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
+                }
+                // First thinking delta — remove status parts, create new streaming thinking part
+                thinkingBufferRef.current = content
+                const cleanedParts = last.parts.filter((p) => p.type !== "status")
+                return [
+                  ...prev.slice(0, -1),
+                  {
+                    ...last,
+                    parts: [
+                      ...cleanedParts,
+                      { id: crypto.randomUUID(), type: "thinking" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
+                    ],
+                  },
+                ]
+              }
+              // Complete thinking block — remove status parts, create a new non-streaming part
+              const cleanedParts = last.parts.filter((p) => p.type !== "status")
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...last,
+                  parts: [
+                    ...cleanedParts,
+                    { id: crypto.randomUUID(), type: "thinking" as TurnPartType, content, isStreaming: false, timestamp: new Date() },
+                  ],
+                },
+              ]
+            }
+            // Create new assistant turn
+            if (isStreamingDelta) {
+              thinkingBufferRef.current = content
+            }
+            return [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "assistant",
+                parts: [{ id: crypto.randomUUID(), type: "thinking" as TurnPartType, content, isStreaming: !isStreamingDelta ? false : true, timestamp: new Date() }],
+                isStreaming: true,
+                timestamp: new Date(),
+              },
+            ]
+          })
+          break
+        }
+
+        case "text":
+          textBufferRef.current += content
+          setTurns((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.role === "assistant" && last.isStreaming) {
+              // Find existing streaming text part
+              const textIdx = last.parts.findLastIndex(
+                (p) => p.type === "text" && p.isStreaming
+              )
+              if (textIdx >= 0) {
+                const updatedParts = [...last.parts]
+                updatedParts[textIdx] = {
+                  ...updatedParts[textIdx],
+                  content: textBufferRef.current,
+                }
+                return [...prev.slice(0, -1), { ...last, parts: updatedParts }]
+              }
+              // First text arriving: remove status parts + close streaming thinking
+              const cleanedParts = last.parts
+                .filter((p) => p.type !== "status")
+                .map((p) =>
+                  p.type === "thinking" && p.isStreaming ? { ...p, isStreaming: false } : p
+                )
+              // New text part
+              textBufferRef.current = content
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...last,
+                  parts: [
+                    ...cleanedParts,
+                    { id: crypto.randomUUID(), type: "text" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
+                  ],
+                },
+              ]
+            }
+            // Create new assistant turn
+            textBufferRef.current = content
+            return [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "assistant",
+                parts: [{ id: crypto.randomUUID(), type: "text" as TurnPartType, content, isStreaming: true, timestamp: new Date() }],
+                isStreaming: true,
+                timestamp: new Date(),
+              },
+            ]
+          })
           break
 
         case "tool_call":
-        case "tool_result":
-          setMessages((prev) => [
-            ...prev,
-            {
+          setTurns((prev) => {
+            const last = prev[prev.length - 1]
+            const part: TurnPart = {
               id: crypto.randomUUID(),
-              role: "tool",
+              type: "tool_call",
               content,
-              eventType,
+              metadata,
               timestamp: new Date(),
-            },
-          ])
+            }
+            if (last?.role === "assistant" && last.isStreaming) {
+              return [
+                ...prev.slice(0, -1),
+                { ...last, parts: [...last.parts, part] },
+              ]
+            }
+            return [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "assistant",
+                parts: [part],
+                isStreaming: true,
+                timestamp: new Date(),
+              },
+            ]
+          })
           break
 
-        case "done":
-          setMessages((prev) => {
+        case "tool_result":
+          setTurns((prev) => {
             const last = prev[prev.length - 1]
-            if (last?.isStreaming) {
-              return [...prev.slice(0, -1), { ...last, isStreaming: false }]
+            const part: TurnPart = {
+              id: crypto.randomUUID(),
+              type: "tool_result",
+              content,
+              metadata,
+              timestamp: new Date(),
+            }
+            if (last?.role === "assistant" && last.isStreaming) {
+              // Try to mark matching tool_call as completed via tool_use_id
+              const toolUseId = metadata?.tool_use_id as string | undefined
+              const updatedParts = toolUseId
+                ? last.parts.map((p) => {
+                    if (p.type === "tool_call" && p.metadata?.tool_id === toolUseId) {
+                      return { ...p, metadata: { ...p.metadata, completed: true } }
+                    }
+                    return p
+                  })
+                : last.parts
+              return [
+                ...prev.slice(0, -1),
+                { ...last, parts: [...updatedParts, part] },
+              ]
+            }
+            return [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "assistant",
+                parts: [part],
+                isStreaming: true,
+                timestamp: new Date(),
+              },
+            ]
+          })
+          break
+
+        case "system":
+          // System events (sidecar security logs, etc.) -- add as status-like parts
+          setTurns((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.role === "assistant" && last.isStreaming) {
+              return [
+                ...prev.slice(0, -1),
+                {
+                  ...last,
+                  parts: [
+                    ...last.parts,
+                    { id: crypto.randomUUID(), type: "status" as TurnPartType, content, timestamp: new Date() },
+                  ],
+                },
+              ]
             }
             return prev
           })
-          streamBufferRef.current = ""
+          break
+
+        case "done":
+          setTurns((prev) => {
+            const last = prev[prev.length - 1]
+            if (last?.role === "assistant" && last.isStreaming) {
+              const finalParts = last.parts
+                .map((p) => (p.isStreaming ? { ...p, isStreaming: false } : p))
+                // Remove status parts once done (they were just progress indicators)
+                .filter((p) => p.type !== "status")
+              return [
+                ...prev.slice(0, -1),
+                { ...last, parts: finalParts, isStreaming: false },
+              ]
+            }
+            return prev
+          })
+          textBufferRef.current = ""
+          thinkingBufferRef.current = ""
           setIsStreaming(false)
           break
 
         case "error":
-          setMessages((prev) => [
-            ...prev,
-            {
+          setTurns((prev) => {
+            const last = prev[prev.length - 1]
+            const errorPart: TurnPart = {
               id: crypto.randomUUID(),
-              role: "system",
+              type: "error",
               content: content || "An error occurred",
-              eventType: "error",
               timestamp: new Date(),
-            },
-          ])
-          streamBufferRef.current = ""
+            }
+            if (last?.role === "assistant" && last.isStreaming) {
+              return [
+                ...prev.slice(0, -1),
+                { ...last, parts: [...last.parts, errorPart], isStreaming: false },
+              ]
+            }
+            return [
+              ...prev,
+              {
+                id: crypto.randomUUID(),
+                role: "system",
+                parts: [errorPart],
+                isStreaming: false,
+                timestamp: new Date(),
+              },
+            ]
+          })
+          textBufferRef.current = ""
+          thinkingBufferRef.current = ""
           setIsStreaming(false)
           break
       }
@@ -175,16 +464,18 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
     (content: string) => {
       if (!content.trim() || isStreaming) return
 
-      const userMsg: ChatMessage = {
+      const userTurn: ChatTurn = {
         id: crypto.randomUUID(),
         role: "user",
-        content: content.trim(),
+        parts: [{ id: crypto.randomUUID(), type: "text", content: content.trim(), timestamp: new Date() }],
+        isStreaming: false,
         timestamp: new Date(),
       }
 
-      setMessages((prev) => [...prev, userMsg])
+      setTurns((prev) => [...prev, userTurn])
       setIsStreaming(true)
-      streamBufferRef.current = ""
+      textBufferRef.current = ""
+      thinkingBufferRef.current = ""
 
       send({
         type: "send_message",
@@ -197,15 +488,38 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
     [sessionId, send, isStreaming],
   )
 
+  const stopGeneration = useCallback(() => {
+    send({
+      type: "cancel_message",
+      payload: JSON.stringify({ session_id: sessionId }),
+    })
+  }, [send, sessionId])
+
   const loadHistory = useCallback((history: ChatMessage[]) => {
-    setMessages(history)
+    setTurns(messagesToTurns(history))
     setIsStreaming(false)
-    streamBufferRef.current = ""
+    textBufferRef.current = ""
+    thinkingBufferRef.current = ""
   }, [])
 
+  // Derive flat messages for backwards compat (used by history loading)
+  const messages: ChatMessage[] = turns.flatMap((turn) =>
+    turn.parts.map((part) => ({
+      id: part.id,
+      role: turn.role === "system" ? "system" as MessageRole : turn.role === "user" ? "user" as MessageRole : (part.type === "tool_call" || part.type === "tool_result" ? "tool" as MessageRole : "assistant" as MessageRole),
+      content: part.content,
+      eventType: part.type as StreamEventType,
+      timestamp: part.timestamp,
+      isStreaming: part.isStreaming,
+      metadata: part.metadata,
+    }))
+  )
+
   return {
+    turns,
     messages,
     sendMessage,
+    stopGeneration,
     loadHistory,
     isStreaming,
     connectionStatus: status as WSStatus,

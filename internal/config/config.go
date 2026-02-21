@@ -34,13 +34,14 @@ type IPCConfig struct {
 }
 
 type ContainerConfig struct {
-	Provider       string `yaml:"provider"` // "docker" | "k8s"
-	RuntimeImage   string `yaml:"runtime_image"`
-	DefaultRuntime string `yaml:"default_runtime"` // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
-	Network        string `yaml:"network"`
-	DefaultMemoryMB int   `yaml:"default_memory_mb"`
-	DefaultCPUs    float64 `yaml:"default_cpus"`
-	SidecarEnabled bool   `yaml:"sidecar_enabled"` // enable sidecar proxy for credential injection
+	Provider        string  `yaml:"provider"` // "docker" | "k8s"
+	RuntimeImage    string  `yaml:"runtime_image"`
+	DefaultRuntime  string  `yaml:"default_runtime"` // "runc" | "runsc" (gVisor) | "kata-runtime" | "sysbox-runc"
+	Network         string  `yaml:"network"`
+	ContainerPrefix string  `yaml:"container_prefix"` // Container name prefix for multi-instance isolation
+	DefaultMemoryMB int     `yaml:"default_memory_mb"`
+	DefaultCPUs     float64 `yaml:"default_cpus"`
+	SidecarEnabled  bool    `yaml:"sidecar_enabled"` // enable sidecar proxy for credential injection
 }
 
 type StorageConfig struct {
@@ -214,6 +215,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_CONTAINER_NETWORK"); v != "" {
 		cfg.Container.Network = v
+	}
+	if v := os.Getenv("CREWSHIP_CONTAINER_PREFIX"); v != "" {
+		cfg.Container.ContainerPrefix = v
 	}
 	if v := os.Getenv("CREWSHIP_STORAGE_PROVIDER"); v != "" {
 		cfg.Storage.Provider = v

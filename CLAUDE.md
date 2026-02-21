@@ -224,7 +224,12 @@ DATABASE_URL=                       # Optional PostgreSQL connection string
 - **Never change GCM byte layout** in `internal/encryption/` — the custom `IV||AuthTag||Ciphertext` order is for Go/TS compatibility. Changing it makes all stored credentials undecryptable.
 - **Never change sidecar UID (1002) or agent UID (1001)** — the UID separation is a security boundary preventing the agent from reading sidecar memory.
 - **Never use `npm` or `yarn`** — `pnpm` only. pnpm-specific config will break with other package managers.
+- **Never discard or lose developed work.** Always `git stash` before switching branches. Never `git checkout .`, `git restore .`, or `git clean` on work-in-progress. If you need a clean branch, stash first, then pop after.
 
 When you make a new mistake, add it here so it never happens again. This file is a living document — updating it is part of every significant PR.
+
+## CodeRabbit Review Workflow
+
+After every push to a PR, verify that CodeRabbit has posted a new review. If no review appears within ~3 minutes, post a comment `@coderabbitai review` on the PR to force-trigger the review process. Always wait for CodeRabbit's review, fix all actionable findings, and push again until clean.
 
 Commit style: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:` (conventional commits). Branch from `main`.
