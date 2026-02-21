@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ func newQueryServer(t *testing.T, ipc *IPCConfig, members []CrewMember) *Server 
 	t.Helper()
 	return NewServer(ServerConfig{
 		Addr:        "127.0.0.1:0",
-		Logger:      slog.Default(),
+		Logger:      slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 		IPC:         ipc,
 		CrewMembers: members,
 	})

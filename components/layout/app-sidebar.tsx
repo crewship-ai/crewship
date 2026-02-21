@@ -110,16 +110,24 @@ export function AppSidebar() {
                   .map((item) => (
                     <SidebarMenuItem key={item.href}>
                       <SidebarMenuButton
-                        asChild
+                        asChild={item.badge !== "FUTURE"}
+                        disabled={item.badge === "FUTURE"}
                         isActive={
                           pathname === item.href ||
                           (item.href !== "/" && pathname.startsWith(item.href))
                         }
                       >
-                        <Link href={item.href}>
-                          <item.icon />
-                          <span>{item.title}</span>
-                        </Link>
+                        {item.badge === "FUTURE" ? (
+                          <span className="flex items-center gap-2 opacity-50">
+                            <item.icon />
+                            <span>{item.title}</span>
+                          </span>
+                        ) : (
+                          <Link href={item.href}>
+                            <item.icon />
+                            <span>{item.title}</span>
+                          </Link>
+                        )}
                       </SidebarMenuButton>
                       {item.badge === "FUTURE" && (
                         <SidebarMenuBadge className="text-[9px] bg-muted text-muted-foreground px-1.5">

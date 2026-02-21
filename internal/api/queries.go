@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -756,11 +757,9 @@ func (h *QueryHandler) ListAllActivity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Sort all items by created_at DESC
-	for i := 1; i < len(items); i++ {
-		for j := i; j > 0 && items[j].CreatedAt > items[j-1].CreatedAt; j-- {
-			items[j], items[j-1] = items[j-1], items[j]
-		}
-	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedAt > items[j].CreatedAt
+	})
 
 	// Truncate to limit
 	if len(items) > limit {

@@ -487,7 +487,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 			ORDER BY name
 		`, crewID.String, agentID)
 		if err != nil {
-			h.logger.Error("query crew members for lead", "error", err)
+			h.logger.Error("query crew members for crew", "error", err)
 		} else {
 			defer memberRows.Close()
 			for memberRows.Next() {

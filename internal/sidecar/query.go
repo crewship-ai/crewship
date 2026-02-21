@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"strconv"
 	"time"
@@ -134,15 +135,15 @@ func (s *Server) handleStandup(w http.ResponseWriter, r *http.Request) {
 
 	since := r.URL.Query().Get("since")
 
-	url := fmt.Sprintf("%s/api/v1/internal/standup?crew_id=%s", s.ipc.BaseURL, s.ipc.CrewID)
+	standupURL := fmt.Sprintf("%s/api/v1/internal/standup?crew_id=%s", s.ipc.BaseURL, neturl.QueryEscape(s.ipc.CrewID))
 	if since != "" {
-		url += "&since=" + since
+		standupURL += "&since=" + neturl.QueryEscape(since)
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, standupURL, nil)
 	if err != nil {
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
 		return
