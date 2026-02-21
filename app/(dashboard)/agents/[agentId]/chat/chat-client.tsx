@@ -175,7 +175,7 @@ export function ChatPageClient() {
         <div className="mx-4 md:mx-6 mt-2 flex items-center gap-2 rounded-md bg-muted/10 border border-border px-3 py-2 shrink-0">
           <Info className="h-4 w-4 text-muted-foreground shrink-0" />
           <p className="text-xs text-muted-foreground">
-            Set <code>CREWSHIPD_URL</code> and run <strong>crewshipd</strong> for live chat.
+            Set <code>CREWSHIPD_URL</code> and start the <strong>engine</strong> for live chat.
           </p>
         </div>
       )}

@@ -193,6 +193,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	}
 
+	// Inject peer communication context for non-LEAD agents in a crew
+	if req.AgentRole != "LEAD" && len(req.CrewMembers) > 0 {
+		peerCtx := BuildPeerContext(req.CrewMembers, req.AgentSlug)
+		if peerCtx != "" {
+			req.SystemPrompt = req.SystemPrompt + "\n\n" + peerCtx
+		}
+	}
+
 	// Inject agent memory context into system prompt (after conversation history)
 	if req.MemoryEnabled {
 		memoryCtx := o.buildMemoryContext(ctx, req)
@@ -219,9 +227,10 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				AgentSlug: req.AgentSlug,
 			}
 		}
-		// Build IPC config for lead agents so the sidecar can forward assignment requests
+		// Build IPC config for agents in a crew so the sidecar can forward
+		// assignment requests (LEAD), peer queries, and escalations (all roles)
 		var ipcCfg *SidecarIPCConfig
-		if ipcBaseURL != "" && req.AgentRole == "LEAD" {
+		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || len(req.CrewMembers) > 0) {
 			ipcCfg = &SidecarIPCConfig{
 				BaseURL:     ipcBaseURL,
 				Token:       ipcToken,

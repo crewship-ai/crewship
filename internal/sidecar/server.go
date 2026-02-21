@@ -156,6 +156,15 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/results/"):
 				s.handleResults(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/query":
+				s.handleQuery(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/standup":
+				s.handleStandup(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/escalate":
+				s.handleEscalate(w, r)
+				return
 			}
 		}
 		proxy.ServeHTTP(w, r)

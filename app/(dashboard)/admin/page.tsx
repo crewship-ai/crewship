@@ -197,7 +197,7 @@ export default function AdminPage() {
               <div className="space-y-3">
                 {[
                   { name: "Database", status: true, desc: "SQLite (connected)" },
-                  { name: "crewshipd", status: true, desc: "Running" },
+                  { name: "Engine", status: true, desc: "Running" },
                   {
                     name: "Container Runtime",
                     status: runtimeAvailable === true,

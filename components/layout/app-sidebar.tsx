@@ -10,6 +10,7 @@ import {
   Zap,
   Settings,
   Network,
+  Workflow,
   Activity,
   Shield,
   Store,
@@ -38,8 +39,9 @@ const navSections = [
     label: "Work",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Agents", href: "/agents", icon: Bot },
+      { title: "Orchestration", href: "/orchestration", icon: Workflow, badge: "FUTURE" as const },
       { title: "Crews", href: "/crews", icon: Network },
+      { title: "Agents", href: "/agents", icon: Bot },
     ],
   },
   {

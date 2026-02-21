@@ -64,6 +64,8 @@ var migrations = []migration{
 	{3, "add_memory_config", migrationAddMemoryConfig},
 	{4, "add_lead_mode", migrationAddLeadMode},
 	{5, "add_preferred_language", migrationAddPreferredLanguage},
+	{6, "add_peer_conversations", migrationAddPeerConversations},
+	{7, "add_escalations", migrationAddEscalations},
 }
 
 const migrationAddOnboardingCompleted = `
@@ -80,6 +82,49 @@ ALTER TABLE agents ADD COLUMN lead_mode TEXT DEFAULT 'active';
 
 const migrationAddPreferredLanguage = `
 ALTER TABLE workspaces ADD COLUMN preferred_language TEXT;
+`
+
+const migrationAddPeerConversations = `
+CREATE TABLE IF NOT EXISTS peer_conversations (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL,
+	crew_id TEXT NOT NULL,
+	chat_id TEXT NOT NULL,
+	from_agent_id TEXT NOT NULL,
+	to_agent_id TEXT NOT NULL,
+	question TEXT NOT NULL,
+	response TEXT,
+	status TEXT NOT NULL DEFAULT 'PENDING',
+	duration_ms INTEGER,
+	escalated INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL,
+	finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_peer_conv_crew ON peer_conversations(crew_id);
+CREATE INDEX IF NOT EXISTS idx_peer_conv_from ON peer_conversations(from_agent_id);
+CREATE INDEX IF NOT EXISTS idx_peer_conv_to ON peer_conversations(to_agent_id);
+CREATE INDEX IF NOT EXISTS idx_peer_conv_created ON peer_conversations(created_at);
+`
+
+const migrationAddEscalations = `
+CREATE TABLE IF NOT EXISTS escalations (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL,
+	crew_id TEXT NOT NULL,
+	chat_id TEXT NOT NULL,
+	from_agent_id TEXT NOT NULL,
+	peer_conversation_id TEXT,
+	reason TEXT NOT NULL,
+	context TEXT,
+	status TEXT NOT NULL DEFAULT 'PENDING',
+	resolution TEXT,
+	resolved_at TEXT,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_escalation_crew ON escalations(crew_id);
+CREATE INDEX IF NOT EXISTS idx_escalation_from ON escalations(from_agent_id);
+CREATE INDEX IF NOT EXISTS idx_escalation_status ON escalations(status);
+CREATE INDEX IF NOT EXISTS idx_escalation_created ON escalations(created_at);
 `
 
 const migrationInit = `

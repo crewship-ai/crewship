@@ -201,7 +201,19 @@ func (h *AssignmentHandler) runAssignment(
 ) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Mark as RUNNING
+	// Create a run record in agent_runs so the dashboard shows sub-agent activity
+	runID := generateCUID()
+	if _, err := h.db.ExecContext(ctx, `
+		INSERT INTO agent_runs (id, agent_id, chat_id, workspace_id, trigger_type, status, metadata, started_at, created_at)
+		VALUES (?, ?, ?, ?, 'ASSIGNMENT', 'RUNNING', ?, ?, ?)`,
+		runID, target.ID, body.ChatID, body.WorkspaceID,
+		fmt.Sprintf(`{"assignment_id":"%s","assigned_by_chat":"%s"}`, assignmentID, body.ChatID),
+		now, now,
+	); err != nil {
+		h.logger.Error("create run record for assignment", "error", err, "assignment_id", assignmentID)
+	}
+
+	// Mark assignment as RUNNING
 	if _, err := h.db.ExecContext(ctx,
 		`UPDATE assignments SET status='RUNNING', started_at=? WHERE id=?`, now, assignmentID); err != nil {
 		h.logger.Error("update assignment to running", "error", err, "assignment_id", assignmentID)
@@ -218,7 +230,7 @@ func (h *AssignmentHandler) runAssignment(
 	}
 
 	if h.orch == nil {
-		h.finishAssignment(ctx, assignmentID, body.ChatID, body.TargetSlug, "", "orchestrator not available")
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, "", "orchestrator not available")
 		return
 	}
 
@@ -226,7 +238,7 @@ func (h *AssignmentHandler) runAssignment(
 	containerID, err := h.orch.GetOrCreateContainer(ctx, target.CrewSlug, body.CrewID)
 	if err != nil {
 		h.logger.Error("get container for assignment", "error", err, "assignment_id", assignmentID)
-		h.finishAssignment(ctx, assignmentID, body.ChatID, body.TargetSlug, "",
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, "",
 			fmt.Sprintf("container error: %v", err))
 		return
 	}
@@ -262,7 +274,7 @@ func (h *AssignmentHandler) runAssignment(
 
 	if err := h.orch.RunAgentForAssignment(ctx, req, handler); err != nil {
 		h.logger.Error("assignment execution failed", "error", err, "assignment_id", assignmentID)
-		h.finishAssignment(ctx, assignmentID, body.ChatID, body.TargetSlug, "",
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, "",
 			fmt.Sprintf("execution error: %v", err))
 		return
 	}
@@ -276,13 +288,13 @@ func (h *AssignmentHandler) runAssignment(
 		result = result[:10000] + "...(truncated)"
 	}
 
-	h.finishAssignment(ctx, assignmentID, body.ChatID, body.TargetSlug, result, "")
+	h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, result, "")
 }
 
-// finishAssignment updates the assignment record and broadcasts the final event.
+// finishAssignment updates the assignment and run records, then broadcasts the final event.
 func (h *AssignmentHandler) finishAssignment(
 	ctx context.Context,
-	assignmentID, chatID, targetSlug, result, errMsg string,
+	assignmentID, runID, chatID, targetSlug, result, errMsg string,
 ) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	status := "COMPLETED"
@@ -302,6 +314,24 @@ func (h *AssignmentHandler) finishAssignment(
 		`UPDATE assignments SET status=?, result_summary=?, error_message=?, finished_at=? WHERE id=?`,
 		status, resultVal, errVal, now, assignmentID); err != nil {
 		h.logger.Error("update assignment status", "error", err, "assignment_id", assignmentID)
+	}
+
+	// Update the agent_runs record so the dashboard reflects the final state
+	if runID != "" {
+		runQuery := `UPDATE agent_runs SET status = ?, finished_at = ?`
+		runArgs := []interface{}{status, now}
+		if errMsg != "" {
+			runQuery += `, error_message = ?`
+			runArgs = append(runArgs, errMsg)
+		}
+		if status == "COMPLETED" {
+			runQuery += `, exit_code = 0`
+		}
+		runQuery += ` WHERE id = ?`
+		runArgs = append(runArgs, runID)
+		if _, err := h.db.ExecContext(ctx, runQuery, runArgs...); err != nil {
+			h.logger.Error("update run record for assignment", "error", err, "run_id", runID)
+		}
 	}
 
 	if h.hub == nil {

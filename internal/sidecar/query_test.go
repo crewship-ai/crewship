@@ -1,0 +1,296 @@
+package sidecar
+
+import (
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// newQueryServer creates a Server configured for query/escalation testing.
+func newQueryServer(t *testing.T, ipc *IPCConfig, members []CrewMember) *Server {
+	t.Helper()
+	return NewServer(ServerConfig{
+		Addr:        "127.0.0.1:0",
+		Logger:      slog.Default(),
+		IPC:         ipc,
+		CrewMembers: members,
+	})
+}
+
+// --- POST /query tests ---
+
+func TestHandleQuery_NoIPC(t *testing.T) {
+	srv := newQueryServer(t, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/query",
+		strings.NewReader(`{"target":"nela","question":"what framework?","from":"viktor"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleQuery(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Code)
+	}
+}
+
+func TestHandleQuery_InvalidJSON(t *testing.T) {
+	srv := newQueryServer(t, &IPCConfig{BaseURL: "http://x", Token: "tok"}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/query", strings.NewReader(`not-json`))
+	w := httptest.NewRecorder()
+
+	srv.handleQuery(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleQuery_MissingFields(t *testing.T) {
+	srv := newQueryServer(t, &IPCConfig{BaseURL: "http://x", Token: "tok"}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/query",
+		strings.NewReader(`{"target":"nela"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleQuery(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleQuery_UnknownTarget(t *testing.T) {
+	srv := newQueryServer(t, &IPCConfig{BaseURL: "http://x", Token: "tok"}, []CrewMember{
+		{Slug: "alice", Name: "Alice"},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/query",
+		strings.NewReader(`{"target":"bob","question":"hello?","from":"alice"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleQuery(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+	var body map[string]string
+	json.NewDecoder(w.Body).Decode(&body)
+	if !strings.Contains(body["error"], "bob") {
+		t.Errorf("expected error about 'bob', got %q", body["error"])
+	}
+}
+
+func TestHandleQuery_DepthLimit(t *testing.T) {
+	srv := newQueryServer(t, &IPCConfig{BaseURL: "http://x", Token: "tok"}, []CrewMember{
+		{Slug: "nela", Name: "Nela"},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/query",
+		strings.NewReader(`{"target":"nela","question":"hello?","from":"viktor","depth":2}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleQuery(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for depth limit, got %d", w.Code)
+	}
+	var body map[string]string
+	json.NewDecoder(w.Body).Decode(&body)
+	if !strings.Contains(body["error"], "depth limit") {
+		t.Errorf("expected depth limit error, got %q", body["error"])
+	}
+}
+
+func TestHandleQuery_ForwardsToCrewshipd(t *testing.T) {
+	var receivedToken, receivedBody string
+	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/internal/queries" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		receivedToken = r.Header.Get("X-Internal-Token")
+		bodyBytes, _ := io.ReadAll(r.Body)
+		receivedBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"query_id":"q-123","response":"Tailwind CSS 4","status":"COMPLETED"}`))
+	}))
+	defer mockCrewshipd.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mockCrewshipd.URL,
+		Token:       "secret-token",
+		CrewID:      "crew-1",
+		WorkspaceID: "ws-1",
+		ChatID:      "chat-1",
+	}, []CrewMember{
+		{Slug: "nela", Name: "Nela"},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/query",
+		strings.NewReader(`{"target":"nela","question":"What CSS framework?","from":"viktor"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleQuery(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	if receivedToken != "secret-token" {
+		t.Errorf("expected X-Internal-Token=secret-token, got %q", receivedToken)
+	}
+
+	var forwarded map[string]interface{}
+	if err := json.Unmarshal([]byte(receivedBody), &forwarded); err != nil {
+		t.Fatalf("invalid forwarded body: %v", err)
+	}
+	if forwarded["target_slug"] != "nela" {
+		t.Errorf("expected target_slug=nela, got %v", forwarded["target_slug"])
+	}
+	if forwarded["question"] != "What CSS framework?" {
+		t.Errorf("expected question forwarded, got %v", forwarded["question"])
+	}
+	if forwarded["crew_id"] != "crew-1" {
+		t.Errorf("expected crew_id=crew-1, got %v", forwarded["crew_id"])
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["query_id"] != "q-123" {
+		t.Errorf("expected query_id=q-123, got %v", result["query_id"])
+	}
+}
+
+// --- GET /standup tests ---
+
+func TestHandleStandup_NoIPC(t *testing.T) {
+	srv := newQueryServer(t, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/standup", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleStandup(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Code)
+	}
+}
+
+func TestHandleStandup_ProxiesToCrewshipd(t *testing.T) {
+	var receivedPath string
+	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.String()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"standup":"[CREW STANDUP]...","crew_id":"crew-1"}`))
+	}))
+	defer mockCrewshipd.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL: mockCrewshipd.URL,
+		Token:   "tok",
+		CrewID:  "crew-1",
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/standup", nil)
+	w := httptest.NewRecorder()
+
+	srv.handleStandup(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(receivedPath, "crew_id=crew-1") {
+		t.Errorf("expected crew_id in forwarded request, got %q", receivedPath)
+	}
+}
+
+// --- POST /escalate tests ---
+
+func TestHandleEscalate_NoIPC(t *testing.T) {
+	srv := newQueryServer(t, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/escalate",
+		strings.NewReader(`{"from":"nela","reason":"need decision"}`))
+	w := httptest.NewRecorder()
+
+	srv.handleEscalate(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", w.Code)
+	}
+}
+
+func TestHandleEscalate_MissingFields(t *testing.T) {
+	srv := newQueryServer(t, &IPCConfig{BaseURL: "http://x", Token: "tok"}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/escalate",
+		strings.NewReader(`{"from":"nela"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleEscalate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleEscalate_ForwardsToCrewshipd(t *testing.T) {
+	var receivedToken string
+	var receivedBody map[string]string
+	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/internal/escalations" {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		receivedToken = r.Header.Get("X-Internal-Token")
+		bodyBytes, _ := io.ReadAll(r.Body)
+		json.Unmarshal(bodyBytes, &receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"escalation_id":"esc-1","status":"PENDING"}`))
+	}))
+	defer mockCrewshipd.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mockCrewshipd.URL,
+		Token:       "secret-token",
+		CrewID:      "crew-1",
+		WorkspaceID: "ws-1",
+		ChatID:      "chat-1",
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/escalate",
+		strings.NewReader(`{"from":"nela","reason":"API conflict","context":"Viktor changed endpoints"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleEscalate(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected 201, got %d; body: %s", w.Code, w.Body.String())
+	}
+	if receivedToken != "secret-token" {
+		t.Errorf("expected X-Internal-Token=secret-token, got %q", receivedToken)
+	}
+	if receivedBody["from_slug"] != "nela" {
+		t.Errorf("expected from_slug=nela, got %q", receivedBody["from_slug"])
+	}
+	if receivedBody["reason"] != "API conflict" {
+		t.Errorf("expected reason='API conflict', got %q", receivedBody["reason"])
+	}
+	if receivedBody["crew_id"] != "crew-1" {
+		t.Errorf("expected crew_id=crew-1, got %q", receivedBody["crew_id"])
+	}
+}

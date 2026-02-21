@@ -2,16 +2,20 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Bot, Hourglass, Key, Activity, Plus } from "lucide-react"
+import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { PageHeader } from "@/components/layout/page-header"
 import { EmptyState } from "@/components/layout/empty-state"
 import { StatCard } from "@/components/layout/stat-card"
-import { FilterBar } from "@/components/layout/filter-bar"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AgentCard } from "@/components/features/agents/agent-card"
 import { SetupNudge } from "@/components/features/onboarding/setup-nudge"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useTick } from "@/hooks/use-tick"
 import Link from "next/link"
 
 interface AgentCrew {
@@ -39,16 +43,64 @@ interface Credential {
   id: string
 }
 
+interface RunEntry {
+  id: string
+  agent_id: string
+  status: string
+  trigger_type: string
+  started_at: string | null
+  finished_at: string | null
+  error_message: string | null
+  created_at: string
+  agent_name: string | null
+  agent_slug: string | null
+  crew_name: string | null
+}
+
+interface RunsResponse {
+  data: RunEntry[]
+  stats: { running: number; today: number; failed: number }
+}
+
+const runStatusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ElementType }> = {
+  PENDING: { label: "Pending", variant: "outline", icon: Clock },
+  RUNNING: { label: "Running", variant: "default", icon: Play },
+  COMPLETED: { label: "Completed", variant: "secondary", icon: CheckCircle },
+  FAILED: { label: "Failed", variant: "destructive", icon: XCircle },
+  CANCELLED: { label: "Cancelled", variant: "outline", icon: XCircle },
+  TIMEOUT: { label: "Timeout", variant: "destructive", icon: AlertTriangle },
+}
+
+const agentStatusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  IDLE: { label: "Idle", variant: "outline" },
+  RUNNING: { label: "Running", variant: "default" },
+  ERROR: { label: "Error", variant: "destructive" },
+}
+
+function formatTimeAgo(ts: string): string {
+  const seconds = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [agents, setAgents] = useState<Agent[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [crewCount, setCrewCount] = useState(0)
+  const [runsData, setRunsData] = useState<RunsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeFilter, setActiveFilter] = useState("All")
+  const [activeFilter, setActiveFilter] = useState("all")
   const [onboardingChecked, setOnboardingChecked] = useState(false)
+
+  useTick(1000)
 
   // Check onboarding status on mount
   useEffect(() => {
@@ -76,10 +128,11 @@ export default function DashboardPage() {
       setLoading(true)
       setError(null)
       try {
-        const [agentsRes, credsRes, crewsRes] = await Promise.all([
+        const [agentsRes, credsRes, crewsRes, runsRes] = await Promise.all([
           fetch(`/api/v1/agents?workspace_id=${workspaceId}`),
           fetch(`/api/v1/credentials?workspace_id=${workspaceId}`),
           fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
+          fetch(`/api/v1/runs?workspace_id=${workspaceId}&limit=50`),
         ])
 
         if (!agentsRes.ok || !credsRes.ok) {
@@ -93,11 +146,13 @@ export default function DashboardPage() {
         ])
 
         const crewsData = crewsRes.ok ? ((await crewsRes.json()) as unknown[]) : []
+        const runsResult = runsRes.ok ? ((await runsRes.json()) as RunsResponse) : null
 
         if (!cancelled) {
           setAgents(agentsData)
           setCredentials(credsData)
           setCrewCount(crewsData.length)
+          setRunsData(runsResult)
         }
       } catch {
         if (!cancelled) setError("Failed to load dashboard data")
@@ -118,10 +173,37 @@ export default function DashboardPage() {
   const runningNow = agents.filter((a) => a.status === "RUNNING").length
   const apiKeysActive = credentials.length
 
+  // Build agent → last run map
+  const agentLastRun = new Map<string, RunEntry>()
+  for (const run of runsData?.data ?? []) {
+    if (!agentLastRun.has(run.agent_id)) agentLastRun.set(run.agent_id, run)
+  }
+
+  // Filter agents
   const filteredAgents =
-    activeFilter === "All"
+    activeFilter === "all"
       ? agents
       : agents.filter((a) => a.status === activeFilter.toUpperCase())
+
+  // Sort: RUNNING first, then by last activity (newest first), no activity last
+  const sortedAgents = [...filteredAgents].sort((a, b) => {
+    // Running agents first
+    if (a.status === "RUNNING" && b.status !== "RUNNING") return -1
+    if (b.status === "RUNNING" && a.status !== "RUNNING") return 1
+
+    const runA = agentLastRun.get(a.id)
+    const runB = agentLastRun.get(b.id)
+
+    // Agents with activity before those without
+    if (runA && !runB) return -1
+    if (runB && !runA) return 1
+    if (!runA && !runB) return 0
+
+    // Both have runs — sort by most recent
+    const tsA = new Date(runA!.started_at ?? runA!.created_at).getTime()
+    const tsB = new Date(runB!.started_at ?? runB!.created_at).getTime()
+    return tsB - tsA
+  })
 
   if (error) {
     return (
@@ -168,9 +250,16 @@ export default function DashboardPage() {
             />
             <StatCard
               title="Today's Runs"
-              value={0}
-              subtitle="No runs today"
+              value={runsData?.stats.today ?? 0}
+              subtitle={
+                runsData?.stats.failed
+                  ? `${runsData.stats.failed} failed`
+                  : runsData?.stats.today
+                    ? `${runsData.stats.today} run${runsData.stats.today === 1 ? "" : "s"} today`
+                    : "No runs today"
+              }
               icon={Hourglass}
+              iconClassName={runsData?.stats.failed ? "bg-destructive/10 text-destructive" : undefined}
             />
             <StatCard
               title="API Keys Active"
@@ -190,49 +279,148 @@ export default function DashboardPage() {
         />
       )}
 
-      <div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
-          <h2 className="text-base font-semibold">All Agents</h2>
-          <FilterBar
-            filters={["All", "Running", "Idle", "Error"]}
-            active={activeFilter}
-            onFilter={setActiveFilter}
-          />
-        </div>
+      {/* Agents Table */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base font-semibold">Agents</CardTitle>
+            <Select value={activeFilter} onValueChange={setActiveFilter}>
+              <SelectTrigger size="sm" className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="running">Running</SelectItem>
+                <SelectItem value="idle">Idle</SelectItem>
+                <SelectItem value="error">Error</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {isLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 rounded-md" />
+              ))}
+            </div>
+          ) : sortedAgents.length === 0 ? (
+            <EmptyState
+              icon={Bot}
+              title={agents.length === 0 ? "No agents yet" : "No matching agents"}
+              description={
+                agents.length === 0
+                  ? "Create your first AI agent to start automating tasks. Agents work in crews and can chat, run tasks, and produce files."
+                  : "No agents match the current filter. Try changing the filter."
+              }
+            >
+              {agents.length === 0 && (
+                <Button className="mt-4" asChild>
+                  <Link href="/agents/new">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create First Agent
+                  </Link>
+                </Button>
+              )}
+            </EmptyState>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Agent</TableHead>
+                  <TableHead>Crew</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Last Activity</TableHead>
+                  <TableHead className="text-right">Sessions</TableHead>
+                  <TableHead className="w-[50px]" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedAgents.map((agent) => {
+                  const lastRun = agentLastRun.get(agent.id)
+                  const statusCfg = agentStatusConfig[agent.status] ?? agentStatusConfig.IDLE
+                  const runCfg = lastRun ? (runStatusConfig[lastRun.status] ?? runStatusConfig.PENDING) : null
+                  const RunIcon = runCfg?.icon
 
-        {isLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-[160px] rounded-xl" />
-            ))}
-          </div>
-        ) : filteredAgents.length === 0 ? (
-          <EmptyState
-            icon={Bot}
-            title={agents.length === 0 ? "No agents yet" : "No matching agents"}
-            description={
-              agents.length === 0
-                ? "Create your first AI agent to start automating tasks. Agents work in crews and can chat, run tasks, and produce files."
-                : "No agents match the current filter. Try changing the filter."
-            }
-          >
-            {agents.length === 0 && (
-              <Button className="mt-4" asChild>
-                <Link href="/agents/new">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create First Agent
-                </Link>
-              </Button>
-            )}
-          </EmptyState>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-            {filteredAgents.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} />
-            ))}
-          </div>
-        )}
-      </div>
+                  return (
+                    <TableRow key={agent.id}>
+                      <TableCell>
+                        <Link href={`/agents/${agent.id}`} className="hover:underline">
+                          <div className="font-medium text-sm">{agent.name}</div>
+                          {agent.role_title && (
+                            <div className="text-xs text-muted-foreground">{agent.role_title}</div>
+                          )}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        {agent.crew ? (
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className="h-2 w-2 rounded-full shrink-0"
+                              style={{ backgroundColor: agent.crew.color ?? "#6b7280" }}
+                            />
+                            <span className="text-sm">{agent.crew.name}</span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">&mdash;</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={statusCfg.variant}>{statusCfg.label}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        {lastRun ? (
+                          <div className="flex items-center gap-1.5">
+                            {RunIcon && <RunIcon className="h-3.5 w-3.5 text-muted-foreground" />}
+                            <span className="text-sm text-muted-foreground">
+                              {runCfg!.label} {formatTimeAgo(lastRun.started_at ?? lastRun.created_at)}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">No activity</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className="text-sm text-muted-foreground">{agent._count.chats}</span>
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="h-4 w-4" />
+                              <span className="sr-only">Actions</span>
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem asChild>
+                              <Link href={`/agents/${agent.id}/chat`}>
+                                <MessageSquare className="h-4 w-4" />
+                                Open Chat
+                              </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem asChild>
+                              <Link href={`/agents/${agent.id}`}>
+                                <FileText className="h-4 w-4" />
+                                View Detail
+                              </Link>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem asChild>
+                              <Link href={`/agents/${agent.id}/logs`}>
+                                <ScrollText className="h-4 w-4" />
+                                Logs
+                              </Link>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

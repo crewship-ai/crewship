@@ -149,7 +149,7 @@ export function DebugPageClient() {
     )
   }
 
-  const crewshipdOk = data.crewshipd_reachable
+  const engineOk = data.crewshipd_reachable
   const runtimeStatus = data.runtime?.status ?? "unknown"
   const errorCount = data.service_logs.filter((l) => l.level === "ERROR").length
   const warnCount = data.service_logs.filter((l) => l.level === "WARN" || l.level === "WARNING").length
@@ -161,7 +161,7 @@ export function DebugPageClient() {
         <div>
           <h2 className="text-sm font-medium">Debug & Diagnostics</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            crewshipd service status, agent runtime, and live logs
+            Engine service status, agent runtime, and live logs
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -188,42 +188,42 @@ export function DebugPageClient() {
 
       {/* Status cards row 1 */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* crewshipd health */}
+        {/* Engine health */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-medium flex items-center gap-2">
               <Server className="h-3.5 w-3.5" />
-              crewshipd
+              Engine
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             <div className="flex items-center gap-2">
-              <StatusIcon ok={crewshipdOk} />
+              <StatusIcon ok={engineOk} />
               <span className="text-sm font-medium">
-                {crewshipdOk ? "Running" : "Unreachable"}
+                {engineOk ? "Running" : "Unreachable"}
               </span>
             </div>
-            {crewshipdOk && data.crewshipd.uptime && (
+            {engineOk && data.crewshipd.uptime && (
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">Uptime</span>
                 <span className="font-mono">{data.crewshipd.uptime}</span>
               </div>
             )}
-            {crewshipdOk && data.crewshipd.connections !== undefined && (
+            {engineOk && data.crewshipd.connections !== undefined && (
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">WS Connections</span>
                 <span className="font-mono">{data.crewshipd.connections}</span>
               </div>
             )}
-            {crewshipdOk && data.crewshipd.started_at && (
+            {engineOk && data.crewshipd.started_at && (
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">Started</span>
                 <span className="font-mono text-[10px]">{formatTime(data.crewshipd.started_at)}</span>
               </div>
             )}
-            {!crewshipdOk && (
+            {!engineOk && (
               <p className="text-xs text-destructive">
-                Cannot connect to crewshipd. Start it with: <code className="bg-muted px-1 rounded">go run ./cmd/crewshipd</code>
+                Cannot connect to the engine. Make sure crewshipd is running.
               </p>
             )}
           </CardContent>
@@ -292,7 +292,7 @@ export function DebugPageClient() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {crewshipdOk && data.crewshipd.providers ? (
+            {engineOk && data.crewshipd.providers ? (
               <>
                 {Object.entries(data.crewshipd.providers).map(([key, val]) => (
                   <div key={key} className="flex justify-between text-xs">
@@ -322,7 +322,7 @@ export function DebugPageClient() {
                 </div>
               </>
             ) : (
-              <p className="text-xs text-muted-foreground">crewshipd not reachable</p>
+              <p className="text-xs text-muted-foreground">Engine not reachable</p>
             )}
           </CardContent>
         </Card>
@@ -365,7 +365,7 @@ export function DebugPageClient() {
             className="text-xs h-7 px-3"
             onClick={() => setLogTab("service")}
           >
-            crewshipd Logs ({data.service_logs.length})
+            Engine Logs ({data.service_logs.length})
           </Button>
           <Button
             variant={logTab === "agent" ? "default" : "outline"}
@@ -381,7 +381,7 @@ export function DebugPageClient() {
           {logTab === "service" ? (
             data.service_logs.length === 0 ? (
               <span className="text-neutral-600">
-                {crewshipdOk ? "No log entries captured yet." : "crewshipd is not running. Start it to see logs."}
+                {engineOk ? "No log entries captured yet." : "Engine is not running. Start it to see logs."}
               </span>
             ) : (
               data.service_logs.map((entry, i) => {

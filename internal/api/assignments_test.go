@@ -269,6 +269,73 @@ func TestAssignmentList_Pagination(t *testing.T) {
 	}
 }
 
+func TestRunAssignment_CreatesAgentRunRecord(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('lead1', 'crew1', ?, 'Tomas', 'tomas')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('worker1', 'crew1', ?, 'Viktor', 'viktor')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('chat1', 'lead1', ?, 'CHAT', 'ACTIVE')`, wsID)
+
+	h := NewAssignmentHandler(db, nil, nil, "token", logger)
+
+	body := createAssignmentBody{
+		TargetSlug:  "viktor",
+		Task:        "create dummy.md",
+		CrewID:      "crew1",
+		WorkspaceID: wsID,
+		ChatID:      "chat1",
+	}
+	target := targetAgentInfo{
+		ID:       "worker1",
+		Slug:     "viktor",
+		Name:     "Viktor",
+		CrewSlug: "eng",
+	}
+
+	// Call runAssignment directly — it will fail at orchestrator (nil) but the run record should exist
+	h.runAssignment(context.Background(), "assign-test", body, target, nil)
+
+	// Verify agent_runs record was created with the target agent's ID
+	var runAgentID, runStatus, runTrigger string
+	err := db.QueryRowContext(context.Background(),
+		`SELECT agent_id, status, trigger_type FROM agent_runs WHERE agent_id = ?`, "worker1",
+	).Scan(&runAgentID, &runStatus, &runTrigger)
+	if err != nil {
+		t.Fatalf("expected agent_runs record for worker1, got error: %v", err)
+	}
+	if runAgentID != "worker1" {
+		t.Errorf("expected agent_id=worker1, got %s", runAgentID)
+	}
+	if runTrigger != "ASSIGNMENT" {
+		t.Errorf("expected trigger_type=ASSIGNMENT, got %s", runTrigger)
+	}
+	// Should be FAILED because orchestrator is nil
+	if runStatus != "FAILED" {
+		t.Errorf("expected status=FAILED (nil orchestrator), got %s", runStatus)
+	}
+
+	// Verify finished_at is set
+	var finishedAt *string
+	err = db.QueryRowContext(context.Background(),
+		`SELECT finished_at FROM agent_runs WHERE agent_id = ?`, "worker1",
+	).Scan(&finishedAt)
+	if err != nil {
+		t.Fatalf("query finished_at: %v", err)
+	}
+	if finishedAt == nil {
+		t.Error("expected finished_at to be set for failed run")
+	}
+}
+
 func TestAssignmentCreate_MissingFields(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))

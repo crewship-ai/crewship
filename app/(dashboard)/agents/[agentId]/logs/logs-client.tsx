@@ -69,7 +69,7 @@ export function LogsPageClient() {
       setLogs(data)
       setError(null)
     } catch {
-      setError("Network error. Is crewshipd running?")
+      setError("Network error. Is the engine running?")
     } finally {
       setLoading(false)
     }

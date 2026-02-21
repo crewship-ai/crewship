@@ -47,9 +47,6 @@ build:
 build\:go:
 	go build $(LDFLAGS) -o crewship ./cmd/crewship
 
-build\:legacy:
-	go build $(LDFLAGS) -o crewshipd ./cmd/crewshipd
-
 # === Test & Lint ===
 
 test:
