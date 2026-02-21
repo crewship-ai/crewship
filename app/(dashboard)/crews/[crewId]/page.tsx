@@ -11,6 +11,7 @@ import { CrewStats } from "@/components/features/crews/crew-stats"
 import { CrewEditForm } from "@/components/features/crews/crew-edit-form"
 import { CrewAgents } from "@/components/features/crews/crew-agents"
 import { CrewMembers } from "@/components/features/crews/crew-members"
+import { CrewAssignments } from "@/components/features/crews/crew-assignments"
 import { CrewDangerZone } from "@/components/features/crews/crew-danger-zone"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -278,6 +279,10 @@ export default function CrewDetailPage() {
         crewId={crew.id}
         canCreate={abilities.can("create", "Agent")}
       />
+
+      <Separator />
+
+      <CrewAssignments crewId={crew.id} workspaceId={workspaceId} />
 
       {agents.length > 0 && credentialCount !== null && credentialCount === 0 && (
         <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">

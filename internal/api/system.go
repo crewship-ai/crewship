@@ -26,10 +26,11 @@ var installLinks = map[string]string{
 
 // Runtime probes for a Docker-compatible container runtime and returns its status.
 // GET /api/v1/system/runtime
+// Accessible to any authenticated user (no workspace role required).
 func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
-	role := RoleFromContext(r.Context())
-	if !canRole(role, "manage") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+	user := UserFromContext(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
 

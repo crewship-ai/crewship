@@ -33,6 +33,18 @@ func TestBuildLeadContext(t *testing.T) {
 			wantMemberLines: 1,
 		},
 		{
+			name: "includes assignment instructions",
+			members: []CrewMember{
+				{Name: "Viktor", Slug: "viktor", RoleTitle: "Backend Developer"},
+			},
+			wantContains: []string{
+				"localhost:9119/assign",
+				"localhost:9119/results/",
+				"target",
+				"task",
+			},
+		},
+		{
 			name: "multiple members with equality phrasing",
 			members: []CrewMember{
 				{Name: "Alice", Slug: "alice", RoleTitle: "Backend Developer", Description: "Handles API development", Status: "IDLE"},

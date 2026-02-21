@@ -87,6 +87,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		orch.SetSidecarEnabled(true)
 		logger.Info("sidecar proxy enabled for credential injection")
 	}
+
+	// Wire IPC config so lead agents can reach crewshipd for assignment routing.
+	// host.docker.internal resolves to the Docker host from inside containers.
+	if cfg.Auth.InternalToken != "" {
+		ipcBase := fmt.Sprintf("http://host.docker.internal:%d", cfg.Server.Port)
+		orch.SetIPCConfig(ipcBase, cfg.Auth.InternalToken)
+		logger.Info("orchestrator IPC config set", "base_url", ipcBase)
+	}
 	logW := logcollector.NewWriter(cfg.Storage.LogPath, logger)
 	logR := logcollector.NewReader(cfg.Storage.LogPath)
 	convStore := conversation.NewStore(cfg.Storage.BasePath, logger)
@@ -165,6 +173,8 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		var opts []goapi.RouterOption
 		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
 		opts = append(opts, goapi.WithInternalToken(cfg.Auth.InternalToken))
+		opts = append(opts, goapi.WithHub(wsHub))
+		opts = append(opts, goapi.WithOrchestrator(orch))
 		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 		if err != nil {
 			logger.Error("failed to create API router", "error", err)

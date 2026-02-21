@@ -14,6 +14,25 @@ import (
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
+// roundTripFunc allows using a plain function as an http.RoundTripper in tests.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// redirectTransport returns an http.RoundTripper that rewrites requests
+// destined for targetHost to the given upstream (HTTP) test server address.
+// This avoids TLS handshake issues when testing reverse proxy logic.
+func redirectTransport(targetHost, upstream string) http.RoundTripper {
+	return roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		r2 := r.Clone(r.Context())
+		if strings.HasPrefix(r2.URL.Host, targetHost) || r2.URL.Host == "" {
+			r2.URL.Scheme = "http"
+			r2.URL.Host = upstream
+		}
+		return http.DefaultTransport.RoundTrip(r2)
+	})
+}
+
 func newTestProxy(creds []Credential, domains []string) *Proxy {
 	cs := NewCredStore()
 	if len(creds) > 0 {
@@ -265,6 +284,78 @@ func TestInjectCredentialOverwritesExistingGoogle(t *testing.T) {
 	injectCredential(req, ProviderGoogle, "AIzaSy-real-key")
 	if req.URL.Query().Get("key") != "AIzaSy-real-key" {
 		t.Errorf("expected real key to overwrite agent key, got %q", req.URL.Query().Get("key"))
+	}
+}
+
+// TestProxyDirectRequestReverseProxiesV1Path verifies that direct requests to the sidecar
+// (via ANTHROPIC_BASE_URL=http://127.0.0.1:9119) on /v1/* paths are reverse-proxied to
+// api.anthropic.com with credential injection.
+func TestProxyDirectRequestReverseProxiesV1Path(t *testing.T) {
+	var receivedKey, receivedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedKey = r.Header.Get("x-api-key")
+		receivedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"type":"message"}`))
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	creds := []Credential{
+		{ID: "c1", Provider: ProviderAnthropic, Token: "sk-ant-real-key"},
+	}
+	proxy := newTestProxy(creds, DefaultAllowedDomains)
+	// Use redirectTransport so HTTPS scheme is rewritten to HTTP for the test server
+	proxy.transport = redirectTransport("api.anthropic.com", upstreamHost)
+
+	// Simulate ANTHROPIC_BASE_URL=http://127.0.0.1:9119 — direct HTTP request, not proxy
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`))
+	req.Host = "127.0.0.1:9119"
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", "sk-ant-dummy-crewship-sidecar")
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if receivedKey != "sk-ant-real-key" {
+		t.Errorf("expected injected real API key, got %q", receivedKey)
+	}
+	if receivedPath != "/v1/messages" {
+		t.Errorf("expected /v1/messages path forwarded, got %q", receivedPath)
+	}
+}
+
+// TestProxyDirectRequestOAuthPassthrough verifies that direct requests with OAuth Bearer
+// auth are forwarded as-is (no sidecar key injection) when no API key is in CredStore.
+func TestProxyDirectRequestOAuthPassthrough(t *testing.T) {
+	var receivedAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"type":"message"}`))
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	// Empty CredStore — OAuth token not stored here, injected as env var instead
+	proxy := newTestProxy(nil, DefaultAllowedDomains)
+	proxy.transport = redirectTransport("api.anthropic.com", upstreamHost)
+
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`))
+	req.Host = "127.0.0.1:9119"
+	req.Header.Set("Authorization", "Bearer sk-ant-oat01-my-oauth-token")
+	w := httptest.NewRecorder()
+
+	proxy.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if receivedAuth != "Bearer sk-ant-oat01-my-oauth-token" {
+		t.Errorf("expected OAuth Bearer token forwarded unchanged, got %q", receivedAuth)
 	}
 }
 

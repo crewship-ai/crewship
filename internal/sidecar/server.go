@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -22,24 +23,45 @@ type MemoryConfig struct {
 	AgentSlug string `json:"agent_slug"`
 }
 
+// IPCConfig holds the crewshipd internal API address for assignment forwarding.
+// Lead agents use this to POST assignment requests through the sidecar to crewshipd.
+type IPCConfig struct {
+	BaseURL     string `json:"base_url"`
+	Token       string `json:"token"`
+	CrewID      string `json:"crew_id"`
+	WorkspaceID string `json:"workspace_id"`
+	ChatID      string `json:"chat_id"`
+}
+
+// CrewMember describes a crew member accessible for lead assignment routing.
+type CrewMember struct {
+	Slug      string `json:"slug"`
+	Name      string `json:"name"`
+	RoleTitle string `json:"role_title"`
+}
+
 // ServerConfig configures the sidecar server.
 type ServerConfig struct {
 	Addr           string   // listen address (default: 127.0.0.1:9119)
 	AllowedDomains []string // extra allowed domains beyond defaults
 	Credentials    []Credential
 	Memory         *MemoryConfig
+	IPC            *IPCConfig
+	CrewMembers    []CrewMember
 	Logger         *slog.Logger
 }
 
 // Server is the crewship sidecar that runs inside agent containers.
-// It provides an HTTP forward proxy with credential injection and
-// optional memory search API.
+// It provides an HTTP forward proxy with credential injection,
+// optional memory search API, and assignment routing for lead agents.
 type Server struct {
 	httpServer   *http.Server
 	credStore    *CredStore
 	allowlist    *DomainAllowlist
 	proxy        *Proxy
 	memoryEngine *memory.Engine
+	ipc          *IPCConfig
+	crewMembers  []CrewMember
 	logger       *slog.Logger
 	readyCh      chan struct{} // closed when the TCP listener is bound
 }
@@ -71,11 +93,13 @@ func NewServer(cfg ServerConfig) *Server {
 	})
 
 	s := &Server{
-		credStore: credStore,
-		allowlist: allowlist,
-		proxy:     proxy,
-		logger:    cfg.Logger,
-		readyCh:   make(chan struct{}),
+		credStore:   credStore,
+		allowlist:   allowlist,
+		proxy:       proxy,
+		ipc:         cfg.IPC,
+		crewMembers: cfg.CrewMembers,
+		logger:      cfg.Logger,
+		readyCh:     make(chan struct{}),
 	}
 
 	// Initialize memory engine if configured
@@ -114,7 +138,7 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 	// both regular HTTP requests (with absolute URLs) and CONNECT tunnels.
 	// We intercept only localhost requests to specific paths.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Memory API routes are only accessible from localhost
+		// Memory and assignment API routes are only accessible from localhost
 		if isLocalhost(r.Host) || isLocalhost(r.URL.Host) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/memory/search":
@@ -125,6 +149,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			case r.Method == http.MethodPost && r.URL.Path == "/memory/reindex":
 				s.handleMemoryReindex(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/assign":
+				s.handleAssign(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/results/"):
+				s.handleResults(w, r)
 				return
 			}
 		}
