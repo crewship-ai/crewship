@@ -163,17 +163,16 @@ func TestHandleStreamJSONLine_InvalidJSON(t *testing.T) {
 }
 
 func TestHandleStreamJSONLine_Result(t *testing.T) {
+	// "result" messages are intentionally ignored because they duplicate
+	// content already delivered via "assistant" content blocks.
 	o := New(nil, nil, slog.Default())
 	line := `{"type":"result","result":"Final answer text"}`
 
 	var events []AgentEvent
 	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
 
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(events))
-	}
-	if events[0].Content != "Final answer text" {
-		t.Errorf("expected result text, got %q", events[0].Content)
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events (result is skipped to avoid duplication), got %d", len(events))
 	}
 }
 

@@ -572,9 +572,9 @@ func (o *Orchestrator) handleStreamJSONLine(line string, handler EventHandler) {
 		}
 
 	case "result":
-		if msg.Result != "" {
-			handler(AgentEvent{Type: "text", Content: msg.Result, Timestamp: time.Now()})
-		}
+		// The "result" message contains the same text already delivered via
+		// "assistant" content blocks. Emitting it again would duplicate the
+		// output in the chat UI. We intentionally skip it.
 
 	default:
 		// Unknown type -- emit raw content if any text content blocks exist
