@@ -325,7 +325,10 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
-		stats, _ := h.getTaskStats(r, m.ID)
+		stats, statsErr := h.getTaskStats(r, m.ID)
+		if statsErr != nil {
+			h.logger.Error("get task stats", "mission_id", m.ID, "error", statsErr)
+		}
 		m.TaskStats = stats
 		result = append(result, m)
 	}
@@ -410,8 +413,16 @@ func (h *MissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 		m.Tasks = append(m.Tasks, t)
 	}
+	if err := taskRows.Err(); err != nil {
+		h.logger.Error("rows iteration (tasks)", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 
-	stats, _ := h.getTaskStats(r, missionID)
+	stats, statsErr := h.getTaskStats(r, missionID)
+	if statsErr != nil {
+		h.logger.Error("get task stats", "mission_id", missionID, "error", statsErr)
+	}
 	m.TaskStats = stats
 
 	writeJSON(w, http.StatusOK, m)
@@ -440,9 +451,17 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("begin transaction", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
 	// Get current status
 	var currentStatus string
-	err := h.db.QueryRowContext(r.Context(),
+	err = tx.QueryRowContext(r.Context(),
 		`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
 		missionID, crewID, wsID).Scan(&currentStatus)
 	if err != nil {
@@ -478,10 +497,9 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 			completedAt = sql.NullString{String: now, Valid: true}
 		}
 
-		_, err = h.db.ExecContext(r.Context(),
+		if _, err = tx.ExecContext(r.Context(),
 			`UPDATE missions SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?`,
-			newStatus, completedAt, now, missionID)
-		if err != nil {
+			newStatus, completedAt, now, missionID); err != nil {
 			h.logger.Error("update mission status", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
@@ -489,25 +507,31 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Title != nil {
-		if _, err := h.db.ExecContext(r.Context(), `UPDATE missions SET title = ?, updated_at = ? WHERE id = ?`, *req.Title, now, missionID); err != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE missions SET title = ?, updated_at = ? WHERE id = ?`, *req.Title, now, missionID); err != nil {
 			h.logger.Error("update mission title", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 	if req.Description != nil {
-		if _, err := h.db.ExecContext(r.Context(), `UPDATE missions SET description = ?, updated_at = ? WHERE id = ?`, *req.Description, now, missionID); err != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE missions SET description = ?, updated_at = ? WHERE id = ?`, *req.Description, now, missionID); err != nil {
 			h.logger.Error("update mission description", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 	if req.Plan != nil {
-		if _, err := h.db.ExecContext(r.Context(), `UPDATE missions SET plan = ?, updated_at = ? WHERE id = ?`, *req.Plan, now, missionID); err != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE missions SET plan = ?, updated_at = ? WHERE id = ?`, *req.Plan, now, missionID); err != nil {
 			h.logger.Error("update mission plan", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		h.logger.Error("commit mission update", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
 	}
 
 	// Return updated mission
@@ -641,16 +665,24 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	// Determine initial status based on dependencies
 	status := "PENDING"
 	if len(req.DependsOn) > 0 {
-		// Check if all dependencies are completed
+		// Validate all dependency IDs exist and check if all are completed
 		allCompleted := true
 		for _, depID := range req.DependsOn {
 			var depStatus string
-			err := h.db.QueryRowContext(r.Context(),
+			depErr := h.db.QueryRowContext(r.Context(),
 				`SELECT status FROM mission_tasks WHERE id = ? AND mission_id = ?`,
 				depID, missionID).Scan(&depStatus)
-			if err != nil || depStatus != "COMPLETED" {
+			if depErr != nil {
+				if errors.Is(depErr, sql.ErrNoRows) {
+					writeProblem(w, r, http.StatusBadRequest, "dependency task not found: "+depID)
+					return
+				}
+				h.logger.Error("lookup dependency task", "error", depErr)
+				writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+				return
+			}
+			if depStatus != "COMPLETED" {
 				allCompleted = false
-				break
 			}
 		}
 		if !allCompleted {
@@ -723,9 +755,17 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("begin transaction", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
 	// Get current task — scoped by crew + workspace via mission join
 	var currentStatus string
-	err := h.db.QueryRowContext(r.Context(),
+	err = tx.QueryRowContext(r.Context(),
 		`SELECT mt.status FROM mission_tasks mt
 		 JOIN missions m ON m.id = mt.mission_id
 		 WHERE mt.id = ? AND mt.mission_id = ? AND m.crew_id = ? AND m.workspace_id = ?`,
@@ -741,6 +781,7 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	unblockNeeded := false
 
 	if req.Status != nil {
 		newStatus := *req.Status
@@ -770,61 +811,68 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		}
 
 		args = append(args, taskID, missionID)
-		_, err = h.db.ExecContext(r.Context(),
-			`UPDATE mission_tasks SET `+updates+` WHERE id = ? AND mission_id = ?`, args...)
-		if err != nil {
+		if _, err = tx.ExecContext(r.Context(),
+			`UPDATE mission_tasks SET `+updates+` WHERE id = ? AND mission_id = ?`, args...); err != nil {
 			h.logger.Error("update task status", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 
-		// Unblock dependent tasks when a task completes
-		if newStatus == "COMPLETED" {
-			h.unblockDependentTasks(r, missionID, taskID)
-		}
+		unblockNeeded = newStatus == "COMPLETED"
 	}
 
 	if req.ResultSummary != nil {
-		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET result_summary = ?, updated_at = ? WHERE id = ?`, *req.ResultSummary, now, taskID); err != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET result_summary = ?, updated_at = ? WHERE id = ?`, *req.ResultSummary, now, taskID); err != nil {
 			h.logger.Error("update task result_summary", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 	if req.ErrorMessage != nil {
-		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET error_message = ?, updated_at = ? WHERE id = ?`, *req.ErrorMessage, now, taskID); err != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET error_message = ?, updated_at = ? WHERE id = ?`, *req.ErrorMessage, now, taskID); err != nil {
 			h.logger.Error("update task error_message", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 	if req.OutputPath != nil {
-		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET output_path = ?, updated_at = ? WHERE id = ?`, *req.OutputPath, now, taskID); err != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET output_path = ?, updated_at = ? WHERE id = ?`, *req.OutputPath, now, taskID); err != nil {
 			h.logger.Error("update task output_path", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 	if req.AssignedAgentID != nil {
-		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET assigned_agent_id = ?, updated_at = ? WHERE id = ?`, *req.AssignedAgentID, now, taskID); err != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET assigned_agent_id = ?, updated_at = ? WHERE id = ?`, *req.AssignedAgentID, now, taskID); err != nil {
 			h.logger.Error("update task assigned_agent_id", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 	if req.TokenCount != nil {
-		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET token_count = ?, updated_at = ? WHERE id = ?`, *req.TokenCount, now, taskID); err != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET token_count = ?, updated_at = ? WHERE id = ?`, *req.TokenCount, now, taskID); err != nil {
 			h.logger.Error("update task token_count", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 	}
 	if req.EstimatedCost != nil {
-		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET estimated_cost = ?, updated_at = ? WHERE id = ?`, *req.EstimatedCost, now, taskID); err != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET estimated_cost = ?, updated_at = ? WHERE id = ?`, *req.EstimatedCost, now, taskID); err != nil {
 			h.logger.Error("update task estimated_cost", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		h.logger.Error("commit task update", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// After commit: unblock dependents and broadcast status change
+	if unblockNeeded {
+		h.unblockDependentTasks(r, missionID, taskID)
 	}
 
 	// Return updated task

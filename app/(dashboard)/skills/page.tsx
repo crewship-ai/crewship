@@ -111,7 +111,7 @@ export default function SkillsPage() {
     return () => {
       cancelled = true
     }
-  }, [workspaceId, wsLoading, activeFilter, debouncedSearch])
+  }, [workspaceId, wsLoading, activeFilter, debouncedSearch, buildParams])
 
   const isLoading = wsLoading || loading
 
@@ -146,6 +146,7 @@ export default function SkillsPage() {
             value={searchQuery}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-9"
+            aria-label="Search skills"
           />
         </div>
       </div>
