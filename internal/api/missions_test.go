@@ -592,7 +592,9 @@ func TestMissionDelete(t *testing.T) {
 
 	// Verify deleted
 	var count int
-	db.QueryRow("SELECT COUNT(*) FROM missions WHERE id = 'm1'").Scan(&count)
+	if err := db.QueryRow("SELECT COUNT(*) FROM missions WHERE id = 'm1'").Scan(&count); err != nil {
+		t.Fatalf("query count: %v", err)
+	}
 	if count != 0 {
 		t.Errorf("mission still exists after delete")
 	}

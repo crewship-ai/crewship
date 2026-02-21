@@ -912,9 +912,11 @@ func (h *MissionHandler) unblockDependentTasks(r *http.Request, missionID, compl
 		}
 
 		if allDone {
-			h.db.ExecContext(r.Context(),
+			if _, err := h.db.ExecContext(r.Context(),
 				`UPDATE mission_tasks SET status = 'PENDING', updated_at = ? WHERE id = ?`,
-				now, id)
+				now, id); err != nil {
+				h.logger.Error("unblock task failed", "task_id", id, "error", err)
+			}
 			if h.hub != nil {
 				h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
 					Type:    "task.status",

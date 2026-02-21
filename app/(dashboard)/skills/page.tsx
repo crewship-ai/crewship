@@ -73,12 +73,12 @@ export default function SkillsPage() {
     }
   }, [])
 
-  function buildParams() {
+  const buildParams = useCallback(() => {
     const params = new URLSearchParams({ workspace_id: workspaceId! })
     if (debouncedSearch) params.set("search", debouncedSearch)
     if (activeFilter !== "All") params.set("category", activeFilter.toUpperCase())
     return params
-  }
+  }, [workspaceId, debouncedSearch, activeFilter])
 
   useEffect(() => {
     if (!workspaceId) {
