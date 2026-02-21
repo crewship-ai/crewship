@@ -228,4 +228,8 @@ DATABASE_URL=                       # Optional PostgreSQL connection string
 
 When you make a new mistake, add it here so it never happens again. This file is a living document — updating it is part of every significant PR.
 
+## CodeRabbit Review Workflow
+
+After every push to a PR, verify that CodeRabbit has posted a new review. If no review appears within ~3 minutes, post a comment `@coderabbitai review` on the PR to force-trigger the review process. Always wait for CodeRabbit's review, fix all actionable findings, and push again until clean.
+
 Commit style: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:` (conventional commits). Branch from `main`.
