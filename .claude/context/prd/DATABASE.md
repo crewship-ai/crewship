@@ -58,7 +58,7 @@ V single binary mode (`crewship start`) pouzivame SQLite jako default databazi.
 
 ## 2. PREHLED ENTIT
 
-**26 tabulek** rozdelenychdo 8 domen:
+**26 tabulek** rozdelenych do 8 domen:
 
 | Domena | Tabulky | Popis |
 |---|---|---|
@@ -110,7 +110,7 @@ Workspace (1) ──── (*) WorkspaceMember (*) ──── (1) User
 ## 3. SPOLECNE KONVENCE
 
 ### Vsechny tabulky maji:
-- `id` -- UUID v4, primarni klic, generovany databazi (`gen_random_uuid()`)
+- `id` -- primarni klic. Vetsina tabulek pouziva UUID v4 generovany databazi (`gen_random_uuid()`). Tabulky Mission a MissionTask pouzivaji CUID generovany aplikaci (`generateCUID()` v Go).
 - `created_at` -- TIMESTAMPTZ, default `now()`
 - `updated_at` -- TIMESTAMPTZ, default `now()`, automaticky updatovany triggerem
 

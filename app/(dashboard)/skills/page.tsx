@@ -73,6 +73,13 @@ export default function SkillsPage() {
     }
   }, [])
 
+  function buildParams() {
+    const params = new URLSearchParams({ workspace_id: workspaceId! })
+    if (debouncedSearch) params.set("search", debouncedSearch)
+    if (activeFilter !== "All") params.set("category", activeFilter.toUpperCase())
+    return params
+  }
+
   useEffect(() => {
     if (!workspaceId) {
       if (!wsLoading) setLoading(false)
@@ -85,11 +92,7 @@ export default function SkillsPage() {
       setLoading(true)
       setError(null)
       try {
-        const params = new URLSearchParams({ workspace_id: workspaceId! })
-        if (debouncedSearch) params.set("search", debouncedSearch)
-        if (activeFilter !== "All") params.set("category", activeFilter.toUpperCase())
-
-        const res = await fetch(`/api/v1/skills?${params}`)
+        const res = await fetch(`/api/v1/skills?${buildParams()}`)
         if (!res.ok) {
           setError("Failed to load skills")
           return
@@ -116,11 +119,8 @@ export default function SkillsPage() {
     if (!workspaceId) return
     setLoading(true)
     setError(null)
-    const params = new URLSearchParams({ workspace_id: workspaceId! })
-    if (debouncedSearch) params.set("search", debouncedSearch)
-    if (activeFilter !== "All") params.set("category", activeFilter.toUpperCase())
 
-    fetch(`/api/v1/skills?${params}`)
+    fetch(`/api/v1/skills?${buildParams()}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((json) => {
         const data = SkillsArraySchema.parse(json)

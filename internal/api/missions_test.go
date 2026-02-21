@@ -204,10 +204,14 @@ func TestMissionList_StatusFilter(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
-		VALUES ('m1', ?, ?, ?, 'mission-t1', 'M1', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID)
-	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
-		VALUES ('m2', ?, ?, ?, 'mission-t2', 'M2', 'IN_PROGRESS', datetime('now'), datetime('now'))`, wsID, crewID, leadID)
+	if _, err := db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES ('m1', ?, ?, ?, 'mission-t1', 'M1', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID); err != nil {
+		t.Fatalf("insert mission m1: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES ('m2', ?, ?, ?, 'mission-t2', 'M2', 'IN_PROGRESS', datetime('now'), datetime('now'))`, wsID, crewID, leadID); err != nil {
+		t.Fatalf("insert mission m2: %v", err)
+	}
 
 	handler := NewMissionHandler(db, nil, logger)
 
@@ -225,7 +229,9 @@ func TestMissionList_StatusFilter(t *testing.T) {
 	}
 
 	var result []map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &result)
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(result) != 1 {
 		t.Errorf("len = %d, want 1 (filtered)", len(result))
 	}
@@ -240,10 +246,14 @@ func TestMissionGet(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
-		VALUES ('m1', ?, ?, ?, 'mission-g1', 'Mission Get', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID)
-	db.Exec(`INSERT INTO mission_tasks (id, mission_id, title, status, task_order, created_at, updated_at)
-		VALUES ('mt1', 'm1', 'Task 1', 'PENDING', 0, datetime('now'), datetime('now'))`)
+	if _, err := db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES ('m1', ?, ?, ?, 'mission-g1', 'Mission Get', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID); err != nil {
+		t.Fatalf("insert mission: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO mission_tasks (id, mission_id, title, status, task_order, created_at, updated_at)
+		VALUES ('mt1', 'm1', 'Task 1', 'PENDING', 0, datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
 
 	handler := NewMissionHandler(db, nil, logger)
 
@@ -262,7 +272,9 @@ func TestMissionGet(t *testing.T) {
 	}
 
 	var result map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &result)
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if result["title"] != "Mission Get" {
 		t.Errorf("title = %v, want 'Mission Get'", result["title"])
 	}
@@ -306,8 +318,10 @@ func TestMissionUpdate(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
-		VALUES ('m1', ?, ?, ?, 'mission-u1', 'Mission Update', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID)
+	if _, err := db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES ('m1', ?, ?, ?, 'mission-u1', 'Mission Update', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID); err != nil {
+		t.Fatalf("insert mission: %v", err)
+	}
 
 	handler := NewMissionHandler(db, nil, logger)
 
@@ -327,7 +341,9 @@ func TestMissionUpdate(t *testing.T) {
 	}
 
 	var result map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &result)
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if result["status"] != "IN_PROGRESS" {
 		t.Errorf("status = %v, want IN_PROGRESS", result["status"])
 	}
@@ -342,8 +358,10 @@ func TestMissionUpdate_InvalidTransition(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
-		VALUES ('m1', ?, ?, ?, 'mission-it1', 'Mission', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID)
+	if _, err := db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES ('m1', ?, ?, ?, 'mission-it1', 'Mission', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID); err != nil {
+		t.Fatalf("insert mission: %v", err)
+	}
 
 	handler := NewMissionHandler(db, nil, logger)
 
@@ -372,8 +390,10 @@ func TestMissionTaskCreate(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
-		VALUES ('m1', ?, ?, ?, 'mission-tc1', 'Mission', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID)
+	if _, err := db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES ('m1', ?, ?, ?, 'mission-tc1', 'Mission', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID); err != nil {
+		t.Fatalf("insert mission: %v", err)
+	}
 
 	handler := NewMissionHandler(db, nil, logger)
 
@@ -393,7 +413,9 @@ func TestMissionTaskCreate(t *testing.T) {
 	}
 
 	var result map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &result)
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if result["title"] != "Write tests" {
 		t.Errorf("title = %v, want 'Write tests'", result["title"])
 	}
@@ -411,10 +433,14 @@ func TestMissionTaskUpdate(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
-		VALUES ('m1', ?, ?, ?, 'mission-tu1', 'Mission', 'IN_PROGRESS', datetime('now'), datetime('now'))`, wsID, crewID, leadID)
-	db.Exec(`INSERT INTO mission_tasks (id, mission_id, title, status, task_order, created_at, updated_at)
-		VALUES ('mt1', 'm1', 'Task 1', 'PENDING', 0, datetime('now'), datetime('now'))`)
+	if _, err := db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES ('m1', ?, ?, ?, 'mission-tu1', 'Mission', 'IN_PROGRESS', datetime('now'), datetime('now'))`, wsID, crewID, leadID); err != nil {
+		t.Fatalf("insert mission: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO mission_tasks (id, mission_id, title, status, task_order, created_at, updated_at)
+		VALUES ('mt1', 'm1', 'Task 1', 'PENDING', 0, datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
 
 	handler := NewMissionHandler(db, nil, logger)
 
@@ -435,7 +461,9 @@ func TestMissionTaskUpdate(t *testing.T) {
 	}
 
 	var result map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &result)
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if result["status"] != "IN_PROGRESS" {
 		t.Errorf("status = %v, want IN_PROGRESS", result["status"])
 	}
@@ -450,14 +478,20 @@ func TestMissionTaskUpdate_UnblocksDependents(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
-		VALUES ('m1', ?, ?, ?, 'mission-ub1', 'Mission', 'IN_PROGRESS', datetime('now'), datetime('now'))`, wsID, crewID, leadID)
+	if _, err := db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES ('m1', ?, ?, ?, 'mission-ub1', 'Mission', 'IN_PROGRESS', datetime('now'), datetime('now'))`, wsID, crewID, leadID); err != nil {
+		t.Fatalf("insert mission: %v", err)
+	}
 	// Task 1: IN_PROGRESS (will be completed)
-	db.Exec(`INSERT INTO mission_tasks (id, mission_id, title, status, task_order, depends_on, created_at, updated_at)
-		VALUES ('mt1', 'm1', 'Task 1', 'IN_PROGRESS', 0, '[]', datetime('now'), datetime('now'))`)
+	if _, err := db.Exec(`INSERT INTO mission_tasks (id, mission_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('mt1', 'm1', 'Task 1', 'IN_PROGRESS', 0, '[]', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("insert task mt1: %v", err)
+	}
 	// Task 2: BLOCKED (depends on mt1)
-	db.Exec(`INSERT INTO mission_tasks (id, mission_id, title, status, task_order, depends_on, created_at, updated_at)
-		VALUES ('mt2', 'm1', 'Task 2', 'BLOCKED', 1, '["mt1"]', datetime('now'), datetime('now'))`)
+	if _, err := db.Exec(`INSERT INTO mission_tasks (id, mission_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('mt2', 'm1', 'Task 2', 'BLOCKED', 1, '["mt1"]', datetime('now'), datetime('now'))`); err != nil {
+		t.Fatalf("insert task mt2: %v", err)
+	}
 
 	handler := NewMissionHandler(db, nil, logger)
 
@@ -498,8 +532,10 @@ func TestMissionListAll(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
-		VALUES ('m1', ?, ?, ?, 'mission-la1', 'Mission 1', 'IN_PROGRESS', datetime('now'), datetime('now'))`, wsID, crewID, leadID)
+	if _, err := db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES ('m1', ?, ?, ?, 'mission-la1', 'Mission 1', 'IN_PROGRESS', datetime('now'), datetime('now'))`, wsID, crewID, leadID); err != nil {
+		t.Fatalf("insert mission: %v", err)
+	}
 
 	handler := NewMissionHandler(db, nil, logger)
 
@@ -516,7 +552,9 @@ func TestMissionListAll(t *testing.T) {
 	}
 
 	var result []map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &result)
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(result) != 1 {
 		t.Errorf("len = %d, want 1", len(result))
 	}
@@ -531,8 +569,10 @@ func TestMissionDelete(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
-		VALUES ('m1', ?, ?, ?, 'mission-d1', 'Mission Del', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID)
+	if _, err := db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES ('m1', ?, ?, ?, 'mission-d1', 'Mission Del', 'PLANNING', datetime('now'), datetime('now'))`, wsID, crewID, leadID); err != nil {
+		t.Fatalf("insert mission: %v", err)
+	}
 
 	handler := NewMissionHandler(db, nil, logger)
 

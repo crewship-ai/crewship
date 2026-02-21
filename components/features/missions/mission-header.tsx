@@ -2,6 +2,7 @@
 
 import { User } from "lucide-react"
 import { MissionStatusBadge } from "./mission-status-badge"
+import { formatCost } from "@/lib/utils/format"
 import type { Mission } from "@/lib/types/mission"
 
 interface MissionHeaderProps {
@@ -21,11 +22,6 @@ function formatDuration(startAt: string, endAt: string | null): string {
   if (hours < 24) return `${hours}h ${minutes % 60}m`
   const days = Math.floor(hours / 24)
   return `${days}d ${hours % 24}h`
-}
-
-function formatCost(cost: number | null): string {
-  if (cost == null || cost === 0) return "—"
-  return `$${cost.toFixed(4)}`
 }
 
 export function MissionHeader({ mission }: MissionHeaderProps) {

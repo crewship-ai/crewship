@@ -55,6 +55,20 @@ export function MissionDetailPageClient() {
 
   const isLoading = wsLoading || loading
 
+  if (!workspaceId && !wsLoading) {
+    return (
+      <div className="p-4 sm:p-6 space-y-4 max-w-4xl">
+        <Button variant="ghost" size="sm" asChild>
+          <Link href={`/crews/${params.crewId}`}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Crew
+          </Link>
+        </Button>
+        <p className="text-sm text-muted-foreground">No workspace selected.</p>
+      </div>
+    )
+  }
+
   if (error) {
     return (
       <div className="p-4 sm:p-6 space-y-4 max-w-4xl">

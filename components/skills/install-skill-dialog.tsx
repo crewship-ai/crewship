@@ -101,7 +101,7 @@ export function InstallSkillDialog({ skillId, workspaceId }: InstallSkillDialogP
         <div className="py-4">
           <Label htmlFor="agent-select">Agent</Label>
           <Select value={selectedAgentId} onValueChange={setSelectedAgentId}>
-            <SelectTrigger className="mt-1">
+            <SelectTrigger id="agent-select" className="mt-1">
               <SelectValue placeholder={loading ? "Loading agents..." : "Select an agent"} />
             </SelectTrigger>
             <SelectContent>

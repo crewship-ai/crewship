@@ -253,7 +253,7 @@ Bezpecnostni omezeni (SSRF ochrana):
 
 | Metoda | Path | Role | Popis |
 |---|---|---|---|
-| `GET` | `/api/v1/missions` | Member | Seznam vsech missi v workspace (supports `?status=`) |
+| `GET` | `/api/v1/missions` | Member | Seznam vsech missi v workspace (supports `?status=`, `?limit=`, `?offset=`) |
 | `GET` | `/api/v1/crews/{crewId}/missions` | Member | Seznam missi crew (supports `?status=`, `?limit=`, `?offset=`) |
 | `POST` | `/api/v1/crews/{crewId}/missions` | MANAGER+ | Vytvorit missi (requires lead_agent_id with LEAD role) |
 | `GET` | `/api/v1/crews/{crewId}/missions/{missionId}` | Member | Detail misse (includes tasks array) |

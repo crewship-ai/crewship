@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { RefreshCw, Target } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -22,7 +22,7 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
-  async function fetchMissions(showRefresh = false) {
+  const fetchMissions = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true)
     else setLoading(true)
     try {
@@ -39,12 +39,11 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [crewId, workspaceId])
 
   useEffect(() => {
     fetchMissions()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crewId, workspaceId])
+  }, [fetchMissions])
 
   if (loading) {
     return (

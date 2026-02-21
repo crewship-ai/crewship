@@ -489,18 +489,30 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Title != nil {
-		h.db.ExecContext(r.Context(), `UPDATE missions SET title = ?, updated_at = ? WHERE id = ?`, *req.Title, now, missionID)
+		if _, err := h.db.ExecContext(r.Context(), `UPDATE missions SET title = ?, updated_at = ? WHERE id = ?`, *req.Title, now, missionID); err != nil {
+			h.logger.Error("update mission title", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 	if req.Description != nil {
-		h.db.ExecContext(r.Context(), `UPDATE missions SET description = ?, updated_at = ? WHERE id = ?`, *req.Description, now, missionID)
+		if _, err := h.db.ExecContext(r.Context(), `UPDATE missions SET description = ?, updated_at = ? WHERE id = ?`, *req.Description, now, missionID); err != nil {
+			h.logger.Error("update mission description", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 	if req.Plan != nil {
-		h.db.ExecContext(r.Context(), `UPDATE missions SET plan = ?, updated_at = ? WHERE id = ?`, *req.Plan, now, missionID)
+		if _, err := h.db.ExecContext(r.Context(), `UPDATE missions SET plan = ?, updated_at = ? WHERE id = ?`, *req.Plan, now, missionID); err != nil {
+			h.logger.Error("update mission plan", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 
 	// Return updated mission
 	var m missionResponse
-	h.db.QueryRowContext(r.Context(), `
+	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT m.id, m.workspace_id, m.crew_id, m.lead_agent_id, m.trace_id, m.title,
 		       m.description, m.status, m.plan, m.workflow_template,
 		       m.total_token_count, m.total_estimated_cost,
@@ -514,7 +526,11 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&m.TotalTokenCount, &m.TotalEstimatedCost,
 		&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
 		&m.LeadAgentName, &m.LeadAgentSlug,
-	)
+	); err != nil {
+		h.logger.Error("read updated mission", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 
 	if h.hub != nil && req.Status != nil {
 		h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
@@ -688,8 +704,10 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	crewID := r.PathValue("crewId")
 	missionID := r.PathValue("missionId")
 	taskID := r.PathValue("taskId")
+	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
 		Status          *string  `json:"status"`
@@ -705,11 +723,13 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get current task
+	// Get current task — scoped by crew + workspace via mission join
 	var currentStatus string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT status FROM mission_tasks WHERE id = ? AND mission_id = ?`,
-		taskID, missionID).Scan(&currentStatus)
+		`SELECT mt.status FROM mission_tasks mt
+		 JOIN missions m ON m.id = mt.mission_id
+		 WHERE mt.id = ? AND mt.mission_id = ? AND m.crew_id = ? AND m.workspace_id = ?`,
+		taskID, missionID, crewID, wsID).Scan(&currentStatus)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Task not found")
@@ -765,27 +785,51 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.ResultSummary != nil {
-		h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET result_summary = ?, updated_at = ? WHERE id = ?`, *req.ResultSummary, now, taskID)
+		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET result_summary = ?, updated_at = ? WHERE id = ?`, *req.ResultSummary, now, taskID); err != nil {
+			h.logger.Error("update task result_summary", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 	if req.ErrorMessage != nil {
-		h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET error_message = ?, updated_at = ? WHERE id = ?`, *req.ErrorMessage, now, taskID)
+		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET error_message = ?, updated_at = ? WHERE id = ?`, *req.ErrorMessage, now, taskID); err != nil {
+			h.logger.Error("update task error_message", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 	if req.OutputPath != nil {
-		h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET output_path = ?, updated_at = ? WHERE id = ?`, *req.OutputPath, now, taskID)
+		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET output_path = ?, updated_at = ? WHERE id = ?`, *req.OutputPath, now, taskID); err != nil {
+			h.logger.Error("update task output_path", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 	if req.AssignedAgentID != nil {
-		h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET assigned_agent_id = ?, updated_at = ? WHERE id = ?`, *req.AssignedAgentID, now, taskID)
+		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET assigned_agent_id = ?, updated_at = ? WHERE id = ?`, *req.AssignedAgentID, now, taskID); err != nil {
+			h.logger.Error("update task assigned_agent_id", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 	if req.TokenCount != nil {
-		h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET token_count = ?, updated_at = ? WHERE id = ?`, *req.TokenCount, now, taskID)
+		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET token_count = ?, updated_at = ? WHERE id = ?`, *req.TokenCount, now, taskID); err != nil {
+			h.logger.Error("update task token_count", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 	if req.EstimatedCost != nil {
-		h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET estimated_cost = ?, updated_at = ? WHERE id = ?`, *req.EstimatedCost, now, taskID)
+		if _, err := h.db.ExecContext(r.Context(), `UPDATE mission_tasks SET estimated_cost = ?, updated_at = ? WHERE id = ?`, *req.EstimatedCost, now, taskID); err != nil {
+			h.logger.Error("update task estimated_cost", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 
 	// Return updated task
 	var t missionTaskResponse
-	h.db.QueryRowContext(r.Context(), `
+	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT mt.id, mt.mission_id, mt.assigned_agent_id, mt.title, mt.description,
 		       mt.status, mt.task_order, mt.depends_on, mt.iteration, mt.max_iterations,
 		       mt.result_summary, mt.output_path, mt.error_message, mt.assignment_id,
@@ -798,7 +842,15 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		&t.ResultSummary, &t.OutputPath, &t.ErrorMessage, &t.AssignmentID,
 		&t.TokenCount, &t.EstimatedCost, &t.StartedAt, &t.CompletedAt,
 		&t.DurationMs, &t.CreatedAt, &t.UpdatedAt,
-	)
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Task not found")
+			return
+		}
+		h.logger.Error("read updated task", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 
 	if h.hub != nil && req.Status != nil {
 		h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{

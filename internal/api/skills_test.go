@@ -166,9 +166,12 @@ func TestSkillsImport_ErrorCases(t *testing.T) {
 
 func seedSkillForTest(t *testing.T, db *sql.DB, id, name, category string) {
 	t.Helper()
-	db.Exec(`INSERT INTO skills (id, name, slug, display_name, version, category, source, verification, downloads, rating_count, pricing_tier, featured, tags, content)
+	_, err := db.Exec(`INSERT INTO skills (id, name, slug, display_name, version, category, source, verification, downloads, rating_count, pricing_tier, featured, tags, content)
 		VALUES (?, ?, ?, ?, '1.0.0', ?, 'CUSTOM', 'UNVERIFIED', 0, 0, 'FREE', 0, '[]', '# Test')`,
 		id, name, name, "Display "+name, category)
+	if err != nil {
+		t.Fatalf("seedSkillForTest failed to insert skill %s: %v", id, err)
+	}
 }
 
 func TestSkillGet(t *testing.T) {
@@ -197,7 +200,9 @@ func TestSkillGet(t *testing.T) {
 	}
 
 	var result map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &result)
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if result["name"] != "test-skill" {
 		t.Errorf("name = %v, want test-skill", result["name"])
 	}
@@ -256,7 +261,9 @@ func TestSkillsList_CategoryFilter(t *testing.T) {
 	}
 
 	var result []map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &result)
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(result) != 1 {
 		t.Errorf("len = %d, want 1", len(result))
 	}
@@ -288,7 +295,9 @@ func TestSkillsList_Search(t *testing.T) {
 	}
 
 	var result []map[string]interface{}
-	json.Unmarshal(rr.Body.Bytes(), &result)
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 	if len(result) != 1 {
 		t.Errorf("len = %d, want 1", len(result))
 	}

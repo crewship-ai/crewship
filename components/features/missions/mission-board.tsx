@@ -17,6 +17,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { TaskStatusBadge } from "./mission-status-badge"
+import { formatCost } from "@/lib/utils/format"
 import type { MissionTask, TaskStats } from "@/lib/types/mission"
 
 interface MissionBoardProps {
@@ -39,11 +40,6 @@ function formatDuration(startedAt: string | null, completedAt: string | null, du
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
   return `${minutes}m ${seconds % 60}s`
-}
-
-function formatCost(cost: number | null): string {
-  if (cost == null || cost === 0) return "—"
-  return `$${cost.toFixed(4)}`
 }
 
 function formatTime(dateStr: string | null): string {
@@ -92,6 +88,7 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
                       <TableRow
                         className={hasDetail ? "cursor-pointer" : ""}
                         role={hasDetail ? "button" : undefined}
+                        aria-expanded={hasDetail ? isExpanded : undefined}
                         tabIndex={hasDetail ? 0 : -1}
                         onClick={() => {
                           if (hasDetail) setExpandedId(isExpanded ? null : task.id)
