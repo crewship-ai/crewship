@@ -88,6 +88,13 @@ func New(
 	}
 }
 
+func truncateID(id string, n int) string {
+	if len(id) <= n {
+		return id
+	}
+	return id[:n]
+}
+
 func generateMsgID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
@@ -123,7 +130,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if containerID != "" && b.container != nil {
 		if _, err := b.container.ContainerStatus(ctx, containerID); err != nil {
 			b.logger.Warn("cached container gone, will recreate",
-				"container_id", containerID[:12], "error", err)
+				"container_id", truncateID(containerID, 12), "error", err)
 			containerID = ""
 			b.containerMu.Lock()
 			delete(b.containerCache, info.CrewID)
@@ -150,7 +157,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		b.containerCache[info.CrewID] = containerID
 		b.containerMu.Unlock()
 		streamFn(ws.ChatEvent{Type: "status", Content: "Container ready"})
-		b.logger.Info("team container ensured", "crew_id", info.CrewID, "container_id", containerID[:12])
+		b.logger.Info("team container ensured", "crew_id", info.CrewID, "container_id", truncateID(containerID, 12))
 	} else if containerID == "" {
 		streamFn(ws.ChatEvent{Type: "error", Content: "container provider not configured"})
 		return fmt.Errorf("no container provider and no container ID")

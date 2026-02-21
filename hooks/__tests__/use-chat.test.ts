@@ -4,8 +4,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 const mockSend = vi.fn()
 const mockStatus = { current: "connected" as string }
 
+interface UseWebSocketArgs {
+  onMessage?: (msg: unknown) => void
+}
+
 vi.mock("@/hooks/use-websocket", () => ({
-  useWebSocket: vi.fn(({ onMessage }: { onMessage?: (msg: unknown) => void }) => {
+  useWebSocket: vi.fn(({ onMessage }: UseWebSocketArgs) => {
     // Expose onMessage for testing
     if (onMessage) {
       ;(globalThis as Record<string, unknown>).__testOnMessage = onMessage

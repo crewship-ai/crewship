@@ -343,8 +343,9 @@ func (c *Client) handleCancelMessage(msg ClientMessage) {
 		return
 	}
 
+	cancelKey := c.userID + ":" + payload.ChatID
 	c.hub.cancelMu.Lock()
-	cancel, ok := c.hub.cancelFns[payload.ChatID]
+	cancel, ok := c.hub.cancelFns[cancelKey]
 	c.hub.cancelMu.Unlock()
 
 	if ok {
@@ -401,9 +402,10 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		runCtx, runCancel := context.WithCancel(c.ctx)
 		defer runCancel()
 
-		// Reject if a run is already in progress for this session
+		// Reject if a run is already in progress for this user+session
+		cancelKey := c.userID + ":" + payload.ChatID
 		c.hub.cancelMu.Lock()
-		if _, exists := c.hub.cancelFns[payload.ChatID]; exists {
+		if _, exists := c.hub.cancelFns[cancelKey]; exists {
 			c.hub.cancelMu.Unlock()
 			errResp, _ := json.Marshal(ServerMessage{
 				Type:    "error",
@@ -413,11 +415,11 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			c.safeSend(errResp)
 			return
 		}
-		c.hub.cancelFns[payload.ChatID] = runCancel
+		c.hub.cancelFns[cancelKey] = runCancel
 		c.hub.cancelMu.Unlock()
 		defer func() {
 			c.hub.cancelMu.Lock()
-			delete(c.hub.cancelFns, payload.ChatID)
+			delete(c.hub.cancelFns, cancelKey)
 			c.hub.cancelMu.Unlock()
 		}()
 

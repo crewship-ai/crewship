@@ -109,7 +109,11 @@ export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps)
   const fileCreationPart = turn.parts.find(
     (p) => p.type === "text" && /file (created|written|saved)/i.test(p.content)
   )
-  const fileMatch = fileCreationPart?.content.match(/[`"]?([a-zA-Z0-9_\-/.]+\.[a-zA-Z0-9]+)[`"]?/)
+  const fileMatchRaw = fileCreationPart?.content.match(/[`"]?([a-zA-Z0-9_\-/.]+\.[a-zA-Z0-9]+)[`"]?/)
+  // Sanitize: reject path traversal and absolute paths
+  const fileMatch = fileMatchRaw && fileMatchRaw[1] &&
+    !fileMatchRaw[1].includes("..") &&
+    !fileMatchRaw[1].startsWith("/") ? fileMatchRaw : null
 
   return (
     <Message from="assistant">
