@@ -228,18 +228,22 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		if ctx.Err() == context.Canceled {
 			b.logger.Info("run cancelled by user", "chat_id", chatID, "duration_ms", time.Since(startedAt).Milliseconds())
 			cancelMsg := "cancelled"
-			_ = b.resolver.UpdateRun(ctx, runID, "CANCELLED", nil, &cancelMsg, map[string]interface{}{
+			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cleanCancel()
+			_ = b.resolver.UpdateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, map[string]interface{}{
 				"duration_ms": time.Since(startedAt).Milliseconds(),
 			})
 			// Persist partial response if any
 			if fullResponse != "" {
-				_ = b.convStore.Append(context.Background(), chatID, conversation.Message{
+				_ = b.convStore.Append(cleanCtx, chatID, conversation.Message{
 					ID:        generateMsgID(),
 					Role:      conversation.RoleAssistant,
 					Content:   fullResponse,
 					Timestamp: time.Now().UTC(),
 				})
-				_ = b.resolver.IncrementMessageCount(context.Background(), chatID, 2)
+				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 2)
+			} else {
+				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
 			}
 			return fmt.Errorf("run agent: %w", runErr)
 		}

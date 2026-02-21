@@ -401,8 +401,18 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		runCtx, runCancel := context.WithCancel(c.ctx)
 		defer runCancel()
 
-		// Register cancel function so client can stop this run
+		// Reject if a run is already in progress for this session
 		c.hub.cancelMu.Lock()
+		if _, exists := c.hub.cancelFns[payload.ChatID]; exists {
+			c.hub.cancelMu.Unlock()
+			errResp, _ := json.Marshal(ServerMessage{
+				Type:    "error",
+				Channel: channel,
+				Payload: map[string]string{"error": "a message is already being processed"},
+			})
+			c.safeSend(errResp)
+			return
+		}
 		c.hub.cancelFns[payload.ChatID] = runCancel
 		c.hub.cancelMu.Unlock()
 		defer func() {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -321,8 +322,13 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT workspace_id FROM chats WHERE id = ?", chatID).Scan(&chatWSID)
 	if err != nil {
-		// Chat doesn't exist yet (new session before first message) — return empty messages
-		writeJSON(w, http.StatusOK, map[string]interface{}{"messages": []interface{}{}})
+		if errors.Is(err, sql.ErrNoRows) {
+			// Chat doesn't exist yet (new session before first message) — return empty messages
+			writeJSON(w, http.StatusOK, map[string]interface{}{"messages": []interface{}{}})
+			return
+		}
+		h.logger.Error("get chat workspace", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 

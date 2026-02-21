@@ -259,11 +259,15 @@ func TestResolveChat_LanguagePreference(t *testing.T) {
 
 			if tt.lang != nil {
 				if *tt.lang == "" {
-					db.ExecContext(context.Background(),
-						"UPDATE workspaces SET preferred_language = NULL WHERE id = ?", wsID)
+					if _, err := db.ExecContext(context.Background(),
+						"UPDATE workspaces SET preferred_language = NULL WHERE id = ?", wsID); err != nil {
+						t.Fatalf("update preferred_language: %v", err)
+					}
 				} else {
-					db.ExecContext(context.Background(),
-						"UPDATE workspaces SET preferred_language = ? WHERE id = ?", *tt.lang, wsID)
+					if _, err := db.ExecContext(context.Background(),
+						"UPDATE workspaces SET preferred_language = ? WHERE id = ?", *tt.lang, wsID); err != nil {
+						t.Fatalf("update preferred_language: %v", err)
+					}
 				}
 			}
 

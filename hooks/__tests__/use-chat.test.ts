@@ -257,9 +257,10 @@ describe("useChat", () => {
       })
     })
 
-    // Status and text should be in the same turn
+    // Status part is removed when text arrives (transient indicator)
     expect(result.current.turns).toHaveLength(1)
-    expect(result.current.turns[0].parts.length).toBeGreaterThanOrEqual(2)
+    expect(result.current.turns[0].parts).toHaveLength(1)
+    expect(result.current.turns[0].parts[0].type).toBe("text")
   })
 
   it("done event marks turn as not streaming and removes status parts", () => {

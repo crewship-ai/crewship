@@ -334,8 +334,11 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 
 	// Query workspace preferred_language
 	var preferredLanguage sql.NullString
-	_ = h.db.QueryRowContext(r.Context(),
-		"SELECT preferred_language FROM workspaces WHERE id = ?", wsID).Scan(&preferredLanguage)
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT preferred_language FROM workspaces WHERE id = ?", wsID).Scan(&preferredLanguage); err != nil &&
+		!errors.Is(err, sql.ErrNoRows) {
+		h.logger.Warn("preferred language lookup failed", "error", err)
+	}
 
 	// Build structured system prompt: ethos → language → identity → persona → skills
 	// Note: crew context for LEADs is added later by the orchestrator

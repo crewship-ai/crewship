@@ -15,7 +15,7 @@ import {
 } from "@/components/ai-elements/reasoning"
 import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool"
 import { CodeBlock } from "@/components/ai-elements/code-block"
-import { StatusIndicator } from "./status-indicator"
+import { StatusIndicator } from "@/components/features/chat/status-indicator"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
 
 interface AssistantTurnProps {

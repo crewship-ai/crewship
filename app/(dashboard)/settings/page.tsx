@@ -248,9 +248,12 @@ export default function SettingsPage() {
         const updated = (await res.json()) as Org
         setOrg(updated)
         setFormLanguage(updated.preferred_language)
+      } else {
+        // Revert on server error
+        setFormLanguage(org?.preferred_language ?? null)
       }
     } catch {
-      // Revert on error
+      // Revert on network error
       setFormLanguage(org?.preferred_language ?? null)
     } finally {
       setLangSaving(false)

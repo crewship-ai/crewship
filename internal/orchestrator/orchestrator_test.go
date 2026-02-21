@@ -463,12 +463,6 @@ func TestRunAgentCancelledContext(t *testing.T) {
 	// 1. Return an error containing "run cancelled"
 	// 2. Update run state to "cancelled"
 	r, w := io.Pipe()
-	go func() {
-		// Simulate slow output — write nothing, just close after a bit
-		// The context cancellation will close the reader before this fires
-		<-make(chan struct{}) // block forever, context cancel will close
-		w.Close()
-	}()
 
 	mc := &mockContainer{
 		execResults: []*provider.ExecResult{
@@ -486,6 +480,11 @@ func TestRunAgentCancelledContext(t *testing.T) {
 	o := New(mc, state, slog.Default())
 
 	ctx, cancel := context.WithCancel(context.Background())
+	// Close the writer when the context is cancelled to unblock readers
+	go func() {
+		<-ctx.Done()
+		_ = w.Close()
+	}()
 	// Cancel immediately to simulate user pressing stop
 	go func() {
 		// Small delay to let RunAgent start the exec
