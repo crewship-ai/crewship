@@ -14,10 +14,12 @@ import (
 )
 
 // sidecarInput is the JSON payload piped via stdin from the orchestrator.
-// It carries credentials and optional memory configuration.
+// It carries credentials, optional memory configuration, and IPC config for assignment routing.
 type sidecarInput struct {
 	Credentials []sidecar.Credential  `json:"credentials"`
 	Memory      *sidecar.MemoryConfig `json:"memory,omitempty"`
+	IPC         *sidecar.IPCConfig    `json:"ipc,omitempty"`
+	CrewMembers []sidecar.CrewMember  `json:"crew_members,omitempty"`
 }
 
 func main() {
@@ -55,12 +57,16 @@ func main() {
 		"addr", *addr,
 		"credentials", len(input.Credentials),
 		"memory_enabled", input.Memory != nil && input.Memory.Enabled,
+		"ipc_enabled", input.IPC != nil,
+		"crew_members", len(input.CrewMembers),
 	)
 
 	srv := sidecar.NewServer(sidecar.ServerConfig{
 		Addr:        *addr,
 		Credentials: input.Credentials,
 		Memory:      input.Memory,
+		IPC:         input.IPC,
+		CrewMembers: input.CrewMembers,
 		Logger:      logger,
 	})
 

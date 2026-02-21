@@ -30,6 +30,9 @@ func BuildCLICommand(req AgentRunRequest) []string {
 			"--dangerously-skip-permissions",
 			"--verbose",
 		}
+		if req.LLMModel != "" {
+			cmd = append(cmd, "--model", req.LLMModel)
+		}
 		systemPrompt := crewshipSystemPreamble + req.SystemPrompt
 		cmd = append(cmd, "--system-prompt", systemPrompt)
 		if req.ToolProfile == "MINIMAL" {
@@ -103,9 +106,27 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 }
 
 // BuildEnvVarsSidecar builds env vars for the agent when sidecar mode is active.
-// Credentials are NOT included -- the sidecar proxy injects them into HTTP requests.
-// The agent gets dummy/empty API keys and proxy configuration pointing to the sidecar.
+// API key credentials are NOT included -- the sidecar proxy injects them into HTTP requests.
+// OAuth tokens (AI_CLI_TOKEN) are injected directly as CLAUDE_CODE_OAUTH_TOKEN because
+// the sidecar cannot use them for x-api-key injection.
+// The agent gets dummy API keys and proxy configuration pointing to the sidecar.
 func BuildEnvVarsSidecar(req AgentRunRequest) []string {
+	// Check if we have an OAuth token -- this changes the env var strategy.
+	// OAuth tokens use HTTPS CONNECT tunnel (sidecar just allowlists the domain).
+	// Claude Code sets Authorization: Bearer itself inside the encrypted tunnel.
+	// IMPORTANT: When OAuth is present, we must NOT set ANTHROPIC_API_KEY or
+	// ANTHROPIC_BASE_URL because Claude Code prioritizes API key auth over OAuth
+	// when both are present, and the dummy key causes authentication failure.
+	hasOAuth := false
+	var oauthToken string
+	for _, cred := range req.Credentials {
+		if cred.Type == "AI_CLI_TOKEN" && cred.PlainValue != "" {
+			hasOAuth = true
+			oauthToken = cred.PlainValue
+			break
+		}
+	}
+
 	env := []string{
 		"HOME=/home/agent",
 		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
@@ -122,14 +143,28 @@ func BuildEnvVarsSidecar(req AgentRunRequest) []string {
 		// would try to proxy requests to 127.0.0.1 through the proxy itself.
 		"NO_PROXY=127.0.0.1,localhost,::1",
 		"no_proxy=127.0.0.1,localhost,::1",
-		// Claude Code: point base URL to sidecar so it uses HTTP (not HTTPS)
-		// and the proxy can inject the real API key
-		"ANTHROPIC_BASE_URL=http://127.0.0.1:9119",
-		// Dummy keys -- the sidecar replaces them with real ones per-request
-		"ANTHROPIC_API_KEY=sk-ant-dummy-crewship-sidecar",
-		"OPENAI_API_KEY=sk-dummy-crewship-sidecar",
-		"GOOGLE_API_KEY=dummy-crewship-sidecar",
 	}
+
+	if hasOAuth {
+		// OAuth mode: Claude Code authenticates via HTTPS CONNECT tunnel.
+		// The sidecar allowlists api.anthropic.com and passes the tunnel through.
+		// No ANTHROPIC_BASE_URL (let Claude Code use the default HTTPS endpoint).
+		// No dummy ANTHROPIC_API_KEY (would override OAuth authentication).
+		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)
+		// Still set dummy keys for other providers (OpenAI, Google) for sidecar injection
+		env = append(env, "OPENAI_API_KEY=sk-dummy-crewship-sidecar")
+		env = append(env, "GOOGLE_API_KEY=dummy-crewship-sidecar")
+	} else {
+		// API key mode: use reverse proxy via ANTHROPIC_BASE_URL for credential injection.
+		// The sidecar intercepts plain HTTP requests and injects the real API key.
+		env = append(env,
+			"ANTHROPIC_BASE_URL=http://127.0.0.1:9119",
+			"ANTHROPIC_API_KEY=sk-ant-dummy-crewship-sidecar",
+			"OPENAI_API_KEY=sk-dummy-crewship-sidecar",
+			"GOOGLE_API_KEY=dummy-crewship-sidecar",
+		)
+	}
+
 	return env
 }
 
@@ -152,12 +187,31 @@ type SidecarMemoryConfig struct {
 	AgentSlug string `json:"agent_slug"`
 }
 
+// SidecarIPCConfig provides the crewshipd internal API address for the sidecar,
+// allowing lead agents to forward assignment requests back to crewshipd.
+type SidecarIPCConfig struct {
+	BaseURL     string `json:"base_url"`
+	Token       string `json:"token"`
+	CrewID      string `json:"crew_id"`
+	WorkspaceID string `json:"workspace_id"`
+	ChatID      string `json:"chat_id"`
+}
+
+// SidecarCrewMember describes a crew member accessible to lead agents for assignment.
+type SidecarCrewMember struct {
+	Slug      string `json:"slug"`
+	Name      string `json:"name"`
+	RoleTitle string `json:"role_title"`
+}
+
 func startSidecar(
 	ctx context.Context,
 	container provider.ContainerProvider,
 	containerID string,
 	creds []Credential,
 	memoryCfg *SidecarMemoryConfig,
+	ipcCfg *SidecarIPCConfig,
+	crewMembers []SidecarCrewMember,
 	logger *slog.Logger,
 ) error {
 	type sidecarCred struct {
@@ -184,14 +238,18 @@ func startSidecar(
 		sc = []sidecarCred{}
 	}
 
-	// Build the input payload (new object format that includes memory config)
+	// Build the input payload (new object format that includes memory config and IPC config)
 	type sidecarInput struct {
-		Credentials []sidecarCred        `json:"credentials"`
+		Credentials []sidecarCred       `json:"credentials"`
 		Memory      *SidecarMemoryConfig `json:"memory,omitempty"`
+		IPC         *SidecarIPCConfig    `json:"ipc,omitempty"`
+		CrewMembers []SidecarCrewMember  `json:"crew_members,omitempty"`
 	}
 	input := sidecarInput{
 		Credentials: sc,
 		Memory:      memoryCfg,
+		IPC:         ipcCfg,
+		CrewMembers: crewMembers,
 	}
 
 	credsJSON, err := json.Marshal(input)
@@ -255,9 +313,12 @@ func startSidecar(
 }
 
 // credTypeToProvider maps orchestrator credential types to sidecar provider types.
+// AI_CLI_TOKEN (OAuth) returns "" — these are injected directly as CLAUDE_CODE_OAUTH_TOKEN
+// env var in BuildEnvVarsSidecar rather than stored in the sidecar CredStore, because
+// the sidecar CredStore only supports x-api-key injection which won't work for OAuth tokens.
 func credTypeToProvider(c Credential) string {
 	switch {
-	case c.EnvVarName == "ANTHROPIC_API_KEY" || c.Type == "AI_CLI_TOKEN":
+	case c.EnvVarName == "ANTHROPIC_API_KEY":
 		return "ANTHROPIC"
 	case c.EnvVarName == "OPENAI_API_KEY":
 		return "OPENAI"

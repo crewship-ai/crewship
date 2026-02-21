@@ -249,7 +249,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 
 	var agentID, agentSlug, agentName, cliAdapter, toolProfile, wsID string
-	var systemPrompt, roleTitle, agentRole sql.NullString
+	var systemPrompt, roleTitle, agentRole, llmModel sql.NullString
 	var timeoutSecs int
 	var memoryEnabled bool
 	var crewID, crewSlug, crewName sql.NullString
@@ -257,14 +257,14 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.slug, a.name, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt,
 			a.tool_profile, a.timeout_seconds, a.memory_enabled,
-			c2.id, c2.slug, c2.name, c.workspace_id
+			c2.id, c2.slug, c2.name, c.workspace_id, a.llm_model
 		FROM chats c
 		JOIN agents a ON a.id = c.agent_id
 		LEFT JOIN crews c2 ON c2.id = a.crew_id
 		WHERE c.id = ?
 	`, chatID).Scan(&agentID, &agentSlug, &agentName, &roleTitle, &agentRole, &cliAdapter, &systemPrompt,
 		&toolProfile, &timeoutSecs, &memoryEnabled,
-		&crewID, &crewSlug, &crewName, &wsID)
+		&crewID, &crewSlug, &crewName, &wsID, &llmModel)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found"})
@@ -490,6 +490,11 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 
 	sysPrompt := strings.Join(promptParts, "\n\n")
 
+	llmModelStr := ""
+	if llmModel.Valid {
+		llmModelStr = llmModel.String
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"agent_id":        agentID,
 		"agent_slug":      agentSlug,
@@ -498,6 +503,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		"crew_slug":       crewSlugStr,
 		"container_id":    "",
 		"cli_adapter":     cliAdapter,
+		"llm_model":       llmModelStr,
 		"system_prompt":   sysPrompt,
 		"tool_profile":    toolProfile,
 		"credentials":     creds,
@@ -598,6 +604,26 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": body.Status})
+}
+
+func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.Request) {
+	chatID := r.PathValue("chatId")
+	var body struct {
+		Delta int `json:"delta"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Delta <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid delta"})
+		return
+	}
+	_, err := h.db.ExecContext(r.Context(),
+		"UPDATE chats SET message_count = message_count + ? WHERE id = ?",
+		body.Delta, chatID)
+	if err != nil {
+		h.logger.Error("increment message count", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": chatID})
 }
 
 // buildEthosBlock returns the [CREWSHIP ETHOS] system prompt block.

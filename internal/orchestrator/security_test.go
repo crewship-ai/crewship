@@ -222,6 +222,8 @@ func TestSecurityCredTypeToProviderUnknown(t *testing.T) {
 		{EnvVarName: "GITHUB_TOKEN", Type: "API_KEY"},
 		{EnvVarName: "", Type: ""},
 		{EnvVarName: "STRIPE_KEY", Type: "API_KEY"},
+		// AI_CLI_TOKEN returns "" — OAuth tokens go directly as env var, not sidecar CredStore
+		{EnvVarName: "CLAUDE_CODE_OAUTH_TOKEN", Type: "AI_CLI_TOKEN"},
 	}
 	for _, c := range unknowns {
 		got := credTypeToProvider(c)
@@ -237,7 +239,9 @@ func TestSecurityCredTypeToProviderAllKnown(t *testing.T) {
 		expected string
 	}{
 		{Credential{EnvVarName: "ANTHROPIC_API_KEY"}, "ANTHROPIC"},
-		{Credential{Type: "AI_CLI_TOKEN"}, "ANTHROPIC"},
+		// AI_CLI_TOKEN (OAuth) is injected directly as CLAUDE_CODE_OAUTH_TOKEN env var,
+		// NOT sent to the sidecar CredStore (which only handles x-api-key injection).
+		{Credential{Type: "AI_CLI_TOKEN"}, ""},
 		{Credential{EnvVarName: "OPENAI_API_KEY"}, "OPENAI"},
 		{Credential{EnvVarName: "GOOGLE_API_KEY"}, "GOOGLE"},
 	}
@@ -246,5 +250,42 @@ func TestSecurityCredTypeToProviderAllKnown(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("credTypeToProvider(%+v) = %q, want %q", tt.cred, got, tt.expected)
 		}
+	}
+}
+
+func TestBuildEnvVarsSidecarOAuthTokenInjectedDirectly(t *testing.T) {
+	oauthToken := "sk-ant-oat01-test-oauth-token-value"
+	req := AgentRunRequest{
+		AgentID: "a1",
+		CrewID:  "crew1",
+		ChatID:  "chat1",
+		Credentials: []Credential{
+			{ID: "c1", Type: "AI_CLI_TOKEN", EnvVarName: "CLAUDE_CODE_OAUTH_TOKEN", PlainValue: oauthToken, Priority: 1},
+		},
+	}
+
+	env := BuildEnvVarsSidecar(req)
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if envMap["CLAUDE_CODE_OAUTH_TOKEN"] != oauthToken {
+		t.Errorf("expected CLAUDE_CODE_OAUTH_TOKEN=%q in sidecar env, got %q", oauthToken, envMap["CLAUDE_CODE_OAUTH_TOKEN"])
+	}
+	// Verify sidecar env still has proxy config
+	if envMap["HTTP_PROXY"] == "" {
+		t.Error("expected HTTP_PROXY to be set")
+	}
+	// OAuth mode: ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY must NOT be set
+	// to avoid Claude Code preferring the dummy API key over OAuth.
+	if envMap["ANTHROPIC_BASE_URL"] != "" {
+		t.Errorf("ANTHROPIC_BASE_URL must not be set in OAuth mode, got %q", envMap["ANTHROPIC_BASE_URL"])
+	}
+	if envMap["ANTHROPIC_API_KEY"] != "" {
+		t.Errorf("ANTHROPIC_API_KEY must not be set in OAuth mode, got %q", envMap["ANTHROPIC_API_KEY"])
 	}
 }

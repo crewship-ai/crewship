@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/docker/docker/api/types/container"
@@ -82,10 +83,14 @@ func candidateSockets() []socketCandidate {
 	return candidates
 }
 
+// socketPingTimeout is the per-socket timeout for the Docker Ping call.
+// Short enough that multiple failing sockets don't block the overall detection.
+const socketPingTimeout = 1500 * time.Millisecond
+
 // Detect probes for a Docker-API-compatible socket and returns info about
 // the detected runtime. It checks DOCKER_HOST first, then iterates candidate
 // sockets (Docker, Colima, OrbStack, Rancher, Podman, nerdctl). The ctx
-// parameter is propagated to all Docker API calls for proper cancellation.
+// parameter is used as an outer deadline; each socket gets its own short timeout.
 func Detect(ctx context.Context) (*DetectResult, error) {
 	// If DOCKER_HOST is set, use that directly.
 	if host := os.Getenv("DOCKER_HOST"); host != "" {
@@ -114,7 +119,9 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 		return &DetectResult{Runtime: rt, Socket: host, Version: ver}, nil
 	}
 
-	// Try candidate sockets in order.
+	// Try candidate sockets in order, using a short per-socket timeout so a
+	// hung daemon (socket file exists but daemon unresponsive) doesn't block
+	// the entire detection for the full outer context deadline.
 	for _, c := range candidateSockets() {
 		if _, err := os.Stat(c.path); err != nil {
 			continue
@@ -126,11 +133,16 @@ func Detect(ctx context.Context) (*DetectResult, error) {
 		if err != nil {
 			continue
 		}
-		_, pingErr := cli.Ping(ctx)
+
+		// Per-socket timeout: bail quickly if daemon is unresponsive.
+		pingCtx, cancel := context.WithTimeout(ctx, socketPingTimeout)
+		_, pingErr := cli.Ping(pingCtx)
+		cancel()
 		if pingErr != nil {
 			cli.Close()
 			continue
 		}
+
 		sv, _ := cli.ServerVersion(ctx)
 		ver := sv.Version
 		rt := c.runtime
@@ -214,13 +226,12 @@ func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
 		}
 	}
 	_, err = p.client.NetworkCreate(ctx, name, dockernetwork.CreateOptions{
-		Driver:   "bridge",
-		Internal: true,
+		Driver: "bridge",
 	})
 	if err != nil {
 		return fmt.Errorf("create network: %w", err)
 	}
-	p.logger.Info("created docker network", "network", name, "internal", true)
+	p.logger.Info("created docker network", "network", name)
 	return nil
 }
 
@@ -332,6 +343,10 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			SecurityOpt:    []string{"no-new-privileges"},
 			CapDrop:        []string{"ALL"},
 			CapAdd:         []string{"NET_RAW"},
+			// ExtraHosts makes host.docker.internal resolve to the Docker host
+			// on both macOS and Linux, enabling containers to reach crewshipd
+			// for assignment IPC calls via the sidecar.
+			ExtraHosts: []string{"host.docker.internal:host-gateway"},
 			Resources: container.Resources{
 				Memory:    int64(memoryMB) * 1024 * 1024,
 				NanoCPUs:  int64(cpus * 1e9),

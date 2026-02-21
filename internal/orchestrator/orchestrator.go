@@ -20,21 +20,25 @@ import (
 var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 type AgentRunRequest struct {
-	AgentID       string
-	AgentSlug     string
-	AgentRole     string // AGENT, LEAD, COORDINATOR
-	CrewID        string
-	CrewSlug      string
-	ChatID        string
-	ContainerID   string
-	CLIAdapter    string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI
-	SystemPrompt  string
-	UserMessage   string
-	ToolProfile   string // MINIMAL, CODING, MESSAGING, FULL
-	Credentials   []Credential
-	TimeoutSecs   int
-	MemoryEnabled bool
-	CrewMembers   []CrewMember // Populated by bridge for LEAD agents
+	AgentID         string
+	AgentSlug       string
+	AgentRole       string // AGENT, LEAD, COORDINATOR
+	CrewID          string
+	CrewSlug        string
+	ChatID          string
+	WorkspaceID     string
+	ContainerID     string
+	CLIAdapter      string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI
+	LLMModel        string // optional model override (e.g. claude-haiku-4-5-20251001)
+	SystemPrompt    string
+	UserMessage     string
+	ToolProfile     string // MINIMAL, CODING, MESSAGING, FULL
+	Credentials     []Credential
+	TimeoutSecs     int
+	MemoryEnabled   bool
+	CrewMembers     []CrewMember // Populated by bridge for LEAD agents
+	SkipSidecar     bool         // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
+	SkipConvHistory bool         // When true, skip injecting conversation history (used by assignment sub-agents)
 }
 
 type Credential struct {
@@ -74,6 +78,8 @@ type Orchestrator struct {
 	logger         *slog.Logger
 	cooldown       *CooldownManager
 	sidecarEnabled bool
+	ipcBaseURL     string
+	ipcToken       string
 	mu             sync.Mutex
 	accepting      bool
 }
@@ -101,6 +107,37 @@ func (o *Orchestrator) SetSidecarEnabled(enabled bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.sidecarEnabled = enabled
+}
+
+// SetIPCConfig sets the crewshipd internal API base URL and token.
+// The sidecar uses this to forward assignment requests from lead agents back to crewshipd.
+// baseURL should be reachable from inside the Docker container (e.g. http://host.docker.internal:8080).
+func (o *Orchestrator) SetIPCConfig(baseURL, token string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.ipcBaseURL = baseURL
+	o.ipcToken = token
+}
+
+// GetOrCreateContainer returns the container ID for a crew, creating it if it doesn't exist.
+// Used by assignment goroutines to ensure the crew container is running before exec-ing the sub-agent.
+func (o *Orchestrator) GetOrCreateContainer(ctx context.Context, crewSlug, crewID string) (string, error) {
+	if o.container == nil {
+		return "", fmt.Errorf("container provider not configured")
+	}
+	return o.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
+		ID:   crewID,
+		Slug: crewSlug,
+	})
+}
+
+// RunAgentForAssignment runs a sub-agent as part of a lead assignment.
+// It skips conversation history injection and sidecar startup to avoid port conflicts
+// when the lead agent's sidecar is already running on port 9119 in the same container.
+func (o *Orchestrator) RunAgentForAssignment(ctx context.Context, req AgentRunRequest, handler EventHandler) error {
+	req.SkipSidecar = true
+	req.SkipConvHistory = true
+	return o.RunAgent(ctx, req, handler)
 }
 
 // SetConversationStore sets the conversation store for reading session history.
@@ -136,7 +173,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 
 	// Inject conversation history into system prompt for context continuity
-	if o.convStore != nil && req.ChatID != "" {
+	if o.convStore != nil && req.ChatID != "" && !req.SkipConvHistory {
 		history := o.buildConversationContext(ctx, req.ChatID, 10)
 		if history != "" {
 			req.SystemPrompt = req.SystemPrompt + "\n\n" + history
@@ -165,7 +202,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 
 	o.mu.Lock()
-	sidecarEnabled := o.sidecarEnabled
+	sidecarEnabled := o.sidecarEnabled && !req.SkipSidecar
+	ipcBaseURL := o.ipcBaseURL
+	ipcToken := o.ipcToken
 	o.mu.Unlock()
 
 	var env []string
@@ -186,7 +225,27 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				AgentSlug: req.AgentSlug,
 			}
 		}
-		if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, o.logger); err != nil {
+		// Build IPC config for lead agents so the sidecar can forward assignment requests
+		var ipcCfg *SidecarIPCConfig
+		if ipcBaseURL != "" && req.AgentRole == "LEAD" {
+			ipcCfg = &SidecarIPCConfig{
+				BaseURL:     ipcBaseURL,
+				Token:       ipcToken,
+				CrewID:      req.CrewID,
+				WorkspaceID: req.WorkspaceID,
+				ChatID:      req.ChatID,
+			}
+		}
+		// Convert crew members to sidecar format for target validation
+		var sidecarMembers []SidecarCrewMember
+		for _, m := range req.CrewMembers {
+			sidecarMembers = append(sidecarMembers, SidecarCrewMember{
+				Slug:      m.Slug,
+				Name:      m.Name,
+				RoleTitle: m.RoleTitle,
+			})
+		}
+		if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, o.logger); err != nil {
 			o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
 			o.updateRunStatus(ctx, runState.ID, "error")
 			return fmt.Errorf("start sidecar: %w", err)

@@ -19,6 +19,7 @@ type ChatResolver interface {
 	ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error)
 	CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error
 	UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error
+	IncrementMessageCount(ctx context.Context, chatID string, delta int) error
 }
 
 type ChatInfo struct {
@@ -29,6 +30,7 @@ type ChatInfo struct {
 	CrewSlug      string
 	ContainerID   string
 	CLIAdapter    string
+	LLMModel      string
 	SystemPrompt  string
 	ToolProfile   string
 	Credentials   []orchestrator.Credential
@@ -144,9 +146,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		AgentRole:     info.AgentRole,
 		CrewID:        info.CrewID,
 		CrewSlug:      info.CrewSlug,
+		WorkspaceID:   info.WorkspaceID,
 		ChatID:        chatID,
 		ContainerID:   containerID,
 		CLIAdapter:    info.CLIAdapter,
+		LLMModel:      info.LLMModel,
 		SystemPrompt:  info.SystemPrompt,
 		UserMessage:   content,
 		ToolProfile:   info.ToolProfile,
@@ -161,7 +165,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			Type:    event.Type,
 			Content: event.Content,
 		})
-		fullResponse += event.Content
+		// Only accumulate actual text content for the persisted assistant message.
+		// System events (sidecar security logs, etc.) and thinking events should not
+		// be stored as part of the assistant response.
+		if event.Type == "text" {
+			fullResponse += event.Content
+		}
 
 		if err := b.logWriter.Append(info.CrewID, info.AgentSlug, logcollector.LogEntry{
 			Timestamp: event.Timestamp,
@@ -215,6 +224,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		b.logger.Error("failed to persist assistant message", "error", err, "chat_id", chatID)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save response"})
 		return fmt.Errorf("persist assistant message: %w", err)
+	}
+
+	// Update message count in DB (user + assistant = 2 messages)
+	if err := b.resolver.IncrementMessageCount(ctx, chatID, 2); err != nil {
+		b.logger.Warn("failed to update message count", "chat_id", chatID, "error", err)
 	}
 
 	streamFn(ws.ChatEvent{Type: "done", Content: ""})

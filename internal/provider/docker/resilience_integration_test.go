@@ -3,7 +3,6 @@ package docker
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -55,10 +54,9 @@ func TestResilienceNetworkRecreate(t *testing.T) {
 	// Cleanup container
 	_ = p.RemoveCrewRuntime(ctx, containerID)
 
-	// Step 2: Delete the network behind the server's back
-	out, err := exec.CommandContext(ctx, "docker", "network", "rm", networkName).CombinedOutput()
-	if err != nil {
-		t.Fatalf("docker network rm: %s: %v", out, err)
+	// Step 2: Delete the network behind the server's back (via Docker API, not CLI)
+	if err := p.client.NetworkRemove(ctx, networkName); err != nil {
+		t.Fatalf("NetworkRemove: %v", err)
 	}
 	t.Log("Network deleted")
 
@@ -88,5 +86,5 @@ func TestResilienceNetworkRecreate(t *testing.T) {
 	}
 
 	// Final cleanup
-	_ = exec.CommandContext(ctx, "docker", "network", "rm", networkName).Run()
+	_ = p.client.NetworkRemove(ctx, networkName)
 }

@@ -5,6 +5,7 @@ import { useWebSocket, type WSStatus } from "@/hooks/use-websocket"
 
 export type MessageRole = "user" | "assistant" | "system" | "tool"
 export type StreamEventType = "text" | "tool_call" | "tool_result" | "thinking" | "done" | "error"
+export type AssignmentEventType = "assignment_created" | "assignment_running" | "assignment_completed" | "assignment_failed"
 
 export interface ChatMessage {
   id: string
@@ -29,6 +30,43 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
 
   const handleMessage = useCallback(
     (msg: { type: string; payload?: string | Record<string, unknown>; channel?: string; [key: string]: unknown }) => {
+      // Handle assignment lifecycle events (broadcast directly to session channel)
+      const assignmentTypes: AssignmentEventType[] = ["assignment_created", "assignment_running", "assignment_completed", "assignment_failed"]
+      if (assignmentTypes.includes(msg.type as AssignmentEventType)) {
+        const channelSessionId = msg.channel?.startsWith("session:") ? msg.channel.slice(8) : undefined
+        if (channelSessionId && channelSessionId !== sessionId) return
+        const payload = (typeof msg.payload === "object" && msg.payload !== null)
+          ? msg.payload as Record<string, unknown>
+          : {}
+        let content = ""
+        switch (msg.type as AssignmentEventType) {
+          case "assignment_created":
+            content = `[Assignment] Assigning task to @${payload.target}: ${payload.task}`
+            break
+          case "assignment_running":
+            content = `[Assignment] @${payload.target} is working on the task...`
+            break
+          case "assignment_completed":
+            content = `[Assignment] @${payload.target} completed the task.`
+            if (payload.result) content += `\nResult: ${payload.result}`
+            break
+          case "assignment_failed":
+            content = `[Assignment] @${payload.target} failed: ${payload.error}`
+            break
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "system" as MessageRole,
+            content,
+            eventType: undefined,
+            timestamp: new Date(),
+          },
+        ])
+        return
+      }
+
       if (msg.type !== "chat_event") return
 
       // Server sends: { type: "chat_event", channel: "session:xxx", payload: { type, content } }
