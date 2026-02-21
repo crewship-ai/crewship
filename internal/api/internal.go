@@ -470,7 +470,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Query crew members for LEAD agents
+	// Query crew members for all agents in a crew (enables peer communication)
 	type crewMemberEntry struct {
 		Name        string `json:"name"`
 		Slug        string `json:"slug"`
@@ -479,7 +479,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		Status      string `json:"status"`
 	}
 	crewMembers := []crewMemberEntry{}
-	if roleStr == "LEAD" && crewID.Valid {
+	if crewID.Valid {
 		memberRows, err := h.db.QueryContext(r.Context(), `
 			SELECT name, slug, COALESCE(role_title, ''), COALESCE(description, ''), status
 			FROM agents
@@ -487,7 +487,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 			ORDER BY name
 		`, crewID.String, agentID)
 		if err != nil {
-			h.logger.Error("query crew members for lead", "error", err)
+			h.logger.Error("query crew members for crew", "error", err)
 		} else {
 			defer memberRows.Close()
 			for memberRows.Next() {

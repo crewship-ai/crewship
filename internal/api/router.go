@@ -235,4 +235,18 @@ func (r *Router) registerRoutes() {
 
 	// Crew assignments (public, authenticated)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/assignments", authed(wsCtx(http.HandlerFunc(assign.List))))
+
+	// Query routes (peer-to-peer communication, standup summaries, escalations)
+	queries := NewQueryHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
+	r.mux.Handle("POST /api/v1/internal/queries", internalAuth(http.HandlerFunc(queries.Create)))
+	r.mux.Handle("GET /api/v1/internal/standup", internalAuth(http.HandlerFunc(queries.Standup)))
+	r.mux.Handle("POST /api/v1/internal/escalations", internalAuth(http.HandlerFunc(queries.CreateEscalation)))
+
+	// Crew peer conversations, standup, and escalations (public, authenticated)
+	r.mux.Handle("GET /api/v1/crews/{crewId}/peer-conversations", authed(wsCtx(http.HandlerFunc(queries.ListPeerConversations))))
+	r.mux.Handle("GET /api/v1/crews/{crewId}/standup", authed(wsCtx(http.HandlerFunc(queries.Standup))))
+	r.mux.Handle("GET /api/v1/crews/{crewId}/escalations", authed(wsCtx(http.HandlerFunc(queries.ListEscalations))))
+
+	// Cross-crew activity feed (public, authenticated)
+	r.mux.Handle("GET /api/v1/activity", authed(wsCtx(http.HandlerFunc(queries.ListAllActivity))))
 }
