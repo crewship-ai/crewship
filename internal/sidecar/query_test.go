@@ -5,8 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -22,22 +22,49 @@ func newQueryServer(t *testing.T, ipc *IPCConfig, members []CrewMember) *Server 
 	})
 }
 
-// --- POST /query tests ---
+// --- NoIPC tests (consolidated) ---
 
-func TestHandleQuery_NoIPC(t *testing.T) {
+func TestHandlers_NoIPC(t *testing.T) {
 	srv := newQueryServer(t, nil, nil)
 
-	req := httptest.NewRequest(http.MethodPost, "/query",
-		strings.NewReader(`{"target":"nela","question":"what framework?","from":"viktor"}`))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
+	cases := []struct {
+		name    string
+		method  string
+		path    string
+		body    string
+		handler func(http.ResponseWriter, *http.Request)
+	}{
+		{"Query", http.MethodPost, "/query", `{"target":"nela","question":"what framework?","from":"viktor"}`, nil},
+		{"Standup", http.MethodGet, "/standup", "", nil},
+		{"Escalate", http.MethodPost, "/escalate", `{"from":"nela","reason":"need decision"}`, nil},
+	}
+	// Assign handlers after srv is created
+	cases[0].handler = srv.handleQuery
+	cases[1].handler = srv.handleStandup
+	cases[2].handler = srv.handleEscalate
 
-	srv.handleQuery(w, req)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var bodyReader io.Reader
+			if tc.body != "" {
+				bodyReader = strings.NewReader(tc.body)
+			}
+			req := httptest.NewRequest(tc.method, tc.path, bodyReader)
+			if tc.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			w := httptest.NewRecorder()
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected 503, got %d", w.Code)
+			tc.handler(w, req)
+
+			if w.Code != http.StatusServiceUnavailable {
+				t.Errorf("expected 503, got %d", w.Code)
+			}
+		})
 	}
 }
+
+// --- POST /query tests ---
 
 func TestHandleQuery_InvalidJSON(t *testing.T) {
 	srv := newQueryServer(t, &IPCConfig{BaseURL: "http://x", Token: "tok"}, nil)
@@ -83,7 +110,9 @@ func TestHandleQuery_UnknownTarget(t *testing.T) {
 		t.Errorf("expected 400, got %d", w.Code)
 	}
 	var body map[string]string
-	json.NewDecoder(w.Body).Decode(&body)
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 	if !strings.Contains(body["error"], "bob") {
 		t.Errorf("expected error about 'bob', got %q", body["error"])
 	}
@@ -105,7 +134,9 @@ func TestHandleQuery_DepthLimit(t *testing.T) {
 		t.Errorf("expected 400 for depth limit, got %d", w.Code)
 	}
 	var body map[string]string
-	json.NewDecoder(w.Body).Decode(&body)
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 	if !strings.Contains(body["error"], "depth limit") {
 		t.Errorf("expected depth limit error, got %q", body["error"])
 	}
@@ -166,26 +197,15 @@ func TestHandleQuery_ForwardsToCrewshipd(t *testing.T) {
 	}
 
 	var result map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&result)
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
 	if result["query_id"] != "q-123" {
 		t.Errorf("expected query_id=q-123, got %v", result["query_id"])
 	}
 }
 
 // --- GET /standup tests ---
-
-func TestHandleStandup_NoIPC(t *testing.T) {
-	srv := newQueryServer(t, nil, nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/standup", nil)
-	w := httptest.NewRecorder()
-
-	srv.handleStandup(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected 503, got %d", w.Code)
-	}
-}
 
 func TestHandleStandup_ProxiesToCrewshipd(t *testing.T) {
 	var receivedPath string
@@ -218,20 +238,6 @@ func TestHandleStandup_ProxiesToCrewshipd(t *testing.T) {
 
 // --- POST /escalate tests ---
 
-func TestHandleEscalate_NoIPC(t *testing.T) {
-	srv := newQueryServer(t, nil, nil)
-
-	req := httptest.NewRequest(http.MethodPost, "/escalate",
-		strings.NewReader(`{"from":"nela","reason":"need decision"}`))
-	w := httptest.NewRecorder()
-
-	srv.handleEscalate(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected 503, got %d", w.Code)
-	}
-}
-
 func TestHandleEscalate_MissingFields(t *testing.T) {
 	srv := newQueryServer(t, &IPCConfig{BaseURL: "http://x", Token: "tok"}, nil)
 
@@ -257,7 +263,10 @@ func TestHandleEscalate_ForwardsToCrewshipd(t *testing.T) {
 		}
 		receivedToken = r.Header.Get("X-Internal-Token")
 		bodyBytes, _ := io.ReadAll(r.Body)
-		json.Unmarshal(bodyBytes, &receivedBody)
+		if err := json.Unmarshal(bodyBytes, &receivedBody); err != nil {
+			http.Error(w, "bad json", http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte(`{"escalation_id":"esc-1","status":"PENDING"}`))

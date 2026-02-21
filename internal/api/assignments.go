@@ -212,6 +212,7 @@ func (h *AssignmentHandler) runAssignment(
 		now, now,
 	); err != nil {
 		h.logger.Error("create run record for assignment", "error", err, "assignment_id", assignmentID)
+		runID = "" // prevent finishAssignment from updating a non-existent record
 	}
 
 	// Mark assignment as RUNNING
