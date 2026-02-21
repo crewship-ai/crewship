@@ -81,8 +81,6 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
         const parsed = z.array(activityItemSchema).safeParse(json)
         if (parsed.success) {
           setItems(parsed.data)
-        } else {
-          setItems(json as ActivityItem[])
         }
       }
     } catch {
@@ -207,11 +205,13 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
                           {item.to_slug ? `@${item.to_slug}` : "—"}
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-1.5">
+                          <div
+                            className="flex items-center gap-1.5"
+                            style={item.crew_color ? { '--crew-color': item.crew_color } as React.CSSProperties : undefined}
+                          >
                             {item.crew_color && (
                               <span
-                                className="inline-block h-2 w-2 rounded-full shrink-0"
-                                style={{ backgroundColor: item.crew_color }}
+                                className="inline-block h-2 w-2 rounded-full shrink-0 bg-[var(--crew-color)]"
                               />
                             )}
                             <span className="text-sm text-muted-foreground truncate">

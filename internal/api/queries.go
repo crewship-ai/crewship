@@ -135,6 +135,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		runID, target.ID, body.ChatID, body.WorkspaceID, metadata, now, now)
 	if err != nil {
 		h.logger.Error("create run record for query", "error", err)
+		runID = "" // prevent finishQuery from updating a non-existent record
 	}
 
 	// Broadcast event
@@ -269,20 +270,22 @@ func (h *QueryHandler) finishQuery(
 	}
 
 	// Update agent_runs
-	runStatus := status
-	runQuery := `UPDATE agent_runs SET status = ?, finished_at = ?`
-	runArgs := []interface{}{runStatus, now}
-	if errMsg != "" {
-		runQuery += `, error_message = ?`
-		runArgs = append(runArgs, errMsg)
-	}
-	if status == "COMPLETED" {
-		runQuery += `, exit_code = 0`
-	}
-	runQuery += ` WHERE id = ?`
-	runArgs = append(runArgs, runID)
-	if _, err := h.db.ExecContext(ctx, runQuery, runArgs...); err != nil {
-		h.logger.Error("update run record for query", "error", err, "run_id", runID)
+	if runID != "" {
+		runStatus := status
+		runQuery := `UPDATE agent_runs SET status = ?, finished_at = ?`
+		runArgs := []interface{}{runStatus, now}
+		if errMsg != "" {
+			runQuery += `, error_message = ?`
+			runArgs = append(runArgs, errMsg)
+		}
+		if status == "COMPLETED" {
+			runQuery += `, exit_code = 0`
+		}
+		runQuery += ` WHERE id = ?`
+		runArgs = append(runArgs, runID)
+		if _, err := h.db.ExecContext(ctx, runQuery, runArgs...); err != nil {
+			h.logger.Error("update run record for query", "error", err, "run_id", runID)
+		}
 	}
 
 	// Broadcast completion

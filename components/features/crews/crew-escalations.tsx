@@ -77,8 +77,6 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
         const parsed = z.array(escalationSchema).safeParse(json)
         if (parsed.success) {
           setEscalations(parsed.data)
-        } else {
-          setEscalations(json as Escalation[])
         }
       }
     } catch {

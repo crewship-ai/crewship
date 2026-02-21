@@ -12,7 +12,8 @@ import (
 	"time"
 )
 
-// queryClient uses a longer timeout than ipcClient since queries run a full agent.
+// queryClient uses a 130s timeout (10s buffer over the 120s context timeout in handleQuery).
+// The context deadline fires first for clean cancellation; the client timeout is a safety net.
 var queryClient = &http.Client{Timeout: 130 * time.Second}
 
 type queryRequest struct {

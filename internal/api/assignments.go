@@ -204,11 +204,19 @@ func (h *AssignmentHandler) runAssignment(
 
 	// Create a run record in agent_runs so the dashboard shows sub-agent activity
 	runID := generateCUID()
+	metadataBytes, err := json.Marshal(map[string]string{
+		"assignment_id":    assignmentID,
+		"assigned_by_chat": body.ChatID,
+	})
+	if err != nil {
+		h.logger.Error("marshal assignment metadata", "error", err, "assignment_id", assignmentID)
+		metadataBytes = []byte("{}")
+	}
 	if _, err := h.db.ExecContext(ctx, `
 		INSERT INTO agent_runs (id, agent_id, chat_id, workspace_id, trigger_type, status, metadata, started_at, created_at)
 		VALUES (?, ?, ?, ?, 'ASSIGNMENT', 'RUNNING', ?, ?, ?)`,
 		runID, target.ID, body.ChatID, body.WorkspaceID,
-		func() string { b, _ := json.Marshal(map[string]string{"assignment_id": assignmentID, "assigned_by_chat": body.ChatID}); return string(b) }(),
+		string(metadataBytes),
 		now, now,
 	); err != nil {
 		h.logger.Error("create run record for assignment", "error", err, "assignment_id", assignmentID)

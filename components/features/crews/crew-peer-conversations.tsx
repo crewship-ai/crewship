@@ -93,8 +93,6 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
         const parsed = z.array(peerConversationSchema).safeParse(json)
         if (parsed.success) {
           setConversations(parsed.data)
-        } else {
-          setConversations(json as PeerConversation[])
         }
       }
     } catch {
