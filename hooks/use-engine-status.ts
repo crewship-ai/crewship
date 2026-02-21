@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from "react"
 
-export type DaemonStatus = "connected" | "disconnected" | "checking"
+export type EngineStatus = "connected" | "disconnected" | "checking"
 
 const POLL_INTERVAL = 10_000
 
-export function useCrewshipdStatus(workspaceId: string | null) {
-  const [status, setStatus] = useState<DaemonStatus>("checking")
+export function useEngineStatus(workspaceId: string | null) {
+  const [status, setStatus] = useState<EngineStatus>("checking")
   const [uptime, setUptime] = useState<string | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
 

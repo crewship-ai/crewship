@@ -8,6 +8,8 @@ import { PageHeader } from "@/components/layout/page-header"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CrewCard } from "@/components/features/crews/crew-card"
+import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed"
+import { Separator } from "@/components/ui/separator"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import {
@@ -195,6 +197,13 @@ export default function CrewsPage() {
             <CrewCard key={crew.id} crew={crew} />
           ))}
         </div>
+      )}
+
+      {!isLoading && crews.length > 0 && workspaceId && (
+        <>
+          <Separator />
+          <CrewActivityFeed workspaceId={workspaceId} />
+        </>
       )}
     </div>
   )

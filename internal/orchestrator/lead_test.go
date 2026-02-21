@@ -45,6 +45,18 @@ func TestBuildLeadContext(t *testing.T) {
 			},
 		},
 		{
+			name: "includes query and standup instructions",
+			members: []CrewMember{
+				{Name: "Viktor", Slug: "viktor", RoleTitle: "Backend Developer"},
+			},
+			wantContains: []string{
+				"localhost:9119/query",
+				"localhost:9119/standup",
+				"quick question",
+				"standup summary",
+			},
+		},
+		{
 			name: "multiple members with equality phrasing",
 			members: []CrewMember{
 				{Name: "Alice", Slug: "alice", RoleTitle: "Backend Developer", Description: "Handles API development", Status: "IDLE"},

@@ -4,9 +4,9 @@ import { renderHook, act, waitFor } from "@testing-library/react"
 const mockFetch = vi.fn()
 vi.stubGlobal("fetch", mockFetch)
 
-import { useCrewshipdStatus } from "@/hooks/use-crewshipd-status"
+import { useEngineStatus } from "@/hooks/use-engine-status"
 
-describe("useCrewshipdStatus", () => {
+describe("useEngineStatus", () => {
   beforeEach(() => {
     mockFetch.mockReset()
     vi.useFakeTimers({ shouldAdvanceTime: true })
@@ -18,13 +18,13 @@ describe("useCrewshipdStatus", () => {
 
   it("starts in checking state", () => {
     mockFetch.mockReturnValue(new Promise(() => {}))
-    const { result } = renderHook(() => useCrewshipdStatus("ws-1"))
+    const { result } = renderHook(() => useEngineStatus("ws-1"))
     expect(result.current.status).toBe("checking")
     expect(result.current.uptime).toBeNull()
   })
 
   it("does nothing when workspaceId is null", () => {
-    const { result } = renderHook(() => useCrewshipdStatus(null))
+    const { result } = renderHook(() => useEngineStatus(null))
     expect(result.current.status).toBe("checking")
     expect(mockFetch).not.toHaveBeenCalled()
   })
@@ -35,7 +35,7 @@ describe("useCrewshipdStatus", () => {
       json: async () => ({ status: "ok", uptime: "2h 15m" }),
     })
 
-    const { result } = renderHook(() => useCrewshipdStatus("ws-1"))
+    const { result } = renderHook(() => useEngineStatus("ws-1"))
 
     await waitFor(() => {
       expect(result.current.status).toBe("connected")
@@ -47,7 +47,7 @@ describe("useCrewshipdStatus", () => {
   it("sets disconnected when API responds with error", async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 502 })
 
-    const { result } = renderHook(() => useCrewshipdStatus("ws-1"))
+    const { result } = renderHook(() => useEngineStatus("ws-1"))
 
     await waitFor(() => {
       expect(result.current.status).toBe("disconnected")
@@ -59,7 +59,7 @@ describe("useCrewshipdStatus", () => {
   it("sets disconnected on network error", async () => {
     mockFetch.mockRejectedValue(new Error("Network error"))
 
-    const { result } = renderHook(() => useCrewshipdStatus("ws-1"))
+    const { result } = renderHook(() => useEngineStatus("ws-1"))
 
     await waitFor(() => {
       expect(result.current.status).toBe("disconnected")
@@ -74,7 +74,7 @@ describe("useCrewshipdStatus", () => {
       json: async () => ({ status: "ok" }),
     })
 
-    renderHook(() => useCrewshipdStatus("ws-123"))
+    renderHook(() => useEngineStatus("ws-123"))
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(
@@ -90,7 +90,7 @@ describe("useCrewshipdStatus", () => {
       json: async () => ({ status: "ok" }),
     })
 
-    const { result } = renderHook(() => useCrewshipdStatus("ws-1"))
+    const { result } = renderHook(() => useEngineStatus("ws-1"))
 
     await waitFor(() => {
       expect(result.current.status).toBe("connected")
@@ -105,7 +105,7 @@ describe("useCrewshipdStatus", () => {
       json: async () => ({ status: "ok", uptime: "1m" }),
     })
 
-    renderHook(() => useCrewshipdStatus("ws-1"))
+    renderHook(() => useEngineStatus("ws-1"))
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledTimes(1)
@@ -126,7 +126,7 @@ describe("useCrewshipdStatus", () => {
       json: async () => ({ status: "ok" }),
     })
 
-    const { unmount } = renderHook(() => useCrewshipdStatus("ws-1"))
+    const { unmount } = renderHook(() => useEngineStatus("ws-1"))
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledTimes(1)

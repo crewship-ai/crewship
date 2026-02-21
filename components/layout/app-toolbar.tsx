@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
-import { useCrewshipdStatus } from "@/hooks/use-crewshipd-status"
+import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useWorkspace } from "@/hooks/use-workspace"
 
 const pageConfig: Record<string, { title: string; breadcrumb?: string; pills?: { label: string; variant: "default" | "secondary" | "outline" | "destructive" }[] }> = {
@@ -40,7 +40,7 @@ export function AppToolbar() {
   const pathname = usePathname()
   const config = pageConfig[pathname] ?? { title: "Crewship" }
   const { workspaceId } = useWorkspace()
-  const { status: daemonStatus } = useCrewshipdStatus(workspaceId)
+  const { status: engineStatus } = useEngineStatus(workspaceId)
   const { session, signOut } = useAuth()
 
   const userName = session?.user?.name ?? "User"
@@ -99,23 +99,23 @@ export function AppToolbar() {
         )}
       </div>
 
-      {/* Right: crewshipd + search + help + notifications + user */}
+      {/* Right: Engine + search + help + notifications + user */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        {/* crewshipd status */}
-        {daemonStatus === "connected" ? (
+        {/* Engine status */}
+        {engineStatus === "connected" ? (
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 mr-1">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400">crewshipd</span>
+            <span className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400">Engine</span>
           </div>
-        ) : daemonStatus === "checking" ? (
+        ) : engineStatus === "checking" ? (
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 mr-1">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
-            <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400">crewshipd</span>
+            <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400">Engine</span>
           </div>
         ) : (
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 mr-1">
             <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
-            <span className="text-[10px] font-medium text-red-700 dark:text-red-400">crewshipd</span>
+            <span className="text-[10px] font-medium text-red-700 dark:text-red-400">Engine</span>
           </div>
         )}
 
