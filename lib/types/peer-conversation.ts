@@ -1,14 +1,18 @@
-export interface PeerConversation {
-  id: string
-  from_name: string
-  from_slug: string
-  to_name: string
-  to_slug: string
-  question: string
-  response: string | null
-  status: "RUNNING" | "COMPLETED" | "FAILED"
-  duration_ms: number | null
-  escalated: boolean
-  created_at: string
-  finished_at: string | null
-}
+import { z } from "zod"
+
+export const peerConversationSchema = z.object({
+  id: z.string(),
+  from_name: z.string(),
+  from_slug: z.string(),
+  to_name: z.string(),
+  to_slug: z.string(),
+  question: z.string(),
+  response: z.string().nullable(),
+  status: z.enum(["RUNNING", "COMPLETED", "FAILED"]),
+  duration_ms: z.number().nullable(),
+  escalated: z.boolean(),
+  created_at: z.string(),
+  finished_at: z.string().nullable(),
+})
+
+export type PeerConversation = z.infer<typeof peerConversationSchema>

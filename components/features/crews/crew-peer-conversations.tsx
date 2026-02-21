@@ -19,7 +19,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import type { PeerConversation } from "@/lib/types/peer-conversation"
+import { peerConversationSchema, type PeerConversation } from "@/lib/types/peer-conversation"
+import { z } from "zod"
 
 interface CrewPeerConversationsProps {
   crewId: string
@@ -88,8 +89,13 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
         `/api/v1/crews/${crewId}/peer-conversations?workspace_id=${workspaceId}&limit=50`
       )
       if (res.ok) {
-        const data = (await res.json()) as PeerConversation[]
-        setConversations(data)
+        const json = await res.json()
+        const parsed = z.array(peerConversationSchema).safeParse(json)
+        if (parsed.success) {
+          setConversations(parsed.data)
+        } else {
+          setConversations(json as PeerConversation[])
+        }
       }
     } catch {
       // Silently fail — component shows empty state
@@ -160,6 +166,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                     const StatusIcon = config.icon
                     const isExpanded = expandedId === c.id
                     const hasDetail = c.response
+                    const detailId = `peer-detail-${c.id}`
 
                     return (
                       <Fragment key={c.id}>
@@ -167,6 +174,8 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                           className={hasDetail ? "cursor-pointer" : ""}
                           role={hasDetail ? "button" : undefined}
                           tabIndex={hasDetail ? 0 : -1}
+                          aria-expanded={hasDetail ? isExpanded : undefined}
+                          aria-controls={hasDetail ? detailId : undefined}
                           onClick={() => {
                             if (hasDetail) setExpandedId(isExpanded ? null : c.id)
                           }}
@@ -219,7 +228,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                           </TableCell>
                         </TableRow>
                         {isExpanded && hasDetail && (
-                          <TableRow>
+                          <TableRow id={detailId}>
                             <TableCell colSpan={6} className="bg-muted/30">
                               <div className="text-sm whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
                                 <span className="font-medium text-muted-foreground">Response: </span>

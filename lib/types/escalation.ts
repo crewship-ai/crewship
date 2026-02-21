@@ -1,12 +1,16 @@
-export interface Escalation {
-  id: string
-  from_name: string
-  from_slug: string
-  reason: string
-  context: string | null
-  peer_conversation_id: string | null
-  status: "PENDING" | "RESOLVED"
-  resolution: string | null
-  resolved_at: string | null
-  created_at: string
-}
+import { z } from "zod"
+
+export const escalationSchema = z.object({
+  id: z.string(),
+  from_name: z.string(),
+  from_slug: z.string(),
+  reason: z.string(),
+  context: z.string().nullable(),
+  peer_conversation_id: z.string().nullable(),
+  status: z.enum(["PENDING", "RESOLVED"]),
+  resolution: z.string().nullable(),
+  resolved_at: z.string().nullable(),
+  created_at: z.string(),
+})
+
+export type Escalation = z.infer<typeof escalationSchema>

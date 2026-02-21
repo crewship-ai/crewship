@@ -19,7 +19,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import type { ActivityItem } from "@/lib/types/activity"
+import { activityItemSchema, type ActivityItem } from "@/lib/types/activity"
+import { z } from "zod"
 
 interface CrewActivityFeedProps {
   workspaceId: string
@@ -76,8 +77,13 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
         `/api/v1/activity?workspace_id=${workspaceId}&limit=30`
       )
       if (res.ok) {
-        const data = (await res.json()) as ActivityItem[]
-        setItems(data)
+        const json = await res.json()
+        const parsed = z.array(activityItemSchema).safeParse(json)
+        if (parsed.success) {
+          setItems(parsed.data)
+        } else {
+          setItems(json as ActivityItem[])
+        }
       }
     } catch {
       // Silently fail — component shows empty state
@@ -154,6 +160,7 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
                   const TypeIcon = config.icon
                   const isExpanded = expandedId === item.id
                   const hasDetail = item.detail
+                  const detailId = `activity-detail-${item.type}-${item.id}`
 
                   return (
                     <Fragment key={`${item.type}-${item.id}`}>
@@ -161,6 +168,8 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
                         className={hasDetail ? "cursor-pointer" : ""}
                         role={hasDetail ? "button" : undefined}
                         tabIndex={hasDetail ? 0 : -1}
+                        aria-expanded={hasDetail ? isExpanded : undefined}
+                        aria-controls={hasDetail ? detailId : undefined}
                         onClick={() => {
                           if (hasDetail) setExpandedId(isExpanded ? null : item.id)
                         }}
@@ -198,14 +207,11 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
                           {item.to_slug ? `@${item.to_slug}` : "—"}
                         </TableCell>
                         <TableCell>
-                          <div
-                            className="flex items-center gap-1.5"
-                            style={item.crew_color ? { ["--crew-color" as string]: item.crew_color } : undefined}
-                          >
+                          <div className="flex items-center gap-1.5">
                             {item.crew_color && (
                               <span
                                 className="inline-block h-2 w-2 rounded-full shrink-0"
-                                style={{ backgroundColor: "var(--crew-color)" }}
+                                style={{ backgroundColor: item.crew_color }}
                               />
                             )}
                             <span className="text-sm text-muted-foreground truncate">
@@ -218,7 +224,7 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
                         </TableCell>
                       </TableRow>
                       {isExpanded && hasDetail && (
-                        <TableRow>
+                        <TableRow id={detailId}>
                           <TableCell colSpan={6} className="bg-muted/30">
                             <div className="text-sm whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
                               {item.detail}

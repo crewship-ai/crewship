@@ -4,6 +4,13 @@ import { useEffect, useState } from "react"
 import { RefreshCw, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { z } from "zod"
+
+const standupResponseSchema = z.object({
+  standup: z.string(),
+  crew_id: z.string(),
+  since: z.string(),
+})
 
 interface CrewStandupProps {
   crewId: string
@@ -23,8 +30,13 @@ export function CrewStandup({ crewId, workspaceId }: CrewStandupProps) {
         `/api/v1/crews/${crewId}/standup?workspace_id=${workspaceId}`
       )
       if (res.ok) {
-        const data = (await res.json()) as { standup: string }
-        setStandup(data.standup)
+        const json = await res.json()
+        const parsed = standupResponseSchema.safeParse(json)
+        if (parsed.success) {
+          setStandup(parsed.data.standup)
+        } else {
+          setStandup((json as { standup: string }).standup ?? null)
+        }
       }
     } catch {
       // Silently fail
@@ -48,7 +60,7 @@ export function CrewStandup({ crewId, workspaceId }: CrewStandupProps) {
     )
   }
 
-  const isEmpty = standup?.includes("No peer interactions") && !standup?.includes("Escalations")
+  const isEmpty = !standup?.trim() || (standup.includes("No peer interactions") && !standup.includes("Escalations"))
 
   return (
     <div>

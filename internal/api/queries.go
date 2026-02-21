@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -114,12 +115,19 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	`, convID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, target.ID, body.Question, now)
 	if err != nil {
 		h.logger.Error("create peer_conversation", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 
 	// Create agent_runs record for dashboard visibility
 	runID := generateCUID()
-	metadata := fmt.Sprintf(`{"peer_query_id":"%s","from_slug":"%s","question":"%s"}`,
-		convID, body.FromSlug, strings.ReplaceAll(body.Question, `"`, `\"`))
+	metadataMap := map[string]string{
+		"peer_query_id": convID,
+		"from_slug":     body.FromSlug,
+		"question":      body.Question,
+	}
+	metadataBytes, _ := json.Marshal(metadataMap)
+	metadata := string(metadataBytes)
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO agent_runs (id, agent_id, chat_id, workspace_id, trigger_type, status, metadata, started_at, created_at)
 		VALUES (?, ?, ?, ?, 'PEER_QUERY', 'RUNNING', ?, ?, ?)`,
@@ -323,8 +331,7 @@ func (h *QueryHandler) loadAgentCredentials(ctx context.Context, agentID string)
 		}
 		dec, err := encryption.Decrypt(encValue)
 		if err != nil {
-			h.logger.Error("decrypt credential", "id", c.ID, "error", err)
-			continue
+			return nil, fmt.Errorf("decrypt credential %s: %w", c.ID, err)
 		}
 		c.PlainValue = dec
 		creds = append(creds, c)

@@ -19,7 +19,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import type { Escalation } from "@/lib/types/escalation"
+import { escalationSchema, type Escalation } from "@/lib/types/escalation"
+import { z } from "zod"
 
 interface CrewEscalationsProps {
   crewId: string
@@ -72,8 +73,13 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
         `/api/v1/crews/${crewId}/escalations?workspace_id=${workspaceId}&limit=50`
       )
       if (res.ok) {
-        const data = (await res.json()) as Escalation[]
-        setEscalations(data)
+        const json = await res.json()
+        const parsed = z.array(escalationSchema).safeParse(json)
+        if (parsed.success) {
+          setEscalations(parsed.data)
+        } else {
+          setEscalations(json as Escalation[])
+        }
       }
     } catch {
       // Silently fail — component shows empty state
@@ -142,6 +148,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                     const StatusIcon = config.icon
                     const isExpanded = expandedId === e.id
                     const hasDetail = e.context || e.resolution
+                    const detailId = `esc-detail-${e.id}`
 
                     return (
                       <Fragment key={e.id}>
@@ -149,6 +156,8 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                           className={hasDetail ? "cursor-pointer" : ""}
                           role={hasDetail ? "button" : undefined}
                           tabIndex={hasDetail ? 0 : -1}
+                          aria-expanded={hasDetail ? isExpanded : undefined}
+                          aria-controls={hasDetail ? detailId : undefined}
                           onClick={() => {
                             if (hasDetail) setExpandedId(isExpanded ? null : e.id)
                           }}
@@ -187,7 +196,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                           </TableCell>
                         </TableRow>
                         {isExpanded && hasDetail && (
-                          <TableRow>
+                          <TableRow id={detailId}>
                             <TableCell colSpan={4} className="bg-muted/30">
                               <div className="text-sm whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
                                 {e.context && (
