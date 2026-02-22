@@ -7,19 +7,24 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 type Router struct {
-	mux           *http.ServeMux
-	db            *sql.DB
-	logger        *slog.Logger
-	authMw        *AuthMiddleware
-	socketPath    string
-	internalToken string
-	hub           *ws.Hub
-	orch          *orchestrator.Orchestrator
+	mux              *http.ServeMux
+	db               *sql.DB
+	logger           *slog.Logger
+	authMw           *AuthMiddleware
+	socketPath       string
+	internalToken    string
+	hub              *ws.Hub
+	orch             *orchestrator.Orchestrator
+	keeperGK         gatekeeper.Evaluator
+	keeperSecrets    SecretGetter
+	keeperContainer  provider.ContainerProvider
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -78,6 +83,28 @@ func WithHub(hub *ws.Hub) RouterOption {
 func WithOrchestrator(orch *orchestrator.Orchestrator) RouterOption {
 	return func(r *Router) {
 		r.orch = orch
+	}
+}
+
+func WithKeeperGatekeeper(gk gatekeeper.Evaluator) RouterOption {
+	return func(r *Router) {
+		r.keeperGK = gk
+	}
+}
+
+// WithKeeperSecrets attaches a SecretGetter to the router for the keeper execute handler.
+// If not set, /keeper/execute will return 500 on ALLOW decisions (execute not configured).
+func WithKeeperSecrets(sg SecretGetter) RouterOption {
+	return func(r *Router) {
+		r.keeperSecrets = sg
+	}
+}
+
+// WithKeeperContainer attaches a ContainerProvider for the keeper execute handler.
+// If not set, /keeper/execute will return 500 on ALLOW decisions (execute not configured).
+func WithKeeperContainer(cp provider.ContainerProvider) RouterOption {
+	return func(r *Router) {
+		r.keeperContainer = cp
 	}
 }
 
@@ -261,4 +288,12 @@ func (r *Router) registerRoutes() {
 
 	// Cross-crew activity feed (public, authenticated)
 	r.mux.Handle("GET /api/v1/activity", authed(wsCtx(http.HandlerFunc(queries.ListAllActivity))))
+
+	// Keeper — credential access control (internal auth)
+	keeperH := NewKeeperHandler(r.db, r.internalToken, r.keeperGK, r.logger).
+		WithSecrets(r.keeperSecrets).
+		WithContainer(r.keeperContainer)
+	r.mux.Handle("POST /api/v1/internal/keeper/request", internalAuth(http.HandlerFunc(keeperH.HandleRequest)))
+	r.mux.Handle("GET /api/v1/internal/keeper/request/{requestId}", internalAuth(http.HandlerFunc(keeperH.GetRequest)))
+	r.mux.Handle("POST /api/v1/internal/keeper/execute", internalAuth(http.HandlerFunc(keeperH.HandleExecute)))
 }

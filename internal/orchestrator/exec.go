@@ -17,8 +17,13 @@ import (
 
 const crewshipSystemPreamble = `You are running inside a Crewship agent container.
 Your working directory IS the output directory -- files you create or edit here are immediately visible to the user in the Files panel.
-Scratch space is available at /workspace/ for temporary files that don't need to be visible.
-Do NOT attempt to write outside /workspace or /output -- the filesystem is read-only elsewhere.
+
+FILESYSTEM:
+- HOME (~/) = /crew/agents/{your-slug}/ — persistent, personal (config, memory)
+- Working dir = /output/{your-slug}/ — visible in Files panel
+- Shared crew space = /crew/shared/ — all crew members can read/write
+- Scratch = /workspace/ — temporary, not persistent
+Do NOT attempt to write outside these directories -- the filesystem is read-only elsewhere.
 `
 
 func BuildCLICommand(req AgentRunRequest) []string {
@@ -72,11 +77,12 @@ func BuildCLICommand(req AgentRunRequest) []string {
 
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	env := []string{
-		"HOME=/home/agent",
+		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),
 		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
 		"CREWSHIP_AGENT_ID=" + req.AgentID,
 		"CREWSHIP_CREW_ID=" + req.CrewID,
 		"CREWSHIP_CHAT_ID=" + req.ChatID,
+		"CREWSHIP_CREW_SHARED=/crew/shared",
 	}
 
 	if activeCred != nil {
@@ -110,6 +116,7 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 // API key credentials are NOT included -- the sidecar proxy injects them into HTTP requests.
 // OAuth tokens (AI_CLI_TOKEN) are injected directly as CLAUDE_CODE_OAUTH_TOKEN because
 // the sidecar cannot use them for x-api-key injection.
+// SECRET credentials are NOT included -- agents must request them via the Keeper API.
 // The agent gets dummy API keys and proxy configuration pointing to the sidecar.
 func BuildEnvVarsSidecar(req AgentRunRequest) []string {
 	// Check if we have an OAuth token -- this changes the env var strategy.
@@ -129,11 +136,12 @@ func BuildEnvVarsSidecar(req AgentRunRequest) []string {
 	}
 
 	env := []string{
-		"HOME=/home/agent",
+		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),
 		"CLAUDE_CODE_DISABLE_AUTOUPDATE=1",
 		"CREWSHIP_AGENT_ID=" + req.AgentID,
 		"CREWSHIP_CREW_ID=" + req.CrewID,
 		"CREWSHIP_CHAT_ID=" + req.ChatID,
+		"CREWSHIP_CREW_SHARED=/crew/shared",
 		// Proxy config -- all outbound HTTP goes through the sidecar
 		"HTTP_PROXY=http://127.0.0.1:9119",
 		"HTTPS_PROXY=http://127.0.0.1:9119",
@@ -166,6 +174,10 @@ func BuildEnvVarsSidecar(req AgentRunRequest) []string {
 		)
 	}
 
+	// SECURITY: SECRET credentials are NOT injected as env vars.
+	// Agents must request them via the Keeper API (/keeper/request on the sidecar),
+	// which enforces access control and creates an audit trail for every access.
+
 	return env
 }
 
@@ -190,12 +202,16 @@ type SidecarMemoryConfig struct {
 
 // SidecarIPCConfig provides the crewshipd internal API address for the sidecar,
 // allowing lead agents to forward assignment requests back to crewshipd.
+// ContainerID is the Docker container ID where this agent is running; the sidecar
+// forwards it to crewshipd so /keeper/execute can run commands in the right container.
 type SidecarIPCConfig struct {
 	BaseURL     string `json:"base_url"`
 	Token       string `json:"token"`
+	AgentID     string `json:"agent_id"`
 	CrewID      string `json:"crew_id"`
 	WorkspaceID string `json:"workspace_id"`
 	ChatID      string `json:"chat_id"`
+	ContainerID string `json:"container_id"`
 }
 
 // SidecarCrewMember describes a crew member accessible to lead agents for assignment.
@@ -340,13 +356,15 @@ func setupClaudeConfig(
 	ctx context.Context,
 	container provider.ContainerProvider,
 	containerID string,
+	agentSlug string,
 	logger *slog.Logger,
 ) error {
-	script := `mkdir -p /home/agent/.claude && ` +
-		`cat > /home/agent/.claude.json << 'CFGEOF'
+	homeDir := fmt.Sprintf("/crew/agents/%s", agentSlug)
+	script := fmt.Sprintf(`mkdir -p %s/.claude && `+
+		`cat > %s/.claude.json << 'CFGEOF'
 {"hasCompletedOnboarding":true,"hasAvailableSubscription":true,"autoUpdates":false}
 CFGEOF
-chmod 600 /home/agent/.claude.json`
+chmod 600 %s/.claude.json`, homeDir, homeDir, homeDir)
 
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,

@@ -402,21 +402,128 @@ cmd_logs_next() {
   tail -f "$NEXT_LOG" 2>/dev/null
 }
 
+cmd_nuke() {
+  echo -e "${BOLD}${RED}Factory Reset — Crewship${S}${NC}"
+  echo "This will destroy ALL local data:"
+  echo "  - SQLite database (./crewship.db)"
+  echo "  - Agent output, workspace, crew data ($DATA_DIR)"
+  echo "  - Bolt state ($STATE_DIR)"
+  echo "  - Conversations ($DATA_DIR/conversations)"
+  echo "  - Log files ($LOG_PATH)"
+  echo "  - Docker containers (crewship${S}-team-*)"
+  echo "  - Docker network ($CONTAINER_NETWORK)"
+  echo ""
+
+  if [[ "${2:-}" != "--yes" ]]; then
+    read -rp "Type 'nuke' to confirm: " confirm
+    if [[ "$confirm" != "nuke" ]]; then
+      err "Aborted."
+      exit 1
+    fi
+  fi
+
+  echo ""
+  # 1. Stop services
+  log "Stopping services..."
+  cmd_stop 2>/dev/null || true
+
+  # 2. Remove Docker containers for this instance
+  log "Removing Docker containers..."
+  local docker_cmd
+  docker_cmd=$(command -v docker 2>/dev/null || echo "$HOME/.docker/bin/docker")
+  if [[ -x "$docker_cmd" ]] || command -v docker &>/dev/null; then
+    local prefix="crewship${S}-team-"
+    local containers
+    containers=$($docker_cmd ps -a --filter "name=${prefix}" --format '{{.ID}}' 2>/dev/null || true)
+    if [[ -n "$containers" ]]; then
+      echo "$containers" | xargs $docker_cmd rm -f 2>/dev/null || true
+      ok "Containers removed"
+    else
+      ok "No containers to remove"
+    fi
+
+    # Remove network
+    if $docker_cmd network inspect "$CONTAINER_NETWORK" &>/dev/null; then
+      $docker_cmd network rm "$CONTAINER_NETWORK" 2>/dev/null || true
+      ok "Network $CONTAINER_NETWORK removed"
+    fi
+  else
+    warn "Docker not available — skipping container cleanup"
+  fi
+
+  # 3. Remove data directories
+  log "Removing data..."
+  rm -rf "$DATA_DIR"
+  rm -rf "$STATE_DIR"
+  rm -rf "$LOG_PATH"
+  rm -f "$SOCKET_PATH"
+  ok "Data directories removed"
+
+  # 4. Remove SQLite database
+  if [[ -f "$PROJECT_DIR/crewship.db" ]]; then
+    rm -f "$PROJECT_DIR/crewship.db"
+    rm -f "$PROJECT_DIR/crewship.db-shm"
+    rm -f "$PROJECT_DIR/crewship.db-wal"
+    ok "SQLite database removed"
+  fi
+
+  # 5. Remove log files
+  rm -f "$GO_LOG" "$NEXT_LOG"
+  rm -f "$GO_PID_FILE" "$NEXT_PID_FILE"
+  ok "Logs and PID files cleaned"
+
+  echo ""
+  ok "Factory reset complete. Run ${CYAN}./dev.sh start${NC} then ${CYAN}./dev.sh seed${NC} for a fresh environment."
+}
+
+cmd_seed() {
+  log "Seeding database..."
+
+  # Verify .env.local exists
+  if [[ ! -f "$PROJECT_DIR/.env.local" ]]; then
+    err ".env.local not found -- copy from .env.example and fill in values"
+    exit 1
+  fi
+
+  # Verify DB file exists (Go server must have run first to create it + apply migrations)
+  local db_file
+  db_file=$(grep -E '^DATABASE_URL=' "$PROJECT_DIR/.env.local" | head -1 | cut -d'=' -f2- | tr -d '"' || true)
+  db_file="${db_file#file:}"
+  db_file="${db_file#./}"
+  db_file="${db_file:-crewship.db}"
+  if [[ ! -f "$PROJECT_DIR/$db_file" ]]; then
+    err "Database $db_file not found. Start the server first (./dev.sh start) so Go migrations create the DB."
+    exit 1
+  fi
+
+  (
+    cd "$PROJECT_DIR"
+    set -a && . ./.env.local && set +a
+    pnpm db:seed
+  )
+
+  ok "Seed complete."
+}
+
 case "${1:-help}" in
   start)     cmd_start ;;
   stop)      cmd_stop ;;
   restart)   cmd_restart ;;
   status)    cmd_status ;;
+  nuke)      cmd_nuke "$@" ;;
+  seed)      cmd_seed ;;
   logs)      cmd_logs ;;
   logs:go)   cmd_logs_go ;;
   logs:next) cmd_logs_next ;;
   *)
-    echo "Usage: ./dev.sh {start|stop|restart|status|logs|logs:go|logs:next}"
+    echo "Usage: ./dev.sh {start|stop|restart|status|seed|nuke|logs|logs:go|logs:next}"
     echo ""
     echo "  start     Start crewship + Next.js (+ PostgreSQL if configured)"
     echo "  stop      Stop crewship + Next.js"
     echo "  restart   Stop then start all services"
     echo "  status    Show status of all services"
+    echo "  seed      Seed database with demo data (requires running server)"
+    echo "  nuke      Factory reset (destroy all data, containers, start fresh)"
     echo "  logs      Tail combined logs"
     echo "  logs:go   Tail crewship logs only"
     echo "  logs:next Tail Next.js logs only"

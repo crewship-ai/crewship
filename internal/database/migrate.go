@@ -67,6 +67,8 @@ var migrations = []migration{
 	{6, "add_peer_conversations", migrationAddPeerConversations},
 	{7, "add_escalations", migrationAddEscalations},
 	{8, "add_missions", migrationAddMissions},
+	{9, "add_keeper", migrationAddKeeper},
+	{10, "add_keeper_execute", migrationAddKeeperExecute},
 }
 
 const migrationAddOnboardingCompleted = `
@@ -178,6 +180,43 @@ CREATE TABLE IF NOT EXISTS mission_tasks (
 CREATE INDEX IF NOT EXISTS idx_mission_task_mission ON mission_tasks(mission_id);
 CREATE INDEX IF NOT EXISTS idx_mission_task_agent ON mission_tasks(assigned_agent_id);
 CREATE INDEX IF NOT EXISTS idx_mission_task_status ON mission_tasks(status);
+`
+
+const migrationAddKeeper = `
+-- Keeper credential security levels (L1-L4) and keeper crew assignment
+ALTER TABLE credentials ADD COLUMN security_level INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE credentials ADD COLUMN keeper_crew_id TEXT;
+
+-- Keeper request audit log
+CREATE TABLE IF NOT EXISTS keeper_requests (
+	id TEXT PRIMARY KEY,
+	requesting_agent_id TEXT NOT NULL REFERENCES agents(id),
+	requesting_crew_id TEXT NOT NULL,
+	credential_id TEXT NOT NULL REFERENCES credentials(id),
+	task_id TEXT,
+	intent TEXT NOT NULL,
+	decision TEXT,
+	reason TEXT,
+	risk_score INTEGER,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	decided_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_keeper_req_agent ON keeper_requests(requesting_agent_id);
+CREATE INDEX IF NOT EXISTS idx_keeper_req_crew ON keeper_requests(requesting_crew_id);
+CREATE INDEX IF NOT EXISTS idx_keeper_req_cred ON keeper_requests(credential_id);
+CREATE INDEX IF NOT EXISTS idx_keeper_req_decision ON keeper_requests(decision);
+CREATE INDEX IF NOT EXISTS idx_keeper_req_created ON keeper_requests(created_at);
+`
+
+const migrationAddKeeperExecute = `
+-- Add execute request tracking to the keeper audit log.
+-- request_type: 'access' (credential lookup) or 'execute' (run command with credential)
+-- command: the shell command executed on behalf of the agent (execute requests only)
+-- exit_code: the exit code of the executed command (execute requests only)
+ALTER TABLE keeper_requests ADD COLUMN request_type TEXT NOT NULL DEFAULT 'access';
+ALTER TABLE keeper_requests ADD COLUMN command TEXT;
+ALTER TABLE keeper_requests ADD COLUMN exit_code INTEGER;
+>>>>>>> 5e141e6 (feat: Keeper credential access control system with /execute endpoint)
 `
 
 const migrationInit = `
