@@ -43,6 +43,12 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace context required"})
+		return
+	}
+
 	limit := 50
 	offset := 0
 	if v := r.URL.Query().Get("limit"); v != "" {
@@ -66,8 +72,9 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 		FROM keeper_requests kr
 		LEFT JOIN agents a ON a.id = kr.requesting_agent_id
 		LEFT JOIN credentials c ON c.id = kr.credential_id
+		WHERE kr.requesting_agent_id IN (SELECT id FROM agents WHERE workspace_id = ?)
 		ORDER BY kr.created_at DESC
-		LIMIT ? OFFSET ?`, limit, offset)
+		LIMIT ? OFFSET ?`, workspaceID, limit, offset)
 	if err != nil {
 		h.logger.Error("keeper log: query failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})

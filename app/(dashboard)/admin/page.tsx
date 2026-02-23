@@ -192,12 +192,13 @@ export default function AdminPage() {
   const fetchKeeperData = useCallback(async () => {
     setKeeperLoading(true)
     try {
-      const [statusRes, logRes] = await Promise.all([
-        fetch("/api/v1/system/keeper"),
-        fetch(`/api/v1/admin/keeper/requests?workspace_id=${workspaceId}&limit=50`),
-      ])
+      const statusRes = await fetch("/api/v1/system/keeper")
       if (statusRes.ok) setKeeperStatus(await statusRes.json())
-      if (logRes.ok) setKeeperLog(await logRes.json())
+
+      if (workspaceId) {
+        const logRes = await fetch(`/api/v1/admin/keeper/requests?workspace_id=${workspaceId}&limit=50`)
+        if (logRes.ok) setKeeperLog(await logRes.json())
+      }
     } catch {
       // silently fail
     } finally {

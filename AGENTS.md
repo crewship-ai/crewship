@@ -24,6 +24,8 @@ pnpm lint && pnpm build                  # Frontend — must pass for UI changes
 ## Project-specific knowledge (not derivable from code)
 
 - Single binary: `make build` → Next.js static export (`out/`) → `web/out/` → Go `//go:embed`. No Node.js at runtime.
+- **Dev server: `./dev.sh start`** — starts Go backend + Next.js (+ PostgreSQL if configured). Other commands: `stop`, `restart`, `status`, `seed`, `nuke`, `logs`. Never start services manually.
+- **Ollama models** are on the external SSD: `OLLAMA_MODELS="/Volumes/SSD 990 PRO/ollama-models"`. Start Ollama with this env var before `./dev.sh start` when testing Keeper.
 - One container per crew (not per agent). `Exec`, not `Run`. Name: `crewship-team-{slug}`.
 - IPC is HTTP-over-Unix-socket on `/tmp/crewship.sock`. Internal auth via `X-Internal-Token`.
 - Credential encryption: versioned `"v1:{base64}"`, byte layout see above.

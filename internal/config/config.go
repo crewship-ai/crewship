@@ -267,12 +267,13 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CREWSHIP_INTERNAL_TOKEN"); v != "" {
 		cfg.Auth.InternalToken = v
 	}
-	if v := os.Getenv("KEEPER_ENABLED"); v == "true" || v == "1" {
-		cfg.Keeper.Enabled = true
+	if v := os.Getenv("KEEPER_ENABLED"); v != "" {
+		cfg.Keeper.Enabled = v == "true" || v == "1"
 	}
 	if v := os.Getenv("KEEPER_OLLAMA_URL"); v != "" {
 		cfg.Keeper.OllamaURL = v
-		if !cfg.Keeper.Enabled {
+		// Auto-enable when URL is set, unless explicitly disabled
+		if os.Getenv("KEEPER_ENABLED") == "" {
 			cfg.Keeper.Enabled = true
 		}
 	}
