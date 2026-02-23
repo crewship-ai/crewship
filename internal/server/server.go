@@ -179,7 +179,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// Wire keeper execute: load secrets store and pass container provider
 		if ctr != nil {
 			opts = append(opts, goapi.WithKeeperContainer(ctr))
-			secretsStore := newSecretsAdapter(deps.DB, logger)
+			secretsStore := newSecretsAdapter(context.Background(), deps.DB, logger)
 			if secretsStore != nil {
 				opts = append(opts, goapi.WithKeeperSecrets(secretsStore))
 			}

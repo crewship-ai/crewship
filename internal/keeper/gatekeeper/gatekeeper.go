@@ -105,7 +105,7 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	resp, err := parseResponse(raw)
 	if err != nil {
 		g.logger.Error("keeper: parse LLM response failed, denying",
-			"error", err, "raw", raw)
+			"error", err, "raw_len", len(raw))
 		return keeper.GatekeeperResponse{
 			Decision:  string(keeper.DecisionDeny),
 			Reason:    "Keeper LLM returned unparseable response — deny by default",

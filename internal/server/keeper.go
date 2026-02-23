@@ -23,9 +23,8 @@ func (a *secretsAdapter) Get(credentialID string) (string, bool) {
 // the database, and returns an adapter that satisfies api.SecretGetter.
 // Returns nil if the store cannot be loaded (credentials may not be decryptable
 // without a valid ENCRYPTION_KEY, which is acceptable in dev/test environments).
-func newSecretsAdapter(db *sql.DB, logger *slog.Logger) *secretsAdapter {
+func newSecretsAdapter(ctx context.Context, db *sql.DB, logger *slog.Logger) *secretsAdapter {
 	store := secrets.New()
-	ctx := context.Background()
 	if err := store.Reload(ctx, db); err != nil {
 		logger.Warn("keeper: failed to load secrets store — /keeper/execute ALLOW will return 500",
 			"error", err)

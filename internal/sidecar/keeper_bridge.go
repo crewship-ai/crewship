@@ -27,6 +27,9 @@ var credentialIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_\-]+$`)
 // could be used for credential exfiltration or command injection.
 // Content inside single quotes is considered safe (shell does not interpret them).
 func containsDangerousShellChars(cmd string) bool {
+	if strings.ContainsAny(cmd, "\n\r") {
+		return true
+	}
 	parts := strings.Split(cmd, "'")
 	for i, part := range parts {
 		if i%2 == 1 {

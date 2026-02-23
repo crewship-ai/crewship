@@ -176,7 +176,16 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	var gkResp keeper.GatekeeperResponse
 	if h.gatekeeper != nil {
-		gkResp, _ = h.gatekeeper.Evaluate(r.Context(), evalReq)
+		var evalErr error
+		gkResp, evalErr = h.gatekeeper.Evaluate(r.Context(), evalReq)
+		if evalErr != nil {
+			h.logger.Error("keeper: gatekeeper evaluate failed", "error", evalErr)
+			gkResp = keeper.GatekeeperResponse{
+				Decision:  string(keeper.DecisionDeny),
+				Reason:    "Keeper evaluation failed — deny by default",
+				RiskScore: 10,
+			}
+		}
 	} else {
 		gkResp = keeper.GatekeeperResponse{
 			Decision:  string(keeper.DecisionDeny),
@@ -240,6 +249,11 @@ var envVarNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // It parses the command carefully: content inside single quotes is safe,
 // everything else is checked against the dangerous pattern list.
 func containsDangerousShellChars(cmd string) bool {
+	// Newline and carriage return are shell command separators that bypass
+	// the metachar check if not caught first.
+	if strings.ContainsAny(cmd, "\n\r") {
+		return true
+	}
 	// Simple approach: check outside single-quoted strings
 	// Split by single quotes — odd-indexed segments are inside quotes
 	parts := strings.Split(cmd, "'")
@@ -365,7 +379,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		lookupErr := h.db.QueryRowContext(r.Context(),
 			`SELECT env_var_name FROM agent_credentials WHERE agent_id = ? AND credential_id = ?`,
 			body.RequestingAgentID, body.CredentialID).Scan(&assignedEnvVar)
-		if lookupErr == nil && assignedEnvVar != "" {
+		if lookupErr == nil && assignedEnvVar != "" && envVarNamePattern.MatchString(assignedEnvVar) {
 			envVar = assignedEnvVar
 		} else {
 			// Fallback: derive from credential name
@@ -415,7 +429,16 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 
 	var gkResp keeper.GatekeeperResponse
 	if h.gatekeeper != nil {
-		gkResp, _ = h.gatekeeper.Evaluate(r.Context(), evalReq)
+		var evalErr error
+		gkResp, evalErr = h.gatekeeper.Evaluate(r.Context(), evalReq)
+		if evalErr != nil {
+			h.logger.Error("keeper execute: gatekeeper evaluate failed", "error", evalErr)
+			gkResp = keeper.GatekeeperResponse{
+				Decision:  string(keeper.DecisionDeny),
+				Reason:    "Keeper evaluation failed — deny by default",
+				RiskScore: 10,
+			}
+		}
 	} else {
 		gkResp = keeper.GatekeeperResponse{
 			Decision:  string(keeper.DecisionDeny),

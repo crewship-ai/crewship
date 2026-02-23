@@ -136,6 +136,19 @@ func TestKeeperHandleExecute_OversizedCommand_Rejected(t *testing.T) {
 	}
 }
 
+// spyContainerExec wraps mockContainerExec and tracks whether Exec was called.
+type spyContainerExec struct {
+	*mockContainerExec
+	execCalled *bool
+}
+
+func (s *spyContainerExec) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	if s.execCalled != nil {
+		*s.execCalled = true
+	}
+	return s.mockContainerExec.Exec(ctx, cfg)
+}
+
 // TestKeeperHandleExecute_GatekeeperDeny_NoExec verifies that when the gatekeeper
 // denies a request, the container exec is never called and DENY is returned.
 func TestKeeperHandleExecute_GatekeeperDeny_NoExec(t *testing.T) {
@@ -143,14 +156,10 @@ func TestKeeperHandleExecute_GatekeeperDeny_NoExec(t *testing.T) {
 	wsID, crewID, agentID, credID := seedKeeperFixture(t, db)
 
 	execCalled := false
-	ctr := &mockContainerExec{}
-
-	// Wrap ctr to detect if Exec was called
-	type spyContainer struct {
-		*mockContainerExec
-		execCalled *bool
+	spyCtr := &spyContainerExec{
+		mockContainerExec: &mockContainerExec{output: "", exitCode: 0},
+		execCalled:        &execCalled,
 	}
-	spyCtr := &mockContainerExec{output: "", exitCode: 0}
 
 	gk := &mockEvaluator{resp: keeper.GatekeeperResponse{
 		Decision:  string(keeper.DecisionDeny),
@@ -188,10 +197,9 @@ func TestKeeperHandleExecute_GatekeeperDeny_NoExec(t *testing.T) {
 	if result.Output != "" {
 		t.Errorf("expected no output on DENY, got %q", result.Output)
 	}
-
-	// Verify exec was NOT called (spyCtr.execErr would have been triggered on exec)
-	_ = ctr
-	_ = execCalled
+	if execCalled {
+		t.Error("expected container Exec not to be called on DENY")
+	}
 }
 
 // TestKeeperHandleExecute_Allow_OutputScrubbed verifies that when the gatekeeper

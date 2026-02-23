@@ -317,8 +317,8 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		// to new location (/crew/agents/{slug}/.memory/) if not already migrated
 		oldMemoryDir := path.Join(outputDir, ".memory")
 		migScript := fmt.Sprintf(
-			`test -f %s/AGENT.md && ! test -f %s/AGENT.md && cp -a %s/* %s/ 2>/dev/null; true`,
-			oldMemoryDir, memoryDir, oldMemoryDir, memoryDir,
+			`if [ -d %[1]s ] && [ -z "$(ls -A %[2]s 2>/dev/null)" ]; then cp -a %[1]s/. %[2]s/ 2>/dev/null; fi; true`,
+			oldMemoryDir, memoryDir,
 		)
 		migCfg := provider.ExecConfig{
 			ContainerID: req.ContainerID,

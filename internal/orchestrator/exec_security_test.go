@@ -41,7 +41,7 @@ func TestBuildEnvVarsSidecar_NoSecretCredentialTypes_InOutput(t *testing.T) {
 	secretCreds := []Credential{
 		{ID: "s1", Type: "SECRET", EnvVarName: "GITHUB_TOKEN", PlainValue: "ghp_realtoken"},
 		{ID: "s2", Type: "SECRET", EnvVarName: "SLACK_WEBHOOK", PlainValue: "https://hooks.slack.com/secret"},
-		{ID: "s3", Type: "SECRET", EnvVarName: "STRIPE_SECRET_KEY", PlainValue: "sk_live_realsecret"},
+		{ID: "s3", Type: "SECRET", EnvVarName: "STRIPE_SECRET_KEY", PlainValue: "sk_test_placeholder"},
 		{ID: "s4", Type: "SECRET", EnvVarName: "DATABASE_URL", PlainValue: "postgres://user:pass@host/db"},
 	}
 
@@ -55,7 +55,7 @@ func TestBuildEnvVarsSidecar_NoSecretCredentialTypes_InOutput(t *testing.T) {
 	env := BuildEnvVarsSidecar(req)
 
 	secretEnvVarNames := []string{"GITHUB_TOKEN", "SLACK_WEBHOOK", "STRIPE_SECRET_KEY", "DATABASE_URL"}
-	secretValues := []string{"ghp_realtoken", "https://hooks.slack.com/secret", "sk_live_realsecret", "postgres://user:pass@host/db"}
+	secretValues := []string{"ghp_realtoken", "https://hooks.slack.com/secret", "sk_test_placeholder", "postgres://user:pass@host/db"}
 
 	for _, e := range env {
 		for _, name := range secretEnvVarNames {

@@ -52,6 +52,7 @@ func (s *Store) Reload(ctx context.Context, db *sql.DB) error {
 	defer rows.Close()
 
 	next := make(map[string]DecryptedCredential)
+	var decryptFailed int
 	for rows.Next() {
 		var c DecryptedCredential
 		var encVal string
@@ -61,7 +62,7 @@ func (s *Store) Reload(ctx context.Context, db *sql.DB) error {
 		}
 		plain, err := encryption.Decrypt(encVal)
 		if err != nil {
-			// Log and skip — don't abort the whole reload for one bad credential.
+			decryptFailed++
 			continue
 		}
 		c.PlainValue = plain
@@ -74,6 +75,9 @@ func (s *Store) Reload(ctx context.Context, db *sql.DB) error {
 	s.mu.Lock()
 	s.secrets = next
 	s.mu.Unlock()
+	if decryptFailed > 0 {
+		return fmt.Errorf("keeper secrets: %d credentials failed to decrypt", decryptFailed)
+	}
 	return nil
 }
 

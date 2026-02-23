@@ -485,15 +485,19 @@ cmd_seed() {
     exit 1
   fi
 
-  # Verify DB file exists (Go server must have run first to create it + apply migrations)
-  local db_file
-  db_file=$(grep -E '^DATABASE_URL=' "$PROJECT_DIR/.env.local" | head -1 | cut -d'=' -f2- | tr -d '"' || true)
-  db_file="${db_file#file:}"
-  db_file="${db_file#./}"
-  db_file="${db_file:-crewship.db}"
-  if [[ ! -f "$PROJECT_DIR/$db_file" ]]; then
-    err "Database $db_file not found. Start the server first (./dev.sh start) so Go migrations create the DB."
-    exit 1
+  # Verify DB exists (SQLite only — Postgres is remote, no file check needed)
+  local db_mode
+  db_mode=$(detect_db_mode)
+  if [[ "$db_mode" != "postgresql" ]]; then
+    local db_file
+    db_file=$(grep -E '^DATABASE_URL=' "$PROJECT_DIR/.env.local" | head -1 | cut -d'=' -f2- | tr -d '"' || true)
+    db_file="${db_file#file:}"
+    db_file="${db_file#./}"
+    db_file="${db_file:-crewship.db}"
+    if [[ ! -f "$PROJECT_DIR/$db_file" ]]; then
+      err "Database $db_file not found. Start the server first (./dev.sh start) so Go migrations create the DB."
+      exit 1
+    fi
   fi
 
   (

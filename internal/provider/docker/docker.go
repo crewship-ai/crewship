@@ -282,14 +282,15 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		for _, name := range c.Names {
 			if name == "/"+containerName {
 				// Check if container has /crew mount; if not, recreate it.
-				needsRecreate := true
 				inspect, inspErr := p.client.ContainerInspect(ctx, c.ID)
-				if inspErr == nil {
-					for _, m := range inspect.Mounts {
-						if m.Destination == "/crew" {
-							needsRecreate = false
-							break
-						}
+				if inspErr != nil {
+					return "", fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
+				}
+				needsRecreate := true
+				for _, m := range inspect.Mounts {
+					if m.Destination == "/crew" {
+						needsRecreate = false
+						break
 					}
 				}
 				if needsRecreate {
