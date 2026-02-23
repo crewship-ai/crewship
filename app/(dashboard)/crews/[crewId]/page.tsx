@@ -11,6 +11,7 @@ import { CrewStats } from "@/components/features/crews/crew-stats"
 import { CrewEditForm } from "@/components/features/crews/crew-edit-form"
 import { CrewAgents } from "@/components/features/crews/crew-agents"
 import { CrewMembers } from "@/components/features/crews/crew-members"
+import { CrewMissions } from "@/components/features/crews/crew-missions"
 import { CrewAssignments } from "@/components/features/crews/crew-assignments"
 import { CrewPeerConversations } from "@/components/features/crews/crew-peer-conversations"
 import { CrewEscalations } from "@/components/features/crews/crew-escalations"
@@ -281,6 +282,17 @@ export default function CrewDetailPage() {
         agents={agents}
         crewId={crew.id}
         canCreate={abilities.can("create", "Agent")}
+      />
+
+      <Separator />
+
+      <CrewMissions
+        crewId={crew.id}
+        workspaceId={workspaceId}
+        canCreate={abilities.can("create", "Crew")}
+        leadAgents={agents
+          .filter((a) => a.agent_role === "LEAD")
+          .map((a) => ({ id: a.id, name: a.name, slug: a.slug }))}
       />
 
       <Separator />

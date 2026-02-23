@@ -58,13 +58,14 @@ V single binary mode (`crewship start`) pouzivame SQLite jako default databazi.
 
 ## 2. PREHLED ENTIT
 
-**24 tabulek** rozdelenychdo 7 domen:
+**26 tabulek** rozdelenych do 8 domen:
 
 | Domena | Tabulky | Popis |
 |---|---|---|
 | **NextAuth** | Account, Session, VerificationToken | OAuth adapter, session tokens, email verifikace |
 | **Uzivatele & Workspace** | User, Workspace, WorkspaceMember, WorkspaceInvitation | Multi-tenant zaklad |
 | **Crews** | Crew, CrewMember | Izolacni boundary (1 kontejner = 1 crew) |
+| **Missions** | Mission, MissionTask | Projektove planovani a sledovani ukolu |
 | **Agenti** | Agent, AgentSkill, AgentCredential, AgentConfigHistory, Assignment | Virtualni zamestnanci + orchestrace |
 | **Skills & Credentials** | Skill, SkillReview, Credential | Dovednosti, marketplace recenze, opravneni |
 | **Konverzace & Behy** | Chat (metadata only), AgentRun | Session metadata, behy |
@@ -94,6 +95,9 @@ Workspace (1) ──── (*) WorkspaceMember (*) ──── (1) User
      │        │       ├── (*) AgentRun
      │        │       └── (*) Assignment (assigned_by/assigned_to — lead↔agent, coordinator↔lead)
      │        │
+     │        ├── (*) Mission (lead_agent_id → Agent)
+     │        │       └── (*) MissionTask (assigned_agent_id → Agent, assignment_id → Assignment)
+     │        │
      │
      ├── (*) Credential
      ├── (*) AuditLog
@@ -106,7 +110,7 @@ Workspace (1) ──── (*) WorkspaceMember (*) ──── (1) User
 ## 3. SPOLECNE KONVENCE
 
 ### Vsechny tabulky maji:
-- `id` -- UUID v4, primarni klic, generovany databazi (`gen_random_uuid()`)
+- `id` -- primarni klic. Vetsina tabulek pouziva UUID v4 generovany databazi (`gen_random_uuid()`). Tabulky Mission a MissionTask pouzivaji CUID generovany aplikaci (`generateCUID()` v Go).
 - `created_at` -- TIMESTAMPTZ, default `now()`
 - `updated_at` -- TIMESTAMPTZ, default `now()`, automaticky updatovany triggerem
 
@@ -577,6 +581,64 @@ model Assignment {
   @@index([group_id], name: "idx_assignment_group")
   @@map("assignments")
 }
+
+// ============================================================
+// 7c. MISSION (Phase 1 — Mission Board)
+// ============================================================
+// Missions are project management units created by Lead agents.
+// A mission belongs to a crew and has a lead agent who orchestrates tasks.
+// Status flow: PLANNING → IN_PROGRESS → REVIEW → COMPLETED | FAILED | CANCELLED
+// Tables created in Go migration #8 (internal/database/migrate.go)
+
+// missions table (SQLite/Go migration):
+// id TEXT PRIMARY KEY (CUID)
+// workspace_id TEXT NOT NULL REFERENCES workspaces(id)
+// crew_id TEXT NOT NULL REFERENCES crews(id)
+// lead_agent_id TEXT NOT NULL REFERENCES agents(id)
+// trace_id TEXT NOT NULL UNIQUE — format: "mission-{cuid}"
+// title TEXT NOT NULL
+// description TEXT
+// status TEXT NOT NULL DEFAULT 'PLANNING' — PLANNING | IN_PROGRESS | REVIEW | COMPLETED | FAILED | CANCELLED
+// plan TEXT — JSON of task definitions
+// workflow_template TEXT — e.g. "dev-test-loop", "sequential"
+// total_token_count INTEGER
+// total_estimated_cost REAL
+// created_at TEXT NOT NULL DEFAULT datetime('now')
+// updated_at TEXT NOT NULL DEFAULT datetime('now')
+// completed_at TEXT
+// Indexes: workspace_id, crew_id, lead_agent_id, status, created_at
+
+// ============================================================
+// 7d. MISSION TASK
+// ============================================================
+// Individual tasks within a mission, assigned to agents.
+// Status flow: PENDING → IN_PROGRESS → COMPLETED | FAILED | SKIPPED
+//              PENDING → BLOCKED (if depends_on has incomplete tasks)
+//              BLOCKED → PENDING (when all deps completed)
+
+// mission_tasks table (SQLite/Go migration):
+// id TEXT PRIMARY KEY (CUID)
+// mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE
+// assigned_agent_id TEXT REFERENCES agents(id) — nullable (unassigned)
+// title TEXT NOT NULL
+// description TEXT
+// status TEXT NOT NULL DEFAULT 'PENDING' — PENDING | BLOCKED | IN_PROGRESS | COMPLETED | FAILED | SKIPPED
+// task_order INTEGER NOT NULL DEFAULT 0 — uses task_order to avoid SQL reserved word
+// depends_on TEXT DEFAULT '[]' — JSON array of task IDs
+// iteration INTEGER DEFAULT 1
+// max_iterations INTEGER
+// result_summary TEXT
+// output_path TEXT
+// error_message TEXT
+// assignment_id TEXT REFERENCES assignments(id) — link to existing assignment system
+// token_count INTEGER
+// estimated_cost REAL
+// started_at TEXT
+// completed_at TEXT
+// duration_ms INTEGER
+// created_at TEXT NOT NULL DEFAULT datetime('now')
+// updated_at TEXT NOT NULL DEFAULT datetime('now')
+// Indexes: mission_id, assigned_agent_id, status
 
 // ============================================================
 // 8. SKILL
@@ -1191,7 +1253,7 @@ docker compose -f docker/docker-compose.yml up -d
 
 ## 13. MIGRACNI STRATEGIE
 
-- **Go migration system** (`internal/database/migrate.go`) = manages actual DB schema (24 tables, 3 migrations)
+- **Go migration system** (`internal/database/migrate.go`) = manages actual DB schema (26 tables, 8 migrations)
 - **Prisma schema** = used ONLY for TypeScript type generation, NOT for migrations
 - Go migration system handles both SQLite and PostgreSQL
 - **SQL skripty** pro RLS politiky a triggers (Phase 2)
