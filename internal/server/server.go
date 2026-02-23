@@ -199,6 +199,11 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			}
 		}
 
+		// Wire conversation history so Keeper can verify agent intent against actual chat
+		if convStore != nil {
+			opts = append(opts, goapi.WithKeeperConversations(&convStoreAdapter{store: convStore}))
+		}
+
 		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 		if err != nil {
 			logger.Error("failed to create API router", "error", err)
@@ -362,4 +367,24 @@ func (s *Server) startIPC() error {
 		return fmt.Errorf("ipc serve: %w", err)
 	}
 	return nil
+}
+
+// convStoreAdapter bridges conversation.Store → api.ConversationReader.
+type convStoreAdapter struct {
+	store *conversation.Store
+}
+
+func (a *convStoreAdapter) Read(ctx context.Context, sessionID string, offset, limit int) ([]goapi.ConversationMessage, error) {
+	msgs, err := a.store.Read(ctx, sessionID, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]goapi.ConversationMessage, len(msgs))
+	for i, m := range msgs {
+		out[i] = goapi.ConversationMessage{
+			Role:    string(m.Role),
+			Content: m.Content,
+		}
+	}
+	return out, nil
 }

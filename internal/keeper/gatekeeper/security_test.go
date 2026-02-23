@@ -141,11 +141,11 @@ func TestGatekeeper_ConvHistory_Sanitized_In_Prompt(t *testing.T) {
 
 	// Conversation history must be wrapped with clear begin/end delimiters so the
 	// LLM can distinguish it from real instructions
-	if !strings.Contains(capturedPrompt, "--- begin conversation history ---") {
-		t.Error("expected '--- begin conversation history ---' delimiter in prompt")
+	if !strings.Contains(capturedPrompt, "--- begin history ---") {
+		t.Error("expected '--- begin history ---' delimiter in prompt")
 	}
-	if !strings.Contains(capturedPrompt, "--- end conversation history ---") {
-		t.Error("expected '--- end conversation history ---' delimiter in prompt")
+	if !strings.Contains(capturedPrompt, "--- end history ---") {
+		t.Error("expected '--- end history ---' delimiter in prompt")
 	}
 }
 

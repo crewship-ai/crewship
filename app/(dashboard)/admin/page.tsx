@@ -6,7 +6,7 @@ import {
   LayoutDashboard, ScrollText, Building, Users, Server, Gauge,
   Globe, Archive, Brain, Lock, Key, ToggleRight, Activity, Shield,
   RefreshCw, CheckCircle2, AlertTriangle, Container, ExternalLink,
-  Radio,
+  Radio, X, ChevronRight,
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -20,6 +20,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 
@@ -110,6 +116,8 @@ interface KeeperLogEntry {
   reason: string | null
   risk_score: number | null
   exit_code: number | null
+  ollama_prompt: string | null
+  ollama_raw_response: string | null
   created_at: string
   decided_at: string | null
 }
@@ -162,6 +170,7 @@ export default function AdminPage() {
   const [keeperLiveEvents, setKeeperLiveEvents] = useState<KeeperLiveEvent[]>([])
   const keeperWsRef = useRef<WebSocket | null>(null)
   const [keeperWsStatus, setKeeperWsStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected")
+  const [selectedKeeperEntry, setSelectedKeeperEntry] = useState<KeeperLogEntry | null>(null)
 
   const checkRuntime = useCallback(async () => {
     setRuntimeChecking(true)
@@ -707,7 +716,7 @@ export default function AdminPage() {
                           </TableRow>
                         )}
                         {keeperLog.map((entry) => (
-                          <TableRow key={entry.id}>
+                          <TableRow key={entry.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedKeeperEntry(entry)}>
                             <TableCell className="text-xs font-medium">{entry.agent_name}</TableCell>
                             <TableCell className="text-xs text-muted-foreground">{entry.credential_name}</TableCell>
                             <TableCell>
@@ -741,6 +750,111 @@ export default function AdminPage() {
                   </CardContent>
                 </Card>
               </div>
+
+              {/* Keeper request detail sheet */}
+              <Sheet open={!!selectedKeeperEntry} onOpenChange={(open) => { if (!open) setSelectedKeeperEntry(null) }}>
+                <SheetContent side="right" className="sm:max-w-2xl w-full overflow-y-auto">
+                  <SheetHeader>
+                    <SheetTitle className="flex items-center gap-2 text-sm">
+                      <Shield className="h-4 w-4" />
+                      Keeper Decision Detail
+                    </SheetTitle>
+                  </SheetHeader>
+                  {selectedKeeperEntry && (
+                    <div className="space-y-5 px-1">
+                      {/* Summary */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Agent</div>
+                          <div className="text-xs font-medium mt-0.5">{selectedKeeperEntry.agent_name}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Credential</div>
+                          <div className="text-xs font-mono mt-0.5">{selectedKeeperEntry.credential_name}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Decision</div>
+                          <Badge
+                            variant="outline"
+                            className={cn("text-[10px] mt-0.5",
+                              selectedKeeperEntry.decision === "ALLOW" && "bg-emerald-50 text-emerald-700 border-emerald-200",
+                              selectedKeeperEntry.decision === "DENY" && "bg-red-50 text-red-700 border-red-200",
+                              selectedKeeperEntry.decision === "ESCALATE" && "bg-amber-50 text-amber-700 border-amber-200",
+                            )}
+                          >
+                            {selectedKeeperEntry.decision ?? "PENDING"}
+                          </Badge>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Risk Score</div>
+                          <div className="text-xs font-medium mt-0.5">{selectedKeeperEntry.risk_score != null ? `${selectedKeeperEntry.risk_score}/10` : "—"}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Type</div>
+                          <div className="text-xs mt-0.5">{selectedKeeperEntry.request_type === "execute" ? "Execute" : "Access"}</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Time</div>
+                          <div className="text-xs text-muted-foreground mt-0.5">{new Date(selectedKeeperEntry.created_at).toLocaleString()}</div>
+                        </div>
+                      </div>
+
+                      {/* Intent */}
+                      <div>
+                        <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Intent</div>
+                        <div className="text-xs bg-muted/50 rounded-md p-3">{selectedKeeperEntry.intent}</div>
+                      </div>
+
+                      {/* Reason */}
+                      {selectedKeeperEntry.reason && (
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Reason</div>
+                          <div className="text-xs bg-muted/50 rounded-md p-3">{selectedKeeperEntry.reason}</div>
+                        </div>
+                      )}
+
+                      {/* Command (execute requests) */}
+                      {selectedKeeperEntry.command && (
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Command</div>
+                          <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto font-mono">{selectedKeeperEntry.command}</pre>
+                        </div>
+                      )}
+
+                      {/* Ollama Prompt */}
+                      {selectedKeeperEntry.ollama_prompt ? (
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Ollama Prompt (sent to LLM)</div>
+                          <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">{selectedKeeperEntry.ollama_prompt}</pre>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Ollama Prompt</div>
+                          <div className="text-xs text-muted-foreground italic bg-muted/50 rounded-md p-3">Not available (L1 auto-allow or pre-observability request)</div>
+                        </div>
+                      )}
+
+                      {/* Ollama Raw Response */}
+                      {selectedKeeperEntry.ollama_raw_response ? (
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Ollama Raw Response</div>
+                          <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">{selectedKeeperEntry.ollama_raw_response}</pre>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Ollama Raw Response</div>
+                          <div className="text-xs text-muted-foreground italic bg-muted/50 rounded-md p-3">Not available (L1 auto-allow or pre-observability request)</div>
+                        </div>
+                      )}
+
+                      {/* Request ID */}
+                      <div className="pt-3 border-t">
+                        <div className="text-[10px] text-muted-foreground">Request ID: <span className="font-mono">{selectedKeeperEntry.id}</span></div>
+                      </div>
+                    </div>
+                  )}
+                </SheetContent>
+              </Sheet>
             </>
           )}
         </div>

@@ -69,6 +69,7 @@ var migrations = []migration{
 	{8, "add_missions", migrationAddMissions},
 	{9, "add_keeper", migrationAddKeeper},
 	{10, "add_keeper_execute", migrationAddKeeperExecute},
+	{11, "add_keeper_observability", migrationAddKeeperObservability},
 }
 
 const migrationAddOnboardingCompleted = `
@@ -216,6 +217,12 @@ const migrationAddKeeperExecute = `
 ALTER TABLE keeper_requests ADD COLUMN request_type TEXT NOT NULL DEFAULT 'access';
 ALTER TABLE keeper_requests ADD COLUMN command TEXT;
 ALTER TABLE keeper_requests ADD COLUMN exit_code INTEGER;
+`
+
+const migrationAddKeeperObservability = `
+-- Store the Ollama prompt and raw LLM response for keeper decision observability.
+ALTER TABLE keeper_requests ADD COLUMN ollama_prompt TEXT;
+ALTER TABLE keeper_requests ADD COLUMN ollama_raw_response TEXT;
 `
 
 const migrationInit = `

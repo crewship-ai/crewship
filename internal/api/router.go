@@ -41,6 +41,7 @@ type Router struct {
 	keeperSecrets    SecretGetter
 	keeperContainer  provider.ContainerProvider
 	keeperConfig     *config.KeeperConfig
+	keeperConvReader ConversationReader
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -128,6 +129,14 @@ func WithKeeperContainer(cp provider.ContainerProvider) RouterOption {
 func WithKeeperConfig(cfg *config.KeeperConfig) RouterOption {
 	return func(r *Router) {
 		r.keeperConfig = cfg
+	}
+}
+
+// WithKeeperConversations attaches a conversation reader so Keeper can inspect
+// the agent's actual chat history before making access decisions.
+func WithKeeperConversations(cr ConversationReader) RouterOption {
+	return func(r *Router) {
+		r.keeperConvReader = cr
 	}
 }
 
@@ -326,7 +335,8 @@ func (r *Router) registerRoutes() {
 	// Keeper — credential access control (internal auth)
 	keeperH := NewKeeperHandler(r.db, r.internalToken, r.keeperGK, r.logger).
 		WithSecrets(r.keeperSecrets).
-		WithContainer(r.keeperContainer)
+		WithContainer(r.keeperContainer).
+		WithConversations(r.keeperConvReader)
 	if r.hub != nil {
 		keeperH.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
 	}

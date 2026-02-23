@@ -17,21 +17,23 @@ func NewKeeperLogHandler(db *sql.DB, logger *slog.Logger) *KeeperLogHandler {
 }
 
 type keeperLogEntry struct {
-	ID           string  `json:"id"`
-	AgentID      string  `json:"agent_id"`
-	AgentName    string  `json:"agent_name"`
-	CrewID       string  `json:"crew_id"`
-	CredentialID string  `json:"credential_id"`
-	CredName     string  `json:"credential_name"`
-	Intent       string  `json:"intent"`
-	RequestType  string  `json:"request_type"`
-	Command      *string `json:"command,omitempty"`
-	Decision     *string `json:"decision"`
-	Reason       *string `json:"reason"`
-	RiskScore    *int    `json:"risk_score"`
-	ExitCode     *int    `json:"exit_code,omitempty"`
-	CreatedAt    string  `json:"created_at"`
-	DecidedAt    *string `json:"decided_at"`
+	ID               string  `json:"id"`
+	AgentID          string  `json:"agent_id"`
+	AgentName        string  `json:"agent_name"`
+	CrewID           string  `json:"crew_id"`
+	CredentialID     string  `json:"credential_id"`
+	CredName         string  `json:"credential_name"`
+	Intent           string  `json:"intent"`
+	RequestType      string  `json:"request_type"`
+	Command          *string `json:"command,omitempty"`
+	Decision         *string `json:"decision"`
+	Reason           *string `json:"reason"`
+	RiskScore        *int    `json:"risk_score"`
+	ExitCode         *int    `json:"exit_code,omitempty"`
+	OllamaPrompt     *string `json:"ollama_prompt,omitempty"`
+	OllamaRawResponse *string `json:"ollama_raw_response,omitempty"`
+	CreatedAt        string  `json:"created_at"`
+	DecidedAt        *string `json:"decided_at"`
 }
 
 // List returns the most recent keeper requests with agent and credential names.
@@ -68,6 +70,7 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 			kr.requesting_crew_id, kr.credential_id, COALESCE(c.name,'Unknown'),
 			kr.intent, kr.request_type, kr.command,
 			kr.decision, kr.reason, kr.risk_score, kr.exit_code,
+			kr.ollama_prompt, kr.ollama_raw_response,
 			kr.created_at, kr.decided_at
 		FROM keeper_requests kr
 		LEFT JOIN agents a ON a.id = kr.requesting_agent_id
@@ -90,6 +93,7 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 			&e.CrewID, &e.CredentialID, &e.CredName,
 			&e.Intent, &e.RequestType, &e.Command,
 			&e.Decision, &e.Reason, &e.RiskScore, &e.ExitCode,
+			&e.OllamaPrompt, &e.OllamaRawResponse,
 			&e.CreatedAt, &e.DecidedAt,
 		); err != nil {
 			h.logger.Error("keeper log: scan failed", "error", err)

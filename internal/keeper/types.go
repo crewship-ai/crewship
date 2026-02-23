@@ -53,6 +53,11 @@ type GatekeeperResponse struct {
 	Decision  string `json:"decision"`
 	Reason    string `json:"reason"`
 	RiskScore int    `json:"risk"`
+
+	// Prompt is the full text sent to Ollama (populated for observability, not serialised to the agent).
+	Prompt string `json:"-"`
+	// RawLLMResponse is the verbatim text returned by Ollama before JSON parsing.
+	RawLLMResponse string `json:"-"`
 }
 
 // ExecuteResult is returned by /keeper/execute after the command has been

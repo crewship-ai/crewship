@@ -415,6 +415,7 @@ func TestRunAgentWithSidecar(t *testing.T) {
 
 	mc := &mockContainer{
 		execResults: []*provider.ExecResult{
+			{ExecID: "health-1", Reader: io.NopCloser(strings.NewReader(""))},   // isSidecarRunning check (empty = not running)
 			{ExecID: "sidecar-1", Reader: io.NopCloser(strings.NewReader(""))},  // startSidecar
 			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},    // createAgentDirs
 			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},   // setupClaudeConfig
