@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -108,6 +109,57 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 		result = []skillResponse{}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// Get handles GET /api/v1/skills/{skillId}
+func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
+	skillID := r.PathValue("skillId")
+
+	type skillDetailResponse struct {
+		skillResponse
+		Content                *string `json:"content"`
+		CredentialRequirements *string `json:"credential_requirements"`
+		McpServerCommand       *string `json:"mcp_server_command"`
+		McpServerImage         *string `json:"mcp_server_image"`
+		McpTransport           *string `json:"mcp_transport"`
+		Dependencies           *string `json:"dependencies"`
+		License                *string `json:"license"`
+		AgentCount             int     `json:"agent_count"`
+	}
+
+	var s skillDetailResponse
+	var featured int
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT s.id, s.name, s.slug, s.display_name, s.description, s.version, s.author,
+		       s.category, s.source, s.icon, s.verification, s.downloads, s.rating_avg, s.rating_count,
+		       s.tags, s.featured, s.pricing_tier, s.tool_count, s.created_at, s.updated_at,
+		       s.content, s.credential_requirements, s.mcp_server_command, s.mcp_server_image,
+		       s.mcp_transport, s.dependencies, s.license,
+		       (SELECT COUNT(*) FROM agent_skills WHERE skill_id = s.id) as agent_count
+		FROM skills s WHERE s.id = ?`, skillID).Scan(
+		&s.ID, &s.Name, &s.Slug, &s.DisplayName, &s.Description, &s.Version, &s.Author,
+		&s.Category, &s.Source, &s.Icon, &s.Verification, &s.Downloads, &s.RatingAvg, &s.RatingCount,
+		&s.Tags, &featured, &s.PricingTier, &s.ToolCount, &s.CreatedAt, &s.UpdatedAt,
+		&s.Content, &s.CredentialRequirements, &s.McpServerCommand, &s.McpServerImage,
+		&s.McpTransport, &s.Dependencies, &s.License, &s.AgentCount,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]interface{}{
+				"type":   "about:blank",
+				"title":  "Not Found",
+				"status": 404,
+				"detail": "Skill not found",
+			})
+			return
+		}
+		h.logger.Error("get skill", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	s.Featured = featured == 1
+
+	writeJSON(w, http.StatusOK, s)
 }
 
 // Import handles POST /api/v1/workspaces/{workspaceId}/skills/import.
