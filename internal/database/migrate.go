@@ -216,7 +216,6 @@ const migrationAddKeeperExecute = `
 ALTER TABLE keeper_requests ADD COLUMN request_type TEXT NOT NULL DEFAULT 'access';
 ALTER TABLE keeper_requests ADD COLUMN command TEXT;
 ALTER TABLE keeper_requests ADD COLUMN exit_code INTEGER;
->>>>>>> 5e141e6 (feat: Keeper credential access control system with /execute endpoint)
 `
 
 const migrationInit = `
