@@ -113,6 +113,20 @@ interface KeeperLogEntry {
   decided_at: string | null
 }
 
+function redactUrl(raw: string): string {
+  try {
+    const url = new URL(raw)
+    if (url.username || url.password) {
+      url.username = url.username ? "****" : ""
+      url.password = ""
+    }
+    if (url.search) url.search = "?…"
+    return url.toString()
+  } catch {
+    return raw
+  }
+}
+
 export default function AdminPage() {
   const router = useRouter()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
@@ -501,7 +515,7 @@ export default function AdminPage() {
 
                   {keeperStatus.enabled && (
                     <div className="pt-3 border-t text-xs text-muted-foreground space-y-1">
-                      <div>Ollama URL: <span className="font-mono">{keeperStatus.ollama_url}</span></div>
+                      <div>Ollama URL: <span className="font-mono">{redactUrl(keeperStatus.ollama_url)}</span></div>
                       <div>Model: <span className="font-mono">{keeperStatus.model}</span></div>
                     </div>
                   )}

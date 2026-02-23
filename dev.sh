@@ -51,6 +51,12 @@ is_running() {
   return 1
 }
 
+# Portable timeout: macOS ships without GNU timeout; Homebrew provides gtimeout.
+TIMEOUT_CMD="$(command -v timeout 2>/dev/null || command -v gtimeout 2>/dev/null || true)"
+if [[ -z "$TIMEOUT_CMD" ]]; then
+  warn "timeout/gtimeout not found; install GNU coreutils for Docker detection timeouts"
+fi
+
 port_in_use() {
   # Use /dev/tcp probe instead of lsof — lsof scans all FDs system-wide
   # and is extremely slow on external SSD volumes (10-30s vs <0.1s).
@@ -209,8 +215,10 @@ start_go() {
     set -a && . ./.env.local && set +a
     export CREWSHIP_LOG_LEVEL=debug
     # Auto-detect container runtime; fall back to --no-docker if none found
-    # Use timeout to avoid hanging when Docker Desktop is not running
-    if timeout 3 docker info &>/dev/null || timeout 3 podman info &>/dev/null; then
+    # Use $TIMEOUT_CMD to avoid hanging when Docker Desktop is not running
+    if [[ -n "$TIMEOUT_CMD" ]] && { "$TIMEOUT_CMD" 3 docker info &>/dev/null || "$TIMEOUT_CMD" 3 podman info &>/dev/null; }; then
+      exec "$binary" start
+    elif [[ -z "$TIMEOUT_CMD" ]] && { docker info &>/dev/null 2>&1; }; then
       exec "$binary" start
     else
       exec "$binary" start --no-docker
@@ -296,8 +304,10 @@ stop_service() {
     # Use fuser (fast) or fall back to lsof with timeout to avoid SSD hangs
     local orphan_pids
     orphan_pids=$(fuser "$port/tcp" 2>/dev/null | tr -s ' ' || true)
-    if [[ -z "$orphan_pids" ]]; then
-      orphan_pids=$(timeout 5 lsof -ti:"$port" 2>/dev/null || true)
+    if [[ -z "$orphan_pids" && -n "$TIMEOUT_CMD" ]]; then
+      orphan_pids=$("$TIMEOUT_CMD" 5 lsof -ti:"$port" 2>/dev/null || true)
+    elif [[ -z "$orphan_pids" ]]; then
+      orphan_pids=$(lsof -ti:"$port" 2>/dev/null || true)
     fi
     for orphan_pid in $orphan_pids; do
       kill "$orphan_pid" 2>/dev/null || true
@@ -305,8 +315,10 @@ stop_service() {
     sleep 1
     if port_in_use "$port"; then
       orphan_pids=$(fuser "$port/tcp" 2>/dev/null | tr -s ' ' || true)
-      if [[ -z "$orphan_pids" ]]; then
-        orphan_pids=$(timeout 5 lsof -ti:"$port" 2>/dev/null || true)
+      if [[ -z "$orphan_pids" && -n "$TIMEOUT_CMD" ]]; then
+        orphan_pids=$("$TIMEOUT_CMD" 5 lsof -ti:"$port" 2>/dev/null || true)
+      elif [[ -z "$orphan_pids" ]]; then
+        orphan_pids=$(lsof -ti:"$port" 2>/dev/null || true)
       fi
       for orphan_pid in $orphan_pids; do
         kill -9 "$orphan_pid" 2>/dev/null || true
