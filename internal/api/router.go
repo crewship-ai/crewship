@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -25,6 +26,7 @@ type Router struct {
 	keeperGK         gatekeeper.Evaluator
 	keeperSecrets    SecretGetter
 	keeperContainer  provider.ContainerProvider
+	keeperConfig     *config.KeeperConfig
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -108,6 +110,13 @@ func WithKeeperContainer(cp provider.ContainerProvider) RouterOption {
 	}
 }
 
+// WithKeeperConfig passes Keeper configuration for the status endpoint.
+func WithKeeperConfig(cfg *config.KeeperConfig) RouterOption {
+	return func(r *Router) {
+		r.keeperConfig = cfg
+	}
+}
+
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)
 }
@@ -132,6 +141,10 @@ func (r *Router) registerRoutes() {
 	// System info (auth required)
 	system := NewSystemHandler(r.logger)
 	r.mux.Handle("GET /api/v1/system/runtime", authed(http.HandlerFunc(system.Runtime)))
+
+	// Keeper status (auth required)
+	keeperStatus := NewKeeperStatusHandler(r.db, r.keeperConfig, r.keeperGK, r.logger)
+	r.mux.Handle("GET /api/v1/system/keeper", authed(http.HandlerFunc(keeperStatus.Status)))
 
 	// Workspaces (auth only, no workspace context needed)
 	r.mux.Handle("GET /api/v1/workspaces", authed(http.HandlerFunc(ws.List)))
@@ -241,6 +254,10 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/admin/stats", authed(wsCtx(http.HandlerFunc(admin.Stats))))
 	r.mux.Handle("GET /api/v1/admin/users", authed(wsCtx(http.HandlerFunc(admin.ListUsers))))
 	r.mux.Handle("GET /api/v1/admin/workspaces", authed(wsCtx(http.HandlerFunc(admin.ListWorkspaces))))
+
+	// Keeper admin log
+	keeperLog := NewKeeperLogHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))
 
 	// Crewshipd proxy + agent runtime routes (require IPC socket)
 	socketPath := r.socketPath

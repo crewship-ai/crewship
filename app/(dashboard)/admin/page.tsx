@@ -55,7 +55,7 @@ const sections: TabDef[] = [
   { key: "ratelimits", label: "Rate Limits", icon: Activity },
 ]
 
-const realTabs: TabKey[] = ["overview", "workspaces", "users", "providers"]
+const realTabs: TabKey[] = ["overview", "workspaces", "users", "providers", "security"]
 
 interface Stats {
   workspaces: number
@@ -83,6 +83,36 @@ interface AdminUser {
   role: string | null
 }
 
+interface KeeperStatus {
+  enabled: boolean
+  ollama_url: string
+  model: string
+  ollama_online: boolean
+  gatekeeper_configured: boolean
+  total_requests: number
+  allow_count: number
+  deny_count: number
+  escalate_count: number
+}
+
+interface KeeperLogEntry {
+  id: string
+  agent_id: string
+  agent_name: string
+  crew_id: string
+  credential_id: string
+  credential_name: string
+  intent: string
+  request_type: string
+  command: string | null
+  decision: string | null
+  reason: string | null
+  risk_score: number | null
+  exit_code: number | null
+  created_at: string
+  decided_at: string | null
+}
+
 export default function AdminPage() {
   const router = useRouter()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
@@ -96,6 +126,10 @@ export default function AdminPage() {
   const [runtimeInfo, setRuntimeInfo] = useState<{ runtime: string; version: string; socket: string } | null>(null)
   const [runtimeInstallLinks, setRuntimeInstallLinks] = useState<Record<string, string>>({})
   const [runtimeChecking, setRuntimeChecking] = useState(false)
+
+  const [keeperStatus, setKeeperStatus] = useState<KeeperStatus | null>(null)
+  const [keeperLog, setKeeperLog] = useState<KeeperLogEntry[]>([])
+  const [keeperLoading, setKeeperLoading] = useState(false)
 
   const checkRuntime = useCallback(async () => {
     setRuntimeChecking(true)
@@ -155,9 +189,29 @@ export default function AdminPage() {
     return () => { cancelled = true }
   }, [workspaceId, role])
 
+  const fetchKeeperData = useCallback(async () => {
+    setKeeperLoading(true)
+    try {
+      const [statusRes, logRes] = await Promise.all([
+        fetch("/api/v1/system/keeper"),
+        fetch(`/api/v1/admin/keeper/requests?workspace_id=${workspaceId}&limit=50`),
+      ])
+      if (statusRes.ok) setKeeperStatus(await statusRes.json())
+      if (logRes.ok) setKeeperLog(await logRes.json())
+    } catch {
+      // silently fail
+    } finally {
+      setKeeperLoading(false)
+    }
+  }, [workspaceId])
+
   useEffect(() => {
     if (role === "OWNER") checkRuntime()
   }, [role, checkRuntime])
+
+  useEffect(() => {
+    if (role === "OWNER" && tab === "security") fetchKeeperData()
+  }, [role, tab, fetchKeeperData])
 
   if (wsLoading || role !== "OWNER") {
     return (
@@ -391,7 +445,165 @@ export default function AdminPage() {
       )
     }
 
-    // Placeholder for infrastructure/security tabs
+    if (tab === "security") {
+      return (
+        <div className="space-y-6">
+          <div className="pb-3 border-b">
+            <h3 className="text-sm font-medium">Keeper — Credential Access Control</h3>
+            <p className="text-xs text-muted-foreground">
+              Keeper evaluates credential access requests using a local AI model (Ollama).
+              Agents never see raw credentials — Keeper decides ALLOW / DENY / ESCALATE.
+            </p>
+          </div>
+
+          {keeperLoading && <Skeleton className="h-[200px] rounded-xl" />}
+
+          {!keeperLoading && keeperStatus && (
+            <>
+              {/* Status card */}
+              <Card>
+                <CardContent className="p-5 space-y-4">
+                  <div className="text-xs font-medium">System Status</div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={cn("w-2 h-2 rounded-full", keeperStatus.enabled ? "bg-emerald-500" : "bg-amber-400")} />
+                        <span className="text-xs">Keeper</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {keeperStatus.enabled ? "Enabled" : "Disabled"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={cn("w-2 h-2 rounded-full", keeperStatus.gatekeeper_configured ? "bg-emerald-500" : "bg-red-400")} />
+                        <span className="text-xs">Gatekeeper</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {keeperStatus.gatekeeper_configured ? "Configured" : "Not configured"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className={cn("w-2 h-2 rounded-full", keeperStatus.ollama_online ? "bg-emerald-500" : "bg-red-400")} />
+                        <span className="text-xs">Ollama LLM</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {keeperStatus.ollama_online
+                          ? `Online — ${keeperStatus.model}`
+                          : keeperStatus.enabled
+                            ? "Offline"
+                            : "Not configured"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {keeperStatus.enabled && (
+                    <div className="pt-3 border-t text-xs text-muted-foreground space-y-1">
+                      <div>Ollama URL: <span className="font-mono">{keeperStatus.ollama_url}</span></div>
+                      <div>Model: <span className="font-mono">{keeperStatus.model}</span></div>
+                    </div>
+                  )}
+
+                  {!keeperStatus.enabled && (
+                    <div className="pt-3 border-t">
+                      <p className="text-xs text-muted-foreground">
+                        To enable Keeper, set <code className="bg-muted px-1 py-0.5 rounded text-[10px]">KEEPER_OLLAMA_URL=http://localhost:11434</code> in
+                        your <code className="bg-muted px-1 py-0.5 rounded text-[10px]">.env.local</code> and restart the server.
+                      </p>
+                    </div>
+                  )}
+
+                  <Button variant="outline" size="sm" onClick={fetchKeeperData} disabled={keeperLoading}>
+                    <RefreshCw className={cn("mr-2 h-3.5 w-3.5", keeperLoading && "animate-spin")} />
+                    Refresh
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Stats */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { label: "Total Requests", value: keeperStatus.total_requests },
+                  { label: "Allowed", value: keeperStatus.allow_count, color: "text-emerald-600" },
+                  { label: "Denied", value: keeperStatus.deny_count, color: "text-red-600" },
+                  { label: "Escalated", value: keeperStatus.escalate_count, color: "text-amber-600" },
+                ].map((s) => (
+                  <Card key={s.label}>
+                    <CardContent className="p-4">
+                      <div className="text-[10px] text-muted-foreground uppercase font-medium">{s.label}</div>
+                      <div className={cn("text-2xl font-bold mt-1", s.color)}>{s.value}</div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Request log */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-medium">Recent Requests</h4>
+                <Card>
+                  <CardContent className="p-0">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Agent</TableHead>
+                          <TableHead>Credential</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Decision</TableHead>
+                          <TableHead>Risk</TableHead>
+                          <TableHead>Time</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {keeperLog.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={6} className="text-center text-xs text-muted-foreground py-8">
+                              No keeper requests yet
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {keeperLog.map((entry) => (
+                          <TableRow key={entry.id}>
+                            <TableCell className="text-xs font-medium">{entry.agent_name}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{entry.credential_name}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="text-[10px]">
+                                {entry.request_type === "execute" ? "Execute" : "Access"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={cn("text-[10px]",
+                                  entry.decision === "ALLOW" && "bg-emerald-50 text-emerald-700 border-emerald-200",
+                                  entry.decision === "DENY" && "bg-red-50 text-red-700 border-red-200",
+                                  entry.decision === "ESCALATE" && "bg-amber-50 text-amber-700 border-amber-200",
+                                  entry.decision === "PENDING" && "bg-blue-50 text-blue-700 border-blue-200",
+                                )}
+                              >
+                                {entry.decision ?? "PENDING"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {entry.risk_score != null ? `${entry.risk_score}/10` : "—"}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {new Date(entry.created_at).toLocaleString()}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </div>
+            </>
+          )}
+        </div>
+      )
+    }
+
+    // Placeholder for other tabs
     return (
       <Card>
         <CardContent className="p-6 text-center space-y-2">
