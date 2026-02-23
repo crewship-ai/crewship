@@ -59,7 +59,7 @@ func TestBuildEnvVarsSidecar_SecretExclusion(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			env := BuildEnvVarsSidecar(tc.req)
+			env := BuildEnvVarsSidecar(tc.req, true)
 
 			envMap := make(map[string]string)
 			for _, e := range env {

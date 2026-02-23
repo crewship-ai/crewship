@@ -16,13 +16,18 @@ import (
 )
 
 type InternalHandler struct {
-	db            *sql.DB
-	logger        *slog.Logger
-	internalToken string
+	db             *sql.DB
+	logger         *slog.Logger
+	internalToken  string
+	keeperEnabled  bool
 }
 
 func NewInternalHandler(db *sql.DB, internalToken string, logger *slog.Logger) *InternalHandler {
 	return &InternalHandler{db: db, internalToken: internalToken, logger: logger}
+}
+
+func (h *InternalHandler) SetKeeperEnabled(enabled bool) {
+	h.keeperEnabled = enabled
 }
 
 func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
@@ -501,6 +506,38 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 			if err := memberRows.Err(); err != nil {
 				h.logger.Error("rows iteration (crew members)", "error", err)
 			}
+		}
+	}
+
+	// [KEEPER] section — credential access control instructions
+	if h.keeperEnabled {
+		// Collect SECRET credentials for this agent
+		var secretCreds []string
+		for _, c := range creds {
+			if c.Type == "SECRET" {
+				secretCreds = append(secretCreds, c.EnvVar)
+			}
+		}
+		if len(secretCreds) > 0 {
+			var keeperBlock strings.Builder
+			keeperBlock.WriteString("[CREDENTIAL ACCESS CONTROL — KEEPER]\n")
+			keeperBlock.WriteString("Some credentials require explicit approval before use.\n")
+			keeperBlock.WriteString("You do NOT have these credentials in your environment. To access them:\n\n")
+			keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/request \\\n")
+			keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
+			keeperBlock.WriteString("    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why you need it>\"}'\n\n")
+			keeperBlock.WriteString("The Keeper (AI gatekeeper) will evaluate your request and respond with ALLOW or DENY.\n")
+			keeperBlock.WriteString("If ALLOW, the response contains the credential value. If DENY, do NOT retry — explain to the user why access was denied.\n\n")
+			keeperBlock.WriteString("To execute a command with a credential (without seeing the value):\n")
+			keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/execute \\\n")
+			keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
+			keeperBlock.WriteString("    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why>\",\"command\":\"<shell command, credential injected as $CREDENTIAL>\"}'\n\n")
+			keeperBlock.WriteString("Keeper-guarded credentials available to you:\n")
+			for _, name := range secretCreds {
+				keeperBlock.WriteString(fmt.Sprintf("  - %s\n", name))
+			}
+			keeperBlock.WriteString("[END CREDENTIAL ACCESS CONTROL]")
+			promptParts = append(promptParts, keeperBlock.String())
 		}
 	}
 

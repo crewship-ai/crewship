@@ -243,7 +243,7 @@ func TestBuildEnvVarsSidecar(t *testing.T) {
 		},
 	}
 
-	env := BuildEnvVarsSidecar(req)
+	env := BuildEnvVarsSidecar(req, true)
 
 	envMap := make(map[string]string)
 	for _, e := range env {

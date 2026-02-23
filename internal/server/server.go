@@ -88,6 +88,9 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		orch.SetSidecarEnabled(true)
 		logger.Info("sidecar proxy enabled for credential injection")
 	}
+	if cfg.Keeper.Enabled {
+		orch.SetKeeperEnabled(true)
+	}
 
 	// Wire IPC config so lead agents can reach crewshipd for assignment routing.
 	// host.docker.internal resolves to the Docker host from inside containers.

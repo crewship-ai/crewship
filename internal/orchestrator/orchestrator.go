@@ -78,6 +78,7 @@ type Orchestrator struct {
 	logger         *slog.Logger
 	cooldown       *CooldownManager
 	sidecarEnabled bool
+	keeperEnabled  bool
 	ipcBaseURL     string
 	ipcToken       string
 	mu             sync.Mutex
@@ -107,6 +108,18 @@ func (o *Orchestrator) SetSidecarEnabled(enabled bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.sidecarEnabled = enabled
+}
+
+func (o *Orchestrator) SetKeeperEnabled(enabled bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.keeperEnabled = enabled
+}
+
+func (o *Orchestrator) KeeperEnabled() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.keeperEnabled
 }
 
 // SetIPCConfig sets the crewshipd internal API base URL and token.
@@ -217,13 +230,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 
 	o.mu.Lock()
 	sidecarEnabled := o.sidecarEnabled && !req.SkipSidecar
+	keeperEnabled := o.keeperEnabled
 	ipcBaseURL := o.ipcBaseURL
 	ipcToken := o.ipcToken
 	o.mu.Unlock()
 
 	var env []string
 	if sidecarEnabled {
-		env = BuildEnvVarsSidecar(req)
+		env = BuildEnvVarsSidecar(req, keeperEnabled)
 		o.logger.Info("sidecar proxy starting", "agent_id", req.AgentID)
 		var memoryCfg *SidecarMemoryConfig
 		if req.MemoryEnabled {

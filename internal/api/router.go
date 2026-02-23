@@ -275,6 +275,9 @@ func (r *Router) registerRoutes() {
 
 	// Internal routes (for crewshipd IPC, X-Internal-Token auth)
 	internal := NewInternalHandler(r.db, r.internalToken, r.logger)
+	if r.keeperConfig != nil && r.keeperConfig.Enabled {
+		internal.SetKeeperEnabled(true)
+	}
 	internalAuth := internal.requireInternal
 	r.mux.Handle("GET /api/v1/internal/credentials", internalAuth(http.HandlerFunc(internal.ListCredentials)))
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
