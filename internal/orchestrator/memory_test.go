@@ -88,9 +88,9 @@ func TestBuildMemoryContext_AllFiles(t *testing.T) {
 	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
 
 	mc := mockContainerForMemory(map[string]string{
-		"/output/test-agent/.memory/AGENT.md":                    "# Agent\n## Facts\nUser prefers Czech.",
-		"/output/test-agent/.memory/daily/" + today + ".md":      "# Today\nFixed auth bug.",
-		"/output/test-agent/.memory/daily/" + yesterday + ".md":  "# Yesterday\nReviewed PR #42.",
+		"/crew/agents/test-agent/.memory/AGENT.md":                    "# Agent\n## Facts\nUser prefers Czech.",
+		"/crew/agents/test-agent/.memory/daily/" + today + ".md":      "# Today\nFixed auth bug.",
+		"/crew/agents/test-agent/.memory/daily/" + yesterday + ".md":  "# Yesterday\nReviewed PR #42.",
 	})
 
 	o := New(mc, newMemState(), slog.Default())
@@ -127,7 +127,7 @@ func TestBuildMemoryContext_AllFiles(t *testing.T) {
 
 func TestBuildMemoryContext_OnlyAgentMD(t *testing.T) {
 	mc := mockContainerForMemory(map[string]string{
-		"/output/test-agent/.memory/AGENT.md": "# Agent\nI am Jarmila.",
+		"/crew/agents/test-agent/.memory/AGENT.md": "# Agent\nI am Jarmila.",
 	})
 
 	o := New(mc, newMemState(), slog.Default())
@@ -177,7 +177,7 @@ func TestBuildMemoryContext_Truncation(t *testing.T) {
 	bigContent := strings.Repeat("This is a long line of memory content. ", 500)
 
 	mc := mockContainerForMemory(map[string]string{
-		"/output/test-agent/.memory/AGENT.md": bigContent,
+		"/crew/agents/test-agent/.memory/AGENT.md": bigContent,
 	})
 
 	o := New(mc, newMemState(), slog.Default())
@@ -201,7 +201,7 @@ func TestBuildMemoryContext_Truncation(t *testing.T) {
 func TestBuildMemoryContext_CatErrorFiltered(t *testing.T) {
 	// cat on nonexistent file outputs "cat: /path: No such file or directory"
 	mc := mockContainerForMemory(map[string]string{
-		"/output/test-agent/.memory/AGENT.md": "cat: /output/test-agent/.memory/AGENT.md: No such file or directory",
+		"/crew/agents/test-agent/.memory/AGENT.md": "cat: /crew/agents/test-agent/.memory/AGENT.md: No such file or directory",
 	})
 
 	o := New(mc, newMemState(), slog.Default())
