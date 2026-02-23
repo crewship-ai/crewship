@@ -25,12 +25,16 @@ type MemoryConfig struct {
 
 // IPCConfig holds the crewshipd internal API address for assignment forwarding.
 // Lead agents use this to POST assignment requests through the sidecar to crewshipd.
+// ContainerID is the Docker container where this agent is running; forwarded to
+// crewshipd so /keeper/execute can exec commands in the correct container.
 type IPCConfig struct {
 	BaseURL     string `json:"base_url"`
 	Token       string `json:"token"`
+	AgentID     string `json:"agent_id"`
 	CrewID      string `json:"crew_id"`
 	WorkspaceID string `json:"workspace_id"`
 	ChatID      string `json:"chat_id"`
+	ContainerID string `json:"container_id"`
 }
 
 // CrewMember describes a crew member accessible for lead assignment routing.
@@ -164,6 +168,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			case r.Method == http.MethodPost && r.URL.Path == "/escalate":
 				s.handleEscalate(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/keeper/request":
+				s.handleKeeperRequest(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/keeper/execute":
+				s.handleKeeperExecute(w, r)
 				return
 			}
 		}

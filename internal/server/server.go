@@ -175,6 +175,16 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		opts = append(opts, goapi.WithInternalToken(cfg.Auth.InternalToken))
 		opts = append(opts, goapi.WithHub(wsHub))
 		opts = append(opts, goapi.WithOrchestrator(orch))
+
+		// Wire keeper execute: load secrets store and pass container provider
+		if ctr != nil {
+			opts = append(opts, goapi.WithKeeperContainer(ctr))
+			secretsStore := newSecretsAdapter(context.Background(), deps.DB, logger)
+			if secretsStore != nil {
+				opts = append(opts, goapi.WithKeeperSecrets(secretsStore))
+			}
+		}
+
 		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
 		if err != nil {
 			logger.Error("failed to create API router", "error", err)

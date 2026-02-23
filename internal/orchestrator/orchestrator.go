@@ -119,6 +119,12 @@ func (o *Orchestrator) SetIPCConfig(baseURL, token string) {
 	o.ipcToken = token
 }
 
+// ContainerProvider returns the underlying container provider.
+// Used by the Keeper execute handler to run commands inside agent containers.
+func (o *Orchestrator) ContainerProvider() provider.ContainerProvider {
+	return o.container
+}
+
 // GetOrCreateContainer returns the container ID for a crew, creating it if it doesn't exist.
 // Used by assignment goroutines to ensure the crew container is running before exec-ing the sub-agent.
 func (o *Orchestrator) GetOrCreateContainer(ctx context.Context, crewSlug, crewID string) (string, error) {
@@ -223,7 +229,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		if req.MemoryEnabled {
 			memoryCfg = &SidecarMemoryConfig{
 				Enabled:   true,
-				BasePath:  path.Join("/output", req.AgentSlug, ".memory"),
+				BasePath:  path.Join("/crew", "agents", req.AgentSlug, ".memory"),
 				AgentSlug: req.AgentSlug,
 			}
 		}
@@ -234,9 +240,11 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			ipcCfg = &SidecarIPCConfig{
 				BaseURL:     ipcBaseURL,
 				Token:       ipcToken,
+				AgentID:     req.AgentID,
 				CrewID:      req.CrewID,
 				WorkspaceID: req.WorkspaceID,
 				ChatID:      req.ChatID,
+				ContainerID: req.ContainerID,
 			}
 		}
 		// Convert crew members to sidecar format for target validation
@@ -270,10 +278,13 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	outputDir := path.Join("/output", req.AgentSlug)
 	workDir := outputDir // CWD = output dir so files are immediately visible to user
 
-	// Create scratch and output directories for the agent
+	crewAgentDir := path.Join("/crew", "agents", req.AgentSlug)
+	crewSharedDir := "/crew/shared"
+
+	// Create scratch, output, and per-agent crew directories
 	mkdirCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,
-		Cmd:         []string{"mkdir", "-p", scratchDir, outputDir},
+		Cmd:         []string{"mkdir", "-p", scratchDir, outputDir, crewAgentDir, crewSharedDir},
 		User:        "1001:1001",
 	}
 	mkResult, err := o.container.Exec(ctx, mkdirCfg)
@@ -284,9 +295,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		mkResult.Reader.Close()
 	}
 
-	// Create .memory/ directories for persistent agent memory
+	// Create .memory/ directories for persistent agent memory (in crew HOME)
 	if req.MemoryEnabled {
-		memoryDir := path.Join(outputDir, ".memory")
+		memoryDir := path.Join(crewAgentDir, ".memory")
 		memoryDailyDir := path.Join(memoryDir, "daily")
 		memorySnapshotsDir := path.Join(memoryDir, ".snapshots")
 		mkMemCfg := provider.ExecConfig{
@@ -301,13 +312,33 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			io.Copy(io.Discard, mkMemResult.Reader)
 			mkMemResult.Reader.Close()
 		}
+
+		// One-time migration: copy memory from old location (/output/{slug}/.memory/)
+		// to new location (/crew/agents/{slug}/.memory/) if not already migrated
+		oldMemoryDir := path.Join(outputDir, ".memory")
+		migScript := fmt.Sprintf(
+			`if [ -d %[1]s ] && [ -z "$(ls -A %[2]s 2>/dev/null)" ]; then cp -a %[1]s/. %[2]s/ 2>/dev/null; fi; true`,
+			oldMemoryDir, memoryDir,
+		)
+		migCfg := provider.ExecConfig{
+			ContainerID: req.ContainerID,
+			Cmd:         []string{"sh", "-c", migScript},
+			User:        "1001:1001",
+		}
+		migResult, err := o.container.Exec(ctx, migCfg)
+		if err != nil {
+			o.logger.Debug("memory migration skipped", "error", err)
+		} else {
+			io.Copy(io.Discard, migResult.Reader)
+			migResult.Reader.Close()
+		}
 	}
 
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
 
 	// Write non-secret Claude config (skip onboarding). Credentials are
 	// passed ONLY via env vars -- never written to disk in the container.
-	if err := setupClaudeConfig(ctx, o.container, req.ContainerID, o.logger); err != nil {
+	if err := setupClaudeConfig(ctx, o.container, req.ContainerID, req.AgentSlug, o.logger); err != nil {
 		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
 	}
 

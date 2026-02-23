@@ -281,6 +281,25 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	for _, c := range containers {
 		for _, name := range c.Names {
 			if name == "/"+containerName {
+				// Check if container has /crew mount; if not, recreate it.
+				inspect, inspErr := p.client.ContainerInspect(ctx, c.ID)
+				if inspErr != nil {
+					return "", fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
+				}
+				needsRecreate := true
+				for _, m := range inspect.Mounts {
+					if m.Destination == "/crew" {
+						needsRecreate = false
+						break
+					}
+				}
+				if needsRecreate {
+					p.logger.Info("recreating container (missing /crew mount)", "container", containerName)
+					timeout := 10
+					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
+					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
+					break // fall through to create new container
+				}
 				if c.State == "running" {
 					return c.ID, nil
 				}
@@ -327,6 +346,19 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		p.logger.Debug("chown workspace (non-fatal)", "path", workspacePath, "error", err)
 	}
 
+	crewPath := filepath.Join(p.cfg.OutputBasePath, "crews", team.ID)
+	for _, sub := range []string{"shared", "agents"} {
+		if err := os.MkdirAll(filepath.Join(crewPath, sub), 0750); err != nil {
+			return "", fmt.Errorf("create crew dir %s: %w", sub, err)
+		}
+	}
+	// Best-effort chown so container user (1001:1001) can write
+	for _, dir := range []string{crewPath, filepath.Join(crewPath, "shared"), filepath.Join(crewPath, "agents")} {
+		if err := os.Chown(dir, 1001, 1001); err != nil {
+			p.logger.Debug("chown crew dir (non-fatal)", "path", dir, "error", err)
+		}
+	}
+
 	pidsLimit := int64(200)
 	resp, err := p.client.ContainerCreate(ctx,
 		&container.Config{
@@ -360,6 +392,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			Mounts: []mount.Mount{
 				{Type: mount.TypeBind, Source: workspacePath, Target: "/workspace"},
 				{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
+				{Type: mount.TypeBind, Source: crewPath, Target: "/crew"},
 			},
 			Tmpfs: map[string]string{
 				"/tmp":        "rw,size=500m",

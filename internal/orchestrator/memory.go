@@ -22,7 +22,7 @@ const (
 // req.MemoryEnabled. When no memory files exist, returns only the
 // memory instructions block.
 func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunRequest) string {
-	memoryDir := path.Join("/output", req.AgentSlug, ".memory")
+	memoryDir := path.Join("/crew", "agents", req.AgentSlug, ".memory")
 	agentMDPath := path.Join(memoryDir, "AGENT.md")
 
 	readCtx, cancel := context.WithTimeout(ctx, memoryReadTimeout)
@@ -105,8 +105,8 @@ You have persistent memory across sessions. Your long-term memory and recent dai
 logs are shown above (if any exist).
 
 WRITING MEMORY:
-- Write lasting facts, preferences, and project context to: .memory/AGENT.md
-- Write daily session notes and decisions to: .memory/daily/%s.md
+- Write lasting facts, preferences, and project context to: ~/.memory/AGENT.md
+- Write daily session notes and decisions to: ~/.memory/daily/%s.md
 - Use today's date (%s) for the daily log filename.
 - Write early and often -- do not wait until the end of the session.
 
