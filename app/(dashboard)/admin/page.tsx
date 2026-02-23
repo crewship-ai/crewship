@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import {
   LayoutDashboard, ScrollText, Building, Users, Server, Gauge,
   Globe, Archive, Brain, Lock, Key, ToggleRight, Activity, Shield,
   RefreshCw, CheckCircle2, AlertTriangle, Container, ExternalLink,
+  Radio,
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -145,6 +146,23 @@ export default function AdminPage() {
   const [keeperLog, setKeeperLog] = useState<KeeperLogEntry[]>([])
   const [keeperLoading, setKeeperLoading] = useState(false)
 
+  interface KeeperLiveEvent {
+    request_id: string
+    request_type: string
+    agent_name: string
+    credential_name: string
+    intent: string
+    command?: string
+    decision: string
+    reason: string
+    risk_score: number
+    exit_code?: number
+    decided_at: string
+  }
+  const [keeperLiveEvents, setKeeperLiveEvents] = useState<KeeperLiveEvent[]>([])
+  const keeperWsRef = useRef<WebSocket | null>(null)
+  const [keeperWsStatus, setKeeperWsStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected")
+
   const checkRuntime = useCallback(async () => {
     setRuntimeChecking(true)
     try {
@@ -227,6 +245,61 @@ export default function AdminPage() {
   useEffect(() => {
     if (role === "OWNER" && tab === "security") fetchKeeperData()
   }, [role, tab, fetchKeeperData])
+
+  // Keeper live WebSocket: connect when Security tab is active
+  useEffect(() => {
+    if (role !== "OWNER" || tab !== "security" || !workspaceId) return
+
+    let ws: WebSocket | null = null
+    let cancelled = false
+
+    const connect = async () => {
+      try {
+        setKeeperWsStatus("connecting")
+        const tokenRes = await fetch("/api/v1/ws-token", { credentials: "include" })
+        if (!tokenRes.ok || cancelled) return
+        const { token } = await tokenRes.json()
+        if (!token || cancelled) return
+
+        const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
+        const host = window.location.port === "3011"
+          ? window.location.hostname + ":8081"
+          : window.location.port === "3001"
+            ? window.location.hostname + ":8080"
+            : window.location.host
+        const wsUrl = `${proto}//${host}/ws?token=${encodeURIComponent(token)}`
+        ws = new WebSocket(wsUrl)
+        keeperWsRef.current = ws
+
+        ws.onopen = () => {
+          if (cancelled) { ws?.close(); return }
+          setKeeperWsStatus("connected")
+          ws?.send(JSON.stringify({ type: "subscribe", channel: `keeper:${workspaceId}` }))
+        }
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data)
+            if (msg.type === "keeper_event" && msg.payload) {
+              setKeeperLiveEvents((prev) => [msg.payload as KeeperLiveEvent, ...prev].slice(0, 100))
+            }
+          } catch { /* ignore non-JSON */ }
+        }
+        ws.onclose = () => {
+          if (!cancelled) setKeeperWsStatus("disconnected")
+        }
+      } catch {
+        setKeeperWsStatus("disconnected")
+      }
+    }
+
+    connect()
+    return () => {
+      cancelled = true
+      ws?.close()
+      keeperWsRef.current = null
+      setKeeperWsStatus("disconnected")
+    }
+  }, [role, tab, workspaceId])
 
   if (wsLoading || role !== "OWNER") {
     return (
@@ -551,6 +624,62 @@ export default function AdminPage() {
                     </CardContent>
                   </Card>
                 ))}
+              </div>
+
+              {/* Live keeper events */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Radio className={cn("h-3.5 w-3.5", keeperWsStatus === "connected" ? "text-emerald-500" : "text-muted-foreground")} />
+                  <h4 className="text-xs font-medium">Live Activity</h4>
+                  <span className={cn("text-[10px]",
+                    keeperWsStatus === "connected" ? "text-emerald-600" : "text-muted-foreground"
+                  )}>
+                    {keeperWsStatus === "connected" ? "Streaming" : keeperWsStatus === "connecting" ? "Connecting..." : "Disconnected"}
+                  </span>
+                </div>
+                <Card>
+                  <CardContent className="p-3 max-h-[240px] overflow-y-auto">
+                    {keeperLiveEvents.length === 0 ? (
+                      <div className="text-center text-xs text-muted-foreground py-6">
+                        Waiting for keeper events... Send a credential request from an agent to see it here in real time.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {keeperLiveEvents.map((evt, i) => (
+                          <div key={evt.request_id + i} className="flex items-start gap-2 py-1.5 border-b last:border-0">
+                            <Badge
+                              variant="outline"
+                              className={cn("text-[10px] shrink-0 mt-0.5",
+                                evt.decision === "ALLOW" && "bg-emerald-50 text-emerald-700 border-emerald-200",
+                                evt.decision === "DENY" && "bg-red-50 text-red-700 border-red-200",
+                                evt.decision === "ESCALATE" && "bg-amber-50 text-amber-700 border-amber-200",
+                              )}
+                            >
+                              {evt.decision}
+                            </Badge>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs">
+                                <span className="font-medium">{evt.agent_name}</span>
+                                <span className="text-muted-foreground"> requested </span>
+                                <span className="font-mono text-[10px]">{evt.credential_name}</span>
+                                {evt.request_type === "execute" && (
+                                  <Badge variant="outline" className="ml-1 text-[9px] py-0">exec</Badge>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground truncate">{evt.intent}</div>
+                              {evt.reason && (
+                                <div className="text-[10px] text-muted-foreground/70 truncate italic">{evt.reason}</div>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground shrink-0">
+                              {evt.risk_score}/10
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               </div>
 
               {/* Request log */}

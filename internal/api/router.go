@@ -14,6 +14,20 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// keeperWSBroadcaster adapts ws.Hub to the KeeperBroadcaster interface.
+type keeperWSBroadcaster struct {
+	hub *ws.Hub
+}
+
+func (b *keeperWSBroadcaster) BroadcastKeeperEvent(workspaceID string, event map[string]any) {
+	channel := "keeper:" + workspaceID
+	b.hub.Broadcast(channel, ws.ServerMessage{
+		Type:    "keeper_event",
+		Channel: channel,
+		Payload: event,
+	})
+}
+
 type Router struct {
 	mux              *http.ServeMux
 	db               *sql.DB
@@ -313,6 +327,9 @@ func (r *Router) registerRoutes() {
 	keeperH := NewKeeperHandler(r.db, r.internalToken, r.keeperGK, r.logger).
 		WithSecrets(r.keeperSecrets).
 		WithContainer(r.keeperContainer)
+	if r.hub != nil {
+		keeperH.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
+	}
 	r.mux.Handle("POST /api/v1/internal/keeper/request", internalAuth(http.HandlerFunc(keeperH.HandleRequest)))
 	r.mux.Handle("GET /api/v1/internal/keeper/request/{requestId}", internalAuth(http.HandlerFunc(keeperH.GetRequest)))
 	r.mux.Handle("POST /api/v1/internal/keeper/execute", internalAuth(http.HandlerFunc(keeperH.HandleExecute)))

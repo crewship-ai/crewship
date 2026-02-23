@@ -36,6 +36,11 @@ const (
 
 // KeeperHandler handles credential access requests forwarded by the sidecar.
 // All requests require X-Internal-Token authentication.
+// KeeperBroadcaster broadcasts keeper events to WebSocket subscribers.
+type KeeperBroadcaster interface {
+	BroadcastKeeperEvent(workspaceID string, event map[string]any)
+}
+
 type KeeperHandler struct {
 	db            *sql.DB
 	logger        *slog.Logger
@@ -43,6 +48,7 @@ type KeeperHandler struct {
 	gatekeeper    gatekeeper.Evaluator
 	secrets       SecretGetter
 	container     provider.ContainerProvider
+	broadcaster   KeeperBroadcaster
 }
 
 func NewKeeperHandler(db *sql.DB, internalToken string, gk gatekeeper.Evaluator, logger *slog.Logger) *KeeperHandler {
@@ -63,6 +69,12 @@ func (h *KeeperHandler) WithSecrets(sg SecretGetter) *KeeperHandler {
 // WithContainer attaches a ContainerProvider used by HandleExecute to exec commands.
 func (h *KeeperHandler) WithContainer(cp provider.ContainerProvider) *KeeperHandler {
 	h.container = cp
+	return h
+}
+
+// WithBroadcaster attaches a broadcaster for real-time keeper event notifications.
+func (h *KeeperHandler) WithBroadcaster(b KeeperBroadcaster) *KeeperHandler {
+	h.broadcaster = b
 	return h
 }
 
@@ -216,6 +228,20 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		"level", secLevel,
 		"decision", gkResp.Decision,
 		"risk", gkResp.RiskScore)
+
+	if h.broadcaster != nil {
+		h.broadcaster.BroadcastKeeperEvent(body.WorkspaceID, map[string]any{
+			"request_id":      reqID,
+			"request_type":    "access",
+			"agent_name":      agentName,
+			"credential_name": credName,
+			"intent":          body.Intent,
+			"decision":        gkResp.Decision,
+			"reason":          gkResp.Reason,
+			"risk_score":      gkResp.RiskScore,
+			"decided_at":      now,
+		})
+	}
 
 	result := keeper.RequestResult{
 		RequestID: reqID,
@@ -466,6 +492,20 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		}
 		h.logger.Info("keeper execute: denied",
 			"request_id", reqID, "agent", agentName, "credential", credName, "decision", gkResp.Decision)
+		if h.broadcaster != nil {
+			h.broadcaster.BroadcastKeeperEvent(body.WorkspaceID, map[string]any{
+				"request_id":      reqID,
+				"request_type":    "execute",
+				"agent_name":      agentName,
+				"credential_name": credName,
+				"intent":          body.Intent,
+				"command":         body.Command,
+				"decision":        gkResp.Decision,
+				"reason":          gkResp.Reason,
+				"risk_score":      gkResp.RiskScore,
+				"decided_at":      now,
+			})
+		}
 		writeJSON(w, http.StatusOK, keeper.ExecuteResult{
 			RequestID: reqID,
 			Decision:  keeper.Decision(gkResp.Decision),
@@ -555,6 +595,22 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("keeper execute: completed",
 		"request_id", reqID, "agent", agentName, "credential", credName,
 		"exit_code", exitCode, "output_bytes", len(scrubbedOutput))
+
+	if h.broadcaster != nil {
+		h.broadcaster.BroadcastKeeperEvent(body.WorkspaceID, map[string]any{
+			"request_id":      reqID,
+			"request_type":    "execute",
+			"agent_name":      agentName,
+			"credential_name": credName,
+			"intent":          body.Intent,
+			"command":         body.Command,
+			"decision":        string(keeper.DecisionAllow),
+			"reason":          gkResp.Reason,
+			"risk_score":      gkResp.RiskScore,
+			"exit_code":       exitCode,
+			"decided_at":      now,
+		})
+	}
 
 	writeJSON(w, http.StatusOK, keeper.ExecuteResult{
 		RequestID: reqID,
