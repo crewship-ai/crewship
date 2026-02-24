@@ -169,6 +169,7 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 			ID:    user.ID,
 			Name:  user.Name,
 			Email: user.Email,
+			Exp:   time.Now().Add(15 * time.Minute).Unix(),
 		})
 		if err != nil {
 			h.logger.Error("create WS token for CLI", "error", err)

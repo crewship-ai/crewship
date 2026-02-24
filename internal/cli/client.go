@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -47,7 +48,7 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 	}
 
 	// Inject workspace_id if set and not already in query
-	wsID := c.getWorkspaceID()
+	wsID := c.GetWorkspaceID()
 	if wsID != "" {
 		q := u.Query()
 		if q.Get("workspace_id") == "" {
@@ -56,7 +57,7 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 		}
 	}
 
-	req, err := http.NewRequest(method, u.String(), bodyReader)
+	req, err := http.NewRequestWithContext(context.Background(), method, u.String(), bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -76,9 +77,9 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 	return resp, nil
 }
 
-// getWorkspaceID returns the resolved workspace ID (CUID).
+// GetWorkspaceID returns the resolved workspace ID (CUID).
 // If WorkspaceID looks like a slug (not a CUID), it resolves it.
-func (c *Client) getWorkspaceID() string {
+func (c *Client) GetWorkspaceID() string {
 	if c.WorkspaceID == "" {
 		return ""
 	}
@@ -101,8 +102,14 @@ func (c *Client) getWorkspaceID() string {
 }
 
 func (c *Client) resolveWorkspaceSlug(slug string) (string, error) {
-	u, _ := url.Parse(c.BaseURL + "/api/v1/workspaces")
-	req, _ := http.NewRequest("GET", u.String(), nil)
+	u, err := url.Parse(c.BaseURL + "/api/v1/workspaces")
+	if err != nil {
+		return "", fmt.Errorf("parse workspace URL: %w", err)
+	}
+	req, err := http.NewRequestWithContext(context.Background(), "GET", u.String(), nil)
+	if err != nil {
+		return "", fmt.Errorf("create workspace request: %w", err)
+	}
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
@@ -118,7 +125,10 @@ func (c *Client) resolveWorkspaceSlug(slug string) (string, error) {
 		ID   string `json:"id"`
 		Slug string `json:"slug"`
 	}
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("read workspace response: %w", err)
+	}
 	if err := json.Unmarshal(data, &workspaces); err != nil {
 		return "", err
 	}

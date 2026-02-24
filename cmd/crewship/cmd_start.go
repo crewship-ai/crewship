@@ -34,19 +34,14 @@ var startCmd = &cobra.Command{
 		detectCtx, detectCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer detectCancel()
 		if !noDocker && !checkDocker(detectCtx) {
-			fmt.Fprintln(os.Stderr, "Error: No container runtime found.")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "Crewship requires a Docker-compatible runtime to run AI agents.")
-			fmt.Fprintln(os.Stderr, "Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "Install Docker Desktop: https://docs.docker.com/get-docker/")
-			fmt.Fprintln(os.Stderr, "Install Podman:         https://podman.io/docs/installation")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "To start without containers (dashboard only, no agents):")
-			fmt.Fprintln(os.Stderr, "  crewship start --no-docker")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "Run 'crewship doctor' for full diagnostics.")
-			os.Exit(1)
+			return fmt.Errorf("no container runtime found.\n\n" +
+				"Crewship requires a Docker-compatible runtime to run AI agents.\n" +
+				"Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop\n\n" +
+				"Install Docker Desktop: https://docs.docker.com/get-docker/\n" +
+				"Install Podman:         https://podman.io/docs/installation\n\n" +
+				"To start without containers (dashboard only, no agents):\n" +
+				"  crewship start --no-docker\n\n" +
+				"Run 'crewship doctor' for full diagnostics.")
 		}
 
 		bootstrapLogger := logging.New("info", "json", os.Stdout)
@@ -54,8 +49,7 @@ var startCmd = &cobra.Command{
 
 		cfg, err := config.Load(configPath)
 		if err != nil {
-			slog.Error("failed to load config", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to load config: %w", err)
 		}
 
 		debugBuffer := logging.NewRingBuffer(500)
@@ -71,8 +65,7 @@ var startCmd = &cobra.Command{
 		if databaseURL == "" {
 			dataDir, err := database.DefaultDataDir()
 			if err != nil {
-				logger.Error("failed to create data directory", "error", err)
-				os.Exit(1)
+				return fmt.Errorf("failed to create data directory: %w", err)
 			}
 			databaseURL = dataDir.DatabaseURL()
 			cfg.Storage.BasePath = dataDir.OutputDir()
@@ -81,14 +74,12 @@ var startCmd = &cobra.Command{
 
 		db, err := database.Open(databaseURL)
 		if err != nil {
-			logger.Error("failed to open database", "error", err, "url", databaseURL)
-			os.Exit(1)
+			return fmt.Errorf("failed to open database: %w", err)
 		}
 		defer db.Close()
 
 		if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-			logger.Error("failed to run migrations", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to run migrations: %w", err)
 		}
 		if err := database.SeedBundledSkills(context.Background(), db.DB, logger); err != nil {
 			logger.Warn("failed to seed bundled skills", "error", err)
@@ -120,8 +111,7 @@ var startCmd = &cobra.Command{
 
 		deps, err := initProviders(ctx, cfg, logger, noDocker)
 		if err != nil {
-			logger.Error("failed to initialize providers", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to initialize providers: %w", err)
 		}
 		defer deps.Close()
 		deps.DebugLogs = debugBuffer
@@ -152,8 +142,7 @@ var startCmd = &cobra.Command{
 		srv.SetChatHandler(bridge)
 
 		if err := srv.Start(ctx); err != nil {
-			logger.Error("server error", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("server error: %w", err)
 		}
 
 		logger.Info("crewship stopped")

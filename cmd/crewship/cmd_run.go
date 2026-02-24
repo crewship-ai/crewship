@@ -129,13 +129,14 @@ func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, qu
 		fmt.Fprintf(os.Stderr, "%s[agent: %s]%s Starting run...\n", cli.Dim, agentSlug, cli.Reset)
 	}
 
-	// Handle Ctrl+C
+	// Handle Ctrl+C: first cancels the run, second terminates the process
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT)
 	go func() {
 		<-sig
 		ws.CancelMessage(chatID)
 		fmt.Fprintf(os.Stderr, "\n%s[cancelled]%s\n", cli.Yellow, cli.Reset)
+		signal.Reset(syscall.SIGINT)
 	}()
 
 	agentChannel := "agent:" + agentID
@@ -208,12 +209,13 @@ func runInteractive(serverURL, wsToken, agentID, agentSlug, chatID, initialPromp
 			cli.Dim, agentSlug, cli.Reset)
 	}
 
-	// Handle Ctrl+C for cancelling current run
+	// Handle Ctrl+C: cancel current run, second Ctrl+C terminates
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT)
 	go func() {
-		<-sig
-		ws.CancelMessage(chatID)
+		for range sig {
+			ws.CancelMessage(chatID)
+		}
 	}()
 
 	// If initial prompt given, send it first

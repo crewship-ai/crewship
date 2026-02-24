@@ -138,7 +138,12 @@ var skillImportCmd = &cobra.Command{
 		}
 
 		fileFlag, _ := cmd.Flags().GetString("file")
-		wsID := cli.ResolveWorkspace(flagWorkspace, cliCfg)
+
+		client := newAPIClient()
+		wsID := client.GetWorkspaceID()
+		if wsID == "" {
+			return fmt.Errorf("workspace ID could not be resolved")
+		}
 
 		body := map[string]interface{}{}
 
@@ -156,7 +161,6 @@ var skillImportCmd = &cobra.Command{
 			return fmt.Errorf("provide a URL argument or --file flag")
 		}
 
-		client := newAPIClient()
 		resp, err := client.Post("/api/v1/workspaces/"+wsID+"/skills/import", body)
 		if err != nil {
 			return err

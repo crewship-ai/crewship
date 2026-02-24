@@ -209,8 +209,14 @@ func loginInteractive(serverURL string) error {
 		"json":      "true",
 	}
 
-	req, _ := json.Marshal(loginBody)
-	httpReq, _ := http.NewRequest("POST", serverURL+"/api/auth/callback/credentials", strings.NewReader(string(req)))
+	req, err := json.Marshal(loginBody)
+	if err != nil {
+		return fmt.Errorf("marshal login body: %w", err)
+	}
+	httpReq, err := http.NewRequest("POST", serverURL+"/api/auth/callback/credentials", strings.NewReader(string(req)))
+	if err != nil {
+		return fmt.Errorf("create login request: %w", err)
+	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if csrfCookie != "" {
 		httpReq.AddCookie(&http.Cookie{Name: "authjs.csrf-token", Value: csrfCookie})
