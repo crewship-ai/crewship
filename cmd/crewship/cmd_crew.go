@@ -325,9 +325,10 @@ var crewStatusCmd = &cobra.Command{
 			Status    string `json:"status"`
 		}
 		if err := cli.CheckError(agentsResp); err != nil {
-			cli.PrintWarning("could not fetch agents: " + err.Error())
-		} else if err := cli.ReadJSON(agentsResp, &agentsList); err != nil {
-			cli.PrintWarning("could not parse agents: " + err.Error())
+			return fmt.Errorf("fetch agents: %w", err)
+		}
+		if err := cli.ReadJSON(agentsResp, &agentsList); err != nil {
+			return fmt.Errorf("parse agents: %w", err)
 		}
 
 		// Fetch assignments
@@ -342,9 +343,10 @@ var crewStatusCmd = &cobra.Command{
 			AssignedToSlug *string `json:"assigned_to_slug"`
 		}
 		if err := cli.CheckError(assignResp); err != nil {
-			cli.PrintWarning("could not fetch assignments: " + err.Error())
-		} else if err := cli.ReadJSON(assignResp, &assignmentsList); err != nil {
-			cli.PrintWarning("could not parse assignments: " + err.Error())
+			return fmt.Errorf("fetch assignments: %w", err)
+		}
+		if err := cli.ReadJSON(assignResp, &assignmentsList); err != nil {
+			return fmt.Errorf("parse assignments: %w", err)
 		}
 
 		// Fetch escalations
@@ -357,9 +359,10 @@ var crewStatusCmd = &cobra.Command{
 			Status string `json:"status"`
 		}
 		if err := cli.CheckError(escResp); err != nil {
-			cli.PrintWarning("could not fetch escalations: " + err.Error())
-		} else if err := cli.ReadJSON(escResp, &escalationsList); err != nil {
-			cli.PrintWarning("could not parse escalations: " + err.Error())
+			return fmt.Errorf("fetch escalations: %w", err)
+		}
+		if err := cli.ReadJSON(escResp, &escalationsList); err != nil {
+			return fmt.Errorf("parse escalations: %w", err)
 		}
 
 		// Display compound view
