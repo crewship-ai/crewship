@@ -156,13 +156,16 @@ func (g *Gatekeeper) buildPrompt(req EvalRequest) string {
 	sb.WriteString("Do NOT repeat or copy previous decisions. Evaluate each request independently on its own merits.\n\n")
 
 	if req.ConvHistory != "" {
-		// Use a random delimiter to prevent prompt injection via conversation history
-		delim := randomDelimiter()
-		sb.WriteString("[BACKGROUND — CONVERSATION HISTORY]\n")
-		sb.WriteString("This is the agent's recent conversation for context only. Use it to verify whether the agent's work genuinely requires the credential.\n")
-		fmt.Fprintf(&sb, "--- %s begin ---\n", delim)
-		sb.WriteString(req.ConvHistory)
-		fmt.Fprintf(&sb, "--- %s end ---\n\n", delim)
+		delim, ok := randomDelimiter()
+		if ok {
+			sb.WriteString("[BACKGROUND — CONVERSATION HISTORY]\n")
+			sb.WriteString("This is the agent's recent conversation for context only. Use it to verify whether the agent's work genuinely requires the credential.\n")
+			fmt.Fprintf(&sb, "--- %s begin ---\n", delim)
+			sb.WriteString(req.ConvHistory)
+			fmt.Fprintf(&sb, "--- %s end ---\n\n", delim)
+		} else {
+			g.logger.Warn("keeper: random delimiter unavailable; skipping conversation history")
+		}
 	}
 
 	sb.WriteString("========== CURRENT REQUEST TO EVALUATE ==========\n")
@@ -262,10 +265,10 @@ func parseResponse(raw string) (keeper.GatekeeperResponse, error) {
 	return resp, nil
 }
 
-func randomDelimiter() string {
+func randomDelimiter() (string, bool) {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		return "boundary"
+		return "", false
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), true
 }

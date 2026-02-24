@@ -162,7 +162,7 @@ function redactUrl(raw: string): string {
       url.username = url.username ? "****" : ""
       url.password = ""
     }
-    if (url.search) url.search = "?…"
+    if (url.search) url.search = ""
     return url.toString()
   } catch {
     return raw
@@ -822,14 +822,14 @@ export default function AdminPage() {
                       {/* Intent */}
                       <div>
                         <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Intent</div>
-                        <div className="text-xs bg-muted/50 rounded-md p-3">{selectedKeeperEntry.intent}</div>
+                        <div className="text-xs bg-muted/50 rounded-md p-3">{redactSecrets(selectedKeeperEntry.intent)}</div>
                       </div>
 
                       {/* Reason */}
                       {selectedKeeperEntry.reason && (
                         <div>
                           <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Reason</div>
-                          <div className="text-xs bg-muted/50 rounded-md p-3">{selectedKeeperEntry.reason}</div>
+                          <div className="text-xs bg-muted/50 rounded-md p-3">{redactSecrets(selectedKeeperEntry.reason)}</div>
                         </div>
                       )}
 
@@ -837,7 +837,7 @@ export default function AdminPage() {
                       {selectedKeeperEntry.command && (
                         <div>
                           <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Command</div>
-                          <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto font-mono">{selectedKeeperEntry.command}</pre>
+                          <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto font-mono">{redactSecrets(selectedKeeperEntry.command)}</pre>
                         </div>
                       )}
 
