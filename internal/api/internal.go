@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -19,7 +20,7 @@ type InternalHandler struct {
 	db             *sql.DB
 	logger         *slog.Logger
 	internalToken  string
-	keeperEnabled  bool
+	keeperEnabled  atomic.Bool
 }
 
 func NewInternalHandler(db *sql.DB, internalToken string, logger *slog.Logger) *InternalHandler {
@@ -27,7 +28,7 @@ func NewInternalHandler(db *sql.DB, internalToken string, logger *slog.Logger) *
 }
 
 func (h *InternalHandler) SetKeeperEnabled(enabled bool) {
-	h.keeperEnabled = enabled
+	h.keeperEnabled.Store(enabled)
 }
 
 func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
@@ -513,7 +514,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// [KEEPER] section — credential access control instructions
-	if h.keeperEnabled {
+	if h.keeperEnabled.Load() {
 		// Collect SECRET credentials for this agent
 		var secretCreds []string
 		for _, c := range creds {

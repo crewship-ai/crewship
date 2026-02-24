@@ -181,7 +181,7 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	// When Keeper is disabled, inject them directly as env vars (legacy mode).
 	if !keeperEnabled {
 		for _, cred := range req.Credentials {
-			if cred.Type == "SECRET" && cred.PlainValue != "" {
+			if cred.Type == "SECRET" && cred.EnvVarName != "" && cred.PlainValue != "" {
 				env = append(env, cred.EnvVarName+"="+cred.PlainValue)
 			}
 		}

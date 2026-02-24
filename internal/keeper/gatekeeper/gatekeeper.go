@@ -91,7 +91,7 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	}
 
 	prompt := g.buildPrompt(req)
-	g.logger.Debug("keeper: ollama prompt", "prompt", prompt)
+	g.logger.Debug("keeper: ollama prompt", "prompt_len", len(prompt))
 	raw, err := g.callOllama(ctx, prompt)
 	if err != nil {
 		g.logger.Error("keeper: ollama call failed, denying",

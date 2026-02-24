@@ -6,7 +6,7 @@ import {
   LayoutDashboard, ScrollText, Building, Users, Server, Gauge,
   Globe, Archive, Brain, Lock, Key, ToggleRight, Activity, Shield,
   RefreshCw, CheckCircle2, AlertTriangle, Container, ExternalLink,
-  Radio, X, ChevronRight,
+  Radio,
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
