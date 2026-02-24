@@ -31,6 +31,7 @@ type IPCConfig struct {
 	BaseURL     string `json:"base_url"`
 	Token       string `json:"token"`
 	AgentID     string `json:"agent_id"`
+	AgentSlug   string `json:"agent_slug"`
 	CrewID      string `json:"crew_id"`
 	WorkspaceID string `json:"workspace_id"`
 	ChatID      string `json:"chat_id"`
@@ -39,9 +40,11 @@ type IPCConfig struct {
 
 // CrewMember describes a crew member accessible for lead assignment routing.
 type CrewMember struct {
+	ID        string `json:"id"`
 	Slug      string `json:"slug"`
 	Name      string `json:"name"`
 	RoleTitle string `json:"role_title"`
+	ChatID    string `json:"chat_id,omitempty"`
 }
 
 // ServerConfig configures the sidecar server.

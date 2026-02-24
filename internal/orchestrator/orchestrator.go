@@ -78,6 +78,7 @@ type Orchestrator struct {
 	logger         *slog.Logger
 	cooldown       *CooldownManager
 	sidecarEnabled bool
+	keeperEnabled  bool
 	ipcBaseURL     string
 	ipcToken       string
 	mu             sync.Mutex
@@ -107,6 +108,18 @@ func (o *Orchestrator) SetSidecarEnabled(enabled bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.sidecarEnabled = enabled
+}
+
+func (o *Orchestrator) SetKeeperEnabled(enabled bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.keeperEnabled = enabled
+}
+
+func (o *Orchestrator) KeeperEnabled() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.keeperEnabled
 }
 
 // SetIPCConfig sets the crewshipd internal API base URL and token.
@@ -217,13 +230,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 
 	o.mu.Lock()
 	sidecarEnabled := o.sidecarEnabled && !req.SkipSidecar
+	keeperEnabled := o.keeperEnabled
 	ipcBaseURL := o.ipcBaseURL
 	ipcToken := o.ipcToken
 	o.mu.Unlock()
 
 	var env []string
 	if sidecarEnabled {
-		env = BuildEnvVarsSidecar(req)
+		env = BuildEnvVarsSidecar(req, keeperEnabled)
 		o.logger.Info("sidecar proxy starting", "agent_id", req.AgentID)
 		var memoryCfg *SidecarMemoryConfig
 		if req.MemoryEnabled {
@@ -241,6 +255,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				BaseURL:     ipcBaseURL,
 				Token:       ipcToken,
 				AgentID:     req.AgentID,
+				AgentSlug:   req.AgentSlug,
 				CrewID:      req.CrewID,
 				WorkspaceID: req.WorkspaceID,
 				ChatID:      req.ChatID,
@@ -251,12 +266,18 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		var sidecarMembers []SidecarCrewMember
 		for _, m := range req.CrewMembers {
 			sidecarMembers = append(sidecarMembers, SidecarCrewMember{
+				ID:        m.ID,
 				Slug:      m.Slug,
 				Name:      m.Name,
 				RoleTitle: m.RoleTitle,
+				ChatID:    m.ChatID,
 			})
 		}
-		if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, o.logger); err != nil {
+		// Check if sidecar already running in this container (shared crew container).
+		// Multiple agents in the same crew share one container — only the first starts the sidecar.
+		if isSidecarRunning(ctx, o.container, req.ContainerID) {
+			o.logger.Info("sidecar already running, reusing", "agent_id", req.AgentID, "container_id", req.ContainerID[:min(12, len(req.ContainerID))])
+		} else if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, o.logger); err != nil {
 			o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
 			o.updateRunStatus(ctx, runState.ID, "error")
 			return fmt.Errorf("start sidecar: %w", err)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -25,6 +26,17 @@ type SecretGetter interface {
 	Get(credentialID string) (plainValue string, found bool)
 }
 
+// ConversationReader reads recent messages for a chat session.
+type ConversationReader interface {
+	Read(ctx context.Context, sessionID string, offset, limit int) ([]ConversationMessage, error)
+}
+
+// ConversationMessage is a minimal view of a conversation message for Keeper context.
+type ConversationMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 const (
 	// maxExecuteCommandLength is the max allowed length for the command field.
 	maxExecuteCommandLength = 4096
@@ -36,6 +48,11 @@ const (
 
 // KeeperHandler handles credential access requests forwarded by the sidecar.
 // All requests require X-Internal-Token authentication.
+// KeeperBroadcaster broadcasts keeper events to WebSocket subscribers.
+type KeeperBroadcaster interface {
+	BroadcastKeeperEvent(workspaceID string, event map[string]any)
+}
+
 type KeeperHandler struct {
 	db            *sql.DB
 	logger        *slog.Logger
@@ -43,6 +60,8 @@ type KeeperHandler struct {
 	gatekeeper    gatekeeper.Evaluator
 	secrets       SecretGetter
 	container     provider.ContainerProvider
+	broadcaster   KeeperBroadcaster
+	conversations ConversationReader
 }
 
 func NewKeeperHandler(db *sql.DB, internalToken string, gk gatekeeper.Evaluator, logger *slog.Logger) *KeeperHandler {
@@ -66,11 +85,24 @@ func (h *KeeperHandler) WithContainer(cp provider.ContainerProvider) *KeeperHand
 	return h
 }
 
+// WithBroadcaster attaches a broadcaster for real-time keeper event notifications.
+func (h *KeeperHandler) WithBroadcaster(b KeeperBroadcaster) *KeeperHandler {
+	h.broadcaster = b
+	return h
+}
+
+// WithConversations attaches a conversation reader for Keeper context enrichment.
+func (h *KeeperHandler) WithConversations(cr ConversationReader) *KeeperHandler {
+	h.conversations = cr
+	return h
+}
+
 type keeperRequestBody struct {
 	RequestingAgentID string `json:"requesting_agent_id"`
 	RequestingCrewID  string `json:"requesting_crew_id"`
 	WorkspaceID       string `json:"workspace_id"`
 	CredentialID      string `json:"credential_id"`
+	CredentialName    string `json:"credential_name"`
 	TaskID            string `json:"task_id,omitempty"`
 	Intent            string `json:"intent"`
 }
@@ -85,11 +117,33 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if body.RequestingAgentID == "" || body.RequestingCrewID == "" ||
-		body.CredentialID == "" || body.WorkspaceID == "" || body.Intent == "" {
+		body.WorkspaceID == "" || body.Intent == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "requesting_agent_id, requesting_crew_id, workspace_id, credential_id, intent required",
+			"error": "requesting_agent_id, requesting_crew_id, workspace_id, intent required",
 		})
 		return
+	}
+	if body.CredentialID == "" && body.CredentialName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "credential_id or credential_name required",
+		})
+		return
+	}
+
+	// Resolve credential_name to credential_id if only name provided
+	if body.CredentialID == "" && body.CredentialName != "" {
+		err := h.db.QueryRowContext(r.Context(), `
+			SELECT c.id FROM credentials c
+			JOIN agent_credentials ac ON ac.credential_id = c.id
+			WHERE ac.agent_id = ? AND ac.env_var_name = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
+			LIMIT 1`,
+			body.RequestingAgentID, body.CredentialName, body.WorkspaceID).Scan(&body.CredentialID)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				"error": "credential not found for name: " + body.CredentialName,
+			})
+			return
+		}
 	}
 
 	// Validate that the requesting agent exists, is not deleted, and belongs to the
@@ -165,6 +219,9 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal — continue with evaluation
 	}
 
+	// Load agent's recent conversation history for Keeper context
+	convHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
+
 	// Run gatekeeper evaluation
 	evalReq := gatekeeper.EvalRequest{
 		Request:        req,
@@ -172,6 +229,7 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		SecurityLevel:  keeper.SecurityLevel(secLevel),
 		AgentName:      agentName,
 		CrewName:       crewName,
+		ConvHistory:    convHistory,
 	}
 
 	var gkResp keeper.GatekeeperResponse
@@ -204,8 +262,9 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := h.db.ExecContext(r.Context(), `
-		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=? WHERE id=?`,
-		gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now, reqID); err != nil {
+		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
+		gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
+		nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID); err != nil {
 		h.logger.Error("keeper: update request decision", "error", err)
 	}
 
@@ -216,6 +275,20 @@ func (h *KeeperHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		"level", secLevel,
 		"decision", gkResp.Decision,
 		"risk", gkResp.RiskScore)
+
+	if h.broadcaster != nil {
+		h.broadcaster.BroadcastKeeperEvent(body.WorkspaceID, map[string]any{
+			"request_id":      reqID,
+			"request_type":    "access",
+			"agent_name":      agentName,
+			"credential_name": credName,
+			"intent":          body.Intent,
+			"decision":        gkResp.Decision,
+			"reason":          gkResp.Reason,
+			"risk_score":      gkResp.RiskScore,
+			"decided_at":      now,
+		})
+	}
 
 	result := keeper.RequestResult{
 		RequestID: reqID,
@@ -234,6 +307,7 @@ type keeperExecuteBody struct {
 	RequestingCrewID  string `json:"requesting_crew_id"`
 	WorkspaceID       string `json:"workspace_id"`
 	CredentialID      string `json:"credential_id"`
+	CredentialName    string `json:"credential_name"`
 	TaskID            string `json:"task_id,omitempty"`
 	Intent            string `json:"intent"`
 	Command           string `json:"command"`
@@ -286,12 +360,34 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if body.RequestingAgentID == "" || body.RequestingCrewID == "" ||
-		body.CredentialID == "" || body.WorkspaceID == "" ||
+		body.WorkspaceID == "" ||
 		body.Intent == "" || body.Command == "" || body.ContainerID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "requesting_agent_id, requesting_crew_id, workspace_id, credential_id, intent, command, container_id required",
+			"error": "requesting_agent_id, requesting_crew_id, workspace_id, intent, command, container_id required",
 		})
 		return
+	}
+	if body.CredentialID == "" && body.CredentialName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "credential_id or credential_name required",
+		})
+		return
+	}
+
+	// Resolve credential_name to credential_id if only name provided
+	if body.CredentialID == "" && body.CredentialName != "" {
+		err := h.db.QueryRowContext(r.Context(), `
+			SELECT c.id FROM credentials c
+			JOIN agent_credentials ac ON ac.credential_id = c.id
+			WHERE ac.agent_id = ? AND ac.env_var_name = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
+			LIMIT 1`,
+			body.RequestingAgentID, body.CredentialName, body.WorkspaceID).Scan(&body.CredentialID)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				"error": "credential not found for name: " + body.CredentialName,
+			})
+			return
+		}
 	}
 
 	if len(body.Command) > maxExecuteCommandLength {
@@ -417,6 +513,9 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		// Non-fatal — continue with evaluation
 	}
 
+	// Load agent's recent conversation history for Keeper context
+	execConvHistory := h.loadConversationHistory(r.Context(), body.RequestingAgentID)
+
 	// Gatekeeper evaluation (include the command so the LLM can reason about it)
 	evalReq := gatekeeper.EvalRequest{
 		Request:        req,
@@ -425,6 +524,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		AgentName:      agentName,
 		CrewName:       crewName,
 		Command:        body.Command,
+		ConvHistory:    execConvHistory,
 	}
 
 	var gkResp keeper.GatekeeperResponse
@@ -460,12 +560,27 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	if gkResp.Decision != string(keeper.DecisionAllow) {
 		// DENY or ESCALATE: update audit and return without executing
 		if _, err := h.db.ExecContext(r.Context(), `
-			UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=? WHERE id=?`,
-			gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now, reqID); err != nil {
+			UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
+			gkResp.Decision, gkResp.Reason, gkResp.RiskScore, now,
+			nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID); err != nil {
 			h.logger.Error("keeper execute: update audit (deny)", "error", err)
 		}
 		h.logger.Info("keeper execute: denied",
 			"request_id", reqID, "agent", agentName, "credential", credName, "decision", gkResp.Decision)
+		if h.broadcaster != nil {
+			h.broadcaster.BroadcastKeeperEvent(body.WorkspaceID, map[string]any{
+				"request_id":      reqID,
+				"request_type":    "execute",
+				"agent_name":      agentName,
+				"credential_name": credName,
+				"intent":          body.Intent,
+				"command":         body.Command,
+				"decision":        gkResp.Decision,
+				"reason":          gkResp.Reason,
+				"risk_score":      gkResp.RiskScore,
+				"decided_at":      now,
+			})
+		}
 		writeJSON(w, http.StatusOK, keeper.ExecuteResult{
 			RequestID: reqID,
 			Decision:  keeper.Decision(gkResp.Decision),
@@ -547,14 +662,31 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 
 	// Update the audit record with the final decision and exit code
 	if _, err := h.db.ExecContext(r.Context(), `
-		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, exit_code=?, decided_at=? WHERE id=?`,
-		string(keeper.DecisionAllow), gkResp.Reason, gkResp.RiskScore, exitCode, now, reqID); err != nil {
+		UPDATE keeper_requests SET decision=?, reason=?, risk_score=?, exit_code=?, decided_at=?, ollama_prompt=?, ollama_raw_response=? WHERE id=?`,
+		string(keeper.DecisionAllow), gkResp.Reason, gkResp.RiskScore, exitCode, now,
+		nullIfEmpty(gkResp.Prompt), nullIfEmpty(gkResp.RawLLMResponse), reqID); err != nil {
 		h.logger.Error("keeper execute: update audit (allow)", "error", err)
 	}
 
 	h.logger.Info("keeper execute: completed",
 		"request_id", reqID, "agent", agentName, "credential", credName,
 		"exit_code", exitCode, "output_bytes", len(scrubbedOutput))
+
+	if h.broadcaster != nil {
+		h.broadcaster.BroadcastKeeperEvent(body.WorkspaceID, map[string]any{
+			"request_id":      reqID,
+			"request_type":    "execute",
+			"agent_name":      agentName,
+			"credential_name": credName,
+			"intent":          body.Intent,
+			"command":         body.Command,
+			"decision":        string(keeper.DecisionAllow),
+			"reason":          gkResp.Reason,
+			"risk_score":      gkResp.RiskScore,
+			"exit_code":       exitCode,
+			"decided_at":      now,
+		})
+	}
 
 	writeJSON(w, http.StatusOK, keeper.ExecuteResult{
 		RequestID: reqID,
@@ -606,4 +738,57 @@ func (h *KeeperHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, row)
+}
+
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+const keeperConvHistoryLimit = 10
+
+// loadConversationHistory fetches the last N messages from the agent's most recent
+// active chat. Returns a formatted string for the Keeper prompt, or "" if unavailable.
+func (h *KeeperHandler) loadConversationHistory(ctx context.Context, agentID string) string {
+	if h.conversations == nil {
+		return ""
+	}
+
+	// Find the agent's most recent active chat
+	var chatID string
+	err := h.db.QueryRowContext(ctx, `
+		SELECT id FROM chats
+		WHERE agent_id = ? AND status = 'ACTIVE'
+		ORDER BY created_at DESC LIMIT 1`, agentID).Scan(&chatID)
+	if err != nil {
+		return ""
+	}
+
+	msgs, err := h.conversations.Read(ctx, chatID, 0, 0)
+	if err != nil || len(msgs) == 0 {
+		return ""
+	}
+
+	// Take last N messages
+	start := 0
+	if len(msgs) > keeperConvHistoryLimit {
+		start = len(msgs) - keeperConvHistoryLimit
+	}
+	msgs = msgs[start:]
+
+	var sb strings.Builder
+	for _, m := range msgs {
+		// Skip tool messages (noisy, not useful for intent verification)
+		if m.Role == "tool" {
+			continue
+		}
+		content := m.Content
+		if len(content) > 300 {
+			content = content[:300] + "..."
+		}
+		fmt.Fprintf(&sb, "[%s]: %s\n", m.Role, content)
+	}
+	return sb.String()
 }

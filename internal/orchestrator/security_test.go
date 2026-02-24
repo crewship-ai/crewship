@@ -28,7 +28,7 @@ func TestSecuritySidecarEnvNeverContainsRealCredential(t *testing.T) {
 				{ID: fmt.Sprintf("o-%d", i), EnvVarName: "OPENAI_API_KEY", PlainValue: "sk-openai-fuzz-" + token, Priority: 2},
 			},
 		}
-		env := BuildEnvVarsSidecar(req)
+		env := BuildEnvVarsSidecar(req, true)
 		for _, e := range env {
 			if strings.Contains(e, token) {
 				t.Fatalf("iteration %d: real credential leaked in sidecar env: %s", i, e)
@@ -56,7 +56,7 @@ func TestSecuritySidecarVsDirectEnvIsolation(t *testing.T) {
 	}
 
 	// Sidecar env: must NOT contain real keys
-	sidecarEnv := BuildEnvVarsSidecar(req)
+	sidecarEnv := BuildEnvVarsSidecar(req, true)
 	for _, e := range sidecarEnv {
 		if strings.Contains(e, anthKey) || strings.Contains(e, oaiKey) {
 			t.Fatalf("real credential in sidecar env: %s", e)
@@ -80,7 +80,7 @@ func TestSecuritySidecarVsDirectEnvIsolation(t *testing.T) {
 func TestSecuritySidecarEnvHasNOPROXY(t *testing.T) {
 	env := BuildEnvVarsSidecar(AgentRunRequest{
 		AgentID: "a1", CrewID: "c1", ChatID: "s1",
-	})
+	}, true)
 	envMap := make(map[string]string)
 	for _, e := range env {
 		parts := strings.SplitN(e, "=", 2)
@@ -264,7 +264,7 @@ func TestBuildEnvVarsSidecarOAuthTokenInjectedDirectly(t *testing.T) {
 		},
 	}
 
-	env := BuildEnvVarsSidecar(req)
+	env := BuildEnvVarsSidecar(req, true)
 	envMap := make(map[string]string)
 	for _, e := range env {
 		parts := strings.SplitN(e, "=", 2)

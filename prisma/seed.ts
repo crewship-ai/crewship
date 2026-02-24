@@ -29,7 +29,13 @@ async function main() {
   if (existingUsers > 0 || existingAgents > 0) {
     console.warn(`  ⚠ DB is not clean: ${existingUsers} users, ${existingAgents} agents found`)
     console.warn("  → Deleting all data for a fresh seed...")
-    // Delete in dependency order
+    // Delete in dependency order (tables with FK references first)
+    // Use raw SQL for tables managed by Go migrations (not in Prisma schema)
+    await prisma.$executeRawUnsafe("DELETE FROM keeper_requests").catch(() => {})
+    await prisma.$executeRawUnsafe("DELETE FROM mission_tasks").catch(() => {})
+    await prisma.$executeRawUnsafe("DELETE FROM missions").catch(() => {})
+    await prisma.$executeRawUnsafe("DELETE FROM escalations").catch(() => {})
+    await prisma.$executeRawUnsafe("DELETE FROM peer_conversations").catch(() => {})
     await prisma.auditLog.deleteMany()
     await prisma.assignment.deleteMany()
     await prisma.agentCredential.deleteMany()
@@ -192,7 +198,7 @@ WORKFLOW:
 
 KEY PATHS:
 - cmd/crewship/ (production entry), internal/api/ (HTTP API), internal/orchestrator/ (agent execution)
-- app/ (Next.js pages), components/ (React), .claude/context/ (authoritative docs)`,
+- app/ (Next.js pages), components/ (React), .factory/context/ (authoritative docs)`,
       webhook_secret: randomBytes(32).toString("hex"),
     },
   })
@@ -276,7 +282,7 @@ CONVENTIONS:
 
 WORKFLOW:
 - pnpm lint && pnpm build must pass before done
-- Check .claude/context/wireframes/ for screen designs
+- Check .factory/context/wireframes/ for screen designs
 - Feature components in components/features/, layout in components/layout/`,
       webhook_secret: randomBytes(32).toString("hex"),
     },
@@ -374,7 +380,7 @@ CREWSHIP ARCHITECTURE AWARENESS:
 
 WORKFLOW:
 - Review PRs for correctness, security, and convention adherence
-- Ensure .claude/context/ docs are updated after significant changes
+- Ensure .factory/context/ docs are updated after significant changes
 - Flag any NEVER DO violations from CLAUDE.md`,
       webhook_secret: randomBytes(32).toString("hex"),
     },
@@ -653,6 +659,45 @@ NEVER ACCEPTABLE:
   })
   console.log(`  ✓ Credential: ${anthropicCred.name} (type: ${credType})`)
 
+  // Google API credential (workspace-scoped, available to all crews/agents)
+  const googleEmail = process.env.SEED_GOOGLE_EMAIL
+  const googlePassword = process.env.SEED_GOOGLE_PASSWORD
+  let googleCred = null
+  if (googleEmail && googlePassword) {
+    console.log("🔑 Seeding Google credential...")
+    const googleSecret = JSON.stringify({ email: googleEmail, password: googlePassword })
+    googleCred = await prisma.credential.upsert({
+      where: {
+        uq_credential_name: { workspace_id: org.id, name: "GOOGLE_API_CREDENTIALS" },
+      },
+      update: {
+        encrypted_value: encrypt(googleSecret),
+      },
+      create: {
+        workspace_id: org.id,
+        name: "GOOGLE_API_CREDENTIALS",
+        description: "Google API credentials (workspace-scoped, all crews)",
+        encrypted_value: encrypt(googleSecret),
+        type: "SECRET",
+        provider: "GOOGLE",
+        scope: "WORKSPACE",
+        created_by: user.id,
+      },
+    })
+    // Set security_level to L3 (sensitive) so Keeper always evaluates access
+    try {
+      await prisma.$executeRawUnsafe(
+        "UPDATE credentials SET security_level = 3 WHERE id = ?",
+        googleCred.id,
+      )
+    } catch {
+      // security_level column may not exist if Go migrations haven't run
+    }
+    console.log(`  ✓ Credential: GOOGLE_API_CREDENTIALS (L3, Keeper-guarded)`)
+  } else {
+    console.log("  ⚠ Skipping Google credential (set SEED_GOOGLE_EMAIL + SEED_GOOGLE_PASSWORD in .env.local)")
+  }
+
   // Step 10: AgentCredentials — all agents use Anthropic
   console.log("🔗 Assigning credentials to agents...")
   const allAgents = [tomas, viktor, nela, martin, eva, daniel, petra, jakub]
@@ -661,6 +706,15 @@ NEVER ACCEPTABLE:
     credential_id: anthropicCred.id,
     env_var_name: credEnvVar,
   }))
+  if (googleCred) {
+    for (const agent of allAgents) {
+      agentCredPairs.push({
+        agent_id: agent.id,
+        credential_id: googleCred.id,
+        env_var_name: "GOOGLE_API_CREDENTIALS",
+      })
+    }
+  }
   for (const pair of agentCredPairs) {
     await prisma.agentCredential.upsert({
       where: {

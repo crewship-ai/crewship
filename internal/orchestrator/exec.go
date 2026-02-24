@@ -116,9 +116,11 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 // API key credentials are NOT included -- the sidecar proxy injects them into HTTP requests.
 // OAuth tokens (AI_CLI_TOKEN) are injected directly as CLAUDE_CODE_OAUTH_TOKEN because
 // the sidecar cannot use them for x-api-key injection.
-// SECRET credentials are NOT included -- agents must request them via the Keeper API.
+// When keeperEnabled is true, SECRET credentials are NOT included -- agents must
+// request them via the Keeper API (/keeper/request on the sidecar).
+// When keeperEnabled is false, SECRET credentials are injected as env vars directly.
 // The agent gets dummy API keys and proxy configuration pointing to the sidecar.
-func BuildEnvVarsSidecar(req AgentRunRequest) []string {
+func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 	// Check if we have an OAuth token -- this changes the env var strategy.
 	// OAuth tokens use HTTPS CONNECT tunnel (sidecar just allowlists the domain).
 	// Claude Code sets Authorization: Bearer itself inside the encrypted tunnel.
@@ -174,9 +176,16 @@ func BuildEnvVarsSidecar(req AgentRunRequest) []string {
 		)
 	}
 
-	// SECURITY: SECRET credentials are NOT injected as env vars.
-	// Agents must request them via the Keeper API (/keeper/request on the sidecar),
-	// which enforces access control and creates an audit trail for every access.
+	// SECRET credentials: when Keeper is enabled, agents must request them via
+	// the Keeper API (/keeper/request), enforcing access control + audit trail.
+	// When Keeper is disabled, inject them directly as env vars (legacy mode).
+	if !keeperEnabled {
+		for _, cred := range req.Credentials {
+			if cred.Type == "SECRET" && cred.EnvVarName != "" && cred.PlainValue != "" {
+				env = append(env, cred.EnvVarName+"="+cred.PlainValue)
+			}
+		}
+	}
 
 	return env
 }
@@ -188,6 +197,26 @@ func resolveEnvVar(cred *Credential) string {
 		return "CLAUDE_CODE_OAUTH_TOKEN"
 	}
 	return cred.EnvVarName
+}
+
+// isSidecarRunning checks if a sidecar proxy is already listening on port 9119
+// inside the given container. Used to avoid port conflicts when multiple agents
+// in the same crew container start concurrently.
+func isSidecarRunning(ctx context.Context, ctr provider.ContainerProvider, containerID string) bool {
+	if ctr == nil {
+		return false
+	}
+	result, err := ctr.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", "curl -sf http://127.0.0.1:9119/healthz 2>/dev/null || wget -q -O - http://127.0.0.1:9119/healthz 2>/dev/null"},
+		User:        "1002:1002",
+	})
+	if err != nil {
+		return false
+	}
+	output, _ := io.ReadAll(result.Reader)
+	result.Reader.Close()
+	return strings.Contains(string(output), "ok")
 }
 
 // startSidecar launches the crewship-sidecar proxy inside the container.
@@ -208,6 +237,7 @@ type SidecarIPCConfig struct {
 	BaseURL     string `json:"base_url"`
 	Token       string `json:"token"`
 	AgentID     string `json:"agent_id"`
+	AgentSlug   string `json:"agent_slug"`
 	CrewID      string `json:"crew_id"`
 	WorkspaceID string `json:"workspace_id"`
 	ChatID      string `json:"chat_id"`
@@ -216,9 +246,11 @@ type SidecarIPCConfig struct {
 
 // SidecarCrewMember describes a crew member accessible to lead agents for assignment.
 type SidecarCrewMember struct {
+	ID        string `json:"id"`
 	Slug      string `json:"slug"`
 	Name      string `json:"name"`
 	RoleTitle string `json:"role_title"`
+	ChatID    string `json:"chat_id,omitempty"`
 }
 
 func startSidecar(

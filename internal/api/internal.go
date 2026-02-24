@@ -10,19 +10,25 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
 type InternalHandler struct {
-	db            *sql.DB
-	logger        *slog.Logger
-	internalToken string
+	db             *sql.DB
+	logger         *slog.Logger
+	internalToken  string
+	keeperEnabled  atomic.Bool
 }
 
 func NewInternalHandler(db *sql.DB, internalToken string, logger *slog.Logger) *InternalHandler {
 	return &InternalHandler{db: db, internalToken: internalToken, logger: logger}
+}
+
+func (h *InternalHandler) SetKeeperEnabled(enabled bool) {
+	h.keeperEnabled.Store(enabled)
 }
 
 func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
@@ -472,19 +478,22 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 
 	// Query crew members for all agents in a crew (enables peer communication)
 	type crewMemberEntry struct {
+		ID          string `json:"id"`
 		Name        string `json:"name"`
 		Slug        string `json:"slug"`
 		RoleTitle   string `json:"role_title"`
 		Description string `json:"description"`
 		Status      string `json:"status"`
+		ChatID      string `json:"chat_id,omitempty"`
 	}
 	crewMembers := []crewMemberEntry{}
 	if crewID.Valid {
 		memberRows, err := h.db.QueryContext(r.Context(), `
-			SELECT name, slug, COALESCE(role_title, ''), COALESCE(description, ''), status
-			FROM agents
-			WHERE crew_id = ? AND deleted_at IS NULL AND id != ?
-			ORDER BY name
+			SELECT a.id, a.name, a.slug, COALESCE(a.role_title, ''), COALESCE(a.description, ''), a.status,
+			       COALESCE((SELECT c.id FROM chats c WHERE c.agent_id = a.id AND c.status = 'ACTIVE' ORDER BY c.created_at DESC LIMIT 1), '')
+			FROM agents a
+			WHERE a.crew_id = ? AND a.deleted_at IS NULL AND a.id != ?
+			ORDER BY a.name
 		`, crewID.String, agentID)
 		if err != nil {
 			h.logger.Error("query crew members for crew", "error", err)
@@ -492,7 +501,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 			defer memberRows.Close()
 			for memberRows.Next() {
 				var m crewMemberEntry
-				if err := memberRows.Scan(&m.Name, &m.Slug, &m.RoleTitle, &m.Description, &m.Status); err != nil {
+				if err := memberRows.Scan(&m.ID, &m.Name, &m.Slug, &m.RoleTitle, &m.Description, &m.Status, &m.ChatID); err != nil {
 					h.logger.Error("scan crew member", "error", err)
 					continue
 				}
@@ -501,6 +510,39 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 			if err := memberRows.Err(); err != nil {
 				h.logger.Error("rows iteration (crew members)", "error", err)
 			}
+		}
+	}
+
+	// [KEEPER] section — credential access control instructions
+	if h.keeperEnabled.Load() {
+		// Collect SECRET credentials for this agent and redact their values
+		var secretCreds []string
+		for i := range creds {
+			if creds[i].Type == "SECRET" {
+				secretCreds = append(secretCreds, creds[i].EnvVar)
+				creds[i].Value = ""
+			}
+		}
+		if len(secretCreds) > 0 {
+			var keeperBlock strings.Builder
+			keeperBlock.WriteString("[CREDENTIAL ACCESS CONTROL — KEEPER]\n")
+			keeperBlock.WriteString("Some credentials require explicit approval before use.\n")
+			keeperBlock.WriteString("You do NOT have these credentials in your environment. To access them:\n\n")
+			keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/request \\\n")
+			keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
+			keeperBlock.WriteString(fmt.Sprintf("    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why you need it>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug))
+			keeperBlock.WriteString("The Keeper (AI gatekeeper) will evaluate your request and respond with ALLOW or DENY.\n")
+			keeperBlock.WriteString("If ALLOW, the response contains the credential value. If DENY, do NOT retry — explain to the user why access was denied.\n\n")
+			keeperBlock.WriteString("To execute a command with a credential (without seeing the value):\n")
+			keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/execute \\\n")
+			keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
+			keeperBlock.WriteString(fmt.Sprintf("    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why>\",\"command\":\"<shell command>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug))
+			keeperBlock.WriteString("Keeper-guarded credentials available to you:\n")
+			for _, name := range secretCreds {
+				keeperBlock.WriteString(fmt.Sprintf("  - %s\n", name))
+			}
+			keeperBlock.WriteString("[END CREDENTIAL ACCESS CONTROL]")
+			promptParts = append(promptParts, keeperBlock.String())
 		}
 	}
 

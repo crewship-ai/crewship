@@ -21,6 +21,7 @@ type Config struct {
 	Logging   LoggingConfig   `yaml:"logging"`
 	Auth      AuthConfig      `yaml:"auth"`
 	LLMProxy  LLMProxyConfig  `yaml:"llm_proxy"`
+	Keeper    KeeperConfig    `yaml:"keeper"`
 }
 
 type ServerConfig struct {
@@ -73,6 +74,12 @@ type LLMProxyConfig struct {
 	HealthCheckInterval time.Duration `yaml:"health_check_interval"`
 }
 
+type KeeperConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	OllamaURL string `yaml:"ollama_url"`
+	Model     string `yaml:"model"`
+}
+
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -112,6 +119,11 @@ func Default() *Config {
 			Enabled:             true,
 			TokenSyncInterval:   30 * time.Second,
 			HealthCheckInterval: 60 * time.Second,
+		},
+		Keeper: KeeperConfig{
+			Enabled:   false,
+			OllamaURL: "http://localhost:11434",
+			Model:     "phi3:mini",
 		},
 	}
 }
@@ -254,6 +266,19 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_INTERNAL_TOKEN"); v != "" {
 		cfg.Auth.InternalToken = v
+	}
+	if v := os.Getenv("KEEPER_ENABLED"); v != "" {
+		cfg.Keeper.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("KEEPER_OLLAMA_URL"); v != "" {
+		cfg.Keeper.OllamaURL = v
+		// Auto-enable when URL is set, unless explicitly disabled
+		if os.Getenv("KEEPER_ENABLED") == "" {
+			cfg.Keeper.Enabled = true
+		}
+	}
+	if v := os.Getenv("KEEPER_MODEL"); v != "" {
+		cfg.Keeper.Model = v
 	}
 }
 

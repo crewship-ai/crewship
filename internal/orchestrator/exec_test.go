@@ -245,7 +245,7 @@ func TestBuildEnvVarsSidecarAgentHome(t *testing.T) {
 			{ID: "c1", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "sk-test"},
 		},
 	}
-	env := BuildEnvVarsSidecar(req)
+	env := BuildEnvVarsSidecar(req, true)
 
 	found := false
 	for _, e := range env {
@@ -324,7 +324,7 @@ func TestBuildEnvVarsSidecar_SecretCredentials_HandledByKeeper(t *testing.T) {
 			{ID: "c4", Type: "API_KEY", EnvVarName: "OPENAI_API_KEY", PlainValue: "sk-openai-real"},
 		},
 	}
-	env := BuildEnvVarsSidecar(req)
+	env := BuildEnvVarsSidecar(req, true)
 
 	envMap := make(map[string]string)
 	for _, e := range env {
@@ -344,6 +344,39 @@ func TestBuildEnvVarsSidecar_SecretCredentials_HandledByKeeper(t *testing.T) {
 	// API_KEY credentials must NOT be injected with real value (sidecar handles them)
 	if v, ok := envMap["OPENAI_API_KEY"]; ok && v == "sk-openai-real" {
 		t.Error("API_KEY credential must NOT have real value in sidecar env")
+	}
+}
+
+func TestBuildEnvVarsSidecar_KeeperDisabled_InjectsSecrets(t *testing.T) {
+	// When Keeper is disabled, SECRET credentials should be injected as env vars (legacy mode).
+	req := AgentRunRequest{
+		AgentID:   "a1",
+		AgentSlug: "tomas",
+		CrewID:    "crew-1",
+		ChatID:    "chat-1",
+		Credentials: []Credential{
+			{ID: "c1", Type: "AI_CLI_TOKEN", EnvVarName: "CLAUDE_CODE_OAUTH_TOKEN", PlainValue: "sk-ant-oat-token"},
+			{ID: "c2", Type: "SECRET", EnvVarName: "GMAIL_PASSWORD", PlainValue: "my-app-password"},
+			{ID: "c3", Type: "SECRET", EnvVarName: "GOOGLE_ACCOUNT", PlainValue: "user@gmail.com"},
+			{ID: "c4", Type: "API_KEY", EnvVarName: "OPENAI_API_KEY", PlainValue: "sk-openai-real"},
+		},
+	}
+	env := BuildEnvVarsSidecar(req, false)
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	// SECRET credentials MUST be injected when Keeper is disabled
+	if v, ok := envMap["GMAIL_PASSWORD"]; !ok || v != "my-app-password" {
+		t.Errorf("SECRET credential GMAIL_PASSWORD should be injected when Keeper disabled, got %q", v)
+	}
+	if v, ok := envMap["GOOGLE_ACCOUNT"]; !ok || v != "user@gmail.com" {
+		t.Errorf("SECRET credential GOOGLE_ACCOUNT should be injected when Keeper disabled, got %q", v)
 	}
 }
 

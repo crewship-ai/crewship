@@ -71,6 +71,7 @@ var migrations = []migration{
 	{10, "add_keeper_execute", migrationAddKeeperExecute},
 	{11, "add_keeper_observability", migrationAddKeeperObservability},
 	{12, "add_cli_tokens", migrationAddCLITokens},
+	{13, "add_chat_agent_status_index", migrationAddChatAgentStatusIndex},
 }
 
 const migrationAddKeeperObservability = `
@@ -648,4 +649,8 @@ CREATE TABLE IF NOT EXISTS agent_config_history (
 	UNIQUE(agent_id, version)
 );
 CREATE INDEX IF NOT EXISTS idx_config_history_agent_time ON agent_config_history(agent_id, created_at);
+`
+
+const migrationAddChatAgentStatusIndex = `
+CREATE INDEX IF NOT EXISTS idx_chat_agent_status_created ON chats(agent_id, status, created_at DESC);
 `

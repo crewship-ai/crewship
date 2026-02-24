@@ -7,11 +7,13 @@ import (
 
 // CrewMember represents a fellow crew member visible to a lead agent.
 type CrewMember struct {
+	ID          string
 	Name        string
 	Slug        string
 	RoleTitle   string
 	Description string
 	Status      string
+	ChatID      string
 }
 
 // BuildLeadContext formats a [CREW CONTEXT] block for the lead agent's system prompt.
