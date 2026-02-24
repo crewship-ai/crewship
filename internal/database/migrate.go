@@ -69,7 +69,29 @@ var migrations = []migration{
 	{8, "add_missions", migrationAddMissions},
 	{9, "add_keeper", migrationAddKeeper},
 	{10, "add_keeper_execute", migrationAddKeeperExecute},
+	{11, "add_keeper_observability", migrationAddKeeperObservability},
+	{12, "add_cli_tokens", migrationAddCLITokens},
 }
+
+const migrationAddKeeperObservability = `
+-- Store the Ollama prompt and raw LLM response for keeper decision observability.
+ALTER TABLE keeper_requests ADD COLUMN ollama_prompt TEXT;
+ALTER TABLE keeper_requests ADD COLUMN ollama_raw_response TEXT;
+`
+
+const migrationAddCLITokens = `
+CREATE TABLE IF NOT EXISTS cli_tokens (
+	id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL REFERENCES users(id),
+	name TEXT NOT NULL,
+	token_hash TEXT NOT NULL UNIQUE,
+	last_used_at TEXT,
+	revoked_at TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cli_token_user ON cli_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_cli_token_hash ON cli_tokens(token_hash);
+`
 
 const migrationAddOnboardingCompleted = `
 ALTER TABLE users ADD COLUMN onboarding_completed INTEGER NOT NULL DEFAULT 0;
