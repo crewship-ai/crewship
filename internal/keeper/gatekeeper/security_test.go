@@ -139,13 +139,13 @@ func TestGatekeeper_ConvHistory_Sanitized_In_Prompt(t *testing.T) {
 		t.Fatal("expected Ollama to be called, but prompt was empty")
 	}
 
-	// Conversation history must be wrapped with clear begin/end delimiters so the
-	// LLM can distinguish it from real instructions
-	if !strings.Contains(capturedPrompt, "--- begin conversation history ---") {
-		t.Error("expected '--- begin conversation history ---' delimiter in prompt")
+	// Conversation history must be wrapped with randomized begin/end delimiters
+	// to prevent prompt injection via predictable boundary strings
+	if !strings.Contains(capturedPrompt, " begin ---") {
+		t.Error("expected randomized begin delimiter in prompt")
 	}
-	if !strings.Contains(capturedPrompt, "--- end conversation history ---") {
-		t.Error("expected '--- end conversation history ---' delimiter in prompt")
+	if !strings.Contains(capturedPrompt, " end ---") {
+		t.Error("expected randomized end delimiter in prompt")
 	}
 }
 

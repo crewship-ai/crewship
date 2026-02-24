@@ -7,11 +7,26 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
+
+// keeperWSBroadcaster adapts ws.Hub to the KeeperBroadcaster interface.
+type keeperWSBroadcaster struct {
+	hub *ws.Hub
+}
+
+func (b *keeperWSBroadcaster) BroadcastKeeperEvent(workspaceID string, event map[string]any) {
+	channel := "keeper:" + workspaceID
+	b.hub.Broadcast(channel, ws.ServerMessage{
+		Type:    "keeper_event",
+		Channel: channel,
+		Payload: event,
+	})
+}
 
 type Router struct {
 	mux              *http.ServeMux
@@ -25,6 +40,8 @@ type Router struct {
 	keeperGK         gatekeeper.Evaluator
 	keeperSecrets    SecretGetter
 	keeperContainer  provider.ContainerProvider
+	keeperConfig     *config.KeeperConfig
+	keeperConvReader ConversationReader
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -108,6 +125,21 @@ func WithKeeperContainer(cp provider.ContainerProvider) RouterOption {
 	}
 }
 
+// WithKeeperConfig passes Keeper configuration for the status endpoint.
+func WithKeeperConfig(cfg *config.KeeperConfig) RouterOption {
+	return func(r *Router) {
+		r.keeperConfig = cfg
+	}
+}
+
+// WithKeeperConversations attaches a conversation reader so Keeper can inspect
+// the agent's actual chat history before making access decisions.
+func WithKeeperConversations(cr ConversationReader) RouterOption {
+	return func(r *Router) {
+		r.keeperConvReader = cr
+	}
+}
+
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)
 }
@@ -132,6 +164,10 @@ func (r *Router) registerRoutes() {
 	// System info (auth required)
 	system := NewSystemHandler(r.logger)
 	r.mux.Handle("GET /api/v1/system/runtime", authed(http.HandlerFunc(system.Runtime)))
+
+	// Keeper status (auth required)
+	keeperStatus := NewKeeperStatusHandler(r.db, r.keeperConfig, r.keeperGK, r.logger)
+	r.mux.Handle("GET /api/v1/system/keeper", authed(http.HandlerFunc(keeperStatus.Status)))
 
 	// Workspaces (auth only, no workspace context needed)
 	r.mux.Handle("GET /api/v1/workspaces", authed(http.HandlerFunc(ws.List)))
@@ -249,6 +285,10 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/admin/users", authed(wsCtx(http.HandlerFunc(admin.ListUsers))))
 	r.mux.Handle("GET /api/v1/admin/workspaces", authed(wsCtx(http.HandlerFunc(admin.ListWorkspaces))))
 
+	// Keeper admin log
+	keeperLog := NewKeeperLogHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))
+
 	// Crewshipd proxy + agent runtime routes (require IPC socket)
 	socketPath := r.socketPath
 	if socketPath == "" {
@@ -265,6 +305,9 @@ func (r *Router) registerRoutes() {
 
 	// Internal routes (for crewshipd IPC, X-Internal-Token auth)
 	internal := NewInternalHandler(r.db, r.internalToken, r.logger)
+	if r.keeperConfig != nil && r.keeperConfig.Enabled {
+		internal.SetKeeperEnabled(true)
+	}
 	internalAuth := internal.requireInternal
 	r.mux.Handle("GET /api/v1/internal/credentials", internalAuth(http.HandlerFunc(internal.ListCredentials)))
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
@@ -299,7 +342,11 @@ func (r *Router) registerRoutes() {
 	// Keeper — credential access control (internal auth)
 	keeperH := NewKeeperHandler(r.db, r.internalToken, r.keeperGK, r.logger).
 		WithSecrets(r.keeperSecrets).
-		WithContainer(r.keeperContainer)
+		WithContainer(r.keeperContainer).
+		WithConversations(r.keeperConvReader)
+	if r.hub != nil {
+		keeperH.WithBroadcaster(&keeperWSBroadcaster{hub: r.hub})
+	}
 	r.mux.Handle("POST /api/v1/internal/keeper/request", internalAuth(http.HandlerFunc(keeperH.HandleRequest)))
 	r.mux.Handle("GET /api/v1/internal/keeper/request/{requestId}", internalAuth(http.HandlerFunc(keeperH.GetRequest)))
 	r.mux.Handle("POST /api/v1/internal/keeper/execute", internalAuth(http.HandlerFunc(keeperH.HandleExecute)))

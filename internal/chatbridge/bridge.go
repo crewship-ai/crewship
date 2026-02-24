@@ -104,6 +104,7 @@ func generateMsgID() string {
 }
 
 func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content string, streamFn func(ws.ChatEvent)) error {
+	b.logger.Debug("HandleChatMessage", "chat_id", chatID, "content_len", len(content))
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
 		ID:        generateMsgID(),
 		Role:      conversation.RoleUser,
@@ -115,16 +116,20 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("persist user message: %w", err)
 	}
 
+	b.logger.Debug("resolving chat", "chat_id", chatID)
 	info, err := b.resolver.ResolveChat(ctx, chatID)
 	if err != nil {
+		b.logger.Debug("ResolveChat failed", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to resolve chat"})
 		return fmt.Errorf("resolve chat: %w", err)
 	}
+	b.logger.Debug("chat resolved", "agent_id", info.AgentID, "crew_id", info.CrewID)
 
 	// Look up cached container ID for this crew (avoids status noise on repeat messages)
 	b.containerMu.RLock()
 	containerID := b.containerCache[info.CrewID]
 	b.containerMu.RUnlock()
+	b.logger.Debug("container cache lookup", "crew_id", info.CrewID, "cached_id", containerID)
 
 	// Verify cached container still exists (may have been deleted at runtime)
 	if containerID != "" && b.container != nil {
@@ -141,6 +146,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	coldStart := containerID == ""
 
 	if containerID == "" && b.container != nil {
+		b.logger.Info("creating container", "crew_slug", info.CrewSlug)
 		streamFn(ws.ChatEvent{Type: "status", Content: "Starting container..."})
 		cID, err := b.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
 			ID:       info.CrewID,

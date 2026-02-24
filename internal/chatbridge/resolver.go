@@ -51,11 +51,13 @@ type chatResolveResponse struct {
 }
 
 type crewMemberResponse struct {
+	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Slug        string `json:"slug"`
 	RoleTitle   string `json:"role_title"`
 	Description string `json:"description"`
 	Status      string `json:"status"`
+	ChatID      string `json:"chat_id,omitempty"`
 }
 
 type credentialResponse struct {
@@ -226,11 +228,13 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 	var crewMembers []orchestrator.CrewMember
 	for _, m := range data.CrewMembers {
 		crewMembers = append(crewMembers, orchestrator.CrewMember{
+			ID:          m.ID,
 			Name:        m.Name,
 			Slug:        m.Slug,
 			RoleTitle:   m.RoleTitle,
 			Description: m.Description,
 			Status:      m.Status,
+			ChatID:      m.ChatID,
 		})
 	}
 

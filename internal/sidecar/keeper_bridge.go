@@ -47,20 +47,24 @@ func containsDangerousShellChars(cmd string) bool {
 
 // keeperRequestBody is what the agent sends to /keeper/request.
 type keeperRequestBody struct {
-	CredentialID string `json:"credential_id"`
-	Intent       string `json:"intent"`
-	TaskID       string `json:"task_id,omitempty"`
+	CredentialID   string `json:"credential_id"`
+	CredentialName string `json:"credential_name"`
+	Intent         string `json:"intent"`
+	TaskID         string `json:"task_id,omitempty"`
+	AgentSlug      string `json:"agent_slug,omitempty"`
 }
 
 // keeperExecuteBody is what the agent sends to /keeper/execute.
 // The sidecar sets container_id and requesting_agent_id from IPC config — agents
 // cannot override these fields.
 type keeperExecuteBody struct {
-	CredentialID string `json:"credential_id"`
-	Intent       string `json:"intent"`
-	Command      string `json:"command"`
-	EnvVar       string `json:"env_var,omitempty"`
-	TaskID       string `json:"task_id,omitempty"`
+	CredentialID   string `json:"credential_id"`
+	CredentialName string `json:"credential_name"`
+	Intent         string `json:"intent"`
+	Command        string `json:"command"`
+	EnvVar         string `json:"env_var,omitempty"`
+	TaskID         string `json:"task_id,omitempty"`
+	AgentSlug      string `json:"agent_slug,omitempty"`
 }
 
 // handleKeeperRequest handles POST /keeper/request from agents (UID 1001).
@@ -81,11 +85,18 @@ func (s *Server) handleKeeperRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.CredentialID = strings.TrimSpace(req.CredentialID)
+	req.CredentialName = strings.TrimSpace(req.CredentialName)
 	req.Intent = strings.TrimSpace(req.Intent)
 
-	if req.CredentialID == "" || req.Intent == "" {
+	if req.CredentialID == "" && req.CredentialName == "" {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
-			"error": "credential_id and intent required",
+			"error": "credential_id or credential_name required",
+		})
+		return
+	}
+	if req.Intent == "" {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+			"error": "intent required",
 		})
 		return
 	}
@@ -108,20 +119,34 @@ func (s *Server) handleKeeperRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Validate credential ID format: only alphanumeric, hyphens, underscores
 	// Rejects path traversal (../), SQL meta-characters, and other injection vectors
-	if !credentialIDPattern.MatchString(req.CredentialID) {
+	if req.CredentialID != "" && !credentialIDPattern.MatchString(req.CredentialID) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
 			"error": "credential_id contains invalid characters",
 		})
 		return
 	}
 
+	// Resolve agent identity: if agent_slug provided, look up the real agent ID
+	// from the crew members list. Falls back to the IPC default (first agent that started sidecar).
+	agentID := s.ipc.AgentID
+	if slug := strings.TrimSpace(req.AgentSlug); slug != "" {
+		if resolved := s.resolveAgentBySlug(slug); resolved != "" {
+			agentID = resolved
+		}
+	}
+
 	// Build the internal keeper request payload
 	ipcPayload := map[string]string{
-		"requesting_agent_id": s.ipc.AgentID,
+		"requesting_agent_id": agentID,
 		"requesting_crew_id":  s.ipc.CrewID,
 		"workspace_id":        s.ipc.WorkspaceID,
-		"credential_id":       req.CredentialID,
 		"intent":              req.Intent,
+	}
+	if req.CredentialID != "" {
+		ipcPayload["credential_id"] = req.CredentialID
+	}
+	if req.CredentialName != "" {
+		ipcPayload["credential_name"] = req.CredentialName
 	}
 	if req.TaskID != "" {
 		ipcPayload["task_id"] = req.TaskID
@@ -184,12 +209,13 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.CredentialID = strings.TrimSpace(req.CredentialID)
+	req.CredentialName = strings.TrimSpace(req.CredentialName)
 	req.Intent = strings.TrimSpace(req.Intent)
 	req.Command = strings.TrimSpace(req.Command)
 
-	if req.CredentialID == "" || req.Intent == "" || req.Command == "" {
+	if (req.CredentialID == "" && req.CredentialName == "") || req.Intent == "" || req.Command == "" {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
-			"error": "credential_id, intent, and command required",
+			"error": "credential_id or credential_name, intent, and command required",
 		})
 		return
 	}
@@ -226,25 +252,38 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate credential ID format
-	if !credentialIDPattern.MatchString(req.CredentialID) {
+	if req.CredentialID != "" && !credentialIDPattern.MatchString(req.CredentialID) {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
 			"error": "credential_id contains invalid characters",
 		})
 		return
 	}
 
+	// Resolve agent identity from slug if provided
+	execAgentID := s.ipc.AgentID
+	if slug := strings.TrimSpace(req.AgentSlug); slug != "" {
+		if resolved := s.resolveAgentBySlug(slug); resolved != "" {
+			execAgentID = resolved
+		}
+	}
+
 	// Build the IPC payload. Critically:
-	// - requesting_agent_id comes from s.ipc.AgentID (not the request body)
+	// - requesting_agent_id resolved from crew members or IPC default (not the request body)
 	// - container_id comes from s.ipc.ContainerID (not the request body)
 	// This prevents an agent from executing commands in another agent's container.
 	ipcPayload := map[string]string{
-		"requesting_agent_id": s.ipc.AgentID,
+		"requesting_agent_id": execAgentID,
 		"requesting_crew_id":  s.ipc.CrewID,
 		"workspace_id":        s.ipc.WorkspaceID,
-		"credential_id":       req.CredentialID,
 		"intent":              req.Intent,
 		"command":             req.Command,
 		"container_id":        s.ipc.ContainerID,
+	}
+	if req.CredentialID != "" {
+		ipcPayload["credential_id"] = req.CredentialID
+	}
+	if req.CredentialName != "" {
+		ipcPayload["credential_name"] = req.CredentialName
 	}
 	if req.EnvVar != "" {
 		ipcPayload["env_var"] = req.EnvVar
@@ -288,4 +327,21 @@ func (s *Server) handleKeeperExecute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONResponse(w, resp.StatusCode, result)
+}
+
+// resolveAgentBySlug looks up an agent by slug and returns their agent ID.
+// Checks crew members first, then the IPC agent itself (self-reference).
+// Returns "" if not found — caller falls back to IPC default agent ID.
+func (s *Server) resolveAgentBySlug(slug string) string {
+	// Check if it's the IPC agent itself
+	if s.ipc != nil && s.ipc.AgentSlug == slug {
+		return s.ipc.AgentID
+	}
+	// Check crew members (other agents in the same crew)
+	for _, m := range s.crewMembers {
+		if m.Slug == slug {
+			return m.ID
+		}
+	}
+	return ""
 }

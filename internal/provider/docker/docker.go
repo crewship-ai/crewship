@@ -238,12 +238,19 @@ func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
 
 // ensureImage pulls the agent runtime image if it is not already present locally.
 func (p *Provider) ensureImage(ctx context.Context, ref string) error {
-	_, _, err := p.client.ImageInspectWithRaw(ctx, ref)
-	if err == nil {
-		return nil
+	// List ALL local images (no filter) and check manually.
+	// Docker Desktop can block indefinitely when using reference filters
+	// or ImageInspect on remote registry references (ghcr.io/...).
+	imgs, err := p.client.ImageList(ctx, image.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("list images: %w", err)
 	}
-	if !client.IsErrNotFound(err) {
-		return fmt.Errorf("inspect image %s: %w", ref, err)
+	for _, img := range imgs {
+		for _, tag := range img.RepoTags {
+			if tag == ref {
+				return nil
+			}
+		}
 	}
 	p.logger.Info("pulling agent runtime image", "image", ref)
 	reader, err := p.client.ImagePull(ctx, ref, image.PullOptions{})
@@ -260,8 +267,10 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 // It applies security isolation (non-root UID, cap-drop ALL, read-only rootfs)
 // and resource limits (memory, CPU, PID). Returns the container ID.
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (string, error) {
+	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
 	// Ensure network exists (auto-recreate if deleted at runtime)
 	if p.cfg.Network != "" {
+		p.logger.Debug("ensuring network", "network", p.cfg.Network)
 		if err := p.ensureNetwork(ctx, p.cfg.Network); err != nil {
 			return "", fmt.Errorf("ensure network: %w", err)
 		}
@@ -273,11 +282,13 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 	containerName := prefix + "-team-" + team.Slug
 
+	p.logger.Debug("listing containers")
 	// Check if container already exists
 	containers, err := p.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return "", fmt.Errorf("list containers: %w", err)
 	}
+	p.logger.Debug("containers listed", "count", len(containers))
 	for _, c := range containers {
 		for _, name := range c.Names {
 			if name == "/"+containerName {
@@ -328,10 +339,12 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		cpus = 1.0
 	}
 
+	p.logger.Debug("ensuring image", "image", p.cfg.RuntimeImage)
 	if err := p.ensureImage(ctx, p.cfg.RuntimeImage); err != nil {
 		return "", fmt.Errorf("ensure image: %w", err)
 	}
 
+	p.logger.Debug("image ok, creating dirs")
 	outputPath := filepath.Join(p.cfg.OutputBasePath, team.ID)
 	if err := os.MkdirAll(outputPath, 0750); err != nil {
 		return "", fmt.Errorf("create output dir: %w", err)
@@ -360,6 +373,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	}
 
 	pidsLimit := int64(200)
+	p.logger.Debug("calling ContainerCreate", "image", p.cfg.RuntimeImage, "name", containerName)
 	resp, err := p.client.ContainerCreate(ctx,
 		&container.Config{
 			Image: p.cfg.RuntimeImage,

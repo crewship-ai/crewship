@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Agent: Claude — SEO Writer / Runs</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','sans-serif'],mono:['JetBrains Mono','monospace']},colors:{primary:{50:'#F0F6FF',100:'#E7F3FF',200:'#C5DCFC',600:'#1877F2',700:'#1877C2'},neutral:{50:'#F7F8FA',100:'#F0F2F5',200:'#E4E6EA',300:'#CED0D4',400:'#ADB1B5',500:'#8A8D91',600:'#65676B',700:'#4B4F54',800:'#373A3F',900:'#242628',950:'#1C1E21'},success:{50:'#E6F5EA',500:'#31A24C',700:'#1B7D36'},warning:{50:'#FFF8E6',500:'#F7B928',700:'#B06D00'},error:{50:'#FDE8E8',500:'#E34234',700:'#B32D1B'},brand:{teal:'#4ECDC4'},team:{marketing:'#E16B3A'}}}}}
+</script>
+<style>
+  body{font-size:14px}
+  @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}.pulse-dot{animation:pulse-dot 2s ease-in-out infinite}
+  .tab-active{border-bottom:2px solid #1877F2;color:#1877F2;font-weight:500}
+  .tab-inactive{border-bottom:2px solid transparent;color:#65676B}.tab-inactive:hover{color:#1C1E21;border-color:#CED0D4}
+</style>
+</head>
+<body class="bg-neutral-100 font-sans text-neutral-950 antialiased">
+<div class="flex h-screen">
+
+  <main class="flex-1 overflow-y-auto">
+    <div class="bg-white border-b border-neutral-200">
+      <div class="h-12 flex items-center justify-between px-6">
+        <div class="flex items-center gap-2">
+          <button class="px-3 py-1.5 text-sm border border-error-300 text-error-700 rounded-md hover:bg-error-50">Stop</button>
+          <a href="09-agent-settings.html" class="px-3 py-1.5 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50">Edit</a>
+          <button class="p-1.5 hover:bg-neutral-100 rounded-md"><svg class="w-4 h-4 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button>
+        </div>
+      </div>
+      <div class="px-6 flex gap-6 text-sm">
+        <a href="03-agent-overview.html" class="pb-3 pt-1 tab-inactive">Overview</a>
+        <a href="04-agent-chat.html" class="pb-3 pt-1 tab-inactive">Chat</a>
+        <a href="05-agent-sessions.html" class="pb-3 pt-1 tab-inactive">Sessions</a>
+        <a href="06-agent-files.html" class="pb-3 pt-1 tab-inactive">Files</a>
+        <a href="07-agent-runs.html" class="pb-3 pt-1 tab-active">Runs</a>
+        <a href="08-agent-logs.html" class="pb-3 pt-1 tab-inactive">Logs</a>
+        <a href="09-agent-settings.html" class="pb-3 pt-1 tab-inactive">Settings</a>
+        <a href="10-agent-skills.html" class="pb-3 pt-1 tab-inactive">Skills <span class="text-xs text-neutral-400 ml-0.5">4</span></a>
+        <a href="11-agent-credentials.html" class="pb-3 pt-1 tab-inactive">Credentials <span class="text-xs text-neutral-400 ml-0.5">3</span></a>
+        <a href="12-agent-history.html" class="pb-3 pt-1 tab-inactive">History</a>
+      </div>
+    </div>
+<div class="p-6 space-y-4">
+      <!-- Filters -->
+      <div class="flex items-center gap-3">
+        <select class="text-sm border border-neutral-300 rounded-md px-3 py-2 bg-white text-neutral-600">
+          <option>All Status</option><option>Running</option><option>Completed</option><option>Failed</option><option>Cancelled</option><option>Timeout</option>
+        </select>
+        <select class="text-sm border border-neutral-300 rounded-md px-3 py-2 bg-white text-neutral-600">
+          <option>All Triggers</option><option>User</option><option>Webhook</option><option>Cron</option><option>Agent</option><option>System</option>
+        </select>
+      </div>
+
+      <!-- Runs Table -->
+      <div class="bg-white border border-neutral-300 rounded-lg overflow-hidden">
+        <table class="w-full">
+          <thead>
+            <tr class="border-b border-neutral-200 text-xs text-neutral-500 uppercase tracking-wide">
+              <th class="text-left px-6 py-3 font-medium">Run ID</th>
+              <th class="text-left px-6 py-3 font-medium">Trigger</th>
+              <th class="text-left px-6 py-3 font-medium">Status</th>
+              <th class="text-left px-6 py-3 font-medium">Duration</th>
+              <th class="text-left px-6 py-3 font-medium">Exit Code</th>
+              <th class="text-left px-6 py-3 font-medium">Started</th>
+              <th class="text-left px-6 py-3 font-medium">Triggered By</th>
+              <th class="text-left px-6 py-3 font-medium w-10"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-neutral-200 text-sm">
+            <!-- Running -->
+            <tr class="hover:bg-neutral-50">
+              <td class="px-6 py-3 font-mono text-xs text-neutral-600">a3f8c1d2</td>
+              <td class="px-6 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium bg-primary-100 text-primary-700">USER</span></td>
+              <td class="px-6 py-3"><span class="inline-flex items-center gap-1.5 text-xs font-medium text-success-700"><span class="w-1.5 h-1.5 rounded-full bg-success-500 pulse-dot"></span>Running</span></td>
+              <td class="px-6 py-3 font-mono text-xs">23m 14s</td>
+              <td class="px-6 py-3 text-neutral-400">—</td>
+              <td class="px-6 py-3 text-neutral-500 text-xs">23 min ago</td>
+              <td class="px-6 py-3 text-neutral-600">Pavel Srba</td>
+              <td class="px-6 py-3"><button class="text-xs text-primary-600 hover:underline">Logs</button></td>
+            </tr>
+            <!-- Completed -->
+            <tr class="hover:bg-neutral-50">
+              <td class="px-6 py-3 font-mono text-xs text-neutral-600">b7e2d4f1</td>
+              <td class="px-6 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium bg-primary-100 text-primary-700">USER</span></td>
+              <td class="px-6 py-3"><span class="text-xs font-medium text-success-700">Completed</span></td>
+              <td class="px-6 py-3 font-mono text-xs">18m 42s</td>
+              <td class="px-6 py-3 font-mono text-xs text-success-700">0</td>
+              <td class="px-6 py-3 text-neutral-500 text-xs">1h ago</td>
+              <td class="px-6 py-3 text-neutral-600">Pavel Srba</td>
+              <td class="px-6 py-3"><button class="text-xs text-primary-600 hover:underline">Logs</button></td>
+            </tr>
+            <!-- Webhook trigger -->
+            <tr class="hover:bg-neutral-50">
+              <td class="px-6 py-3 font-mono text-xs text-neutral-600">c9a1b3e5</td>
+              <td class="px-6 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium bg-neutral-200 text-neutral-700">WEBHOOK</span></td>
+              <td class="px-6 py-3"><span class="text-xs font-medium text-success-700">Completed</span></td>
+              <td class="px-6 py-3 font-mono text-xs">6m 15s</td>
+              <td class="px-6 py-3 font-mono text-xs text-success-700">0</td>
+              <td class="px-6 py-3 text-neutral-500 text-xs">3h ago</td>
+              <td class="px-6 py-3 text-neutral-500 text-xs">n8n webhook</td>
+              <td class="px-6 py-3"><button class="text-xs text-primary-600 hover:underline">Logs</button></td>
+            </tr>
+            <!-- Failed — expandable -->
+            <tr class="hover:bg-neutral-50 bg-error-50/30">
+              <td class="px-6 py-3 font-mono text-xs text-neutral-600">d2f5a8c7</td>
+              <td class="px-6 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium bg-primary-100 text-primary-700">USER</span></td>
+              <td class="px-6 py-3"><span class="text-xs font-medium text-error-700">Failed</span></td>
+              <td class="px-6 py-3 font-mono text-xs">2m 08s</td>
+              <td class="px-6 py-3 font-mono text-xs text-error-700">1</td>
+              <td class="px-6 py-3 text-neutral-500 text-xs">5h ago</td>
+              <td class="px-6 py-3 text-neutral-600">Pavel Srba</td>
+              <td class="px-6 py-3">
+                <div class="flex items-center gap-2">
+                  <button class="text-xs text-primary-600 hover:underline">Retry</button>
+                  <button class="text-xs text-primary-600 hover:underline">Logs</button>
+                </div>
+              </td>
+            </tr>
+            <!-- Expanded error detail -->
+            <tr class="bg-error-50/20">
+              <td colspan="8" class="px-6 py-3">
+                <div class="bg-error-50 rounded-lg p-4 text-sm space-y-2">
+                  <div class="font-mono text-xs text-error-700">Error: Rate limit exceeded (429) — all API keys in cooldown</div>
+                  <div class="flex items-center gap-4 text-xs text-neutral-500">
+                    <span>CLI: Claude Code</span>
+                    <span>Model: claude-sonnet-4</span>
+                    <span>Credential: ANTHROPIC_KEY_1 (cooldown)</span>
+                    <a href="04-agent-chat.html" class="text-primary-600 hover:underline">Session #2</a>
+                    <a href="08-agent-logs.html" class="text-primary-600 hover:underline">View full logs</a>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            <!-- Completed -->
+            <tr class="hover:bg-neutral-50">
+              <td class="px-6 py-3 font-mono text-xs text-neutral-600">e8c3b1a9</td>
+              <td class="px-6 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium bg-primary-100 text-primary-700">USER</span></td>
+              <td class="px-6 py-3"><span class="text-xs font-medium text-success-700">Completed</span></td>
+              <td class="px-6 py-3 font-mono text-xs">24m 08s</td>
+              <td class="px-6 py-3 font-mono text-xs text-success-700">0</td>
+              <td class="px-6 py-3 text-neutral-500 text-xs">Yesterday</td>
+              <td class="px-6 py-3 text-neutral-600">Pavel Srba</td>
+              <td class="px-6 py-3"><button class="text-xs text-primary-600 hover:underline">Logs</button></td>
+            </tr>
+            <!-- Cancelled -->
+            <tr class="hover:bg-neutral-50">
+              <td class="px-6 py-3 font-mono text-xs text-neutral-600">f1d7e2b4</td>
+              <td class="px-6 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium bg-primary-100 text-primary-700">USER</span></td>
+              <td class="px-6 py-3"><span class="text-xs font-medium text-neutral-500">Cancelled</span></td>
+              <td class="px-6 py-3 font-mono text-xs">1m 02s</td>
+              <td class="px-6 py-3 font-mono text-xs text-neutral-500">-1</td>
+              <td class="px-6 py-3 text-neutral-500 text-xs">Yesterday</td>
+              <td class="px-6 py-3 text-neutral-600">Pavel Srba</td>
+              <td class="px-6 py-3"><button class="text-xs text-primary-600 hover:underline">Logs</button></td>
+            </tr>
+            <!-- Timeout -->
+            <tr class="hover:bg-neutral-50 bg-warning-50/30">
+              <td class="px-6 py-3 font-mono text-xs text-neutral-600">a2b4c6d8</td>
+              <td class="px-6 py-3"><span class="px-2 py-0.5 rounded text-xs font-medium bg-neutral-200 text-neutral-700">CRON</span></td>
+              <td class="px-6 py-3"><span class="text-xs font-medium text-warning-700">Timeout</span></td>
+              <td class="px-6 py-3 font-mono text-xs">30m 00s</td>
+              <td class="px-6 py-3 font-mono text-xs text-warning-700">124</td>
+              <td class="px-6 py-3 text-neutral-500 text-xs">2 days ago</td>
+              <td class="px-6 py-3 text-neutral-500 text-xs">System (cron)</td>
+              <td class="px-6 py-3">
+                <div class="flex items-center gap-2">
+                  <button class="text-xs text-primary-600 hover:underline">Retry</button>
+                  <button class="text-xs text-primary-600 hover:underline">Logs</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="px-6 py-3 border-t border-neutral-200 flex items-center justify-between text-xs text-neutral-500">
+          <span>Showing 7 runs</span>
+          <div class="flex items-center gap-1">
+            <button class="px-2 py-1 rounded border border-neutral-300 text-neutral-400 cursor-not-allowed">Previous</button>
+            <button class="px-2 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50">Next</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="_shared.js"></script>
+</body>
+</html>

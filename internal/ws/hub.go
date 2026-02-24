@@ -355,6 +355,7 @@ func (c *Client) handleCancelMessage(msg ClientMessage) {
 }
 
 func (c *Client) handleSendMessage(msg ClientMessage) {
+	c.hub.logger.Debug("handleSendMessage", "user_id", c.userID, "payload_len", len(msg.Payload))
 	if c.hub.chatHandler == nil {
 		resp, _ := json.Marshal(ServerMessage{
 			Type:    "error",
@@ -386,6 +387,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 	}
 
 	if payload.ChatID == "" || payload.Content == "" {
+		c.hub.logger.Debug("send_message missing fields", "chat_id_empty", payload.ChatID == "", "content_empty", payload.Content == "")
 		resp, _ := json.Marshal(ServerMessage{
 			Type:    "error",
 			Channel: msg.Channel,

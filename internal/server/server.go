@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/llmproxy"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/logging"
@@ -86,6 +87,9 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	if cfg.Container.SidecarEnabled {
 		orch.SetSidecarEnabled(true)
 		logger.Info("sidecar proxy enabled for credential injection")
+	}
+	if cfg.Keeper.Enabled {
+		orch.SetKeeperEnabled(true)
 	}
 
 	// Wire IPC config so lead agents can reach crewshipd for assignment routing.
@@ -176,6 +180,16 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		opts = append(opts, goapi.WithHub(wsHub))
 		opts = append(opts, goapi.WithOrchestrator(orch))
 
+		// Wire Keeper gatekeeper (Ollama-based credential access control)
+		opts = append(opts, goapi.WithKeeperConfig(&cfg.Keeper))
+		if cfg.Keeper.Enabled {
+			gk := gatekeeper.New(cfg.Keeper.OllamaURL, cfg.Keeper.Model, logger)
+			opts = append(opts, goapi.WithKeeperGatekeeper(gk))
+			logger.Info("keeper gatekeeper enabled", "ollama_url", cfg.Keeper.OllamaURL, "model", cfg.Keeper.Model)
+		} else {
+			logger.Info("keeper gatekeeper disabled (set KEEPER_ENABLED=true or KEEPER_OLLAMA_URL to enable)")
+		}
+
 		// Wire keeper execute: load secrets store and pass container provider
 		if ctr != nil {
 			opts = append(opts, goapi.WithKeeperContainer(ctr))
@@ -183,6 +197,11 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			if secretsStore != nil {
 				opts = append(opts, goapi.WithKeeperSecrets(secretsStore))
 			}
+		}
+
+		// Wire conversation history so Keeper can verify agent intent against actual chat
+		if convStore != nil {
+			opts = append(opts, goapi.WithKeeperConversations(&convStoreAdapter{store: convStore}))
 		}
 
 		apiRouter, err := goapi.NewRouter(deps.DB, cfg.Auth.JWTSecret, logger, opts...)
@@ -348,4 +367,24 @@ func (s *Server) startIPC() error {
 		return fmt.Errorf("ipc serve: %w", err)
 	}
 	return nil
+}
+
+// convStoreAdapter bridges conversation.Store → api.ConversationReader.
+type convStoreAdapter struct {
+	store *conversation.Store
+}
+
+func (a *convStoreAdapter) Read(ctx context.Context, sessionID string, offset, limit int) ([]goapi.ConversationMessage, error) {
+	msgs, err := a.store.Read(ctx, sessionID, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]goapi.ConversationMessage, len(msgs))
+	for i, m := range msgs {
+		out[i] = goapi.ConversationMessage{
+			Role:    string(m.Role),
+			Content: m.Content,
+		}
+	}
+	return out, nil
 }
