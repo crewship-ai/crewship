@@ -52,7 +52,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 	query := `SELECT id, workspace_id, name, type, provider, encrypted_value,
 		encrypted_refresh_token, token_expires_at, account_label, account_email, status
 		FROM credentials
-		WHERE status = 'ACTIVE' AND deleted_at IS NULL
+		WHERE status IN ('ACTIVE', 'EXPIRED', 'ERROR') AND deleted_at IS NULL
 		AND type IN ('AI_CLI_TOKEN', 'API_KEY') AND provider != 'NONE'`
 
 	var args []interface{}
@@ -682,6 +682,26 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": chatID})
+}
+
+func (h *InternalHandler) UpdateChatTitle(w http.ResponseWriter, r *http.Request) {
+	chatID := r.PathValue("chatId")
+	var body struct {
+		Title string `json:"title"`
+	}
+	if err := readJSON(r, &body); err != nil || body.Title == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title required"})
+		return
+	}
+	_, err := h.db.ExecContext(r.Context(),
+		"UPDATE chats SET title = ? WHERE id = ? AND (title IS NULL OR title = '')",
+		body.Title, chatID)
+	if err != nil {
+		h.logger.Error("update chat title", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": chatID, "title": body.Title})
 }
 
 // buildEthosBlock returns the [CREWSHIP ETHOS] system prompt block.

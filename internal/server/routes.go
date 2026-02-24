@@ -190,9 +190,15 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(s.runCtx, timeout)
 		defer cancel()
 
+		var logBuf *logcollector.OutputBuffer
+		if s.logWriter != nil {
+			logBuf = logcollector.NewOutputBuffer(s.logWriter, req.CrewID, req.AgentSlug)
+			defer logBuf.Close()
+		}
+
 		handler := func(event orchestrator.AgentEvent) {
-			if s.logWriter != nil {
-				_ = s.logWriter.Append(req.CrewID, req.AgentSlug, logcollector.LogEntry{
+			if logBuf != nil {
+				_ = logBuf.Append(logcollector.LogEntry{
 					Timestamp: event.Timestamp,
 					Level:     "info",
 					Agent:     req.AgentSlug,

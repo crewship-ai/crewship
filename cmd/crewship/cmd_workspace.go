@@ -118,9 +118,14 @@ var workspaceCreateCmd = &cobra.Command{
 			return fmt.Errorf("--name is required")
 		}
 
+		lang, _ := cmd.Flags().GetString("language")
+
 		body := map[string]interface{}{"name": name}
 		if slug != "" {
 			body["slug"] = slug
+		}
+		if lang != "" {
+			body["preferred_language"] = lang
 		}
 
 		client := newAPIClient()
@@ -174,20 +179,27 @@ var workspaceGetCmd = &cobra.Command{
 		}
 
 		var ws struct {
-			ID        string  `json:"id"`
-			Name      string  `json:"name"`
-			Slug      string  `json:"slug"`
-			CreatedAt string  `json:"created_at"`
-			LogoURL   *string `json:"logo_url"`
+			ID                string  `json:"id"`
+			Name              string  `json:"name"`
+			Slug              string  `json:"slug"`
+			CreatedAt         string  `json:"created_at"`
+			LogoURL           *string `json:"logo_url"`
+			PreferredLanguage *string `json:"preferred_language"`
 		}
 		if err := cli.ReadJSON(resp, &ws); err != nil {
 			return err
+		}
+
+		lang := "-"
+		if ws.PreferredLanguage != nil {
+			lang = *ws.PreferredLanguage
 		}
 
 		f := newFormatter()
 		pairs := [][]string{
 			{"Name", ws.Name},
 			{"Slug", ws.Slug},
+			{"Language", lang},
 			{"ID", ws.ID},
 			{"Created", ws.CreatedAt},
 		}
@@ -195,12 +207,68 @@ var workspaceGetCmd = &cobra.Command{
 	},
 }
 
+var workspaceUpdateCmd = &cobra.Command{
+	Use:   "update",
+	Short: "Update the current workspace",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		body := map[string]interface{}{}
+		flags := cmd.Flags()
+
+		if flags.Changed("name") {
+			v, _ := flags.GetString("name")
+			body["name"] = v
+		}
+		if flags.Changed("slug") {
+			v, _ := flags.GetString("slug")
+			body["slug"] = v
+		}
+		if flags.Changed("language") {
+			v, _ := flags.GetString("language")
+			body["preferred_language"] = v
+		}
+
+		if len(body) == 0 {
+			return fmt.Errorf("no fields to update")
+		}
+
+		client := newAPIClient()
+		wsID := client.GetWorkspaceID()
+		if wsID == "" {
+			return fmt.Errorf("no workspace selected")
+		}
+		resp, err := client.Patch("/api/v1/workspaces/"+wsID, body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+
+		cli.PrintSuccess("Workspace updated.")
+		return nil
+	},
+}
+
 func init() {
 	workspaceCreateCmd.Flags().String("name", "", "Workspace name (required)")
 	workspaceCreateCmd.Flags().String("slug", "", "Workspace slug (auto-generated from name)")
+	workspaceCreateCmd.Flags().String("language", "", "Preferred language (e.g. cs, en)")
+
+	workspaceUpdateCmd.Flags().String("name", "", "Workspace name")
+	workspaceUpdateCmd.Flags().String("slug", "", "Workspace slug")
+	workspaceUpdateCmd.Flags().String("language", "", "Preferred language (e.g. cs, en)")
 
 	workspaceCmd.AddCommand(workspaceListCmd)
 	workspaceCmd.AddCommand(workspaceUseCmd)
 	workspaceCmd.AddCommand(workspaceGetCmd)
 	workspaceCmd.AddCommand(workspaceCreateCmd)
+	workspaceCmd.AddCommand(workspaceUpdateCmd)
 }

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Eye, EyeOff, Loader2 } from "lucide-react"
+import { Eye, EyeOff, Loader2, CheckCircle2, XCircle, FlaskConical } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -31,6 +31,8 @@ interface CredentialData {
   id: string
   name: string
   description: string | null
+  type: string
+  provider: string
   scope: "WORKSPACE" | "CREW"
   crew_id: string | null
 }
@@ -61,6 +63,8 @@ export function EditCredentialDialog({
   const [crews, setTeams] = React.useState<Team[]>([])
   const [teamsLoading, setTeamsLoading] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
+  const [testing, setTesting] = React.useState(false)
+  const [testResult, setTestResult] = React.useState<{ valid: boolean; error?: string } | null>(null)
   const [error, setError] = React.useState("")
 
   React.useEffect(() => {
@@ -71,6 +75,7 @@ export function EditCredentialDialog({
     setValue("")
     setShowValue(false)
     setError("")
+    setTestResult(null)
   }, [credential])
 
   React.useEffect(() => {
@@ -89,8 +94,40 @@ export function EditCredentialDialog({
       setError("")
       setValue("")
       setShowValue(false)
+      setTestResult(null)
     }
     onOpenChange(nextOpen)
+  }
+
+  async function handleTest() {
+    if (!value.trim()) {
+      setError("Enter a value to test")
+      return
+    }
+    setTesting(true)
+    setTestResult(null)
+    setError("")
+    try {
+      const res = await fetch(`/api/v1/credentials/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: credential.provider,
+          type: credential.type,
+          value: value.trim(),
+        }),
+      })
+      if (!res.ok) {
+        setTestResult({ valid: false, error: "Test request failed" })
+        return
+      }
+      const data = await res.json()
+      setTestResult({ valid: data.valid, error: data.error })
+    } catch {
+      setTestResult({ valid: false, error: "Network error" })
+    } finally {
+      setTesting(false)
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -120,7 +157,7 @@ export function EditCredentialDialog({
       else body.crew_id = null
 
       const res = await fetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       })
@@ -181,7 +218,7 @@ export function EditCredentialDialog({
                 type={showValue ? "text" : "password"}
                 placeholder="Leave empty to keep existing value"
                 value={value}
-                onChange={(e) => setValue(e.target.value)}
+                onChange={(e) => { setValue(e.target.value); setTestResult(null) }}
                 className="pr-10"
               />
               <Button
@@ -195,6 +232,27 @@ export function EditCredentialDialog({
                 <span className="sr-only">{showValue ? "Hide" : "Show"} value</span>
               </Button>
             </div>
+            {credential.provider !== "NONE" && value.trim() && !value.trim().startsWith("sk-ant-oat") && (
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTest}
+                  disabled={testing}
+                  className="h-7 text-xs"
+                >
+                  {testing ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <FlaskConical className="mr-1.5 h-3 w-3" />}
+                  Test Key
+                </Button>
+                {testResult && (
+                  <span className={`flex items-center gap-1 text-xs ${testResult.valid ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
+                    {testResult.valid ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+                    {testResult.valid ? "Valid" : testResult.error || "Invalid"}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">

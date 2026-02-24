@@ -129,6 +129,8 @@ export default function CredentialsPage() {
       id: credential.id,
       name: credential.name,
       description: credential.description,
+      type: credential.type,
+      provider: credential.provider,
       scope: credential.scope,
       crew_id: credential.crew_id,
     })
