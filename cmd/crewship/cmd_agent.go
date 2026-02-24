@@ -5,8 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 var agentCmd = &cobra.Command{

@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
-	"github.com/spf13/cobra"
 )
 
 var crewCmd = &cobra.Command{
@@ -388,8 +390,8 @@ var crewStatusCmd = &cobra.Command{
 					to = *a.AssignedToSlug
 				}
 				task := a.Task
-				if len(task) > 60 {
-					task = task[:57] + "..."
+				if utf8.RuneCountInString(task) > 60 {
+					task = string([]rune(task)[:57]) + "..."
 				}
 				fmt.Printf("  %s%-10s%s %s -> %s: %q\n", statusColor(a.Status), a.Status, cli.Reset, a.AssignedBySlug, to, task)
 			}
