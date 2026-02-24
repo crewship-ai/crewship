@@ -166,6 +166,15 @@ var agentCreateCmd = &cobra.Command{
 		if v, _ := flags.GetString("lead-mode"); v != "" {
 			body["lead_mode"] = v
 		}
+		if v, _ := flags.GetString("llm-provider"); v != "" {
+			body["llm_provider"] = v
+		}
+		if v, _ := flags.GetString("llm-model"); v != "" {
+			body["llm_model"] = v
+		}
+		if v, _ := flags.GetFloat64("temperature"); cmd.Flags().Changed("temperature") {
+			body["temperature"] = v
+		}
 		if v, _ := flags.GetInt("timeout"); v > 0 {
 			body["timeout_seconds"] = v
 		}
@@ -263,6 +272,18 @@ var agentUpdateCmd = &cobra.Command{
 		if flags.Changed("lead-mode") {
 			v, _ := flags.GetString("lead-mode")
 			body["lead_mode"] = v
+		}
+		if flags.Changed("llm-provider") {
+			v, _ := flags.GetString("llm-provider")
+			body["llm_provider"] = v
+		}
+		if flags.Changed("llm-model") {
+			v, _ := flags.GetString("llm-model")
+			body["llm_model"] = v
+		}
+		if flags.Changed("temperature") {
+			v, _ := flags.GetFloat64("temperature")
+			body["temperature"] = v
 		}
 		if flags.Changed("timeout") {
 			v, _ := flags.GetInt("timeout")
@@ -432,6 +453,9 @@ func init() {
 	agentCreateCmd.Flags().String("cli-adapter", "CLAUDE_CODE", "CLI adapter: CLAUDE_CODE|CODEX_CLI|GEMINI_CLI|OPENCODE")
 	agentCreateCmd.Flags().String("system-prompt", "", "System prompt text or @file.txt")
 	agentCreateCmd.Flags().String("tool-profile", "CODING", "Tool profile: MINIMAL|CODING|MESSAGING|FULL")
+	agentCreateCmd.Flags().String("llm-provider", "", "LLM provider: ANTHROPIC|OPENAI|GOOGLE")
+	agentCreateCmd.Flags().String("llm-model", "", "LLM model (e.g., claude-haiku-4-5)")
+	agentCreateCmd.Flags().Float64("temperature", 0, "Temperature (0.0-1.0)")
 	agentCreateCmd.Flags().Bool("memory", false, "Enable memory")
 	agentCreateCmd.Flags().String("lead-mode", "", "Lead mode: active|passive")
 	agentCreateCmd.Flags().Int("timeout", 0, "Timeout in seconds")
@@ -442,6 +466,9 @@ func init() {
 	agentUpdateCmd.Flags().String("cli-adapter", "", "CLI adapter")
 	agentUpdateCmd.Flags().String("system-prompt", "", "System prompt text or @file.txt")
 	agentUpdateCmd.Flags().String("tool-profile", "", "Tool profile")
+	agentUpdateCmd.Flags().String("llm-provider", "", "LLM provider: ANTHROPIC|OPENAI|GOOGLE")
+	agentUpdateCmd.Flags().String("llm-model", "", "LLM model")
+	agentUpdateCmd.Flags().Float64("temperature", 0, "Temperature (0.0-1.0)")
 	agentUpdateCmd.Flags().Bool("memory", false, "Enable memory")
 	agentUpdateCmd.Flags().String("lead-mode", "", "Lead mode")
 	agentUpdateCmd.Flags().Int("timeout", 0, "Timeout in seconds")
@@ -553,5 +580,13 @@ func resolveCrewID(client *cli.Client, slugOrID string) (string, error) {
 }
 
 func looksLikeCUID(s string) bool {
-	return len(s) >= 20 && (strings.HasPrefix(s, "c") || strings.HasPrefix(s, "cl"))
+	if len(s) < 20 || s[0] != 'c' {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
 }
