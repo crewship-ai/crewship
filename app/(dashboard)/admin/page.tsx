@@ -122,6 +122,20 @@ interface KeeperLogEntry {
   decided_at: string | null
 }
 
+interface KeeperLiveEvent {
+  request_id: string
+  request_type: string
+  agent_name: string
+  credential_name: string
+  intent: string
+  command?: string
+  decision: string
+  reason: string
+  risk_score: number
+  exit_code?: number
+  decided_at: string
+}
+
 function redactUrl(raw: string): string {
   try {
     const url = new URL(raw)
@@ -154,19 +168,6 @@ export default function AdminPage() {
   const [keeperLog, setKeeperLog] = useState<KeeperLogEntry[]>([])
   const [keeperLoading, setKeeperLoading] = useState(false)
 
-  interface KeeperLiveEvent {
-    request_id: string
-    request_type: string
-    agent_name: string
-    credential_name: string
-    intent: string
-    command?: string
-    decision: string
-    reason: string
-    risk_score: number
-    exit_code?: number
-    decided_at: string
-  }
   const [keeperLiveEvents, setKeeperLiveEvents] = useState<KeeperLiveEvent[]>([])
   const keeperWsRef = useRef<WebSocket | null>(null)
   const [keeperWsStatus, setKeeperWsStatus] = useState<"disconnected" | "connecting" | "connected">("disconnected")
@@ -655,7 +656,7 @@ export default function AdminPage() {
                     ) : (
                       <div className="space-y-2">
                         {keeperLiveEvents.map((evt, i) => (
-                          <div key={evt.request_id + i} className="flex items-start gap-2 py-1.5 border-b last:border-0">
+                          <div key={evt.request_id} className="flex items-start gap-2 py-1.5 border-b last:border-0">
                             <Badge
                               variant="outline"
                               className={cn("text-[10px] shrink-0 mt-0.5",

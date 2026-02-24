@@ -515,11 +515,12 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 
 	// [KEEPER] section — credential access control instructions
 	if h.keeperEnabled.Load() {
-		// Collect SECRET credentials for this agent
+		// Collect SECRET credentials for this agent and redact their values
 		var secretCreds []string
-		for _, c := range creds {
-			if c.Type == "SECRET" {
-				secretCreds = append(secretCreds, c.EnvVar)
+		for i := range creds {
+			if creds[i].Type == "SECRET" {
+				secretCreds = append(secretCreds, creds[i].EnvVar)
+				creds[i].Value = ""
 			}
 		}
 		if len(secretCreds) > 0 {
