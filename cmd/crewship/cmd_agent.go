@@ -173,9 +173,6 @@ var agentCreateCmd = &cobra.Command{
 		if v, _ := flags.GetString("llm-model"); v != "" {
 			body["llm_model"] = v
 		}
-		if v, _ := flags.GetFloat64("temperature"); cmd.Flags().Changed("temperature") {
-			body["temperature"] = v
-		}
 		if v, _ := flags.GetInt("timeout"); v > 0 {
 			body["timeout_seconds"] = v
 		}
@@ -281,10 +278,6 @@ var agentUpdateCmd = &cobra.Command{
 		if flags.Changed("llm-model") {
 			v, _ := flags.GetString("llm-model")
 			body["llm_model"] = v
-		}
-		if flags.Changed("temperature") {
-			v, _ := flags.GetFloat64("temperature")
-			body["temperature"] = v
 		}
 		if flags.Changed("timeout") {
 			v, _ := flags.GetInt("timeout")
@@ -456,7 +449,6 @@ func init() {
 	agentCreateCmd.Flags().String("tool-profile", "CODING", "Tool profile: MINIMAL|CODING|MESSAGING|FULL")
 	agentCreateCmd.Flags().String("llm-provider", "", "LLM provider: ANTHROPIC|OPENAI|GOOGLE")
 	agentCreateCmd.Flags().String("llm-model", "", "LLM model (e.g., claude-haiku-4-5)")
-	agentCreateCmd.Flags().Float64("temperature", 0, "Temperature (0.0-1.0)")
 	agentCreateCmd.Flags().Bool("memory", false, "Enable memory")
 	agentCreateCmd.Flags().String("lead-mode", "", "Lead mode: active|passive")
 	agentCreateCmd.Flags().Int("timeout", 0, "Timeout in seconds")
@@ -469,7 +461,6 @@ func init() {
 	agentUpdateCmd.Flags().String("tool-profile", "", "Tool profile")
 	agentUpdateCmd.Flags().String("llm-provider", "", "LLM provider: ANTHROPIC|OPENAI|GOOGLE")
 	agentUpdateCmd.Flags().String("llm-model", "", "LLM model")
-	agentUpdateCmd.Flags().Float64("temperature", 0, "Temperature (0.0-1.0)")
 	agentUpdateCmd.Flags().Bool("memory", false, "Enable memory")
 	agentUpdateCmd.Flags().String("lead-mode", "", "Lead mode")
 	agentUpdateCmd.Flags().Int("timeout", 0, "Timeout in seconds")

@@ -163,7 +163,7 @@ export default function CrewDetailPage() {
 
     try {
       const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(parsed.data),
       })

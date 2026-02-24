@@ -11,6 +11,51 @@ import (
 	"time"
 )
 
+// validLanguages maps language name → true for validation.
+// Must stay in sync with lib/languages.ts on the frontend.
+var validLanguages = map[string]bool{
+	"Afrikaans": true, "Arabic": true, "Bulgarian": true, "Bengali": true,
+	"Catalan": true, "Czech": true, "Danish": true, "German": true,
+	"Greek": true, "English": true, "Spanish": true, "Estonian": true,
+	"Persian": true, "Finnish": true, "French": true, "Hebrew": true,
+	"Hindi": true, "Croatian": true, "Hungarian": true, "Indonesian": true,
+	"Italian": true, "Japanese": true, "Korean": true, "Lithuanian": true,
+	"Latvian": true, "Malay": true, "Norwegian": true, "Dutch": true,
+	"Polish": true, "Portuguese": true, "Portuguese (Brazil)": true,
+	"Romanian": true, "Russian": true, "Slovak": true, "Slovenian": true,
+	"Serbian": true, "Swedish": true, "Swahili": true, "Tamil": true,
+	"Thai": true, "Turkish": true, "Ukrainian": true, "Urdu": true,
+	"Vietnamese": true, "Chinese": true, "Chinese (Traditional)": true,
+}
+
+// languageCodeToName maps ISO codes to language names for CLI convenience.
+var languageCodeToName = map[string]string{
+	"af": "Afrikaans", "ar": "Arabic", "bg": "Bulgarian", "bn": "Bengali",
+	"ca": "Catalan", "cs": "Czech", "da": "Danish", "de": "German",
+	"el": "Greek", "en": "English", "es": "Spanish", "et": "Estonian",
+	"fa": "Persian", "fi": "Finnish", "fr": "French", "he": "Hebrew",
+	"hi": "Hindi", "hr": "Croatian", "hu": "Hungarian", "id": "Indonesian",
+	"it": "Italian", "ja": "Japanese", "ko": "Korean", "lt": "Lithuanian",
+	"lv": "Latvian", "ms": "Malay", "nb": "Norwegian", "nl": "Dutch",
+	"pl": "Polish", "pt": "Portuguese", "pt-BR": "Portuguese (Brazil)",
+	"ro": "Romanian", "ru": "Russian", "sk": "Slovak", "sl": "Slovenian",
+	"sr": "Serbian", "sv": "Swedish", "sw": "Swahili", "ta": "Tamil",
+	"th": "Thai", "tr": "Turkish", "uk": "Ukrainian", "ur": "Urdu",
+	"vi": "Vietnamese", "zh": "Chinese", "zh-TW": "Chinese (Traditional)",
+}
+
+// resolveLanguage validates a language value. Accepts either a name ("Czech")
+// or an ISO code ("cs") and returns the canonical name, or an error.
+func resolveLanguage(val string) (string, error) {
+	if validLanguages[val] {
+		return val, nil
+	}
+	if name, ok := languageCodeToName[val]; ok {
+		return name, nil
+	}
+	return "", fmt.Errorf("invalid language %q — use a name (e.g. Czech) or ISO code (e.g. cs)", val)
+}
+
 type WorkspaceHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
@@ -85,8 +130,9 @@ func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type createWorkspaceRequest struct {
-	Name string `json:"name"`
-	Slug string `json:"slug"`
+	Name              string  `json:"name"`
+	Slug              string  `json:"slug"`
+	PreferredLanguage *string `json:"preferred_language"`
 }
 
 func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -109,6 +155,14 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Slug == "" || len(req.Slug) < 2 || len(req.Slug) > 50 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
 		return
+	}
+	if req.PreferredLanguage != nil && *req.PreferredLanguage != "" {
+		resolved, err := resolveLanguage(*req.PreferredLanguage)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		req.PreferredLanguage = &resolved
 	}
 
 	var existingID string
@@ -136,8 +190,8 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(r.Context(),
-		"INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-		wsID, req.Name, req.Slug, now, now)
+		"INSERT INTO workspaces (id, name, slug, preferred_language, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+		wsID, req.Name, req.Slug, req.PreferredLanguage, now, now)
 	if err != nil {
 		h.logger.Error("insert workspace", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -160,11 +214,12 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, workspaceResponse{
-		ID:        wsID,
-		Name:      req.Name,
-		Slug:      req.Slug,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:                wsID,
+		Name:              req.Name,
+		Slug:              req.Slug,
+		PreferredLanguage: req.PreferredLanguage,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	})
 }
 
@@ -224,6 +279,15 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Slug != nil && (len(*req.Slug) < 2 || len(*req.Slug) > 50) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
 		return
+	}
+
+	if req.PreferredLanguage != nil && *req.PreferredLanguage != "" {
+		resolved, err := resolveLanguage(*req.PreferredLanguage)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		req.PreferredLanguage = &resolved
 	}
 
 	if req.Slug != nil {

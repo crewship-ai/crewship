@@ -18,9 +18,9 @@ type ChatHandler interface {
 }
 
 type ChatEvent struct {
-	Type     string `json:"type"`                // "text", "tool_call", "tool_result", "thinking", "status", "done", "error"
+	Type     string `json:"type"`                // "text", "tool_call", "tool_result", "thinking", "status", "done", "error", "result", "system"
 	Content  string `json:"content"`
-	Metadata any    `json:"metadata,omitempty"`   // structured data for tool calls, etc.
+	Metadata any    `json:"metadata,omitempty"`   // structured data for tool calls, cost/usage, session init, etc.
 }
 
 type Hub struct {

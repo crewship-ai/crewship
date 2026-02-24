@@ -184,6 +184,26 @@ func (r *IPCResolver) IncrementMessageCount(ctx context.Context, chatID string, 
 	return nil
 }
 
+func (r *IPCResolver) UpdateChatTitle(ctx context.Context, chatID, title string) error {
+	reqURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/title", r.baseURL, url.PathEscape(chatID))
+	body, _ := json.Marshal(map[string]string{"title": title})
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, reqURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Internal-Token", r.internalToken)
+	resp, err := r.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("update chat title: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("update chat title: server returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error) {
 	resolveURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/resolve", r.baseURL, url.PathEscape(chatID))
 

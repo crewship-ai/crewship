@@ -12,6 +12,7 @@ interface LogEntry {
   agent: string
   event: string
   content?: string
+  metadata?: Record<string, unknown>
 }
 
 type LogLevel = "ALL" | "INFO" | "WARN" | "ERROR"
@@ -42,6 +43,9 @@ const EVENT_COLORS: Record<string, string> = {
   rate_limit: "text-amber-400",
   failover: "text-yellow-400",
   error: "text-red-400",
+  result: "text-purple-400",
+  system: "text-blue-400",
+  image: "text-pink-400",
 }
 
 /** Agent logs viewer with dark terminal style, filtering, and auto-refresh. */
@@ -60,7 +64,7 @@ export function LogsPageClient() {
   const fetchLogs = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/agents/${agentId}/logs?workspace_id=${workspaceId}`)
+      const res = await fetch(`/api/v1/agents/${agentId}/logs?workspace_id=${workspaceId}&limit=1000`)
       if (!res.ok) {
         setError("Failed to load logs")
         return
@@ -87,7 +91,7 @@ export function LogsPageClient() {
 
   useEffect(() => {
     if (!autoRefresh || !workspaceId) return
-    const interval = setInterval(fetchLogs, 3000)
+    const interval = setInterval(fetchLogs, 2000)
     return () => clearInterval(interval)
   }, [autoRefresh, workspaceId, fetchLogs])
 
@@ -222,12 +226,71 @@ export function LogsPageClient() {
             const contentColor = level === "ERROR" ? "text-red-300" :
               level === "WARN" ? "text-amber-300" : "text-neutral-300"
 
+            let extraInfo = ""
+            if (log.event === "result" && log.metadata) {
+              const m = log.metadata
+              const parts: string[] = []
+              if (m.total_cost_usd) parts.push(`$${Number(m.total_cost_usd).toFixed(4)}`)
+              if (m.duration_ms) parts.push(`${(Number(m.duration_ms) / 1000).toFixed(1)}s`)
+              if (m.num_turns) parts.push(`${m.num_turns} turns`)
+              const usage = m.usage as Record<string, number> | undefined
+              if (usage) {
+                if (usage.input_tokens) parts.push(`in:${usage.input_tokens}`)
+                if (usage.output_tokens) parts.push(`out:${usage.output_tokens}`)
+              }
+              if (parts.length) extraInfo = ` [${parts.join(" | ")}]`
+            }
+            if (log.event === "system" && log.metadata) {
+              const m = log.metadata
+              const parts: string[] = []
+              if (m.model) parts.push(String(m.model))
+              const tools = m.tools as string[] | undefined
+              if (tools?.length) parts.push(`${tools.length} tools`)
+              if (parts.length) extraInfo = ` [${parts.join(" | ")}]`
+            }
+            if (log.event === "tool_call" && log.metadata) {
+              const input = log.metadata.input as Record<string, unknown> | undefined
+              const toolName = (log.metadata.tool_name as string) ?? log.content ?? ""
+              if (input) {
+                switch (toolName) {
+                  case "WebFetch": if (input.url) extraInfo = ` ${input.url}`; break
+                  case "WebSearch": if (input.query) extraInfo = ` "${input.query}"`; break
+                  case "Bash": if (input.command) extraInfo = ` $ ${String(input.command).slice(0, 80)}${String(input.command).length > 80 ? "..." : ""}`; break
+                  case "Read": case "Write": if (input.file_path) extraInfo = ` ${input.file_path}`; break
+                  case "Edit": if (input.file_path) extraInfo = ` ${input.file_path}`; break
+                  case "Grep": {
+                    const parts: string[] = []
+                    if (input.pattern) parts.push(`"${input.pattern}"`)
+                    if (input.path) parts.push(`in ${input.path}`)
+                    if (parts.length) extraInfo = ` ${parts.join(" ")}`
+                    break
+                  }
+                  case "Glob": if (input.pattern) extraInfo = ` ${input.pattern}`; break
+                  case "Task": if (input.description) extraInfo = ` ${input.description}`; break
+                  case "AskUserQuestion": {
+                    const qs = input.questions as { header: string }[] | undefined
+                    if (qs?.[0]?.header) extraInfo = ` [${qs[0].header}]`
+                    break
+                  }
+                  case "TodoWrite": {
+                    const todos = input.todos as { status: string }[] | undefined
+                    if (todos) {
+                      const done = todos.filter((t) => t.status === "completed").length
+                      extraInfo = ` ${done}/${todos.length} done`
+                    }
+                    break
+                  }
+                }
+              }
+            }
+
             return (
               <div key={i} className="flex gap-0 hover:bg-neutral-900/50">
                 <span className="text-neutral-600 shrink-0">{formatLogTime(log.ts)}</span>
                 <span className={`${levelColor} mx-2 shrink-0`}>[{level.toLowerCase()}]</span>
                 <span className={`${eventColor} mr-2 shrink-0`}>{log.event}</span>
                 <span className={contentColor}>{log.content ?? ""}</span>
+                {extraInfo && <span className="text-neutral-500 ml-1">{extraInfo}</span>}
               </div>
             )
           })}

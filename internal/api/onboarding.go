@@ -59,6 +59,24 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Smart detect: if user already has agents (e.g. provisioned via CLI), treat as completed
+	if !completed {
+		var agentCount int
+		err = h.db.QueryRowContext(r.Context(), `
+			SELECT COUNT(*) FROM agents a
+			JOIN workspace_members wm ON wm.workspace_id = a.workspace_id
+			WHERE wm.user_id = ? AND a.deleted_at IS NULL
+		`, user.ID).Scan(&agentCount)
+		if err == nil && agentCount > 0 {
+			completed = true
+			// Persist the flag so we don't re-query next time
+			if _, err := h.db.ExecContext(r.Context(),
+				"UPDATE users SET onboarding_completed = 1 WHERE id = ?", user.ID); err != nil {
+				h.logger.Warn("persist onboarding flag", "error", err, "user_id", user.ID)
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"completed": completed,
 	})

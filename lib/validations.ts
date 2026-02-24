@@ -32,8 +32,6 @@ export const createAgentSchema = z.object({
   llm_provider: z.enum(["OPENAI", "ANTHROPIC", "GOOGLE", "OLLAMA"]).optional(),
   llm_model: z.string().max(100).optional(),
   system_prompt: z.string().max(10000).optional(),
-  temperature: z.number().min(0).max(2).default(0.7),
-  max_tokens: z.number().int().positive().optional(),
   timeout_seconds: z.number().int().min(30).max(7200).default(1800),
   tool_profile: z.enum(["MINIMAL", "CODING", "MESSAGING", "FULL"]).default("CODING"),
 })

@@ -21,6 +21,7 @@ type ChatResolver interface {
 	CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error
 	UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error
 	IncrementMessageCount(ctx context.Context, chatID string, delta int) error
+	UpdateChatTitle(ctx context.Context, chatID, title string) error
 }
 
 type ChatInfo struct {
@@ -116,6 +117,15 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("persist user message: %w", err)
 	}
 
+	// Auto-title: use first user message (truncated) as session title
+	title := content
+	if len([]rune(title)) > 60 {
+		title = string([]rune(title)[:57]) + "..."
+	}
+	if err := b.resolver.UpdateChatTitle(ctx, chatID, title); err != nil {
+		b.logger.Debug("auto-title failed (non-fatal)", "error", err)
+	}
+
 	b.logger.Debug("resolving chat", "chat_id", chatID)
 	info, err := b.resolver.ResolveChat(ctx, chatID)
 	if err != nil {
@@ -197,6 +207,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		streamFn(ws.ChatEvent{Type: "status", Content: "Starting agent..."})
 	}
 
+	logBuf := logcollector.NewOutputBuffer(b.logWriter, info.CrewID, info.AgentSlug)
+	defer logBuf.Close()
+
+	var resultMeta map[string]interface{}
+
 	handler := func(event orchestrator.AgentEvent) {
 		streamFn(ws.ChatEvent{
 			Type:     event.Type,
@@ -209,13 +224,20 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		if event.Type == "text" {
 			fullResponse += event.Content
 		}
+		// Capture result metadata (cost, usage, duration) for the run record.
+		if event.Type == "result" {
+			if m, ok := event.Metadata.(map[string]interface{}); ok {
+				resultMeta = m
+			}
+		}
 
-		if err := b.logWriter.Append(info.CrewID, info.AgentSlug, logcollector.LogEntry{
+		if err := logBuf.Append(logcollector.LogEntry{
 			Timestamp: event.Timestamp,
 			Level:     "info",
 			Agent:     info.AgentSlug,
-			Event:     "output",
+			Event:     event.Type,
 			Content:   event.Content,
+			Metadata:  event.Metadata,
 		}); err != nil {
 			b.logger.Debug("log write error", "error", err)
 		}
@@ -272,9 +294,24 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	exitCode := 0
-	if err := b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, map[string]interface{}{
+	completedMeta := map[string]interface{}{
 		"duration_ms": time.Since(startedAt).Milliseconds(),
-	}); err != nil {
+	}
+	if resultMeta != nil {
+		if v, ok := resultMeta["total_cost_usd"]; ok {
+			completedMeta["total_cost_usd"] = v
+		}
+		if v, ok := resultMeta["num_turns"]; ok {
+			completedMeta["num_turns"] = v
+		}
+		if v, ok := resultMeta["usage"]; ok {
+			completedMeta["usage"] = v
+		}
+		if v, ok := resultMeta["model_usage"]; ok {
+			completedMeta["model_usage"] = v
+		}
+	}
+	if err := b.resolver.UpdateRun(ctx, runID, "COMPLETED", &exitCode, nil, completedMeta); err != nil {
 		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 	}
 

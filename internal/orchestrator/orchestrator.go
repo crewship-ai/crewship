@@ -293,6 +293,16 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		env = BuildEnvVars(req, cred)
 	}
 
+	// Log auth mode for debugging
+	for _, e := range env {
+		if strings.HasPrefix(e, "CLAUDE_CODE_OAUTH_TOKEN=") {
+			o.logger.Info("agent auth mode: OAuth (CONNECT tunnel)", "agent_id", req.AgentID)
+		}
+		if strings.HasPrefix(e, "ANTHROPIC_BASE_URL=") {
+			o.logger.Info("agent auth mode: API key (reverse proxy)", "agent_id", req.AgentID)
+		}
+	}
+
 	cmd := BuildCLICommand(req)
 
 	scratchDir := path.Join("/workspace", req.AgentSlug)

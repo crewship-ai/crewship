@@ -32,8 +32,6 @@ interface AgentDetail {
   llm_provider: string | null
   llm_model: string | null
   system_prompt: string | null
-  temperature: number | null
-  max_tokens: number | null
   timeout_seconds: number
   tool_profile: string
   memory_enabled: boolean
@@ -239,28 +237,10 @@ export function AgentOverviewPageClient() {
                   })()}
                 </span>
               </div>
-              {agent.llm_provider && (
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Provider</span>
-                  <span>{agent.llm_provider}</span>
-                </div>
-              )}
               {agent.llm_model && (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Model</span>
                   <code className="text-xs">{agent.llm_model}</code>
-                </div>
-              )}
-              {agent.temperature !== null && (
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Temperature</span>
-                  <span className="font-mono text-xs">{agent.temperature}</span>
-                </div>
-              )}
-              {agent.max_tokens !== null && (
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Max Tokens</span>
-                  <span className="font-mono text-xs">{agent.max_tokens.toLocaleString()}</span>
                 </div>
               )}
               <div className="flex items-center justify-between">

@@ -32,8 +32,6 @@ interface AgentDetail {
   llm_provider: string | null
   llm_model: string | null
   system_prompt: string | null
-  temperature: number | null
-  max_tokens: number | null
   timeout_seconds: number
   tool_profile: string
   memory_enabled: boolean
@@ -69,8 +67,6 @@ export function SettingsPageClient() {
   const [llmProvider, setLlmProvider] = useState("")
   const [llmModel, setLlmModel] = useState("")
   const [systemPrompt, setSystemPrompt] = useState("")
-  const [temperature, setTemperature] = useState("0.7")
-  const [maxTokens, setMaxTokens] = useState("")
   const [timeoutSeconds, setTimeoutSeconds] = useState("1800")
   const [toolProfile, setToolProfile] = useState("CODING")
   const [leadMode, setLeadMode] = useState("active")
@@ -130,8 +126,6 @@ export function SettingsPageClient() {
             setShowCustomModel(true)
           }
           setSystemPrompt(agentData.system_prompt ?? "")
-          setTemperature(agentData.temperature?.toString() ?? "0.7")
-          setMaxTokens(agentData.max_tokens?.toString() ?? "")
           setTimeoutSeconds(agentData.timeout_seconds.toString())
           setToolProfile(agentData.tool_profile)
           setTeamId(agentData.crew_id ?? "")
@@ -165,7 +159,6 @@ export function SettingsPageClient() {
       agent_role: agentRole,
       cli_adapter: cliAdapter,
       tool_profile: toolProfile,
-      temperature: parseFloat(temperature),
       timeout_seconds: parseInt(timeoutSeconds, 10),
     }
 
@@ -175,7 +168,6 @@ export function SettingsPageClient() {
     if (llmProvider) body.llm_provider = llmProvider
     if (llmModel) body.llm_model = llmModel
     if (systemPrompt) body.system_prompt = systemPrompt
-    if (maxTokens) body.max_tokens = parseInt(maxTokens, 10)
     if (crewId) body.crew_id = crewId
 
     try {
@@ -197,7 +189,7 @@ export function SettingsPageClient() {
     } finally {
       setSubmitting(false)
     }
-  }, [workspaceId, agentId, name, description, roleTitle, agentRole, leadMode, cliAdapter, llmProvider, llmModel, systemPrompt, temperature, maxTokens, timeoutSeconds, toolProfile, crewId])
+  }, [workspaceId, agentId, name, description, roleTitle, agentRole, leadMode, cliAdapter, llmProvider, llmModel, systemPrompt, timeoutSeconds, toolProfile, crewId])
 
   const handleDelete = useCallback(async () => {
     if (!workspaceId) return
@@ -422,41 +414,16 @@ export function SettingsPageClient() {
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="temperature">Temperature</Label>
-                <Input
-                  id="temperature"
-                  type="number"
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  value={temperature}
-                  onChange={(e) => setTemperature(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="max_tokens">Max Tokens</Label>
-                <Input
-                  id="max_tokens"
-                  type="number"
-                  min={1}
-                  value={maxTokens}
-                  onChange={(e) => setMaxTokens(e.target.value)}
-                  placeholder="Default"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="timeout">Timeout (seconds)</Label>
-                <Input
-                  id="timeout"
-                  type="number"
-                  min={30}
-                  max={7200}
-                  value={timeoutSeconds}
-                  onChange={(e) => setTimeoutSeconds(e.target.value)}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="timeout">Timeout (seconds)</Label>
+              <Input
+                id="timeout"
+                type="number"
+                min={30}
+                max={7200}
+                value={timeoutSeconds}
+                onChange={(e) => setTimeoutSeconds(e.target.value)}
+              />
             </div>
           </CardContent>
         </Card>

@@ -1,7 +1,10 @@
 package api
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -14,13 +17,14 @@ import (
 )
 
 type AuthHandler struct {
-	db        *sql.DB
-	logger    *slog.Logger
-	validator *auth.JWTValidator
+	db          *sql.DB
+	logger      *slog.Logger
+	validator   *auth.JWTValidator
+	allowSignup bool
 }
 
-func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator) *AuthHandler {
-	return &AuthHandler{db: db, logger: logger, validator: validator}
+func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator, allowSignup bool) *AuthHandler {
+	return &AuthHandler{db: db, logger: logger, validator: validator, allowSignup: allowSignup}
 }
 
 func (h *AuthHandler) setSessionCookie(w http.ResponseWriter, r *http.Request, userID, fullName, email string) error {
@@ -61,6 +65,11 @@ type signupRequest struct {
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
 func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
+	if !h.allowSignup {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Registration is disabled. Set CREWSHIP_ALLOW_SIGNUP=true to enable."})
+		return
+	}
+
 	var req signupRequest
 	if err := readJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
@@ -154,6 +163,126 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": userID, "email": req.Email})
+}
+
+// Bootstrap creates the first admin user on an empty database.
+// This endpoint is unauthenticated but only works when no users exist.
+func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
+	var userCount int
+	if err := h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users").Scan(&userCount); err != nil {
+		h.logger.Error("bootstrap: count users", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if userCount > 0 {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Already initialized — bootstrap is only available on an empty database"})
+		return
+	}
+
+	var req signupRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		return
+	}
+	if len(req.FullName) < 2 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Name must be at least 2 characters"})
+		return
+	}
+	if !emailRegex.MatchString(req.Email) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid email address"})
+		return
+	}
+	if len(req.Password) < 8 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Password must be at least 8 characters"})
+		return
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
+	if err != nil {
+		h.logger.Error("bootstrap: hash password", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	slugBase := strings.Split(req.Email, "@")[0]
+	slugBase = regexp.MustCompile(`[^a-z0-9-]`).ReplaceAllString(strings.ToLower(slugBase), "-")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	userID := generateCUID()
+	workspaceID := generateCUID()
+	memberID := generateCUID()
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("bootstrap: begin tx", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(r.Context(),
+		"INSERT INTO users (id, full_name, email, hashed_password, onboarding_completed, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+		userID, req.FullName, req.Email, string(hashed), now, now)
+	if err != nil {
+		h.logger.Error("bootstrap: insert user", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	slug := slugBase + "-" + workspaceID[:8]
+	_, err = tx.ExecContext(r.Context(),
+		"INSERT INTO workspaces (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+		workspaceID, req.FullName+"'s Workspace", slug, now, now)
+	if err != nil {
+		h.logger.Error("bootstrap: insert workspace", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	_, err = tx.ExecContext(r.Context(),
+		"INSERT INTO workspace_members (id, workspace_id, user_id, role, created_at) VALUES (?, ?, ?, ?, ?)",
+		memberID, workspaceID, userID, "OWNER", now)
+	if err != nil {
+		h.logger.Error("bootstrap: insert membership", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	// Generate CLI token for immediate CLI access
+	tokenBytes := make([]byte, 20)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		h.logger.Error("bootstrap: generate token", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	cliToken := cliTokenPrefix + hex.EncodeToString(tokenBytes)
+	tokenHash := sha256.Sum256([]byte(cliToken))
+	tokenHashHex := hex.EncodeToString(tokenHash[:])
+	tokenID := generateCUID()
+
+	_, err = tx.ExecContext(r.Context(),
+		"INSERT INTO cli_tokens (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+		tokenID, userID, "bootstrap", tokenHashHex, now)
+	if err != nil {
+		h.logger.Error("bootstrap: insert cli_token", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("bootstrap: commit", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	h.logger.Info("bootstrap: admin created", "email", req.Email, "workspace", slug)
+
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"user_id":      userID,
+		"email":        req.Email,
+		"workspace_id": workspaceID,
+		"cli_token":    cliToken,
+	})
 }
 
 func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {

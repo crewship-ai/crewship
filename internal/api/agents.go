@@ -57,8 +57,8 @@ type agentResponse struct {
 	LLMProvider     *string        `json:"llm_provider"`
 	LLMModel        *string        `json:"llm_model"`
 	SystemPrompt    *string        `json:"system_prompt"`
-	Temperature     float64        `json:"temperature"`
-	MaxTokens       *int           `json:"max_tokens"`
+	Temperature     float64        `json:"-"`
+	MaxTokens       *int           `json:"-"`
 	TimeoutSeconds  int            `json:"timeout_seconds"`
 	ToolProfile     string         `json:"tool_profile"`
 	MemoryEnabled   bool           `json:"memory_enabled"`
@@ -154,8 +154,6 @@ type createAgentRequest struct {
 	LLMProvider    *string `json:"llm_provider"`
 	LLMModel       *string `json:"llm_model"`
 	SystemPrompt   *string `json:"system_prompt"`
-	Temperature    float64 `json:"temperature"`
-	MaxTokens      *int    `json:"max_tokens"`
 	TimeoutSeconds int     `json:"timeout_seconds"`
 	ToolProfile    string  `json:"tool_profile"`
 	MemoryEnabled  bool    `json:"memory_enabled"`
@@ -235,9 +233,6 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.ToolProfile == "" {
 		req.ToolProfile = "CODING"
 	}
-	if req.Temperature == 0 {
-		req.Temperature = 0.7
-	}
 	if req.TimeoutSeconds == 0 {
 		req.TimeoutSeconds = 1800
 	}
@@ -272,12 +267,12 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO agents (id, crew_id, workspace_id, name, slug, description, role_title,
 			agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model, system_prompt,
-			temperature, max_tokens, timeout_seconds, tool_profile, memory_enabled,
+			timeout_seconds, tool_profile, memory_enabled,
 			created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IDLE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IDLE', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		agentID, req.CrewID, workspaceID, req.Name, req.Slug, req.Description, req.RoleTitle,
 		req.AgentRole, leadMode, req.CLIAdapter, req.LLMProvider, req.LLMModel, req.SystemPrompt,
-		req.Temperature, req.MaxTokens, req.TimeoutSeconds, req.ToolProfile, memEnabled,
+		req.TimeoutSeconds, req.ToolProfile, memEnabled,
 		now, now)
 	if err != nil {
 		h.logger.Error("insert agent", "error", err)
@@ -309,8 +304,6 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		LLMProvider:    req.LLMProvider,
 		LLMModel:       req.LLMModel,
 		SystemPrompt:   req.SystemPrompt,
-		Temperature:    req.Temperature,
-		MaxTokens:      req.MaxTokens,
 		TimeoutSeconds: req.TimeoutSeconds,
 		ToolProfile:    req.ToolProfile,
 		MemoryEnabled:  req.MemoryEnabled,
@@ -397,7 +390,6 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"lead_mode": "lead_mode",
 		"cli_adapter": "cli_adapter", "llm_provider": "llm_provider",
 		"llm_model": "llm_model", "system_prompt": "system_prompt",
-		"temperature": "temperature", "max_tokens": "max_tokens",
 		"timeout_seconds": "timeout_seconds", "tool_profile": "tool_profile",
 		"memory_enabled": "memory_enabled", "crew_id": "crew_id",
 	}
