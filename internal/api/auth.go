@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/auth"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/crewship-ai/crewship/internal/auth"
 )
 
 type AuthHandler struct {

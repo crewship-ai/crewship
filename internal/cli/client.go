@@ -86,8 +86,8 @@ func (c *Client) GetWorkspaceID() string {
 	if c.resolvedWorkspaceID != "" {
 		return c.resolvedWorkspaceID
 	}
-	// If it already looks like a CUID, use it directly
-	if len(c.WorkspaceID) >= 20 {
+	// If it already looks like a CUID (starts with 'c', length >= 20), use directly
+	if looksLikeCUID(c.WorkspaceID) {
 		c.resolvedWorkspaceID = c.WorkspaceID
 		return c.WorkspaceID
 	}
@@ -115,11 +115,11 @@ func (c *Client) resolveWorkspaceSlug(slug string) (string, error) {
 	}
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("fetch workspaces: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("workspace list failed: %d", resp.StatusCode)
+		return "", fmt.Errorf("workspace list failed (HTTP %d)", resp.StatusCode)
 	}
 	var workspaces []struct {
 		ID   string `json:"id"`
@@ -186,4 +186,17 @@ func CheckError(resp *http.Response) error {
 	}
 
 	return fmt.Errorf("API error (%d): %s", resp.StatusCode, string(data))
+}
+
+// looksLikeCUID returns true if s looks like a CUID (starts with 'c', alphanumeric, length >= 20).
+func looksLikeCUID(s string) bool {
+	if len(s) < 20 || s[0] != 'c' {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
 }

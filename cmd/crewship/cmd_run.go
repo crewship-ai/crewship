@@ -8,9 +8,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
+
+	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
-	"github.com/spf13/cobra"
 )
 
 var runCmd = &cobra.Command{
@@ -64,6 +66,10 @@ Examples:
 		existingChat, _ := cmd.Flags().GetString("chat")
 		timeoutSecs, _ := cmd.Flags().GetInt("timeout")
 
+		if !interactive && prompt == "" {
+			return fmt.Errorf("prompt is required (provide as argument, --prompt flag, or use --interactive)")
+		}
+
 		if timeoutSecs > 0 {
 			client.HTTPClient.Timeout = time.Duration(timeoutSecs) * time.Second
 		}
@@ -87,10 +93,6 @@ Examples:
 				return err
 			}
 			chatID = chatResult.ID
-		}
-
-		if !interactive && prompt == "" {
-			return fmt.Errorf("prompt is required (provide as argument, --prompt flag, or use --interactive)")
 		}
 
 		// Get WS token
@@ -302,8 +304,9 @@ func streamEvents(ws *cli.WSClient, quiet bool) error {
 
 func truncate(s string, n int) string {
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) > n {
-		return s[:n-3] + "..."
+	if utf8.RuneCountInString(s) > n {
+		runes := []rune(s)
+		return string(runes[:n-3]) + "..."
 	}
 	return s
 }

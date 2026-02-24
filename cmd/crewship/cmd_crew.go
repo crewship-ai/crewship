@@ -278,8 +278,9 @@ var crewDeleteCmd = &cobra.Command{
 }
 
 var crewStatusCmd = &cobra.Command{
-	Use:   "status [slug-or-id]",
+	Use:   "status <slug-or-id>",
 	Short: "Show live crew status (agents, assignments, escalations)",
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -290,15 +291,9 @@ var crewStatusCmd = &cobra.Command{
 
 		client := newAPIClient()
 
-		var crewID string
-		var err error
-		if len(args) > 0 {
-			crewID, err = resolveCrewID(client, args[0])
-			if err != nil {
-				return err
-			}
-		} else {
-			return fmt.Errorf("crew slug or ID is required")
+		crewID, err := resolveCrewID(client, args[0])
+		if err != nil {
+			return err
 		}
 
 		// Fetch crew detail

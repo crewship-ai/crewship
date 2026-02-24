@@ -9,9 +9,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 var loginTokenFlag string
@@ -165,7 +166,7 @@ func loginInteractive(serverURL string) error {
 	email = strings.TrimSpace(email)
 
 	fmt.Print("Password: ")
-	passwordBytes, err := terminal.ReadPassword(int(syscall.Stdin))
+	passwordBytes, err := term.ReadPassword(int(syscall.Stdin))
 	if err != nil {
 		return fmt.Errorf("read password: %w", err)
 	}
@@ -260,12 +261,16 @@ func loginInteractive(serverURL string) error {
 	})
 
 	var finalToken string
-	if err == nil && cliTokenResp.StatusCode == http.StatusOK {
-		var tokenResult struct {
-			Token string `json:"token"`
-		}
-		if err := cli.ReadJSON(cliTokenResp, &tokenResult); err == nil && tokenResult.Token != "" {
-			finalToken = tokenResult.Token
+	if err == nil {
+		if cliTokenResp.StatusCode == http.StatusOK {
+			var tokenResult struct {
+				Token string `json:"token"`
+			}
+			if err := cli.ReadJSON(cliTokenResp, &tokenResult); err == nil && tokenResult.Token != "" {
+				finalToken = tokenResult.Token
+			}
+		} else {
+			cliTokenResp.Body.Close()
 		}
 	}
 
