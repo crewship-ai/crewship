@@ -57,17 +57,25 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		claims, err := m.validator.Validate(token)
-		if err != nil {
-			m.logger.Debug("auth failed", "error", err)
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
-			return
-		}
+		var user *AuthUser
 
-		user := &AuthUser{
-			ID:    claims.ID,
-			Email: claims.Email,
-			Name:  claims.Name,
+		// Check if this is a CLI token (crewship_cli_xxx)
+		if IsCLIToken(token) {
+			userID, email, name, err := ValidateCLIToken(m.db, token)
+			if err != nil {
+				m.logger.Debug("CLI token auth failed", "error", err)
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+				return
+			}
+			user = &AuthUser{ID: userID, Email: email, Name: name}
+		} else {
+			claims, err := m.validator.Validate(token)
+			if err != nil {
+				m.logger.Debug("auth failed", "error", err)
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+				return
+			}
+			user = &AuthUser{ID: claims.ID, Email: claims.Email, Name: claims.Name}
 		}
 
 		ctx := context.WithValue(r.Context(), ctxUser, user)
