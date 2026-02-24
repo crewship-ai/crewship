@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/auth"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/crewship-ai/crewship/internal/auth"
 )
 
 type AuthHandler struct {
@@ -161,6 +162,25 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
+
+	// If auth came from a CLI token (no session cookie), generate a short-lived JWE.
+	token := extractToken(r)
+	if IsCLIToken(token) {
+		jweToken, err := h.validator.CreateToken(&auth.Claims{
+			ID:    user.ID,
+			Name:  user.Name,
+			Email: user.Email,
+			Exp:   time.Now().Add(15 * time.Minute).Unix(),
+		})
+		if err != nil {
+			h.logger.Error("create WS token for CLI", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"token": jweToken})
+		return
+	}
+
 	// Return the session cookie value as the ws token.
 	// The WebSocket hub validates it using the same JWTValidator.
 	for _, name := range []string{"__Secure-authjs.session-token", "authjs.session-token"} {

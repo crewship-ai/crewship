@@ -224,6 +224,13 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
 	r.mux.Handle("GET /api/v1/ws-token", authed(http.HandlerFunc(authH.WsToken)))
 
+	// CLI token management (auth required)
+	cliTokenH := NewCLITokenHandler(r.db, r.logger)
+	r.mux.Handle("POST /api/v1/auth/cli-token", authed(http.HandlerFunc(cliTokenH.Create)))
+	r.mux.Handle("GET /api/v1/auth/cli-token/validate", authed(http.HandlerFunc(cliTokenH.Validate)))
+	r.mux.Handle("GET /api/v1/auth/cli-tokens", authed(http.HandlerFunc(cliTokenH.List)))
+	r.mux.Handle("DELETE /api/v1/auth/cli-tokens/{tokenId}", authed(http.HandlerFunc(cliTokenH.Revoke)))
+
 	// Auth endpoints (no RBAC -- public access required for login/signup flow).
 	// These intentionally bypass RequireAuth as they are the authentication
 	// bootstrap endpoints that establish the session cookie.
