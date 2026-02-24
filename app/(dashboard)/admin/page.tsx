@@ -29,6 +29,25 @@ import {
 import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 
+const SECRET_PATTERNS = [
+  /sk-ant-[a-zA-Z0-9_-]{20,}/g,
+  /sk-[a-zA-Z0-9]{20,}/g,
+  /AIza[a-zA-Z0-9_-]{35}/g,
+  /AKIA[A-Z0-9]{16}/g,
+  /Bearer\s+[a-zA-Z0-9._-]{20,}/g,
+  /-----BEGIN[A-Z ]*PRIVATE KEY-----[\s\S]*?-----END[A-Z ]*PRIVATE KEY-----/g,
+  /ghp_[a-zA-Z0-9]{36}/g,
+  /gho_[a-zA-Z0-9]{36}/g,
+]
+
+function redactSecrets(text: string): string {
+  let result = text
+  for (const pattern of SECRET_PATTERNS) {
+    result = result.replace(pattern, (m) => m.slice(0, 8) + "***REDACTED***")
+  }
+  return result
+}
+
 type TabKey =
   | "overview" | "logs" | "workspaces" | "users"
   | "providers" | "resources" | "networking" | "backups"
@@ -655,7 +674,7 @@ export default function AdminPage() {
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {keeperLiveEvents.map((evt, i) => (
+                        {keeperLiveEvents.map((evt) => (
                           <div key={evt.request_id} className="flex items-start gap-2 py-1.5 border-b last:border-0">
                             <Badge
                               variant="outline"
@@ -826,7 +845,7 @@ export default function AdminPage() {
                       {selectedKeeperEntry.ollama_prompt ? (
                         <div>
                           <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Ollama Prompt (sent to LLM)</div>
-                          <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">{selectedKeeperEntry.ollama_prompt}</pre>
+                          <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">{redactSecrets(selectedKeeperEntry.ollama_prompt)}</pre>
                         </div>
                       ) : (
                         <div>
@@ -839,7 +858,7 @@ export default function AdminPage() {
                       {selectedKeeperEntry.ollama_raw_response ? (
                         <div>
                           <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Ollama Raw Response</div>
-                          <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">{selectedKeeperEntry.ollama_raw_response}</pre>
+                          <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">{redactSecrets(selectedKeeperEntry.ollama_raw_response)}</pre>
                         </div>
                       ) : (
                         <div>

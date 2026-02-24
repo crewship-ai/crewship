@@ -113,13 +113,13 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 			Decision:       string(keeper.DecisionDeny),
 			Reason:         "Keeper LLM returned unparseable response — deny by default",
 			RiskScore:      10,
-			Prompt:         prompt,
-			RawLLMResponse: raw,
+			Prompt:         truncateForAudit(prompt),
+			RawLLMResponse: truncateForAudit(raw),
 		}, nil
 	}
 
-	resp.Prompt = prompt
-	resp.RawLLMResponse = raw
+	resp.Prompt = truncateForAudit(prompt)
+	resp.RawLLMResponse = truncateForAudit(raw)
 
 	// Normalise decision to uppercase; unknown values → DENY (safe default)
 	resp.Decision = strings.ToUpper(resp.Decision)
@@ -138,6 +138,15 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	}
 
 	return resp, nil
+}
+
+const maxAuditText = 2000
+
+func truncateForAudit(s string) string {
+	if len(s) <= maxAuditText {
+		return s
+	}
+	return s[:maxAuditText] + "...(truncated)"
 }
 
 func (g *Gatekeeper) buildPrompt(req EvalRequest) string {
