@@ -325,7 +325,7 @@ var credDeleteCmd = &cobra.Command{
 }
 
 var credAssignCmd = &cobra.Command{
-	Use:   "assign <credential-id> <agent-slug>",
+	Use:   "assign <name-or-id> <agent-slug>",
 	Short: "Assign a credential to an agent",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -486,6 +486,9 @@ func testCredentialValue(client *cli.Client, provider, credType, value string) (
 		return false, "test request failed: " + err.Error()
 	}
 	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return false, "test request failed: " + err.Error()
+	}
 
 	var result struct {
 		Valid bool   `json:"valid"`

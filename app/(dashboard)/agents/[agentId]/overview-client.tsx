@@ -85,6 +85,10 @@ export function AgentOverviewPageClient() {
   useEffect(() => {
     if (!workspaceId || !agentId) return
     let cancelled = false
+    setRecentChats([])
+    setRecentRuns([])
+    setTotalRunCount(0)
+    setTotalCompletedRunCount(0)
 
     async function fetchActivity() {
       try {
@@ -410,8 +414,10 @@ export function AgentOverviewPageClient() {
                   {recentRuns.map((run, idx) => {
                     const isSuccess = run.status === "COMPLETED"
                     const isError = run.status === "FAILED" || run.status === "ERROR"
-                    const cost = run.metadata?.total_cost_usd as number | undefined
-                    const durationMs = run.metadata?.duration_api_ms as number | undefined
+                    const rawCost = run.metadata?.total_cost_usd
+                    const cost = typeof rawCost === "number" && isFinite(rawCost) ? rawCost : undefined
+                    const rawDur = run.metadata?.duration_api_ms
+                    const durationMs = typeof rawDur === "number" && isFinite(rawDur) ? rawDur : undefined
                     return (
                       <div
                         key={run.id}
