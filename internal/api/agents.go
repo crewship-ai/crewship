@@ -60,8 +60,6 @@ type agentResponse struct {
 	SystemPrompt    *string        `json:"system_prompt"`
 	AvatarSeed      *string        `json:"avatar_seed"`
 	AvatarStyle     *string        `json:"avatar_style"`
-	Temperature     float64        `json:"-"`
-	MaxTokens       *int           `json:"-"`
 	TimeoutSeconds  int            `json:"timeout_seconds"`
 	ToolProfile     string         `json:"tool_profile"`
 	MemoryEnabled   bool           `json:"memory_enabled"`
@@ -377,7 +375,12 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&existing); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -557,7 +560,12 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -621,7 +629,12 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -661,7 +674,12 @@ func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -703,7 +721,12 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -765,7 +788,12 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -895,7 +923,12 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
