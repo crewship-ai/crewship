@@ -83,7 +83,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	const listQuery = `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
-			a.system_prompt, a.avatar_seed, a.avatar_style, a.temperature, a.max_tokens, a.timeout_seconds,
+			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.created_at, a.updated_at,
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
@@ -117,8 +117,8 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		var crewName, crewSlug, crewColor, crewAvatarStyle *string
 		if err := rows.Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 			&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
-			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle, &a.Temperature,
-			&a.MaxTokens, &a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
+			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
+			&a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
 			&a.CreatedAt, &a.UpdatedAt,
 			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 			&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats); err != nil {
@@ -330,7 +330,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
-			a.system_prompt, a.avatar_seed, a.avatar_style, a.temperature, a.max_tokens, a.timeout_seconds,
+			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.created_at, a.updated_at,
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
@@ -341,8 +341,8 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WHERE a.id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
 	`, agentID, workspaceID).Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 		&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
-		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle, &a.Temperature,
-		&a.MaxTokens, &a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
+		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
+		&a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
 		&a.CreatedAt, &a.UpdatedAt,
 		&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats)

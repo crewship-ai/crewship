@@ -79,6 +79,7 @@ export function AgentOverviewPageClient() {
   const { workspaceId } = useWorkspace()
   const [recentChats, setRecentChats] = useState<RecentChat[]>([])
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([])
+  const [totalRunCount, setTotalRunCount] = useState(0)
 
   useEffect(() => {
     if (!workspaceId || !agentId) return
@@ -96,6 +97,7 @@ export function AgentOverviewPageClient() {
         }
         if (runsRes.ok && !cancelled) {
           const runs: RecentRun[] = await runsRes.json()
+          setTotalRunCount(runs.length)
           setRecentRuns(runs.slice(0, 4))
         }
       } catch {
@@ -124,7 +126,7 @@ export function AgentOverviewPageClient() {
 
   const statusStyle = STATUS_STYLES[agent.status] ?? STATUS_STYLES.IDLE
   const adapterCfg = CLI_ADAPTERS[agent.cli_adapter]
-  const totalRuns = recentRuns.length > 0 ? recentRuns.length : 0
+  const totalRuns = totalRunCount
   const activeChats = recentChats.filter((c) => c.status === "ACTIVE").length
 
   return (
@@ -165,7 +167,7 @@ export function AgentOverviewPageClient() {
                 <Zap className="h-3.5 w-3.5" />
                 <span className="text-[10px] uppercase tracking-wider font-semibold">Runs</span>
               </div>
-              <div className="text-2xl font-bold">{recentRuns.length}</div>
+              <div className="text-2xl font-bold">{totalRuns}</div>
               <div className="text-[10px] text-muted-foreground mt-0.5">
                 {recentRuns.filter((r) => r.status === "COMPLETED").length} completed
               </div>

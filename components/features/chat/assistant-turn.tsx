@@ -413,13 +413,17 @@ export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps)
             )
 
           case "image": {
-            const mediaType = (part.metadata?.media_type as string) || "image/png"
+            const allowedMedia = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
+            const rawMedia = typeof part.metadata?.media_type === "string" ? part.metadata.media_type : "image/png"
+            const mediaType = allowedMedia.has(rawMedia) ? rawMedia : "image/png"
             return (
               <div key={part.id} className="max-w-md rounded-lg overflow-hidden border">
                 <img
                   src={`data:${mediaType};base64,${part.content}`}
                   alt="Agent screenshot"
                   className="w-full h-auto"
+                  loading="lazy"
+                  decoding="async"
                 />
               </div>
             )

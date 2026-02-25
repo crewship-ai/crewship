@@ -59,11 +59,15 @@ function useAgentBreadcrumb(pathname: string, workspaceId: string | null): Agent
     }
 
     let cancelled = false
+    setData(null)
 
     async function fetchBreadcrumb() {
       try {
         const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
-        if (!res.ok) return
+        if (!res.ok) {
+          if (!cancelled) setData(null)
+          return
+        }
         const agent = await res.json()
         if (!cancelled) {
           setData({
@@ -74,7 +78,7 @@ function useAgentBreadcrumb(pathname: string, workspaceId: string | null): Agent
           })
         }
       } catch {
-        // silently fail — breadcrumb just won't show crew
+        if (!cancelled) setData(null)
       }
     }
 

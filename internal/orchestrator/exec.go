@@ -537,7 +537,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	}()
 
 	scanner := bufio.NewScanner(result.Reader)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 256*1024), 16*1024*1024)
 
 	useStreamJSON := req.CLIAdapter == "CLAUDE_CODE"
 
