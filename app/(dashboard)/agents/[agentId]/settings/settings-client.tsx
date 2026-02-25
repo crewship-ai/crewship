@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
+import { AvatarPicker } from "@/components/avatar-picker"
 
 interface AgentDetail {
   id: string
@@ -32,11 +33,13 @@ interface AgentDetail {
   llm_provider: string | null
   llm_model: string | null
   system_prompt: string | null
+  avatar_seed: string | null
+  avatar_style: string | null
   timeout_seconds: number
   tool_profile: string
   memory_enabled: boolean
   crew_id: string | null
-  crew: { name: string; slug: string; color: string | null } | null
+  crew: { name: string; slug: string; color: string | null; avatar_style: string | null } | null
 }
 
 interface TeamOption {
@@ -72,6 +75,8 @@ export function SettingsPageClient() {
   const [leadMode, setLeadMode] = useState("active")
   const [crewId, setTeamId] = useState("")
   const [showCustomModel, setShowCustomModel] = useState(false)
+  const [avatarSeed, setAvatarSeed] = useState("")
+  const [avatarStyle, setAvatarStyle] = useState("")
 
   function handleAdapterChange(key: string) {
     setCliAdapter(key)
@@ -126,6 +131,8 @@ export function SettingsPageClient() {
             setShowCustomModel(true)
           }
           setSystemPrompt(agentData.system_prompt ?? "")
+          setAvatarSeed(agentData.avatar_seed ?? "")
+          setAvatarStyle(agentData.avatar_style ?? "")
           setTimeoutSeconds(agentData.timeout_seconds.toString())
           setToolProfile(agentData.tool_profile)
           setTeamId(agentData.crew_id ?? "")
@@ -164,6 +171,8 @@ export function SettingsPageClient() {
 
     if (description) body.description = description
     if (roleTitle) body.role_title = roleTitle
+    body.avatar_seed = avatarSeed || null
+    body.avatar_style = avatarStyle || null
     if (agentRole === "LEAD") body.lead_mode = leadMode
     if (llmProvider) body.llm_provider = llmProvider
     if (llmModel) body.llm_model = llmModel
@@ -189,7 +198,7 @@ export function SettingsPageClient() {
     } finally {
       setSubmitting(false)
     }
-  }, [workspaceId, agentId, name, description, roleTitle, agentRole, leadMode, cliAdapter, llmProvider, llmModel, systemPrompt, timeoutSeconds, toolProfile, crewId])
+  }, [workspaceId, agentId, name, description, roleTitle, agentRole, leadMode, cliAdapter, llmProvider, llmModel, systemPrompt, timeoutSeconds, toolProfile, crewId, avatarSeed, avatarStyle])
 
   const handleDelete = useCallback(async () => {
     if (!workspaceId) return
@@ -327,6 +336,22 @@ export function SettingsPageClient() {
                 </p>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Avatar */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Avatar</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AvatarPicker
+              seed={avatarSeed || agent?.name || ""}
+              style={avatarStyle}
+              onSeedChange={setAvatarSeed}
+              onStyleChange={setAvatarStyle}
+              lockedStyle={!avatarStyle ? agent?.crew?.avatar_style : undefined}
+            />
           </CardContent>
         </Card>
 

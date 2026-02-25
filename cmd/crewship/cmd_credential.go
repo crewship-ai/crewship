@@ -235,6 +235,9 @@ var credUpdateCmd = &cobra.Command{
 		}
 		if flags.Changed("security-level") {
 			v, _ := flags.GetInt("security-level")
+			if v < 0 || v > 3 {
+				return fmt.Errorf("--security-level must be between 0 and 3")
+			}
 			body["security_level"] = v
 		}
 

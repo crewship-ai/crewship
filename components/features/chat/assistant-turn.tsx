@@ -206,8 +206,8 @@ function TodoWriteCard({ part }: { part: TurnPart }) {
         <div className="px-4 py-2 border-t">
           <div className="h-1.5 bg-muted rounded-full overflow-hidden">
             <div
-              className="h-full bg-emerald-500 rounded-full transition-all duration-300"
-              style={{ width: `${pct}%` }}
+              className="h-full bg-emerald-500 rounded-full transition-all duration-300 w-[var(--pct)]"
+              style={{ "--pct": `${pct}%` } as React.CSSProperties}
             />
           </div>
           {inProgress > 0 && (

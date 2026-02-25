@@ -1,6 +1,8 @@
 "use client"
 
 import { usePathname } from "next/navigation"
+import { useState, useEffect } from "react"
+import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import { Search, Bell, BookOpen, ChevronDown, User, HelpCircle, Github, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -16,9 +18,9 @@ import { Badge } from "@/components/ui/badge"
 import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useWorkspace } from "@/hooks/use-workspace"
 
-const pageConfig: Record<string, { title: string; breadcrumb?: string; pills?: { label: string; variant: "default" | "secondary" | "outline" | "destructive" }[] }> = {
-  "/": { title: "Dashboard", pills: [{ label: "0 running", variant: "secondary" }] },
-  "/agents": { title: "Agents", pills: [{ label: "0 agents", variant: "secondary" }] },
+const pageConfig: Record<string, { title: string }> = {
+  "/": { title: "Dashboard" },
+  "/agents": { title: "Agents" },
   "/crews": { title: "Crews" },
   "/credentials": { title: "Credentials" },
   "/skills": { title: "Skills" },
@@ -36,22 +38,115 @@ function getInitials(name: string): string {
     .toUpperCase()
 }
 
+interface AgentBreadcrumb {
+  agentName: string
+  crewName: string | null
+  crewId: string | null
+  crewColor: string | null
+}
+
+const AGENT_PATH_RE = /^\/agents\/([^/]+)/
+
+function useAgentBreadcrumb(pathname: string, workspaceId: string | null): AgentBreadcrumb | null {
+  const [data, setData] = useState<AgentBreadcrumb | null>(null)
+  const match = pathname.match(AGENT_PATH_RE)
+  const agentId = match?.[1]
+
+  useEffect(() => {
+    if (!agentId || agentId === "_" || !workspaceId) {
+      setData(null)
+      return
+    }
+
+    let cancelled = false
+
+    async function fetchBreadcrumb() {
+      try {
+        const res = await fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
+        if (!res.ok) return
+        const agent = await res.json()
+        if (!cancelled) {
+          setData({
+            agentName: agent.name,
+            crewName: agent.crew?.name ?? null,
+            crewId: agent.crew_id,
+            crewColor: agent.crew?.color ?? null,
+          })
+        }
+      } catch {
+        // silently fail — breadcrumb just won't show crew
+      }
+    }
+
+    fetchBreadcrumb()
+    return () => { cancelled = true }
+  }, [agentId, workspaceId])
+
+  return agentId ? data : null
+}
+
 export function AppToolbar() {
   const pathname = usePathname()
-  const config = pageConfig[pathname] ?? { title: "Crewship" }
+  const config = pageConfig[pathname] ?? null
   const { workspaceId } = useWorkspace()
   const { status: engineStatus } = useEngineStatus(workspaceId)
   const { session, signOut } = useAuth()
+  const agentBreadcrumb = useAgentBreadcrumb(pathname, workspaceId)
 
   const userName = session?.user?.name ?? "User"
   const userEmail = session?.user?.email ?? ""
   const userInitials = getInitials(userName)
 
+  const isAgentPage = AGENT_PATH_RE.test(pathname)
+
+  function renderBreadcrumbs() {
+    if (isAgentPage && agentBreadcrumb) {
+      return (
+        <>
+          <Link href="/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            Agents
+          </Link>
+          {agentBreadcrumb.crewName && agentBreadcrumb.crewId && (
+            <>
+              <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+              <Link
+                href={`/crews/${agentBreadcrumb.crewId}`}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5"
+              >
+                <span
+                  className="h-2 w-2 rounded-full shrink-0"
+                  style={{ backgroundColor: agentBreadcrumb.crewColor ?? "#6b7280" }}
+                />
+                {agentBreadcrumb.crewName}
+              </Link>
+            </>
+          )}
+          <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+          <span className="text-sm font-semibold truncate">{agentBreadcrumb.agentName}</span>
+        </>
+      )
+    }
+
+    if (isAgentPage) {
+      return (
+        <>
+          <Link href="/agents" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            Agents
+          </Link>
+          <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+          <span className="text-sm text-muted-foreground">...</span>
+        </>
+      )
+    }
+
+    const title = config?.title ?? "Crewship"
+    return <span className="text-sm font-semibold truncate">{title}</span>
+  }
+
   return (
     <header className="flex h-12 shrink-0 items-center justify-between bg-white dark:bg-background px-3 sm:px-4">
-      {/* Left: Org switcher + breadcrumb + pills */}
+      {/* Left: Org switcher + breadcrumb */}
       <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-        {/* Org switcher */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex items-center gap-1.5 rounded-md px-1.5 py-1 hover:bg-accent transition-colors shrink-0">
@@ -76,32 +171,11 @@ export function AppToolbar() {
 
         <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
 
-        {/* Page title breadcrumb */}
-        {config.breadcrumb ? (
-          <>
-            <span className="text-sm text-muted-foreground truncate">{config.title}</span>
-            <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
-            <span className="text-sm font-semibold truncate">{config.breadcrumb}</span>
-          </>
-        ) : (
-          <span className="text-sm font-semibold truncate">{config.title}</span>
-        )}
-
-        {/* Status pills */}
-        {config.pills && config.pills.length > 0 && (
-          <div className="hidden md:flex items-center gap-1.5 ml-1">
-            {config.pills.map((pill) => (
-              <Badge key={pill.label} variant={pill.variant} className="text-[10px] px-2 py-0.5">
-                {pill.label}
-              </Badge>
-            ))}
-          </div>
-        )}
+        {renderBreadcrumbs()}
       </div>
 
       {/* Right: Engine + search + help + notifications + user */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        {/* Engine status */}
         {engineStatus === "connected" ? (
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 mr-1">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -119,7 +193,6 @@ export function AppToolbar() {
           </div>
         )}
 
-        {/* Search */}
         <Button variant="outline" size="sm" className="h-8 gap-2 rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground px-3" aria-label="Search">
           <Search className="h-3.5 w-3.5" />
           <span className="text-xs hidden sm:inline">Search...</span>
@@ -128,12 +201,10 @@ export function AppToolbar() {
           </kbd>
         </Button>
 
-        {/* Help */}
         <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:inline-flex" aria-label="Help">
           <BookOpen className="h-4 w-4" />
         </Button>
 
-        {/* Notifications */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="h-8 w-8 relative" aria-label="Notifications">
@@ -156,7 +227,6 @@ export function AppToolbar() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* User */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent transition-colors" aria-label="User menu">

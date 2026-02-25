@@ -693,12 +693,17 @@ func (h *InternalHandler) UpdateChatTitle(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "title required"})
 		return
 	}
-	_, err := h.db.ExecContext(r.Context(),
+	res, err := h.db.ExecContext(r.Context(),
 		"UPDATE chats SET title = ? WHERE id = ? AND (title IS NULL OR title = '')",
 		body.Title, chatID)
 	if err != nil {
 		h.logger.Error("update chat title", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found or already titled"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": chatID, "title": body.Title})

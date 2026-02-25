@@ -31,9 +31,10 @@ var validLeadModes = map[string]bool{
 }
 
 type agentCrewInfo struct {
-	Name  string  `json:"name"`
-	Slug  string  `json:"slug"`
-	Color *string `json:"color"`
+	Name        string  `json:"name"`
+	Slug        string  `json:"slug"`
+	Color       *string `json:"color"`
+	AvatarStyle *string `json:"avatar_style"`
 }
 
 type agentCounts struct {
@@ -57,6 +58,8 @@ type agentResponse struct {
 	LLMProvider     *string        `json:"llm_provider"`
 	LLMModel        *string        `json:"llm_model"`
 	SystemPrompt    *string        `json:"system_prompt"`
+	AvatarSeed      *string        `json:"avatar_seed"`
+	AvatarStyle     *string        `json:"avatar_style"`
 	Temperature     float64        `json:"-"`
 	MaxTokens       *int           `json:"-"`
 	TimeoutSeconds  int            `json:"timeout_seconds"`
@@ -80,9 +83,9 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	const listQuery = `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
-			a.system_prompt, a.temperature, a.max_tokens, a.timeout_seconds,
+			a.system_prompt, a.avatar_seed, a.avatar_style, a.temperature, a.max_tokens, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.created_at, a.updated_at,
-			c.name, c.slug, c.color,
+			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id)
@@ -111,13 +114,13 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a agentResponse
 		var memEnabled int
-		var crewName, crewSlug, crewColor *string
+		var crewName, crewSlug, crewColor, crewAvatarStyle *string
 		if err := rows.Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 			&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
-			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.Temperature,
+			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle, &a.Temperature,
 			&a.MaxTokens, &a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
 			&a.CreatedAt, &a.UpdatedAt,
-			&crewName, &crewSlug, &crewColor,
+			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 			&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats); err != nil {
 			h.logger.Error("scan agent", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -125,7 +128,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		a.MemoryEnabled = memEnabled == 1
 		if crewName != nil {
-			a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor}
+			a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 		}
 		result = append(result, a)
 	}
@@ -323,13 +326,13 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	var a agentResponse
 	var memEnabled int
-	var crewName, crewSlug, crewColor *string
+	var crewName, crewSlug, crewColor, crewAvatarStyle *string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
-			a.system_prompt, a.temperature, a.max_tokens, a.timeout_seconds,
+			a.system_prompt, a.avatar_seed, a.avatar_style, a.temperature, a.max_tokens, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.created_at, a.updated_at,
-			c.name, c.slug, c.color,
+			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id)
@@ -338,10 +341,10 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WHERE a.id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
 	`, agentID, workspaceID).Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 		&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
-		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.Temperature,
+		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle, &a.Temperature,
 		&a.MaxTokens, &a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
 		&a.CreatedAt, &a.UpdatedAt,
-		&crewName, &crewSlug, &crewColor,
+		&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -354,7 +357,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	a.MemoryEnabled = memEnabled == 1
 	if crewName != nil {
-		a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor}
+		a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 	}
 
 	writeJSON(w, http.StatusOK, a)
@@ -390,6 +393,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"lead_mode": "lead_mode",
 		"cli_adapter": "cli_adapter", "llm_provider": "llm_provider",
 		"llm_model": "llm_model", "system_prompt": "system_prompt",
+		"avatar_seed": "avatar_seed", "avatar_style": "avatar_style",
 		"timeout_seconds": "timeout_seconds", "tool_profile": "tool_profile",
 		"memory_enabled": "memory_enabled", "crew_id": "crew_id",
 	}

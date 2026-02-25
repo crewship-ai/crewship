@@ -29,6 +29,7 @@ type crewResponse struct {
 	Description       *string          `json:"description"`
 	Color             *string          `json:"color"`
 	Icon              *string          `json:"icon"`
+	AvatarStyle       *string          `json:"avatar_style"`
 	ContainerMemoryMB int              `json:"container_memory_mb"`
 	ContainerCPUs     float64          `json:"container_cpus"`
 	CreatedAt         string           `json:"created_at"`
@@ -44,7 +45,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon,
+		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -63,7 +64,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c crewResponse
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
-			&c.Color, &c.Icon, &c.ContainerMemoryMB, &c.ContainerCPUs,
+			&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
 			h.logger.Error("scan crew", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -168,14 +169,14 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	var c crewResponse
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon,
+		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
 	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
-		&c.Color, &c.Icon, &c.ContainerMemoryMB, &c.ContainerCPUs,
+		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -196,6 +197,7 @@ type updateCrewRequest struct {
 	Description       *string  `json:"description"`
 	Color             *string  `json:"color"`
 	Icon              *string  `json:"icon"`
+	AvatarStyle       *string  `json:"avatar_style"`
 	ContainerMemoryMB *int     `json:"container_memory_mb"`
 	ContainerCPUs     *float64 `json:"container_cpus"`
 }
@@ -287,6 +289,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		query += ", icon = ?"
 		args = append(args, *req.Icon)
 	}
+	if req.AvatarStyle != nil {
+		query += ", avatar_style = ?"
+		args = append(args, *req.AvatarStyle)
+	}
 	if req.ContainerMemoryMB != nil {
 		query += ", container_memory_mb = ?"
 		args = append(args, *req.ContainerMemoryMB)
@@ -309,14 +315,14 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// Return updated crew
 	var c crewResponse
 	err = h.db.QueryRowContext(r.Context(), `
-		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon,
+		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
 		WHERE c.id = ? AND c.deleted_at IS NULL
 	`, crewID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
-		&c.Color, &c.Icon, &c.ContainerMemoryMB, &c.ContainerCPUs,
+		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		h.logger.Error("get crew after update", "error", err)
@@ -611,4 +617,58 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	crewID := r.PathValue("crewId")
+
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	if crewID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crewId is required"})
+		return
+	}
+
+	var existingID string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		crewID, workspaceID).Scan(&existingID); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		return
+	}
+
+	var body struct {
+		AvatarStyle string `json:"avatar_style"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		return
+	}
+
+	if body.AvatarStyle == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "avatar_style is required"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	res, err := h.db.ExecContext(r.Context(),
+		"UPDATE agents SET avatar_style = ?, avatar_seed = NULL, updated_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
+		body.AvatarStyle, now, crewID)
+	if err != nil {
+		h.logger.Error("apply avatar style to agents", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	affected, _ := res.RowsAffected()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"updated": affected,
+		"style":   body.AvatarStyle,
+	})
 }

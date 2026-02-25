@@ -168,17 +168,6 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 // Bootstrap creates the first admin user on an empty database.
 // This endpoint is unauthenticated but only works when no users exist.
 func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
-	var userCount int
-	if err := h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users").Scan(&userCount); err != nil {
-		h.logger.Error("bootstrap: count users", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	if userCount > 0 {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Already initialized — bootstrap is only available on an empty database"})
-		return
-	}
-
 	var req signupRequest
 	if err := readJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
@@ -219,6 +208,18 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	// Check inside tx to eliminate TOCTOU race
+	var userCount int
+	if err := tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM users").Scan(&userCount); err != nil {
+		h.logger.Error("bootstrap: count users", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if userCount > 0 {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Already initialized — bootstrap is only available on an empty database"})
+		return
+	}
 
 	_, err = tx.ExecContext(r.Context(),
 		"INSERT INTO users (id, full_name, email, hashed_password, onboarding_completed, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
