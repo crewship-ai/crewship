@@ -253,10 +253,25 @@ function TaskCard({ part }: { part: TurnPart }) {
   )
 }
 
+const SENSITIVE_KEY_RE = /(?:api[_-]?key|token|secret|password|authorization|auth|cookie|private[_-]?key|credential)/i
+
+function redactSensitiveKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactSensitiveKeys)
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k, SENSITIVE_KEY_RE.test(k) ? "[REDACTED]" : redactSensitiveKeys(v),
+      ])
+    )
+  }
+  return value
+}
+
 function DefaultToolCall({ part }: { part: TurnPart }) {
   const toolName = (part.metadata?.tool_name as string) ?? part.content ?? "Tool"
   const isCompleted = !!part.metadata?.completed
-  const input = part.metadata?.input as Record<string, unknown> | undefined
+  const rawInput = part.metadata?.input as Record<string, unknown> | undefined
+  const input = rawInput ? redactSensitiveKeys(rawInput) as Record<string, unknown> : undefined
 
   let subtitle = ""
   if (input) {
