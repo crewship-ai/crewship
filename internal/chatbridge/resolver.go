@@ -189,7 +189,7 @@ func (r *IPCResolver) UpdateChatTitle(ctx context.Context, chatID, title string)
 	body, _ := json.Marshal(map[string]string{"title": title})
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, reqURL, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return fmt.Errorf("update chat title: create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Internal-Token", r.internalToken)

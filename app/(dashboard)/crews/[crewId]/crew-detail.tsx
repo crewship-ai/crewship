@@ -2,7 +2,10 @@
 
 import { useEffect, useState, type FormEvent } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { Bot, Users, Pencil, Trash2, ArrowLeft, Clock, Cpu, HardDrive } from "lucide-react"
+import { Bot, Users, Pencil, Trash2, ArrowLeft, Clock, Cpu, HardDrive, RefreshCw, AlertTriangle } from "lucide-react"
+import { AVATAR_STYLES, getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { getCrewIconUrl } from "@/lib/crew-icon"
+import { AvatarPicker } from "@/components/avatar-picker"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -30,6 +33,7 @@ interface Crew {
   description: string | null
   color: string | null
   icon: string | null
+  avatar_style: string | null
   container_ttl_hours: number | null
   container_memory_mb: number
   container_cpus: number
@@ -75,8 +79,9 @@ export function CrewDetailClient() {
   const [editing, setEditing] = useState(false)
   const [formName, setFormName] = useState("")
   const [formDescription, setFormDescription] = useState("")
-  const [formColor, setFormColor] = useState("#6b7280")
-  const [formIcon, setFormIcon] = useState("")
+  const [formAvatarSeed, setFormAvatarSeed] = useState("")
+  const [formAvatarStyle, setFormAvatarStyle] = useState("")
+  const [applyingToAgents, setApplyingToAgents] = useState(false)
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle")
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -108,8 +113,8 @@ export function CrewDetailClient() {
           setCrew(crewData)
           setFormName(crewData.name)
           setFormDescription(crewData.description ?? "")
-          setFormColor(crewData.color ?? "#6b7280")
-          setFormIcon(crewData.icon ?? "")
+          setFormAvatarSeed(crewData.icon ?? "")
+          setFormAvatarStyle(crewData.avatar_style ?? "")
         }
 
         if (membersRes.ok) {
@@ -146,8 +151,8 @@ export function CrewDetailClient() {
         body: JSON.stringify({
           name: formName,
           description: formDescription || undefined,
-          color: formColor,
-          icon: formIcon || undefined,
+          icon: formAvatarSeed || undefined,
+          avatar_style: formAvatarStyle || undefined,
         }),
       })
 
@@ -247,14 +252,11 @@ export function CrewDetailClient() {
           <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
         </Button>
         <div className="flex items-center gap-4">
-          <div
-            className="flex h-12 w-12 items-center justify-center rounded-lg text-xl shrink-0"
-            style={{ backgroundColor: crew.color ? `${crew.color}20` : undefined }}
-          >
-            {crew.icon ?? (
-              <Users className="h-6 w-6" style={{ color: crew.color ?? "#6b7280" }} />
-            )}
-          </div>
+          <img
+            src={getCrewIconUrl(crew.icon || crew.name)}
+            alt={crew.name}
+            className="h-12 w-12 rounded-lg shrink-0"
+          />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
               <h1 className="text-xl font-semibold truncate">{crew.name}</h1>
@@ -284,7 +286,7 @@ export function CrewDetailClient() {
             <CardTitle className="text-base">Edit Crew</CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSave} className="space-y-4">
+            <form onSubmit={handleSave} className="space-y-6">
               <div className="space-y-2">
                 <Label htmlFor="team-name">Name</Label>
                 <Input id="team-name" value={formName} onChange={(e) => setFormName(e.target.value)} />
@@ -293,18 +295,129 @@ export function CrewDetailClient() {
                 <Label htmlFor="team-desc">Description</Label>
                 <Textarea id="team-desc" value={formDescription} onChange={(e) => setFormDescription(e.target.value)} rows={3} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="team-color">Color</Label>
-                  <div className="flex items-center gap-2">
-                    <input type="color" id="team-color" value={formColor} onChange={(e) => setFormColor(e.target.value)} className="h-9 w-9 rounded border cursor-pointer" />
-                    <Input value={formColor} onChange={(e) => setFormColor(e.target.value)} className="flex-1 font-mono text-sm" />
+
+              <Separator />
+
+              {/* Crew Icon — DiceBear icons style */}
+              <div className="space-y-2">
+                <Label>Crew Icon</Label>
+                <div className="flex items-start gap-4">
+                  <img
+                    src={getCrewIconUrl(formAvatarSeed || formName || "preview")}
+                    alt="Crew icon"
+                    className="h-16 w-16 rounded-xl border shrink-0"
+                  />
+                  <div className="space-y-2 flex-1">
+                    <Label className="text-xs text-muted-foreground font-normal">Icon Seed</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={formAvatarSeed}
+                        onChange={(e) => setFormAvatarSeed(e.target.value)}
+                        placeholder="Leave empty to use crew name"
+                        className="font-mono text-xs"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setFormAvatarSeed(Math.random().toString(36).substring(2, 10))}
+                        title="Randomize"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="team-icon">Icon (emoji)</Label>
-                  <Input id="team-icon" value={formIcon} onChange={(e) => setFormIcon(e.target.value)} placeholder="e.g. 🚀" maxLength={10} />
+                <div className="grid grid-cols-8 gap-2 mt-2">
+                  {["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setFormAvatarSeed(s)}
+                      className={`rounded-lg border p-1.5 transition-colors hover:bg-muted ${
+                        formAvatarSeed === s ? "border-primary bg-primary/5" : "border-border"
+                      }`}
+                    >
+                      <img src={getCrewIconUrl(s)} alt={s} className="h-8 w-8 rounded" />
+                    </button>
+                  ))}
                 </div>
+              </div>
+
+              <Separator />
+
+              {/* Agent Avatar Style — same picker as agent settings */}
+              <div className="space-y-3">
+                <Label>Agent Avatar Style</Label>
+                <p className="text-xs text-muted-foreground">
+                  New style for agents in this crew. Agents with custom styles keep theirs unless you apply below.
+                </p>
+                <AvatarPicker
+                  seed={crew?.name || "preview"}
+                  style={formAvatarStyle}
+                  onSeedChange={() => {}}
+                  onStyleChange={setFormAvatarStyle}
+                />
+              </div>
+
+              <Separator />
+
+              {/* Apply to all agents — destructive */}
+              <div className="rounded-lg border border-amber-200 bg-amber-50/50 dark:border-amber-900 dark:bg-amber-950/20 p-4 space-y-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Apply style to all agents</p>
+                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                      This will overwrite avatar style on all {agents.length} agent{agents.length !== 1 ? "s" : ""} in this crew,
+                      including any custom styles they may have set individually. This cannot be undone.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-300"
+                  disabled={applyingToAgents || !formAvatarStyle}
+                  onClick={async () => {
+                    const style = AVATAR_STYLES[formAvatarStyle]?.label ?? formAvatarStyle
+                    if (!confirm(
+                      `Apply "${style}" avatar style to all ${agents.length} agent${agents.length !== 1 ? "s" : ""} in ${crew?.name}?\n\nThis will overwrite any individually set avatar styles. This cannot be undone.`
+                    )) return
+
+                    setApplyingToAgents(true)
+                    try {
+                      const res = await fetch(
+                        `/api/v1/crews/${crew?.id}/apply-avatar-style?workspace_id=${workspaceId}`,
+                        {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ avatar_style: formAvatarStyle }),
+                        }
+                      )
+                      if (!res.ok) {
+                        const data = await res.json().catch(() => ({ error: "Failed" }))
+                        setSaveError(typeof data.error === "string" ? data.error : "Failed to apply")
+                        setSaveStatus("error")
+                      } else {
+                        const data = await res.json()
+                        setSaveStatus("success")
+                        setSaveError(null)
+                        // Refresh agents list
+                        const agentsRes = await fetch(`/api/v1/agents?workspace_id=${workspaceId}&crew_id=${crew?.id}`)
+                        if (agentsRes.ok) setAgents(await agentsRes.json())
+                      }
+                    } catch {
+                      setSaveError("Network error")
+                      setSaveStatus("error")
+                    } finally {
+                      setApplyingToAgents(false)
+                    }
+                  }}
+                >
+                  {applyingToAgents ? "Applying..." : `Apply to all ${agents.length} agents`}
+                </Button>
               </div>
 
               {saveStatus === "success" && <p className="text-sm text-emerald-600">Changes saved.</p>}

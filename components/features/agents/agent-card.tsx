@@ -1,14 +1,16 @@
 "use client"
 
 import Link from "next/link"
-import { Bot, Cpu, Key, MessageSquare } from "lucide-react"
+import { Cpu, Key, MessageSquare } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 interface AgentCrew {
   name: string
   slug: string
   color: string | null
+  avatar_style?: string | null
 }
 
 interface AgentCount {
@@ -28,6 +30,8 @@ interface AgentData {
   cli_adapter: string
   llm_provider: string
   llm_model: string
+  avatar_seed?: string | null
+  avatar_style?: string | null
   crew: AgentCrew | null
   _count: AgentCount
 }
@@ -59,9 +63,11 @@ export function AgentCard({ agent }: { agent: AgentData }) {
       <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
         <CardContent className="p-4 sm:p-5">
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 shrink-0">
-              <Bot className="h-5 w-5 text-primary" />
-            </div>
+            <img
+              src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
+              alt={agent.name}
+              className="h-10 w-10 rounded-lg shrink-0"
+            />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-semibold truncate">{agent.name}</h3>

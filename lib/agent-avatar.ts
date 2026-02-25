@@ -1,0 +1,35 @@
+import { createAvatar, type Style } from "@dicebear/core"
+import * as botttsNeutral from "@dicebear/bottts-neutral"
+import * as adventurer from "@dicebear/adventurer"
+import * as funEmoji from "@dicebear/fun-emoji"
+import * as pixelArt from "@dicebear/pixel-art"
+import * as micah from "@dicebear/micah"
+import * as notionists from "@dicebear/notionists"
+import * as thumbs from "@dicebear/thumbs"
+import * as lorelei from "@dicebear/lorelei"
+import * as bigSmile from "@dicebear/big-smile"
+import * as avataaars from "@dicebear/avataaars"
+
+export const AVATAR_STYLES: Record<string, { label: string; style: Style<object> }> = {
+  "bottts-neutral": { label: "Robots", style: botttsNeutral as unknown as Style<object> },
+  adventurer: { label: "Adventurer", style: adventurer as unknown as Style<object> },
+  "fun-emoji": { label: "Fun Emoji", style: funEmoji as unknown as Style<object> },
+  "pixel-art": { label: "Pixel Art", style: pixelArt as unknown as Style<object> },
+  micah: { label: "Micah", style: micah as unknown as Style<object> },
+  notionists: { label: "Notionists", style: notionists as unknown as Style<object> },
+  thumbs: { label: "Thumbs", style: thumbs as unknown as Style<object> },
+  lorelei: { label: "Lorelei", style: lorelei as unknown as Style<object> },
+  "big-smile": { label: "Big Smile", style: bigSmile as unknown as Style<object> },
+  avataaars: { label: "Avataaars", style: avataaars as unknown as Style<object> },
+}
+
+export const DEFAULT_AVATAR_STYLE = "bottts-neutral"
+
+export function getAgentAvatarUrl(seed: string, styleName?: string | null): string {
+  const entry = AVATAR_STYLES[styleName || DEFAULT_AVATAR_STYLE] ?? AVATAR_STYLES[DEFAULT_AVATAR_STYLE]
+  return createAvatar(entry.style, { seed, size: 128 }).toDataUri()
+}
+
+export function getAvatarStyleKeys(): string[] {
+  return Object.keys(AVATAR_STYLES)
+}

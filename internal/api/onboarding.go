@@ -71,7 +71,8 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 			completed = true
 			// Persist the flag so we don't re-query next time
 			if _, err := h.db.ExecContext(r.Context(),
-				"UPDATE users SET onboarding_completed = 1 WHERE id = ?", user.ID); err != nil {
+				"UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ?",
+				time.Now().UTC().Format(time.RFC3339), user.ID); err != nil {
 				h.logger.Warn("persist onboarding flag", "error", err, "user_id", user.ID)
 			}
 		}

@@ -1,15 +1,21 @@
 package logcollector
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
+func testLogger(t *testing.T) *slog.Logger {
+	t.Helper()
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
+
 func TestOutputBuffer_AggregatesTokens(t *testing.T) {
 	dir := t.TempDir()
-	w := NewWriter(dir, nil)
+	w := NewWriter(dir, testLogger(t))
 	defer w.Close()
 
 	buf := NewOutputBuffer(w, "crew1", "agent1")
@@ -42,14 +48,20 @@ func TestOutputBuffer_AggregatesTokens(t *testing.T) {
 
 func TestOutputBuffer_FlushesOnNewline(t *testing.T) {
 	dir := t.TempDir()
-	w := NewWriter(dir, nil)
+	w := NewWriter(dir, testLogger(t))
 	defer w.Close()
 
 	buf := NewOutputBuffer(w, "crew1", "agent1")
 
-	buf.Append(LogEntry{Event: "output", Content: "line one"})
-	buf.Append(LogEntry{Event: "output", Content: "\n"})
-	buf.Append(LogEntry{Event: "output", Content: "line two"})
+	if err := buf.Append(LogEntry{Event: "output", Content: "line one"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := buf.Append(LogEntry{Event: "output", Content: "\n"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := buf.Append(LogEntry{Event: "output", Content: "line two"}); err != nil {
+		t.Fatal(err)
+	}
 	buf.Close()
 
 	entries, err := readJSONL(filepath.Join(dir, "crews", "crew1", "agents", "agent1", "current.jsonl"), 0, 0)
@@ -70,14 +82,20 @@ func TestOutputBuffer_FlushesOnNewline(t *testing.T) {
 
 func TestOutputBuffer_NonOutputPassThrough(t *testing.T) {
 	dir := t.TempDir()
-	w := NewWriter(dir, nil)
+	w := NewWriter(dir, testLogger(t))
 	defer w.Close()
 
 	buf := NewOutputBuffer(w, "crew1", "agent1")
 
-	buf.Append(LogEntry{Event: "output", Content: "buffered "})
-	buf.Append(LogEntry{Event: "tool_use", Content: "bash", Tool: "bash"})
-	buf.Append(LogEntry{Event: "output", Content: "after tool"})
+	if err := buf.Append(LogEntry{Event: "output", Content: "buffered "}); err != nil {
+		t.Fatal(err)
+	}
+	if err := buf.Append(LogEntry{Event: "tool_use", Content: "bash", Tool: "bash"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := buf.Append(LogEntry{Event: "output", Content: "after tool"}); err != nil {
+		t.Fatal(err)
+	}
 	buf.Close()
 
 	entries, err := readJSONL(filepath.Join(dir, "crews", "crew1", "agents", "agent1", "current.jsonl"), 0, 0)
@@ -102,15 +120,23 @@ func TestOutputBuffer_NonOutputPassThrough(t *testing.T) {
 
 func TestOutputBuffer_TextAndThinkingEvents(t *testing.T) {
 	dir := t.TempDir()
-	w := NewWriter(dir, nil)
+	w := NewWriter(dir, testLogger(t))
 	defer w.Close()
 
 	buf := NewOutputBuffer(w, "crew1", "agent1")
 
-	buf.Append(LogEntry{Event: "thinking", Content: "Let me "})
-	buf.Append(LogEntry{Event: "thinking", Content: "think..."})
-	buf.Append(LogEntry{Event: "text", Content: "Hello "})
-	buf.Append(LogEntry{Event: "text", Content: "world!"})
+	if err := buf.Append(LogEntry{Event: "thinking", Content: "Let me "}); err != nil {
+		t.Fatal(err)
+	}
+	if err := buf.Append(LogEntry{Event: "thinking", Content: "think..."}); err != nil {
+		t.Fatal(err)
+	}
+	if err := buf.Append(LogEntry{Event: "text", Content: "Hello "}); err != nil {
+		t.Fatal(err)
+	}
+	if err := buf.Append(LogEntry{Event: "text", Content: "world!"}); err != nil {
+		t.Fatal(err)
+	}
 	buf.Close()
 
 	entries, err := readJSONL(filepath.Join(dir, "crews", "crew1", "agents", "agent1", "current.jsonl"), 0, 0)
@@ -131,13 +157,17 @@ func TestOutputBuffer_TextAndThinkingEvents(t *testing.T) {
 
 func TestOutputBuffer_EventLevelMapping(t *testing.T) {
 	dir := t.TempDir()
-	w := NewWriter(dir, nil)
+	w := NewWriter(dir, testLogger(t))
 	defer w.Close()
 
 	buf := NewOutputBuffer(w, "crew1", "agent1")
 
-	buf.Append(LogEntry{Event: "error", Content: "something failed"})
-	buf.Append(LogEntry{Event: "system", Content: "sidecar restarted"})
+	if err := buf.Append(LogEntry{Event: "error", Content: "something failed"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := buf.Append(LogEntry{Event: "system", Content: "sidecar restarted"}); err != nil {
+		t.Fatal(err)
+	}
 	buf.Close()
 
 	entries, err := readJSONL(filepath.Join(dir, "crews", "crew1", "agents", "agent1", "current.jsonl"), 0, 0)
@@ -158,24 +188,30 @@ func TestOutputBuffer_EventLevelMapping(t *testing.T) {
 
 func TestOutputBuffer_TimerFlush(t *testing.T) {
 	dir := t.TempDir()
-	w := NewWriter(dir, nil)
+	w := NewWriter(dir, testLogger(t))
 	defer w.Close()
 
 	buf := NewOutputBuffer(w, "crew1", "agent1")
 
-	buf.Append(LogEntry{Event: "output", Content: "hello"})
-
-	// Wait for timer to flush (300ms + margin)
-	time.Sleep(500 * time.Millisecond)
-
-	path := filepath.Join(dir, "crews", "crew1", "agents", "agent1", "current.jsonl")
-	data, err := os.ReadFile(path)
-	if err != nil {
+	if err := buf.Append(LogEntry{Event: "output", Content: "hello"}); err != nil {
 		t.Fatal(err)
 	}
 
+	// Poll for timer flush instead of fixed sleep
+	path := filepath.Join(dir, "crews", "crew1", "agents", "agent1", "current.jsonl")
+	deadline := time.Now().Add(2 * time.Second)
+	var data []byte
+	for time.Now().Before(deadline) {
+		var err error
+		data, err = os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	if len(data) == 0 {
-		t.Error("expected timer to flush buffered content, but file is empty")
+		t.Error("expected timer to flush buffered content, but file is empty after 2s")
 	}
 
 	buf.Close()

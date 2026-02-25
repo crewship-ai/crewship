@@ -731,7 +731,7 @@ func (o *Orchestrator) handleStreamJSONLine(line string, handler EventHandler) {
 				meta["cwd"] = msg.CWD
 			}
 			if len(msg.MCPSrvrs) > 0 {
-				var servers []interface{}
+				var servers []json.RawMessage
 				if json.Unmarshal(msg.MCPSrvrs, &servers) == nil {
 					meta["mcp_servers"] = servers
 				}

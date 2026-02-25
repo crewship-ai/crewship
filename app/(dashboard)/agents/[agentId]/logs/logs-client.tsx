@@ -6,6 +6,9 @@ import { Download, AlertCircle, Inbox, Search, Pause, Play } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 
+const SECRET_RE = /(?:sk-[a-zA-Z0-9_-]{10,}|ghp_[a-zA-Z0-9]{36,}|gho_[a-zA-Z0-9]{36,}|xoxb-[a-zA-Z0-9-]+|AIza[a-zA-Z0-9_-]{35}|eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]+)/g
+function redactSecrets(s: string): string { return s.replace(SECRET_RE, "***") }
+
 interface LogEntry {
   ts: string
   level: string
@@ -230,13 +233,13 @@ export function LogsPageClient() {
             if (log.event === "result" && log.metadata) {
               const m = log.metadata
               const parts: string[] = []
-              if (m.total_cost_usd) parts.push(`$${Number(m.total_cost_usd).toFixed(4)}`)
-              if (m.duration_ms) parts.push(`${(Number(m.duration_ms) / 1000).toFixed(1)}s`)
-              if (m.num_turns) parts.push(`${m.num_turns} turns`)
+              if (m.total_cost_usd != null) parts.push(`$${Number(m.total_cost_usd).toFixed(4)}`)
+              if (m.duration_ms != null) parts.push(`${(Number(m.duration_ms) / 1000).toFixed(1)}s`)
+              if (m.num_turns != null) parts.push(`${m.num_turns} turns`)
               const usage = m.usage as Record<string, number> | undefined
               if (usage) {
-                if (usage.input_tokens) parts.push(`in:${usage.input_tokens}`)
-                if (usage.output_tokens) parts.push(`out:${usage.output_tokens}`)
+                if (usage.input_tokens != null) parts.push(`in:${usage.input_tokens}`)
+                if (usage.output_tokens != null) parts.push(`out:${usage.output_tokens}`)
               }
               if (parts.length) extraInfo = ` [${parts.join(" | ")}]`
             }
@@ -253,9 +256,9 @@ export function LogsPageClient() {
               const toolName = (log.metadata.tool_name as string) ?? log.content ?? ""
               if (input) {
                 switch (toolName) {
-                  case "WebFetch": if (input.url) extraInfo = ` ${input.url}`; break
+                  case "WebFetch": if (input.url) extraInfo = ` ${redactSecrets(String(input.url))}`; break
                   case "WebSearch": if (input.query) extraInfo = ` "${input.query}"`; break
-                  case "Bash": if (input.command) extraInfo = ` $ ${String(input.command).slice(0, 80)}${String(input.command).length > 80 ? "..." : ""}`; break
+                  case "Bash": if (input.command) { const cmd = redactSecrets(String(input.command)); extraInfo = ` $ ${cmd.slice(0, 80)}${cmd.length > 80 ? "..." : ""}`; } break
                   case "Read": case "Write": if (input.file_path) extraInfo = ` ${input.file_path}`; break
                   case "Edit": if (input.file_path) extraInfo = ` ${input.file_path}`; break
                   case "Grep": {

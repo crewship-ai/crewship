@@ -331,6 +331,7 @@ model Crew {
   description  String?
   color        String?
   icon         String?
+  avatar_style String?
   created_at   DateTime  @default(now())
   updated_at   DateTime  @default(now()) @updatedAt
   deleted_at   DateTime?
@@ -386,6 +387,8 @@ model Agent {
   llm_provider    LLMProvider?
   llm_model       String?
   system_prompt   String?
+  avatar_seed     String?
+  avatar_style    String?
   temperature     Float       @default(0.7)
   max_tokens      Int?
   timeout_seconds Int         @default(1800)

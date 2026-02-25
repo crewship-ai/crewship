@@ -478,9 +478,9 @@ export function DebugPageClient() {
                 if (entry.event === "result" && entry.metadata) {
                   const m = entry.metadata
                   const parts: string[] = []
-                  if (m.total_cost_usd) parts.push(`$${Number(m.total_cost_usd).toFixed(4)}`)
-                  if (m.duration_ms) parts.push(`${(Number(m.duration_ms) / 1000).toFixed(1)}s`)
-                  if (m.num_turns) parts.push(`${m.num_turns} turns`)
+                  if (m.total_cost_usd != null) parts.push(`$${Number(m.total_cost_usd).toFixed(4)}`)
+                  if (m.duration_ms != null) parts.push(`${(Number(m.duration_ms) / 1000).toFixed(1)}s`)
+                  if (m.num_turns != null) parts.push(`${m.num_turns} turns`)
                   if (parts.length) extra = ` [${parts.join(" | ")}]`
                 }
                 if (entry.event === "system" && entry.metadata?.model) {
