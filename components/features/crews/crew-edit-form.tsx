@@ -7,6 +7,10 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { AvatarPicker } from "@/components/avatar-picker"
 import { CrewIconPicker } from "@/components/crew-icon-picker"
 import { AVATAR_STYLES } from "@/lib/agent-avatar"
@@ -45,15 +49,16 @@ export function CrewEditForm({
   onAgentsRefresh,
 }: CrewEditFormProps) {
   const [applying, setApplying] = useState(false)
-  const [applyResult, setApplyResult] = useState<string | null>(null)
+  const [applyResult, setApplyResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
-  async function handleApplyToAll() {
+  function handleApplyToAll() {
     if (!avatarStyle) return
-    const label = AVATAR_STYLES[avatarStyle]?.label ?? avatarStyle
-    if (!confirm(
-      `Apply "${label}" avatar style to all ${agentCount} agent${agentCount !== 1 ? "s" : ""} in this crew?\n\nThis will overwrite any individually set avatar styles and seeds.`
-    )) return
+    setConfirmOpen(true)
+  }
 
+  async function doApplyToAll() {
+    setConfirmOpen(false)
     setApplying(true)
     setApplyResult(null)
     try {
@@ -67,14 +72,14 @@ export function CrewEditForm({
       )
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: "Failed" }))
-        setApplyResult(`Error: ${data.error ?? "Unknown error"}`)
+        setApplyResult({ ok: false, message: data.error ?? "Unknown error" })
       } else {
         const data = await res.json()
-        setApplyResult(`Applied to ${data.updated} agent${data.updated !== 1 ? "s" : ""}`)
+        setApplyResult({ ok: true, message: `Applied to ${data.updated} agent${data.updated !== 1 ? "s" : ""}` })
         onAgentsRefresh()
       }
     } catch {
-      setApplyResult("Network error")
+      setApplyResult({ ok: false, message: "Network error" })
     } finally {
       setApplying(false)
     }
@@ -162,8 +167,8 @@ export function CrewEditForm({
                       )}
                     </Button>
                     {applyResult && (
-                      <p className={`text-[11px] ${applyResult.startsWith("Error") ? "text-destructive" : "text-emerald-600"}`}>
-                        {applyResult.startsWith("Error") ? applyResult : <><Check className="inline h-3 w-3 mr-0.5" />{applyResult}</>}
+                      <p className={`text-[11px] ${applyResult.ok ? "text-emerald-600" : "text-destructive"}`}>
+                        {applyResult.ok ? <><Check className="inline h-3 w-3 mr-0.5" />{applyResult.message}</> : applyResult.message}
                       </p>
                     )}
                   </div>
@@ -184,6 +189,21 @@ export function CrewEditForm({
           )}
         </Button>
       </div>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apply avatar style to all agents?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will overwrite individually set avatar styles for all {agentCount} agent{agentCount !== 1 ? "s" : ""} in this crew.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={doApplyToAll}>Apply</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </form>
   )
 }

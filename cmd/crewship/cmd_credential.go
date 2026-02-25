@@ -247,13 +247,17 @@ var credUpdateCmd = &cobra.Command{
 
 		if val, ok := body["value"]; ok {
 			if valStr, ok := val.(string); ok && valStr != "" {
-				resp, err := client.Get("/api/v1/credentials/" + credID)
-				if err == nil {
+				metaResp, metaErr := client.Get("/api/v1/credentials/" + credID)
+				if metaErr != nil {
+					cli.PrintWarning("Could not fetch credential metadata for validation: " + metaErr.Error())
+				} else if err := cli.CheckError(metaResp); err != nil {
+					cli.PrintWarning("Could not fetch credential metadata for validation: " + err.Error())
+				} else {
 					var cred struct {
 						Type     string `json:"type"`
 						Provider string `json:"provider"`
 					}
-					if cli.ReadJSON(resp, &cred) == nil {
+					if cli.ReadJSON(metaResp, &cred) == nil {
 						valid, errMsg := testCredentialValue(client, cred.Provider, cred.Type, valStr)
 						if valid {
 							cli.PrintSuccess("Key validated successfully")

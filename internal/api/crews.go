@@ -638,7 +638,12 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		crewID, workspaceID).Scan(&existingID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+			return
+		}
+		h.logger.Error("apply avatar style: lookup crew", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -658,7 +663,7 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	res, err := h.db.ExecContext(r.Context(),
-		"UPDATE agents SET avatar_style = ?, avatar_seed = NULL, updated_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
+		"UPDATE agents SET avatar_style = ?, updated_at = ? WHERE crew_id = ? AND deleted_at IS NULL",
 		body.AvatarStyle, now, crewID)
 	if err != nil {
 		h.logger.Error("apply avatar style to agents", "error", err)

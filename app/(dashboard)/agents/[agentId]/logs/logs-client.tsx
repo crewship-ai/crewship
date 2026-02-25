@@ -257,19 +257,19 @@ export function LogsPageClient() {
               if (input) {
                 switch (toolName) {
                   case "WebFetch": if (input.url) extraInfo = ` ${redactSecrets(String(input.url))}`; break
-                  case "WebSearch": if (input.query) extraInfo = ` "${input.query}"`; break
+                  case "WebSearch": if (input.query) extraInfo = ` "${redactSecrets(String(input.query))}"`; break
                   case "Bash": if (input.command) { const cmd = redactSecrets(String(input.command)); extraInfo = ` $ ${cmd.slice(0, 80)}${cmd.length > 80 ? "..." : ""}`; } break
                   case "Read": case "Write": if (input.file_path) extraInfo = ` ${input.file_path}`; break
                   case "Edit": if (input.file_path) extraInfo = ` ${input.file_path}`; break
                   case "Grep": {
                     const parts: string[] = []
-                    if (input.pattern) parts.push(`"${input.pattern}"`)
-                    if (input.path) parts.push(`in ${input.path}`)
+                    if (input.pattern) parts.push(`"${redactSecrets(String(input.pattern))}"`)
+                    if (input.path) parts.push(`in ${redactSecrets(String(input.path))}`)
                     if (parts.length) extraInfo = ` ${parts.join(" ")}`
                     break
                   }
                   case "Glob": if (input.pattern) extraInfo = ` ${input.pattern}`; break
-                  case "Task": if (input.description) extraInfo = ` ${input.description}`; break
+                  case "Task": if (input.description) extraInfo = ` ${redactSecrets(String(input.description))}`; break
                   case "AskUserQuestion": {
                     const qs = input.questions as { header: string }[] | undefined
                     if (qs?.[0]?.header) extraInfo = ` [${qs[0].header}]`

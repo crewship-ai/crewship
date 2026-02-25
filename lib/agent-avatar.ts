@@ -25,9 +25,16 @@ export const AVATAR_STYLES: Record<string, { label: string; style: Style<object>
 
 export const DEFAULT_AVATAR_STYLE = "bottts-neutral"
 
+const _avatarCache = new Map<string, string>()
+
 export function getAgentAvatarUrl(seed: string, styleName?: string | null): string {
+  const key = `${styleName ?? DEFAULT_AVATAR_STYLE}:${seed}`
+  const cached = _avatarCache.get(key)
+  if (cached) return cached
   const entry = AVATAR_STYLES[styleName || DEFAULT_AVATAR_STYLE] ?? AVATAR_STYLES[DEFAULT_AVATAR_STYLE]
-  return createAvatar(entry.style, { seed, size: 128 }).toDataUri()
+  const uri = createAvatar(entry.style, { seed, size: 128 }).toDataUri()
+  _avatarCache.set(key, uri)
+  return uri
 }
 
 export function getAvatarStyleKeys(): string[] {
