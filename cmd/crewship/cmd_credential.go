@@ -8,6 +8,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var credentialCmd = &cobra.Command{
@@ -118,7 +119,9 @@ var credCreateCmd = &cobra.Command{
 		if valid {
 			cli.PrintSuccess("Key validated successfully")
 		} else if errMsg != "" {
-			if !confirmInvalidKey(errMsg) {
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				cli.PrintWarning(fmt.Sprintf("Key validation failed: %s (non-interactive, skipping confirmation)", errMsg))
+			} else if !confirmInvalidKey(errMsg) {
 				return fmt.Errorf("aborted")
 			}
 		}
@@ -262,7 +265,9 @@ var credUpdateCmd = &cobra.Command{
 						if valid {
 							cli.PrintSuccess("Key validated successfully")
 						} else if errMsg != "" {
-							if !confirmInvalidKey(errMsg) {
+							if !term.IsTerminal(int(os.Stdin.Fd())) {
+								cli.PrintWarning(fmt.Sprintf("Key validation failed: %s (non-interactive, skipping confirmation)", errMsg))
+							} else if !confirmInvalidKey(errMsg) {
 								return fmt.Errorf("aborted")
 							}
 						}
@@ -370,7 +375,7 @@ var credAssignCmd = &cobra.Command{
 }
 
 var credUnassignCmd = &cobra.Command{
-	Use:   "unassign <credential-id> <agent-slug>",
+	Use:   "unassign <name-or-id> <agent-slug>",
 	Short: "Remove a credential from an agent",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -382,6 +387,10 @@ var credUnassignCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
+		credID, err := resolveCredentialID(client, args[0])
+		if err != nil {
+			return err
+		}
 		agentID, err := resolveAgentID(client, args[1])
 		if err != nil {
 			return err
@@ -404,7 +413,7 @@ var credUnassignCmd = &cobra.Command{
 		}
 		var assignmentID string
 		for _, a := range assignments {
-			if a.CredentialID == args[0] {
+			if a.CredentialID == credID {
 				assignmentID = a.ID
 				break
 			}

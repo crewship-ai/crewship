@@ -80,6 +80,7 @@ export function AgentOverviewPageClient() {
   const [recentChats, setRecentChats] = useState<RecentChat[]>([])
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([])
   const [totalRunCount, setTotalRunCount] = useState(0)
+  const [totalCompletedRunCount, setTotalCompletedRunCount] = useState(0)
 
   useEffect(() => {
     if (!workspaceId || !agentId) return
@@ -98,6 +99,7 @@ export function AgentOverviewPageClient() {
         if (runsRes.ok && !cancelled) {
           const runs: RecentRun[] = await runsRes.json()
           setTotalRunCount(runs.length)
+          setTotalCompletedRunCount(runs.filter((r) => r.status === "COMPLETED").length)
           setRecentRuns(runs.slice(0, 4))
         }
       } catch {
@@ -169,7 +171,7 @@ export function AgentOverviewPageClient() {
               </div>
               <div className="text-2xl font-bold">{totalRuns}</div>
               <div className="text-[10px] text-muted-foreground mt-0.5">
-                {recentRuns.filter((r) => r.status === "COMPLETED").length} completed
+                {totalCompletedRunCount} completed
               </div>
             </CardContent>
           </Card>

@@ -204,12 +204,12 @@ function TodoWriteCard({ part }: { part: TurnPart }) {
           ))}
         </div>
         <div className="px-4 py-2 border-t">
-          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-            <div
-              className="h-full bg-emerald-500 rounded-full transition-all duration-300 w-[var(--pct)]"
-              style={{ "--pct": `${pct}%` } as React.CSSProperties}
-            />
-          </div>
+          <progress
+            value={pct}
+            max={100}
+            aria-label={`Progress ${pct}%`}
+            className="h-1.5 w-full overflow-hidden rounded-full bg-muted [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-value]:bg-emerald-500 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-all [&::-moz-progress-bar]:bg-emerald-500 [&::-moz-progress-bar]:rounded-full"
+          />
           {inProgress > 0 && (
             <p className="text-[10px] text-amber-500 mt-1">{inProgress} in progress</p>
           )}
