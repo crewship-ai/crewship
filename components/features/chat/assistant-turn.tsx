@@ -17,6 +17,7 @@ import { Tool, ToolContent, ToolHeader } from "@/components/ai-elements/tool"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import { StatusIndicator } from "@/components/features/chat/status-indicator"
 import type { ChatTurn, TurnPart } from "@/hooks/use-chat"
+import { formatCost } from "@/lib/utils/format"
 
 interface AssistantTurnProps {
   turn: ChatTurn
@@ -33,10 +34,7 @@ function formatDuration(ms: number): string {
   return remSecs > 0 ? `${mins}m ${remSecs}s` : `${mins}m`
 }
 
-function formatCost(usd: number): string {
-  if (usd < 0.01) return `$${usd.toFixed(4)}`
-  return `$${usd.toFixed(2)}`
-}
+
 
 function formatTokens(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
@@ -70,7 +68,7 @@ function ResultCard({ part }: { part: TurnPart }) {
 
   // Compact one-line summary for the trigger
   const summaryParts: string[] = []
-  if (cost != null && cost > 0) summaryParts.push(formatCost(cost))
+  if (cost != null && cost > 0) summaryParts.push(formatCost(cost, true))
   if (durationMs != null && durationMs > 0) summaryParts.push(formatDuration(durationMs))
   if (numTurns != null && numTurns > 0) summaryParts.push(`${numTurns} turn${numTurns !== 1 ? "s" : ""}`)
   if (modelName) summaryParts.push(modelName)
@@ -88,7 +86,7 @@ function ResultCard({ part }: { part: TurnPart }) {
           {cost != null && cost > 0 && (
             <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
               <DollarSign className="h-3 w-3" />
-              {formatCost(cost)}
+              {formatCost(cost, true)}
             </span>
           )}
           {durationMs != null && durationMs > 0 && (

@@ -121,10 +121,14 @@ var credCreateCmd = &cobra.Command{
 		valid, errMsg := testCredentialValue(client, provider, credType, value)
 		if valid {
 			cli.PrintSuccess("Key validated successfully")
-		} else if errMsg != "" {
+		} else {
+			msg := errMsg
+			if msg == "" {
+				msg = "key validation failed"
+			}
 			if !term.IsTerminal(int(os.Stdin.Fd())) {
-				cli.PrintWarning(fmt.Sprintf("Key validation failed: %s (non-interactive, skipping confirmation)", errMsg))
-			} else if !confirmInvalidKey(errMsg) {
+				cli.PrintWarning(fmt.Sprintf("Key validation failed: %s (non-interactive, skipping confirmation)", msg))
+			} else if !confirmInvalidKey(msg) {
 				return fmt.Errorf("aborted")
 			}
 		}
@@ -269,10 +273,14 @@ var credUpdateCmd = &cobra.Command{
 						valid, errMsg := testCredentialValue(client, cred.Provider, cred.Type, valStr)
 						if valid {
 							cli.PrintSuccess("Key validated successfully")
-						} else if errMsg != "" {
+						} else {
+							msg := errMsg
+							if msg == "" {
+								msg = "key validation failed"
+							}
 							if !term.IsTerminal(int(os.Stdin.Fd())) {
-								cli.PrintWarning(fmt.Sprintf("Key validation failed: %s (non-interactive, skipping confirmation)", errMsg))
-							} else if !confirmInvalidKey(errMsg) {
+								cli.PrintWarning(fmt.Sprintf("Key validation failed: %s (non-interactive, skipping confirmation)", msg))
+							} else if !confirmInvalidKey(msg) {
 								return fmt.Errorf("aborted")
 							}
 						}
