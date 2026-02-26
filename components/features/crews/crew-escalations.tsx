@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import { RefreshCw, CheckCircle2, Clock, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -20,6 +20,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { escalationSchema, type Escalation } from "@/lib/types/escalation"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { z } from "zod"
 
 interface CrewEscalationsProps {
@@ -65,7 +66,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  async function fetchEscalations(showRefresh = false) {
+  const fetchEscalations = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true)
     else setLoading(true)
     try {
@@ -85,12 +86,14 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [crewId, workspaceId])
 
   useEffect(() => {
     fetchEscalations()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crewId, workspaceId])
+  }, [fetchEscalations])
+
+  // Real-time: refetch when escalations are created
+  useRealtimeEvent("escalation.created", useCallback(() => { fetchEscalations() }, [fetchEscalations]))
 
   if (loading) {
     return (

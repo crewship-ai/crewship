@@ -317,6 +317,9 @@ func (r *Router) registerRoutes() {
 
 	// Internal routes (for crewshipd IPC, X-Internal-Token auth)
 	internal := NewInternalHandler(r.db, r.internalToken, r.logger)
+	if r.hub != nil {
+		internal.SetHub(r.hub)
+	}
 	if r.keeperConfig != nil && r.keeperConfig.Enabled {
 		internal.SetKeeperEnabled(true)
 	}

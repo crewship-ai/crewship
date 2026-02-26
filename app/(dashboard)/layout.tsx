@@ -8,6 +8,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar"
 import { AppToolbar } from "@/components/layout/app-toolbar"
 import { RuntimeBanner } from "@/components/layout/runtime-banner"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
+import { RealtimeProvider } from "@/hooks/use-realtime"
 
 export default function DashboardLayout({
   children,
@@ -32,15 +33,17 @@ export default function DashboardLayout({
   }
 
   return (
-    <SidebarProvider defaultOpen>
-      <AppSidebar />
-      <SidebarInset>
-        <AppToolbar />
-        <RuntimeBanner />
-        <main className="flex-1 overflow-y-auto">
-          {children}
-        </main>
-      </SidebarInset>
-    </SidebarProvider>
+    <RealtimeProvider>
+      <SidebarProvider defaultOpen>
+        <AppSidebar />
+        <SidebarInset>
+          <AppToolbar />
+          <RuntimeBanner />
+          <main className="flex-1 overflow-y-auto">
+            {children}
+          </main>
+        </SidebarInset>
+      </SidebarProvider>
+    </RealtimeProvider>
   )
 }

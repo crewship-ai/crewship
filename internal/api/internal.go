@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 type InternalHandler struct {
@@ -21,10 +22,15 @@ type InternalHandler struct {
 	logger         *slog.Logger
 	internalToken  string
 	keeperEnabled  atomic.Bool
+	hub            *ws.Hub
 }
 
 func NewInternalHandler(db *sql.DB, internalToken string, logger *slog.Logger) *InternalHandler {
 	return &InternalHandler{db: db, internalToken: internalToken, logger: logger}
+}
+
+func (h *InternalHandler) SetHub(hub *ws.Hub) {
+	h.hub = hub
 }
 
 func (h *InternalHandler) SetKeeperEnabled(enabled bool) {
@@ -607,6 +613,38 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
+
+	// Update agent status to RUNNING
+	h.db.ExecContext(r.Context(),
+		"UPDATE agents SET status = 'RUNNING', updated_at = ? WHERE id = ?", now, body.AgentID)
+
+	// Broadcast real-time events
+	if h.hub != nil {
+		var agentName string
+		h.db.QueryRowContext(r.Context(), "SELECT name FROM agents WHERE id = ?", body.AgentID).Scan(&agentName)
+
+		channel := "workspace:" + body.WorkspaceID
+		h.hub.Broadcast(channel, ws.ServerMessage{
+			Type:    "run.started",
+			Channel: channel,
+			Payload: map[string]string{
+				"run_id":    body.ID,
+				"agent_id":  body.AgentID,
+				"agent_name": agentName,
+				"status":    "RUNNING",
+			},
+		})
+		h.hub.Broadcast(channel, ws.ServerMessage{
+			Type:    "agent.status",
+			Channel: channel,
+			Payload: map[string]string{
+				"agent_id":  body.AgentID,
+				"agent_name": agentName,
+				"status":    "RUNNING",
+			},
+		})
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]string{"id": body.ID, "status": "RUNNING"})
 }
 
@@ -661,6 +699,64 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
+
+	// Broadcast real-time events for terminal states
+	if h.hub != nil && terminal[body.Status] {
+		var agentID, workspaceID string
+		var agentName sql.NullString
+		h.db.QueryRowContext(r.Context(),
+			`SELECT r.agent_id, r.workspace_id, a.name FROM agent_runs r
+			 LEFT JOIN agents a ON a.id = r.agent_id WHERE r.id = ?`, runID,
+		).Scan(&agentID, &workspaceID, &agentName)
+
+		if workspaceID != "" {
+			channel := "workspace:" + workspaceID
+			eventType := "run.completed"
+			if body.Status == "FAILED" || body.Status == "CANCELLED" {
+				eventType = "run.failed"
+			}
+			payload := map[string]string{
+				"run_id":   runID,
+				"agent_id": agentID,
+				"agent_name": agentName.String,
+				"status":   body.Status,
+			}
+			h.hub.Broadcast(channel, ws.ServerMessage{
+				Type: eventType, Channel: channel, Payload: payload,
+			})
+
+			// Update agent status back to IDLE (or ERROR for failed runs)
+			agentStatus := "IDLE"
+			if body.Status == "FAILED" {
+				agentStatus = "ERROR"
+			}
+			now2 := time.Now().UTC().Format(time.RFC3339)
+			// Only set IDLE if no other runs are still RUNNING for this agent
+			if agentStatus == "IDLE" {
+				var otherRunning int
+				h.db.QueryRowContext(r.Context(),
+					"SELECT COUNT(*) FROM agent_runs WHERE agent_id = ? AND status = 'RUNNING' AND id != ?",
+					agentID, runID).Scan(&otherRunning)
+				if otherRunning > 0 {
+					agentStatus = "RUNNING"
+				}
+			}
+			h.db.ExecContext(r.Context(),
+				"UPDATE agents SET status = ?, updated_at = ? WHERE id = ?",
+				agentStatus, now2, agentID)
+
+			h.hub.Broadcast(channel, ws.ServerMessage{
+				Type:    "agent.status",
+				Channel: channel,
+				Payload: map[string]string{
+					"agent_id":  agentID,
+					"agent_name": agentName.String,
+					"status":    agentStatus,
+				},
+			})
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"id": runID, "status": body.Status})
 }
 

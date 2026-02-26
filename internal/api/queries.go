@@ -623,6 +623,18 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 				"reason": body.Reason,
 			},
 		})
+		// Broadcast to workspace for global visibility
+		wsChannel := "workspace:" + body.WorkspaceID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "escalation.created",
+			Channel: wsChannel,
+			Payload: map[string]string{
+				"id":        escalationID,
+				"crew_id":   body.CrewID,
+				"from_slug": body.FromSlug,
+				"reason":    body.Reason,
+			},
+		})
 	}
 
 	h.logger.Info("escalation created",

@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import { RefreshCw, Activity, ClipboardList, MessageSquare, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -20,6 +20,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { activityItemSchema, type ActivityItem } from "@/lib/types/activity"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { z } from "zod"
 
 interface CrewActivityFeedProps {
@@ -69,7 +70,7 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  async function fetchActivity(showRefresh = false) {
+  const fetchActivity = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true)
     else setLoading(true)
     try {
@@ -89,12 +90,15 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [workspaceId])
 
   useEffect(() => {
     fetchActivity()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId])
+  }, [fetchActivity])
+
+  // Real-time: refetch when assignment or escalation events arrive
+  useRealtimeEvent("assignment.updated", useCallback(() => { fetchActivity() }, [fetchActivity]))
+  useRealtimeEvent("escalation.created", useCallback(() => { fetchActivity() }, [fetchActivity]))
 
   if (loading) {
     return (

@@ -185,6 +185,12 @@ func (h *MissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 			Channel: "crew:" + crewID,
 			Payload: map[string]string{"id": id, "title": req.Title},
 		})
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "mission.updated",
+			Channel: wsChannel,
+			Payload: map[string]string{"id": id, "crew_id": crewID, "status": "PLANNING"},
+		})
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -562,6 +568,13 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 			Channel: "mission:" + missionID,
 			Payload: map[string]string{"id": missionID, "status": *req.Status},
 		})
+		// Broadcast to workspace for dashboard visibility
+		wsChannel := "workspace:" + m.WorkspaceID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "mission.updated",
+			Channel: wsChannel,
+			Payload: map[string]string{"id": missionID, "crew_id": crewID, "status": *req.Status},
+		})
 	}
 
 	writeJSON(w, http.StatusOK, m)
@@ -905,6 +918,13 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 			Type:    "task.status",
 			Channel: "mission:" + missionID,
 			Payload: map[string]string{"id": taskID, "status": *req.Status},
+		})
+		// Broadcast to workspace for dashboard visibility
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "task.updated",
+			Channel: wsChannel,
+			Payload: map[string]string{"id": taskID, "mission_id": missionID, "status": *req.Status},
 		})
 	}
 

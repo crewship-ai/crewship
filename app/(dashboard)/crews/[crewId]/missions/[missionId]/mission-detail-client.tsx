@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { MissionHeader } from "@/components/features/missions/mission-header"
 import { MissionBoard } from "@/components/features/missions/mission-board"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { Mission } from "@/lib/types/mission"
 
 export function MissionDetailPageClient() {
@@ -19,39 +20,40 @@ export function MissionDetailPageClient() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const fetchMission = useCallback(async (showLoading = true) => {
+    if (!workspaceId) return
+    if (showLoading) {
+      setLoading(true)
+      setError(null)
+    }
+    try {
+      const res = await fetch(
+        `/api/v1/crews/${params.crewId}/missions/${params.missionId}?workspace_id=${workspaceId}`
+      )
+      if (!res.ok) {
+        if (showLoading) setError("Mission not found")
+        return
+      }
+      const data = (await res.json()) as Mission
+      setMission(data)
+    } catch {
+      if (showLoading) setError("Failed to load mission")
+    } finally {
+      if (showLoading) setLoading(false)
+    }
+  }, [workspaceId, params.crewId, params.missionId])
+
   useEffect(() => {
     if (!workspaceId) {
       if (!wsLoading) setLoading(false)
       return
     }
-
-    let cancelled = false
-
-    async function fetchMission() {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await fetch(
-          `/api/v1/crews/${params.crewId}/missions/${params.missionId}?workspace_id=${workspaceId}`
-        )
-        if (!res.ok) {
-          setError("Mission not found")
-          return
-        }
-        const data = (await res.json()) as Mission
-        if (!cancelled) setMission(data)
-      } catch {
-        if (!cancelled) setError("Failed to load mission")
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
     fetchMission()
-    return () => {
-      cancelled = true
-    }
-  }, [workspaceId, wsLoading, params.crewId, params.missionId])
+  }, [workspaceId, wsLoading, fetchMission])
+
+  // Real-time: refetch when mission or task status changes
+  useRealtimeEvent("mission.updated", useCallback(() => { fetchMission(false) }, [fetchMission]))
+  useRealtimeEvent("task.updated", useCallback(() => { fetchMission(false) }, [fetchMission]))
 
   const isLoading = wsLoading || loading
 

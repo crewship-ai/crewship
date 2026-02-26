@@ -237,10 +237,21 @@ func (h *AssignmentHandler) runAssignment(
 				"target": body.TargetSlug,
 			},
 		})
+		// Broadcast to workspace for global visibility
+		wsChannel := "workspace:" + body.WorkspaceID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "assignment.updated",
+			Channel: wsChannel,
+			Payload: map[string]string{
+				"id":     assignmentID,
+				"status": "RUNNING",
+				"target": body.TargetSlug,
+			},
+		})
 	}
 
 	if h.orch == nil {
-		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, "", "orchestrator not available")
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", "orchestrator not available")
 		return
 	}
 
@@ -248,7 +259,7 @@ func (h *AssignmentHandler) runAssignment(
 	containerID, err := h.orch.GetOrCreateContainer(ctx, target.CrewSlug, body.CrewID)
 	if err != nil {
 		h.logger.Error("get container for assignment", "error", err, "assignment_id", assignmentID)
-		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, "",
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("container error: %v", err))
 		return
 	}
@@ -284,7 +295,7 @@ func (h *AssignmentHandler) runAssignment(
 
 	if err := h.orch.RunAgentForAssignment(ctx, req, handler); err != nil {
 		h.logger.Error("assignment execution failed", "error", err, "assignment_id", assignmentID)
-		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, "",
+		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("execution error: %v", err))
 		return
 	}
@@ -298,13 +309,13 @@ func (h *AssignmentHandler) runAssignment(
 		result = result[:10000] + "...(truncated)"
 	}
 
-	h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, result, "")
+	h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, result, "")
 }
 
 // finishAssignment updates the assignment and run records, then broadcasts the final event.
 func (h *AssignmentHandler) finishAssignment(
 	ctx context.Context,
-	assignmentID, runID, chatID, targetSlug, result, errMsg string,
+	assignmentID, runID, chatID, targetSlug, workspaceID, result, errMsg string,
 ) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	status := "COMPLETED"
@@ -366,6 +377,20 @@ func (h *AssignmentHandler) finishAssignment(
 				"id":     assignmentID,
 				"target": targetSlug,
 				"result": result,
+			},
+		})
+	}
+
+	// Broadcast to workspace channel for real-time dashboard updates
+	if h.hub != nil && workspaceID != "" {
+		wsChannel := "workspace:" + workspaceID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "assignment.updated",
+			Channel: wsChannel,
+			Payload: map[string]string{
+				"id":     assignmentID,
+				"status": status,
+				"target": targetSlug,
 			},
 		})
 	}
