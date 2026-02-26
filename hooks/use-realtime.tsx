@@ -20,6 +20,7 @@ export type RealtimeEventType =
   | "escalation.created"
   | "mission.updated"
   | "task.updated"
+  | "peer_conversation.updated"
 
 export interface RealtimeEvent {
   type: RealtimeEventType
@@ -69,7 +70,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       const validTypes: Set<string> = new Set([
         "run.started", "run.completed", "run.failed",
         "agent.status", "assignment.updated", "escalation.created",
-        "mission.updated", "task.updated",
+        "mission.updated", "task.updated", "peer_conversation.updated",
       ])
       if (!validTypes.has(msg.type)) return
 

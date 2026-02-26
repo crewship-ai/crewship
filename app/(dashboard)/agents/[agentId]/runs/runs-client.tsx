@@ -2,11 +2,12 @@
 
 import { useParams } from "next/navigation"
 
-import { use, useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { AlertCircle, Inbox } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 interface AgentRun {
   id: string
@@ -69,30 +70,29 @@ export function RunsPageClient() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const fetchRuns = useCallback(async (silent = false) => {
     if (!workspaceId) return
-
-    let cancelled = false
-
-    async function fetchRuns() {
-      try {
-        const res = await fetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`)
-        if (!res.ok) {
-          if (!cancelled) setError("Failed to load runs")
-          return
-        }
-        const data = await res.json()
-        if (!cancelled) setRuns(Array.isArray(data) ? data : [])
-      } catch {
-        if (!cancelled) setError("Network error. Please try again.")
-      } finally {
-        if (!cancelled) setLoading(false)
+    try {
+      const res = await fetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`)
+      if (!res.ok) {
+        if (!silent) setError("Failed to load runs")
+        return
       }
+      const data = await res.json()
+      setRuns(Array.isArray(data) ? data : [])
+    } catch {
+      if (!silent) setError("Network error. Please try again.")
+    } finally {
+      if (!silent) setLoading(false)
     }
-
-    fetchRuns()
-    return () => { cancelled = true }
   }, [agentId, workspaceId])
+
+  useEffect(() => { fetchRuns() }, [fetchRuns])
+
+  // Real-time: refetch runs on run events
+  useRealtimeEvent("run.started", useCallback(() => { fetchRuns(true) }, [fetchRuns]))
+  useRealtimeEvent("run.completed", useCallback(() => { fetchRuns(true) }, [fetchRuns]))
+  useRealtimeEvent("run.failed", useCallback(() => { fetchRuns(true) }, [fetchRuns]))
 
   if (wsLoading || loading) {
     return <RunsSkeleton />

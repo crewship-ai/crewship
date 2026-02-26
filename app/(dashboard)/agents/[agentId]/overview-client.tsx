@@ -1,7 +1,7 @@
 "use client"
 
 import { useParams } from "next/navigation"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import {
   AlertCircle, Puzzle, KeyRound, MessagesSquare,
@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { CLI_ADAPTERS } from "@/lib/cli-adapters"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
@@ -75,45 +76,48 @@ interface RecentRun {
 
 export function AgentOverviewPageClient() {
   const { agentId } = useParams<{ agentId: string }>()
-  const { agent, loading, error } = useAgentDetail()
+  const { agent, loading, error, refresh } = useAgentDetail()
   const { workspaceId } = useWorkspace()
   const [recentChats, setRecentChats] = useState<RecentChat[]>([])
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([])
   const [totalRunCount, setTotalRunCount] = useState(0)
   const [totalCompletedRunCount, setTotalCompletedRunCount] = useState(0)
 
-  useEffect(() => {
+  const fetchActivity = useCallback(async (silent = false) => {
     if (!workspaceId || !agentId) return
-    let cancelled = false
-    setRecentChats([])
-    setRecentRuns([])
-    setTotalRunCount(0)
-    setTotalCompletedRunCount(0)
-
-    async function fetchActivity() {
-      try {
-        const [chatsRes, runsRes] = await Promise.all([
-          fetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`),
-          fetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`),
-        ])
-        if (chatsRes.ok && !cancelled) {
-          const chats: RecentChat[] = await chatsRes.json()
-          setRecentChats(chats.slice(0, 4))
-        }
-        if (runsRes.ok && !cancelled) {
-          const runs: RecentRun[] = await runsRes.json()
-          setTotalRunCount(runs.length)
-          setTotalCompletedRunCount(runs.filter((r) => r.status === "COMPLETED").length)
-          setRecentRuns(runs.slice(0, 4))
-        }
-      } catch {
-        // non-fatal
-      }
+    if (!silent) {
+      setRecentChats([])
+      setRecentRuns([])
+      setTotalRunCount(0)
+      setTotalCompletedRunCount(0)
     }
-
-    fetchActivity()
-    return () => { cancelled = true }
+    try {
+      const [chatsRes, runsRes] = await Promise.all([
+        fetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`),
+        fetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}`),
+      ])
+      if (chatsRes.ok) {
+        const chats: RecentChat[] = await chatsRes.json()
+        setRecentChats(chats.slice(0, 4))
+      }
+      if (runsRes.ok) {
+        const runs: RecentRun[] = await runsRes.json()
+        setTotalRunCount(runs.length)
+        setTotalCompletedRunCount(runs.filter((r) => r.status === "COMPLETED").length)
+        setRecentRuns(runs.slice(0, 4))
+      }
+    } catch {
+      // non-fatal
+    }
   }, [agentId, workspaceId])
+
+  useEffect(() => { fetchActivity() }, [fetchActivity])
+
+  // Real-time: refresh agent status + runs on workspace events
+  useRealtimeEvent("agent.status", useCallback(() => { refresh(); fetchActivity(true) }, [refresh, fetchActivity]))
+  useRealtimeEvent("run.started", useCallback(() => { fetchActivity(true) }, [fetchActivity]))
+  useRealtimeEvent("run.completed", useCallback(() => { fetchActivity(true) }, [fetchActivity]))
+  useRealtimeEvent("run.failed", useCallback(() => { fetchActivity(true) }, [fetchActivity]))
 
   if (loading) {
     return <OverviewSkeleton />

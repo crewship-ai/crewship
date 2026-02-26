@@ -159,7 +159,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if h.orch == nil {
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, "", "orchestrator not available", startTime)
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "", "orchestrator not available", startTime)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "orchestrator not available"})
 		return
 	}
@@ -168,7 +168,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	containerID, err := h.orch.GetOrCreateContainer(r.Context(), target.CrewSlug, body.CrewID)
 	if err != nil {
 		h.logger.Error("get container for query", "error", err, "query_id", convID)
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, "",
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("container error: %v", err), startTime)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container error"})
 		return
@@ -217,7 +217,7 @@ Question: %s`, body.FromSlug, body.Question)
 
 	if err := h.orch.RunAgentForAssignment(r.Context(), req, handler); err != nil {
 		h.logger.Error("peer query execution failed", "error", err, "query_id", convID)
-		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, "",
+		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "",
 			fmt.Sprintf("execution error: %v", err), startTime)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error":    "query execution failed",
@@ -232,7 +232,7 @@ Question: %s`, body.FromSlug, body.Question)
 		result = result[:10000] + "...(truncated)"
 	}
 
-	h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, result, "", startTime)
+	h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, result, "", startTime)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"query_id": convID,
@@ -247,7 +247,7 @@ Question: %s`, body.FromSlug, body.Question)
 // finishQuery updates peer_conversations and agent_runs records.
 func (h *QueryHandler) finishQuery(
 	ctx context.Context,
-	convID, runID, chatID, fromSlug, targetSlug, result, errMsg string,
+	convID, runID, chatID, fromSlug, targetSlug, workspaceID, result, errMsg string,
 	startTime time.Time,
 ) {
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -307,6 +307,20 @@ func (h *QueryHandler) finishQuery(
 			Channel: "session:" + chatID,
 			Payload: payload,
 		})
+		// Broadcast to workspace for global visibility
+		if workspaceID != "" {
+			wsChannel := "workspace:" + workspaceID
+			h.hub.Broadcast(wsChannel, ws.ServerMessage{
+				Type:    "peer_conversation.updated",
+				Channel: wsChannel,
+				Payload: map[string]string{
+					"id":     convID,
+					"from":   fromSlug,
+					"target": targetSlug,
+					"status": status,
+				},
+			})
+		}
 	}
 
 	h.logger.Info("peer query finished", "query_id", convID, "status", status, "duration_ms", durationMs)
