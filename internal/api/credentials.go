@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -96,6 +98,7 @@ type createCredentialRequest struct {
 	AccountEmail  *string `json:"account_email"`
 	RefreshToken  *string `json:"refresh_token"`
 	TokenExpires  *string `json:"token_expires_at"`
+	SecurityLevel *int    `json:"security_level"`
 }
 
 func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -159,14 +162,19 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	secLevel := 1
+	if req.SecurityLevel != nil && *req.SecurityLevel >= 1 && *req.SecurityLevel <= 3 {
+		secLevel = *req.SecurityLevel
+	}
+
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, crew_id, account_label, account_email,
-			token_expires_at, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			token_expires_at, security_level, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		credID, workspaceID, req.Name, req.Description, encryptedValue,
 		req.Type, req.Provider, req.Scope, req.CrewID, req.AccountLabel, req.AccountEmail,
-		req.TokenExpires, user.ID, now, now)
+		req.TokenExpires, secLevel, user.ID, now, now)
 	if err != nil {
 		h.logger.Error("insert credential", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -248,6 +256,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"provider": "provider", "status": "status", "scope": "scope",
 		"crew_id": "crew_id", "account_label": "account_label",
 		"account_email": "account_email", "token_expires_at": "token_expires_at",
+		"security_level": "security_level",
 	}
 
 	if crewIDVal, ok := body["crew_id"]; ok && crewIDVal != nil {
@@ -277,6 +286,9 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 			setClauses = append(setClauses, "encrypted_value = ?")
 			args = append(args, encrypted)
+			// Reset status when value changes so monitor re-validates
+			setClauses = append(setClauses, "status = ?", "last_error = ?")
+			args = append(args, "ACTIVE", nil)
 		}
 	}
 
@@ -332,4 +344,124 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// Test validates a credential value against the provider's API without storing it.
+// POST /api/v1/credentials/test
+func (h *CredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Provider string `json:"provider"`
+		Type     string `json:"type"`
+		Value    string `json:"value"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		return
+	}
+	if body.Value == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Value is required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	type testResult struct {
+		Valid   bool   `json:"valid"`
+		Status int    `json:"status"`
+		Error  string `json:"error,omitempty"`
+	}
+
+	switch body.Provider {
+	case "ANTHROPIC":
+		// OAuth setup tokens (sk-ant-oat*) cannot be validated via standard API.
+		// They only work inside Claude Code's authenticated tunnel.
+		if body.Type == "AI_CLI_TOKEN" || isAnthropicOAuthToken(body.Value) {
+			writeJSON(w, http.StatusOK, testResult{Valid: true, Error: "OAuth token accepted (cannot validate via API, will be verified at runtime)"})
+			return
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "GET", "https://api.anthropic.com/v1/models", nil)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Failed to create request"})
+			return
+		}
+		req.Header.Set("x-api-key", body.Value)
+		req.Header.Set("anthropic-version", "2023-06-01")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Connection failed: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			writeJSON(w, http.StatusOK, testResult{Valid: true, Status: resp.StatusCode})
+		case http.StatusUnauthorized:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Invalid API key"})
+		case http.StatusForbidden:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Access revoked"})
+		case http.StatusTooManyRequests:
+			writeJSON(w, http.StatusOK, testResult{Valid: true, Status: resp.StatusCode, Error: "Rate limited (key is valid but temporarily throttled)"})
+		default:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)})
+		}
+
+	case "OPENAI":
+		req, err := http.NewRequestWithContext(ctx, "GET", "https://api.openai.com/v1/models", nil)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Failed to create request"})
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+body.Value)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Connection failed: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+
+		if resp.StatusCode == http.StatusOK {
+			writeJSON(w, http.StatusOK, testResult{Valid: true, Status: resp.StatusCode})
+		} else if resp.StatusCode == http.StatusUnauthorized {
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Invalid API key"})
+		} else {
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)})
+		}
+
+	case "GOOGLE":
+		req, err := http.NewRequestWithContext(ctx, "GET", "https://generativelanguage.googleapis.com/v1/models?key="+body.Value, nil)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Failed to create request"})
+			return
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Connection failed: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+
+		if resp.StatusCode == http.StatusOK {
+			writeJSON(w, http.StatusOK, testResult{Valid: true, Status: resp.StatusCode})
+		} else {
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)})
+		}
+
+	default:
+		writeJSON(w, http.StatusOK, testResult{Valid: true, Error: "No validation available for this provider"})
+	}
+}
+
+// isAnthropicOAuthToken detects if a value is an Anthropic OAuth/setup token
+// rather than a plain API key. OAuth tokens use "sk-ant-oat" prefix.
+func isAnthropicOAuthToken(value string) bool {
+	return strings.HasPrefix(value, "sk-ant-oat")
 }

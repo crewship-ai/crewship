@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Eye, EyeOff, Loader2, Bot, Key, Lock } from "lucide-react"
+import { Eye, EyeOff, Loader2, Bot, Key, Lock, CheckCircle2, XCircle, FlaskConical } from "lucide-react"
 import { AnthropicIcon, OpenAIIcon, GeminiIcon } from "@/components/icons/provider-icons"
 import { Button } from "@/components/ui/button"
 import {
@@ -80,6 +80,8 @@ export function AddCredentialDialog({
   const [crews, setTeams] = React.useState<Team[]>([])
   const [teamsLoading, setTeamsLoading] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
+  const [testing, setTesting] = React.useState(false)
+  const [testResult, setTestResult] = React.useState<{ valid: boolean; error?: string } | null>(null)
   const [error, setError] = React.useState("")
 
   React.useEffect(() => {
@@ -109,7 +111,36 @@ export function AddCredentialDialog({
     setScope("WORKSPACE")
     setTeamId("")
     setShowValue(false)
+    setTesting(false)
+    setTestResult(null)
     setError("")
+  }
+
+  async function handleTest() {
+    if (!value.trim()) {
+      setError("Enter a value to test")
+      return
+    }
+    setTesting(true)
+    setTestResult(null)
+    setError("")
+    try {
+      const res = await fetch(`/api/v1/credentials/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, type, value: value.trim() }),
+      })
+      if (!res.ok) {
+        setTestResult({ valid: false, error: "Test request failed" })
+        return
+      }
+      const data = await res.json()
+      setTestResult({ valid: data.valid, error: data.error })
+    } catch {
+      setTestResult({ valid: false, error: "Network error" })
+    } finally {
+      setTesting(false)
+    }
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -297,7 +328,7 @@ export function AddCredentialDialog({
                       : "Enter secret value"
                 }
                 value={value}
-                onChange={(e) => setValue(e.target.value)}
+                onChange={(e) => { setValue(e.target.value); setTestResult(null) }}
                 required
                 className="pr-10 font-mono text-xs"
               />
@@ -312,6 +343,27 @@ export function AddCredentialDialog({
                 <span className="sr-only">{showValue ? "Hide" : "Show"} value</span>
               </Button>
             </div>
+            {provider !== "NONE" && value.trim() && !value.trim().startsWith("sk-ant-oat") && (
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTest}
+                  disabled={testing}
+                  className="h-7 text-xs"
+                >
+                  {testing ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <FlaskConical className="mr-1.5 h-3 w-3" />}
+                  Test Key
+                </Button>
+                {testResult && (
+                  <span className={`flex items-center gap-1 text-xs ${testResult.valid ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
+                    {testResult.valid ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+                    {testResult.valid ? "Valid" : testResult.error || "Invalid"}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {type === "SECRET" && (

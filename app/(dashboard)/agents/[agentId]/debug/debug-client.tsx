@@ -26,6 +26,7 @@ interface AgentLogEntry {
   agent: string
   event: string
   content?: string
+  metadata?: Record<string, unknown>
 }
 
 interface DebugData {
@@ -154,6 +155,12 @@ export function DebugPageClient() {
   const errorCount = data.service_logs.filter((l) => l.level === "ERROR").length
   const warnCount = data.service_logs.filter((l) => l.level === "WARN" || l.level === "WARNING").length
 
+  // Extract latest result and system/init from agent logs
+  const lastResult = [...data.agent_logs].reverse().find((l) => l.event === "result")
+  const lastInit = [...data.agent_logs].reverse().find((l) => l.event === "system")
+  const resultMeta = lastResult?.metadata as Record<string, unknown> | undefined
+  const initMeta = lastInit?.metadata as Record<string, unknown> | undefined
+
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       {/* Header */}
@@ -186,8 +193,8 @@ export function DebugPageClient() {
         </div>
       </div>
 
-      {/* Status cards row 1 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Status cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Engine health */}
         <Card>
           <CardHeader className="pb-2">
@@ -326,6 +333,66 @@ export function DebugPageClient() {
             )}
           </CardContent>
         </Card>
+
+        {/* Last Run Stats */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs font-medium flex items-center gap-2">
+              <Cpu className="h-3.5 w-3.5" />
+              Last Run
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {resultMeta ? (
+              <>
+                {resultMeta.total_cost_usd != null && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Cost</span>
+                    <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">${Number(resultMeta.total_cost_usd).toFixed(4)}</span>
+                  </div>
+                )}
+                {resultMeta.duration_ms != null && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Duration</span>
+                    <span className="font-mono">{(Number(resultMeta.duration_ms) / 1000).toFixed(1)}s</span>
+                  </div>
+                )}
+                {resultMeta.num_turns != null && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Turns</span>
+                    <span className="font-mono">{String(resultMeta.num_turns)}</span>
+                  </div>
+                )}
+                {resultMeta.usage && (
+                  <>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">Input Tokens</span>
+                      <span className="font-mono">{String((resultMeta.usage as Record<string, number>).input_tokens ?? 0)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted-foreground">Output Tokens</span>
+                      <span className="font-mono">{String((resultMeta.usage as Record<string, number>).output_tokens ?? 0)}</span>
+                    </div>
+                  </>
+                )}
+                {initMeta?.model && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Model</span>
+                    <span className="font-mono text-[10px]">{String(initMeta.model)}</span>
+                  </div>
+                )}
+                {initMeta?.tools && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Tools</span>
+                    <span className="font-mono">{(initMeta.tools as string[]).length}</span>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">No run data yet</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Log summary bar */}
@@ -407,13 +474,29 @@ export function DebugPageClient() {
             ) : (
               data.agent_logs.map((entry, i) => {
                 const lc = levelColor(entry.level)
+                let extra = ""
+                if (entry.event === "result" && entry.metadata) {
+                  const m = entry.metadata
+                  const parts: string[] = []
+                  if (m.total_cost_usd != null) parts.push(`$${Number(m.total_cost_usd).toFixed(4)}`)
+                  if (m.duration_ms != null) parts.push(`${(Number(m.duration_ms) / 1000).toFixed(1)}s`)
+                  if (m.num_turns != null) parts.push(`${m.num_turns} turns`)
+                  if (parts.length) extra = ` [${parts.join(" | ")}]`
+                }
+                if (entry.event === "system" && entry.metadata?.model) {
+                  extra = ` [${entry.metadata.model}]`
+                }
+                const eventColor = entry.event === "result" ? "text-purple-400" :
+                  entry.event === "system" ? "text-blue-400" : ""
                 return (
                   <div key={i} className="hover:bg-white/5 px-1 -mx-1 rounded">
                     <span className="text-neutral-600">[{formatTime(entry.ts)}]</span>{" "}
                     <Badge variant="outline" className={`${lc.badge} border-current/20 text-[10px] px-1 py-0 font-mono`}>
                       {entry.level}
                     </Badge>{" "}
+                    {eventColor && <span className={`${eventColor} mr-1`}>[{entry.event}]</span>}
                     <span className={lc.text}>{entry.content ?? entry.event}</span>
+                    {extra && <span className="text-neutral-500">{extra}</span>}
                   </div>
                 )
               })

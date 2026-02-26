@@ -170,7 +170,6 @@ async function main() {
       llm_provider: "ANTHROPIC",
       llm_model: "claude-haiku-4-5",
       tool_profile: "FULL",
-      temperature: 0.5,
       timeout_seconds: 3600,
       memory_enabled: true,
       system_prompt: `You are Tomáš, the Technical Architect and Lead of the Engineering crew at Crewship HQ.
@@ -217,7 +216,7 @@ KEY PATHS:
       llm_provider: "ANTHROPIC",
       llm_model: "claude-haiku-4-5",
       tool_profile: "CODING",
-      temperature: 0.2,
+
       timeout_seconds: 1800,
       memory_enabled: true,
       system_prompt: `You are Viktor, a Backend Engineer in the Engineering crew at Crewship HQ.
@@ -259,7 +258,7 @@ WORKFLOW:
       llm_provider: "ANTHROPIC",
       llm_model: "claude-haiku-4-5",
       tool_profile: "CODING",
-      temperature: 0.3,
+
       timeout_seconds: 1800,
       memory_enabled: true,
       system_prompt: `You are Nela, a Frontend Engineer in the Engineering crew at Crewship HQ.
@@ -302,7 +301,7 @@ WORKFLOW:
       llm_provider: "ANTHROPIC",
       llm_model: "claude-haiku-4-5",
       tool_profile: "CODING",
-      temperature: 0.1,
+
       timeout_seconds: 2400,
       memory_enabled: true,
       system_prompt: `You are Martin, an Infrastructure Engineer in the Engineering crew at Crewship HQ.
@@ -352,7 +351,7 @@ WORKFLOW:
       llm_provider: "ANTHROPIC",
       llm_model: "claude-haiku-4-5",
       tool_profile: "FULL",
-      temperature: 0.4,
+
       timeout_seconds: 3600,
       memory_enabled: true,
       system_prompt: `You are Eva, the Quality Director and Lead of the Quality crew at Crewship HQ.
@@ -400,7 +399,7 @@ WORKFLOW:
       llm_provider: "ANTHROPIC",
       llm_model: "claude-haiku-4-5",
       tool_profile: "MINIMAL",
-      temperature: 0.3,
+
       timeout_seconds: 1800,
       memory_enabled: true,
       system_prompt: `You are Daniel, a Code Reviewer in the Quality crew at Crewship HQ.
@@ -443,7 +442,7 @@ CONVENTIONS:
       llm_provider: "ANTHROPIC",
       llm_model: "claude-haiku-4-5",
       tool_profile: "CODING",
-      temperature: 0.2,
+
       timeout_seconds: 2400,
       memory_enabled: true,
       system_prompt: `You are Petra, a Test Engineer in the Quality crew at Crewship HQ.
@@ -485,7 +484,7 @@ KEY TEST AREAS:
       llm_provider: "ANTHROPIC",
       llm_model: "claude-haiku-4-5",
       tool_profile: "MINIMAL",
-      temperature: 0.2,
+
       timeout_seconds: 2400,
       memory_enabled: true,
       system_prompt: `You are Jakub, a Security Analyst in the Quality crew at Crewship HQ.

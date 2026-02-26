@@ -1,12 +1,12 @@
 "use client"
 
-import { Users, Pencil } from "lucide-react"
+import { Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { getCrewIconUrl } from "@/lib/crew-icon"
 
 interface CrewHeaderProps {
   name: string
   slug: string
-  color: string | null
   icon: string | null
   description: string | null
   editing: boolean
@@ -17,34 +17,22 @@ interface CrewHeaderProps {
 export function CrewHeader({
   name,
   slug,
-  color,
   icon,
   description,
   editing,
   canEdit,
   onToggleEdit,
 }: CrewHeaderProps) {
-  const crewColor = color ?? "#6b7280"
-
   return (
-    <div style={{ "--crew-color": crewColor } as React.CSSProperties}>
+    <div>
       <div className="flex items-center gap-4">
-        <div
-          className="flex h-12 w-12 items-center justify-center rounded-lg text-xl shrink-0"
-          style={{ backgroundColor: `color-mix(in srgb, var(--crew-color) 12%, transparent)` }}
-        >
-          {icon ?? (
-            <Users className="h-6 w-6" style={{ color: "var(--crew-color)" }} />
-          )}
-        </div>
+        <img
+          src={getCrewIconUrl(icon || name)}
+          alt={name}
+          className="h-12 w-12 rounded-lg shrink-0"
+        />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold truncate">{name}</h1>
-            <span
-              className="h-3 w-3 rounded-full shrink-0"
-              style={{ backgroundColor: "var(--crew-color)" }}
-            />
-          </div>
+          <h1 className="text-xl font-semibold truncate">{name}</h1>
           <p className="text-sm text-muted-foreground font-mono">{slug}</p>
         </div>
         {canEdit && (

@@ -42,6 +42,7 @@ type Router struct {
 	keeperContainer  provider.ContainerProvider
 	keeperConfig     *config.KeeperConfig
 	keeperConvReader ConversationReader
+	allowSignup      bool
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -134,6 +135,12 @@ func WithKeeperConfig(cfg *config.KeeperConfig) RouterOption {
 
 // WithKeeperConversations attaches a conversation reader so Keeper can inspect
 // the agent's actual chat history before making access decisions.
+func WithAllowSignup(allow bool) RouterOption {
+	return func(r *Router) {
+		r.allowSignup = allow
+	}
+}
+
 func WithKeeperConversations(cr ConversationReader) RouterOption {
 	return func(r *Router) {
 		r.keeperConvReader = cr
@@ -191,12 +198,14 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/crews", authed(wsCtx(http.HandlerFunc(crews.Create))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Get))))
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Update))))
+	r.mux.Handle("PUT /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Update))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Delete))))
 
 	// Crew members
 	r.mux.Handle("GET /api/v1/crews/{crewId}/members", authed(wsCtx(http.HandlerFunc(crews.ListMembers))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/members", authed(wsCtx(http.HandlerFunc(crews.AddMember))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/members/{memberId}", authed(wsCtx(http.HandlerFunc(crews.RemoveMember))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/apply-avatar-style", authed(wsCtx(http.HandlerFunc(crews.ApplyAvatarStyle))))
 
 	// Missions
 	missions := NewMissionHandler(r.db, r.hub, r.logger)
@@ -234,8 +243,10 @@ func (r *Router) registerRoutes() {
 	// Credentials (require workspace context + manage role for create)
 	r.mux.Handle("GET /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.List))))
 	r.mux.Handle("POST /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.Create))))
+	r.mux.Handle("POST /api/v1/credentials/test", authed(http.HandlerFunc(creds.Test)))
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Get))))
 	r.mux.Handle("PATCH /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Update))))
+	r.mux.Handle("PUT /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Update))))
 	r.mux.Handle("DELETE /api/v1/credentials/{credentialId}", authed(wsCtx(http.HandlerFunc(creds.Delete))))
 
 	// Skills (require auth)
@@ -256,7 +267,8 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/onboarding/setup", authed(http.HandlerFunc(onboarding.Setup)))
 
 	// Auth (no auth required)
-	authH := NewAuthHandler(r.db, r.logger, r.authMw.validator)
+	authH := NewAuthHandler(r.db, r.logger, r.authMw.validator, r.allowSignup)
+	r.mux.HandleFunc("POST /api/v1/bootstrap", authH.Bootstrap)
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
 	r.mux.Handle("GET /api/v1/ws-token", authed(http.HandlerFunc(authH.WsToken)))
 
@@ -316,6 +328,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/internal/runs", internalAuth(http.HandlerFunc(internal.CreateRun)))
 	r.mux.Handle("PATCH /api/v1/internal/runs/{runId}", internalAuth(http.HandlerFunc(internal.UpdateRun)))
 	r.mux.Handle("PATCH /api/v1/internal/chats/{chatId}/message-count", internalAuth(http.HandlerFunc(internal.IncrementMessageCount)))
+	r.mux.Handle("PATCH /api/v1/internal/chats/{chatId}/title", internalAuth(http.HandlerFunc(internal.UpdateChatTitle)))
 
 	// Assignment routes (internal auth, called by sidecar on behalf of lead agents)
 	assign := NewAssignmentHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)

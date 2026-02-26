@@ -11,6 +11,8 @@ import {
   PanelRightClose,
   FileText,
   Download,
+  Settings2,
+  Wrench,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -124,8 +126,34 @@ function TurnRenderer({ turn, onCopy, onFileClick }: { turn: ChatTurn; onCopy: (
   }
 
   if (turn.role === "system") {
-    const content = turn.parts[0]?.content ?? ""
-    const isError = turn.parts[0]?.type === "error"
+    const part = turn.parts[0]
+    const content = part?.content ?? ""
+    const isError = part?.type === "error"
+    const isInit = part?.type === "system_init"
+
+    if (isInit) {
+      const meta = part?.metadata ?? {}
+      const model = meta.model as string | undefined
+      const tools = meta.tools as string[] | undefined
+      return (
+        <div className="flex items-center justify-center py-2">
+          <div className="flex items-center gap-3 px-4 py-2 bg-muted/40 border rounded-full text-xs text-muted-foreground">
+            <Settings2 className="h-3 w-3" />
+            <span>Session started</span>
+            {model && (
+              <span className="font-mono text-[10px] bg-background px-1.5 py-0.5 rounded border">{model}</span>
+            )}
+            {tools && tools.length > 0 && (
+              <span className="flex items-center gap-1">
+                <Wrench className="h-3 w-3" />
+                {tools.length} tools
+              </span>
+            )}
+          </div>
+        </div>
+      )
+    }
+
     return (
       <Message from="assistant">
         <MessageContent className={isError ? "border-destructive/50 bg-destructive/5 rounded-lg px-4 py-3" : ""}>

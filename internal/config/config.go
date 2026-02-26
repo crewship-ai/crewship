@@ -66,6 +66,7 @@ type AuthConfig struct {
 	WSTokenExpiry time.Duration `yaml:"ws_token_expiry"`
 	NextjsURL     string        `yaml:"nextjs_url"`
 	InternalToken string        `yaml:"internal_token"`
+	AllowSignup   bool          `yaml:"allow_signup"`
 }
 
 type LLMProxyConfig struct {
@@ -114,6 +115,7 @@ func Default() *Config {
 		Auth: AuthConfig{
 			WSTokenExpiry: 5 * time.Minute,
 			NextjsURL:     "http://localhost:8080",
+			AllowSignup:   true,
 		},
 		LLMProxy: LLMProxyConfig{
 			Enabled:             true,
@@ -266,6 +268,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_INTERNAL_TOKEN"); v != "" {
 		cfg.Auth.InternalToken = v
+	}
+	if v := os.Getenv("CREWSHIP_ALLOW_SIGNUP"); v != "" {
+		cfg.Auth.AllowSignup = v == "true" || v == "1"
 	}
 	if v := os.Getenv("KEEPER_ENABLED"); v != "" {
 		cfg.Keeper.Enabled = v == "true" || v == "1"

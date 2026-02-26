@@ -8,6 +8,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var credentialCmd = &cobra.Command{
@@ -95,6 +96,11 @@ var credCreateCmd = &cobra.Command{
 			return fmt.Errorf("--value or --value-stdin is required")
 		}
 
+		secLevel, _ := flags.GetInt("security-level")
+		if secLevel < 0 || secLevel > 3 {
+			return fmt.Errorf("--security-level must be between 0 and 3")
+		}
+
 		body := map[string]interface{}{
 			"name":  name,
 			"type":  credType,
@@ -106,8 +112,27 @@ var credCreateCmd = &cobra.Command{
 		if envVarName != "" {
 			body["env_var_name"] = envVarName
 		}
+		if secLevel >= 1 {
+			body["security_level"] = secLevel
+		}
 
 		client := newAPIClient()
+
+		valid, errMsg := testCredentialValue(client, provider, credType, value)
+		if valid {
+			cli.PrintSuccess("Key validated successfully")
+		} else {
+			msg := errMsg
+			if msg == "" {
+				msg = "key validation failed"
+			}
+			if !term.IsTerminal(int(os.Stdin.Fd())) {
+				cli.PrintWarning(fmt.Sprintf("Key validation failed: %s (non-interactive, skipping confirmation)", msg))
+			} else if !confirmInvalidKey(msg) {
+				return fmt.Errorf("aborted")
+			}
+		}
+
 		resp, err := client.Post("/api/v1/credentials", body)
 		if err != nil {
 			return err
@@ -130,7 +155,7 @@ var credCreateCmd = &cobra.Command{
 }
 
 var credGetCmd = &cobra.Command{
-	Use:   "get <id>",
+	Use:   "get <name-or-id>",
 	Short: "Show credential details (value is never displayed)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -142,7 +167,11 @@ var credGetCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/credentials/" + args[0])
+		credID, err := resolveCredentialID(client, args[0])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Get("/api/v1/credentials/" + credID)
 		if err != nil {
 			return err
 		}
@@ -179,7 +208,7 @@ var credGetCmd = &cobra.Command{
 }
 
 var credUpdateCmd = &cobra.Command{
-	Use:   "update <id>",
+	Use:   "update <name-or-id>",
 	Short: "Update a credential",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -187,6 +216,13 @@ var credUpdateCmd = &cobra.Command{
 			return err
 		}
 		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+
+		credID, err := resolveCredentialID(client, args[0])
+		if err != nil {
 			return err
 		}
 
@@ -207,13 +243,53 @@ var credUpdateCmd = &cobra.Command{
 				body["value"] = strings.TrimSpace(scanner.Text())
 			}
 		}
+		if flags.Changed("security-level") {
+			v, _ := flags.GetInt("security-level")
+			if v < 0 || v > 3 {
+				return fmt.Errorf("--security-level must be between 0 and 3")
+			}
+			body["security_level"] = v
+		}
 
 		if len(body) == 0 {
 			return fmt.Errorf("no fields to update")
 		}
 
-		client := newAPIClient()
-		resp, err := client.Patch("/api/v1/credentials/"+args[0], body)
+		if val, ok := body["value"]; ok {
+			if valStr, ok := val.(string); ok && valStr != "" {
+				metaResp, metaErr := client.Get("/api/v1/credentials/" + credID)
+				if metaErr != nil {
+					cli.PrintWarning("Could not fetch credential metadata for validation: " + metaErr.Error())
+				} else if err := cli.CheckError(metaResp); err != nil {
+					cli.PrintWarning("Could not fetch credential metadata for validation: " + err.Error())
+				} else {
+					var cred struct {
+						Type     string `json:"type"`
+						Provider string `json:"provider"`
+					}
+					if err := cli.ReadJSON(metaResp, &cred); err != nil {
+						cli.PrintWarning("Could not parse credential metadata, skipping validation: " + err.Error())
+					} else {
+						valid, errMsg := testCredentialValue(client, cred.Provider, cred.Type, valStr)
+						if valid {
+							cli.PrintSuccess("Key validated successfully")
+						} else {
+							msg := errMsg
+							if msg == "" {
+								msg = "key validation failed"
+							}
+							if !term.IsTerminal(int(os.Stdin.Fd())) {
+								cli.PrintWarning(fmt.Sprintf("Key validation failed: %s (non-interactive, skipping confirmation)", msg))
+							} else if !confirmInvalidKey(msg) {
+								return fmt.Errorf("aborted")
+							}
+						}
+					}
+				}
+			}
+		}
+
+		resp, err := client.Patch("/api/v1/credentials/"+credID, body)
 		if err != nil {
 			return err
 		}
@@ -228,7 +304,7 @@ var credUpdateCmd = &cobra.Command{
 }
 
 var credDeleteCmd = &cobra.Command{
-	Use:   "delete <id>",
+	Use:   "delete <name-or-id>",
 	Short: "Delete a credential",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -243,7 +319,11 @@ var credDeleteCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		resp, err := client.Delete("/api/v1/credentials/" + args[0])
+		credID, err := resolveCredentialID(client, args[0])
+		if err != nil {
+			return err
+		}
+		resp, err := client.Delete("/api/v1/credentials/" + credID)
 		if err != nil {
 			return err
 		}
@@ -258,7 +338,7 @@ var credDeleteCmd = &cobra.Command{
 }
 
 var credAssignCmd = &cobra.Command{
-	Use:   "assign <credential-id> <agent-slug>",
+	Use:   "assign <name-or-id> <agent-slug>",
 	Short: "Assign a credential to an agent",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -270,6 +350,10 @@ var credAssignCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
+		credID, err := resolveCredentialID(client, args[0])
+		if err != nil {
+			return err
+		}
 		agentID, err := resolveAgentID(client, args[1])
 		if err != nil {
 			return err
@@ -282,7 +366,7 @@ var credAssignCmd = &cobra.Command{
 		priority, _ := cmd.Flags().GetInt("priority")
 
 		body := map[string]interface{}{
-			"credential_id": args[0],
+			"credential_id": credID,
 			"env_var_name":  envVarName,
 		}
 		if priority > 0 {
@@ -304,7 +388,7 @@ var credAssignCmd = &cobra.Command{
 }
 
 var credUnassignCmd = &cobra.Command{
-	Use:   "unassign <credential-id> <agent-slug>",
+	Use:   "unassign <name-or-id> <agent-slug>",
 	Short: "Remove a credential from an agent",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -316,6 +400,10 @@ var credUnassignCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
+		credID, err := resolveCredentialID(client, args[0])
+		if err != nil {
+			return err
+		}
 		agentID, err := resolveAgentID(client, args[1])
 		if err != nil {
 			return err
@@ -338,7 +426,7 @@ var credUnassignCmd = &cobra.Command{
 		}
 		var assignmentID string
 		for _, a := range assignments {
-			if a.CredentialID == args[0] {
+			if a.CredentialID == credID {
 				assignmentID = a.ID
 				break
 			}
@@ -361,6 +449,82 @@ var credUnassignCmd = &cobra.Command{
 	},
 }
 
+func resolveCredentialID(client *cli.Client, nameOrID string) (string, error) {
+	if looksLikeCUID(nameOrID) {
+		return nameOrID, nil
+	}
+
+	resp, err := client.Get("/api/v1/credentials")
+	if err != nil {
+		return "", fmt.Errorf("resolve credential: %w", err)
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return "", err
+	}
+
+	var creds []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := cli.ReadJSON(resp, &creds); err != nil {
+		return "", err
+	}
+
+	for _, c := range creds {
+		if c.Name == nameOrID {
+			return c.ID, nil
+		}
+	}
+	return "", fmt.Errorf("credential %q not found", nameOrID)
+}
+
+// testCredentialValue validates a credential value against the provider API.
+// Returns (valid, errorMessage). Skips test for SECRET type, NONE provider,
+// and OAuth tokens (sk-ant-oat*) which cannot be validated via API.
+func testCredentialValue(client *cli.Client, provider, credType, value string) (bool, string) {
+	if credType == "SECRET" || provider == "" || provider == "NONE" {
+		return true, ""
+	}
+	if strings.HasPrefix(value, "sk-ant-oat") {
+		return true, ""
+	}
+
+	body := map[string]interface{}{
+		"provider": provider,
+		"type":     credType,
+		"value":    value,
+	}
+	resp, err := client.Post("/api/v1/credentials/test", body)
+	if err != nil {
+		return false, "test request failed: " + err.Error()
+	}
+	defer resp.Body.Close()
+	if err := cli.CheckError(resp); err != nil {
+		return false, "test request failed: " + err.Error()
+	}
+
+	var result struct {
+		Valid bool   `json:"valid"`
+		Error string `json:"error"`
+	}
+	if err := cli.ReadJSON(resp, &result); err != nil {
+		return false, "failed to read test result"
+	}
+	return result.Valid, result.Error
+}
+
+// confirmInvalidKey prompts the user to confirm saving an invalid credential.
+func confirmInvalidKey(errMsg string) bool {
+	cli.PrintWarning(fmt.Sprintf("Key validation failed: %s", errMsg))
+	fmt.Print("Save anyway? [y/N] ")
+	scanner := bufio.NewScanner(os.Stdin)
+	if scanner.Scan() {
+		answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+		return answer == "y" || answer == "yes"
+	}
+	return false
+}
+
 func init() {
 	credCreateCmd.Flags().String("name", "", "Credential name (required)")
 	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN (required)")
@@ -368,10 +532,12 @@ func init() {
 	credCreateCmd.Flags().String("value", "", "Credential value (visible in process list, prefer --value-stdin)")
 	credCreateCmd.Flags().Bool("value-stdin", false, "Read value from stdin (secure)")
 	credCreateCmd.Flags().String("env-var-name", "", "Environment variable name")
+	credCreateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
 
 	credUpdateCmd.Flags().String("name", "", "Credential name")
 	credUpdateCmd.Flags().String("value", "", "New value")
 	credUpdateCmd.Flags().Bool("value-stdin", false, "Read value from stdin")
+	credUpdateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
 
 	credAssignCmd.Flags().String("env-var-name", "", "Environment variable name override")
 	credAssignCmd.Flags().Int("priority", 0, "Priority (1-10)")
