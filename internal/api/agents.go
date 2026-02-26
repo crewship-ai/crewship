@@ -307,6 +307,8 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		LLMProvider:    req.LLMProvider,
 		LLMModel:       req.LLMModel,
 		SystemPrompt:   req.SystemPrompt,
+		AvatarSeed:     req.AvatarSeed,
+		AvatarStyle:    req.AvatarStyle,
 		TimeoutSeconds: req.TimeoutSeconds,
 		ToolProfile:    req.ToolProfile,
 		MemoryEnabled:  req.MemoryEnabled,
