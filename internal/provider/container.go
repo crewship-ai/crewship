@@ -39,3 +39,11 @@ type ContainerProvider interface {
 	Exec(ctx context.Context, cfg ExecConfig) (*ExecResult, error)
 	ExecInspect(ctx context.Context, execID string) (bool, int, error)
 }
+
+// HostAddressProvider is an optional interface that container providers can
+// implement to advertise the hostname/IP that containers should use to reach
+// the host machine. Docker uses "host.docker.internal"; Apple Containers use
+// the host's actual IP since each container runs in its own VM.
+type HostAddressProvider interface {
+	HostAddress() string
+}

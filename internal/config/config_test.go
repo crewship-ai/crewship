@@ -159,6 +159,22 @@ func TestValidationInvalidContainerProvider(t *testing.T) {
 	}
 }
 
+func TestValidationAppleContainerProvider(t *testing.T) {
+	cfg := Default()
+	cfg.Container.Provider = "apple"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected apple provider to be valid, got: %v", err)
+	}
+}
+
+func TestValidationAutoContainerProvider(t *testing.T) {
+	cfg := Default()
+	cfg.Container.Provider = "auto"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected auto provider to be valid, got: %v", err)
+	}
+}
+
 func TestValidationInvalidStorageProvider(t *testing.T) {
 	cfg := Default()
 	cfg.Storage.Provider = "invalid"

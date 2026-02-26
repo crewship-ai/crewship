@@ -93,9 +93,17 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	}
 
 	// Wire IPC config so lead agents can reach crewshipd for assignment routing.
-	// host.docker.internal resolves to the Docker host from inside containers.
+	// The host address depends on the container provider:
+	//   Docker: host.docker.internal (injected via ExtraHosts)
+	//   Apple:  actual host IP (containers run in their own VMs)
 	if cfg.Auth.InternalToken != "" {
-		ipcBase := fmt.Sprintf("http://host.docker.internal:%d", cfg.Server.Port)
+		hostAddr := "host.docker.internal" // default for Docker
+		if ctr != nil {
+			if hap, ok := ctr.(provider.HostAddressProvider); ok {
+				hostAddr = hap.HostAddress()
+			}
+		}
+		ipcBase := fmt.Sprintf("http://%s:%d", hostAddr, cfg.Server.Port)
 		orch.SetIPCConfig(ipcBase, cfg.Auth.InternalToken)
 		logger.Info("orchestrator IPC config set", "base_url", ipcBase)
 	}

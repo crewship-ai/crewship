@@ -531,6 +531,12 @@ func (p *Provider) ExecInspect(ctx context.Context, execID string) (bool, int, e
 	return resp.Running, resp.ExitCode, nil
 }
 
+// HostAddress returns the hostname that containers should use to reach the host.
+// Docker injects "host.docker.internal" via ExtraHosts in container creation.
+func (p *Provider) HostAddress() string {
+	return "host.docker.internal"
+}
+
 // Close releases the Docker API client connection.
 func (p *Provider) Close() error {
 	return p.client.Close()
