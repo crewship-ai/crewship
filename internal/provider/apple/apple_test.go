@@ -60,13 +60,14 @@ func TestNewRequiresAppleRuntime(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := New(ctx, Config{
+	p, err := New(ctx, Config{
 		RuntimeImage: "test:latest",
 		Network:      "test-net",
 	}, nil)
 	if err != nil {
 		t.Skipf("Apple Container runtime not available, skipping: %v", err)
 	}
+	defer p.Close()
 }
 
 func TestConfigDefaults(t *testing.T) {
