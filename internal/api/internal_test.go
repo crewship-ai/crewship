@@ -536,7 +536,9 @@ func TestCreateRun_UpdatesAgentStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert agent: %v", err)
 	}
-	db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('c1', 'a1', ?, 'CHAT', 'ACTIVE')`, wsID)
+	if _, err := db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('c1', 'a1', ?, 'CHAT', 'ACTIVE')`, wsID); err != nil {
+		t.Fatalf("insert chat: %v", err)
+	}
 
 	handler := NewInternalHandler(db, "test-token", logger)
 	// Hub is nil — broadcasts are skipped, but DB updates still happen
@@ -551,7 +553,9 @@ func TestCreateRun_UpdatesAgentStatus(t *testing.T) {
 
 	// Verify agent status was updated to RUNNING
 	var status string
-	db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status)
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
 	if status != "RUNNING" {
 		t.Errorf("agent status = %q, want RUNNING", status)
 	}
@@ -593,14 +597,18 @@ func TestUpdateRun_UpdatesAgentStatusOnCompletion(t *testing.T) {
 
 	// Verify agent status was updated to IDLE
 	var status string
-	db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status)
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
 	if status != "IDLE" {
 		t.Errorf("agent status = %q, want IDLE", status)
 	}
 
 	// Verify run was marked completed
 	var runStatus string
-	db.QueryRow("SELECT status FROM agent_runs WHERE id = 'run1'").Scan(&runStatus)
+	if err := db.QueryRow("SELECT status FROM agent_runs WHERE id = 'run1'").Scan(&runStatus); err != nil {
+		t.Fatalf("query run status: %v", err)
+	}
 	if runStatus != "COMPLETED" {
 		t.Errorf("run status = %q, want COMPLETED", runStatus)
 	}
@@ -641,7 +649,9 @@ func TestUpdateRun_FailedSetsAgentError(t *testing.T) {
 
 	// Verify agent status was set to ERROR on failure
 	var status string
-	db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status)
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
 	if status != "ERROR" {
 		t.Errorf("agent status = %q, want ERROR", status)
 	}
@@ -687,7 +697,9 @@ func TestUpdateRun_StaysRunningIfOtherRunActive(t *testing.T) {
 
 	// Agent should stay RUNNING since run2 is still active
 	var status string
-	db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status)
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
 	if status != "RUNNING" {
 		t.Errorf("agent status = %q, want RUNNING (other run still active)", status)
 	}
@@ -731,7 +743,9 @@ func TestUpdateRun_FailedStaysRunningIfOtherRunActive(t *testing.T) {
 	}
 
 	var status string
-	db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status)
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
 	if status != "RUNNING" {
 		t.Errorf("agent status = %q, want RUNNING (other run still active despite failure)", status)
 	}
@@ -771,13 +785,17 @@ func TestUpdateRun_CancelledSetsAgentIdle(t *testing.T) {
 	}
 
 	var status string
-	db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status)
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
 	if status != "IDLE" {
 		t.Errorf("agent status = %q, want IDLE", status)
 	}
 
 	var runStatus string
-	db.QueryRow("SELECT status FROM agent_runs WHERE id = 'run1'").Scan(&runStatus)
+	if err := db.QueryRow("SELECT status FROM agent_runs WHERE id = 'run1'").Scan(&runStatus); err != nil {
+		t.Fatalf("query run status: %v", err)
+	}
 	if runStatus != "CANCELLED" {
 		t.Errorf("run status = %q, want CANCELLED", runStatus)
 	}

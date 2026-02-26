@@ -734,12 +734,14 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 			if body.Status == "FAILED" {
 				failedStatus = "ERROR"
 			}
-			h.db.ExecContext(r.Context(), `
+			if _, err := h.db.ExecContext(r.Context(), `
 				UPDATE agents SET status = CASE
 					WHEN (SELECT COUNT(*) FROM agent_runs WHERE agent_id = ? AND status = 'RUNNING' AND id != ?) > 0 THEN 'RUNNING'
 					ELSE ?
 				END, updated_at = ? WHERE id = ?`,
-				agentID, runID, failedStatus, now, agentID)
+				agentID, runID, failedStatus, now, agentID); err != nil {
+				h.logger.Debug("update agent status on run completion", "error", err, "agent_id", agentID)
+			}
 
 			// Read back for broadcast
 			agentStatus := failedStatus

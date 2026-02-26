@@ -338,6 +338,8 @@ func (p *Provider) findContainer(ctx context.Context, name string) (*containerLi
 		return nil, fmt.Errorf("parse container list: %w", err)
 	}
 
+	// In Apple Containers, configuration.id IS the container name (set via --name on create).
+	// There is no separate "name" field in the CLI output.
 	for _, c := range containers {
 		if c.Configuration.ID == name {
 			return &c, nil
