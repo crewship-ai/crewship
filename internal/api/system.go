@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 )
 
@@ -22,6 +23,7 @@ var installLinks = map[string]string{
 	"podman":   "https://podman.io/docs/installation",
 	"colima":   "https://github.com/abiosoft/colima",
 	"orbstack": "https://orbstack.dev/",
+	"apple":    "https://github.com/apple/container",
 }
 
 // Runtime probes for a Docker-compatible container runtime and returns its status.
@@ -37,23 +39,49 @@ func (h *SystemHandler) Runtime(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	result, err := docker.Detect(ctx)
-	if err != nil {
-		h.logger.Debug("container runtime not found", "error", err)
+	// Build list of all available runtimes
+	var runtimes []map[string]interface{}
+
+	// Check Docker-compatible runtimes
+	dockerResult, dockerErr := docker.Detect(ctx)
+	if dockerErr == nil {
+		runtimes = append(runtimes, map[string]interface{}{
+			"runtime": dockerResult.Runtime,
+			"version": dockerResult.Version,
+			"socket":  dockerResult.Socket,
+		})
+	}
+
+	// Check Apple Containers
+	appleResult, appleErr := apple.Detect(ctx)
+	if appleErr == nil {
+		runtimes = append(runtimes, map[string]interface{}{
+			"runtime": "apple",
+			"version": appleResult.Version,
+			"socket":  "",
+		})
+	}
+
+	if len(runtimes) == 0 {
+		h.logger.Debug("no container runtime found", "docker_error", dockerErr, "apple_error", appleErr)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"available":     false,
 			"runtime":       nil,
 			"version":       nil,
 			"socket":        nil,
+			"runtimes":      []interface{}{},
 			"install_links": installLinks,
 		})
 		return
 	}
 
+	// Primary runtime is the first detected one
+	primary := runtimes[0]
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"available": true,
-		"runtime":   result.Runtime,
-		"version":   result.Version,
-		"socket":    result.Socket,
+		"runtime":   primary["runtime"],
+		"version":   primary["version"],
+		"socket":    primary["socket"],
+		"runtimes":  runtimes,
 	})
 }

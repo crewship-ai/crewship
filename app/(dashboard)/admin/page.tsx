@@ -180,6 +180,7 @@ export default function AdminPage() {
 
   const [runtimeAvailable, setRuntimeAvailable] = useState<boolean | null>(null)
   const [runtimeInfo, setRuntimeInfo] = useState<{ runtime: string; version: string; socket: string } | null>(null)
+  const [allRuntimes, setAllRuntimes] = useState<{ runtime: string; version: string; socket: string }[]>([])
   const [runtimeInstallLinks, setRuntimeInstallLinks] = useState<Record<string, string>>({})
   const [runtimeChecking, setRuntimeChecking] = useState(false)
 
@@ -204,8 +205,10 @@ export default function AdminPage() {
       setRuntimeAvailable(data.available)
       if (data.available) {
         setRuntimeInfo({ runtime: data.runtime, version: data.version, socket: data.socket })
+        setAllRuntimes(data.runtimes ?? [])
       } else {
         setRuntimeInstallLinks(data.install_links ?? {})
+        setAllRuntimes([])
       }
     } catch {
       setRuntimeAvailable(false)
@@ -373,7 +376,7 @@ export default function AdminPage() {
                     name: "Container Runtime",
                     status: runtimeAvailable === true,
                     desc: runtimeAvailable === null ? "Checking..."
-                      : runtimeAvailable ? `${runtimeInfo?.runtime ?? "Unknown"} ${runtimeInfo?.version ?? ""}`
+                      : runtimeAvailable ? `${runtimeInfo?.runtime === "apple" ? "Apple Containers" : (runtimeInfo?.runtime ?? "Unknown").charAt(0).toUpperCase() + (runtimeInfo?.runtime ?? "").slice(1)} ${runtimeInfo?.version ?? ""}`
                       : "Not detected",
                   },
                 ].map((s) => (
@@ -508,18 +511,20 @@ export default function AdminPage() {
 
               {!runtimeChecking && runtimeAvailable && runtimeInfo && (
                 <div className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-                    <div>
-                      <div className="text-sm font-medium">
-                        {runtimeInfo.runtime.charAt(0).toUpperCase() + runtimeInfo.runtime.slice(1)} {runtimeInfo.version}
+                  {(allRuntimes.length > 0 ? allRuntimes : [runtimeInfo]).map((rt, i) => (
+                    <div key={rt.runtime + i} className="flex items-center gap-3">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                      <div>
+                        <div className="text-sm font-medium">
+                          {rt.runtime === "apple" ? "Apple Containers" : rt.runtime.charAt(0).toUpperCase() + rt.runtime.slice(1)} {rt.version}
+                        </div>
+                        {rt.socket && <p className="text-xs text-muted-foreground font-mono">{rt.socket}</p>}
                       </div>
-                      <p className="text-xs text-muted-foreground font-mono">{runtimeInfo.socket}</p>
+                      <Badge variant="outline" className={cn("ml-auto", i === 0 ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-600 border-slate-200")}>
+                        {i === 0 ? "Active" : "Available"}
+                      </Badge>
                     </div>
-                    <Badge variant="outline" className="ml-auto bg-emerald-50 text-emerald-700 border-emerald-200">
-                      Connected
-                    </Badge>
-                  </div>
+                  ))}
                 </div>
               )}
 
@@ -530,7 +535,7 @@ export default function AdminPage() {
                     <div>
                       <div className="text-sm font-medium text-amber-700">No runtime detected</div>
                       <p className="text-xs text-muted-foreground">
-                        Install a Docker-compatible runtime to enable agent containers.
+                        Install a container runtime to enable agent containers.
                       </p>
                     </div>
                   </div>

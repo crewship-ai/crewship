@@ -344,6 +344,7 @@ const RUNTIME_LABELS: Record<string, string> = {
   colima: "Colima",
   orbstack: "OrbStack",
   rancher: "Rancher Desktop",
+  apple: "Apple Containers",
   nerdctl: "nerdctl",
 }
 
@@ -369,7 +370,7 @@ function StepSystemCheck({
       <div className="space-y-1">
         <h2 className="text-lg font-semibold">System Check</h2>
         <p className="text-sm text-muted-foreground">
-          Crewship runs AI agents in isolated containers. A Docker-compatible runtime is required.
+          Crewship runs AI agents in isolated containers. A container runtime is required.
         </p>
       </div>
 

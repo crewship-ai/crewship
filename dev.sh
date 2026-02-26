@@ -215,10 +215,19 @@ start_go() {
     set -a && . ./.env.local && set +a
     export CREWSHIP_LOG_LEVEL=debug
     # Auto-detect container runtime; fall back to --no-docker if none found
-    # Use $TIMEOUT_CMD to avoid hanging when Docker Desktop is not running
+    # Supports Docker, Podman, and Apple Containers (macOS 26+)
+    export CREWSHIP_CONTAINER_PROVIDER="${CREWSHIP_CONTAINER_PROVIDER:-auto}"
+    local has_runtime=false
     if [[ -n "$TIMEOUT_CMD" ]] && { "$TIMEOUT_CMD" 3 docker info &>/dev/null || "$TIMEOUT_CMD" 3 podman info &>/dev/null; }; then
-      exec "$binary" start
-    elif [[ -z "$TIMEOUT_CMD" ]] && { docker info &>/dev/null 2>&1; }; then
+      has_runtime=true
+    elif [[ -z "$TIMEOUT_CMD" ]] && { docker info &>/dev/null 2>&1 || podman info &>/dev/null 2>&1; }; then
+      has_runtime=true
+    fi
+    # Check Apple Containers CLI (macOS 26+)
+    if ! $has_runtime && command -v container &>/dev/null && container system status &>/dev/null 2>&1; then
+      has_runtime=true
+    fi
+    if $has_runtime; then
       exec "$binary" start
     else
       exec "$binary" start --no-docker
