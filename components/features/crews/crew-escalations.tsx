@@ -66,8 +66,9 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  const fetchEscalations = useCallback(async (showRefresh = false) => {
-    if (showRefresh) setRefreshing(true)
+  const fetchEscalations = useCallback(async (showRefresh = false, silent = false) => {
+    if (silent) { /* no loading state change */ }
+    else if (showRefresh) setRefreshing(true)
     else setLoading(true)
     try {
       const res = await fetch(
@@ -93,7 +94,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   }, [fetchEscalations])
 
   // Real-time: refetch when escalations are created
-  useRealtimeEvent("escalation.created", useCallback(() => { fetchEscalations() }, [fetchEscalations]))
+  useRealtimeEvent("escalation.created", useCallback(() => { fetchEscalations(false, true) }, [fetchEscalations]))
 
   if (loading) {
     return (

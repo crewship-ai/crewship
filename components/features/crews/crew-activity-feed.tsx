@@ -70,8 +70,9 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  const fetchActivity = useCallback(async (showRefresh = false) => {
-    if (showRefresh) setRefreshing(true)
+  const fetchActivity = useCallback(async (showRefresh = false, silent = false) => {
+    if (silent) { /* no loading state change */ }
+    else if (showRefresh) setRefreshing(true)
     else setLoading(true)
     try {
       const res = await fetch(
@@ -97,8 +98,8 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
   }, [fetchActivity])
 
   // Real-time: refetch when assignment or escalation events arrive
-  useRealtimeEvent("assignment.updated", useCallback(() => { fetchActivity() }, [fetchActivity]))
-  useRealtimeEvent("escalation.created", useCallback(() => { fetchActivity() }, [fetchActivity]))
+  useRealtimeEvent("assignment.updated", useCallback(() => { fetchActivity(false, true) }, [fetchActivity]))
+  useRealtimeEvent("escalation.created", useCallback(() => { fetchActivity(false, true) }, [fetchActivity]))
 
   if (loading) {
     return (

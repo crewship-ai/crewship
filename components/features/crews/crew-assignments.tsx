@@ -90,8 +90,9 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  const fetchAssignments = useCallback(async (showRefresh = false) => {
-    if (showRefresh) setRefreshing(true)
+  const fetchAssignments = useCallback(async (showRefresh = false, silent = false) => {
+    if (silent) { /* no loading state change */ }
+    else if (showRefresh) setRefreshing(true)
     else setLoading(true)
     try {
       const res = await fetch(
@@ -114,7 +115,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
   }, [fetchAssignments])
 
   // Real-time: refetch when assignment status changes
-  useRealtimeEvent("assignment.updated", useCallback(() => { fetchAssignments() }, [fetchAssignments]))
+  useRealtimeEvent("assignment.updated", useCallback(() => { fetchAssignments(false, true) }, [fetchAssignments]))
 
   if (loading) {
     return (

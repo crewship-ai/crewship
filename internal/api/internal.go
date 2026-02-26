@@ -725,25 +725,21 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 				Type: eventType, Channel: channel, Payload: payload,
 			})
 
-			// Update agent status back to IDLE (or ERROR for failed runs)
+			// Update agent status: check if other runs are still active first
+			var otherRunning int
+			h.db.QueryRowContext(r.Context(),
+				"SELECT COUNT(*) FROM agent_runs WHERE agent_id = ? AND status = 'RUNNING' AND id != ?",
+				agentID, runID).Scan(&otherRunning)
+
 			agentStatus := "IDLE"
-			if body.Status == "FAILED" {
+			if otherRunning > 0 {
+				agentStatus = "RUNNING"
+			} else if body.Status == "FAILED" {
 				agentStatus = "ERROR"
-			}
-			now2 := time.Now().UTC().Format(time.RFC3339)
-			// Only set IDLE if no other runs are still RUNNING for this agent
-			if agentStatus == "IDLE" {
-				var otherRunning int
-				h.db.QueryRowContext(r.Context(),
-					"SELECT COUNT(*) FROM agent_runs WHERE agent_id = ? AND status = 'RUNNING' AND id != ?",
-					agentID, runID).Scan(&otherRunning)
-				if otherRunning > 0 {
-					agentStatus = "RUNNING"
-				}
 			}
 			h.db.ExecContext(r.Context(),
 				"UPDATE agents SET status = ?, updated_at = ? WHERE id = ?",
-				agentStatus, now2, agentID)
+				agentStatus, now, agentID)
 
 			h.hub.Broadcast(channel, ws.ServerMessage{
 				Type:    "agent.status",
