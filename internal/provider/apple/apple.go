@@ -116,6 +116,8 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 // HostAddress returns the IP address that containers should use to reach the host.
 // Apple Containers run in dedicated VMs so they need the host's actual IP.
 func (p *Provider) HostAddress() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.hostIP
 }
 
@@ -314,9 +316,11 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	if err == nil && info.Configuration.ID != "" {
 		containerID = info.Configuration.ID
 		// Discover host IP from gateway if not already known
+		p.mu.Lock()
 		if p.hostIP == "" && len(info.Networks) > 0 && info.Networks[0].IPv4Gateway != "" {
 			p.hostIP = info.Networks[0].IPv4Gateway
 		}
+		p.mu.Unlock()
 	}
 
 	p.logger.Info("crew container started",

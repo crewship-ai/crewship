@@ -708,10 +708,12 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	if h.hub != nil && terminal[body.Status] {
 		var agentID, workspaceID string
 		var agentName sql.NullString
-		h.db.QueryRowContext(r.Context(),
+		if err := h.db.QueryRowContext(r.Context(),
 			`SELECT r.agent_id, r.workspace_id, a.name FROM agent_runs r
 			 LEFT JOIN agents a ON a.id = r.agent_id WHERE r.id = ?`, runID,
-		).Scan(&agentID, &workspaceID, &agentName)
+		).Scan(&agentID, &workspaceID, &agentName); err != nil {
+			h.logger.Debug("fetch run details for broadcast", "error", err, "run_id", runID)
+		}
 
 		if workspaceID != "" {
 			channel := "workspace:" + workspaceID
