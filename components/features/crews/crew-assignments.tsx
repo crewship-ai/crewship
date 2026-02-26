@@ -91,9 +91,10 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const fetchAssignments = useCallback(async (showRefresh = false, silent = false) => {
-    if (silent) { /* no loading state change */ }
-    else if (showRefresh) setRefreshing(true)
-    else setLoading(true)
+    if (!silent) {
+      if (showRefresh) setRefreshing(true)
+      else setLoading(true)
+    }
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/assignments?workspace_id=${workspaceId}&limit=50`
@@ -105,8 +106,10 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
     } catch {
       // Silently fail — component shows empty state
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (!silent) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [crewId, workspaceId])
 

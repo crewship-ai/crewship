@@ -661,10 +661,14 @@ func TestUpdateRun_StaysRunningIfOtherRunActive(t *testing.T) {
 
 	now := "2026-01-01T00:00:00Z"
 	// Two running runs for the same agent
-	db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now)
-	db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES ('run2', 'a1', ?, 'ASSIGNMENT', 'RUNNING', ?, ?)`, wsID, now, now)
+	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
+		t.Fatalf("insert run1: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES ('run2', 'a1', ?, 'ASSIGNMENT', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
+		t.Fatalf("insert run2: %v", err)
+	}
 
 	handler := NewInternalHandler(db, "test-token", logger)
 	hub := ws.NewHub(logger, nil)
@@ -702,10 +706,14 @@ func TestUpdateRun_FailedStaysRunningIfOtherRunActive(t *testing.T) {
 	}
 
 	now := "2026-01-01T00:00:00Z"
-	db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now)
-	db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
-		VALUES ('run2', 'a1', ?, 'ASSIGNMENT', 'RUNNING', ?, ?)`, wsID, now, now)
+	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
+		t.Fatalf("insert run1: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES ('run2', 'a1', ?, 'ASSIGNMENT', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
+		t.Fatalf("insert run2: %v", err)
+	}
 
 	handler := NewInternalHandler(db, "test-token", logger)
 	hub := ws.NewHub(logger, nil)

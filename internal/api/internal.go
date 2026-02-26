@@ -615,13 +615,17 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update agent status to RUNNING
-	h.db.ExecContext(r.Context(),
-		"UPDATE agents SET status = 'RUNNING', updated_at = ? WHERE id = ?", now, body.AgentID)
+	if _, err := h.db.ExecContext(r.Context(),
+		"UPDATE agents SET status = 'RUNNING', updated_at = ? WHERE id = ?", now, body.AgentID); err != nil {
+		h.logger.Debug("update agent status on run create", "error", err, "agent_id", body.AgentID)
+	}
 
 	// Broadcast real-time events
 	if h.hub != nil {
 		var agentName string
-		h.db.QueryRowContext(r.Context(), "SELECT name FROM agents WHERE id = ?", body.AgentID).Scan(&agentName)
+		if err := h.db.QueryRowContext(r.Context(), "SELECT name FROM agents WHERE id = ?", body.AgentID).Scan(&agentName); err != nil {
+			h.logger.Debug("fetch agent name for broadcast", "error", err, "agent_id", body.AgentID)
+		}
 
 		channel := "workspace:" + body.WorkspaceID
 		h.hub.Broadcast(channel, ws.ServerMessage{
@@ -725,21 +729,24 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 				Type: eventType, Channel: channel, Payload: payload,
 			})
 
-			// Update agent status: check if other runs are still active first
-			var otherRunning int
-			h.db.QueryRowContext(r.Context(),
-				"SELECT COUNT(*) FROM agent_runs WHERE agent_id = ? AND status = 'RUNNING' AND id != ?",
-				agentID, runID).Scan(&otherRunning)
-
-			agentStatus := "IDLE"
-			if otherRunning > 0 {
-				agentStatus = "RUNNING"
-			} else if body.Status == "FAILED" {
-				agentStatus = "ERROR"
+			// Atomic agent status update: single query avoids race between concurrent completions
+			failedStatus := "IDLE"
+			if body.Status == "FAILED" {
+				failedStatus = "ERROR"
 			}
-			h.db.ExecContext(r.Context(),
-				"UPDATE agents SET status = ?, updated_at = ? WHERE id = ?",
-				agentStatus, now, agentID)
+			h.db.ExecContext(r.Context(), `
+				UPDATE agents SET status = CASE
+					WHEN (SELECT COUNT(*) FROM agent_runs WHERE agent_id = ? AND status = 'RUNNING' AND id != ?) > 0 THEN 'RUNNING'
+					ELSE ?
+				END, updated_at = ? WHERE id = ?`,
+				agentID, runID, failedStatus, now, agentID)
+
+			// Read back for broadcast
+			agentStatus := failedStatus
+			var readBack string
+			if err := h.db.QueryRowContext(r.Context(), "SELECT status FROM agents WHERE id = ?", agentID).Scan(&readBack); err == nil {
+				agentStatus = readBack
+			}
 
 			h.hub.Broadcast(channel, ws.ServerMessage{
 				Type:    "agent.status",
