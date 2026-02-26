@@ -519,12 +519,12 @@ func init() {
 	credCreateCmd.Flags().String("value", "", "Credential value (visible in process list, prefer --value-stdin)")
 	credCreateCmd.Flags().Bool("value-stdin", false, "Read value from stdin (secure)")
 	credCreateCmd.Flags().String("env-var-name", "", "Environment variable name")
-	credCreateCmd.Flags().Int("security-level", 0, "Keeper security level: 1 (low), 2 (medium), 3 (sensitive)")
+	credCreateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
 
 	credUpdateCmd.Flags().String("name", "", "Credential name")
 	credUpdateCmd.Flags().String("value", "", "New value")
 	credUpdateCmd.Flags().Bool("value-stdin", false, "Read value from stdin")
-	credUpdateCmd.Flags().Int("security-level", 0, "Keeper security level: 1 (low), 2 (medium), 3 (sensitive)")
+	credUpdateCmd.Flags().Int("security-level", 0, "Keeper security level: 0 (none), 1 (low), 2 (medium), 3 (sensitive)")
 
 	credAssignCmd.Flags().String("env-var-name", "", "Environment variable name override")
 	credAssignCmd.Flags().Int("priority", 0, "Priority (1-10)")
