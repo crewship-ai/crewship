@@ -97,6 +97,9 @@ var credCreateCmd = &cobra.Command{
 		}
 
 		secLevel, _ := flags.GetInt("security-level")
+		if secLevel < 0 || secLevel > 3 {
+			return fmt.Errorf("--security-level must be between 0 and 3")
+		}
 
 		body := map[string]interface{}{
 			"name":  name,
@@ -109,7 +112,7 @@ var credCreateCmd = &cobra.Command{
 		if envVarName != "" {
 			body["env_var_name"] = envVarName
 		}
-		if secLevel >= 1 && secLevel <= 3 {
+		if secLevel >= 1 {
 			body["security_level"] = secLevel
 		}
 
@@ -260,7 +263,9 @@ var credUpdateCmd = &cobra.Command{
 						Type     string `json:"type"`
 						Provider string `json:"provider"`
 					}
-					if cli.ReadJSON(metaResp, &cred) == nil {
+					if err := cli.ReadJSON(metaResp, &cred); err != nil {
+						cli.PrintWarning("Could not parse credential metadata, skipping validation: " + err.Error())
+					} else {
 						valid, errMsg := testCredentialValue(client, cred.Provider, cred.Type, valStr)
 						if valid {
 							cli.PrintSuccess("Key validated successfully")

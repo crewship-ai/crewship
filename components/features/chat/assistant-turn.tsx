@@ -26,10 +26,10 @@ interface AssistantTurnProps {
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`
-  const secs = ms / 1000
-  if (secs < 60) return `${secs.toFixed(1)}s`
-  const mins = Math.floor(secs / 60)
-  const remSecs = Math.round(secs % 60)
+  const totalSecs = Math.round(ms / 1000)
+  if (totalSecs < 60) return `${totalSecs}s`
+  const mins = Math.floor(totalSecs / 60)
+  const remSecs = totalSecs % 60
   return remSecs > 0 ? `${mins}m ${remSecs}s` : `${mins}m`
 }
 
