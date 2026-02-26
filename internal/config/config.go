@@ -166,7 +166,7 @@ func Load(path string) (*Config, error) {
 }
 
 var (
-	validContainerProviders = map[string]bool{"docker": true, "k8s": true}
+	validContainerProviders = map[string]bool{"docker": true, "apple": true, "auto": true, "k8s": true}
 	validStorageProviders   = map[string]bool{"localfs": true, "s3": true}
 	validStateProviders     = map[string]bool{"bbolt": true, "postgres": true}
 	validContainerRuntimes  = map[string]bool{
@@ -182,7 +182,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("ipc.socket_path is required")
 	}
 	if !validContainerProviders[c.Container.Provider] {
-		return fmt.Errorf("container.provider must be 'docker' or 'k8s', got %q", c.Container.Provider)
+		return fmt.Errorf("container.provider must be 'docker', 'apple', 'auto', or 'k8s', got %q", c.Container.Provider)
 	}
 	if !validStorageProviders[c.Storage.Provider] {
 		return fmt.Errorf("storage.provider must be 'localfs' or 's3', got %q", c.Storage.Provider)

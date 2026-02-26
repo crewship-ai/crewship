@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
@@ -33,12 +34,13 @@ var startCmd = &cobra.Command{
 
 		detectCtx, detectCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer detectCancel()
-		if !noDocker && !checkDocker(detectCtx) {
+		if !noDocker && !checkAnyRuntime(detectCtx) {
 			return fmt.Errorf("no container runtime found.\n\n" +
-				"Crewship requires a Docker-compatible runtime to run AI agents.\n" +
-				"Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop\n\n" +
-				"Install Docker Desktop: https://docs.docker.com/get-docker/\n" +
-				"Install Podman:         https://podman.io/docs/installation\n\n" +
+				"Crewship requires a container runtime to run AI agents.\n" +
+				"Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop, Apple Containers\n\n" +
+				"Install Docker Desktop:    https://docs.docker.com/get-docker/\n" +
+				"Install Podman:            https://podman.io/docs/installation\n" +
+				"Install Apple Containers:  brew install container (macOS 26+)\n\n" +
 				"To start without containers (dashboard only, no agents):\n" +
 				"  crewship start --no-docker\n\n" +
 				"Run 'crewship doctor' for full diagnostics.")
@@ -150,9 +152,14 @@ var startCmd = &cobra.Command{
 	},
 }
 
-func checkDocker(ctx context.Context) bool {
-	_, err := docker.Detect(ctx)
-	return err == nil
+func checkAnyRuntime(ctx context.Context) bool {
+	if _, err := docker.Detect(ctx); err == nil {
+		return true
+	}
+	if _, err := apple.Detect(ctx); err == nil {
+		return true
+	}
+	return false
 }
 
 func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger, skipDocker bool) (*server.Deps, error) {
@@ -176,8 +183,58 @@ func initProviders(ctx context.Context, cfg *config.Config, logger *slog.Logger,
 		} else {
 			deps.Container = d
 		}
+
+	case "apple":
+		if skipDocker {
+			logger.Info("apple container provider disabled via --no-docker")
+			break
+		}
+		a, err := apple.New(ctx, apple.Config{
+			RuntimeImage:    cfg.Container.RuntimeImage,
+			Network:         cfg.Container.Network,
+			OutputBasePath:  cfg.Storage.BasePath,
+			ContainerPrefix: cfg.Container.ContainerPrefix,
+		}, logger)
+		if err != nil {
+			logger.Warn("apple container provider unavailable, running without containers", "error", err)
+		} else {
+			deps.Container = a
+		}
+
+	case "auto":
+		if skipDocker {
+			logger.Info("container provider disabled via --no-docker")
+			break
+		}
+		// Try Apple Containers first (native, lighter on macOS), fall back to Docker
+		a, appleErr := apple.New(ctx, apple.Config{
+			RuntimeImage:    cfg.Container.RuntimeImage,
+			Network:         cfg.Container.Network,
+			OutputBasePath:  cfg.Storage.BasePath,
+			ContainerPrefix: cfg.Container.ContainerPrefix,
+		}, logger)
+		if appleErr == nil {
+			logger.Info("auto-detected Apple Containers as container provider")
+			deps.Container = a
+			break
+		}
+		logger.Debug("apple containers not available, trying docker", "error", appleErr)
+		d, dockerErr := docker.New(ctx, docker.Config{
+			RuntimeImage:    cfg.Container.RuntimeImage,
+			DefaultRuntime:  cfg.Container.DefaultRuntime,
+			Network:         cfg.Container.Network,
+			OutputBasePath:  cfg.Storage.BasePath,
+			ContainerPrefix: cfg.Container.ContainerPrefix,
+		}, logger)
+		if dockerErr == nil {
+			logger.Info("auto-detected Docker as container provider")
+			deps.Container = d
+			break
+		}
+		logger.Warn("no container provider available (tried Apple Containers and Docker)", "apple_error", appleErr, "docker_error", dockerErr)
+
 	default:
-		if cfg.Container.Provider != "" {
+		if cfg.Container.Provider != "" && cfg.Container.Provider != "k8s" {
 			logger.Warn("unknown container provider", "provider", cfg.Container.Provider)
 		}
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/logging"
+	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/spf13/cobra"
 )
@@ -29,19 +30,38 @@ var doctorCmd = &cobra.Command{
 
 		doctorCtx, doctorCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer doctorCancel()
+
+		runtimeFound := false
+
+		// Check Docker-compatible runtimes
 		detected, detectErr := docker.Detect(doctorCtx)
 		if detectErr == nil {
 			logger.Info("container runtime found",
-				"container", detected.Runtime,
+				"runtime", detected.Runtime,
 				"version", detected.Version,
 				"socket", detected.Socket,
 			)
-		} else {
+			runtimeFound = true
+		}
+
+		// Check Apple Containers
+		appleDetected, appleErr := apple.Detect(doctorCtx)
+		if appleErr == nil {
+			logger.Info("container runtime found",
+				"runtime", "apple",
+				"version", appleDetected.Version,
+				"host_ip", appleDetected.HostIP,
+			)
+			runtimeFound = true
+		}
+
+		if !runtimeFound {
 			logger.Error("no container runtime found",
-				"error", detectErr,
-				"supported", "Docker, Podman, Colima, OrbStack, Rancher Desktop",
+				"docker_error", detectErr,
+				"apple_error", appleErr,
+				"supported", "Docker, Podman, Colima, OrbStack, Rancher Desktop, Apple Containers",
 				"install_docker", "https://docs.docker.com/get-docker/",
-				"install_podman", "https://podman.io/docs/installation",
+				"install_apple", "brew install container",
 			)
 			allOK = false
 		}
