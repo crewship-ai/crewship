@@ -474,11 +474,13 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	var convs []convEntry
 	for rows.Next() {
 		var c convEntry
-		if err := rows.Scan(&c.question, &c.response, &c.status, &c.escalated, &c.createdAt,
+		var nullResp sql.NullString
+		if err := rows.Scan(&c.question, &nullResp, &c.status, &c.escalated, &c.createdAt,
 			&c.fromName, &c.fromSlug, &c.toName, &c.toSlug); err != nil {
 			h.logger.Error("scan standup conversation", "error", err)
 			continue
 		}
+		c.response = nullResp.String
 		convs = append(convs, c)
 	}
 	if err := rows.Err(); err != nil {
