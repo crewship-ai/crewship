@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/select"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
+import { AvatarPicker } from "@/components/avatar-picker"
 
 interface AgentDetail {
   id: string
@@ -32,13 +33,13 @@ interface AgentDetail {
   llm_provider: string | null
   llm_model: string | null
   system_prompt: string | null
-  temperature: number | null
-  max_tokens: number | null
+  avatar_seed: string | null
+  avatar_style: string | null
   timeout_seconds: number
   tool_profile: string
   memory_enabled: boolean
   crew_id: string | null
-  crew: { name: string; slug: string; color: string | null } | null
+  crew: { name: string; slug: string; color: string | null; avatar_style: string | null } | null
 }
 
 interface TeamOption {
@@ -69,13 +70,13 @@ export function SettingsPageClient() {
   const [llmProvider, setLlmProvider] = useState("")
   const [llmModel, setLlmModel] = useState("")
   const [systemPrompt, setSystemPrompt] = useState("")
-  const [temperature, setTemperature] = useState("0.7")
-  const [maxTokens, setMaxTokens] = useState("")
   const [timeoutSeconds, setTimeoutSeconds] = useState("1800")
   const [toolProfile, setToolProfile] = useState("CODING")
   const [leadMode, setLeadMode] = useState("active")
   const [crewId, setTeamId] = useState("")
   const [showCustomModel, setShowCustomModel] = useState(false)
+  const [avatarSeed, setAvatarSeed] = useState("")
+  const [avatarStyle, setAvatarStyle] = useState("")
 
   function handleAdapterChange(key: string) {
     setCliAdapter(key)
@@ -130,8 +131,8 @@ export function SettingsPageClient() {
             setShowCustomModel(true)
           }
           setSystemPrompt(agentData.system_prompt ?? "")
-          setTemperature(agentData.temperature?.toString() ?? "0.7")
-          setMaxTokens(agentData.max_tokens?.toString() ?? "")
+          setAvatarSeed(agentData.avatar_seed ?? "")
+          setAvatarStyle(agentData.avatar_style ?? "")
           setTimeoutSeconds(agentData.timeout_seconds.toString())
           setToolProfile(agentData.tool_profile)
           setTeamId(agentData.crew_id ?? "")
@@ -165,17 +166,17 @@ export function SettingsPageClient() {
       agent_role: agentRole,
       cli_adapter: cliAdapter,
       tool_profile: toolProfile,
-      temperature: parseFloat(temperature),
       timeout_seconds: parseInt(timeoutSeconds, 10),
     }
 
     if (description) body.description = description
     if (roleTitle) body.role_title = roleTitle
+    body.avatar_seed = avatarSeed || null
+    body.avatar_style = avatarStyle || null
     if (agentRole === "LEAD") body.lead_mode = leadMode
     if (llmProvider) body.llm_provider = llmProvider
     if (llmModel) body.llm_model = llmModel
     if (systemPrompt) body.system_prompt = systemPrompt
-    if (maxTokens) body.max_tokens = parseInt(maxTokens, 10)
     if (crewId) body.crew_id = crewId
 
     try {
@@ -197,7 +198,7 @@ export function SettingsPageClient() {
     } finally {
       setSubmitting(false)
     }
-  }, [workspaceId, agentId, name, description, roleTitle, agentRole, leadMode, cliAdapter, llmProvider, llmModel, systemPrompt, temperature, maxTokens, timeoutSeconds, toolProfile, crewId])
+  }, [workspaceId, agentId, name, description, roleTitle, agentRole, leadMode, cliAdapter, llmProvider, llmModel, systemPrompt, timeoutSeconds, toolProfile, crewId, avatarSeed, avatarStyle])
 
   const handleDelete = useCallback(async () => {
     if (!workspaceId) return
@@ -338,6 +339,22 @@ export function SettingsPageClient() {
           </CardContent>
         </Card>
 
+        {/* Avatar */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Avatar</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <AvatarPicker
+              seed={avatarSeed || agent?.name || ""}
+              style={avatarStyle}
+              onSeedChange={setAvatarSeed}
+              onStyleChange={setAvatarStyle}
+              lockedStyle={!avatarStyle ? agent?.crew?.avatar_style : undefined}
+            />
+          </CardContent>
+        </Card>
+
         {/* Runtime */}
         <Card>
           <CardHeader>
@@ -422,41 +439,16 @@ export function SettingsPageClient() {
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="temperature">Temperature</Label>
-                <Input
-                  id="temperature"
-                  type="number"
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  value={temperature}
-                  onChange={(e) => setTemperature(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="max_tokens">Max Tokens</Label>
-                <Input
-                  id="max_tokens"
-                  type="number"
-                  min={1}
-                  value={maxTokens}
-                  onChange={(e) => setMaxTokens(e.target.value)}
-                  placeholder="Default"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="timeout">Timeout (seconds)</Label>
-                <Input
-                  id="timeout"
-                  type="number"
-                  min={30}
-                  max={7200}
-                  value={timeoutSeconds}
-                  onChange={(e) => setTimeoutSeconds(e.target.value)}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="timeout">Timeout (seconds)</Label>
+              <Input
+                id="timeout"
+                type="number"
+                min={30}
+                max={7200}
+                value={timeoutSeconds}
+                onChange={(e) => setTimeoutSeconds(e.target.value)}
+              />
             </div>
           </CardContent>
         </Card>

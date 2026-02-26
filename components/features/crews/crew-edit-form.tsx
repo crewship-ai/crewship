@@ -1,138 +1,209 @@
 "use client"
 
-import type { FormEvent } from "react"
+import { useState, type FormEvent } from "react"
+import { AlertTriangle, Save, Loader2, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { AvatarPicker } from "@/components/avatar-picker"
+import { CrewIconPicker } from "@/components/crew-icon-picker"
+import { AVATAR_STYLES } from "@/lib/agent-avatar"
 
 interface CrewEditFormProps {
   name: string
   description: string
-  color: string
-  icon: string
-  containerTtlHours: string
-  containerMemoryMb: string
-  containerCpus: string
+  iconSeed: string
+  avatarStyle: string
+  agentCount: number
   saving: boolean
+  crewId: string
+  workspaceId: string
   onNameChange: (v: string) => void
   onDescriptionChange: (v: string) => void
-  onColorChange: (v: string) => void
-  onIconChange: (v: string) => void
-  onTtlChange: (v: string) => void
-  onMemoryChange: (v: string) => void
-  onCpusChange: (v: string) => void
+  onIconSeedChange: (v: string) => void
+  onAvatarStyleChange: (v: string) => void
   onSubmit: (e: FormEvent) => void
+  onAgentsRefresh: () => void
 }
 
 export function CrewEditForm({
   name,
   description,
-  color,
-  icon,
-  containerTtlHours,
-  containerMemoryMb,
-  containerCpus,
+  iconSeed,
+  avatarStyle,
+  agentCount,
   saving,
+  crewId,
+  workspaceId,
   onNameChange,
   onDescriptionChange,
-  onColorChange,
-  onIconChange,
-  onTtlChange,
-  onMemoryChange,
-  onCpusChange,
+  onIconSeedChange,
+  onAvatarStyleChange,
   onSubmit,
+  onAgentsRefresh,
 }: CrewEditFormProps) {
+  const [applying, setApplying] = useState(false)
+  const [applyResult, setApplyResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  function handleApplyToAll() {
+    if (!avatarStyle) return
+    setConfirmOpen(true)
+  }
+
+  async function doApplyToAll() {
+    setConfirmOpen(false)
+    setApplying(true)
+    setApplyResult(null)
+    try {
+      const res = await fetch(
+        `/api/v1/crews/${crewId}/apply-avatar-style?workspace_id=${workspaceId}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ avatar_style: avatarStyle }),
+        }
+      )
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed" }))
+        setApplyResult({ ok: false, message: data.error ?? "Unknown error" })
+      } else {
+        const data = await res.json()
+        setApplyResult({ ok: true, message: `Applied to ${data.updated} agent${data.updated !== 1 ? "s" : ""}` })
+        onAgentsRefresh()
+      }
+    } catch {
+      setApplyResult({ ok: false, message: "Network error" })
+    } finally {
+      setApplying(false)
+    }
+  }
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Edit Crew</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="crew-name">Name</Label>
-            <Input id="crew-name" value={name} onChange={(e) => onNameChange(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="crew-desc">Description</Label>
-            <Textarea id="crew-desc" value={description} onChange={(e) => onDescriptionChange(e.target.value)} rows={3} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="crew-color">Color</Label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  id="crew-color"
-                  value={color}
-                  onChange={(e) => onColorChange(e.target.value)}
-                  className="h-9 w-9 rounded border cursor-pointer"
-                />
-                <Input
-                  aria-label="Color hex value"
-                  value={color}
-                  onChange={(e) => onColorChange(e.target.value)}
-                  className="flex-1 font-mono text-sm"
+    <form onSubmit={onSubmit}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Left column — General info + Crew Icon */}
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="pt-5 space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="crew-name" className="text-xs font-medium">Name</Label>
+                <Input id="crew-name" value={name} onChange={(e) => onNameChange(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="crew-desc" className="text-xs font-medium">Description</Label>
+                <Textarea
+                  id="crew-desc"
+                  value={description}
+                  onChange={(e) => onDescriptionChange(e.target.value)}
+                  rows={3}
+                  placeholder="What does this crew do?"
                 />
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="crew-icon">Icon (emoji)</Label>
-              <Input
-                id="crew-icon"
-                value={icon}
-                onChange={(e) => onIconChange(e.target.value)}
-                placeholder="e.g. 🚀"
-                maxLength={10}
-              />
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="crew-memory">Memory (MB)</Label>
-              <Input
-                id="crew-memory"
-                type="number"
-                min={512}
-                max={32768}
-                value={containerMemoryMb}
-                onChange={(e) => onMemoryChange(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="crew-cpus">CPUs</Label>
-              <Input
-                id="crew-cpus"
-                type="number"
-                min={0.5}
-                max={16}
-                step={0.5}
-                value={containerCpus}
-                onChange={(e) => onCpusChange(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="crew-ttl">TTL (hours)</Label>
-              <Input
-                id="crew-ttl"
-                type="number"
-                min={1}
-                max={720}
-                placeholder="No limit (empty)"
-                value={containerTtlHours}
-                onChange={(e) => onTtlChange(e.target.value)}
-              />
-            </div>
-          </div>
+          <Card>
+            <CardContent className="pt-5 space-y-3">
+              <div>
+                <Label className="text-xs font-medium">Crew Icon</Label>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Search by category or icon name
+                </p>
+              </div>
+              <CrewIconPicker selected={iconSeed} onSelect={onIconSeedChange} />
+            </CardContent>
+          </Card>
+        </div>
 
-          <Button type="submit" disabled={saving}>
-            {saving ? "Saving..." : "Save Changes"}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+        {/* Right column — Avatar Style + Apply */}
+        <div className="space-y-4">
+          <Card>
+            <CardContent className="pt-5 space-y-3">
+              <div>
+                <Label className="text-xs font-medium">Agent Avatar Style</Label>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Default avatar style for agents in this crew
+                </p>
+              </div>
+              <AvatarPicker
+                seed={name || "preview"}
+                style={avatarStyle}
+                onSeedChange={() => {}}
+                onStyleChange={onAvatarStyleChange}
+                styleOnly
+              />
+            </CardContent>
+          </Card>
+
+          {avatarStyle && agentCount > 0 && (
+            <Card className="border-amber-200 dark:border-amber-900">
+              <CardContent className="pt-5">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                  <div className="flex-1 space-y-2">
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Override individual agent avatars with <span className="font-medium text-foreground">{AVATAR_STYLES[avatarStyle]?.label ?? avatarStyle}</span> for
+                      all {agentCount} agent{agentCount !== 1 ? "s" : ""}.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                      disabled={applying}
+                      onClick={handleApplyToAll}
+                    >
+                      {applying ? (
+                        <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Applying...</>
+                      ) : (
+                        `Apply to all ${agentCount} agents`
+                      )}
+                    </Button>
+                    {applyResult && (
+                      <p className={`text-[11px] ${applyResult.ok ? "text-emerald-600" : "text-destructive"}`}>
+                        {applyResult.ok ? <><Check className="inline h-3 w-3 mr-0.5" />{applyResult.message}</> : applyResult.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      {/* Save — full width below */}
+      <div className="mt-4 flex justify-end">
+        <Button type="submit" disabled={saving} size="sm">
+          {saving ? (
+            <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Saving...</>
+          ) : (
+            <><Save className="mr-1.5 h-3.5 w-3.5" />Save Changes</>
+          )}
+        </Button>
+      </div>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apply avatar style to all agents?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will overwrite individually set avatar styles for all {agentCount} agent{agentCount !== 1 ? "s" : ""} in this crew.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={doApplyToAll}>Apply</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </form>
   )
 }

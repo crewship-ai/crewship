@@ -1,7 +1,7 @@
 "use client"
 
 import { useParams, useSearchParams } from "next/navigation"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Plus, ChevronDown, Info } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
@@ -38,6 +38,7 @@ export function ChatPageClient() {
   const [activeSessionId, setActiveSessionId] = useState<string>(sessionParam ?? "")
   const [showSessionList, setShowSessionList] = useState(false)
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!workspaceId) return
@@ -98,6 +99,25 @@ export function ChatPageClient() {
     return () => clearInterval(interval)
   }, [sessionsLoaded, workspaceId, refreshSessions])
 
+  // Close dropdown on click outside or Escape
+  useEffect(() => {
+    if (!showSessionList) return
+    const handleClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowSessionList(false)
+      }
+    }
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowSessionList(false)
+    }
+    document.addEventListener("mousedown", handleClick)
+    document.addEventListener("keydown", handleKey)
+    return () => {
+      document.removeEventListener("mousedown", handleClick)
+      document.removeEventListener("keydown", handleKey)
+    }
+  }, [showSessionList])
+
   const currentSession = sessions.find((s) => s.id === activeSessionId)
   const handleNewSession = useCallback(() => {
     setActiveSessionId(crypto.randomUUID())
@@ -114,35 +134,42 @@ export function ChatPageClient() {
       {/* Session selector bar with metadata */}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 md:px-6 py-2 bg-muted/30 shrink-0">
         <span className="text-xs text-muted-foreground">Session:</span>
-        <div className="relative">
+        <div className="relative" ref={dropdownRef}>
           <Button
             variant="outline"
             size="sm"
-            className="gap-1.5 text-xs"
+            className="gap-1.5 text-xs max-w-[300px]"
             onClick={() => setShowSessionList(!showSessionList)}
           >
-            {currentSession
-              ? `#${sessions.indexOf(currentSession) + 1} — "${currentSession.title ?? "Untitled"}" ${currentSession.status === "ACTIVE" ? "(active)" : ""}`
-              : "New Session"
-            }
-            <ChevronDown className="h-3 w-3" />
+            <span className="truncate">
+              {currentSession
+                ? `#${sessions.length - sessions.indexOf(currentSession)} — ${currentSession.title ?? "Untitled"}`
+                : "New Session"
+              }
+            </span>
+            <ChevronDown className={`h-3 w-3 shrink-0 transition-transform ${showSessionList ? "rotate-180" : ""}`} />
           </Button>
           {showSessionList && (
-            <div className="absolute top-full left-0 mt-1 w-72 bg-background border rounded-md shadow-lg z-50 py-1">
-              {sessions.map((s, i) => (
-                <button
-                  key={s.id}
-                  className="w-full text-left px-3 py-2 text-xs hover:bg-muted/50 flex items-center gap-2"
-                  onClick={() => handleSelectSession(s.id)}
-                >
-                  <span className="text-muted-foreground font-mono">#{sessions.length - i}</span>
-                  <span className="truncate flex-1">{s.title ?? "Untitled"}</span>
-                  {s.status === "ACTIVE" && (
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                  )}
-                  <span className="text-muted-foreground">{s.message_count} msgs</span>
-                </button>
-              ))}
+            <div className="absolute top-full left-0 mt-1 w-80 bg-background border rounded-md shadow-lg z-50 py-1 max-h-80 overflow-y-auto">
+              {sessions.map((s, i) => {
+                const isActive = s.id === activeSessionId
+                return (
+                  <button
+                    key={s.id}
+                    className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 ${
+                      isActive ? "bg-primary/10 text-primary" : "hover:bg-muted/50"
+                    }`}
+                    onClick={() => handleSelectSession(s.id)}
+                  >
+                    <span className="text-muted-foreground font-mono shrink-0">#{sessions.length - i}</span>
+                    <span className="truncate flex-1">{s.title ?? "Untitled"}</span>
+                    {s.status === "ACTIVE" && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                    )}
+                    <span className="text-muted-foreground shrink-0">{s.message_count}</span>
+                  </button>
+                )
+              })}
               {sessions.length === 0 && (
                 <p className="px-3 py-2 text-xs text-muted-foreground">No sessions yet</p>
               )}

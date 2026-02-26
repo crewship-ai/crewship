@@ -52,26 +52,6 @@ describe("createAgentSchema", () => {
     expect(result.success).toBe(false)
   })
 
-  it("temperature must be 0-2", () => {
-    const tooLow = createAgentSchema.safeParse({
-      ...validAgent,
-      temperature: -0.1,
-    })
-    expect(tooLow.success).toBe(false)
-
-    const tooHigh = createAgentSchema.safeParse({
-      ...validAgent,
-      temperature: 2.1,
-    })
-    expect(tooHigh.success).toBe(false)
-
-    const valid = createAgentSchema.safeParse({
-      ...validAgent,
-      temperature: 1.5,
-    })
-    expect(valid.success).toBe(true)
-  })
-
   it("timeout_seconds must be 30-7200", () => {
     const tooLow = createAgentSchema.safeParse({
       ...validAgent,
@@ -96,7 +76,6 @@ describe("createAgentSchema", () => {
     const result = createAgentSchema.parse(validAgent)
     expect(result.agent_role).toBe("AGENT")
     expect(result.cli_adapter).toBe("CLAUDE_CODE")
-    expect(result.temperature).toBe(0.7)
     expect(result.timeout_seconds).toBe(1800)
     expect(result.tool_profile).toBe("CODING")
   })

@@ -48,7 +48,6 @@ export default function NewAgentPage() {
   const [llmProvider, setLlmProvider] = useState("")
   const [llmModel, setLlmModel] = useState("")
   const [systemPrompt, setSystemPrompt] = useState("")
-  const [temperature, setTemperature] = useState("0.7")
   const [toolProfile, setToolProfile] = useState("CODING")
   const [showCustomModel, setShowCustomModel] = useState(false)
 
@@ -118,7 +117,6 @@ export default function NewAgentPage() {
         agent_role: agentRole,
         cli_adapter: cliAdapter,
         tool_profile: toolProfile,
-        temperature: parseFloat(temperature),
       }
 
       if (description) body.description = description
@@ -163,7 +161,6 @@ export default function NewAgentPage() {
       llmProvider,
       llmModel,
       systemPrompt,
-      temperature,
       toolProfile,
       router,
     ]
@@ -356,18 +353,6 @@ export default function NewAgentPage() {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="temperature">Temperature</Label>
-              <Input
-                id="temperature"
-                type="number"
-                min={0}
-                max={2}
-                step={0.1}
-                value={temperature}
-                onChange={(e) => setTemperature(e.target.value)}
-              />
             </div>
           </CardContent>
         </Card>

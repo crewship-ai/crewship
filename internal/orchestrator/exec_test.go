@@ -26,31 +26,18 @@ func TestHandleStreamJSONLine_TextDelta(t *testing.T) {
 }
 
 func TestHandleStreamJSONLine_ThinkingBlock(t *testing.T) {
-	// Claude Code emits assistant messages with thinking content blocks
+	// With --include-partial-messages, text and thinking from assistant messages
+	// are skipped (already delivered via stream_event deltas). Only tool_use/tool_result
+	// blocks are emitted from assistant messages.
 	line := `{"type":"assistant","content":[{"type":"thinking","thinking":"Let me analyze this code..."},{"type":"text","text":"Here is my answer"}]}`
 
 	o := New(nil, nil, slog.Default())
 	var events []AgentEvent
 	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
 
-	if len(events) != 2 {
-		t.Fatalf("expected 2 events, got %d: %+v", len(events), events)
-	}
-
-	// First event should be thinking
-	if events[0].Type != "thinking" {
-		t.Errorf("expected thinking event, got %q", events[0].Type)
-	}
-	if events[0].Content != "Let me analyze this code..." {
-		t.Errorf("expected thinking content, got %q", events[0].Content)
-	}
-
-	// Second event should be text
-	if events[1].Type != "text" {
-		t.Errorf("expected text event, got %q", events[1].Type)
-	}
-	if events[1].Content != "Here is my answer" {
-		t.Errorf("expected text content, got %q", events[1].Content)
+	// text and thinking blocks from assistant messages are skipped to avoid duplication
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events (text/thinking already streamed via deltas), got %d: %+v", len(events), events)
 	}
 }
 
@@ -164,16 +151,114 @@ func TestHandleStreamJSONLine_InvalidJSON(t *testing.T) {
 }
 
 func TestHandleStreamJSONLine_Result(t *testing.T) {
-	// "result" messages are intentionally ignored because they duplicate
-	// content already delivered via "assistant" content blocks.
+	// "result" messages now emit metadata (cost, usage, duration) without duplicating text.
 	o := New(nil, nil, slog.Default())
-	line := `{"type":"result","result":"Final answer text"}`
+	line := `{"type":"result","subtype":"success","result":"Final answer","duration_ms":1234.5,"total_cost_usd":0.05,"num_turns":3,"usage":{"input_tokens":100,"output_tokens":50}}`
 
 	var events []AgentEvent
 	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
 
-	if len(events) != 0 {
-		t.Fatalf("expected 0 events (result is skipped to avoid duplication), got %d", len(events))
+	if len(events) != 1 {
+		t.Fatalf("expected 1 result event, got %d", len(events))
+	}
+	if events[0].Type != "result" {
+		t.Errorf("expected type 'result', got %q", events[0].Type)
+	}
+	meta, ok := events[0].Metadata.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %T", events[0].Metadata)
+	}
+	if meta["total_cost_usd"] != 0.05 {
+		t.Errorf("expected cost 0.05, got %v", meta["total_cost_usd"])
+	}
+	if meta["num_turns"] != 3 {
+		t.Errorf("expected 3 turns, got %v", meta["num_turns"])
+	}
+	usage, ok := meta["usage"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected usage map, got %T", meta["usage"])
+	}
+	if usage["input_tokens"] != float64(100) {
+		t.Errorf("expected 100 input tokens, got %v", usage["input_tokens"])
+	}
+}
+
+func TestHandleStreamJSONLine_SystemInit(t *testing.T) {
+	o := New(nil, nil, slog.Default())
+	line := `{"type":"system","subtype":"init","model":"claude-sonnet-4-20250514","tools":["Read","Write","Bash"],"cwd":"/home/user"}`
+
+	var events []AgentEvent
+	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 system event, got %d", len(events))
+	}
+	if events[0].Type != "system" {
+		t.Errorf("expected type 'system', got %q", events[0].Type)
+	}
+	if events[0].Content != "init" {
+		t.Errorf("expected content 'init', got %q", events[0].Content)
+	}
+	meta, ok := events[0].Metadata.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %T", events[0].Metadata)
+	}
+	if meta["model"] != "claude-sonnet-4-20250514" {
+		t.Errorf("expected model claude-sonnet-4-20250514, got %v", meta["model"])
+	}
+	tools, ok := meta["tools"].([]string)
+	if !ok {
+		t.Fatalf("expected tools []string, got %T", meta["tools"])
+	}
+	if len(tools) != 3 {
+		t.Errorf("expected 3 tools, got %d", len(tools))
+	}
+}
+
+func TestHandleStreamJSONLine_ImageBlock(t *testing.T) {
+	o := New(nil, nil, slog.Default())
+	line := `{"type":"assistant","message":{"content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAA"}}]}}`
+
+	var events []AgentEvent
+	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 image event, got %d", len(events))
+	}
+	if events[0].Type != "image" {
+		t.Errorf("expected type 'image', got %q", events[0].Type)
+	}
+	if events[0].Content != "iVBORw0KGgoAAAA" {
+		t.Errorf("expected base64 data, got %q", events[0].Content)
+	}
+	meta, ok := events[0].Metadata.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected metadata map, got %T", events[0].Metadata)
+	}
+	if meta["media_type"] != "image/png" {
+		t.Errorf("expected media_type image/png, got %v", meta["media_type"])
+	}
+}
+
+func TestHandleStreamJSONLine_ImageBlockInToolResult(t *testing.T) {
+	o := New(nil, nil, slog.Default())
+	line := `{"type":"tool","content":[{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"AQIDBA=="}}]}`
+
+	var events []AgentEvent
+	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 image event, got %d", len(events))
+	}
+	if events[0].Type != "image" {
+		t.Errorf("expected type 'image', got %q", events[0].Type)
+	}
+	if events[0].Content != "AQIDBA==" {
+		t.Errorf("expected base64 data, got %q", events[0].Content)
+	}
+	meta := events[0].Metadata.(map[string]interface{})
+	if meta["media_type"] != "image/jpeg" {
+		t.Errorf("expected media_type image/jpeg, got %v", meta["media_type"])
 	}
 }
 
@@ -393,7 +478,9 @@ func TestSystemPreambleContainsFilesystem(t *testing.T) {
 }
 
 func TestHandleStreamJSONLine_MixedContentBlocks(t *testing.T) {
-	// A realistic Claude Code response with thinking + tool_use + text
+	// With --include-partial-messages, text and thinking are streamed via
+	// stream_event deltas and skipped in the assistant message. Only tool_use
+	// blocks are emitted from the final assistant message.
 	line := `{"type":"assistant","content":[` +
 		`{"type":"thinking","thinking":"I need to read the file first"},` +
 		`{"type":"tool_use","id":"toolu_abc","name":"Read","input":{"file_path":"test.go"}},` +
@@ -404,15 +491,14 @@ func TestHandleStreamJSONLine_MixedContentBlocks(t *testing.T) {
 	var events []AgentEvent
 	o.handleStreamJSONLine(line, func(e AgentEvent) { events = append(events, e) })
 
-	if len(events) != 3 {
-		t.Fatalf("expected 3 events, got %d: %+v", len(events), events)
+	// Only tool_use is emitted; thinking and text are skipped (already streamed via deltas)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event (tool_call only), got %d: %+v", len(events), events)
 	}
-
-	types := []string{events[0].Type, events[1].Type, events[2].Type}
-	expected := []string{"thinking", "tool_call", "text"}
-	for i, exp := range expected {
-		if types[i] != exp {
-			t.Errorf("event %d: expected %q, got %q", i, exp, types[i])
-		}
+	if events[0].Type != "tool_call" {
+		t.Errorf("expected tool_call event, got %q", events[0].Type)
+	}
+	if events[0].Content != "Read" {
+		t.Errorf("expected tool name 'Read', got %q", events[0].Content)
 	}
 }

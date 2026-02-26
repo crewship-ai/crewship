@@ -239,6 +239,7 @@ func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
 	outReq.RequestURI = ""
 	outReq.URL.Scheme = "https"
 	outReq.URL.Host = "api.anthropic.com"
+	outReq.Host = "api.anthropic.com"
 
 	for _, h := range hopByHopHeaders {
 		outReq.Header.Del(h)
@@ -265,7 +266,11 @@ func (p *Proxy) handleReverseProxy(w http.ResponseWriter, r *http.Request) {
 func injectCredential(r *http.Request, provider ProviderType, token string) {
 	switch provider {
 	case ProviderAnthropic:
-		r.Header.Set("x-api-key", token)
+		if strings.HasPrefix(token, "sk-ant-oat") {
+			r.Header.Set("Authorization", "Bearer "+token)
+		} else {
+			r.Header.Set("x-api-key", token)
+		}
 		r.Header.Set("anthropic-version", "2023-06-01")
 	case ProviderOpenAI:
 		r.Header.Set("Authorization", "Bearer "+token)

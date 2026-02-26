@@ -35,6 +35,10 @@ func (m *mockResolver) IncrementMessageCount(_ context.Context, _ string, _ int)
 	return nil
 }
 
+func (m *mockResolver) UpdateChatTitle(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func testBridge(t *testing.T, resolver ChatResolver) (*Bridge, string) {
 	t.Helper()
 	dir := t.TempDir()

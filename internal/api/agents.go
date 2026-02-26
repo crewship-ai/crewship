@@ -31,9 +31,10 @@ var validLeadModes = map[string]bool{
 }
 
 type agentCrewInfo struct {
-	Name  string  `json:"name"`
-	Slug  string  `json:"slug"`
-	Color *string `json:"color"`
+	Name        string  `json:"name"`
+	Slug        string  `json:"slug"`
+	Color       *string `json:"color"`
+	AvatarStyle *string `json:"avatar_style"`
 }
 
 type agentCounts struct {
@@ -57,8 +58,8 @@ type agentResponse struct {
 	LLMProvider     *string        `json:"llm_provider"`
 	LLMModel        *string        `json:"llm_model"`
 	SystemPrompt    *string        `json:"system_prompt"`
-	Temperature     float64        `json:"temperature"`
-	MaxTokens       *int           `json:"max_tokens"`
+	AvatarSeed      *string        `json:"avatar_seed"`
+	AvatarStyle     *string        `json:"avatar_style"`
 	TimeoutSeconds  int            `json:"timeout_seconds"`
 	ToolProfile     string         `json:"tool_profile"`
 	MemoryEnabled   bool           `json:"memory_enabled"`
@@ -80,9 +81,9 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	const listQuery = `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
-			a.system_prompt, a.temperature, a.max_tokens, a.timeout_seconds,
+			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.created_at, a.updated_at,
-			c.name, c.slug, c.color,
+			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id)
@@ -111,13 +112,13 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a agentResponse
 		var memEnabled int
-		var crewName, crewSlug, crewColor *string
+		var crewName, crewSlug, crewColor, crewAvatarStyle *string
 		if err := rows.Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 			&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
-			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.Temperature,
-			&a.MaxTokens, &a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
+			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
+			&a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
 			&a.CreatedAt, &a.UpdatedAt,
-			&crewName, &crewSlug, &crewColor,
+			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 			&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats); err != nil {
 			h.logger.Error("scan agent", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -125,7 +126,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		a.MemoryEnabled = memEnabled == 1
 		if crewName != nil {
-			a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor}
+			a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 		}
 		result = append(result, a)
 	}
@@ -154,8 +155,8 @@ type createAgentRequest struct {
 	LLMProvider    *string `json:"llm_provider"`
 	LLMModel       *string `json:"llm_model"`
 	SystemPrompt   *string `json:"system_prompt"`
-	Temperature    float64 `json:"temperature"`
-	MaxTokens      *int    `json:"max_tokens"`
+	AvatarSeed     *string `json:"avatar_seed"`
+	AvatarStyle    *string `json:"avatar_style"`
 	TimeoutSeconds int     `json:"timeout_seconds"`
 	ToolProfile    string  `json:"tool_profile"`
 	MemoryEnabled  bool    `json:"memory_enabled"`
@@ -235,9 +236,6 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.ToolProfile == "" {
 		req.ToolProfile = "CODING"
 	}
-	if req.Temperature == 0 {
-		req.Temperature = 0.7
-	}
 	if req.TimeoutSeconds == 0 {
 		req.TimeoutSeconds = 1800
 	}
@@ -272,12 +270,12 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO agents (id, crew_id, workspace_id, name, slug, description, role_title,
 			agent_role, lead_mode, status, cli_adapter, llm_provider, llm_model, system_prompt,
-			temperature, max_tokens, timeout_seconds, tool_profile, memory_enabled,
+			avatar_seed, avatar_style, timeout_seconds, tool_profile, memory_enabled,
 			created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'IDLE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		agentID, req.CrewID, workspaceID, req.Name, req.Slug, req.Description, req.RoleTitle,
 		req.AgentRole, leadMode, req.CLIAdapter, req.LLMProvider, req.LLMModel, req.SystemPrompt,
-		req.Temperature, req.MaxTokens, req.TimeoutSeconds, req.ToolProfile, memEnabled,
+		req.AvatarSeed, req.AvatarStyle, req.TimeoutSeconds, req.ToolProfile, memEnabled,
 		now, now)
 	if err != nil {
 		h.logger.Error("insert agent", "error", err)
@@ -309,8 +307,8 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		LLMProvider:    req.LLMProvider,
 		LLMModel:       req.LLMModel,
 		SystemPrompt:   req.SystemPrompt,
-		Temperature:    req.Temperature,
-		MaxTokens:      req.MaxTokens,
+		AvatarSeed:     req.AvatarSeed,
+		AvatarStyle:    req.AvatarStyle,
 		TimeoutSeconds: req.TimeoutSeconds,
 		ToolProfile:    req.ToolProfile,
 		MemoryEnabled:  req.MemoryEnabled,
@@ -330,13 +328,13 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	var a agentResponse
 	var memEnabled int
-	var crewName, crewSlug, crewColor *string
+	var crewName, crewSlug, crewColor, crewAvatarStyle *string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
-			a.system_prompt, a.temperature, a.max_tokens, a.timeout_seconds,
+			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.created_at, a.updated_at,
-			c.name, c.slug, c.color,
+			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id)
@@ -345,10 +343,10 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WHERE a.id = ? AND a.workspace_id = ? AND a.deleted_at IS NULL
 	`, agentID, workspaceID).Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 		&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
-		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.Temperature,
-		&a.MaxTokens, &a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
+		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
+		&a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
 		&a.CreatedAt, &a.UpdatedAt,
-		&crewName, &crewSlug, &crewColor,
+		&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -361,7 +359,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	a.MemoryEnabled = memEnabled == 1
 	if crewName != nil {
-		a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor}
+		a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 	}
 
 	writeJSON(w, http.StatusOK, a)
@@ -381,7 +379,12 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&existing); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -397,7 +400,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"lead_mode": "lead_mode",
 		"cli_adapter": "cli_adapter", "llm_provider": "llm_provider",
 		"llm_model": "llm_model", "system_prompt": "system_prompt",
-		"temperature": "temperature", "max_tokens": "max_tokens",
+		"avatar_seed": "avatar_seed", "avatar_style": "avatar_style",
 		"timeout_seconds": "timeout_seconds", "tool_profile": "tool_profile",
 		"memory_enabled": "memory_enabled", "crew_id": "crew_id",
 	}
@@ -561,7 +564,12 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -625,7 +633,12 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -665,7 +678,12 @@ func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -707,7 +725,12 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -769,7 +792,12 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -899,7 +927,12 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if err == sql.ErrNoRows {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent exists", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 

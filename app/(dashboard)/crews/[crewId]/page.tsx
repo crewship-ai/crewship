@@ -1,14 +1,15 @@
 "use client"
 
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { ArrowLeft, AlertTriangle } from "lucide-react"
+import {
+  ArrowLeft, AlertTriangle, Info, Paintbrush, RefreshCw, Loader2,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Separator } from "@/components/ui/separator"
-import { CrewHeader } from "@/components/features/crews/crew-header"
+import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { CrewStats } from "@/components/features/crews/crew-stats"
-import { CrewEditForm } from "@/components/features/crews/crew-edit-form"
 import { CrewAgents } from "@/components/features/crews/crew-agents"
 import { CrewMembers } from "@/components/features/crews/crew-members"
 import { CrewMissions } from "@/components/features/crews/crew-missions"
@@ -17,9 +18,10 @@ import { CrewPeerConversations } from "@/components/features/crews/crew-peer-con
 import { CrewEscalations } from "@/components/features/crews/crew-escalations"
 import { CrewStandup } from "@/components/features/crews/crew-standup"
 import { CrewDangerZone } from "@/components/features/crews/crew-danger-zone"
+import { AvatarPicker } from "@/components/avatar-picker"
+import { AVATAR_STYLES } from "@/lib/agent-avatar"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
-import { updateCrewSchema } from "@/lib/validations"
 import type { CrewMember } from "@/lib/types/crew"
 import { toast } from "sonner"
 import Link from "next/link"
@@ -31,6 +33,7 @@ interface Crew {
   description: string | null
   color: string | null
   icon: string | null
+  avatar_style: string | null
   container_ttl_hours: number | null
   container_memory_mb: number
   container_cpus: number
@@ -62,72 +65,38 @@ export default function CrewDetailPage() {
   const [crew, setCrew] = useState<Crew | null>(null)
   const [members, setMembers] = useState<CrewMember[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
-  const [credentialCount, setCredentialCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [editing, setEditing] = useState(false)
-  const [formName, setFormName] = useState("")
-  const [formDescription, setFormDescription] = useState("")
-  const [formColor, setFormColor] = useState("#6b7280")
-  const [formIcon, setFormIcon] = useState("")
-  const [formMemory, setFormMemory] = useState("4096")
-  const [formCpus, setFormCpus] = useState("2")
-  const [formTtl, setFormTtl] = useState("")
-  const [saving, setSaving] = useState(false)
+  const [avatarStyle, setAvatarStyle] = useState("")
+  const [applying, setApplying] = useState(false)
 
   useEffect(() => {
     if (!workspaceId) {
       if (!wsLoading) setLoading(false)
       return
     }
-
     let cancelled = false
 
     async function fetchData() {
       setLoading(true)
       setError(null)
       try {
-        const [crewRes, membersRes, agentsRes, credsRes] = await Promise.all([
+        const [crewRes, membersRes, agentsRes] = await Promise.all([
           fetch(`/api/v1/crews/${params.crewId}?workspace_id=${workspaceId}`),
           fetch(`/api/v1/crews/${params.crewId}/members?workspace_id=${workspaceId}`),
           fetch(`/api/v1/agents?workspace_id=${workspaceId}&crew_id=${params.crewId}`),
-          fetch(`/api/v1/credentials?workspace_id=${workspaceId}`),
         ])
 
-        if (!crewRes.ok) {
-          setError("Crew not found")
-          return
-        }
+        if (!crewRes.ok) { setError("Crew not found"); return }
 
         const crewData = (await crewRes.json()) as Crew
         if (!cancelled) {
           setCrew(crewData)
-          setFormName(crewData.name)
-          setFormDescription(crewData.description ?? "")
-          setFormColor(crewData.color ?? "#6b7280")
-          setFormIcon(crewData.icon ?? "")
-          setFormMemory(String(crewData.container_memory_mb))
-          setFormCpus(String(crewData.container_cpus))
-          setFormTtl(crewData.container_ttl_hours ? String(crewData.container_ttl_hours) : "")
+          setAvatarStyle(crewData.avatar_style ?? "")
         }
-
-        if (membersRes.ok) {
-          const membersData = (await membersRes.json()) as CrewMember[]
-          if (!cancelled) setMembers(membersData)
-        }
-
-        if (agentsRes.ok) {
-          const agentsData = (await agentsRes.json()) as Agent[]
-          if (!cancelled) setAgents(agentsData)
-        }
-
-        if (credsRes.ok) {
-          const credsData = (await credsRes.json()) as unknown[]
-          if (!cancelled) setCredentialCount(credsData.length)
-        } else if (!cancelled) {
-          setCredentialCount(null)
-        }
+        if (membersRes.ok && !cancelled) setMembers(await membersRes.json())
+        if (agentsRes.ok && !cancelled) setAgents(await agentsRes.json())
       } catch {
         if (!cancelled) setError("Failed to load crew")
       } finally {
@@ -139,90 +108,73 @@ export default function CrewDetailPage() {
     return () => { cancelled = true }
   }, [workspaceId, wsLoading, params.crewId])
 
-  async function handleSave(e: FormEvent) {
-    e.preventDefault()
+  async function patchCrew(body: Record<string, unknown>) {
     if (!workspaceId || !crew) return
-
-    const parsed = updateCrewSchema.safeParse({
-      name: formName,
-      description: formDescription || undefined,
-      color: formColor,
-      icon: formIcon || undefined,
-      container_memory_mb: formMemory ? parseInt(formMemory) : undefined,
-      container_cpus: formCpus ? parseFloat(formCpus) : undefined,
-      container_ttl_hours: formTtl ? parseInt(formTtl) : null,
-    })
-
-    if (!parsed.success) {
-      const msg = parsed.error.issues[0]?.message ?? "Invalid input"
-      toast.error(msg)
-      return
-    }
-
-    setSaving(true)
-
     try {
       const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsed.data),
+        body: JSON.stringify(body),
       })
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => null)
-        const msg = typeof body?.error === "string" ? body.error : "Failed to save"
-        toast.error(msg)
-        return
+      if (res.ok) {
+        const updated = (await res.json()) as Crew
+        setCrew(updated)
       }
+    } catch { /* silent */ }
+  }
 
-      const updated = (await res.json()) as Crew
-      setCrew(updated)
-      setEditing(false)
-      toast.success("Crew updated successfully")
+  async function handleApplyToAll() {
+    if (!avatarStyle || !crew || !workspaceId) return
+    const label = AVATAR_STYLES[avatarStyle]?.label ?? avatarStyle
+    if (!confirm(`Apply "${label}" to all ${agents.length} agents? This overrides individual styles.`)) return
+
+    setApplying(true)
+    try {
+      const res = await fetch(
+        `/api/v1/crews/${crew.id}/apply-avatar-style?workspace_id=${workspaceId}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ avatar_style: avatarStyle }) },
+      )
+      if (res.ok) {
+        const data = await res.json()
+        toast.success(`Applied to ${data.updated} agents`)
+        const agentsRes = await fetch(`/api/v1/agents?workspace_id=${workspaceId}&crew_id=${crew.id}`)
+        if (agentsRes.ok) setAgents(await agentsRes.json())
+      } else {
+        toast.error("Failed to apply style")
+      }
     } catch {
-      toast.error("Failed to save changes")
+      toast.error("Network error")
     } finally {
-      setSaving(false)
+      setApplying(false)
     }
   }
 
   async function handleDelete() {
     if (!workspaceId || !crew) return
-
     try {
-      const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, {
-        method: "DELETE",
-      })
-      if (res.ok) {
-        toast.success(`"${crew.name}" deleted`)
-        router.push("/crews")
-      } else {
-        toast.error("Failed to delete crew")
-      }
-    } catch {
-      toast.error("Failed to delete crew")
-    }
+      const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+      if (res.ok) { toast.success(`"${crew.name}" deleted`); router.push("/crews") }
+      else toast.error("Failed to delete crew")
+    } catch { toast.error("Failed to delete crew") }
   }
-
-  const isLoading = wsLoading || loading
 
   if (error) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 max-w-4xl">
+      <div className="p-4 sm:p-6">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
         </Button>
-        <p className="text-sm text-destructive">{error}</p>
+        <p className="text-sm text-destructive mt-4">{error}</p>
       </div>
     )
   }
 
-  if (isLoading) {
+  if (wsLoading || loading) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 max-w-4xl">
+      <div className="p-4 sm:p-6 space-y-4">
         <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-[200px] rounded-xl" />
-        <Skeleton className="h-[200px] rounded-xl" />
+        <Skeleton className="h-16 w-full rounded-xl" />
+        <div className="grid grid-cols-4 gap-3"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div>
       </div>
     )
   }
@@ -233,109 +185,153 @@ export default function CrewDetailPage() {
   const canDelete = abilities.can("delete", "Crew")
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 max-w-4xl">
-      <Button variant="ghost" size="sm" className="mb-3" asChild>
+    <div className="p-4 sm:p-6">
+      <Button variant="ghost" size="sm" className="mb-4" asChild>
         <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
       </Button>
 
-      <CrewHeader
-        name={crew.name}
-        slug={crew.slug}
-        color={crew.color}
-        icon={crew.icon}
-        description={crew.description}
-        editing={editing}
-        canEdit={canEdit}
-        onToggleEdit={() => setEditing(!editing)}
-      />
-
-      {editing && canEdit && (
-        <CrewEditForm
-          name={formName}
-          description={formDescription}
-          color={formColor}
-          icon={formIcon}
-          containerTtlHours={formTtl}
-          containerMemoryMb={formMemory}
-          containerCpus={formCpus}
-          saving={saving}
-          onNameChange={setFormName}
-          onDescriptionChange={setFormDescription}
-          onColorChange={setFormColor}
-          onIconChange={setFormIcon}
-          onTtlChange={setFormTtl}
-          onMemoryChange={setFormMemory}
-          onCpusChange={setFormCpus}
-          onSubmit={handleSave}
+      {/* Hero */}
+      <div className="flex items-start gap-4 mb-6">
+        <CrewIconPopover
+          icon={crew.icon || crew.name}
+          color={crew.color || "90caf9"}
+          onIconChange={(icon) => patchCrew({ icon })}
+          onColorChange={(color) => patchCrew({ color })}
         />
-      )}
-
-      <CrewStats
-        agentCount={crew._count.agents}
-        memberCount={crew._count.members}
-        memoryMb={crew.container_memory_mb}
-        cpus={crew.container_cpus}
-        ttlHours={crew.container_ttl_hours}
-      />
-
-      <CrewAgents
-        agents={agents}
-        crewId={crew.id}
-        canCreate={abilities.can("create", "Agent")}
-      />
-
-      <Separator />
-
-      <CrewMissions
-        crewId={crew.id}
-        workspaceId={workspaceId}
-        canCreate={abilities.can("create", "Crew")}
-        leadAgents={agents
-          .filter((a) => a.agent_role === "LEAD")
-          .map((a) => ({ id: a.id, name: a.name, slug: a.slug }))}
-      />
-
-      <Separator />
-
-      <CrewAssignments crewId={crew.id} workspaceId={workspaceId} />
-
-      <CrewPeerConversations crewId={crew.id} workspaceId={workspaceId} />
-
-      <CrewEscalations crewId={crew.id} workspaceId={workspaceId} />
-
-      <CrewStandup crewId={crew.id} workspaceId={workspaceId} />
-
-      {agents.length > 0 && credentialCount !== null && credentialCount === 0 && (
-        <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
-          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-          <p className="text-sm text-amber-800 dark:text-amber-200">
-            No credentials configured. Agents need API keys to connect to LLM providers.{" "}
-            <Link href="/credentials" className="font-medium underline underline-offset-2">
-              Add credentials
-            </Link>
-          </p>
+        <div className="flex-1 min-w-0 pt-0.5">
+          <h1 className="text-xl font-semibold">{crew.name}</h1>
+          {crew.description && (
+            <p className="text-sm text-muted-foreground mt-1">{crew.description}</p>
+          )}
         </div>
-      )}
+      </div>
 
-      <Separator />
+      {/* Stats */}
+      <div className="mb-6">
+        <CrewStats
+          agentCount={crew._count.agents}
+          memberCount={crew._count.members}
+          memoryMb={crew.container_memory_mb}
+          cpus={crew.container_cpus}
+          ttlHours={crew.container_ttl_hours}
+        />
+      </div>
 
-      <CrewMembers
-        members={members}
-        crewId={crew.id}
-        workspaceId={workspaceId}
-        canEdit={canEdit}
-        onMembersChange={setMembers}
-      />
+      {/* Main grid: 1 col left (settings), 2 cols right (content) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Left column */}
+        <div className="space-y-4">
+          {/* Identity */}
+          <Card>
+            <CardContent className="p-4 space-y-1">
+              <div className="flex items-center gap-2 mb-2">
+                <Info className="h-4 w-4 text-muted-foreground" />
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Identity</span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-[13px] text-muted-foreground">Name</span>
+                <span className="text-[13px] font-medium">{crew.name}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-t">
+                <span className="text-[13px] text-muted-foreground">Slug</span>
+                <span className="text-xs font-mono text-muted-foreground">{crew.slug}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-t">
+                <span className="text-[13px] text-muted-foreground">Created</span>
+                <span className="text-xs text-muted-foreground">{new Date(crew.created_at).toLocaleDateString()}</span>
+              </div>
+            </CardContent>
+          </Card>
 
-      {canDelete && (
-        <>
-          <Separator />
-          <CrewDangerZone crewName={crew.name} onDelete={handleDelete} />
-        </>
-      )}
+          {/* Appearance */}
+          {canEdit && (
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Paintbrush className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Appearance</span>
+                </div>
+                <p className="text-xs text-muted-foreground mb-2">Agent avatar style</p>
+                <AvatarPicker
+                  seed={crew.name || "preview"}
+                  style={avatarStyle}
+                  onSeedChange={() => {}}
+                  onStyleChange={(s) => {
+                    setAvatarStyle(s)
+                    patchCrew({ avatar_style: s })
+                  }}
+                  styleOnly
+                />
+                {avatarStyle && agents.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleApplyToAll}
+                    disabled={applying}
+                    className="mt-3 text-[11px] font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 inline-flex items-center gap-1 disabled:opacity-50"
+                  >
+                    {applying ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3 w-3" />
+                    )}
+                    Apply to all {agents.length} agents
+                  </button>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
-      <div className="text-xs text-muted-foreground">
-        Created {new Date(crew.created_at).toLocaleDateString()}
+          {/* Danger Zone */}
+          {canDelete && (
+            <CrewDangerZone crewName={crew.name} onDelete={handleDelete} />
+          )}
+        </div>
+
+        {/* Right column (2 cols wide) */}
+        <div className="lg:col-span-2 space-y-4">
+          <CrewAgents
+            agents={agents}
+            crewId={crew.id}
+            canCreate={abilities.can("create", "Agent")}
+          />
+
+          <CrewMissions
+            crewId={crew.id}
+            workspaceId={workspaceId}
+            canCreate={abilities.can("create", "Crew")}
+            leadAgents={agents
+              .filter((a) => a.agent_role === "LEAD")
+              .map((a) => ({ id: a.id, name: a.name, slug: a.slug }))}
+          />
+
+          <CrewAssignments crewId={crew.id} workspaceId={workspaceId} />
+
+          <CrewPeerConversations crewId={crew.id} workspaceId={workspaceId} />
+
+          <CrewEscalations crewId={crew.id} workspaceId={workspaceId} />
+
+          <CrewStandup crewId={crew.id} workspaceId={workspaceId} />
+
+          {agents.length > 0 && (
+            <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+              <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                Agents need API keys to connect to LLM providers.{" "}
+                <Link href="/credentials" className="font-medium underline underline-offset-2">
+                  Add credentials
+                </Link>
+              </p>
+            </div>
+          )}
+
+          <CrewMembers
+            members={members}
+            crewId={crew.id}
+            workspaceId={workspaceId}
+            canEdit={canEdit}
+            onMembersChange={setMembers}
+          />
+        </div>
       </div>
     </div>
   )

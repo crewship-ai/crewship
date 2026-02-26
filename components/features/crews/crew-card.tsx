@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { Bot, Users } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
+import { getCrewIconUrl } from "@/lib/crew-icon"
 
 interface TeamCount {
   agents: number
@@ -21,35 +22,18 @@ interface CrewData {
 }
 
 export function CrewCard({ crew }: { crew: CrewData }) {
-  const crewColor = crew.color ?? "#6b7280"
-
   return (
     <Link href={`/crews/${crew.id}`}>
-      <Card
-        className="hover:border-primary/50 transition-colors cursor-pointer h-full"
-        style={{ "--crew-color": crewColor } as React.CSSProperties}
-      >
+      <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
         <CardContent className="p-4 sm:p-5">
           <div className="flex items-start gap-3">
-            <div
-              className="flex h-10 w-10 items-center justify-center rounded-lg text-lg shrink-0"
-              style={{ backgroundColor: `color-mix(in srgb, var(--crew-color) 12%, transparent)` }}
-            >
-              {crew.icon ?? (
-                <Users
-                  className="h-5 w-5"
-                  style={{ color: "var(--crew-color)" }}
-                />
-              )}
-            </div>
+            <img
+              src={getCrewIconUrl(crew.icon || crew.name, crew.color)}
+              alt={crew.name}
+              className="h-10 w-10 rounded-lg shrink-0"
+            />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span
-                  className="h-2.5 w-2.5 rounded-full shrink-0"
-                  style={{ backgroundColor: "var(--crew-color)" }}
-                />
-                <h3 className="text-sm font-semibold truncate">{crew.name}</h3>
-              </div>
+              <h3 className="text-sm font-semibold truncate">{crew.name}</h3>
               {crew.description && (
                 <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                   {crew.description}

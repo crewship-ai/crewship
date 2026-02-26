@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -71,10 +72,17 @@ func (cm *CredentialMonitor) checkAll(ctx context.Context) {
 		if conn.Status == StatusRevoked {
 			continue
 		}
-		// Skip health checks for AI CLI tokens -- OAuth setup tokens
-		// cannot be validated via standard API endpoints (/v1/models).
-		// They are validated when actually used by the agent runtime.
-		if conn.Type == TypeAICLIToken {
+		// Skip health checks for OAuth tokens -- they cannot be validated
+		// via standard API endpoints (/v1/models). Detect by type or prefix.
+		if conn.Type == TypeAICLIToken || strings.HasPrefix(conn.AccessToken, "sk-ant-oat") {
+			// If an OAuth token is stored as API_KEY and currently EXPIRED
+			// from a previous (incorrect) validation, reset it to ACTIVE.
+			if conn.Status == StatusExpired && strings.HasPrefix(conn.AccessToken, "sk-ant-oat") {
+				cm.pool.MarkStatus(conn.ID, StatusActive)
+				cm.persistStatus(ctx, conn.ID, StatusActive, "")
+				cm.logger.Info("oauth token reset to active (cannot validate via API)",
+					"connection_id", conn.ID, "provider", conn.Provider)
+			}
 			continue
 		}
 		cm.checkOne(ctx, conn)
@@ -118,8 +126,9 @@ func (cm *CredentialMonitor) validateAnthropic(ctx context.Context, conn Provide
 	if err != nil {
 		return StatusError, fmt.Sprintf("create request: %v", err)
 	}
-	// AI_CLI_TOKEN (OAuth setup token) uses Bearer auth; API_KEY uses x-api-key header
-	if conn.Type == TypeAICLIToken {
+	// OAuth tokens (sk-ant-oat*) use Bearer auth regardless of stored type;
+	// this handles the case where a user stores an OAuth token as API_KEY.
+	if conn.Type == TypeAICLIToken || strings.HasPrefix(conn.AccessToken, "sk-ant-oat") {
 		req.Header.Set("Authorization", "Bearer "+conn.AccessToken)
 	} else {
 		req.Header.Set("x-api-key", conn.AccessToken)
