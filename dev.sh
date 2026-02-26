@@ -220,7 +220,7 @@ start_go() {
     local has_runtime=false
     if [[ -n "$TIMEOUT_CMD" ]] && { "$TIMEOUT_CMD" 3 docker info &>/dev/null || "$TIMEOUT_CMD" 3 podman info &>/dev/null; }; then
       has_runtime=true
-    elif [[ -z "$TIMEOUT_CMD" ]] && { docker info &>/dev/null 2>&1; }; then
+    elif [[ -z "$TIMEOUT_CMD" ]] && { docker info &>/dev/null 2>&1 || podman info &>/dev/null 2>&1; }; then
       has_runtime=true
     fi
     # Check Apple Containers CLI (macOS 26+)

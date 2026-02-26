@@ -39,6 +39,7 @@ type Provider struct {
 	mu       sync.RWMutex
 	execSeq  atomic.Int64
 	execs    map[string]*execEntry
+	done     chan struct{}
 }
 
 type execEntry struct {
@@ -87,6 +88,7 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 		logger: logger,
 		hostIP: detected.HostIP,
 		execs:  make(map[string]*execEntry),
+		done:   make(chan struct{}),
 	}
 
 	logger.Info("apple container runtime detected",
@@ -99,6 +101,8 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 			logger.Warn("failed to create apple container network", "network", cfg.Network, "error", err)
 		}
 	}
+
+	go p.gcExecs()
 
 	return p, nil
 }
@@ -279,7 +283,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			existing, findErr := p.findContainer(ctx, containerName)
 			if findErr == nil && existing != nil {
 				if existing.Status != "running" {
-					runCLI(ctx, "start", existing.ID)
+					if _, startErr := runCLI(ctx, "start", existing.ID); startErr != nil {
+						return "", fmt.Errorf("start existing container after race: %w", startErr)
+					}
 				}
 				return existing.ID, nil
 			}
@@ -476,8 +482,9 @@ func (p *Provider) ExecInspect(_ context.Context, execID string) (bool, int, err
 	}
 }
 
-// Close is a no-op for the Apple provider (no persistent client connection).
+// Close stops the background gc goroutine and releases resources.
 func (p *Provider) Close() error {
+	close(p.done)
 	return nil
 }
 
@@ -501,20 +508,24 @@ func shortID(id string) string {
 	return id
 }
 
-// gcExecs periodically cleans up finished exec entries older than 5 minutes.
-// Called as a goroutine from New().
+// gcExecs periodically cleans up finished exec entries.
 func (p *Provider) gcExecs() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		p.mu.Lock()
-		for id, entry := range p.execs {
-			select {
-			case <-entry.done:
-				delete(p.execs, id)
-			default:
+	for {
+		select {
+		case <-p.done:
+			return
+		case <-ticker.C:
+			p.mu.Lock()
+			for id, entry := range p.execs {
+				select {
+				case <-entry.done:
+					delete(p.execs, id)
+				default:
+				}
 			}
+			p.mu.Unlock()
 		}
-		p.mu.Unlock()
 	}
 }

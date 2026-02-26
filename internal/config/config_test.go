@@ -159,19 +159,17 @@ func TestValidationInvalidContainerProvider(t *testing.T) {
 	}
 }
 
-func TestValidationAppleContainerProvider(t *testing.T) {
-	cfg := Default()
-	cfg.Container.Provider = "apple"
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("expected apple provider to be valid, got: %v", err)
-	}
-}
-
-func TestValidationAutoContainerProvider(t *testing.T) {
-	cfg := Default()
-	cfg.Container.Provider = "auto"
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("expected auto provider to be valid, got: %v", err)
+func TestValidationContainerProviders(t *testing.T) {
+	t.Parallel()
+	for _, prov := range []string{"apple", "auto"} {
+		t.Run(prov, func(t *testing.T) {
+			t.Parallel()
+			cfg := Default()
+			cfg.Container.Provider = prov
+			if err := cfg.Validate(); err != nil {
+				t.Errorf("expected %s provider to be valid, got: %v", prov, err)
+			}
+		})
 	}
 }
 

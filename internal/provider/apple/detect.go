@@ -20,11 +20,10 @@ type DetectResult struct {
 // service is running. Returns an error if Apple Containers are not available.
 func Detect(ctx context.Context) (*DetectResult, error) {
 	// Check if the `container` binary exists
-	path, err := exec.LookPath("container")
+	_, err := exec.LookPath("container")
 	if err != nil {
 		return nil, fmt.Errorf("apple container CLI not found: %w", err)
 	}
-	_ = path
 
 	// Get version
 	version, err := getVersion(ctx)
@@ -105,7 +104,7 @@ func discoverHostIP() string {
 	// Try to find the primary non-loopback IPv4 address
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		return ""
+		return "127.0.0.1"
 	}
 	for _, addr := range addrs {
 		if ipNet, ok := addr.(*net.IPNet); ok && !ipNet.IP.IsLoopback() {

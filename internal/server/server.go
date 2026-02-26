@@ -100,8 +100,14 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		hostAddr := "host.docker.internal" // default for Docker
 		if ctr != nil {
 			if hap, ok := ctr.(provider.HostAddressProvider); ok {
-				hostAddr = hap.HostAddress()
+				if addr := hap.HostAddress(); addr != "" {
+					hostAddr = addr
+				}
 			}
+		}
+		// Wrap IPv6 literals in brackets for URL construction
+		if strings.Contains(hostAddr, ":") {
+			hostAddr = "[" + hostAddr + "]"
 		}
 		ipcBase := fmt.Sprintf("http://%s:%d", hostAddr, cfg.Server.Port)
 		orch.SetIPCConfig(ipcBase, cfg.Auth.InternalToken)

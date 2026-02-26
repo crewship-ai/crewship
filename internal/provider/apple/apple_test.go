@@ -2,14 +2,14 @@ package apple
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 func TestProviderImplementsInterface(t *testing.T) {
-	// Compile-time check via var _ line in apple.go
-	var _ interface{} = (*Provider)(nil)
+	var _ provider.ContainerProvider = (*Provider)(nil)
 }
 
 func TestContainerNameFormat(t *testing.T) {
@@ -88,5 +88,5 @@ func TestDiscoverHostIP(t *testing.T) {
 	if ip == "" {
 		t.Error("expected non-empty host IP")
 	}
-	fmt.Printf("Discovered host IP: %s\n", ip)
+	t.Logf("Discovered host IP: %s", ip)
 }
