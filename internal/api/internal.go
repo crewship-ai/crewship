@@ -704,8 +704,8 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Broadcast real-time events for terminal states
-	if h.hub != nil && terminal[body.Status] {
+	// Update agent status and broadcast events for terminal states
+	if terminal[body.Status] {
 		var agentID, workspaceID string
 		var agentName sql.NullString
 		if err := h.db.QueryRowContext(r.Context(),
@@ -715,23 +715,9 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 			h.logger.Debug("fetch run details for broadcast", "error", err, "run_id", runID)
 		}
 
-		if workspaceID != "" {
-			channel := "workspace:" + workspaceID
-			eventType := "run.completed"
-			if body.Status == "FAILED" || body.Status == "CANCELLED" {
-				eventType = "run.failed"
-			}
-			payload := map[string]string{
-				"run_id":   runID,
-				"agent_id": agentID,
-				"agent_name": agentName.String,
-				"status":   body.Status,
-			}
-			h.hub.Broadcast(channel, ws.ServerMessage{
-				Type: eventType, Channel: channel, Payload: payload,
-			})
-
-			// Atomic agent status update: single query avoids race between concurrent completions
+		// Atomic agent status update: always runs regardless of hub presence
+		agentStatus := "IDLE"
+		if agentID != "" {
 			failedStatus := "IDLE"
 			if body.Status == "FAILED" {
 				failedStatus = "ERROR"
@@ -745,20 +731,34 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 				h.logger.Debug("update agent status on run completion", "error", err, "agent_id", agentID)
 			}
 
-			// Read back for broadcast
-			agentStatus := failedStatus
+			// Read back actual status
+			agentStatus = failedStatus
 			var readBack string
 			if err := h.db.QueryRowContext(r.Context(), "SELECT status FROM agents WHERE id = ?", agentID).Scan(&readBack); err == nil {
 				agentStatus = readBack
 			}
+		}
 
+		// Broadcast real-time events (only when hub is available)
+		if h.hub != nil && workspaceID != "" {
+			channel := "workspace:" + workspaceID
+			eventType := "run.completed"
+			if body.Status == "FAILED" || body.Status == "CANCELLED" {
+				eventType = "run.failed"
+			}
 			h.hub.Broadcast(channel, ws.ServerMessage{
-				Type:    "agent.status",
-				Channel: channel,
-				Payload: map[string]string{
-					"agent_id":  agentID,
+				Type: eventType, Channel: channel, Payload: map[string]string{
+					"run_id":     runID,
+					"agent_id":   agentID,
 					"agent_name": agentName.String,
-					"status":    agentStatus,
+					"status":     body.Status,
+				},
+			})
+			h.hub.Broadcast(channel, ws.ServerMessage{
+				Type: "agent.status", Channel: channel, Payload: map[string]string{
+					"agent_id":   agentID,
+					"agent_name": agentName.String,
+					"status":     agentStatus,
 				},
 			})
 		}
