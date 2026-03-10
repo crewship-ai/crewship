@@ -26,7 +26,7 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
   const refreshingOwnerRef = useRef<number | null>(null)
 
   const fetchMissions = useCallback(async (showRefresh = false, silent = false) => {
-    const requestId = ++requestIdRef.current
+    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
 
     if (!silent && showRefresh) {
       refreshingOwnerRef.current = requestId

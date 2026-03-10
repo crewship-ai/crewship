@@ -427,7 +427,11 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 		s.logger.Error("recover orphaned runs", "error", err)
 		return
 	}
-	affected, _ := result.RowsAffected()
+	affected, err := result.RowsAffected()
+	if err != nil {
+		s.logger.Warn("rows affected check failed", "error", err)
+		return
+	}
 	if affected == 0 {
 		return
 	}

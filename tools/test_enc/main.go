@@ -12,12 +12,10 @@ import (
 )
 
 func main() {
-	key := os.Getenv("ENCRYPTION_KEY")
-	if key == "" {
+	if os.Getenv("ENCRYPTION_KEY") == "" {
 		fmt.Println("ENCRYPTION_KEY not set")
 		os.Exit(1)
 	}
-	_ = key
 
 	// Test roundtrip
 	testValue := "test-credential-roundtrip-value-12345"
@@ -42,11 +40,15 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("DB key length: %d\n", len(dbDec))
-		// Mask credential material -- only show type prefix for safety
-		if len(dbDec) > 10 {
-			fmt.Printf("DB key prefix: %s...***\n", dbDec[:min(10, len(dbDec))])
-		} else {
-			fmt.Println("DB key: ***masked***")
+		switch {
+		case strings.HasPrefix(dbDec, "sk-ant-oat"):
+			fmt.Println("DB token type: anthropic-oauth")
+		case strings.HasPrefix(dbDec, "sk-ant-"):
+			fmt.Println("DB token type: anthropic-api-key")
+		case strings.HasPrefix(dbDec, "glpat-"):
+			fmt.Println("DB token type: gitlab-pat")
+		default:
+			fmt.Println("DB credential: ***masked***")
 		}
 
 		// Test with Anthropic API using Bearer auth
@@ -75,18 +77,4 @@ func main() {
 			}
 		}
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

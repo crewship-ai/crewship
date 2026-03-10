@@ -28,8 +28,8 @@ interface CrewEscalationsProps {
   workspaceId: string
 }
 
-function PendingIcon() {
-  return <BadgeAlertIcon size={14} />
+function PendingIcon({ className }: { className?: string }) {
+  return <BadgeAlertIcon size={14} className={className} />
 }
 
 const STATUS_CONFIG: Record<Escalation["status"], {
@@ -74,7 +74,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   const refreshingOwnerRef = useRef<number | null>(null)
 
   const fetchEscalations = useCallback(async (showRefresh = false, silent = false) => {
-    const requestId = ++requestIdRef.current
+    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
 
     if (!silent && showRefresh) {
       refreshingOwnerRef.current = requestId

@@ -699,8 +699,9 @@ BEGIN
 	   != (SELECT workspace_id FROM crews WHERE id = NEW.crew_id);
 END;
 
--- Migrate existing crew-scoped credentials to junction table
+-- Migrate existing crew-scoped credentials to junction table (same workspace only)
 INSERT OR IGNORE INTO credential_crews (credential_id, crew_id, created_at)
-SELECT id, crew_id, datetime('now') FROM credentials
-WHERE scope = 'CREW' AND crew_id IS NOT NULL AND deleted_at IS NULL;
+SELECT c.id, c.crew_id, datetime('now') FROM credentials c
+JOIN crews cr ON cr.id = c.crew_id AND cr.workspace_id = c.workspace_id
+WHERE c.scope = 'CREW' AND c.crew_id IS NOT NULL AND c.deleted_at IS NULL AND cr.deleted_at IS NULL;
 `

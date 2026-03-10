@@ -85,7 +85,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
   const refreshingOwnerRef = useRef<number | null>(null)
 
   const fetchConversations = useCallback(async (showRefresh = false, silent = false) => {
-    const requestId = ++requestIdRef.current
+    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
 
     if (!silent && showRefresh) {
       refreshingOwnerRef.current = requestId

@@ -102,7 +102,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
   const refreshingOwnerRef = useRef<number | null>(null)
 
   const fetchAssignments = useCallback(async (showRefresh = false, silent = false) => {
-    const requestId = ++requestIdRef.current
+    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
 
     if (!silent && showRefresh) {
       refreshingOwnerRef.current = requestId
@@ -150,13 +150,13 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
         <div className="flex items-center gap-2">
           <h2 className="text-base font-semibold">Assignments</h2>
           {assignments.some((a) => a.status === "RUNNING") && (
-            <span className="relative flex h-2 w-2">
+            <span aria-hidden="true" className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
             </span>
           )}
         </div>
-        <span className="text-xs text-muted-foreground">
+        <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
           {refreshing ? "Updating..." : "Live"}
         </span>
       </div>
@@ -217,7 +217,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                               className={`gap-1.5 border-0 ${config.className}`}
                             >
                               {a.status === "RUNNING" ? (
-                                <span className="relative flex h-2 w-2 shrink-0">
+                                <span aria-hidden="true" className="relative flex h-2 w-2 shrink-0">
                                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
                                   <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
                                 </span>
