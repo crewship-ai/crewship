@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llmproxy"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/logging"
@@ -56,6 +57,7 @@ type Deps struct {
 	DebugLogs *logging.RingBuffer
 	DB        *sql.DB
 	WebFS     fs.FS
+	License   *license.License
 }
 
 func (d *Deps) Close() {
@@ -189,6 +191,9 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// Mount Go API routes when database is available
 	if deps != nil && deps.DB != nil && cfg.Auth.JWTSecret != "" {
 		var opts []goapi.RouterOption
+		if deps.License != nil {
+			opts = append(opts, goapi.WithLicense(deps.License))
+		}
 		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
 		opts = append(opts, goapi.WithInternalToken(cfg.Auth.InternalToken))
 		opts = append(opts, goapi.WithHub(wsHub))

@@ -8,16 +8,21 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/license"
 )
 
 type AgentHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	license *license.License
 }
 
 func NewAgentHandler(db *sql.DB, logger *slog.Logger) *AgentHandler {
 	return &AgentHandler{db: db, logger: logger}
 }
+
+func (h *AgentHandler) SetLicense(lic *license.License) { h.license = lic }
 
 var validAgentRoles = map[string]bool{
 	"AGENT":       true,
@@ -203,6 +208,19 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.AgentRole == "COORDINATOR" && req.CrewID != nil && *req.CrewID != "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "COORDINATOR role must not have crew_id"})
 		return
+	}
+
+	// License: check agent-per-crew limit
+	if h.license != nil && req.CrewID != nil && *req.CrewID != "" {
+		if err := h.license.CheckAgentLimit(r.Context(), h.db, *req.CrewID); err != nil {
+			if license.IsLimitError(err) {
+				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": err.Error()})
+				return
+			}
+			h.logger.Error("check agent limit", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 	}
 
 	// Max 1 LEAD per crew

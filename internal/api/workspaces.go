@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/license"
 )
 
 // validLanguages maps language name → true for validation.
@@ -57,13 +59,16 @@ func resolveLanguage(val string) (string, error) {
 }
 
 type WorkspaceHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	license *license.License
 }
 
 func NewWorkspaceHandler(db *sql.DB, logger *slog.Logger) *WorkspaceHandler {
 	return &WorkspaceHandler{db: db, logger: logger}
 }
+
+func (h *WorkspaceHandler) SetLicense(lic *license.License) { h.license = lic }
 
 type workspaceResponse struct {
 	ID                string  `json:"id"`
@@ -431,6 +436,18 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.license != nil {
+		if err := h.license.CheckMemberLimit(r.Context(), h.db, workspaceID); err != nil {
+			if license.IsLimitError(err) {
+				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": err.Error()})
+				return
+			}
+			h.logger.Error("check member limit", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+	}
+
 	var req addMemberRequest
 	if err := readJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
@@ -625,6 +642,18 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	if !canRole(role, "manage") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 		return
+	}
+
+	if h.license != nil {
+		if err := h.license.CheckMemberLimit(r.Context(), h.db, workspaceID); err != nil {
+			if license.IsLimitError(err) {
+				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": err.Error()})
+				return
+			}
+			h.logger.Error("check member limit for invitation", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 	}
 
 	var req createInvitationRequest
