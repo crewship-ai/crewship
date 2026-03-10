@@ -12,6 +12,8 @@ import {
   Ban,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { CircleCheckIcon } from "@/components/ui/circle-check"
+import { LoaderPinwheelIcon } from "@/components/ui/loader-pinwheel"
 import type { MissionStatus, MissionTaskStatus } from "@/lib/types/mission"
 
 const MISSION_STATUS_CONFIG: Record<
@@ -86,12 +88,17 @@ const TASK_STATUS_CONFIG: Record<
   },
 }
 
+function StatusIcon({ status, icon: Icon }: { status: string; icon: React.ComponentType<{ className?: string }> }) {
+  if (status === "IN_PROGRESS") return <LoaderPinwheelIcon size={14} />
+  if (status === "COMPLETED") return <CircleCheckIcon size={14} />
+  return <Icon className="h-3 w-3" />
+}
+
 export function MissionStatusBadge({ status }: { status: MissionStatus }) {
   const config = MISSION_STATUS_CONFIG[status]
-  const Icon = config.icon
   return (
     <Badge variant="outline" className={`gap-1 border-0 ${config.className}`}>
-      <Icon className={`h-3 w-3 ${status === "IN_PROGRESS" ? "animate-spin" : ""}`} />
+      <StatusIcon status={status} icon={config.icon} />
       {config.label}
     </Badge>
   )
@@ -99,10 +106,9 @@ export function MissionStatusBadge({ status }: { status: MissionStatus }) {
 
 export function TaskStatusBadge({ status }: { status: MissionTaskStatus }) {
   const config = TASK_STATUS_CONFIG[status]
-  const Icon = config.icon
   return (
     <Badge variant="outline" className={`gap-1 border-0 ${config.className}`}>
-      <Icon className={`h-3 w-3 ${status === "IN_PROGRESS" ? "animate-spin" : ""}`} />
+      <StatusIcon status={status} icon={config.icon} />
       {config.label}
     </Badge>
   )

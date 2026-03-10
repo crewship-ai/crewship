@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Activity, Clock, AlertTriangle, CheckCircle, XCircle, Play, ExternalLink } from "lucide-react"
+import { RocketIcon as AnimatedRocket } from "@/components/ui/rocket"
+import { AnimatedNumber } from "@/components/ui/animated-number"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { PageHeader } from "@/components/layout/page-header"
@@ -74,6 +76,15 @@ function formatDuration(start: string | null, end: string | null): string {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
 
+function LiveRunDuration({ startedAt }: { startedAt: string }) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return <>{formatDuration(startedAt, null)}</>
+}
+
 export default function RunsPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [data, setData] = useState<RunsResponse | null>(null)
@@ -133,26 +144,34 @@ export default function RunsPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-4">
-              <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Running Now</div>
-              <div className="text-2xl font-bold mt-1 text-emerald-600">{data.stats.running}</div>
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Running Now</div>
+                {data.stats.running > 0 && (
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                  </span>
+                )}
+              </div>
+              <div className="text-2xl font-bold mt-1 text-emerald-600"><AnimatedNumber value={data.stats.running} /></div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
               <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Today&apos;s Runs</div>
-              <div className="text-2xl font-bold mt-1">{data.stats.today}</div>
+              <div className="text-2xl font-bold mt-1"><AnimatedNumber value={data.stats.today} /></div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
               <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Failed</div>
-              <div className="text-2xl font-bold mt-1 text-destructive">{data.stats.failed}</div>
+              <div className="text-2xl font-bold mt-1 text-destructive"><AnimatedNumber value={data.stats.failed} /></div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
               <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Total</div>
-              <div className="text-2xl font-bold mt-1">{data.pagination.total}</div>
+              <div className="text-2xl font-bold mt-1"><AnimatedNumber value={data.pagination.total} /></div>
             </CardContent>
           </Card>
         </div>
@@ -246,16 +265,28 @@ export default function RunsPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={config.variant} className="gap-1 text-[10px]">
-                          <StatusIcon className="h-3 w-3" />
+                        <Badge variant={config.variant} className="gap-1.5 text-[10px]">
+                          {run.status === "RUNNING" ? (
+                            <span className="relative flex h-2 w-2 shrink-0">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                            </span>
+                          ) : (
+                            <StatusIcon className="h-3 w-3" />
+                          )}
                           {config.label}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {run.trigger_type}
+                        <span className="flex items-center gap-1.5">
+                          {run.trigger_type === "WEBHOOK" && <AnimatedRocket size={12} />}
+                          {run.trigger_type}
+                        </span>
                       </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {formatDuration(run.started_at, run.finished_at)}
+                      <TableCell className="font-mono text-xs tabular-nums">
+                        {run.status === "RUNNING" && run.started_at
+                          ? <LiveRunDuration startedAt={run.started_at} />
+                          : formatDuration(run.started_at, run.finished_at)}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {run.started_at

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Eye, EyeOff, Loader2, CheckCircle2, XCircle, FlaskConical } from "lucide-react"
+import { Eye, EyeOff, Loader2, CheckCircle2, XCircle, FlaskConical, Check, ChevronsUpDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -21,6 +21,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 
 interface Team {
   id: string
@@ -35,6 +39,7 @@ interface CredentialData {
   provider: string
   scope: "WORKSPACE" | "CREW"
   crew_id: string | null
+  crew_ids: string[]
 }
 
 interface EditCredentialDialogProps {
@@ -58,7 +63,8 @@ export function EditCredentialDialog({
   const [description, setDescription] = React.useState(credential.description ?? "")
   const [value, setValue] = React.useState("")
   const [scope, setScope] = React.useState<"WORKSPACE" | "CREW">(credential.scope)
-  const [crewId, setTeamId] = React.useState(credential.crew_id ?? "")
+  const [crewIds, setCrewIds] = React.useState<string[]>(credential.crew_ids ?? [])
+  const [crewPopoverOpen, setCrewPopoverOpen] = React.useState(false)
   const [showValue, setShowValue] = React.useState(false)
   const [crews, setTeams] = React.useState<Team[]>([])
   const [teamsLoading, setTeamsLoading] = React.useState(false)
@@ -71,7 +77,7 @@ export function EditCredentialDialog({
     setName(credential.name)
     setDescription(credential.description ?? "")
     setScope(credential.scope)
-    setTeamId(credential.crew_id ?? "")
+    setCrewIds(credential.crew_ids ?? [])
     setValue("")
     setShowValue(false)
     setError("")
@@ -83,7 +89,7 @@ export function EditCredentialDialog({
       setTeamsLoading(true)
       fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
         .then((res) => res.json())
-        .then((data: Team[]) => setTeams(data))
+        .then((data: Team[]) => setTeams(Array.isArray(data) ? data : []))
         .catch(() => setTeams([]))
         .finally(() => setTeamsLoading(false))
     }
@@ -95,6 +101,7 @@ export function EditCredentialDialog({
       setValue("")
       setShowValue(false)
       setTestResult(null)
+      setCrewPopoverOpen(false)
     }
     onOpenChange(nextOpen)
   }
@@ -138,8 +145,8 @@ export function EditCredentialDialog({
       setError("Name is required")
       return
     }
-    if (scope === "CREW" && !crewId) {
-      setError("Crew is required for crew-scoped credentials")
+    if (scope === "CREW" && crewIds.length === 0) {
+      setError("At least one crew is required for crew-scoped credentials")
       return
     }
 
@@ -153,8 +160,8 @@ export function EditCredentialDialog({
       if (description.trim()) body.description = description.trim()
       else body.description = ""
       if (value) body.value = value
-      if (scope === "CREW") body.crew_id = crewId
-      else body.crew_id = null
+      if (scope === "CREW") body.crew_ids = crewIds
+      else body.crew_ids = []
 
       const res = await fetch(`/api/v1/credentials/${credential.id}?workspace_id=${workspaceId}`, {
         method: "PATCH",
@@ -257,7 +264,7 @@ export function EditCredentialDialog({
 
           <div className="space-y-2">
             <Label htmlFor="edit-cred-scope">Scope</Label>
-            <Select value={scope} onValueChange={(v) => { setScope(v as "WORKSPACE" | "CREW"); if (v === "WORKSPACE") setTeamId(""); }}>
+            <Select value={scope} onValueChange={(v) => { setScope(v as "WORKSPACE" | "CREW"); if (v === "WORKSPACE") setCrewIds([]); }}>
               <SelectTrigger id="edit-cred-scope" className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -270,25 +277,77 @@ export function EditCredentialDialog({
 
           {scope === "CREW" && (
             <div className="space-y-2">
-              <Label htmlFor="edit-cred-team">Crew</Label>
+              <Label>Crews</Label>
               {teamsLoading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Loading crews...
                 </div>
               ) : (
-                <Select value={crewId} onValueChange={setTeamId}>
-                  <SelectTrigger id="edit-cred-team" className="w-full">
-                    <SelectValue placeholder="Select a crew" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {crews.map((crew) => (
-                      <SelectItem key={crew.id} value={crew.id}>
-                        {crew.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <>
+                  <Popover open={crewPopoverOpen} onOpenChange={setCrewPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={crewPopoverOpen}
+                        className="w-full justify-between font-normal"
+                      >
+                        {crewIds.length === 0
+                          ? "Select crews..."
+                          : `${crewIds.length} crew${crewIds.length > 1 ? "s" : ""} selected`}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search crews..." />
+                        <CommandList>
+                          <CommandEmpty>No crews found.</CommandEmpty>
+                          <CommandGroup>
+                            {crews.map((crew) => {
+                              const isSelected = crewIds.includes(crew.id)
+                              return (
+                                <CommandItem
+                                  key={crew.id}
+                                  value={crew.name}
+                                  onSelect={() => {
+                                    setCrewIds((prev) =>
+                                      isSelected
+                                        ? prev.filter((id) => id !== crew.id)
+                                        : [...prev, crew.id]
+                                    )
+                                  }}
+                                >
+                                  <Check className={cn("mr-2 h-4 w-4", isSelected ? "opacity-100" : "opacity-0")} />
+                                  {crew.name}
+                                </CommandItem>
+                              )
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  {crewIds.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {crewIds.map((id) => {
+                        const crew = crews.find((c) => c.id === id)
+                        return crew ? (
+                          <Badge
+                            key={id}
+                            variant="secondary"
+                            className="cursor-pointer"
+                            onClick={() => setCrewIds((prev) => prev.filter((cid) => cid !== id))}
+                          >
+                            {crew.name}
+                            <XCircle className="ml-1 h-3 w-3" />
+                          </Badge>
+                        ) : null
+                      })}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText } from "lucide-react"
+import { BotIcon as AnimatedBot } from "@/components/ui/bot"
+import { ActivityIcon as AnimatedActivity } from "@/components/ui/activity"
+import { KeyIcon as AnimatedKey } from "@/components/ui/key"
+
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -249,6 +253,7 @@ export default function DashboardPage() {
               subtitle={totalAgents === 0 ? "No agents yet" : `${totalAgents} agent${totalAgents === 1 ? "" : "s"}`}
               icon={Bot}
               iconClassName="bg-primary/10 text-primary"
+              animatedIcon={<AnimatedBot size={16} />}
             />
             <StatCard
               title="Running Now"
@@ -256,6 +261,7 @@ export default function DashboardPage() {
               subtitle={`of ${totalAgents} agents`}
               icon={Activity}
               iconClassName="bg-emerald-500/10 text-emerald-600"
+              animatedIcon={<AnimatedActivity size={16} />}
             />
             <StatCard
               title="Today's Runs"
@@ -275,6 +281,7 @@ export default function DashboardPage() {
               value={apiKeysActive}
               subtitle={apiKeysActive === 0 ? "Add credentials to get started" : `${apiKeysActive} key${apiKeysActive === 1 ? "" : "s"} configured`}
               icon={Key}
+              animatedIcon={<AnimatedKey size={16} />}
             />
           </>
         )}
@@ -352,7 +359,7 @@ export default function DashboardPage() {
                   const RunIcon = runCfg?.icon
 
                   return (
-                    <TableRow key={agent.id}>
+                    <TableRow key={agent.id} className="transition-colors duration-500">
                       <TableCell>
                         <Link href={`/agents/${agent.id}`} className="hover:underline">
                           <div className="font-medium text-sm">{agent.name}</div>
@@ -375,7 +382,15 @@ export default function DashboardPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={statusCfg.variant}>{statusCfg.label}</Badge>
+                        <Badge variant={statusCfg.variant} className="gap-1.5">
+                          {agent.status === "RUNNING" && (
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                            </span>
+                          )}
+                          {statusCfg.label}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         {lastRun ? (

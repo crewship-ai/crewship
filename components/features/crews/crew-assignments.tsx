@@ -1,8 +1,7 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useState } from "react"
-import { RefreshCw, CheckCircle2, Loader2, Clock, XCircle, ClipboardList } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Fragment, useCallback, useEffect, useRef, useState } from "react"
+import { CheckCircle2, Loader2, Clock, XCircle, ClipboardList } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -84,32 +83,50 @@ function formatDuration(startedAt: string | null, finishedAt: string | null): st
   return `${hours}h ${minutes % 60}m`
 }
 
+function LiveDuration({ startedAt }: { startedAt: string }) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return <>{formatDuration(startedAt, null)}</>
+}
+
 export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
   const [assignments, setAssignments] = useState<Assignment[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const requestIdRef = useRef(0)
+  const loadingOwnerRef = useRef<number | null>(null)
+  const refreshingOwnerRef = useRef<number | null>(null)
 
   const fetchAssignments = useCallback(async (showRefresh = false, silent = false) => {
-    if (!silent) {
-      if (showRefresh) setRefreshing(true)
-      else setLoading(true)
+    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
+    const ownsLoading = !silent && !showRefresh
+    const ownsRefresh = !silent && showRefresh
+
+    if (ownsRefresh) {
+      refreshingOwnerRef.current = requestId
+      setRefreshing(true)
+    } else if (ownsLoading) {
+      loadingOwnerRef.current = requestId
+      setLoading(true)
     }
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/assignments?workspace_id=${workspaceId}&limit=50`
       )
-      if (res.ok) {
-        const data = (await res.json()) as Assignment[]
+      if (!res.ok) return
+      const data = (await res.json()) as Assignment[]
+      if (requestId === requestIdRef.current) {
         setAssignments(data)
       }
     } catch {
       // Silently fail — component shows empty state
     } finally {
-      if (!silent) {
-        setLoading(false)
-        setRefreshing(false)
-      }
+      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
+      if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
     }
   }, [crewId, workspaceId])
 
@@ -132,17 +149,18 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Assignments</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          onClick={() => fetchAssignments(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold">Assignments</h2>
+          {assignments.some((a) => a.status === "RUNNING") && (
+            <span aria-hidden="true" className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+            </span>
+          )}
+        </div>
+        <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
+          {refreshing ? "Updating..." : "Live"}
+        </span>
       </div>
 
       {assignments.length === 0 ? (
@@ -181,37 +199,57 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                       <Fragment key={a.id}>
                         <TableRow
                           className={hasDetail ? "cursor-pointer" : ""}
-                          role={hasDetail ? "button" : undefined}
-                          tabIndex={hasDetail ? 0 : -1}
                           onClick={() => {
                             if (hasDetail) setExpandedId(isExpanded ? null : a.id)
-                          }}
-                          onKeyDown={(e) => {
-                            if (!hasDetail) return
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault()
-                              setExpandedId(isExpanded ? null : a.id)
-                            }
                           }}
                         >
                           <TableCell>
                             <Badge
                               variant="outline"
-                              className={`gap-1 border-0 ${config.className}`}
+                              className={`gap-1.5 border-0 ${config.className}`}
                             >
-                              <StatusIcon className={`h-3 w-3 ${a.status === "RUNNING" ? "animate-spin" : ""}`} />
+                              {a.status === "RUNNING" ? (
+                                <span aria-hidden="true" className="relative flex h-2 w-2 shrink-0">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                                </span>
+                              ) : (
+                                <StatusIcon className="h-3 w-3" />
+                              )}
                               {config.label}
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="text-sm line-clamp-1">{a.task}</span>
-                              </TooltipTrigger>
-                              <TooltipContent className="max-w-sm">
-                                <p className="whitespace-pre-wrap">{a.task}</p>
-                              </TooltipContent>
-                            </Tooltip>
+                            {hasDetail ? (
+                              <button
+                                type="button"
+                                className="text-left w-full"
+                                aria-expanded={isExpanded}
+                                aria-controls={`assign-detail-${a.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setExpandedId(isExpanded ? null : a.id)
+                                }}
+                              >
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="text-sm line-clamp-1">{a.task}</span>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-sm">
+                                    <p className="whitespace-pre-wrap">{a.task}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </button>
+                            ) : (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="text-sm line-clamp-1">{a.task}</span>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-sm">
+                                  <p className="whitespace-pre-wrap">{a.task}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             @{a.assigned_by_slug}
@@ -222,12 +260,14 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                           <TableCell className="text-xs text-muted-foreground">
                             {formatRelativeTime(a.created_at)}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {formatDuration(a.started_at, a.finished_at)}
+                          <TableCell className="text-xs text-muted-foreground tabular-nums">
+                            {a.status === "RUNNING" && a.started_at
+                              ? <LiveDuration startedAt={a.started_at} />
+                              : formatDuration(a.started_at, a.finished_at)}
                           </TableCell>
                         </TableRow>
                         {isExpanded && hasDetail && (
-                          <TableRow>
+                          <TableRow id={`assign-detail-${a.id}`}>
                             <TableCell colSpan={6} className="bg-muted/30">
                               <div className="text-sm whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
                                 {a.error_message && (

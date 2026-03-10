@@ -1,0 +1,176 @@
+<mxfile host="app.diagrams.net" modified="2026-03-10" agent="Crewship" version="24.0.0" type="device">
+  <diagram id="skills-mcp" name="Skills + MCP Architecture">
+    <mxGraphModel dx="1800" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- TITLE -->
+        <mxCell id="title" value="&lt;b&gt;CREWSHIP — Skills + MCP Architecture&lt;/b&gt;&lt;br&gt;Curated marketplace, sidecar MCP gateway, sandboxed execution" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=18;" vertex="1" parent="1">
+          <mxGeometry x="650" y="20" width="560" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ========== SKILL HUB (Marketplace) ========== -->
+        <mxCell id="hub_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;strokeWidth=3;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="100" y="90" width="900" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="hub_label" value="&lt;b&gt;CREWSHIP SKILL HUB&lt;/b&gt; (MCP Marketplace)" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=16;fontColor=#283593;" vertex="1" parent="1">
+          <mxGeometry x="120" y="95" width="360" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- 3 tiers -->
+        <mxCell id="tier_official" value="&lt;b&gt;✓ Official Skills&lt;/b&gt;&lt;br&gt;(Crewship-maintained)&lt;br&gt;&lt;br&gt;coding-assistant&lt;br&gt;web-researcher&lt;br&gt;customer-support" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C5CAE9;strokeColor=#283593;fontSize=11;verticalAlign=top;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="130" y="140" width="200" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="tier_community" value="&lt;b&gt;✓ Verified Community&lt;/b&gt;&lt;br&gt;(anyone + security review)&lt;br&gt;&lt;br&gt;20,000+ MCP servers&lt;br&gt;Docker MCP Catalog&lt;br&gt;as import source" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C5CAE9;strokeColor=#283593;fontSize=11;verticalAlign=top;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="360" y="140" width="210" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="tier_private" value="&lt;b&gt;🔒 Private Skills&lt;/b&gt;&lt;br&gt;(org-internal)&lt;br&gt;&lt;br&gt;Custom MCP servers&lt;br&gt;Internal tools&lt;br&gt;Org-specific workflows" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C5CAE9;strokeColor=#283593;fontSize=11;verticalAlign=top;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="600" y="140" width="200" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- Security Pipeline -->
+        <mxCell id="pipeline" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCDD2;strokeColor=#C62828;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="130" y="290" width="670" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="pipeline_label" value="&lt;b&gt;Security Pipeline (6 steps before VERIFIED)&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#C62828;" vertex="1" parent="1">
+          <mxGeometry x="140" y="295" width="330" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1" value="&lt;b&gt;1. Source&lt;/b&gt;&lt;br&gt;Sigstore /&lt;br&gt;GitHub Attestations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="150" y="330" width="100" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="p2" value="&lt;b&gt;2. Static&lt;/b&gt;&lt;br&gt;tool definition&lt;br&gt;scan" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="260" y="330" width="90" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="p3" value="&lt;b&gt;3. Deps&lt;/b&gt;&lt;br&gt;SBOM + CVE&lt;br&gt;(Trivy/Grype)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="360" y="330" width="90" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="p4" value="&lt;b&gt;4. Sandbox&lt;/b&gt;&lt;br&gt;srt isolation&lt;br&gt;test run" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="460" y="330" width="90" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="p5" value="&lt;b&gt;5. Manual&lt;/b&gt;&lt;br&gt;review" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="560" y="330" width="80" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="p6" value="&lt;b&gt;6. Monitor&lt;/b&gt;&lt;br&gt;continuous&lt;br&gt;re-scan" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="650" y="330" width="90" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ep12" style="rounded=1;" edge="1" source="p1" target="p2" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep23" style="rounded=1;" edge="1" source="p2" target="p3" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep34" style="rounded=1;" edge="1" source="p3" target="p4" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep45" style="rounded=1;" edge="1" source="p4" target="p5" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep56" style="rounded=1;" edge="1" source="p5" target="p6" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="p_result" value="→ security_score (0-100)&lt;br&gt;→ VERIFIED / REJECTED" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=11;fontColor=#C62828;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="150" y="400" width="210" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- OCI Registry -->
+        <mxCell id="oci" value="&lt;b&gt;OCI Registry&lt;/b&gt;&lt;br&gt;ghcr.io/crewship-ai/skills/{name}:{ver}&lt;br&gt;SHA256 digest-verified" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#C5CAE9;strokeColor=#283593;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="830" y="300" width="150" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- ========== SKILL DEFINITION ========== -->
+        <mxCell id="skill_def" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#F57F17;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="90" width="400" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="skill_def_label" value="&lt;b&gt;Skill Definition (DB)&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=13;fontColor=#F57F17;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="95" width="160" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sd1" value="MCP Server command" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE082;strokeColor=#F57F17;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="130" width="360" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="sd1v" value="e.g. &quot;npx @modelcontextprotocol/server-github&quot;" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=9;fontFamily=Courier New;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="1130" y="155" width="330" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="sd2" value="MCP transport: stdio | sse | streamable-http" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE082;strokeColor=#F57F17;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="175" width="360" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="sd3" value="System prompt fragment (instructions for LLM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE082;strokeColor=#F57F17;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="210" width="360" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="sd4" value="Credential requirements (e.g. GITHUB_TOKEN)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE082;strokeColor=#F57F17;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="245" width="360" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="sd5" value="Dependencies (apt/pip/npm packages)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE082;strokeColor=#F57F17;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="280" width="360" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="sd6" value="defer_loading (true = on-demand via tool search)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE082;strokeColor=#F57F17;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="315" width="360" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="sd7" value="allowed_domains (for srt network sandbox)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE082;strokeColor=#F57F17;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="350" width="360" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- ========== RUNTIME FLOW (in container) ========== -->
+        <mxCell id="runtime_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFECB3;strokeColor=#FF8F00;strokeWidth=3;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="100" y="540" width="1400" height="400" as="geometry" />
+        </mxCell>
+        <mxCell id="runtime_label" value="&lt;b&gt;RUNTIME FLOW (inside crew container)&lt;/b&gt;  —  Phase 2" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#FF8F00;" vertex="1" parent="1">
+          <mxGeometry x="120" y="545" width="420" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- Sidecar -->
+        <mxCell id="rt_sidecar" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCDD2;strokeColor=#C62828;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="400" y="590" width="600" height="320" as="geometry" />
+        </mxCell>
+        <mxCell id="rt_sidecar_label" value="&lt;b&gt;crewship-sidecar (MCP Gateway)&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=13;fontColor=#C62828;" vertex="1" parent="1">
+          <mxGeometry x="420" y="595" width="280" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- MCP servers -->
+        <mxCell id="mcp1" value="&lt;b&gt;GitHub MCP&lt;/b&gt;&lt;br&gt;(stdio)&lt;br&gt;&lt;br&gt;🔒 srt sandbox&lt;br&gt;net: api.github.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=10;verticalAlign=top;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="430" y="650" width="140" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="mcp2" value="&lt;b&gt;Slack MCP&lt;/b&gt;&lt;br&gt;(stdio)&lt;br&gt;&lt;br&gt;🔒 srt sandbox&lt;br&gt;net: slack.com" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=10;verticalAlign=top;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="590" y="650" width="140" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="mcp3" value="&lt;b&gt;Custom MCP&lt;/b&gt;&lt;br&gt;(stdio)&lt;br&gt;&lt;br&gt;🔒 srt sandbox" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=10;verticalAlign=top;spacingTop=5;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="750" y="650" width="130" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- Sidecar functions -->
+        <mxCell id="rt_cred_inject" value="&lt;b&gt;Credential injection&lt;/b&gt;&lt;br&gt;Sidecar injects creds into MCP servers&lt;br&gt;Agent NEVER sees credentials" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="430" y="760" width="250" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="rt_rbac" value="&lt;b&gt;RBAC check&lt;/b&gt;&lt;br&gt;per-tool permissions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="700" y="760" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="rt_audit" value="&lt;b&gt;Audit log&lt;/b&gt;&lt;br&gt;every tool call" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="700" y="810" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="rt_search_tools" value="&lt;b&gt;search_tools&lt;/b&gt; (meta-tool)&lt;br&gt;On-demand tool discovery&lt;br&gt;(deferred loading)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EF9A9A;strokeColor=#C62828;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="430" y="820" width="240" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Agent -->
+        <mxCell id="rt_agent" value="&lt;b&gt;Agent Process&lt;/b&gt;&lt;br&gt;(UID 1001)&lt;br&gt;&lt;br&gt;Gets: search_tools meta-tool&lt;br&gt;+ critical tools only&lt;br&gt;&lt;br&gt;Needs a tool?&lt;br&gt;→ calls search_tools()&lt;br&gt;→ sidecar returns matching&lt;br&gt;→ agent calls tool&lt;br&gt;→ sidecar proxies to MCP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2EBF2;strokeColor=#00838F;fontSize=10;align=left;spacingLeft=10;verticalAlign=top;spacingTop=8;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="130" y="590" width="230" height="200" as="geometry" />
+        </mxCell>
+
+        <!-- Agent -> Sidecar -->
+        <mxCell id="e_agent_sidecar" value="MCP tool calls&lt;br&gt;(stdio proxy)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeWidth=2;strokeColor=#C62828;" edge="1" source="rt_agent" target="rt_sidecar" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Credential comparison -->
+        <mxCell id="cred_compare" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;strokeWidth=1;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="540" width="450" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="cred_title" value="&lt;b&gt;Credential Flow Comparison&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#C62828;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="545" width="220" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cred_old" value="&lt;b&gt;OLD (insecure):&lt;/b&gt;&lt;br&gt;Agent gets GITHUB_TOKEN as env var&lt;br&gt;→ calls API directly&lt;br&gt;⚠️ Prompt injection can extract token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCDD2;strokeColor=#C62828;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="575" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="cred_new" value="&lt;b&gt;NEW (secure):&lt;/b&gt;&lt;br&gt;Agent has NO tool credentials&lt;br&gt;Agent → MCP → Sidecar (RBAC)&lt;br&gt;→ inject cred → MCP server → API&lt;br&gt;✅ Agent sees only tool result" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1290" y="575" width="200" height="80" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

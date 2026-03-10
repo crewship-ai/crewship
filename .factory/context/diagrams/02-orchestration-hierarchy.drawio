@@ -1,0 +1,248 @@
+<mxfile host="app.diagrams.net" modified="2026-03-10" agent="Crewship" version="24.0.0" type="device">
+  <diagram id="orch-hierarchy" name="Orchestration Hierarchy">
+    <mxGraphModel dx="2074" dy="1156" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3300" pageHeight="2340" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- TITLE -->
+        <mxCell id="title" value="&lt;b&gt;CREWSHIP — 3-Level Orchestration Hierarchy&lt;/b&gt;&lt;br&gt;Coordinator → Crew Lead → Agent" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=18;" vertex="1" parent="1">
+          <mxGeometry x="900" y="30" width="500" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ========== USER ========== -->
+        <mxCell id="user" value="&lt;b&gt;User&lt;/b&gt;" style="shape=actor;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="100" width="60" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ========== LEVEL 3: COORDINATOR ========== -->
+        <mxCell id="coord_zone" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;strokeWidth=2;arcSize=5;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="830" y="230" width="640" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="coord_zone_label" value="&lt;b&gt;LEVEL 3: WORKSPACE (opt-in)&lt;/b&gt;  —  Phase 2B" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#7B1FA2;" vertex="1" parent="1">
+          <mxGeometry x="840" y="235" width="320" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="coordinator" value="&lt;b&gt;🏢 Coordinator&lt;/b&gt;&lt;br&gt;&lt;br&gt;1 per workspace (opt-in)&lt;br&gt;Lightweight LLM call&lt;br&gt;(NO Docker container)&lt;br&gt;&lt;br&gt;Knows all crews &amp; leads&lt;br&gt;Cross-crew coordination&lt;br&gt;Strategic aggregation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CE93D8;strokeColor=#7B1FA2;fontSize=11;align=left;spacingLeft=10;verticalAlign=top;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="980" y="265" width="220" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- User -> Coordinator -->
+        <mxCell id="e_user_coord" value="cross-crew questions&lt;br&gt;(10% of interactions)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#7B1FA2;dashed=1;" edge="1" source="user" target="coordinator" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ========== LEVEL 2: CREW LEADS ========== -->
+        <mxCell id="lead_zone" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="300" y="480" width="1700" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="lead_zone_label" value="&lt;b&gt;LEVEL 2: CREW LEADS&lt;/b&gt;  —  1 per crew, primary user contact (Phase 2A)" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#283593;" vertex="1" parent="1">
+          <mxGeometry x="310" y="485" width="420" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- Marketing Lead -->
+        <mxCell id="lead_mkt" value="&lt;b&gt;👑 Marketing Lead&lt;/b&gt;&lt;br&gt;(Anna)&lt;br&gt;&lt;hr&gt;• Splits tasks to agents&lt;br&gt;• Aggregates results&lt;br&gt;• Quality control&lt;br&gt;• Reports to user" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9FA8DA;strokeColor=#283593;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="380" y="520" width="200" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- Dev Lead -->
+        <mxCell id="lead_dev" value="&lt;b&gt;👑 Development Lead&lt;/b&gt;&lt;br&gt;(Tomas)&lt;br&gt;&lt;hr&gt;• Code review&lt;br&gt;• Dev-test loop&lt;br&gt;• Git worktree mgmt&lt;br&gt;• Architecture decisions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9FA8DA;strokeColor=#283593;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="880" y="520" width="200" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- Finance Lead -->
+        <mxCell id="lead_fin" value="&lt;b&gt;👑 Finance Lead&lt;/b&gt;&lt;br&gt;(Karel)&lt;br&gt;&lt;hr&gt;• Cost reports&lt;br&gt;• Budget tracking&lt;br&gt;• Invoice processing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9FA8DA;strokeColor=#283593;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="520" width="200" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- User -> Leads -->
+        <mxCell id="e_user_lead1" value="90% of interactions" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeWidth=2;strokeColor=#283593;" edge="1" source="user" target="lead_mkt" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1150" y="200" />
+              <mxPoint x="480" y="200" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_user_lead2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;strokeColor=#283593;" edge="1" source="user" target="lead_dev" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_user_lead3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;strokeWidth=2;strokeColor=#283593;" edge="1" source="user" target="lead_fin" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1150" y="200" />
+              <mxPoint x="1480" y="200" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Coordinator -> Leads -->
+        <mxCell id="e_coord_lead1" value="@assign_crew" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#7B1FA2;dashed=1;" edge="1" source="coordinator" target="lead_mkt" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_coord_lead2" value="@ask_lead" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#7B1FA2;dashed=1;" edge="1" source="coordinator" target="lead_dev" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_coord_lead3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#7B1FA2;dashed=1;" edge="1" source="coordinator" target="lead_fin" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ========== LEVEL 1: AGENTS ========== -->
+        <mxCell id="agent_zone" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="300" y="750" width="1700" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="agent_zone_label" value="&lt;b&gt;LEVEL 1: AGENTS&lt;/b&gt;  —  Specialized workers, run in crew containers (Phase 1 ✅)" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#00695C;" vertex="1" parent="1">
+          <mxGeometry x="310" y="755" width="440" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- Marketing Agents -->
+        <mxCell id="agent_bob" value="&lt;b&gt;Bob&lt;/b&gt;&lt;br&gt;Data Analyst&lt;br&gt;Twitter/LinkedIn" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="340" y="800" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="agent_claudia" value="&lt;b&gt;Claudia&lt;/b&gt;&lt;br&gt;Copywriter&lt;br&gt;Reports, articles" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="490" y="800" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="agent_dave" value="&lt;b&gt;Dave&lt;/b&gt;&lt;br&gt;SEO Specialist" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="340" y="880" width="130" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Dev Agents -->
+        <mxCell id="agent_alice" value="&lt;b&gt;Alice&lt;/b&gt;&lt;br&gt;Backend Dev&lt;br&gt;Go, API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="840" y="800" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="agent_charlie" value="&lt;b&gt;Charlie&lt;/b&gt;&lt;br&gt;Frontend Dev&lt;br&gt;React, UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="990" y="800" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="agent_diana" value="&lt;b&gt;Diana&lt;/b&gt;&lt;br&gt;QA Tester" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="840" y="880" width="130" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Finance Agents -->
+        <mxCell id="agent_acc" value="&lt;b&gt;Accountant&lt;/b&gt;&lt;br&gt;Cost tracking" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="800" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="agent_crm" value="&lt;b&gt;CRM Agent&lt;/b&gt;&lt;br&gt;Revenue data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1490" y="800" width="130" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Lead -> Agent edges -->
+        <mxCell id="e_lead_bob" value="@assign" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#00695C;" edge="1" source="lead_mkt" target="agent_bob" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_lead_claudia" value="@assign" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#00695C;" edge="1" source="lead_mkt" target="agent_claudia" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_lead_dave" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#00695C;" edge="1" source="lead_mkt" target="agent_dave" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_lead_alice" value="@assign" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#00695C;" edge="1" source="lead_dev" target="agent_alice" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_lead_charlie" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#00695C;" edge="1" source="lead_dev" target="agent_charlie" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_lead_diana" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#00695C;" edge="1" source="lead_dev" target="agent_diana" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e_lead_acc" value="@assign" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#00695C;" edge="1" source="lead_fin" target="agent_acc" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_lead_crm" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#00695C;" edge="1" source="lead_fin" target="agent_crm" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ========== CREW CONTAINER BOUNDARIES ========== -->
+        <mxCell id="crew_boundary_mkt" value="Marketing Crew Container" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF8F00;strokeWidth=2;dashed=1;fontSize=10;fontColor=#FF8F00;verticalAlign=bottom;spacingBottom=5;" vertex="1" parent="1">
+          <mxGeometry x="320" y="790" width="320" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="crew_boundary_dev" value="Development Crew Container" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF8F00;strokeWidth=2;dashed=1;fontSize=10;fontColor=#FF8F00;verticalAlign=bottom;spacingBottom=5;" vertex="1" parent="1">
+          <mxGeometry x="820" y="790" width="320" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="crew_boundary_fin" value="Finance Crew Container" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#FF8F00;strokeWidth=2;dashed=1;fontSize=10;fontColor=#FF8F00;verticalAlign=bottom;spacingBottom=5;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="790" width="320" height="160" as="geometry" />
+        </mxCell>
+
+        <!-- ========== DIRECT CHAT (bypass) ========== -->
+        <mxCell id="e_user_direct" value="direct chat&lt;br&gt;(bypass lead)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeColor=#999999;dashed=1;" edge="1" source="user" target="agent_alice" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="200" y="180" />
+              <mxPoint x="200" y="830" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ========== ASSIGNMENT FLOW BOX ========== -->
+        <mxCell id="assign_flow" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#F57F17;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="300" y="1080" width="1100" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="assign_flow_label" value="&lt;b&gt;ASSIGNMENT FLOW (Phase 2A)&lt;/b&gt;  —  How Lead delegates to Agent" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=13;fontColor=#F57F17;" vertex="1" parent="1">
+          <mxGeometry x="310" y="1085" width="430" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- Flow steps -->
+        <mxCell id="step1" value="&lt;b&gt;1&lt;/b&gt;&lt;br&gt;User sends message&lt;br&gt;to Lead via WebSocket" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="330" y="1130" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="step2" value="&lt;b&gt;2&lt;/b&gt;&lt;br&gt;crewshipd starts&lt;br&gt;Docker exec for Lead" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="1130" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="step3" value="&lt;b&gt;3&lt;/b&gt;&lt;br&gt;Lead decides:&lt;br&gt;do it myself OR&lt;br&gt;assign to agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="670" y="1130" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="step4" value="&lt;b&gt;4&lt;/b&gt;&lt;br&gt;POST /assign to&lt;br&gt;sidecar (localhost:9119)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="840" y="1130" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="step5" value="&lt;b&gt;5&lt;/b&gt;&lt;br&gt;Sidecar validates:&lt;br&gt;RBAC, circuit breaker,&lt;br&gt;target exists?" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="1130" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="step6" value="&lt;b&gt;6&lt;/b&gt;&lt;br&gt;crewshipd starts&lt;br&gt;Docker exec for Agent&lt;br&gt;(same container)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="1130" width="150" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="step7" value="&lt;b&gt;7&lt;/b&gt;&lt;br&gt;Agent works...&lt;br&gt;stdout → JSONL log" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="330" y="1230" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="step8" value="&lt;b&gt;8&lt;/b&gt;&lt;br&gt;Agent completes,&lt;br&gt;result → sidecar" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="1230" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="step9" value="&lt;b&gt;9&lt;/b&gt;&lt;br&gt;Lead reads result&lt;br&gt;via GET /results/:id&lt;br&gt;(or sidecar callback)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9FA8DA;strokeColor=#283593;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="670" y="1230" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="step10" value="&lt;b&gt;10&lt;/b&gt;&lt;br&gt;Lead aggregates,&lt;br&gt;responds to user&lt;br&gt;via stdout → WebSocket" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#9FA8DA;strokeColor=#283593;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="860" y="1230" width="160" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Flow arrows -->
+        <mxCell id="ea12" style="rounded=1;" edge="1" source="step1" target="step2" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea23" style="rounded=1;" edge="1" source="step2" target="step3" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea34" style="rounded=1;" edge="1" source="step3" target="step4" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea45" style="rounded=1;" edge="1" source="step4" target="step5" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea56" style="rounded=1;" edge="1" source="step5" target="step6" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea67" style="rounded=1;" edge="1" source="step6" target="step7" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea78" style="rounded=1;" edge="1" source="step7" target="step8" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea89" style="rounded=1;" edge="1" source="step8" target="step9" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ea910" style="rounded=1;" edge="1" source="step9" target="step10" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== LEAD MODES BOX ========== -->
+        <mxCell id="modes_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECEFF1;strokeColor=#546E7A;strokeWidth=1;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="1080" width="350" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="modes_title" value="&lt;b&gt;Lead Modes (Phase 2B)&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#546E7A;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="1085" width="180" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mode_active" value="&lt;b&gt;Active Mode&lt;/b&gt; (default)&lt;br&gt;&lt;hr&gt;Lead runs during entire Mission&lt;br&gt;Real-time decisions&lt;br&gt;Can change strategy mid-flight&lt;br&gt;&lt;br&gt;💰 Higher cost (continuous LLM)&lt;br&gt;✅ Flexible, iterative" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="1515" y="1120" width="160" height="140" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mode_passive" value="&lt;b&gt;Passive Mode&lt;/b&gt;&lt;br&gt;&lt;hr&gt;Lead runs 2x:&lt;br&gt;  1. Init (task breakdown)&lt;br&gt;  2. Finalize (aggregate)&lt;br&gt;&lt;br&gt;💰 Lower cost (2 LLM calls)&lt;br&gt;⚠️ Cannot adapt mid-run" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#F57F17;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=5;" vertex="1" parent="1">
+          <mxGeometry x="1685" y="1120" width="155" height="140" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

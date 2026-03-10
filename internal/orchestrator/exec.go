@@ -177,6 +177,15 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		)
 	}
 
+	// CLI_TOKEN credentials: injected as direct env vars (agent sees them).
+	// CLI tools (gh, glab, vercel...) read credentials from env vars, not HTTP proxy.
+	// The sidecar proxy cannot inject credentials into HTTPS CONNECT tunnels.
+	for _, cred := range req.Credentials {
+		if cred.Type == "CLI_TOKEN" && cred.EnvVarName != "" && cred.PlainValue != "" {
+			env = append(env, cred.EnvVarName+"="+cred.PlainValue)
+		}
+	}
+
 	// SECRET credentials: when Keeper is enabled, agents must request them via
 	// the Keeper API (/keeper/request), enforcing access control + audit trail.
 	// When Keeper is disabled, inject them directly as env vars (legacy mode).
@@ -199,6 +208,70 @@ func resolveEnvVar(cred *Credential) string {
 		return "CLAUDE_CODE_OAUTH_TOKEN"
 	}
 	return cred.EnvVarName
+}
+
+// DefaultEnvVarForProvider returns the conventional env var name for a CLI tool provider.
+// Used by the UI to auto-suggest the env var when assigning a credential.
+func DefaultEnvVarForProvider(provider string) string {
+	switch provider {
+	case "GITHUB":
+		return "GH_TOKEN"
+	case "GITLAB":
+		return "GITLAB_TOKEN"
+	case "VERCEL":
+		return "VERCEL_TOKEN"
+	case "AWS":
+		return "AWS_ACCESS_KEY_ID"
+	case "KUBERNETES":
+		return "KUBECONFIG"
+	default:
+		return ""
+	}
+}
+
+// PreRunInstallPackages installs system packages as root before the agent starts.
+// The agent runs as UID 1001 (non-root) and cannot install apt packages itself.
+// This function runs `apt-get install` as root (UID 0), then the agent exec
+// runs as UID 1001 with the packages available in PATH.
+func PreRunInstallPackages(
+	ctx context.Context,
+	ctr provider.ContainerProvider,
+	containerID string,
+	packages []string,
+	logger *slog.Logger,
+) error {
+	if len(packages) == 0 {
+		return nil
+	}
+
+	// Sanitize package names: only allow alphanumeric, dash, dot, plus
+	for _, pkg := range packages {
+		for _, c := range pkg {
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '+') {
+				return fmt.Errorf("invalid package name: %q", pkg)
+			}
+		}
+	}
+
+	script := "apt-get update -qq && apt-get install -y -qq " + strings.Join(packages, " ")
+	cfg := provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", script},
+		User:        "0:0",
+	}
+
+	result, err := ctr.Exec(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("pre-run install: %w", err)
+	}
+	io.Copy(io.Discard, result.Reader)
+	result.Reader.Close()
+
+	logger.Info("pre-run packages installed",
+		"container_id", containerID[:min(12, len(containerID))],
+		"packages", packages,
+	)
+	return nil
 }
 
 // isSidecarRunning checks if a sidecar proxy is already listening on port 9119

@@ -1,8 +1,8 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useState } from "react"
-import { RefreshCw, CheckCircle2, Clock, AlertTriangle } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Fragment, useCallback, useEffect, useRef, useState } from "react"
+import { CheckCircle2, AlertTriangle } from "lucide-react"
+import { BadgeAlertIcon } from "@/components/ui/badge-alert"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -28,6 +28,10 @@ interface CrewEscalationsProps {
   workspaceId: string
 }
 
+function PendingIcon({ className }: { className?: string }) {
+  return <BadgeAlertIcon size={14} className={className} />
+}
+
 const STATUS_CONFIG: Record<Escalation["status"], {
   label: string
   className: string
@@ -36,7 +40,7 @@ const STATUS_CONFIG: Record<Escalation["status"], {
   PENDING: {
     label: "Pending",
     className: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-    icon: Clock,
+    icon: PendingIcon,
   },
   RESOLVED: {
     label: "Resolved",
@@ -65,30 +69,38 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const requestIdRef = useRef(0)
+  const loadingOwnerRef = useRef<number | null>(null)
+  const refreshingOwnerRef = useRef<number | null>(null)
 
   const fetchEscalations = useCallback(async (showRefresh = false, silent = false) => {
-    if (!silent) {
-      if (showRefresh) setRefreshing(true)
-      else setLoading(true)
+    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
+    const ownsLoading = !silent && !showRefresh
+    const ownsRefresh = !silent && showRefresh
+
+    if (ownsRefresh) {
+      refreshingOwnerRef.current = requestId
+      setRefreshing(true)
+    } else if (ownsLoading) {
+      loadingOwnerRef.current = requestId
+      setLoading(true)
     }
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/escalations?workspace_id=${workspaceId}&limit=50`
       )
-      if (res.ok) {
-        const json = await res.json()
-        const parsed = z.array(escalationSchema).safeParse(json)
-        if (parsed.success) {
-          setEscalations(parsed.data)
-        }
+      if (!res.ok) return
+      const json = await res.json()
+      if (requestId !== requestIdRef.current) return
+      const parsed = z.array(escalationSchema).safeParse(json)
+      if (parsed.success) {
+        setEscalations(parsed.data)
       }
     } catch {
       // Silently fail — component shows empty state
     } finally {
-      if (!silent) {
-        setLoading(false)
-        setRefreshing(false)
-      }
+      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
+      if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
     }
   }, [crewId, workspaceId])
 
@@ -111,17 +123,18 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Escalations</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          onClick={() => fetchEscalations(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold">Escalations</h2>
+          {escalations.some((e) => e.status === "PENDING") && (
+            <span aria-hidden="true" className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+            </span>
+          )}
+        </div>
+        <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
+          {refreshing ? "Updating..." : "Live"}
+        </span>
       </div>
 
       {escalations.length === 0 ? (

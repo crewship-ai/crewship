@@ -502,3 +502,107 @@ func TestHandleStreamJSONLine_MixedContentBlocks(t *testing.T) {
 		t.Errorf("expected tool name 'Read', got %q", events[0].Content)
 	}
 }
+
+func TestBuildEnvVarsSidecar_CLITokenInjection(t *testing.T) {
+	req := AgentRunRequest{
+		AgentID:   "a1",
+		AgentSlug: "karel",
+		CrewID:    "crew-1",
+		ChatID:    "chat-1",
+		Credentials: []Credential{
+			{ID: "c1", Type: "API_KEY", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "sk-ant-real"},
+			{ID: "c2", Type: "CLI_TOKEN", EnvVarName: "GH_TOKEN", PlainValue: "ghp_testtoken123"},
+			{ID: "c3", Type: "CLI_TOKEN", EnvVarName: "GITLAB_TOKEN", PlainValue: "glpat-testtoken456"},
+		},
+	}
+
+	env := BuildEnvVarsSidecar(req, false)
+
+	// CLI_TOKEN credentials must be injected as direct env vars
+	foundGH := false
+	foundGL := false
+	for _, e := range env {
+		if e == "GH_TOKEN=ghp_testtoken123" {
+			foundGH = true
+		}
+		if e == "GITLAB_TOKEN=glpat-testtoken456" {
+			foundGL = true
+		}
+	}
+	if !foundGH {
+		t.Error("GH_TOKEN not found in sidecar env vars")
+	}
+	if !foundGL {
+		t.Error("GITLAB_TOKEN not found in sidecar env vars")
+	}
+
+	// API_KEY credentials must NOT be injected as direct env vars (sidecar proxy handles them)
+	for _, e := range env {
+		if strings.HasPrefix(e, "ANTHROPIC_API_KEY=sk-ant-real") {
+			t.Error("real ANTHROPIC_API_KEY should not be in sidecar env vars")
+		}
+	}
+}
+
+func TestBuildEnvVarsSidecar_CLITokenNotDuplicated(t *testing.T) {
+	req := AgentRunRequest{
+		AgentID:   "a1",
+		AgentSlug: "tomas",
+		CrewID:    "crew-1",
+		ChatID:    "chat-1",
+		Credentials: []Credential{
+			{ID: "c1", Type: "CLI_TOKEN", EnvVarName: "GH_TOKEN", PlainValue: "ghp_abc"},
+		},
+	}
+
+	env := BuildEnvVarsSidecar(req, true)
+
+	count := 0
+	for _, e := range env {
+		if strings.HasPrefix(e, "GH_TOKEN=") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected GH_TOKEN to appear exactly once, got %d", count)
+	}
+}
+
+func TestDefaultEnvVarForProvider(t *testing.T) {
+	tests := []struct {
+		provider string
+		expected string
+	}{
+		{"GITHUB", "GH_TOKEN"},
+		{"GITLAB", "GITLAB_TOKEN"},
+		{"VERCEL", "VERCEL_TOKEN"},
+		{"AWS", "AWS_ACCESS_KEY_ID"},
+		{"KUBERNETES", "KUBECONFIG"},
+		{"CUSTOM_CLI", ""},
+		{"UNKNOWN", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			result := DefaultEnvVarForProvider(tt.provider)
+			if result != tt.expected {
+				t.Errorf("DefaultEnvVarForProvider(%q) = %q, want %q", tt.provider, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestPreRunInstallPackages_InvalidName(t *testing.T) {
+	err := PreRunInstallPackages(nil, nil, "container-1", []string{"gh;rm -rf /"}, slog.Default())
+	if err == nil {
+		t.Error("expected error for invalid package name with semicolon")
+	}
+}
+
+func TestPreRunInstallPackages_EmptyList(t *testing.T) {
+	err := PreRunInstallPackages(nil, nil, "container-1", nil, slog.Default())
+	if err != nil {
+		t.Errorf("expected nil error for empty package list, got %v", err)
+	}
+}

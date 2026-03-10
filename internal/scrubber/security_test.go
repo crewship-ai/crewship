@@ -198,6 +198,27 @@ func TestSecurityContainsSecretTruePositives(t *testing.T) {
 	}
 }
 
+func TestSecurityGitLabToken(t *testing.T) {
+	s := New()
+	glpatKey := "glpat-" + strings.Repeat("abcDEF12345_-abc", 2)[:25]
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"bare", glpatKey},
+		{"in_env", "GITLAB_TOKEN=" + glpatKey},
+		{"in_text", "token is " + glpatKey + " here"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := s.Scrub(tt.input)
+			if strings.Contains(got, "glpat-") {
+				t.Errorf("GitLab token not scrubbed in %q", got)
+			}
+		})
+	}
+}
+
 func TestSecurityConcurrentScrub(t *testing.T) {
 	s := New()
 	key := buildTestKey("sk-ant-api03-", 30)

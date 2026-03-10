@@ -123,8 +123,8 @@ export function AppSidebar() {
                             <span>{item.title}</span>
                           </span>
                         ) : (
-                          <Link href={item.href}>
-                            <item.icon />
+                          <Link href={item.href} className="group/nav">
+                            <item.icon className="transition-transform duration-200 group-hover/nav:scale-110" />
                             <span>{item.title}</span>
                           </Link>
                         )}

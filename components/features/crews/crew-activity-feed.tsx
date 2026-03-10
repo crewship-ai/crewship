@@ -1,8 +1,7 @@
 "use client"
 
 import { Fragment, useCallback, useEffect, useState } from "react"
-import { RefreshCw, Activity, ClipboardList, MessageSquare, AlertTriangle } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Activity, ClipboardList, MessageSquare, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -134,16 +133,13 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
     <div>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-semibold">Recent Activity</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          onClick={() => fetchActivity(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+          </span>
+          {refreshing ? "Updating..." : "Live"}
+        </div>
       </div>
 
       <Card>

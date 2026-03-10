@@ -1,0 +1,332 @@
+<mxfile host="app.diagrams.net" modified="2026-03-10" agent="Crewship" version="24.0.0" type="device">
+  <diagram id="arch-overview" name="Architecture Overview">
+    <mxGraphModel dx="2074" dy="1156" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3300" pageHeight="2340" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ========== TITLE ========== -->
+        <mxCell id="title" value="&lt;b&gt;CREWSHIP — Architecture Overview&lt;/b&gt;&lt;br&gt;Single Binary + Docker Agent Containers" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=20;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="30" width="500" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ========== USER / BROWSER ========== -->
+        <mxCell id="user" value="&lt;b&gt;User&lt;/b&gt;" style="shape=actor;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1">
+          <mxGeometry x="200" y="150" width="60" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="browser" value="&lt;b&gt;Browser&lt;/b&gt;&lt;br&gt;React + shadcn/ui&lt;br&gt;Tailwind CSS 4&lt;br&gt;Zustand state" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="120" y="300" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e_user_browser" style="edgeStyle=orthogonalEdgeStyle;rounded=1;" edge="1" source="user" target="browser" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ========== EXTERNAL TRIGGERS ========== -->
+        <mxCell id="webhook_src" value="&lt;b&gt;External Triggers&lt;/b&gt;&lt;br&gt;Grafana / n8n / Make&lt;br&gt;Other Crewship instances" style="shape=hexagon;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;perimeter=hexagonPerimeter2;" vertex="1" parent="1">
+          <mxGeometry x="120" y="500" width="220" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ========== GO BINARY (MAIN BOX) ========== -->
+        <mxCell id="go_binary" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;strokeWidth=3;arcSize=5;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="480" y="120" width="900" height="620" as="geometry" />
+        </mxCell>
+        <mxCell id="go_binary_label" value="&lt;b&gt;crewship&lt;/b&gt; (single Go binary, port 8080)" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=16;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="500" y="130" width="350" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Embedded Static UI -->
+        <mxCell id="static_ui" value="&lt;b&gt;Embedded Static UI&lt;/b&gt;&lt;br&gt;Next.js static export (embed.FS)&lt;br&gt;HTML / CSS / JS — no Node.js at runtime" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="510" y="170" width="340" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- REST API -->
+        <mxCell id="rest_api" value="&lt;b&gt;REST API&lt;/b&gt;&lt;br&gt;/api/v1/*&lt;br&gt;70+ routes&lt;br&gt;RBAC middleware" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="510" y="260" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Auth -->
+        <mxCell id="auth" value="&lt;b&gt;Auth&lt;/b&gt;&lt;br&gt;/api/auth/*&lt;br&gt;NextAuth JWE compat&lt;br&gt;bcrypt + JWT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="690" y="260" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- WebSocket Gateway -->
+        <mxCell id="ws_gateway" value="&lt;b&gt;WebSocket Gateway&lt;/b&gt;&lt;br&gt;native goroutines&lt;br&gt;real-time streaming&lt;br&gt;thousands of connections" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="870" y="170" width="200" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Webhook Ingress -->
+        <mxCell id="webhook_ingress" value="&lt;b&gt;Webhook Ingress&lt;/b&gt;&lt;br&gt;HMAC validation&lt;br&gt;per-agent secrets" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="170" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Database -->
+        <mxCell id="database" value="&lt;b&gt;Database&lt;/b&gt;&lt;br&gt;SQLite (default, embedded)&lt;br&gt;or PostgreSQL (opt-in)&lt;br&gt;Go database/sql — NO ORM&lt;br&gt;24 tables, 3 migrations" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="510" y="380" width="200" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- Orchestrator -->
+        <mxCell id="orchestrator" value="&lt;b&gt;Orchestrator&lt;/b&gt;&lt;br&gt;Docker container lifecycle&lt;br&gt;Agent dispatch &amp; results&lt;br&gt;Credential failover&lt;br&gt;Cooldown management" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="750" y="380" width="200" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Encryption -->
+        <mxCell id="encryption" value="&lt;b&gt;Encryption&lt;/b&gt;&lt;br&gt;AES-256-GCM&lt;br&gt;v1:{base64}&lt;br&gt;IV||AuthTag||Cipher" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="980" y="380" width="150" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Scrubber -->
+        <mxCell id="scrubber" value="&lt;b&gt;Credential Scrubber&lt;/b&gt;&lt;br&gt;13+ regex patterns&lt;br&gt;stdout redaction&lt;br&gt;~2.8 μs/op per line" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="380" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- bbolt WAL -->
+        <mxCell id="bbolt" value="&lt;b&gt;bbolt WAL&lt;/b&gt;&lt;br&gt;durable job state&lt;br&gt;survives crashes" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="510" y="530" width="130" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Log Collector -->
+        <mxCell id="log_collector" value="&lt;b&gt;Log Collector&lt;/b&gt;&lt;br&gt;JSONL files&lt;br&gt;hourly rotation&lt;br&gt;gzip compression" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="670" y="530" width="150" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- File Server -->
+        <mxCell id="file_server" value="&lt;b&gt;File Server&lt;/b&gt;&lt;br&gt;/output/ serving&lt;br&gt;fsnotify watcher&lt;br&gt;WS notifications" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="850" y="530" width="150" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Metrics -->
+        <mxCell id="metrics" value="&lt;b&gt;Prometheus&lt;/b&gt;&lt;br&gt;/metrics endpoint&lt;br&gt;Go native" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="530" width="130" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Rate Limiter -->
+        <mxCell id="rate_limiter" value="&lt;b&gt;Rate Limiter&lt;/b&gt;&lt;br&gt;token bucket&lt;br&gt;in-memory" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1190" y="530" width="120" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Memory Engine label -->
+        <mxCell id="memory_label" value="&lt;b&gt;Memory Engine&lt;/b&gt;&lt;br&gt;(in sidecar)&lt;br&gt;SQLite FTS5&lt;br&gt;BM25 search" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="480" width="130" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ========== EDGES: Browser/External -> Go Binary ========== -->
+        <mxCell id="e_browser_ui" value="GET /" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=10;" edge="1" source="browser" target="static_ui" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_browser_api" value="REST /api/v1/*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=10;" edge="1" source="browser" target="rest_api" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_browser_ws" value="WebSocket" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=10;dashed=1;" edge="1" source="browser" target="ws_gateway" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_external_webhook" value="POST /webhooks" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=10;" edge="1" source="webhook_src" target="webhook_ingress" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- API -> DB -->
+        <mxCell id="e_api_db" style="edgeStyle=orthogonalEdgeStyle;rounded=1;" edge="1" source="rest_api" target="database" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_auth_db" style="edgeStyle=orthogonalEdgeStyle;rounded=1;" edge="1" source="auth" target="database" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- WS -> Orchestrator -->
+        <mxCell id="e_ws_orch" value="dispatch" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=10;" edge="1" source="ws_gateway" target="orchestrator" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ========== DOCKER NETWORK (BELOW GO BINARY) ========== -->
+        <mxCell id="docker_net" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#E65100;strokeWidth=2;arcSize=5;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="480" y="820" width="900" height="350" as="geometry" />
+        </mxCell>
+        <mxCell id="docker_net_label" value="&lt;b&gt;crewship-agents network&lt;/b&gt; (Docker --internal, no internet)" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#E65100;" vertex="1" parent="1">
+          <mxGeometry x="500" y="825" width="430" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Crew A Container -->
+        <mxCell id="crew_a" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFECB3;strokeColor=#FF8F00;strokeWidth=2;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="520" y="870" width="380" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="crew_a_label" value="&lt;b&gt;Crew A Container&lt;/b&gt;&lt;br&gt;crewship-team-{slug}&lt;br&gt;Ubuntu 24.04 | non-root UID 1001" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=11;fontColor=#E65100;" vertex="1" parent="1">
+          <mxGeometry x="530" y="875" width="250" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Sidecar in Crew A -->
+        <mxCell id="sidecar_a" value="&lt;b&gt;crewship-sidecar&lt;/b&gt;&lt;br&gt;Go binary, UID 1002&lt;br&gt;localhost:9119&lt;br&gt;&lt;hr&gt;• Credential injection&lt;br&gt;• Domain allowlist&lt;br&gt;• Memory engine (FTS5)&lt;br&gt;• Assignment proxy (Phase 2)&lt;br&gt;• MCP Gateway (Phase 2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="540" y="930" width="200" height="150" as="geometry" />
+        </mxCell>
+
+        <!-- Agent process in Crew A -->
+        <mxCell id="agent_a1" value="&lt;b&gt;Agent Process&lt;/b&gt;&lt;br&gt;(Docker exec)&lt;br&gt;&lt;hr&gt;CLI: Claude Code&lt;br&gt;or OpenCode / Codex&lt;br&gt;or crewship-agent (Phase 2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="760" y="930" width="120" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Agent -> Sidecar -->
+        <mxCell id="e_agent_sidecar" value="HTTP localhost:9119" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;" edge="1" source="agent_a1" target="sidecar_a" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Mounts labels -->
+        <mxCell id="mount_workspace" value="/workspace (ephemeral)" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=9;fontStyle=2;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="760" y="1060" width="130" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="mount_output" value="/output (persistent bind mount)" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=9;fontStyle=2;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="760" y="1080" width="180" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- Crew B Container (simplified) -->
+        <mxCell id="crew_b" value="&lt;b&gt;Crew B Container&lt;/b&gt;&lt;br&gt;&lt;br&gt;sidecar + agent(s)&lt;br&gt;(same structure)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFECB3;strokeColor=#FF8F00;strokeWidth=2;arcSize=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="940" y="870" width="180" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Crew N Container (simplified) -->
+        <mxCell id="crew_n" value="&lt;b&gt;Crew N ...&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFECB3;strokeColor=#FF8F00;strokeWidth=2;arcSize=8;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="940" y="1020" width="180" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Orchestrator -> Docker -->
+        <mxCell id="e_orch_docker" value="Docker SDK&lt;br&gt;(create, exec, logs)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=10;strokeWidth=2;" edge="1" source="orchestrator" target="crew_a" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="850" y="780" />
+              <mxPoint x="710" y="780" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Sidecar -> crewship (back) -->
+        <mxCell id="e_sidecar_crewship" value="credentials loaded&lt;br&gt;from stdin at start" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;dashed=1;exitX=0;exitY=0.3;exitDx=0;exitDy=0;" edge="1" source="sidecar_a" target="orchestrator" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="490" y="975" />
+              <mxPoint x="490" y="780" />
+              <mxPoint x="850" y="780" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ========== HOST FILESYSTEM ========== -->
+        <mxCell id="host_fs" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="400" width="280" height="380" as="geometry" />
+        </mxCell>
+        <mxCell id="host_fs_label" value="&lt;b&gt;Host Filesystem&lt;/b&gt;&lt;br&gt;~/.crewship/" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=13;fontColor=#388E3C;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="405" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="fs_db" value="crewship.db (SQLite)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1520" y="455" width="150" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="fs_output" value="/output/{crew}/{agent}/" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1520" y="495" width="150" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="fs_logs" value="/logs/ (JSONL, rotated)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1520" y="535" width="150" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="fs_memory" value="/output/{agent}/.memory/" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1520" y="575" width="150" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="fs_config" value="config.yaml" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1520" y="615" width="150" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="fs_bbolt" value="state.db (bbolt WAL)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1520" y="655" width="150" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="fs_skills" value="/output/.skills/ (installed)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1520" y="695" width="150" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- DB -> Host FS -->
+        <mxCell id="e_db_fs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;dashed=1;strokeColor=#388E3C;" edge="1" source="database" target="fs_db" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ========== LLM APIs (external) ========== -->
+        <mxCell id="llm_apis" value="&lt;b&gt;LLM APIs&lt;/b&gt;&lt;br&gt;(via sidecar proxy)" style="shape=cloud;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="900" width="250" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="llm_anthropic" value="api.anthropic.com" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1555" y="930" width="100" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="llm_openai" value="api.openai.com" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1555" y="950" width="90" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="llm_google" value="googleapis.com" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1650" y="930" width="90" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="llm_ollama" value="Ollama (local)" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="1650" y="950" width="80" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- Sidecar -> LLM APIs -->
+        <mxCell id="e_sidecar_llm" value="credential injection&lt;br&gt;+ domain allowlist" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=9;strokeWidth=2;strokeColor=#1565C0;" edge="1" source="sidecar_a" target="llm_apis" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="640" y="1150" />
+              <mxPoint x="1400" y="1150" />
+              <mxPoint x="1400" y="950" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ========== LEGEND ========== -->
+        <mxCell id="legend_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#999999;strokeWidth=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="120" width="280" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_title" value="&lt;b&gt;LEGEND&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="125" width="70" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="1515" y="160" width="20" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="leg1t" value="UI / Frontend" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1545" y="155" width="80" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1515" y="185" width="20" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="leg2t" value="API / Gateway" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1545" y="180" width="90" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="1515" y="210" width="20" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="leg3t" value="Storage / Infra" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1545" y="205" width="100" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="1515" y="235" width="20" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="leg4t" value="Orchestration / Logic" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1545" y="230" width="130" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="1515" y="260" width="20" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="leg5t" value="Security" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1545" y="255" width="60" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFECB3;strokeColor=#FF8F00;" vertex="1" parent="1">
+          <mxGeometry x="1515" y="285" width="20" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="leg6t" value="Docker Containers" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1545" y="280" width="120" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="leg7" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;" vertex="1" parent="1">
+          <mxGeometry x="1515" y="310" width="20" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="leg7t" value="Host Filesystem" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1545" y="305" width="100" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- ========== STATUS MARKERS ========== -->
+        <mxCell id="status_impl" value="✅ IMPLEMENTED" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=#C8E6C9;fontSize=10;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="1650" y="160" width="110" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="status_plan" value="⏳ PLANNED" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=#FFF9C4;fontSize=10;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="1650" y="190" width="90" height="25" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,8 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { Eye, EyeOff, Loader2, Bot, Key, Lock, CheckCircle2, XCircle, FlaskConical } from "lucide-react"
-import { AnthropicIcon, OpenAIIcon, GeminiIcon } from "@/components/icons/provider-icons"
+import { Eye, EyeOff, Loader2, Bot, Key, Lock, Terminal, CheckCircle2, XCircle, FlaskConical, Check, ChevronsUpDown } from "lucide-react"
+import { AnthropicIcon, OpenAIIcon, GeminiIcon, GitHubIcon, GitLabIcon, VercelIcon, AWSIcon, CustomCLIIcon } from "@/components/icons/provider-icons"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -22,9 +22,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 
-type CredentialType = "AI_CLI_TOKEN" | "API_KEY" | "SECRET"
-type CredentialProvider = "ANTHROPIC" | "OPENAI" | "GOOGLE" | "NONE"
+type CredentialType = "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET"
+type CredentialProvider = "ANTHROPIC" | "OPENAI" | "GOOGLE" | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
 
 interface Team {
   id: string
@@ -42,6 +46,11 @@ const PROVIDER_ENV_NAMES: Record<string, string> = {
   ANTHROPIC: "ANTHROPIC_API_KEY",
   OPENAI: "OPENAI_API_KEY",
   GOOGLE: "GOOGLE_API_KEY",
+  GITHUB: "GH_TOKEN",
+  GITLAB: "GITLAB_TOKEN",
+  VERCEL: "VERCEL_TOKEN",
+  AWS: "AWS_ACCESS_KEY_ID",
+  CUSTOM_CLI: "",
 }
 
 const TYPE_CONFIG = {
@@ -54,6 +63,11 @@ const TYPE_CONFIG = {
     icon: Key,
     label: "API Key",
     description: "API key from provider console",
+  },
+  CLI_TOKEN: {
+    icon: Terminal,
+    label: "CLI Token",
+    description: "Token for CLI tools (gh, glab, vercel)",
   },
   SECRET: {
     icon: Lock,
@@ -75,7 +89,8 @@ export function AddCredentialDialog({
   const [value, setValue] = React.useState("")
   const [accountLabel, setAccountLabel] = React.useState("")
   const [scope, setScope] = React.useState<"WORKSPACE" | "CREW">("WORKSPACE")
-  const [crewId, setTeamId] = React.useState<string>("")
+  const [crewIds, setCrewIds] = React.useState<string[]>([])
+  const [crewPopoverOpen, setCrewPopoverOpen] = React.useState(false)
   const [showValue, setShowValue] = React.useState(false)
   const [crews, setTeams] = React.useState<Team[]>([])
   const [teamsLoading, setTeamsLoading] = React.useState(false)
@@ -86,7 +101,8 @@ export function AddCredentialDialog({
 
   React.useEffect(() => {
     if (type !== "SECRET" && provider !== "NONE") {
-      setName(PROVIDER_ENV_NAMES[provider] || "")
+      const envName = PROVIDER_ENV_NAMES[provider] ?? ""
+      setName(envName)
     }
   }, [type, provider])
 
@@ -95,7 +111,7 @@ export function AddCredentialDialog({
       setTeamsLoading(true)
       fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
         .then((res) => res.json())
-        .then((data: Team[]) => setTeams(data))
+        .then((data: Team[]) => setTeams(Array.isArray(data) ? data : []))
         .catch(() => setTeams([]))
         .finally(() => setTeamsLoading(false))
     }
@@ -109,7 +125,8 @@ export function AddCredentialDialog({
     setValue("")
     setAccountLabel("")
     setScope("WORKSPACE")
-    setTeamId("")
+    setCrewIds([])
+    setCrewPopoverOpen(false)
     setShowValue(false)
     setTesting(false)
     setTestResult(null)
@@ -154,6 +171,9 @@ export function AddCredentialDialog({
       setProvider("NONE")
       setName("")
       setAccountLabel("")
+    } else if (newType === "CLI_TOKEN") {
+      setProvider("CUSTOM_CLI")
+      setAccountLabel("")
     } else {
       setProvider("ANTHROPIC")
     }
@@ -171,12 +191,12 @@ export function AddCredentialDialog({
       setError("Value is required")
       return
     }
-    if (type !== "SECRET" && provider === "NONE") {
+    if (type !== "SECRET" && type !== "CLI_TOKEN" && provider === "NONE") {
       setError("Provider is required for AI CLI Token and API Key")
       return
     }
-    if (scope === "CREW" && !crewId) {
-      setError("Crew is required for crew-scoped credentials")
+    if (scope === "CREW" && crewIds.length === 0) {
+      setError("At least one crew is required for crew-scoped credentials")
       return
     }
 
@@ -192,7 +212,7 @@ export function AddCredentialDialog({
       }
       if (description.trim()) body.description = description.trim()
       if (accountLabel.trim()) body.account_label = accountLabel.trim()
-      if (scope === "CREW") body.crew_id = crewId
+      if (scope === "CREW") body.crew_ids = crewIds
 
       const res = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
@@ -228,8 +248,8 @@ export function AddCredentialDialog({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label>Type</Label>
-            <div className="grid grid-cols-3 gap-2">
-              {(["AI_CLI_TOKEN", "API_KEY", "SECRET"] as const).map((t) => {
+            <div className="grid grid-cols-4 gap-2">
+              {(["AI_CLI_TOKEN", "API_KEY", "CLI_TOKEN", "SECRET"] as const).map((t) => {
                 const cfg = TYPE_CONFIG[t]
                 const Icon = cfg.icon
                 const isActive = type === t
@@ -260,15 +280,38 @@ export function AddCredentialDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="ANTHROPIC">
-                    <span className="flex items-center gap-2"><AnthropicIcon className="h-4 w-4" /> Anthropic (Claude)</span>
-                  </SelectItem>
-                  <SelectItem value="OPENAI">
-                    <span className="flex items-center gap-2"><OpenAIIcon className="h-4 w-4" /> OpenAI (GPT / Codex)</span>
-                  </SelectItem>
-                  <SelectItem value="GOOGLE">
-                    <span className="flex items-center gap-2"><GeminiIcon className="h-4 w-4" /> Google (Gemini)</span>
-                  </SelectItem>
+                  {(type === "AI_CLI_TOKEN" || type === "API_KEY") && (
+                    <>
+                      <SelectItem value="ANTHROPIC">
+                        <span className="flex items-center gap-2"><AnthropicIcon className="h-4 w-4" /> Anthropic (Claude)</span>
+                      </SelectItem>
+                      <SelectItem value="OPENAI">
+                        <span className="flex items-center gap-2"><OpenAIIcon className="h-4 w-4" /> OpenAI (GPT / Codex)</span>
+                      </SelectItem>
+                      <SelectItem value="GOOGLE">
+                        <span className="flex items-center gap-2"><GeminiIcon className="h-4 w-4" /> Google (Gemini)</span>
+                      </SelectItem>
+                    </>
+                  )}
+                  {type === "CLI_TOKEN" && (
+                    <>
+                      <SelectItem value="CUSTOM_CLI">
+                        <span className="flex items-center gap-2"><CustomCLIIcon className="h-4 w-4" /> Custom CLI</span>
+                      </SelectItem>
+                      <SelectItem value="GITHUB">
+                        <span className="flex items-center gap-2"><GitHubIcon className="h-4 w-4" /> GitHub</span>
+                      </SelectItem>
+                      <SelectItem value="GITLAB">
+                        <span className="flex items-center gap-2"><GitLabIcon className="h-4 w-4" /> GitLab</span>
+                      </SelectItem>
+                      <SelectItem value="VERCEL">
+                        <span className="flex items-center gap-2"><VercelIcon className="h-4 w-4" /> Vercel</span>
+                      </SelectItem>
+                      <SelectItem value="AWS">
+                        <span className="flex items-center gap-2"><AWSIcon className="h-4 w-4" /> AWS</span>
+                      </SelectItem>
+                    </>
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -278,11 +321,11 @@ export function AddCredentialDialog({
             <Label htmlFor="cred-name">Name (env variable)</Label>
             <Input
               id="cred-name"
-              placeholder={type === "SECRET" ? "e.g. GITHUB_TOKEN" : "e.g. ANTHROPIC_API_KEY"}
+              placeholder={type === "SECRET" ? "e.g. MY_SECRET" : type === "CLI_TOKEN" ? "e.g. GH_TOKEN" : "e.g. ANTHROPIC_API_KEY"}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              readOnly={type !== "SECRET"}
-              className={type !== "SECRET" ? "bg-muted" : undefined}
+              readOnly={type !== "SECRET" && !(type === "CLI_TOKEN" && provider === "CUSTOM_CLI")}
+              className={type !== "SECRET" && !(type === "CLI_TOKEN" && provider === "CUSTOM_CLI") ? "bg-muted" : undefined}
               required
             />
           </div>
@@ -343,7 +386,7 @@ export function AddCredentialDialog({
                 <span className="sr-only">{showValue ? "Hide" : "Show"} value</span>
               </Button>
             </div>
-            {provider !== "NONE" && value.trim() && !value.trim().startsWith("sk-ant-oat") && (
+            {provider !== "NONE" && provider !== "CUSTOM_CLI" && value.trim() && !value.trim().startsWith("sk-ant-oat") && (
               <div className="flex items-center gap-2">
                 <Button
                   type="button"
@@ -385,7 +428,7 @@ export function AddCredentialDialog({
               value={scope}
               onValueChange={(v) => {
                 setScope(v as "WORKSPACE" | "CREW")
-                if (v === "WORKSPACE") setTeamId("")
+                if (v === "WORKSPACE") setCrewIds([])
               }}
             >
               <SelectTrigger id="cred-scope" className="w-full">
@@ -400,25 +443,77 @@ export function AddCredentialDialog({
 
           {scope === "CREW" && (
             <div className="space-y-2">
-              <Label htmlFor="cred-team">Crew</Label>
+              <Label>Crews</Label>
               {teamsLoading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Loading crews...
                 </div>
               ) : (
-                <Select value={crewId} onValueChange={setTeamId}>
-                  <SelectTrigger id="cred-team" className="w-full">
-                    <SelectValue placeholder="Select a crew" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {crews.map((crew) => (
-                      <SelectItem key={crew.id} value={crew.id}>
-                        {crew.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <>
+                  <Popover open={crewPopoverOpen} onOpenChange={setCrewPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={crewPopoverOpen}
+                        className="w-full justify-between font-normal"
+                      >
+                        {crewIds.length === 0
+                          ? "Select crews..."
+                          : `${crewIds.length} crew${crewIds.length > 1 ? "s" : ""} selected`}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search crews..." />
+                        <CommandList>
+                          <CommandEmpty>No crews found.</CommandEmpty>
+                          <CommandGroup>
+                            {crews.map((crew) => {
+                              const isSelected = crewIds.includes(crew.id)
+                              return (
+                                <CommandItem
+                                  key={crew.id}
+                                  value={crew.name}
+                                  onSelect={() => {
+                                    setCrewIds((prev) =>
+                                      isSelected
+                                        ? prev.filter((id) => id !== crew.id)
+                                        : [...prev, crew.id]
+                                    )
+                                  }}
+                                >
+                                  <Check className={cn("mr-2 h-4 w-4", isSelected ? "opacity-100" : "opacity-0")} />
+                                  {crew.name}
+                                </CommandItem>
+                              )
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  {crewIds.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {crewIds.map((id) => {
+                        const crew = crews.find((c) => c.id === id)
+                        return crew ? (
+                          <Badge
+                            key={id}
+                            variant="secondary"
+                            className="cursor-pointer"
+                            onClick={() => setCrewIds((prev) => prev.filter((cid) => cid !== id))}
+                          >
+                            {crew.name}
+                            <XCircle className="ml-1 h-3 w-3" />
+                          </Badge>
+                        ) : null
+                      })}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
