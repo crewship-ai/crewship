@@ -103,11 +103,13 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
 
   const fetchAssignments = useCallback(async (showRefresh = false, silent = false) => {
     const requestId = silent ? requestIdRef.current : ++requestIdRef.current
+    const ownsLoading = !silent && !showRefresh
+    const ownsRefresh = !silent && showRefresh
 
-    if (!silent && showRefresh) {
+    if (ownsRefresh) {
       refreshingOwnerRef.current = requestId
       setRefreshing(true)
-    } else if (!silent) {
+    } else if (ownsLoading) {
       loadingOwnerRef.current = requestId
       setLoading(true)
     }
@@ -123,8 +125,8 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
     } catch {
       // Silently fail — component shows empty state
     } finally {
-      if (loadingOwnerRef.current === requestId) setLoading(false)
-      if (refreshingOwnerRef.current === requestId) setRefreshing(false)
+      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
+      if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
     }
   }, [crewId, workspaceId])
 

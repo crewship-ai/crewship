@@ -75,11 +75,13 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
 
   const fetchEscalations = useCallback(async (showRefresh = false, silent = false) => {
     const requestId = silent ? requestIdRef.current : ++requestIdRef.current
+    const ownsLoading = !silent && !showRefresh
+    const ownsRefresh = !silent && showRefresh
 
-    if (!silent && showRefresh) {
+    if (ownsRefresh) {
       refreshingOwnerRef.current = requestId
       setRefreshing(true)
-    } else if (!silent) {
+    } else if (ownsLoading) {
       loadingOwnerRef.current = requestId
       setLoading(true)
     }
@@ -97,8 +99,8 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
     } catch {
       // Silently fail — component shows empty state
     } finally {
-      if (loadingOwnerRef.current === requestId) setLoading(false)
-      if (refreshingOwnerRef.current === requestId) setRefreshing(false)
+      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
+      if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
     }
   }, [crewId, workspaceId])
 
@@ -124,13 +126,13 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
         <div className="flex items-center gap-2">
           <h2 className="text-base font-semibold">Escalations</h2>
           {escalations.some((e) => e.status === "PENDING") && (
-            <span className="relative flex h-2 w-2">
+            <span aria-hidden="true" className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
             </span>
           )}
         </div>
-        <span className="text-xs text-muted-foreground">
+        <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
           {refreshing ? "Updating..." : "Live"}
         </span>
       </div>

@@ -27,11 +27,13 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
 
   const fetchMissions = useCallback(async (showRefresh = false, silent = false) => {
     const requestId = silent ? requestIdRef.current : ++requestIdRef.current
+    const ownsLoading = !silent && !showRefresh
+    const ownsRefresh = !silent && showRefresh
 
-    if (!silent && showRefresh) {
+    if (ownsRefresh) {
       refreshingOwnerRef.current = requestId
       setRefreshing(true)
-    } else if (!silent) {
+    } else if (ownsLoading) {
       loadingOwnerRef.current = requestId
       setLoading(true)
     }
@@ -47,8 +49,8 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
     } catch {
       // Silently fail
     } finally {
-      if (loadingOwnerRef.current === requestId) setLoading(false)
-      if (refreshingOwnerRef.current === requestId) setRefreshing(false)
+      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
+      if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
     }
   }, [crewId, workspaceId])
 
