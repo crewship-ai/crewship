@@ -185,6 +185,14 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
+func (p *Provider) CrewContainerName(slug string) string {
+	prefix := p.cfg.ContainerPrefix
+	if prefix == "" {
+		prefix = "crewship"
+	}
+	return prefix + "-team-" + slug
+}
+
 // EnsureCrewRuntime creates or starts an Apple Container for the given crew.
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (string, error) {
 	p.logger.Debug("EnsureCrewRuntime", "crew_id", team.ID, "crew_slug", team.Slug)
@@ -195,11 +203,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
-	containerName := prefix + "-team-" + team.Slug
+	containerName := p.CrewContainerName(team.Slug)
 
 	// Check if container already exists
 	existing, err := p.findContainer(ctx, containerName)
@@ -394,7 +398,7 @@ func (p *Provider) inspectContainer(ctx context.Context, id string) (*containerJ
 
 // StopCrewRuntime gracefully stops a crew container.
 func (p *Provider) StopCrewRuntime(ctx context.Context, containerID string) error {
-	_, err := runCLI(ctx, "stop", "--time", "30", containerID)
+	_, err := runCLI(ctx, "stop", "--time", "10", containerID)
 	if err != nil {
 		return fmt.Errorf("stop crew runtime %s: %w", shortID(containerID), err)
 	}

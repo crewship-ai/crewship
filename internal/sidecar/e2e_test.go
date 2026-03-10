@@ -68,6 +68,7 @@ func TestE2ESidecarIntegration(t *testing.T) {
 			{ID: "oai-1", Provider: ProviderOpenAI, Token: realOAIKey, Priority: 1},
 			{ID: "google-1", Provider: ProviderGoogle, Token: realGoogleKey, Priority: 1},
 		},
+		NetworkPolicy: &NetworkPolicyConfig{Mode: "restricted"},
 	})
 
 	// Override sidecar's internal transport to redirect LLM domains to our fake upstream

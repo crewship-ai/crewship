@@ -25,21 +25,23 @@ type ChatResolver interface {
 }
 
 type ChatInfo struct {
-	AgentID       string
-	AgentSlug     string
-	AgentRole     string
-	CrewID        string
-	CrewSlug      string
-	ContainerID   string
-	CLIAdapter    string
-	LLMModel      string
-	SystemPrompt  string
-	ToolProfile   string
-	Credentials   []orchestrator.Credential
-	TimeoutSecs   int
-	WorkspaceID   string
-	MemoryEnabled bool
-	CrewMembers   []orchestrator.CrewMember
+	AgentID        string
+	AgentSlug      string
+	AgentRole      string
+	CrewID         string
+	CrewSlug       string
+	ContainerID    string
+	CLIAdapter     string
+	LLMModel       string
+	SystemPrompt   string
+	ToolProfile    string
+	Credentials    []orchestrator.Credential
+	TimeoutSecs    int
+	WorkspaceID    string
+	MemoryEnabled  bool
+	CrewMembers    []orchestrator.CrewMember
+	NetworkMode    string
+	AllowedDomains []string
 }
 
 type Bridge struct {
@@ -141,11 +143,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	b.containerMu.RUnlock()
 	b.logger.Debug("container cache lookup", "crew_id", info.CrewID, "cached_id", containerID)
 
-	// Verify cached container still exists (may have been deleted at runtime)
+	// Verify cached container still exists and is running.
+	// A stopped container (e.g. after network policy change) must be recreated.
 	if containerID != "" && b.container != nil {
-		if _, err := b.container.ContainerStatus(ctx, containerID); err != nil {
-			b.logger.Warn("cached container gone, will recreate",
-				"container_id", truncateID(containerID, 12), "error", err)
+		status, err := b.container.ContainerStatus(ctx, containerID)
+		if err != nil || (status != nil && status.State != "running" && status.State != "idle") {
+			reason := "gone"
+			if status != nil {
+				reason = status.State
+			}
+			b.logger.Warn("cached container not usable, will recreate",
+				"container_id", truncateID(containerID, 12), "state", reason)
 			containerID = ""
 			b.containerMu.Lock()
 			delete(b.containerCache, info.CrewID)
@@ -182,23 +190,25 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	var fullResponse string
 
 	req := orchestrator.AgentRunRequest{
-		AgentID:       info.AgentID,
-		AgentSlug:     info.AgentSlug,
-		AgentRole:     info.AgentRole,
-		CrewID:        info.CrewID,
-		CrewSlug:      info.CrewSlug,
-		WorkspaceID:   info.WorkspaceID,
-		ChatID:        chatID,
-		ContainerID:   containerID,
-		CLIAdapter:    info.CLIAdapter,
-		LLMModel:      info.LLMModel,
-		SystemPrompt:  info.SystemPrompt,
-		UserMessage:   content,
-		ToolProfile:   info.ToolProfile,
-		Credentials:   info.Credentials,
-		TimeoutSecs:   info.TimeoutSecs,
-		MemoryEnabled: info.MemoryEnabled,
-		CrewMembers:   info.CrewMembers,
+		AgentID:        info.AgentID,
+		AgentSlug:      info.AgentSlug,
+		AgentRole:      info.AgentRole,
+		CrewID:         info.CrewID,
+		CrewSlug:       info.CrewSlug,
+		WorkspaceID:    info.WorkspaceID,
+		ChatID:         chatID,
+		ContainerID:    containerID,
+		CLIAdapter:     info.CLIAdapter,
+		LLMModel:       info.LLMModel,
+		SystemPrompt:   info.SystemPrompt,
+		UserMessage:    content,
+		ToolProfile:    info.ToolProfile,
+		Credentials:    info.Credentials,
+		TimeoutSecs:    info.TimeoutSecs,
+		MemoryEnabled:  info.MemoryEnabled,
+		CrewMembers:    info.CrewMembers,
+		NetworkMode:    info.NetworkMode,
+		AllowedDomains: info.AllowedDomains,
 	}
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).

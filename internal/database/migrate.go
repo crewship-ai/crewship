@@ -76,6 +76,7 @@ var migrations = []migration{
 	{15, "add_avatar_style", migrationAddAvatarStyle},
 	{16, "add_agent_cli_tools", migrationAddAgentCLITools},
 	{17, "add_credential_crews", migrationAddCredentialCrews},
+	{18, "add_crew_network_policy", migrationAddCrewNetworkPolicy},
 }
 
 const migrationAddKeeperObservability = `
@@ -704,4 +705,9 @@ INSERT OR IGNORE INTO credential_crews (credential_id, crew_id, created_at)
 SELECT c.id, c.crew_id, datetime('now') FROM credentials c
 JOIN crews cr ON cr.id = c.crew_id AND cr.workspace_id = c.workspace_id
 WHERE c.scope = 'CREW' AND c.crew_id IS NOT NULL AND c.deleted_at IS NULL AND cr.deleted_at IS NULL;
+`
+
+const migrationAddCrewNetworkPolicy = `
+ALTER TABLE crews ADD COLUMN network_mode TEXT NOT NULL DEFAULT 'free' CHECK(network_mode IN ('free', 'restricted'));
+ALTER TABLE crews ADD COLUMN allowed_domains TEXT;
 `

@@ -39,6 +39,8 @@ type AgentRunRequest struct {
 	CrewMembers     []CrewMember // Populated by bridge for LEAD agents
 	SkipSidecar     bool         // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
 	SkipConvHistory bool         // When true, skip injecting conversation history (used by assignment sub-agents)
+	NetworkMode     string       // "free" (default) or "restricted" — crew-level network policy
+	AllowedDomains  []string     // Extra allowed domains for restricted mode
 }
 
 type Credential struct {
@@ -273,14 +275,52 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 				ChatID:    m.ChatID,
 			})
 		}
+		// Build network policy for sidecar.
+		// Normalize and validate: only "free" and "restricted" are accepted.
+		desiredMode := strings.TrimSpace(strings.ToLower(req.NetworkMode))
+		if desiredMode == "" {
+			desiredMode = "free"
+		}
+		var networkPolicy *SidecarNetworkPolicy
+		switch desiredMode {
+		case "free":
+			networkPolicy = &SidecarNetworkPolicy{Mode: "free"}
+		case "restricted":
+			networkPolicy = &SidecarNetworkPolicy{
+				Mode:           "restricted",
+				AllowedDomains: req.AllowedDomains,
+			}
+		default:
+			o.logger.Error("unknown network mode, refusing to start sidecar", "mode", req.NetworkMode)
+			o.updateRunStatus(ctx, runState.ID, "error")
+			return fmt.Errorf("unknown network mode: %s", req.NetworkMode)
+		}
 		// Check if sidecar already running in this container (shared crew container).
 		// Multiple agents in the same crew share one container — only the first starts the sidecar.
-		if isSidecarRunning(ctx, o.container, req.ContainerID) {
-			o.logger.Info("sidecar already running, reusing", "agent_id", req.AgentID, "container_id", req.ContainerID[:min(12, len(req.ContainerID))])
-		} else if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, o.logger); err != nil {
-			o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
-			o.updateRunStatus(ctx, runState.ID, "error")
-			return fmt.Errorf("start sidecar: %w", err)
+		// Also verify the running sidecar's network mode matches the desired mode;
+		// if it differs (e.g. after a policy change), we must restart the sidecar.
+		needStart := true
+		if health := checkSidecar(ctx, o.container, req.ContainerID); health != nil {
+			if health.NetworkMode == desiredMode {
+				o.logger.Info("sidecar already running, reusing", "agent_id", req.AgentID, "container_id", req.ContainerID[:min(12, len(req.ContainerID))])
+				needStart = false
+			} else {
+				o.logger.Warn("sidecar running with stale network policy, restarting",
+					"running_mode", health.NetworkMode, "desired_mode", desiredMode)
+				// Kill existing sidecar so we can start a new one
+				_, _ = o.container.Exec(ctx, provider.ExecConfig{
+					ContainerID: req.ContainerID,
+					Cmd:         []string{"sh", "-c", "pkill -f crewship-sidecar || true"},
+					User:        "0:0",
+				})
+			}
+		}
+		if needStart {
+			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, networkPolicy, o.logger); err != nil {
+				o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
+				o.updateRunStatus(ctx, runState.ID, "error")
+				return fmt.Errorf("start sidecar: %w", err)
+			}
 		}
 		credCount := 0
 		for _, c := range req.Credentials {

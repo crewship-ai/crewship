@@ -47,6 +47,12 @@ type CrewMember struct {
 	ChatID    string `json:"chat_id,omitempty"`
 }
 
+// NetworkPolicyConfig configures per-crew network access mode.
+type NetworkPolicyConfig struct {
+	Mode           string   `json:"mode"`            // "free" or "restricted"
+	AllowedDomains []string `json:"allowed_domains"` // extra allowed domains for restricted mode
+}
+
 // ServerConfig configures the sidecar server.
 type ServerConfig struct {
 	Addr           string   // listen address (default: 127.0.0.1:9119)
@@ -55,6 +61,7 @@ type ServerConfig struct {
 	Memory         *MemoryConfig
 	IPC            *IPCConfig
 	CrewMembers    []CrewMember
+	NetworkPolicy  *NetworkPolicyConfig
 	Logger         *slog.Logger
 }
 
@@ -90,6 +97,23 @@ func NewServer(cfg ServerConfig) *Server {
 	domains := make([]string, 0, len(DefaultAllowedDomains)+len(cfg.AllowedDomains))
 	domains = append(domains, DefaultAllowedDomains...)
 	domains = append(domains, cfg.AllowedDomains...)
+
+	// Determine network mode: "free" means skip allowlist checks.
+	// Unknown modes default to restricted (fail closed) to prevent silent egress.
+	freeMode := true // default when no policy is set: unrestricted
+	if cfg.NetworkPolicy != nil {
+		switch cfg.NetworkPolicy.Mode {
+		case "free":
+			freeMode = true
+		case "restricted":
+			freeMode = false
+			domains = append(domains, cfg.NetworkPolicy.AllowedDomains...)
+		default:
+			cfg.Logger.Error("unknown network mode, defaulting to restricted", "mode", cfg.NetworkPolicy.Mode)
+			freeMode = false
+		}
+	}
+
 	allowlist := NewDomainAllowlist(domains)
 
 	proxy := NewProxy(ProxyConfig{
@@ -97,6 +121,7 @@ func NewServer(cfg ServerConfig) *Server {
 		Allowlist: allowlist,
 		Scrubber:  scrubber.New(),
 		Logger:    cfg.Logger,
+		FreeMode:  freeMode,
 	})
 
 	s := &Server{

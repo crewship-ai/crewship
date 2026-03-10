@@ -265,18 +265,21 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	var timeoutSecs int
 	var memoryEnabled bool
 	var crewID, crewSlug, crewName sql.NullString
+	var crewNetworkMode, crewAllowedDomains sql.NullString
 
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.slug, a.name, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt,
 			a.tool_profile, a.timeout_seconds, a.memory_enabled,
-			c2.id, c2.slug, c2.name, c.workspace_id, a.llm_model
+			c2.id, c2.slug, c2.name, c.workspace_id, a.llm_model,
+			c2.network_mode, c2.allowed_domains
 		FROM chats c
 		JOIN agents a ON a.id = c.agent_id
 		LEFT JOIN crews c2 ON c2.id = a.crew_id
 		WHERE c.id = ?
 	`, chatID).Scan(&agentID, &agentSlug, &agentName, &roleTitle, &agentRole, &cliAdapter, &systemPrompt,
 		&toolProfile, &timeoutSecs, &memoryEnabled,
-		&crewID, &crewSlug, &crewName, &wsID, &llmModel)
+		&crewID, &crewSlug, &crewName, &wsID, &llmModel,
+		&crewNetworkMode, &crewAllowedDomains)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found"})
@@ -559,6 +562,25 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		llmModelStr = llmModel.String
 	}
 
+	networkMode := "free"
+	if crewNetworkMode.Valid && crewNetworkMode.String != "" {
+		mode := crewNetworkMode.String
+		if mode == "free" || mode == "restricted" {
+			networkMode = mode
+		} else {
+			// Unknown mode in DB — fail closed to prevent silent egress
+			h.logger.Error("unknown network_mode in DB, defaulting to restricted", "mode", mode, "crew_id", crewIDStr)
+			networkMode = "restricted"
+		}
+	}
+	allowedDomains := []string{}
+	if crewAllowedDomains.Valid && crewAllowedDomains.String != "" {
+		if err := json.Unmarshal([]byte(crewAllowedDomains.String), &allowedDomains); err != nil {
+			h.logger.Error("malformed allowed_domains JSON in DB, defaulting to empty", "error", err, "crew_id", crewIDStr)
+			allowedDomains = []string{}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"agent_id":        agentID,
 		"agent_slug":      agentSlug,
@@ -575,6 +597,8 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		"workspace_id":    wsID,
 		"memory_enabled":  memoryEnabled,
 		"crew_members":    crewMembers,
+		"network_mode":    networkMode,
+		"allowed_domains": allowedDomains,
 	})
 }
 

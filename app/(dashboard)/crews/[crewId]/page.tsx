@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
-  ArrowLeft, AlertTriangle, Info, Paintbrush, RefreshCw, Loader2,
+  ArrowLeft, AlertTriangle, Paintbrush, RefreshCw, Loader2, ChevronDown,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { CrewStats } from "@/components/features/crews/crew-stats"
@@ -18,6 +19,7 @@ import { CrewPeerConversations } from "@/components/features/crews/crew-peer-con
 import { CrewEscalations } from "@/components/features/crews/crew-escalations"
 import { CrewStandup } from "@/components/features/crews/crew-standup"
 import { CrewDangerZone } from "@/components/features/crews/crew-danger-zone"
+import { CrewNetworkPolicy } from "@/components/features/crews/crew-network-policy"
 import { AvatarPicker } from "@/components/avatar-picker"
 import { AVATAR_STYLES } from "@/lib/agent-avatar"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -38,6 +40,8 @@ interface Crew {
   container_ttl_hours: number | null
   container_memory_mb: number
   container_cpus: number
+  network_mode: string
+  allowed_domains: string[]
   created_at: string
   _count: { agents: number; members: number }
 }
@@ -112,17 +116,17 @@ export default function CrewDetailPage() {
 
   async function patchCrew(body: Record<string, unknown>) {
     if (!workspaceId || !crew) return
-    try {
-      const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      if (res.ok) {
-        const updated = (await res.json()) as Crew
-        setCrew(updated)
-      }
-    } catch { /* silent */ }
+    const res = await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Request failed" }))
+      throw new Error(err.error || `HTTP ${res.status}`)
+    }
+    const updated = (await res.json()) as Crew
+    setCrew(updated)
   }
 
   async function handleApplyToAll() {
@@ -186,81 +190,93 @@ export default function CrewDetailPage() {
   const canEdit = abilities.can("update", "Crew")
   const canDelete = abilities.can("delete", "Crew")
 
+  async function handleNetworkSave(mode: string, domains: string[]) {
+    await patchCrew({ network_mode: mode, allowed_domains: domains })
+  }
+
   return (
-    <div className="p-4 sm:p-6">
-      <Button variant="ghost" size="sm" className="mb-4" asChild>
+    <div className="p-4 sm:p-6 space-y-6">
+      <Button variant="ghost" size="sm" asChild>
         <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
       </Button>
 
       {/* Hero */}
-      <div className="flex items-start gap-4 mb-6">
+      <div className="flex items-start gap-4">
         <CrewIconPopover
           icon={crew.icon || crew.name}
           color={crew.color || "90caf9"}
-          onIconChange={(icon) => patchCrew({ icon })}
-          onColorChange={(color) => patchCrew({ color })}
+          onIconChange={(icon) => patchCrew({ icon }).catch(() => {})}
+          onColorChange={(color) => patchCrew({ color }).catch(() => {})}
         />
         <div className="flex-1 min-w-0 pt-0.5">
-          <h1 className="text-xl font-semibold">{crew.name}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-semibold">{crew.name}</h1>
+            <span className="text-xs font-mono text-muted-foreground">{crew.slug}</span>
+          </div>
           {crew.description && (
             <p className="text-sm text-muted-foreground mt-1">{crew.description}</p>
           )}
+          <p className="text-xs text-muted-foreground mt-1">
+            Created {new Date(crew.created_at).toLocaleDateString()}
+          </p>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="mb-6">
-        <CrewStats
-          agentCount={crew._count.agents}
-          memberCount={crew._count.members}
-          memoryMb={crew.container_memory_mb}
-          cpus={crew.container_cpus}
-          ttlHours={crew.container_ttl_hours}
-        />
-      </div>
+      <CrewStats
+        agentCount={crew._count.agents}
+        memberCount={crew._count.members}
+        memoryMb={crew.container_memory_mb}
+        cpus={crew.container_cpus}
+        ttlHours={crew.container_ttl_hours}
+      />
 
-      {/* Main grid: 1 col left (settings), 2 cols right (content) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left column */}
-        <div className="space-y-4">
-          {/* Identity */}
+      {/* Network Policy */}
+      <CrewNetworkPolicy
+        networkMode={crew.network_mode || "free"}
+        allowedDomains={crew.allowed_domains || []}
+        canEdit={canEdit}
+        onSave={handleNetworkSave}
+      />
+
+      {/* Agents */}
+      <CrewAgents
+        agents={agents}
+        crewId={crew.id}
+        canCreate={abilities.can("create", "Agent")}
+      />
+
+      {/* Appearance — collapsible */}
+      {canEdit && (
+        <Collapsible>
           <Card>
-            <CardContent className="p-4 space-y-1">
-              <div className="flex items-center gap-2 mb-2">
-                <Info className="h-4 w-4 text-muted-foreground" />
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Identity</span>
-              </div>
-              <div className="flex justify-between items-center py-2">
-                <span className="text-[13px] text-muted-foreground">Name</span>
-                <span className="text-[13px] font-medium">{crew.name}</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-t">
-                <span className="text-[13px] text-muted-foreground">Slug</span>
-                <span className="text-xs font-mono text-muted-foreground">{crew.slug}</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-t">
-                <span className="text-[13px] text-muted-foreground">Created</span>
-                <span className="text-xs text-muted-foreground">{new Date(crew.created_at).toLocaleDateString()}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Appearance */}
-          {canEdit && (
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-3">
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between p-4 text-left hover:bg-muted/50 transition-colors rounded-xl"
+              >
+                <div className="flex items-center gap-2">
                   <Paintbrush className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Appearance</span>
+                  <span className="text-sm font-medium">Agent Avatar Style</span>
+                  {avatarStyle && (
+                    <span className="text-xs text-muted-foreground">
+                      ({AVATAR_STYLES[avatarStyle]?.label ?? avatarStyle})
+                    </span>
+                  )}
                 </div>
-                <p className="text-xs text-muted-foreground mb-2">Agent avatar style</p>
+                <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="px-4 pb-4 pt-0 space-y-3">
+                <p className="text-xs text-muted-foreground">Choose a style for agent avatars in this crew.</p>
                 <AvatarPicker
                   seed={crew.name || "preview"}
                   style={avatarStyle}
                   onSeedChange={() => {}}
                   onStyleChange={(s) => {
                     setAvatarStyle(s)
-                    patchCrew({ avatar_style: s })
+                    patchCrew({ avatar_style: s }).catch(() => {})
                   }}
                   styleOnly
                 />
@@ -269,7 +285,7 @@ export default function CrewDetailPage() {
                     type="button"
                     onClick={handleApplyToAll}
                     disabled={applying}
-                    className="mt-3 text-[11px] font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 inline-flex items-center gap-1 disabled:opacity-50"
+                    className="text-[11px] font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 inline-flex items-center gap-1 disabled:opacity-50"
                   >
                     {applying ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -280,61 +296,57 @@ export default function CrewDetailPage() {
                   </button>
                 )}
               </CardContent>
-            </Card>
-          )}
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+      )}
 
-          {/* Danger Zone */}
-          {canDelete && (
-            <CrewDangerZone crewName={crew.name} onDelete={handleDelete} />
-          )}
+      {/* Missions */}
+      <CrewMissions
+        crewId={crew.id}
+        workspaceId={workspaceId}
+        canCreate={abilities.can("create", "Crew")}
+        leadAgents={agents
+          .filter((a) => a.agent_role === "LEAD")
+          .map((a) => ({ id: a.id, name: a.name, slug: a.slug }))}
+      />
+
+      {/* Assignments */}
+      <CrewAssignments crewId={crew.id} workspaceId={workspaceId} />
+
+      {/* Peer Conversations */}
+      <CrewPeerConversations crewId={crew.id} workspaceId={workspaceId} />
+
+      {/* Escalations */}
+      <CrewEscalations crewId={crew.id} workspaceId={workspaceId} />
+
+      {/* Standup */}
+      <CrewStandup crewId={crew.id} workspaceId={workspaceId} />
+
+      {/* Credentials reminder */}
+      {agents.length > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+          <p className="text-sm text-amber-800 dark:text-amber-200">
+            Agents need API keys to connect to LLM providers.{" "}
+            <Link href="/credentials" className="font-medium underline underline-offset-2">
+              Add credentials
+            </Link>
+          </p>
         </div>
+      )}
 
-        {/* Right column (2 cols wide) */}
-        <div className="lg:col-span-2 space-y-4">
-          <CrewAgents
-            agents={agents}
-            crewId={crew.id}
-            canCreate={abilities.can("create", "Agent")}
-          />
+      {/* Members */}
+      <CrewMembers
+        members={members}
+        crewId={crew.id}
+        workspaceId={workspaceId}
+        canEdit={canEdit}
+        onMembersChange={setMembers}
+      />
 
-          <CrewMissions
-            crewId={crew.id}
-            workspaceId={workspaceId}
-            canCreate={abilities.can("create", "Crew")}
-            leadAgents={agents
-              .filter((a) => a.agent_role === "LEAD")
-              .map((a) => ({ id: a.id, name: a.name, slug: a.slug }))}
-          />
-
-          <CrewAssignments crewId={crew.id} workspaceId={workspaceId} />
-
-          <CrewPeerConversations crewId={crew.id} workspaceId={workspaceId} />
-
-          <CrewEscalations crewId={crew.id} workspaceId={workspaceId} />
-
-          <CrewStandup crewId={crew.id} workspaceId={workspaceId} />
-
-          {agents.length > 0 && (
-            <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
-              <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-              <p className="text-sm text-amber-800 dark:text-amber-200">
-                Agents need API keys to connect to LLM providers.{" "}
-                <Link href="/credentials" className="font-medium underline underline-offset-2">
-                  Add credentials
-                </Link>
-              </p>
-            </div>
-          )}
-
-          <CrewMembers
-            members={members}
-            crewId={crew.id}
-            workspaceId={workspaceId}
-            canEdit={canEdit}
-            onMembersChange={setMembers}
-          />
-        </div>
-      </div>
+      {/* Danger Zone */}
+      {canDelete && <CrewDangerZone crewName={crew.name} onDelete={handleDelete} />}
     </div>
   )
 }

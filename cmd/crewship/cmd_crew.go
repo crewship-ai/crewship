@@ -42,6 +42,7 @@ var crewListCmd = &cobra.Command{
 			Description *string `json:"description"`
 			MemoryMB    int     `json:"container_memory_mb"`
 			CPUs        float64 `json:"container_cpus"`
+			NetworkMode string  `json:"network_mode"`
 			AgentCount  int     `json:"_count_agents"`
 		}
 		if err := cli.ReadJSON(resp, &crews); err != nil {
@@ -49,12 +50,17 @@ var crewListCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		headers := []string{"SLUG", "NAME", "AGENTS", "MEMORY", "CPUS"}
+		headers := []string{"SLUG", "NAME", "AGENTS", "NETWORK", "MEMORY", "CPUS"}
 		var rows [][]string
 		for _, c := range crews {
+			nm := c.NetworkMode
+			if nm == "" {
+				nm = "free"
+			}
 			rows = append(rows, []string{
 				c.Slug, c.Name,
 				fmt.Sprintf("%d", c.AgentCount),
+				nm,
 				fmt.Sprintf("%dMB", c.MemoryMB),
 				fmt.Sprintf("%.1f", c.CPUs),
 			})
@@ -90,15 +96,17 @@ var crewGetCmd = &cobra.Command{
 		}
 
 		var crew struct {
-			ID          string  `json:"id"`
-			Name        string  `json:"name"`
-			Slug        string  `json:"slug"`
-			Description *string `json:"description"`
-			Color       *string `json:"color"`
-			Icon        *string `json:"icon"`
-			MemoryMB    int     `json:"container_memory_mb"`
-			CPUs        float64 `json:"container_cpus"`
-			CreatedAt   string  `json:"created_at"`
+			ID             string   `json:"id"`
+			Name           string   `json:"name"`
+			Slug           string   `json:"slug"`
+			Description    *string  `json:"description"`
+			Color          *string  `json:"color"`
+			Icon           *string  `json:"icon"`
+			MemoryMB       int      `json:"container_memory_mb"`
+			CPUs           float64  `json:"container_cpus"`
+			NetworkMode    string   `json:"network_mode"`
+			AllowedDomains []string `json:"allowed_domains"`
+			CreatedAt      string   `json:"created_at"`
 		}
 		if err := cli.ReadJSON(resp, &crew); err != nil {
 			return err
@@ -109,6 +117,14 @@ var crewGetCmd = &cobra.Command{
 		if crew.Description != nil {
 			desc = *crew.Description
 		}
+		domainsStr := "-"
+		if len(crew.AllowedDomains) > 0 {
+			domainsStr = strings.Join(crew.AllowedDomains, ", ")
+		}
+		networkMode := crew.NetworkMode
+		if networkMode == "" {
+			networkMode = "free"
+		}
 		pairs := [][]string{
 			{"Name", crew.Name},
 			{"Slug", crew.Slug},
@@ -116,6 +132,8 @@ var crewGetCmd = &cobra.Command{
 			{"Description", desc},
 			{"Memory", fmt.Sprintf("%dMB", crew.MemoryMB)},
 			{"CPUs", fmt.Sprintf("%.1f", crew.CPUs)},
+			{"Network Mode", networkMode},
+			{"Allowed Domains", domainsStr},
 			{"Created", crew.CreatedAt},
 		}
 		return f.AutoDetail(crew, pairs)
@@ -157,6 +175,20 @@ var crewCreateCmd = &cobra.Command{
 		}
 		if v, _ := flags.GetFloat64("cpus"); v > 0 {
 			body["container_cpus"] = v
+		}
+		if v, _ := flags.GetString("network-mode"); v != "" {
+			body["network_mode"] = v
+		}
+		if v, _ := flags.GetString("allowed-domains"); v != "" {
+			domains := strings.Split(v, ",")
+			trimmed := make([]string, 0, len(domains))
+			for _, d := range domains {
+				d = strings.TrimSpace(d)
+				if d != "" {
+					trimmed = append(trimmed, d)
+				}
+			}
+			body["allowed_domains"] = trimmed
 		}
 
 		client := newAPIClient()
@@ -224,6 +256,26 @@ var crewUpdateCmd = &cobra.Command{
 		if flags.Changed("cpus") {
 			v, _ := flags.GetFloat64("cpus")
 			body["container_cpus"] = v
+		}
+		if flags.Changed("network-mode") {
+			v, _ := flags.GetString("network-mode")
+			body["network_mode"] = v
+		}
+		if flags.Changed("allowed-domains") {
+			v, _ := flags.GetString("allowed-domains")
+			if v == "" {
+				body["allowed_domains"] = []string{}
+			} else {
+				domains := strings.Split(v, ",")
+				trimmed := make([]string, 0, len(domains))
+				for _, d := range domains {
+					d = strings.TrimSpace(d)
+					if d != "" {
+						trimmed = append(trimmed, d)
+					}
+				}
+				body["allowed_domains"] = trimmed
+			}
 		}
 
 		if len(body) == 0 {
@@ -561,6 +613,8 @@ func init() {
 	crewCreateCmd.Flags().String("icon", "", "Emoji icon")
 	crewCreateCmd.Flags().Int("memory-mb", 0, "Container memory limit in MB")
 	crewCreateCmd.Flags().Float64("cpus", 0, "Container CPU limit")
+	crewCreateCmd.Flags().String("network-mode", "", "Network policy mode: free or restricted")
+	crewCreateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode")
 
 	crewUpdateCmd.Flags().String("name", "", "Crew name")
 	crewUpdateCmd.Flags().String("description", "", "Description")
@@ -568,6 +622,8 @@ func init() {
 	crewUpdateCmd.Flags().String("icon", "", "Emoji icon")
 	crewUpdateCmd.Flags().Int("memory-mb", 0, "Container memory limit in MB")
 	crewUpdateCmd.Flags().Float64("cpus", 0, "Container CPU limit")
+	crewUpdateCmd.Flags().String("network-mode", "", "Network policy mode: free or restricted")
+	crewUpdateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode")
 
 	crewDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 

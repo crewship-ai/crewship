@@ -199,6 +199,161 @@ func TestCrewCreate(t *testing.T) {
 	}
 }
 
+func TestCrewCreate_WithNetworkPolicy(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	handler := NewCrewHandler(db, logger)
+
+	// Create crew with restricted network mode
+	body := bytes.NewBufferString(`{"name":"Secure Team","slug":"secure-team","network_mode":"restricted","allowed_domains":["github.com","api.github.com"]}`)
+	req := httptest.NewRequest("POST", "/api/v1/crews?workspace_id="+wsID, body)
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.Create(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d, body: %s", rr.Code, http.StatusCreated, rr.Body.String())
+	}
+
+	var crew crewResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &crew); err != nil {
+		t.Fatalf("decode crew response: %v", err)
+	}
+	if crew.NetworkMode != "restricted" {
+		t.Errorf("network_mode = %q, want restricted", crew.NetworkMode)
+	}
+	if len(crew.AllowedDomains) != 2 {
+		t.Fatalf("allowed_domains length = %d, want 2", len(crew.AllowedDomains))
+	}
+	if crew.AllowedDomains[0] != "github.com" || crew.AllowedDomains[1] != "api.github.com" {
+		t.Errorf("allowed_domains = %v, want [github.com api.github.com]", crew.AllowedDomains)
+	}
+
+	// Verify default create (no network_mode) returns "free"
+	body2 := bytes.NewBufferString(`{"name":"Free Team","slug":"free-team"}`)
+	req2 := httptest.NewRequest("POST", "/api/v1/crews?workspace_id="+wsID, body2)
+	ctx2 := withUser(req2.Context(), &AuthUser{ID: userID})
+	ctx2 = withWorkspace(ctx2, wsID, "OWNER")
+	req2 = req2.WithContext(ctx2)
+	rr2 := httptest.NewRecorder()
+
+	handler.Create(rr2, req2)
+
+	if rr2.Code != http.StatusCreated {
+		t.Fatalf("create2 status = %d, want %d, body: %s", rr2.Code, http.StatusCreated, rr2.Body.String())
+	}
+
+	var crew2 crewResponse
+	if err := json.Unmarshal(rr2.Body.Bytes(), &crew2); err != nil {
+		t.Fatalf("decode crew2 response: %v", err)
+	}
+	if crew2.NetworkMode != "free" {
+		t.Errorf("default network_mode = %q, want free", crew2.NetworkMode)
+	}
+	if crew2.AllowedDomains == nil || len(crew2.AllowedDomains) != 0 {
+		t.Errorf("default allowed_domains = %v, want []", crew2.AllowedDomains)
+	}
+
+	// Verify invalid network_mode is rejected
+	body3 := bytes.NewBufferString(`{"name":"Bad Team","slug":"bad-team","network_mode":"yolo"}`)
+	req3 := httptest.NewRequest("POST", "/api/v1/crews?workspace_id="+wsID, body3)
+	ctx3 := withUser(req3.Context(), &AuthUser{ID: userID})
+	ctx3 = withWorkspace(ctx3, wsID, "OWNER")
+	req3 = req3.WithContext(ctx3)
+	rr3 := httptest.NewRecorder()
+
+	handler.Create(rr3, req3)
+
+	if rr3.Code != http.StatusBadRequest {
+		t.Errorf("invalid network_mode status = %d, want %d", rr3.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCrewUpdate_WithNetworkPolicy(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	handler := NewCrewHandler(db, logger)
+
+	// Seed a crew
+	crewID := "crew-net-test"
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug, network_mode, created_at, updated_at)
+		VALUES (?, ?, 'Net Test', 'net-test', 'free', datetime('now'), datetime('now'))`, crewID, wsID); err != nil {
+		t.Fatalf("seed crew: %v", err)
+	}
+
+	// Update to restricted with allowed_domains
+	body := bytes.NewBufferString(`{"network_mode":"restricted","allowed_domains":["github.com","npm.pkg.dev"]}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/crews/"+crewID, body)
+	req.SetPathValue("crewId", crewID)
+	ctx := withUser(req.Context(), &AuthUser{ID: userID})
+	ctx = withWorkspace(ctx, wsID, "OWNER")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+
+	handler.Update(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var crew crewResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &crew); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if crew.NetworkMode != "restricted" {
+		t.Errorf("network_mode = %q, want restricted", crew.NetworkMode)
+	}
+	if len(crew.AllowedDomains) != 2 {
+		t.Fatalf("allowed_domains length = %d, want 2", len(crew.AllowedDomains))
+	}
+
+	// Switch back to free — allowed_domains should be auto-cleared
+	body2 := bytes.NewBufferString(`{"network_mode":"free"}`)
+	req2 := httptest.NewRequest("PATCH", "/api/v1/crews/"+crewID, body2)
+	req2.SetPathValue("crewId", crewID)
+	ctx2 := withUser(req2.Context(), &AuthUser{ID: userID})
+	ctx2 = withWorkspace(ctx2, wsID, "OWNER")
+	req2 = req2.WithContext(ctx2)
+	rr2 := httptest.NewRecorder()
+
+	handler.Update(rr2, req2)
+
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("update2 status = %d, want %d, body: %s", rr2.Code, http.StatusOK, rr2.Body.String())
+	}
+
+	var crew2 crewResponse
+	if err := json.Unmarshal(rr2.Body.Bytes(), &crew2); err != nil {
+		t.Fatalf("decode update2 response: %v", err)
+	}
+	if crew2.NetworkMode != "free" {
+		t.Errorf("network_mode = %q, want free", crew2.NetworkMode)
+	}
+	if len(crew2.AllowedDomains) != 0 {
+		t.Errorf("allowed_domains should be cleared after switching to free, got %v", crew2.AllowedDomains)
+	}
+
+	// Verify in DB that allowed_domains is actually NULL
+	var dbDomains sql.NullString
+	if err := db.QueryRow("SELECT allowed_domains FROM crews WHERE id = ?", crewID).Scan(&dbDomains); err != nil {
+		t.Fatalf("scan DB allowed_domains: %v", err)
+	}
+	if dbDomains.Valid {
+		t.Errorf("DB allowed_domains should be NULL after switching to free, got %q", dbDomains.String)
+	}
+}
+
 func TestCrewCreate_Forbidden(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))

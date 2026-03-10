@@ -689,8 +689,10 @@ Nebo runtime: `server.Allowlist().Add("custom-llm.example.com")`
 | Hot credential rotation | CredStore.Load() pro zmenu klicu bez restartu agenta | Phase 2 |
 | Per-request audit trail | Kazdy HTTP request logovan s credential_id a trace_id | Phase 2 |
 | Response body limit | Streaming limit pro velke LLM odpovedi | Phase 2 |
-| Custom allowlists per crew | Ruzne domeny pro ruzne tymy | Phase 2 |
+| ~~Custom allowlists per crew~~ | ~~Ruzne domeny pro ruzne tymy~~ | **DONE** — viz NETWORK-POLICY.md |
 | Sidecar healthcheck | crewshipd detekuje padly sidecar a restartuje | Phase 2 |
+| iptables hardening | DROP vše kromě loopback + sidecar port v kontejneru | Phase 2 |
+| DNS filtering | Custom DNS resolver v sidecar, blokuje non-allowlisted domeny | Phase 2 |
 
 ---
 
