@@ -68,6 +68,7 @@ type agentResponse struct {
 	TimeoutSeconds  int            `json:"timeout_seconds"`
 	ToolProfile     string         `json:"tool_profile"`
 	MemoryEnabled   bool           `json:"memory_enabled"`
+	CLITools        *string        `json:"cli_tools"`
 	CreatedAt       string         `json:"created_at"`
 	UpdatedAt       string         `json:"updated_at"`
 	Crew            *agentCrewInfo `json:"crew"`
@@ -87,7 +88,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
 			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
-			a.tool_profile, a.memory_enabled, a.created_at, a.updated_at,
+			a.tool_profile, a.memory_enabled, a.cli_tools, a.created_at, a.updated_at,
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
@@ -121,7 +122,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 			&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
-			&a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
+			&a.TimeoutSeconds, &a.ToolProfile, &memEnabled, &a.CLITools,
 			&a.CreatedAt, &a.UpdatedAt,
 			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 			&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats); err != nil {
@@ -351,7 +352,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
 			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
-			a.tool_profile, a.memory_enabled, a.created_at, a.updated_at,
+			a.tool_profile, a.memory_enabled, a.cli_tools, a.created_at, a.updated_at,
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
@@ -362,7 +363,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	`, agentID, workspaceID).Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 		&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
-		&a.TimeoutSeconds, &a.ToolProfile, &memEnabled,
+		&a.TimeoutSeconds, &a.ToolProfile, &memEnabled, &a.CLITools,
 		&a.CreatedAt, &a.UpdatedAt,
 		&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats)
@@ -420,7 +421,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"llm_model": "llm_model", "system_prompt": "system_prompt",
 		"avatar_seed": "avatar_seed", "avatar_style": "avatar_style",
 		"timeout_seconds": "timeout_seconds", "tool_profile": "tool_profile",
-		"memory_enabled": "memory_enabled", "crew_id": "crew_id",
+		"memory_enabled": "memory_enabled", "cli_tools": "cli_tools", "crew_id": "crew_id",
 	}
 
 	// Validate agent_role if being updated

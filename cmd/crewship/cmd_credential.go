@@ -82,7 +82,7 @@ var credCreateCmd = &cobra.Command{
 			return fmt.Errorf("--name is required")
 		}
 		if credType == "" {
-			return fmt.Errorf("--type is required (SECRET, API_KEY, or AI_CLI_TOKEN)")
+			return fmt.Errorf("--type is required (SECRET, API_KEY, AI_CLI_TOKEN, or CLI_TOKEN)")
 		}
 
 		if valueStdin {
@@ -527,8 +527,8 @@ func confirmInvalidKey(errMsg string) bool {
 
 func init() {
 	credCreateCmd.Flags().String("name", "", "Credential name (required)")
-	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN (required)")
-	credCreateCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|NONE")
+	credCreateCmd.Flags().String("type", "", "Type: SECRET|API_KEY|AI_CLI_TOKEN|CLI_TOKEN (required)")
+	credCreateCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|GITLAB|VERCEL|AWS|CUSTOM_CLI|NONE")
 	credCreateCmd.Flags().String("value", "", "Credential value (visible in process list, prefer --value-stdin)")
 	credCreateCmd.Flags().Bool("value-stdin", false, "Read value from stdin (secure)")
 	credCreateCmd.Flags().String("env-var-name", "", "Environment variable name")

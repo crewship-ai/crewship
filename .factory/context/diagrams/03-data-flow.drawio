@@ -1,0 +1,209 @@
+<mxfile host="app.diagrams.net" modified="2026-03-10" agent="Crewship" version="24.0.0" type="device">
+  <diagram id="data-flow" name="Data Flow">
+    <mxGraphModel dx="2074" dy="1156" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="3300" pageHeight="2340" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- TITLE -->
+        <mxCell id="title" value="&lt;b&gt;CREWSHIP — Data Flow Diagrams&lt;/b&gt;" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=18;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="20" width="400" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ========== FLOW 1: USER SENDS MESSAGE ========== -->
+        <mxCell id="flow1_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#424242;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
+          <mxGeometry x="80" y="80" width="2200" height="280" as="geometry" />
+        </mxCell>
+        <mxCell id="flow1_label" value="&lt;b&gt;FLOW 1: User sends message to Agent&lt;/b&gt;  ✅ IMPLEMENTED" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#424242;" vertex="1" parent="1">
+          <mxGeometry x="100" y="85" width="400" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f1_user" value="&lt;b&gt;User&lt;/b&gt;&lt;br&gt;types in chat" style="shape=actor;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="120" y="140" width="50" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_browser" value="&lt;b&gt;React Chat UI&lt;/b&gt;&lt;br&gt;Zustand + WS hook" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="220" y="140" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_ws" value="&lt;b&gt;WebSocket&lt;/b&gt;&lt;br&gt;Gateway" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="400" y="140" width="100" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_orch" value="&lt;b&gt;Orchestrator&lt;/b&gt;&lt;br&gt;builds cmd" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="550" y="140" width="110" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_cred" value="&lt;b&gt;Credential&lt;/b&gt;&lt;br&gt;selection&lt;br&gt;(priority+round-robin)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="710" y="130" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_docker" value="&lt;b&gt;Docker exec&lt;/b&gt;&lt;br&gt;in crew container&lt;br&gt;(UID 1001)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFECB3;strokeColor=#FF8F00;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="880" y="140" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_sidecar" value="&lt;b&gt;Sidecar&lt;/b&gt;&lt;br&gt;injects credentials&lt;br&gt;via stdin JSON" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="140" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_cli" value="&lt;b&gt;CLI Tool&lt;/b&gt;&lt;br&gt;(Claude Code /&lt;br&gt;OpenCode / Codex)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="140" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_llm" value="&lt;b&gt;LLM API&lt;/b&gt;&lt;br&gt;(via sidecar proxy)" style="shape=cloud;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1410" y="125" width="140" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_stdout" value="&lt;b&gt;Agent stdout&lt;/b&gt;&lt;br&gt;(clean, user-facing)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1240" y="230" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_scrub" value="&lt;b&gt;Scrubber&lt;/b&gt;&lt;br&gt;redact credentials" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="230" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_jsonl" value="&lt;b&gt;JSONL Log&lt;/b&gt;&lt;br&gt;(append)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="880" y="225" width="80" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_ws_back" value="&lt;b&gt;WebSocket&lt;/b&gt;&lt;br&gt;stream to UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="700" y="230" width="110" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f1_ui_update" value="&lt;b&gt;UI renders&lt;/b&gt;&lt;br&gt;streaming response&lt;br&gt;(streamdown)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="230" width="140" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Flow 1 edges -->
+        <mxCell id="ef1_1" style="rounded=1;fontSize=9;" edge="1" source="f1_user" target="f1_browser" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_2" value="fetch/WS" style="rounded=1;fontSize=9;" edge="1" source="f1_browser" target="f1_ws" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_3" style="rounded=1;fontSize=9;" edge="1" source="f1_ws" target="f1_orch" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_4" style="rounded=1;fontSize=9;" edge="1" source="f1_orch" target="f1_cred" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_5" style="rounded=1;fontSize=9;" edge="1" source="f1_cred" target="f1_docker" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_6" style="rounded=1;fontSize=9;" edge="1" source="f1_docker" target="f1_sidecar" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_7" style="rounded=1;fontSize=9;" edge="1" source="f1_sidecar" target="f1_cli" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_8" value="API call" style="rounded=1;fontSize=9;" edge="1" source="f1_cli" target="f1_llm" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_9" value="response" style="rounded=1;fontSize=9;" edge="1" source="f1_cli" target="f1_stdout" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_10" style="rounded=1;fontSize=9;" edge="1" source="f1_stdout" target="f1_scrub" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_11" style="rounded=1;fontSize=9;" edge="1" source="f1_scrub" target="f1_jsonl" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_12" style="rounded=1;fontSize=9;" edge="1" source="f1_scrub" target="f1_ws_back" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef1_13" style="rounded=1;fontSize=9;" edge="1" source="f1_ws_back" target="f1_ui_update" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== FLOW 2: WEBHOOK TRIGGER ========== -->
+        <mxCell id="flow2_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#424242;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
+          <mxGeometry x="80" y="400" width="2200" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="flow2_label" value="&lt;b&gt;FLOW 2: External webhook triggers Agent&lt;/b&gt;  ✅ IMPLEMENTED" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#424242;" vertex="1" parent="1">
+          <mxGeometry x="100" y="405" width="420" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f2_ext" value="&lt;b&gt;Grafana / n8n&lt;/b&gt;&lt;br&gt;POST webhook" style="shape=hexagon;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;perimeter=hexagonPerimeter2;" vertex="1" parent="1">
+          <mxGeometry x="120" y="450" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f2_wh" value="&lt;b&gt;Webhook Ingress&lt;/b&gt;&lt;br&gt;HMAC validate&lt;br&gt;per-agent secret" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="310" y="450" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f2_wake" value="&lt;b&gt;Wake agent&lt;/b&gt;&lt;br&gt;(start container&lt;br&gt;if stopped)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="510" y="450" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f2_process" value="&lt;b&gt;Agent processes&lt;/b&gt;&lt;br&gt;event payload" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="700" y="450" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f2_output" value="&lt;b&gt;Write to&lt;/b&gt;&lt;br&gt;/output/" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=8;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="890" y="445" width="80" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="f2_notify" value="&lt;b&gt;WS notify&lt;/b&gt;&lt;br&gt;(if user online)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="450" width="110" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f2_ext_call" value="&lt;b&gt;External call&lt;/b&gt;&lt;br&gt;(Slack, Jira, email&lt;br&gt;via skill)" style="shape=cloud;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1190" y="440" width="140" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ef2_1" style="rounded=1;" edge="1" source="f2_ext" target="f2_wh" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef2_2" style="rounded=1;" edge="1" source="f2_wh" target="f2_wake" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef2_3" style="rounded=1;" edge="1" source="f2_wake" target="f2_process" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef2_4" style="rounded=1;" edge="1" source="f2_process" target="f2_output" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef2_5" style="rounded=1;" edge="1" source="f2_output" target="f2_notify" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef2_6" style="rounded=1;dashed=1;" edge="1" source="f2_process" target="f2_ext_call" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== FLOW 3: FILE CREATION ========== -->
+        <mxCell id="flow3_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#424242;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
+          <mxGeometry x="80" y="640" width="1600" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="flow3_label" value="&lt;b&gt;FLOW 3: Agent creates file → User downloads&lt;/b&gt;  ✅ IMPLEMENTED" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#424242;" vertex="1" parent="1">
+          <mxGeometry x="100" y="645" width="460" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f3_write" value="&lt;b&gt;Agent writes&lt;/b&gt;&lt;br&gt;/output/reports/&lt;br&gt;q1-report.pdf" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="120" y="700" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f3_fsnotify" value="&lt;b&gt;fsnotify&lt;/b&gt;&lt;br&gt;detects change&lt;br&gt;(inotify)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="310" y="700" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f3_index" value="&lt;b&gt;Index&lt;/b&gt;&lt;br&gt;file metadata" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="490" y="700" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f3_ws_notify" value="&lt;b&gt;WebSocket&lt;/b&gt;&lt;br&gt;push notification&lt;br&gt;to frontend" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="650" y="700" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f3_ui" value="&lt;b&gt;UI shows&lt;/b&gt;&lt;br&gt;'Agent created&lt;br&gt;q1-report.pdf'" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="840" y="700" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f3_download" value="&lt;b&gt;User clicks&lt;/b&gt;&lt;br&gt;Download →&lt;br&gt;HTTP file serve" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="700" width="130" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ef3_1" style="rounded=1;" edge="1" source="f3_write" target="f3_fsnotify" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef3_2" style="rounded=1;" edge="1" source="f3_fsnotify" target="f3_index" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef3_3" style="rounded=1;" edge="1" source="f3_index" target="f3_ws_notify" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef3_4" style="rounded=1;" edge="1" source="f3_ws_notify" target="f3_ui" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef3_5" style="rounded=1;" edge="1" source="f3_ui" target="f3_download" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== FLOW 4: CREDENTIAL FAILOVER ========== -->
+        <mxCell id="flow4_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#424242;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
+          <mxGeometry x="80" y="880" width="2200" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="flow4_label" value="&lt;b&gt;FLOW 4: Credential pool selection + failover (429 rate limit)&lt;/b&gt;  ✅ IMPLEMENTED" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#424242;" vertex="1" parent="1">
+          <mxGeometry x="100" y="885" width="550" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f4_start" value="&lt;b&gt;Agent start&lt;/b&gt;&lt;br&gt;request" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="120" y="940" width="100" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f4_pool" value="&lt;b&gt;Query credential pool&lt;/b&gt;&lt;br&gt;sorted by priority ASC&lt;br&gt;skip keys in cooldown" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="280" y="930" width="160" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f4_select" value="&lt;b&gt;Select first&lt;/b&gt;&lt;br&gt;available key" style="shape=rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="930" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f4_sidecar_inject" value="&lt;b&gt;Sidecar mode:&lt;/b&gt;&lt;br&gt;pipe all creds via&lt;br&gt;stdin JSON to sidecar&lt;br&gt;Agent gets DUMMY keys" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="680" y="920" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="f4_run" value="&lt;b&gt;Agent runs&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#80CBC4;strokeColor=#00695C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="900" y="935" width="100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="f4_429" value="&lt;b&gt;429 Rate Limit?&lt;/b&gt;" style="shape=rhombus;whiteSpace=wrap;html=1;fillColor=#FFCDD2;strokeColor=#C62828;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="925" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f4_cooldown" value="&lt;b&gt;Mark key cooldown&lt;/b&gt;&lt;br&gt;(5 min)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCDD2;strokeColor=#C62828;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1250" y="930" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f4_next" value="&lt;b&gt;Select next key&lt;/b&gt;&lt;br&gt;+ preserve context&lt;br&gt;(--resume / JSONL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1440" y="925" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="f4_ok" value="&lt;b&gt;✅ Success&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="1030" width="100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="f4_exhausted" value="&lt;b&gt;❌ All keys&lt;/b&gt;&lt;br&gt;exhausted" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCDD2;strokeColor=#C62828;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1650" y="930" width="110" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ef4_1" style="rounded=1;" edge="1" source="f4_start" target="f4_pool" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef4_2" style="rounded=1;" edge="1" source="f4_pool" target="f4_select" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef4_3" style="rounded=1;" edge="1" source="f4_select" target="f4_sidecar_inject" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef4_4" style="rounded=1;" edge="1" source="f4_sidecar_inject" target="f4_run" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef4_5" style="rounded=1;" edge="1" source="f4_run" target="f4_429" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef4_6" value="YES" style="rounded=1;fontSize=9;" edge="1" source="f4_429" target="f4_cooldown" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef4_7" style="rounded=1;" edge="1" source="f4_cooldown" target="f4_next" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef4_8" value="retry" style="rounded=1;dashed=1;fontSize=9;" edge="1" source="f4_next" target="f4_run" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1515" y="1060" />
+              <mxPoint x="950" y="1060" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ef4_9" value="NO" style="rounded=1;fontSize=9;" edge="1" source="f4_429" target="f4_ok" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ef4_10" value="pool empty" style="rounded=1;fontSize=9;strokeColor=#C62828;" edge="1" source="f4_next" target="f4_exhausted" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

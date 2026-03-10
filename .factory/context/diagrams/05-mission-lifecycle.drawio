@@ -1,0 +1,242 @@
+<mxfile host="app.diagrams.net" modified="2026-03-10" agent="Crewship" version="24.0.0" type="device">
+  <diagram id="mission-lifecycle" name="Mission Lifecycle">
+    <mxGraphModel dx="2074" dy="1156" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2800" pageHeight="1800" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- TITLE -->
+        <mxCell id="title" value="&lt;b&gt;CREWSHIP — Mission Lifecycle &amp; Task Flow&lt;/b&gt;&lt;br&gt;Phase 2A/2B — NOT YET IMPLEMENTED" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=18;" vertex="1" parent="1">
+          <mxGeometry x="850" y="20" width="480" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ========== MISSION STATE MACHINE ========== -->
+        <mxCell id="sm_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#424242;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
+          <mxGeometry x="80" y="90" width="2000" height="350" as="geometry" />
+        </mxCell>
+        <mxCell id="sm_label" value="&lt;b&gt;MISSION STATE MACHINE&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#424242;" vertex="1" parent="1">
+          <mxGeometry x="100" y="95" width="220" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- States -->
+        <mxCell id="st_trigger" value="&lt;b&gt;User sends&lt;/b&gt;&lt;br&gt;complex task&lt;br&gt;to Lead" style="shape=ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="120" y="180" width="130" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="st_planning" value="&lt;b&gt;PLANNING&lt;/b&gt;&lt;br&gt;&lt;hr&gt;Lead analyzes task&lt;br&gt;Creates plan&lt;br&gt;Assigns tasks to agents" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#F57F17;fontSize=11;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="320" y="160" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="st_inprogress" value="&lt;b&gt;IN_PROGRESS&lt;/b&gt;&lt;br&gt;&lt;hr&gt;Agents working on tasks&lt;br&gt;Lead coordinates&lt;br&gt;Parallel + sequential" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=11;strokeWidth=3;" vertex="1" parent="1">
+          <mxGeometry x="580" y="160" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="st_review" value="&lt;b&gt;REVIEW&lt;/b&gt;&lt;br&gt;&lt;hr&gt;All tasks done&lt;br&gt;Lead checks quality&lt;br&gt;Aggregates results" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#BBDEFB;strokeColor=#1565C0;fontSize=11;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="860" y="160" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="st_completed" value="&lt;b&gt;✅ COMPLETED&lt;/b&gt;&lt;br&gt;&lt;hr&gt;Lead responds to user&lt;br&gt;with final answer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D6A7;strokeColor=#2E7D32;fontSize=11;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="130" width="180" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="st_failed" value="&lt;b&gt;❌ FAILED&lt;/b&gt;&lt;br&gt;&lt;hr&gt;Unresolvable problem&lt;br&gt;Lead reports to user" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCDD2;strokeColor=#C62828;fontSize=11;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="230" width="170" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="st_cancelled" value="&lt;b&gt;🚫 CANCELLED&lt;/b&gt;&lt;br&gt;&lt;hr&gt;User or Lead cancelled" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0E0E0;strokeColor=#616161;fontSize=11;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="330" width="170" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- State transitions -->
+        <mxCell id="et1" style="rounded=1;strokeWidth=2;" edge="1" source="st_trigger" target="st_planning" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="et2" value="plan created" style="rounded=1;strokeWidth=2;fontSize=9;" edge="1" source="st_planning" target="st_inprogress" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="et3" value="all tasks done" style="rounded=1;strokeWidth=2;fontSize=9;" edge="1" source="st_inprogress" target="st_review" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="et4" value="approved" style="rounded=1;strokeWidth=2;fontSize=9;" edge="1" source="st_review" target="st_completed" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="et5" value="quality issue" style="rounded=1;strokeWidth=1;fontSize=9;dashed=1;" edge="1" source="st_review" target="st_inprogress" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="770" y="300" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="et6" style="rounded=1;strokeWidth=1;fontSize=9;" edge="1" source="st_review" target="st_failed" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="et7" value="cancel" style="rounded=1;strokeWidth=1;fontSize=9;strokeColor=#616161;" edge="1" source="st_inprogress" target="st_cancelled" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== TASK STATE MACHINE ========== -->
+        <mxCell id="tsm_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#424242;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
+          <mxGeometry x="80" y="470" width="1300" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="tsm_label" value="&lt;b&gt;TASK (MissionTask) STATE MACHINE&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=13;fontColor=#424242;" vertex="1" parent="1">
+          <mxGeometry x="100" y="475" width="290" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ts_pending" value="&lt;b&gt;PENDING&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0E0E0;strokeColor=#616161;fontSize=11;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="120" y="530" width="100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="ts_blocked" value="&lt;b&gt;BLOCKED&lt;/b&gt;&lt;br&gt;(waiting on dep)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#F57F17;fontSize=10;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="280" y="520" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="ts_inprogress" value="&lt;b&gt;IN_PROGRESS&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#388E3C;fontSize=11;strokeWidth=3;" vertex="1" parent="1">
+          <mxGeometry x="470" y="530" width="130" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="ts_completed" value="&lt;b&gt;✅ COMPLETED&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D6A7;strokeColor=#2E7D32;fontSize=11;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="660" y="510" width="130" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="ts_failed" value="&lt;b&gt;❌ FAILED&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCDD2;strokeColor=#C62828;fontSize=11;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="660" y="570" width="100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="ts_skipped" value="&lt;b&gt;⏭️ SKIPPED&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0E0E0;strokeColor=#616161;fontSize=10;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="660" y="625" width="100" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Dev-test loop -->
+        <mxCell id="ts_loop" value="&lt;b&gt;iteration++&lt;/b&gt;&lt;br&gt;(dev-test loop)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1BEE7;strokeColor=#7B1FA2;fontSize=9;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="530" y="610" width="100" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ets1" style="rounded=1;" edge="1" source="ts_pending" target="ts_blocked" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ets2" value="deps done" style="rounded=1;fontSize=9;" edge="1" source="ts_blocked" target="ts_inprogress" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ets2b" value="no deps" style="rounded=1;fontSize=9;" edge="1" source="ts_pending" target="ts_inprogress" parent="1">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="170" y="600" /><mxPoint x="470" y="600" /></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="ets3" style="rounded=1;" edge="1" source="ts_inprogress" target="ts_completed" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ets4" style="rounded=1;" edge="1" source="ts_inprogress" target="ts_failed" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ets5" value="test fail" style="rounded=1;fontSize=9;strokeColor=#7B1FA2;dashed=1;" edge="1" source="ts_failed" target="ts_loop" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ets6" style="rounded=1;fontSize=9;strokeColor=#7B1FA2;dashed=1;" edge="1" source="ts_loop" target="ts_inprogress" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== MISSION BOARD (UI MOCKUP) ========== -->
+        <mxCell id="board_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECEFF1;strokeColor=#37474F;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
+          <mxGeometry x="80" y="710" width="1600" height="350" as="geometry" />
+        </mxCell>
+        <mxCell id="board_label" value="&lt;b&gt;MISSION BOARD (UI — spreadsheet view)&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontColor=#37474F;" vertex="1" parent="1">
+          <mxGeometry x="100" y="715" width="340" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- Mission header -->
+        <mxCell id="board_header" value="&lt;b&gt;Mission:&lt;/b&gt; Monthly Social Media Report  |  &lt;b&gt;Lead:&lt;/b&gt; Anna  |  &lt;b&gt;Status:&lt;/b&gt; IN_PROGRESS  |  &lt;b&gt;Started:&lt;/b&gt; 14:32  |  &lt;b&gt;Duration:&lt;/b&gt; 18m" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CFD8DC;strokeColor=#37474F;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="120" y="750" width="800" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Table header -->
+        <mxCell id="th_num" value="&lt;b&gt;#&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#455A64;strokeColor=#263238;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="120" y="790" width="40" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="th_task" value="&lt;b&gt;Task&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#455A64;strokeColor=#263238;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="160" y="790" width="200" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="th_agent" value="&lt;b&gt;Agent&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#455A64;strokeColor=#263238;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="360" y="790" width="100" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="th_status" value="&lt;b&gt;Status&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#455A64;strokeColor=#263238;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="460" y="790" width="100" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="th_iter" value="&lt;b&gt;Iter&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#455A64;strokeColor=#263238;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="560" y="790" width="50" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="th_start" value="&lt;b&gt;Started&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#455A64;strokeColor=#263238;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="610" y="790" width="70" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="th_dur" value="&lt;b&gt;Duration&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#455A64;strokeColor=#263238;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="680" y="790" width="70" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="th_cost" value="&lt;b&gt;Cost&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#455A64;strokeColor=#263238;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="750" y="790" width="70" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- Row 1 -->
+        <mxCell id="r1c1" value="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="120" y="815" width="40" height="25" as="geometry" /></mxCell>
+        <mxCell id="r1c2" value="Twitter data" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1"><mxGeometry x="160" y="815" width="200" height="25" as="geometry" /></mxCell>
+        <mxCell id="r1c3" value="Bob" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="360" y="815" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="r1c4" value="✅ Done" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="460" y="815" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="r1c5" value="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="560" y="815" width="50" height="25" as="geometry" /></mxCell>
+        <mxCell id="r1c6" value="14:32" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="610" y="815" width="70" height="25" as="geometry" /></mxCell>
+        <mxCell id="r1c7" value="3m" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="680" y="815" width="70" height="25" as="geometry" /></mxCell>
+        <mxCell id="r1c8" value="$0.03" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="750" y="815" width="70" height="25" as="geometry" /></mxCell>
+
+        <!-- Row 2 -->
+        <mxCell id="r2c1" value="2" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="120" y="840" width="40" height="25" as="geometry" /></mxCell>
+        <mxCell id="r2c2" value="LinkedIn data" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1"><mxGeometry x="160" y="840" width="200" height="25" as="geometry" /></mxCell>
+        <mxCell id="r2c3" value="Bob" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="360" y="840" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="r2c4" value="✅ Done" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="460" y="840" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="r2c5" value="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="560" y="840" width="50" height="25" as="geometry" /></mxCell>
+        <mxCell id="r2c6" value="14:32" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="610" y="840" width="70" height="25" as="geometry" /></mxCell>
+        <mxCell id="r2c7" value="3m" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="680" y="840" width="70" height="25" as="geometry" /></mxCell>
+        <mxCell id="r2c8" value="$0.02" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="750" y="840" width="70" height="25" as="geometry" /></mxCell>
+
+        <!-- Row 3 (in progress) -->
+        <mxCell id="r3c1" value="3" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#BBDEFB;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="120" y="865" width="40" height="25" as="geometry" /></mxCell>
+        <mxCell id="r3c2" value="Write report" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#BBDEFB;strokeColor=#BDBDBD;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1"><mxGeometry x="160" y="865" width="200" height="25" as="geometry" /></mxCell>
+        <mxCell id="r3c3" value="Claudia" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#BBDEFB;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="360" y="865" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="r3c4" value="🔄 Working" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#BBDEFB;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="460" y="865" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="r3c5" value="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#BBDEFB;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="560" y="865" width="50" height="25" as="geometry" /></mxCell>
+        <mxCell id="r3c6" value="14:41" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#BBDEFB;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="610" y="865" width="70" height="25" as="geometry" /></mxCell>
+        <mxCell id="r3c7" value="9m+" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#BBDEFB;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="680" y="865" width="70" height="25" as="geometry" /></mxCell>
+        <mxCell id="r3c8" value="$0.18" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#BBDEFB;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="750" y="865" width="70" height="25" as="geometry" /></mxCell>
+
+        <!-- Row 4 (blocked) -->
+        <mxCell id="r4c1" value="4" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="120" y="890" width="40" height="25" as="geometry" /></mxCell>
+        <mxCell id="r4c2" value="SEO optimize report" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;align=left;spacingLeft=5;" vertex="1" parent="1"><mxGeometry x="160" y="890" width="200" height="25" as="geometry" /></mxCell>
+        <mxCell id="r4c3" value="Dave" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="360" y="890" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="r4c4" value="⏳ Blocked" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="460" y="890" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="r4c5" value="—" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="560" y="890" width="50" height="25" as="geometry" /></mxCell>
+        <mxCell id="r4c6" value="—" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="610" y="890" width="70" height="25" as="geometry" /></mxCell>
+        <mxCell id="r4c7" value="—" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="680" y="890" width="70" height="25" as="geometry" /></mxCell>
+        <mxCell id="r4c8" value="—" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="750" y="890" width="70" height="25" as="geometry" /></mxCell>
+
+        <!-- Summary row -->
+        <mxCell id="summary" value="&lt;b&gt;Total:&lt;/b&gt; 4 tasks | 2 done | 1 working | 1 blocked | &lt;b&gt;Est. cost:&lt;/b&gt; ~$0.42" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#CFD8DC;strokeColor=#37474F;fontSize=10;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="120" y="925" width="700" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- ========== DEV-TEST LOOP ========== -->
+        <mxCell id="loop_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="710" width="700" height="350" as="geometry" />
+        </mxCell>
+        <mxCell id="loop_label" value="&lt;b&gt;DEV-TEST LOOP (Workflow Template, Phase 2B)&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=13;fontColor=#7B1FA2;" vertex="1" parent="1">
+          <mxGeometry x="1020" y="715" width="380" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="loop_dev" value="&lt;b&gt;Developer&lt;/b&gt;&lt;br&gt;implements feature" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CE93D8;strokeColor=#7B1FA2;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="770" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="loop_test" value="&lt;b&gt;Tester&lt;/b&gt;&lt;br&gt;runs tests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CE93D8;strokeColor=#7B1FA2;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="770" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="loop_check" value="&lt;b&gt;Tests pass?&lt;/b&gt;" style="shape=rhombus;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#F57F17;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="860" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="loop_done" value="&lt;b&gt;✅ Done&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D6A7;strokeColor=#2E7D32;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="870" width="100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="loop_retry" value="&lt;b&gt;iteration++&lt;/b&gt;&lt;br&gt;(with error context)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCDD2;strokeColor=#C62828;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="870" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="loop_max" value="&lt;b&gt;max_iterations&lt;/b&gt;&lt;br&gt;reached → FAILED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFCDD2;strokeColor=#C62828;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="940" width="140" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="el1" style="rounded=1;strokeWidth=2;" edge="1" source="loop_dev" target="loop_test" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="el2" style="rounded=1;strokeWidth=2;" edge="1" source="loop_test" target="loop_check" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="el3" value="YES" style="rounded=1;fontSize=10;" edge="1" source="loop_check" target="loop_done" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="el4" value="NO" style="rounded=1;fontSize=10;strokeColor=#C62828;" edge="1" source="loop_check" target="loop_retry" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="el5" style="rounded=1;strokeColor=#C62828;dashed=1;" edge="1" source="loop_retry" target="loop_dev" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== DUAL STORAGE ========== -->
+        <mxCell id="storage_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#F57F17;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="80" y="1100" width="1600" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="storage_label" value="&lt;b&gt;DUAL STORAGE: DB + JSONL Mirror&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=13;fontColor=#F57F17;" vertex="1" parent="1">
+          <mxGeometry x="100" y="1105" width="270" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="store_db" value="&lt;b&gt;SQLite / PostgreSQL&lt;/b&gt;&lt;br&gt;(Source of Truth)&lt;br&gt;&lt;hr&gt;missions table&lt;br&gt;mission_tasks table&lt;br&gt;UI queries, dashboard" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="150" y="1150" width="200" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="store_jsonl" value="&lt;b&gt;progress.jsonl&lt;/b&gt;&lt;br&gt;(Mirror — agents read this)&lt;br&gt;&lt;hr&gt;/output/{lead}/mission-{id}/&lt;br&gt;Append-only, real-time&lt;br&gt;External state for iterations" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="450" y="1150" width="260" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="store_ws" value="&lt;b&gt;WebSocket events&lt;/b&gt;&lt;br&gt;(Real-time UI updates)&lt;br&gt;&lt;hr&gt;mission.created&lt;br&gt;task.status&lt;br&gt;task.progress&lt;br&gt;mission.completed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="800" y="1150" width="200" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="es_sync" value="sync" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=10;strokeWidth=2;" edge="1" source="store_db" target="store_jsonl" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="es_ws" style="edgeStyle=orthogonalEdgeStyle;rounded=1;fontSize=10;strokeWidth=2;" edge="1" source="store_db" target="store_ws" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

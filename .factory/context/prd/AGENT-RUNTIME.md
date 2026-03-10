@@ -1130,6 +1130,46 @@ WORKDIR /workspace
 HEALTHCHECK --interval=30s --timeout=5s CMD echo "alive"
 ```
 
+### 9.3 CLI Tools Installation Strategy
+
+> **Kompletni specifikace: `prd/CLI-TOOLS.md`**
+
+Agent si CLI tools nainstaluje sam za behu (Claude Code styl).
+System packages (apt) se instaluji pred startem agenta jako root.
+
+```
+Flow:
+1. Agent ma cli_tools: ["gh", "vercel"]  (DB: agents.cli_tools JSON)
+2. crewshipd pre-run: docker exec -u root apt-get install -y gh
+3. Agent start: docker exec -u 1001:1001 claude --print "..."
+4. Agent instaluje user-space tools: npm install -g vercel (sam)
+5. Agent ma GH_TOKEN, VERCEL_TOKEN v env vars (z agent_credentials)
+```
+
+CLI credentials pouzivaji novy typ `CLI_TOKEN` se specifickymi providery
+(GITHUB, GITLAB, VERCEL, AWS, KUBERNETES, CUSTOM_CLI). Injektuji se
+jako prime env vars v Docker exec — ne pres sidecar proxy (CLI tools
+nepouzivaji HTTP_PROXY).
+
+### 3.3a Pre-run apt-get script (root -> UID 1001 drop)
+
+System packages vyzadujici root (apt-get) se instaluji PRED startem agenta:
+
+```go
+func (o *Orchestrator) PreRunInstallPackages(ctx, containerID, packages) error {
+    cfg := provider.ExecConfig{
+        ContainerID: containerID,
+        Cmd:  []string{"sh", "-c", "apt-get update -qq && apt-get install -y -qq " + join(packages)},
+        User: "0:0",  // ROOT — jen pro install
+    }
+    result, err := o.container.Exec(ctx, cfg)
+    // ... wait for completion
+}
+```
+
+Agent pak bezi jako UID 1001 (non-root). Toto je bezpecne — Crewship
+kontroluje co se instaluje (z agents.cli_tools), agent sam nema root.
+
 ### 9.2 Security hardening (pri vytvoreni kontejneru)
 
 ```
@@ -1655,7 +1695,7 @@ Pro Phase 3+ zvazit Firecracker pro scenare kde gVisor nestaci
 
 1. **Multi-agent v jednom kontejneru** — jak izolovat /workspace/ per agent? Docker exec s `--workdir` — ok?
 3. **GPU podpora** — Phase 3: `--gpus` flag pro ML agenty?
-4. **Custom agent images** — uzivatel si muze prinest vlastni Docker image? Bezpecnostni implikace?
+4. ~~**Custom agent images**~~ → Ne pro MVP. Jeden base image (Ubuntu 24.04). Agent si CLI tools nainstaluje sám za běhu. Pre-run apt-get jako root pro system packages. CLI credentials přes env vars (CLI_TOKEN typ). Viz `CLI-TOOLS.md`.
 5. **Streaming format** — Claude Code ma jiny stdout format nez Codex. Univerzalni parser?
 7. **Coordinator kontejner** — Phase 3: kdyz coordinator dostane tools, jaky kontejner? Dedicovany "org kontejner"?
 10. **Lead volba** — Muze uzivatel zmenit leada za behu? Co s probihajicimi assignmentsmi?

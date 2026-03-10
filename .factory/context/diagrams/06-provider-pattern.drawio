@@ -1,0 +1,140 @@
+<mxfile host="app.diagrams.net" modified="2026-03-10" agent="Crewship" version="24.0.0" type="device">
+  <diagram id="provider-pattern" name="Provider Pattern (K8s Readiness)">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- TITLE -->
+        <mxCell id="title" value="&lt;b&gt;CREWSHIP — Provider Pattern (K8s Readiness)&lt;/b&gt;&lt;br&gt;Swap implementation, not rewrite — env var per provider" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=18;" vertex="1" parent="1">
+          <mxGeometry x="650" y="20" width="530" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Business Logic -->
+        <mxCell id="biz" value="&lt;b&gt;crewship&lt;/b&gt;&lt;br&gt;(business logic only — never accesses Docker/FS/bbolt directly)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=13;strokeWidth=3;" vertex="1" parent="1">
+          <mxGeometry x="600" y="100" width="600" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ========== 3 PROVIDER INTERFACES ========== -->
+
+        <!-- Container Provider -->
+        <mxCell id="cp_iface" value="&lt;b&gt;ContainerProvider&lt;/b&gt;&lt;br&gt;(interface)" style="shape=hexagon;whiteSpace=wrap;html=1;fillColor=#C5CAE9;strokeColor=#283593;fontSize=12;perimeter=hexagonPerimeter2;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="250" y="240" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="cp_docker" value="&lt;b&gt;Docker SDK&lt;/b&gt;&lt;br&gt;(exec, logs, lifecycle)&lt;br&gt;&lt;br&gt;✅ MVP — IMPLEMENTED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#2E7D32;fontSize=11;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="160" y="380" width="180" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="cp_k8s" value="&lt;b&gt;client-go (K8s)&lt;/b&gt;&lt;br&gt;Pods, Jobs&lt;br&gt;&lt;br&gt;⏳ Enterprise" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#F57F17;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="370" y="380" width="150" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Storage Provider -->
+        <mxCell id="sp_iface" value="&lt;b&gt;StorageProvider&lt;/b&gt;&lt;br&gt;(interface)" style="shape=hexagon;whiteSpace=wrap;html=1;fillColor=#C5CAE9;strokeColor=#283593;fontSize=12;perimeter=hexagonPerimeter2;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="680" y="240" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="sp_local" value="&lt;b&gt;Local FS&lt;/b&gt;&lt;br&gt;+ fsnotify&lt;br&gt;&lt;br&gt;✅ MVP — IMPLEMENTED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#2E7D32;fontSize=11;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="600" y="380" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="sp_s3" value="&lt;b&gt;S3 / MinIO&lt;/b&gt;&lt;br&gt;+ event notifications&lt;br&gt;&lt;br&gt;⏳ Enterprise" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#F57F17;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="780" y="380" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- State Provider -->
+        <mxCell id="stp_iface" value="&lt;b&gt;StateProvider&lt;/b&gt;&lt;br&gt;(interface)" style="shape=hexagon;whiteSpace=wrap;html=1;fillColor=#C5CAE9;strokeColor=#283593;fontSize=12;perimeter=hexagonPerimeter2;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="240" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="stp_bbolt" value="&lt;b&gt;bbolt&lt;/b&gt;&lt;br&gt;embedded WAL&lt;br&gt;&lt;br&gt;✅ MVP — IMPLEMENTED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#2E7D32;fontSize=11;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="380" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="stp_pg" value="&lt;b&gt;PostgreSQL table&lt;/b&gt;&lt;br&gt;(shared state)&lt;br&gt;&lt;br&gt;⏳ Enterprise" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#F57F17;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1210" y="380" width="160" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Edges: biz -> interfaces -->
+        <mxCell id="e_biz_cp" style="rounded=1;strokeWidth=2;" edge="1" source="biz" target="cp_iface" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_biz_sp" style="rounded=1;strokeWidth=2;" edge="1" source="biz" target="sp_iface" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_biz_stp" style="rounded=1;strokeWidth=2;" edge="1" source="biz" target="stp_iface" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- Edges: interfaces -> impls -->
+        <mxCell id="e_cp_docker" style="rounded=1;strokeWidth=2;" edge="1" source="cp_iface" target="cp_docker" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_cp_k8s" style="rounded=1;dashed=1;" edge="1" source="cp_iface" target="cp_k8s" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_sp_local" style="rounded=1;strokeWidth=2;" edge="1" source="sp_iface" target="sp_local" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_sp_s3" style="rounded=1;dashed=1;" edge="1" source="sp_iface" target="sp_s3" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_stp_bbolt" style="rounded=1;strokeWidth=2;" edge="1" source="stp_iface" target="stp_bbolt" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_stp_pg" style="rounded=1;dashed=1;" edge="1" source="stp_iface" target="stp_pg" parent="1"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== ADDITIONAL PROVIDERS ========== -->
+        <mxCell id="extra_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECEFF1;strokeColor=#546E7A;strokeWidth=1;arcSize=5;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="250" y="530" width="1130" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="extra_label" value="&lt;b&gt;Additional Provider Dimensions (not interfaces yet — in-code switches)&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#546E7A;" vertex="1" parent="1">
+          <mxGeometry x="260" y="535" width="480" height="25" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ws_broad" value="&lt;b&gt;WS Broadcast&lt;/b&gt;&lt;br&gt;&lt;hr&gt;MVP: In-process (single instance)&lt;br&gt;Enterprise: PG LISTEN/NOTIFY" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CFD8DC;strokeColor=#546E7A;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="280" y="570" width="230" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="rate_lim" value="&lt;b&gt;Rate Limiting&lt;/b&gt;&lt;br&gt;&lt;hr&gt;MVP: In-memory token bucket&lt;br&gt;Enterprise: PG-backed counters" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CFD8DC;strokeColor=#546E7A;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="540" y="570" width="230" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="db_prov" value="&lt;b&gt;Database&lt;/b&gt;&lt;br&gt;&lt;hr&gt;MVP: SQLite (modernc.org/sqlite)&lt;br&gt;Enterprise: PostgreSQL 16+" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CFD8DC;strokeColor=#546E7A;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="800" y="570" width="230" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="msg_prov" value="&lt;b&gt;Messaging (Phase 3)&lt;/b&gt;&lt;br&gt;&lt;hr&gt;MVP: Go channels&lt;br&gt;Multi-node: NATS JetStream" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CFD8DC;strokeColor=#546E7A;fontSize=10;align=left;spacingLeft=8;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="570" width="230" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ========== CONFIG ========== -->
+        <mxCell id="config_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#2E7D32;strokeWidth=2;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="250" y="760" width="700" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="config_label" value="&lt;b&gt;Configuration: single env var per provider&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=13;fontColor=#2E7D32;" vertex="1" parent="1">
+          <mxGeometry x="270" y="765" width="330" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="config1" value="CREWSHIP_CONTAINER_PROVIDER=docker    # docker | k8s" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="280" y="800" width="470" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="config2" value="CREWSHIP_STORAGE_PROVIDER=localfs      # localfs | s3" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="280" y="825" width="470" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="config3" value="CREWSHIP_STATE_PROVIDER=bbolt          # bbolt | postgres" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=12;fontFamily=Courier New;" vertex="1" parent="1">
+          <mxGeometry x="280" y="850" width="490" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ========== COMPARISON TABLE ========== -->
+        <mxCell id="table_box" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#424242;strokeWidth=2;arcSize=3;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="760" width="600" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="table_label" value="&lt;b&gt;MVP vs Enterprise&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=13;fontColor=#424242;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="765" width="150" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- Table -->
+        <mxCell id="t_h1" value="&lt;b&gt;Provider&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#455A64;strokeColor=#263238;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1070" y="795" width="140" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_h2" value="&lt;b&gt;MVP (single-node)&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#455A64;strokeColor=#263238;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1210" y="795" width="180" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_h3" value="&lt;b&gt;Enterprise (K8s)&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#455A64;strokeColor=#263238;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1390" y="795" width="180" height="25" as="geometry" /></mxCell>
+
+        <mxCell id="t_r1c1" value="Container" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ECEFF1;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1070" y="820" width="140" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_r1c2" value="Docker SDK (exec)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1210" y="820" width="180" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_r1c3" value="client-go (Pods/Jobs)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1390" y="820" width="180" height="25" as="geometry" /></mxCell>
+
+        <mxCell id="t_r2c1" value="Storage" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ECEFF1;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1070" y="845" width="140" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_r2c2" value="Local FS + fsnotify" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1210" y="845" width="180" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_r2c3" value="S3/MinIO + events" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1390" y="845" width="180" height="25" as="geometry" /></mxCell>
+
+        <mxCell id="t_r3c1" value="State" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ECEFF1;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1070" y="870" width="140" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_r3c2" value="bbolt (embedded WAL)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1210" y="870" width="180" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_r3c3" value="PostgreSQL table (shared)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1390" y="870" width="180" height="25" as="geometry" /></mxCell>
+
+        <mxCell id="t_r4c1" value="WS broadcast" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ECEFF1;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1070" y="895" width="140" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_r4c2" value="In-process (goroutines)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1210" y="895" width="180" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_r4c3" value="PG LISTEN/NOTIFY" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1390" y="895" width="180" height="25" as="geometry" /></mxCell>
+
+        <mxCell id="t_r5c1" value="Rate limiting" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ECEFF1;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1070" y="920" width="140" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_r5c2" value="In-memory token bucket" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#C8E6C9;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1210" y="920" width="180" height="25" as="geometry" /></mxCell>
+        <mxCell id="t_r5c3" value="PG-backed counters" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#BDBDBD;fontSize=10;" vertex="1" parent="1"><mxGeometry x="1390" y="920" width="180" height="25" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

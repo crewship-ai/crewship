@@ -1,8 +1,7 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useState } from "react"
-import { RefreshCw, CheckCircle2, Loader2, XCircle, MessageSquare, AlertTriangle } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { Fragment, useCallback, useEffect, useRef, useState } from "react"
+import { CheckCircle2, Loader2, XCircle, MessageSquare, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -79,29 +78,33 @@ function formatDurationMs(ms: number | null): string {
 export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversationsProps) {
   const [conversations, setConversations] = useState<PeerConversation[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const requestIdRef = useRef(0)
+  const loadingOwnerRef = useRef<number | null>(null)
 
-  const fetchConversations = useCallback(async (showRefresh = false, silent = false) => {
-    if (silent) { /* no loading state change */ }
-    else if (showRefresh) setRefreshing(true)
-    else setLoading(true)
+  const fetchConversations = useCallback(async (silent = false) => {
+    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
+    const ownsLoading = !silent
+
+    if (ownsLoading) {
+      loadingOwnerRef.current = requestId
+      setLoading(true)
+    }
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/peer-conversations?workspace_id=${workspaceId}&limit=50`
       )
-      if (res.ok) {
-        const json = await res.json()
-        const parsed = z.array(peerConversationSchema).safeParse(json)
-        if (parsed.success) {
-          setConversations(parsed.data)
-        }
+      if (!res.ok) return
+      const json = await res.json()
+      if (requestId !== requestIdRef.current) return
+      const parsed = z.array(peerConversationSchema).safeParse(json)
+      if (parsed.success) {
+        setConversations(parsed.data)
       }
     } catch {
       // Silently fail — component shows empty state
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
     }
   }, [crewId, workspaceId])
 
@@ -110,7 +113,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
   }, [fetchConversations])
 
   // Real-time: refetch when peer conversations finish
-  useRealtimeEvent("peer_conversation.updated", useCallback(() => { fetchConversations(false, true) }, [fetchConversations]))
+  useRealtimeEvent("peer_conversation.updated", useCallback(() => { fetchConversations(true) }, [fetchConversations]))
 
   if (loading) {
     return (
@@ -124,17 +127,18 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Peer Conversations</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          onClick={() => fetchConversations(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold">Peer Conversations</h2>
+          {conversations.some((c) => c.status === "RUNNING") && (
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+            </span>
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          Live
+        </span>
       </div>
 
       {conversations.length === 0 ? (
@@ -192,9 +196,16 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                           <TableCell>
                             <Badge
                               variant="outline"
-                              className={`gap-1 border-0 ${config.className}`}
+                              className={`gap-1.5 border-0 ${config.className}`}
                             >
-                              <StatusIcon className={`h-3 w-3 ${c.status === "RUNNING" ? "animate-spin" : ""}`} />
+                              {c.status === "RUNNING" ? (
+                                <span className="relative flex h-2 w-2 shrink-0">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                                </span>
+                              ) : (
+                                <StatusIcon className="h-3 w-3" />
+                              )}
                               {config.label}
                             </Badge>
                           </TableCell>

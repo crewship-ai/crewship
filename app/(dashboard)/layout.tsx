@@ -9,6 +9,7 @@ import { AppToolbar } from "@/components/layout/app-toolbar"
 import { RuntimeBanner } from "@/components/layout/runtime-banner"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { RealtimeProvider } from "@/hooks/use-realtime"
+import { RealtimeToasts } from "@/components/layout/realtime-toasts"
 
 export default function DashboardLayout({
   children,
@@ -44,6 +45,7 @@ export default function DashboardLayout({
           </main>
         </SidebarInset>
       </SidebarProvider>
+      <RealtimeToasts />
     </RealtimeProvider>
   )
 }

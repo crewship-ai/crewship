@@ -23,22 +23,87 @@ func NewCredentialHandler(db *sql.DB, logger *slog.Logger) *CredentialHandler {
 }
 
 type credentialResponse struct {
-	ID             string  `json:"id"`
-	Name           string  `json:"name"`
-	Description    *string `json:"description"`
-	Type           string  `json:"type"`
-	Provider       string  `json:"provider"`
-	Status         string  `json:"status"`
-	Scope          string  `json:"scope"`
-	CrewID         *string `json:"crew_id"`
-	AccountLabel   *string `json:"account_label"`
-	AccountEmail   *string `json:"account_email"`
-	TokenExpiresAt *string `json:"token_expires_at"`
-	LastCheckedAt  *string `json:"last_checked_at"`
-	LastError      *string `json:"last_error"`
-	CreatedAt      string  `json:"created_at"`
-	UpdatedAt      string  `json:"updated_at"`
-	AgentCount     int     `json:"_count_agent_credentials"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Description    *string  `json:"description"`
+	Type           string   `json:"type"`
+	Provider       string   `json:"provider"`
+	Status         string   `json:"status"`
+	Scope          string   `json:"scope"`
+	CrewID         *string  `json:"crew_id"`
+	CrewIDs        []string `json:"crew_ids"`
+	AccountLabel   *string  `json:"account_label"`
+	AccountEmail   *string  `json:"account_email"`
+	TokenExpiresAt *string  `json:"token_expires_at"`
+	LastCheckedAt  *string  `json:"last_checked_at"`
+	LastError      *string  `json:"last_error"`
+	CreatedAt      string   `json:"created_at"`
+	UpdatedAt      string   `json:"updated_at"`
+	AgentCount     int      `json:"_count_agent_credentials"`
+}
+
+// loadCrewIDs fetches crew_ids from the junction table for a single credential.
+func (h *CredentialHandler) loadCrewIDs(ctx context.Context, credentialID string) []string {
+	rows, err := h.db.QueryContext(ctx,
+		"SELECT crew_id FROM credential_crews WHERE credential_id = ? ORDER BY created_at", credentialID)
+	if err != nil {
+		return []string{}
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids
+}
+
+// loadCrewIDsBatch fetches crew_ids for multiple credentials in one query.
+func (h *CredentialHandler) loadCrewIDsBatch(ctx context.Context, credentialIDs []string) map[string][]string {
+	result := make(map[string][]string, len(credentialIDs))
+	if len(credentialIDs) == 0 {
+		return result
+	}
+	placeholders := make([]string, len(credentialIDs))
+	args := make([]interface{}, len(credentialIDs))
+	for i, id := range credentialIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	rows, err := h.db.QueryContext(ctx,
+		"SELECT credential_id, crew_id FROM credential_crews WHERE credential_id IN ("+strings.Join(placeholders, ",")+") ORDER BY created_at",
+		args...)
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var credID, crewID string
+		if rows.Scan(&credID, &crewID) == nil {
+			result[credID] = append(result[credID], crewID)
+		}
+	}
+	return result
+}
+
+// setCrewIDs replaces crew_ids for a credential in the junction table.
+func (h *CredentialHandler) setCrewIDs(ctx context.Context, tx *sql.Tx, credentialID string, crewIDs []string) error {
+	if _, err := tx.ExecContext(ctx, "DELETE FROM credential_crews WHERE credential_id = ?", credentialID); err != nil {
+		return err
+	}
+	for _, crewID := range crewIDs {
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO credential_crews (credential_id, crew_id) VALUES (?, ?)",
+			credentialID, crewID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -83,21 +148,37 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []credentialResponse{}
 	}
+
+	// Batch-load crew_ids from junction table
+	credIDs := make([]string, len(result))
+	for i, c := range result {
+		credIDs[i] = c.ID
+	}
+	crewIDsMap := h.loadCrewIDsBatch(r.Context(), credIDs)
+	for i := range result {
+		if ids, ok := crewIDsMap[result[i].ID]; ok {
+			result[i].CrewIDs = ids
+		} else {
+			result[i].CrewIDs = []string{}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 
 type createCredentialRequest struct {
-	Name          string  `json:"name"`
-	Description   *string `json:"description"`
-	Value         string  `json:"value"`
-	Type          string  `json:"type"`
-	Provider      string  `json:"provider"`
-	Scope         string  `json:"scope"`
-	CrewID        *string `json:"crew_id"`
-	AccountLabel  *string `json:"account_label"`
-	AccountEmail  *string `json:"account_email"`
-	RefreshToken  *string `json:"refresh_token"`
-	TokenExpires  *string `json:"token_expires_at"`
+	Name          string   `json:"name"`
+	Description   *string  `json:"description"`
+	Value         string   `json:"value"`
+	Type          string   `json:"type"`
+	Provider      string   `json:"provider"`
+	Scope         string   `json:"scope"`
+	CrewID        *string  `json:"crew_id"`
+	CrewIDs       []string `json:"crew_ids"`
+	AccountLabel  *string  `json:"account_label"`
+	AccountEmail  *string  `json:"account_email"`
+	RefreshToken  *string  `json:"refresh_token"`
+	TokenExpires  *string  `json:"token_expires_at"`
 	SecurityLevel *int    `json:"security_level"`
 }
 
@@ -136,15 +217,42 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Scope = "WORKSPACE"
 	}
 
-	if req.CrewID != nil {
+	// Merge crew_ids and legacy crew_id into a single list
+	crewIDs := req.CrewIDs
+	if req.CrewID != nil && *req.CrewID != "" {
+		found := false
+		for _, id := range crewIDs {
+			if id == *req.CrewID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			crewIDs = append(crewIDs, *req.CrewID)
+		}
+	}
+
+	// Auto-set scope when crews are provided
+	if len(crewIDs) > 0 {
+		req.Scope = "CREW"
+	}
+
+	// Validate all crew IDs
+	for _, cid := range crewIDs {
 		var crewExists string
 		err := h.db.QueryRowContext(r.Context(),
 			"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-			*req.CrewID, workspaceID).Scan(&crewExists)
+			cid, workspaceID).Scan(&crewExists)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid crew_id"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
 			return
 		}
+	}
+
+	// Keep legacy crew_id field pointing to first crew for backwards compat
+	var legacyCrewID *string
+	if len(crewIDs) > 0 {
+		legacyCrewID = &crewIDs[0]
 	}
 
 	// Remove soft-deleted credential with same name
@@ -167,18 +275,44 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		secLevel = *req.SecurityLevel
 	}
 
-	_, err = h.db.ExecContext(r.Context(), `
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("begin tx", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, crew_id, account_label, account_email,
 			token_expires_at, security_level, created_by, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		credID, workspaceID, req.Name, req.Description, encryptedValue,
-		req.Type, req.Provider, req.Scope, req.CrewID, req.AccountLabel, req.AccountEmail,
+		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail,
 		req.TokenExpires, secLevel, user.ID, now, now)
 	if err != nil {
+		tx.Rollback()
 		h.logger.Error("insert credential", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
+	}
+
+	if err := h.setCrewIDs(r.Context(), tx, credID, crewIDs); err != nil {
+		tx.Rollback()
+		h.logger.Error("set credential crews", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("commit credential", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	respCrewIDs := crewIDs
+	if respCrewIDs == nil {
+		respCrewIDs = []string{}
 	}
 
 	writeJSON(w, http.StatusCreated, credentialResponse{
@@ -189,7 +323,8 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Provider:     req.Provider,
 		Status:       "ACTIVE",
 		Scope:        req.Scope,
-		CrewID:       req.CrewID,
+		CrewID:       legacyCrewID,
+		CrewIDs:      respCrewIDs,
 		AccountLabel: req.AccountLabel,
 		AccountEmail: req.AccountEmail,
 		CreatedAt:    now,
@@ -224,6 +359,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	c.CrewIDs = h.loadCrewIDs(r.Context(), c.ID)
 	writeJSON(w, http.StatusOK, c)
 }
 
@@ -259,7 +395,39 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"security_level": "security_level",
 	}
 
-	if crewIDVal, ok := body["crew_id"]; ok && crewIDVal != nil {
+	// Parse crew_ids if provided — will be written to junction table
+	var updateCrewIDs bool
+	var crewIDs []string
+	if raw, ok := body["crew_ids"]; ok {
+		updateCrewIDs = true
+		if arr, ok := raw.([]interface{}); ok {
+			for _, v := range arr {
+				if s, ok := v.(string); ok && s != "" {
+					crewIDs = append(crewIDs, s)
+				}
+			}
+		}
+		// Validate all crew IDs
+		for _, cid := range crewIDs {
+			var crewExists string
+			err := h.db.QueryRowContext(r.Context(),
+				"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+				cid, workspaceID).Scan(&crewExists)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
+				return
+			}
+		}
+		// Auto-update scope and legacy crew_id
+		if len(crewIDs) > 0 {
+			body["scope"] = "CREW"
+			body["crew_id"] = crewIDs[0]
+		} else {
+			body["scope"] = "WORKSPACE"
+			body["crew_id"] = nil
+		}
+		delete(body, "crew_ids")
+	} else if crewIDVal, ok := body["crew_id"]; ok && crewIDVal != nil {
 		if crewIDStr, ok := crewIDVal.(string); ok && crewIDStr != "" {
 			var crewExists string
 			err := h.db.QueryRowContext(r.Context(),
@@ -299,18 +467,44 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if len(setClauses) == 0 {
+	if len(setClauses) == 0 && !updateCrewIDs {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No fields to update"})
 		return
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	setClauses = append(setClauses, "updated_at = ?")
-	args = append(args, now, credID, workspaceID)
 
-	query := fmt.Sprintf("UPDATE credentials SET %s WHERE id = ? AND workspace_id = ?", strings.Join(setClauses, ", "))
-	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update credential", "error", err)
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("begin tx (update credential)", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	if len(setClauses) > 0 {
+		setClauses = append(setClauses, "updated_at = ?")
+		args = append(args, now, credID, workspaceID)
+
+		query := fmt.Sprintf("UPDATE credentials SET %s WHERE id = ? AND workspace_id = ?", strings.Join(setClauses, ", "))
+		if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
+			tx.Rollback()
+			h.logger.Error("update credential", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+	}
+
+	if updateCrewIDs {
+		if err := h.setCrewIDs(r.Context(), tx, credID, crewIDs); err != nil {
+			tx.Rollback()
+			h.logger.Error("update credential crews", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("commit credential update", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
@@ -455,8 +649,113 @@ func (h *CredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)})
 		}
 
+	case "GITHUB":
+		req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Failed to create request"})
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+body.Value)
+		req.Header.Set("User-Agent", "Crewship/1.0")
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Connection failed: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			writeJSON(w, http.StatusOK, testResult{Valid: true, Status: resp.StatusCode})
+		case http.StatusUnauthorized:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Invalid token"})
+		case http.StatusForbidden:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Token lacks required scopes"})
+		default:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)})
+		}
+
+	case "GITLAB":
+		req, err := http.NewRequestWithContext(ctx, "GET", "https://gitlab.com/api/v4/user", nil)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Failed to create request"})
+			return
+		}
+		req.Header.Set("PRIVATE-TOKEN", body.Value)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Connection failed: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			writeJSON(w, http.StatusOK, testResult{Valid: true, Status: resp.StatusCode})
+		case http.StatusUnauthorized:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Invalid token"})
+		case http.StatusForbidden:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Token lacks required scopes"})
+		default:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)})
+		}
+
+	case "VERCEL":
+		req, err := http.NewRequestWithContext(ctx, "GET", "https://api.vercel.com/v2/user", nil)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Failed to create request"})
+			return
+		}
+		req.Header.Set("Authorization", "Bearer "+body.Value)
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			writeJSON(w, http.StatusOK, testResult{Error: "Connection failed: " + err.Error()})
+			return
+		}
+		defer resp.Body.Close()
+		io.Copy(io.Discard, resp.Body)
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			writeJSON(w, http.StatusOK, testResult{Valid: true, Status: resp.StatusCode})
+		case http.StatusUnauthorized, http.StatusForbidden:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Invalid token"})
+		default:
+			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)})
+		}
+
 	default:
 		writeJSON(w, http.StatusOK, testResult{Valid: true, Error: "No validation available for this provider"})
+	}
+}
+
+// DefaultEnvVar returns the conventional env var name for a CLI tool provider.
+// GET /api/v1/credentials/default-env-var?provider=GITHUB
+func (h *CredentialHandler) DefaultEnvVar(w http.ResponseWriter, r *http.Request) {
+	prov := r.URL.Query().Get("provider")
+	envVar := defaultEnvVarForCLIProvider(prov)
+	writeJSON(w, http.StatusOK, map[string]string{"env_var": envVar})
+}
+
+func defaultEnvVarForCLIProvider(provider string) string {
+	switch provider {
+	case "GITHUB":
+		return "GH_TOKEN"
+	case "GITLAB":
+		return "GITLAB_TOKEN"
+	case "VERCEL":
+		return "VERCEL_TOKEN"
+	case "AWS":
+		return "AWS_ACCESS_KEY_ID"
+	case "KUBERNETES":
+		return "KUBECONFIG"
+	default:
+		return ""
 	}
 }
 

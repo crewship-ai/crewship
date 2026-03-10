@@ -378,9 +378,15 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		o.logger.Warn("failed to write system prompt files", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)
 	}
 
+	// Wrap agent CLI command with stdbuf to force line-buffered stdout.
+	// Apple's container runtime buffers exec output which causes choppy
+	// streaming in chat. stdbuf -oL flushes on every newline so JSON
+	// stream events arrive immediately.
+	execCmd := append([]string{"stdbuf", "-oL"}, cmd...)
+
 	execCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,
-		Cmd:         cmd,
+		Cmd:         execCmd,
 		Env:         env,
 		WorkingDir:  workDir,
 		User:        "1001:1001",

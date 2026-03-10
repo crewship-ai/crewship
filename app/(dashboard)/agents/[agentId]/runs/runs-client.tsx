@@ -1,7 +1,6 @@
 "use client"
 
 import { useParams } from "next/navigation"
-
 import { useState, useEffect, useCallback } from "react"
 import { AlertCircle, Inbox } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -49,6 +48,15 @@ function formatDuration(start: string | null, end: string | null): string {
     return `${hours}h ${remaining}m`
   }
   return `${minutes}m ${seconds.toString().padStart(2, "0")}s`
+}
+
+function LiveDuration({ startedAt }: { startedAt: string }) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return <>{formatDuration(startedAt, null)}</>
 }
 
 function formatRelativeTime(dateStr: string | null): string {
@@ -140,8 +148,13 @@ export function RunsPageClient() {
                   return (
                     <tr key={r.id} className="hover:bg-muted/50">
                       <td className="px-4 sm:px-6 py-3">
-                        <Badge variant="secondary" className={`${statusStyle.class} text-xs gap-1`}>
-                          {statusStyle.pulse && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                        <Badge variant="secondary" className={`${statusStyle.class} text-xs gap-1.5`}>
+                          {statusStyle.pulse && (
+                            <span className="relative flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                            </span>
+                          )}
                           {r.status}
                         </Badge>
                       </td>
@@ -150,8 +163,10 @@ export function RunsPageClient() {
                           {r.trigger_type}
                         </Badge>
                       </td>
-                      <td className="px-4 sm:px-6 py-3 font-mono text-xs">
-                        {formatDuration(r.started_at, r.finished_at)}
+                      <td className="px-4 sm:px-6 py-3 font-mono text-xs tabular-nums">
+                        {r.status === "RUNNING" && r.started_at
+                          ? <LiveDuration startedAt={r.started_at} />
+                          : formatDuration(r.started_at, r.finished_at)}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-xs text-muted-foreground hidden sm:table-cell">
                         {formatRelativeTime(r.started_at)}

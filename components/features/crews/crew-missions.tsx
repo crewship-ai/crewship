@@ -1,9 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import { RefreshCw, Target } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Target } from "lucide-react"
 import Link from "next/link"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { MissionStatusBadge } from "@/components/features/missions/mission-status-badge"
@@ -22,24 +21,36 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
   const [missions, setMissions] = useState<Mission[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const requestIdRef = useRef(0)
+  const loadingOwnerRef = useRef<number | null>(null)
+  const refreshingOwnerRef = useRef<number | null>(null)
 
   const fetchMissions = useCallback(async (showRefresh = false, silent = false) => {
-    if (silent) { /* no loading state change */ }
-    else if (showRefresh) setRefreshing(true)
-    else setLoading(true)
+    const requestId = silent ? requestIdRef.current : ++requestIdRef.current
+    const ownsLoading = !silent && !showRefresh
+    const ownsRefresh = !silent && showRefresh
+
+    if (ownsRefresh) {
+      refreshingOwnerRef.current = requestId
+      setRefreshing(true)
+    } else if (ownsLoading) {
+      loadingOwnerRef.current = requestId
+      setLoading(true)
+    }
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/missions?workspace_id=${workspaceId}&limit=5`
       )
-      if (res.ok) {
-        const data = (await res.json()) as Mission[]
+      if (!res.ok) return
+      const data = (await res.json()) as Mission[]
+      if (requestId === requestIdRef.current) {
         setMissions(data)
       }
     } catch {
       // Silently fail
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
+      if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
     }
   }, [crewId, workspaceId])
 
@@ -65,16 +76,9 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-semibold">Missions</h2>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={() => fetchMissions(true)}
-            disabled={refreshing}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+          <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
+            {refreshing ? "Updating..." : "Live"}
+          </span>
           {canCreate && (
             <CreateMissionDialog
               crewId={crewId}
