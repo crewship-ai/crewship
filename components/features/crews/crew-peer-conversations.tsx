@@ -78,21 +78,15 @@ function formatDurationMs(ms: number | null): string {
 export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversationsProps) {
   const [conversations, setConversations] = useState<PeerConversation[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const requestIdRef = useRef(0)
   const loadingOwnerRef = useRef<number | null>(null)
-  const refreshingOwnerRef = useRef<number | null>(null)
 
-  const fetchConversations = useCallback(async (showRefresh = false, silent = false) => {
+  const fetchConversations = useCallback(async (silent = false) => {
     const requestId = silent ? requestIdRef.current : ++requestIdRef.current
-    const ownsLoading = !silent && !showRefresh
-    const ownsRefresh = !silent && showRefresh
+    const ownsLoading = !silent
 
-    if (ownsRefresh) {
-      refreshingOwnerRef.current = requestId
-      setRefreshing(true)
-    } else if (ownsLoading) {
+    if (ownsLoading) {
       loadingOwnerRef.current = requestId
       setLoading(true)
     }
@@ -111,7 +105,6 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
       // Silently fail — component shows empty state
     } finally {
       if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
-      if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
     }
   }, [crewId, workspaceId])
 
@@ -120,7 +113,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
   }, [fetchConversations])
 
   // Real-time: refetch when peer conversations finish
-  useRealtimeEvent("peer_conversation.updated", useCallback(() => { fetchConversations(false, true) }, [fetchConversations]))
+  useRealtimeEvent("peer_conversation.updated", useCallback(() => { fetchConversations(true) }, [fetchConversations]))
 
   if (loading) {
     return (
@@ -144,7 +137,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
           )}
         </div>
         <span className="text-xs text-muted-foreground">
-          {refreshing ? "Updating..." : "Live"}
+          Live
         </span>
       </div>
 

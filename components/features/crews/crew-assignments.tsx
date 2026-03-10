@@ -199,18 +199,8 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                       <Fragment key={a.id}>
                         <TableRow
                           className={hasDetail ? "cursor-pointer" : ""}
-                          role={hasDetail ? "button" : undefined}
-                          tabIndex={hasDetail ? 0 : -1}
-                          aria-expanded={hasDetail ? isExpanded : undefined}
                           onClick={() => {
                             if (hasDetail) setExpandedId(isExpanded ? null : a.id)
-                          }}
-                          onKeyDown={(e) => {
-                            if (!hasDetail) return
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault()
-                              setExpandedId(isExpanded ? null : a.id)
-                            }
                           }}
                         >
                           <TableCell>
@@ -230,14 +220,36 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="text-sm line-clamp-1">{a.task}</span>
-                              </TooltipTrigger>
-                              <TooltipContent className="max-w-sm">
-                                <p className="whitespace-pre-wrap">{a.task}</p>
-                              </TooltipContent>
-                            </Tooltip>
+                            {hasDetail ? (
+                              <button
+                                type="button"
+                                className="text-left w-full"
+                                aria-expanded={isExpanded}
+                                aria-controls={`assign-detail-${a.id}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setExpandedId(isExpanded ? null : a.id)
+                                }}
+                              >
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="text-sm line-clamp-1">{a.task}</span>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-sm">
+                                    <p className="whitespace-pre-wrap">{a.task}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </button>
+                            ) : (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="text-sm line-clamp-1">{a.task}</span>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-sm">
+                                  <p className="whitespace-pre-wrap">{a.task}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             @{a.assigned_by_slug}
@@ -255,7 +267,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                           </TableCell>
                         </TableRow>
                         {isExpanded && hasDetail && (
-                          <TableRow>
+                          <TableRow id={`assign-detail-${a.id}`}>
                             <TableCell colSpan={6} className="bg-muted/30">
                               <div className="text-sm whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
                                 {a.error_message && (
