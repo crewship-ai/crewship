@@ -58,6 +58,12 @@ func New() *Scrubber {
 		re:   regexp.MustCompile(`(?:ghp_|gho_|ghs_|ghr_|github_pat_)[a-zA-Z0-9]{10,}`),
 	})
 
+	// GitLab personal access tokens: glpat-*
+	s.patterns = append(s.patterns, pattern{
+		name: "gitlab_token",
+		re:   regexp.MustCompile(`glpat-[a-zA-Z0-9_-]{20,}`),
+	})
+
 	// Slack tokens: xoxb-, xoxp-, xoxa-, xoxr-
 	s.patterns = append(s.patterns, pattern{
 		name: "slack_token",

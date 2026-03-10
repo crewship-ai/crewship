@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useState } from "react"
+import { Fragment, useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Table,
@@ -17,6 +17,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { TaskStatusBadge } from "./mission-status-badge"
+import { AnimatedNumber } from "@/components/ui/animated-number"
 import { formatCost } from "@/lib/utils/format"
 import type { MissionTask, TaskStats } from "@/lib/types/mission"
 
@@ -40,6 +41,15 @@ function formatDuration(startedAt: string | null, completedAt: string | null, du
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
   return `${minutes}m ${seconds % 60}s`
+}
+
+function LiveDuration({ startedAt }: { startedAt: string }) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return <>{formatDuration(startedAt, null, null)}</>
 }
 
 function formatTime(dateStr: string | null): string {
@@ -118,13 +128,23 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
                           {task.agent_slug ? `@${task.agent_slug}` : "—"}
                         </TableCell>
                         <TableCell>
-                          <TaskStatusBadge status={task.status} />
+                          <div className="flex items-center gap-1.5">
+                            {task.status === "IN_PROGRESS" && (
+                              <span className="relative flex h-2 w-2 shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                              </span>
+                            )}
+                            <TaskStatusBadge status={task.status} />
+                          </div>
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {formatTime(task.started_at)}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {formatDuration(task.started_at, task.completed_at, task.duration_ms)}
+                        <TableCell className="text-xs text-muted-foreground tabular-nums">
+                          {task.status === "IN_PROGRESS" && task.started_at
+                            ? <LiveDuration startedAt={task.started_at} />
+                            : formatDuration(task.started_at, task.completed_at, task.duration_ms)}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {formatCost(task.estimated_cost)}
@@ -160,18 +180,53 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
       </Card>
 
       {taskStats && (
-        <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span>{taskStats.total} total</span>
-          <span className="text-emerald-600">{taskStats.completed} completed</span>
-          {taskStats.in_progress > 0 && (
-            <span className="text-blue-600">{taskStats.in_progress} working</span>
+        <div className="space-y-2">
+          {taskStats.total > 0 && (
+            <div className="h-2 w-full rounded-full bg-muted overflow-hidden flex">
+              {taskStats.completed > 0 && (
+                <div
+                  className="h-full bg-emerald-500 transition-all duration-700 ease-out"
+                  style={{ width: `${(taskStats.completed / taskStats.total) * 100}%` }}
+                />
+              )}
+              {taskStats.in_progress > 0 && (
+                <div
+                  className="h-full bg-blue-500 animate-pulse transition-all duration-700 ease-out"
+                  style={{ width: `${(taskStats.in_progress / taskStats.total) * 100}%` }}
+                />
+              )}
+              {taskStats.failed > 0 && (
+                <div
+                  className="h-full bg-red-500 transition-all duration-700 ease-out"
+                  style={{ width: `${(taskStats.failed / taskStats.total) * 100}%` }}
+                />
+              )}
+              {taskStats.blocked > 0 && (
+                <div
+                  className="h-full bg-orange-500 transition-all duration-700 ease-out"
+                  style={{ width: `${(taskStats.blocked / taskStats.total) * 100}%` }}
+                />
+              )}
+            </div>
           )}
-          {taskStats.blocked > 0 && (
-            <span className="text-orange-600">{taskStats.blocked} blocked</span>
-          )}
-          {taskStats.failed > 0 && (
-            <span className="text-red-600">{taskStats.failed} failed</span>
-          )}
+          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <span><AnimatedNumber value={taskStats.completed} /> / {taskStats.total} tasks</span>
+            {taskStats.in_progress > 0 && (
+              <span className="text-blue-600 flex items-center gap-1">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                </span>
+                {taskStats.in_progress} working
+              </span>
+            )}
+            {taskStats.blocked > 0 && (
+              <span className="text-orange-600">{taskStats.blocked} blocked</span>
+            )}
+            {taskStats.failed > 0 && (
+              <span className="text-red-600">{taskStats.failed} failed</span>
+            )}
+          </div>
         </div>
       )}
     </div>

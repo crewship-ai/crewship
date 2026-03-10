@@ -1,8 +1,8 @@
 "use client"
 
 import { Fragment, useCallback, useEffect, useState } from "react"
-import { RefreshCw, CheckCircle2, Clock, AlertTriangle } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { CheckCircle2, AlertTriangle } from "lucide-react"
+import { BadgeAlertIcon } from "@/components/ui/badge-alert"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -28,6 +28,10 @@ interface CrewEscalationsProps {
   workspaceId: string
 }
 
+function PendingIcon() {
+  return <BadgeAlertIcon size={14} />
+}
+
 const STATUS_CONFIG: Record<Escalation["status"], {
   label: string
   className: string
@@ -36,7 +40,7 @@ const STATUS_CONFIG: Record<Escalation["status"], {
   PENDING: {
     label: "Pending",
     className: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-    icon: Clock,
+    icon: PendingIcon,
   },
   RESOLVED: {
     label: "Resolved",
@@ -111,17 +115,18 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Escalations</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          onClick={() => fetchEscalations(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold">Escalations</h2>
+          {escalations.some((e) => e.status === "PENDING") && (
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+            </span>
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {refreshing ? "Updating..." : "Live"}
+        </span>
       </div>
 
       {escalations.length === 0 ? (

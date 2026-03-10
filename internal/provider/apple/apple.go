@@ -207,11 +207,19 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		if existing.Status == "running" {
 			return existing.Configuration.ID, nil
 		}
-		// Start stopped container
-		if _, err := runCLI(ctx, "start", existing.Configuration.ID); err != nil {
-			return "", fmt.Errorf("start existing container: %w", err)
+		// Verify bind-mount directories still exist (macOS /tmp is wiped on reboot).
+		workspacePath := filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID)
+		if _, statErr := os.Stat(workspacePath); os.IsNotExist(statErr) {
+			p.logger.Info("bind-mount dirs missing, recreating container", "container", containerName)
+			_, _ = runCLI(ctx, "rm", existing.Configuration.ID)
+			// fall through to create a fresh container below
+		} else {
+			// Start stopped container
+			if _, err := runCLI(ctx, "start", existing.Configuration.ID); err != nil {
+				return "", fmt.Errorf("start existing container: %w", err)
+			}
+			return existing.Configuration.ID, nil
 		}
-		return existing.Configuration.ID, nil
 	}
 
 	// Set up resources

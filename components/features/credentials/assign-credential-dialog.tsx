@@ -40,7 +40,9 @@ const ENV_VAR_PRESETS = [
   "ANTHROPIC_API_KEY",
   "OPENAI_API_KEY",
   "GOOGLE_API_KEY",
-  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "GITLAB_TOKEN",
+  "VERCEL_TOKEN",
 ]
 
 export function AssignCredentialDialog({

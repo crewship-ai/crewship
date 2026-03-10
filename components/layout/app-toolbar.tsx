@@ -1,10 +1,13 @@
 "use client"
 
 import { usePathname } from "next/navigation"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
-import { Search, Bell, BookOpen, ChevronDown, User, HelpCircle, Github, LogOut } from "lucide-react"
+import { Search, BookOpen, ChevronDown, User, HelpCircle, Github, LogOut } from "lucide-react"
+import { BellIcon as AnimatedBell } from "@/components/ui/bell"
+import { WifiIcon as AnimatedWifi, type WifiIconHandle } from "@/components/ui/wifi"
+import { useRealtime } from "@/hooks/use-realtime"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -15,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useEngineStatus } from "@/hooks/use-engine-status"
 import { useWorkspace } from "@/hooks/use-workspace"
 
@@ -96,6 +100,16 @@ export function AppToolbar() {
   const { status: engineStatus } = useEngineStatus(workspaceId)
   const { session, signOut } = useAuth()
   const agentBreadcrumb = useAgentBreadcrumb(pathname, workspaceId)
+  const { status: wsStatus } = useRealtime()
+  const wifiRef = useRef<WifiIconHandle>(null)
+
+  useEffect(() => {
+    if (wsStatus === "connected") {
+      wifiRef.current?.startAnimation()
+      const t = setTimeout(() => wifiRef.current?.stopAnimation(), 1000)
+      return () => clearTimeout(t)
+    }
+  }, [wsStatus])
 
   const userName = session?.user?.name ?? "User"
   const userEmail = session?.user?.email ?? ""
@@ -209,10 +223,40 @@ export function AppToolbar() {
           <BookOpen className="h-4 w-4" />
         </Button>
 
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div className={`hidden lg:flex items-center gap-1.5 px-2 py-1 rounded-full border mr-0.5 ${
+              wsStatus === "connected"
+                ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800"
+                : wsStatus === "connecting"
+                  ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800"
+                  : "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800"
+            }`}>
+              <AnimatedWifi ref={wifiRef} size={12} className={
+                wsStatus === "connected"
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : wsStatus === "connecting"
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-red-600 dark:text-red-400"
+              } />
+              <span className={`text-[10px] font-medium ${
+                wsStatus === "connected"
+                  ? "text-emerald-700 dark:text-emerald-400"
+                  : wsStatus === "connecting"
+                    ? "text-amber-700 dark:text-amber-400"
+                    : "text-red-700 dark:text-red-400"
+              }`}>WS</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>
+            WebSocket: {wsStatus}
+          </TooltipContent>
+        </Tooltip>
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="h-8 w-8 relative" aria-label="Notifications">
-              <Bell className="h-4 w-4" />
+              <AnimatedBell size={16} />
               <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground ring-2 ring-background" aria-hidden="true">
                 3
               </span>

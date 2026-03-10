@@ -74,6 +74,8 @@ var migrations = []migration{
 	{13, "add_chat_agent_status_index", migrationAddChatAgentStatusIndex},
 	{14, "add_agent_avatar_seed", migrationAddAgentAvatarSeed},
 	{15, "add_avatar_style", migrationAddAvatarStyle},
+	{16, "add_agent_cli_tools", migrationAddAgentCLITools},
+	{17, "add_credential_crews", migrationAddCredentialCrews},
 }
 
 const migrationAddKeeperObservability = `
@@ -664,4 +666,24 @@ ALTER TABLE agents ADD COLUMN avatar_seed TEXT;
 const migrationAddAvatarStyle = `
 ALTER TABLE agents ADD COLUMN avatar_style TEXT;
 ALTER TABLE crews ADD COLUMN avatar_style TEXT;
+`
+
+const migrationAddAgentCLITools = `
+ALTER TABLE agents ADD COLUMN cli_tools TEXT;
+`
+
+const migrationAddCredentialCrews = `
+CREATE TABLE IF NOT EXISTS credential_crews (
+	credential_id TEXT NOT NULL REFERENCES credentials(id) ON DELETE CASCADE,
+	crew_id TEXT NOT NULL REFERENCES crews(id) ON DELETE CASCADE,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	PRIMARY KEY (credential_id, crew_id)
+);
+CREATE INDEX IF NOT EXISTS idx_credential_crews_cred ON credential_crews(credential_id);
+CREATE INDEX IF NOT EXISTS idx_credential_crews_crew ON credential_crews(crew_id);
+
+-- Migrate existing crew-scoped credentials to junction table
+INSERT OR IGNORE INTO credential_crews (credential_id, crew_id, created_at)
+SELECT id, crew_id, datetime('now') FROM credentials
+WHERE scope = 'CREW' AND crew_id IS NOT NULL AND deleted_at IS NULL;
 `

@@ -1,8 +1,7 @@
 "use client"
 
 import { Fragment, useCallback, useEffect, useState } from "react"
-import { RefreshCw, CheckCircle2, Loader2, XCircle, MessageSquare, AlertTriangle } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { CheckCircle2, Loader2, XCircle, MessageSquare, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -124,17 +123,18 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Peer Conversations</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          onClick={() => fetchConversations(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold">Peer Conversations</h2>
+          {conversations.some((c) => c.status === "RUNNING") && (
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+            </span>
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {refreshing ? "Updating..." : "Live"}
+        </span>
       </div>
 
       {conversations.length === 0 ? (
@@ -192,9 +192,16 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                           <TableCell>
                             <Badge
                               variant="outline"
-                              className={`gap-1 border-0 ${config.className}`}
+                              className={`gap-1.5 border-0 ${config.className}`}
                             >
-                              <StatusIcon className={`h-3 w-3 ${c.status === "RUNNING" ? "animate-spin" : ""}`} />
+                              {c.status === "RUNNING" ? (
+                                <span className="relative flex h-2 w-2 shrink-0">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                                </span>
+                              ) : (
+                                <StatusIcon className="h-3 w-3" />
+                              )}
                               {config.label}
                             </Badge>
                           </TableCell>

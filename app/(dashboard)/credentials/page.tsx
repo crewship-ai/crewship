@@ -3,7 +3,7 @@
 import * as React from "react"
 import {
   Key, Plus, Pencil, Trash2,
-  Bot, Lock, CheckCircle, AlertTriangle, Clock, XCircle,
+  Bot, Lock, Terminal, CheckCircle, AlertTriangle, Clock, XCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
@@ -27,11 +27,12 @@ interface Credential {
   id: string
   name: string
   description: string | null
-  type: "AI_CLI_TOKEN" | "API_KEY" | "SECRET"
-  provider: "ANTHROPIC" | "OPENAI" | "GOOGLE" | "NONE"
+  type: "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET"
+  provider: "ANTHROPIC" | "OPENAI" | "GOOGLE" | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
   status: "ACTIVE" | "EXPIRED" | "RATE_LIMITED" | "REVOKED" | "ERROR"
   scope: "WORKSPACE" | "CREW"
   crew_id: string | null
+  crew_ids: string[]
   account_label: string | null
   account_email: string | null
   token_expires_at: string | null
@@ -50,6 +51,7 @@ interface Org {
 const TYPE_CONFIG = {
   AI_CLI_TOKEN: { icon: Bot, label: "AI CLI Token", color: "text-violet-600" },
   API_KEY: { icon: Key, label: "API Key", color: "text-amber-600" },
+  CLI_TOKEN: { icon: Terminal, label: "CLI Token", color: "text-blue-600" },
   SECRET: { icon: Lock, label: "Secret", color: "text-muted-foreground" },
 } as const
 
@@ -57,6 +59,11 @@ const PROVIDER_LABELS: Record<string, string> = {
   ANTHROPIC: "Anthropic",
   OPENAI: "OpenAI",
   GOOGLE: "Google",
+  GITHUB: "GitHub",
+  GITLAB: "GitLab",
+  VERCEL: "Vercel",
+  AWS: "AWS",
+  CUSTOM_CLI: "Custom CLI",
   NONE: "--",
 }
 
@@ -133,6 +140,7 @@ export default function CredentialsPage() {
       provider: credential.provider,
       scope: credential.scope,
       crew_id: credential.crew_id,
+      crew_ids: credential.crew_ids?.length > 0 ? credential.crew_ids : (credential.crew_id ? [credential.crew_id] : []),
     })
     setEditOpen(true)
   }

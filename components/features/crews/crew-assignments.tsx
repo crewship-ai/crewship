@@ -1,8 +1,7 @@
 "use client"
 
 import { Fragment, useCallback, useEffect, useState } from "react"
-import { RefreshCw, CheckCircle2, Loader2, Clock, XCircle, ClipboardList } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { CheckCircle2, Loader2, Clock, XCircle, ClipboardList } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -84,6 +83,15 @@ function formatDuration(startedAt: string | null, finishedAt: string | null): st
   return `${hours}h ${minutes % 60}m`
 }
 
+function LiveDuration({ startedAt }: { startedAt: string }) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return <>{formatDuration(startedAt, null)}</>
+}
+
 export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
   const [assignments, setAssignments] = useState<Assignment[]>([])
   const [loading, setLoading] = useState(true)
@@ -132,17 +140,18 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Assignments</h2>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          onClick={() => fetchAssignments(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-semibold">Assignments</h2>
+          {assignments.some((a) => a.status === "RUNNING") && (
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+            </span>
+          )}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {refreshing ? "Updating..." : "Live"}
+        </span>
       </div>
 
       {assignments.length === 0 ? (
@@ -197,9 +206,16 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                           <TableCell>
                             <Badge
                               variant="outline"
-                              className={`gap-1 border-0 ${config.className}`}
+                              className={`gap-1.5 border-0 ${config.className}`}
                             >
-                              <StatusIcon className={`h-3 w-3 ${a.status === "RUNNING" ? "animate-spin" : ""}`} />
+                              {a.status === "RUNNING" ? (
+                                <span className="relative flex h-2 w-2 shrink-0">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                                </span>
+                              ) : (
+                                <StatusIcon className="h-3 w-3" />
+                              )}
                               {config.label}
                             </Badge>
                           </TableCell>
@@ -222,8 +238,10 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                           <TableCell className="text-xs text-muted-foreground">
                             {formatRelativeTime(a.created_at)}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {formatDuration(a.started_at, a.finished_at)}
+                          <TableCell className="text-xs text-muted-foreground tabular-nums">
+                            {a.status === "RUNNING" && a.started_at
+                              ? <LiveDuration startedAt={a.started_at} />
+                              : formatDuration(a.started_at, a.finished_at)}
                           </TableCell>
                         </TableRow>
                         {isExpanded && hasDetail && (

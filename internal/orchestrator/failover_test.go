@@ -222,6 +222,8 @@ func TestResolveEnvVar(t *testing.T) {
 		{"AI_CLI_TOKEN without env var name", Credential{Type: "AI_CLI_TOKEN", EnvVarName: ""}, "CLAUDE_CODE_OAUTH_TOKEN"},
 		{"SECRET stays as-is", Credential{Type: "SECRET", EnvVarName: "MY_SECRET"}, "MY_SECRET"},
 		{"OAuth value stored as API_KEY type", Credential{Type: "API_KEY", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "sk-ant-oat01-token"}, "CLAUDE_CODE_OAUTH_TOKEN"},
+		{"CLI_TOKEN stays as-is", Credential{Type: "CLI_TOKEN", EnvVarName: "GH_TOKEN"}, "GH_TOKEN"},
+		{"CLI_TOKEN GitLab", Credential{Type: "CLI_TOKEN", EnvVarName: "GITLAB_TOKEN"}, "GITLAB_TOKEN"},
 	}
 
 	for _, tt := range tests {

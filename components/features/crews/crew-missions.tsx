@@ -1,9 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { RefreshCw, Target } from "lucide-react"
+import { Target } from "lucide-react"
 import Link from "next/link"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { MissionStatusBadge } from "@/components/features/missions/mission-status-badge"
@@ -65,16 +64,9 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-semibold">Missions</h2>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={() => fetchMissions(true)}
-            disabled={refreshing}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+          <span className="text-xs text-muted-foreground">
+            {refreshing ? "Updating..." : "Live"}
+          </span>
           {canCreate && (
             <CreateMissionDialog
               crewId={crewId}
