@@ -81,32 +81,35 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const requestIdRef = useRef(0)
+  const loadingOwnerRef = useRef<number | null>(null)
+  const refreshingOwnerRef = useRef<number | null>(null)
 
   const fetchConversations = useCallback(async (showRefresh = false, silent = false) => {
     const requestId = ++requestIdRef.current
-    const trackLoading = !silent && !showRefresh
-    const trackRefreshing = !silent && showRefresh
 
-    if (trackRefreshing) setRefreshing(true)
-    if (trackLoading) setLoading(true)
+    if (!silent && showRefresh) {
+      refreshingOwnerRef.current = requestId
+      setRefreshing(true)
+    } else if (!silent) {
+      loadingOwnerRef.current = requestId
+      setLoading(true)
+    }
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/peer-conversations?workspace_id=${workspaceId}&limit=50`
       )
-      if (res.ok && requestId === requestIdRef.current) {
-        const json = await res.json()
-        const parsed = z.array(peerConversationSchema).safeParse(json)
-        if (parsed.success) {
-          setConversations(parsed.data)
-        }
+      if (!res.ok) return
+      const json = await res.json()
+      if (requestId !== requestIdRef.current) return
+      const parsed = z.array(peerConversationSchema).safeParse(json)
+      if (parsed.success) {
+        setConversations(parsed.data)
       }
     } catch {
       // Silently fail — component shows empty state
     } finally {
-      if (requestId === requestIdRef.current) {
-        if (trackLoading) setLoading(false)
-        if (trackRefreshing) setRefreshing(false)
-      }
+      if (loadingOwnerRef.current === requestId) setLoading(false)
+      if (refreshingOwnerRef.current === requestId) setRefreshing(false)
     }
   }, [crewId, workspaceId])
 

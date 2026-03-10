@@ -44,6 +44,7 @@ type Server struct {
 	tokenSyncer  *llmproxy.TokenSyncer
 	credMonitor  *llmproxy.CredentialMonitor
 	debugLogs    *logging.RingBuffer
+	db           *sql.DB
 	startedAt    time.Time
 	runCtx       context.Context
 	runCancel    context.CancelFunc
@@ -182,6 +183,9 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		credMonitor:  credMonitor,
 		debugLogs:    debugLogs,
 	}
+	if deps != nil {
+		s.db = deps.DB
+	}
 
 	s.registerRoutes()
 	s.registerIPCRoutes()
@@ -293,6 +297,12 @@ func (s *Server) LogWriter() *logcollector.Writer {
 func (s *Server) Start(ctx context.Context) error {
 	s.startedAt = time.Now()
 
+	// Recover orphaned RUNNING runs from previous crashes/restarts.
+	// Without this, agents whose runs were interrupted stay RUNNING forever.
+	if s.db != nil {
+		s.recoverOrphanedRuns(ctx)
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	s.runCtx, s.runCancel = ctx, cancel
 	defer cancel()
@@ -402,4 +412,33 @@ func (a *convStoreAdapter) Read(ctx context.Context, sessionID string, offset, l
 		}
 	}
 	return out, nil
+}
+
+// recoverOrphanedRuns marks stale RUNNING runs as CANCELLED and resets
+// agent statuses. This handles cases where the server crashed or was
+// restarted while agent runs were in progress.
+func (s *Server) recoverOrphanedRuns(ctx context.Context) {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE agent_runs SET status = 'CANCELLED', finished_at = ?
+		WHERE status = 'RUNNING'`, now)
+	if err != nil {
+		s.logger.Error("recover orphaned runs", "error", err)
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return
+	}
+
+	s.logger.Info("recovered orphaned runs", "count", affected)
+
+	// Reset agents that no longer have active runs to IDLE
+	if _, err := s.db.ExecContext(ctx, `
+		UPDATE agents SET status = 'IDLE', updated_at = ?
+		WHERE status = 'RUNNING'
+		AND id NOT IN (SELECT DISTINCT agent_id FROM agent_runs WHERE status = 'RUNNING')`, now); err != nil {
+		s.logger.Error("reset agent statuses after recovery", "error", err)
+	}
 }

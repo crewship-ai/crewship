@@ -229,7 +229,7 @@ export function AppToolbar() {
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className={`hidden lg:flex items-center gap-1.5 px-2 py-1 rounded-full border mr-0.5 ${
+            <div tabIndex={0} role="status" aria-label={`WebSocket ${wsStatus}`} className={`hidden lg:flex items-center gap-1.5 px-2 py-1 rounded-full border mr-0.5 ${
               wsStatus === "connected"
                 ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800"
                 : wsStatus === "connecting"

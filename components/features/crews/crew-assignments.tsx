@@ -98,29 +98,33 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const requestIdRef = useRef(0)
+  const loadingOwnerRef = useRef<number | null>(null)
+  const refreshingOwnerRef = useRef<number | null>(null)
 
   const fetchAssignments = useCallback(async (showRefresh = false, silent = false) => {
     const requestId = ++requestIdRef.current
-    const trackLoading = !silent && !showRefresh
-    const trackRefreshing = !silent && showRefresh
 
-    if (trackRefreshing) setRefreshing(true)
-    if (trackLoading) setLoading(true)
+    if (!silent && showRefresh) {
+      refreshingOwnerRef.current = requestId
+      setRefreshing(true)
+    } else if (!silent) {
+      loadingOwnerRef.current = requestId
+      setLoading(true)
+    }
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/assignments?workspace_id=${workspaceId}&limit=50`
       )
-      if (res.ok && requestId === requestIdRef.current) {
-        const data = (await res.json()) as Assignment[]
+      if (!res.ok) return
+      const data = (await res.json()) as Assignment[]
+      if (requestId === requestIdRef.current) {
         setAssignments(data)
       }
     } catch {
       // Silently fail — component shows empty state
     } finally {
-      if (requestId === requestIdRef.current) {
-        if (trackLoading) setLoading(false)
-        if (trackRefreshing) setRefreshing(false)
-      }
+      if (loadingOwnerRef.current === requestId) setLoading(false)
+      if (refreshingOwnerRef.current === requestId) setRefreshing(false)
     }
   }, [crewId, workspaceId])
 
@@ -195,6 +199,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                           className={hasDetail ? "cursor-pointer" : ""}
                           role={hasDetail ? "button" : undefined}
                           tabIndex={hasDetail ? 0 : -1}
+                          aria-expanded={hasDetail ? isExpanded : undefined}
                           onClick={() => {
                             if (hasDetail) setExpandedId(isExpanded ? null : a.id)
                           }}

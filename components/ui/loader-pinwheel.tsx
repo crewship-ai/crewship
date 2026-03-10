@@ -72,12 +72,14 @@ const LoaderPinwheelIcon = forwardRef<
 
   return (
     <div
-      className={cn(className)}
+      className={cn("inline-flex", className)}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       {...props}
     >
       <svg
+        role="img"
+        aria-hidden="true"
         fill="none"
         height={size}
         stroke="currentColor"

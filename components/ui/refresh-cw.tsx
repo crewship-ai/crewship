@@ -46,7 +46,7 @@ const RefreshCWIcon = forwardRef<RefreshCWIconHandle, RefreshCWIconProps>(
 
     return (
       <div
-        className={cn(className)}
+        className={cn("inline-flex", className)}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         {...props}

@@ -20,7 +20,7 @@ func main() {
 	_ = key
 
 	// Test roundtrip
-	testValue := "sk-ant-api03-test-value-12345"
+	testValue := "test-credential-roundtrip-value-12345"
 	enc, err := encryption.Encrypt(testValue)
 	if err != nil {
 		fmt.Println("Encrypt error:", err)

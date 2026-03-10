@@ -22,29 +22,33 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const requestIdRef = useRef(0)
+  const loadingOwnerRef = useRef<number | null>(null)
+  const refreshingOwnerRef = useRef<number | null>(null)
 
   const fetchMissions = useCallback(async (showRefresh = false, silent = false) => {
     const requestId = ++requestIdRef.current
-    const trackLoading = !silent && !showRefresh
-    const trackRefreshing = !silent && showRefresh
 
-    if (trackRefreshing) setRefreshing(true)
-    if (trackLoading) setLoading(true)
+    if (!silent && showRefresh) {
+      refreshingOwnerRef.current = requestId
+      setRefreshing(true)
+    } else if (!silent) {
+      loadingOwnerRef.current = requestId
+      setLoading(true)
+    }
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/missions?workspace_id=${workspaceId}&limit=5`
       )
-      if (res.ok && requestId === requestIdRef.current) {
-        const data = (await res.json()) as Mission[]
+      if (!res.ok) return
+      const data = (await res.json()) as Mission[]
+      if (requestId === requestIdRef.current) {
         setMissions(data)
       }
     } catch {
       // Silently fail
     } finally {
-      if (requestId === requestIdRef.current) {
-        if (trackLoading) setLoading(false)
-        if (trackRefreshing) setRefreshing(false)
-      }
+      if (loadingOwnerRef.current === requestId) setLoading(false)
+      if (refreshingOwnerRef.current === requestId) setRefreshing(false)
     }
   }, [crewId, workspaceId])
 
@@ -70,7 +74,7 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-semibold">Missions</h2>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">
+          <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
             {refreshing ? "Updating..." : "Live"}
           </span>
           {canCreate && (
