@@ -682,6 +682,15 @@ CREATE TABLE IF NOT EXISTS credential_crews (
 CREATE INDEX IF NOT EXISTS idx_credential_crews_cred ON credential_crews(credential_id);
 CREATE INDEX IF NOT EXISTS idx_credential_crews_crew ON credential_crews(crew_id);
 
+-- Prevent cross-workspace credential-crew associations at the DB level.
+CREATE TRIGGER IF NOT EXISTS trg_credential_crews_workspace_check
+BEFORE INSERT ON credential_crews
+BEGIN
+	SELECT RAISE(ABORT, 'credential and crew must belong to the same workspace')
+	WHERE (SELECT workspace_id FROM credentials WHERE id = NEW.credential_id)
+	   != (SELECT workspace_id FROM crews WHERE id = NEW.crew_id);
+END;
+
 -- Migrate existing crew-scoped credentials to junction table
 INSERT OR IGNORE INTO credential_crews (credential_id, crew_id, created_at)
 SELECT id, crew_id, datetime('now') FROM credentials

@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import { CheckCircle2, Loader2, XCircle, MessageSquare, AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -80,16 +80,20 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const requestIdRef = useRef(0)
 
   const fetchConversations = useCallback(async (showRefresh = false, silent = false) => {
-    if (silent) { /* no loading state change */ }
-    else if (showRefresh) setRefreshing(true)
-    else setLoading(true)
+    const requestId = ++requestIdRef.current
+    const trackLoading = !silent && !showRefresh
+    const trackRefreshing = !silent && showRefresh
+
+    if (trackRefreshing) setRefreshing(true)
+    if (trackLoading) setLoading(true)
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/peer-conversations?workspace_id=${workspaceId}&limit=50`
       )
-      if (res.ok) {
+      if (res.ok && requestId === requestIdRef.current) {
         const json = await res.json()
         const parsed = z.array(peerConversationSchema).safeParse(json)
         if (parsed.success) {
@@ -99,8 +103,10 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
     } catch {
       // Silently fail — component shows empty state
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (requestId === requestIdRef.current) {
+        if (trackLoading) setLoading(false)
+        if (trackRefreshing) setRefreshing(false)
+      }
     }
   }, [crewId, workspaceId])
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import { CheckCircle2, AlertTriangle } from "lucide-react"
 import { BadgeAlertIcon } from "@/components/ui/badge-alert"
 import { Badge } from "@/components/ui/badge"
@@ -69,17 +69,20 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const requestIdRef = useRef(0)
 
   const fetchEscalations = useCallback(async (showRefresh = false, silent = false) => {
-    if (!silent) {
-      if (showRefresh) setRefreshing(true)
-      else setLoading(true)
-    }
+    const requestId = ++requestIdRef.current
+    const trackLoading = !silent && !showRefresh
+    const trackRefreshing = !silent && showRefresh
+
+    if (trackRefreshing) setRefreshing(true)
+    if (trackLoading) setLoading(true)
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/escalations?workspace_id=${workspaceId}&limit=50`
       )
-      if (res.ok) {
+      if (res.ok && requestId === requestIdRef.current) {
         const json = await res.json()
         const parsed = z.array(escalationSchema).safeParse(json)
         if (parsed.success) {
@@ -89,9 +92,9 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
     } catch {
       // Silently fail — component shows empty state
     } finally {
-      if (!silent) {
-        setLoading(false)
-        setRefreshing(false)
+      if (requestId === requestIdRef.current) {
+        if (trackLoading) setLoading(false)
+        if (trackRefreshing) setRefreshing(false)
       }
     }
   }, [crewId, workspaceId])

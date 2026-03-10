@@ -315,8 +315,19 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 					return c.ID, nil
 				}
 				// Verify bind-mount directories still exist (macOS /tmp is wiped on reboot).
-				workspacePath := filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID)
-				if _, statErr := os.Stat(workspacePath); os.IsNotExist(statErr) {
+				bindMountDirs := []string{
+					filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID),
+					filepath.Join(p.cfg.OutputBasePath, team.ID),
+					filepath.Join(p.cfg.OutputBasePath, "crews", team.ID),
+				}
+				bindsMissing := false
+				for _, d := range bindMountDirs {
+					if _, statErr := os.Stat(d); os.IsNotExist(statErr) {
+						bindsMissing = true
+						break
+					}
+				}
+				if bindsMissing {
 					p.logger.Info("bind-mount dirs missing, recreating container", "container", containerName)
 					timeout := 10
 					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})

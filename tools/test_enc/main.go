@@ -42,14 +42,22 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("DB key length: %d\n", len(dbDec))
-		fmt.Printf("DB key prefix: %s\n", dbDec[:min(20, len(dbDec))])
-		fmt.Printf("DB key suffix: %s\n", dbDec[max(0, len(dbDec)-10):])
+		// Mask credential material -- only show type prefix for safety
+		if len(dbDec) > 10 {
+			fmt.Printf("DB key prefix: %s...***\n", dbDec[:min(10, len(dbDec))])
+		} else {
+			fmt.Println("DB key: ***masked***")
+		}
 
 		// Test with Anthropic API using Bearer auth
 		if strings.HasPrefix(dbDec, "sk-ant-oat") {
 			fmt.Println("\nDetected OAuth token, testing with Bearer auth...")
 			client := &nethttp.Client{Timeout: 10 * time.Second}
-			req, _ := nethttp.NewRequest("GET", "https://api.anthropic.com/v1/models", nil)
+			req, err := nethttp.NewRequest("GET", "https://api.anthropic.com/v1/models", nil)
+			if err != nil {
+				fmt.Println("Failed to create request:", err)
+				os.Exit(1)
+			}
 			req.Header.Set("Authorization", "Bearer "+dbDec)
 			req.Header.Set("anthropic-version", "2023-06-01")
 			resp, err := client.Do(req)

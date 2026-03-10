@@ -105,9 +105,13 @@ export function AppToolbar() {
 
   useEffect(() => {
     if (wsStatus === "connected") {
-      wifiRef.current?.startAnimation()
-      const t = setTimeout(() => wifiRef.current?.stopAnimation(), 1000)
-      return () => clearTimeout(t)
+      const handle = wifiRef.current
+      handle?.startAnimation()
+      const t = setTimeout(() => handle?.stopAnimation(), 1000)
+      return () => {
+        clearTimeout(t)
+        handle?.stopAnimation()
+      }
     }
   }, [wsStatus])
 

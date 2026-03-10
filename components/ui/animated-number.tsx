@@ -11,15 +11,13 @@ interface AnimatedNumberProps {
 }
 
 export function AnimatedNumber({ value, duration = 0.5, className }: AnimatedNumberProps) {
-  const motionValue = useMotionValue(0)
+  const initialRef = useRef(value)
+  const motionValue = useMotionValue(initialRef.current)
   const rounded = useTransform(motionValue, (v) => Math.round(v))
-  const prevRef = useRef(value)
 
   useEffect(() => {
-    const from = prevRef.current
-    prevRef.current = value
     const controls = animate(motionValue, value, {
-      duration: from === 0 && value === 0 ? 0 : duration,
+      duration,
       ease: "easeOut",
     })
     return () => controls.stop()

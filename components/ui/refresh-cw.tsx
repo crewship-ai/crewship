@@ -6,16 +6,16 @@ import { forwardRef, useCallback, useImperativeHandle, useRef } from "react";
 
 import { cn } from "@/lib/utils";
 
-export interface RefreshCCWIconWIcon {
+export interface RefreshCWIconHandle {
   startAnimation: () => void;
   stopAnimation: () => void;
 }
 
-interface RefreshCCWIcoWIcon extends HTMLAttributes<HTMLDivElement> {
+interface RefreshCWIconProps extends HTMLAttributes<HTMLDivElement> {
   size?: number;
 }
 
-const RefreshCWIcon = forwardRef<RefreshCCWIconWIcon, RefreshCCWIcoWIcon>(
+const RefreshCWIcon = forwardRef<RefreshCWIconHandle, RefreshCWIconProps>(
   ({ onMouseEnter, onMouseLeave, className, size = 28, ...props }, ref) => {
     const controls = useAnimation();
     const isControlledRef = useRef(false);
@@ -30,16 +30,16 @@ const RefreshCWIcon = forwardRef<RefreshCCWIconWIcon, RefreshCCWIcoWIcon>(
 
     const handleMouseEnter = useCallback(
       (e: React.MouseEvent<HTMLDivElement>) => {
-        if (isControlledRef.current) onMouseEnter?.(e);
-        else controls.start("animate");
+        if (!isControlledRef.current) controls.start("animate");
+        onMouseEnter?.(e);
       },
       [controls, onMouseEnter]
     );
 
     const handleMouseLeave = useCallback(
       (e: React.MouseEvent<HTMLDivElement>) => {
-        if (isControlledRef.current) onMouseLeave?.(e);
-        else controls.start("normal");
+        if (!isControlledRef.current) controls.start("normal");
+        onMouseLeave?.(e);
       },
       [controls, onMouseLeave]
     );
@@ -52,6 +52,7 @@ const RefreshCWIcon = forwardRef<RefreshCCWIconWIcon, RefreshCCWIcoWIcon>(
         {...props}
       >
         <motion.svg
+          aria-hidden="true"
           animate={controls}
           fill="none"
           height={size}

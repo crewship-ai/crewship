@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Target } from "lucide-react"
 import Link from "next/link"
 import { Card, CardContent } from "@/components/ui/card"
@@ -21,24 +21,30 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
   const [missions, setMissions] = useState<Mission[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const requestIdRef = useRef(0)
 
   const fetchMissions = useCallback(async (showRefresh = false, silent = false) => {
-    if (silent) { /* no loading state change */ }
-    else if (showRefresh) setRefreshing(true)
-    else setLoading(true)
+    const requestId = ++requestIdRef.current
+    const trackLoading = !silent && !showRefresh
+    const trackRefreshing = !silent && showRefresh
+
+    if (trackRefreshing) setRefreshing(true)
+    if (trackLoading) setLoading(true)
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/missions?workspace_id=${workspaceId}&limit=5`
       )
-      if (res.ok) {
+      if (res.ok && requestId === requestIdRef.current) {
         const data = (await res.json()) as Mission[]
         setMissions(data)
       }
     } catch {
       // Silently fail
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (requestId === requestIdRef.current) {
+        if (trackLoading) setLoading(false)
+        if (trackRefreshing) setRefreshing(false)
+      }
     }
   }, [crewId, workspaceId])
 
