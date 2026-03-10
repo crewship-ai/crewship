@@ -5,16 +5,21 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/license"
 )
 
 type CrewHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	license *license.License
 }
 
 func NewCrewHandler(db *sql.DB, logger *slog.Logger) *CrewHandler {
 	return &CrewHandler{db: db, logger: logger}
 }
+
+func (h *CrewHandler) SetLicense(lic *license.License) { h.license = lic }
 
 type crewCountResponse struct {
 	Agents  int `json:"agents"`
@@ -100,6 +105,18 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if !canRole(role, "create") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 		return
+	}
+
+	if h.license != nil {
+		if err := h.license.CheckCrewLimit(r.Context(), h.db, workspaceID); err != nil {
+			if license.IsLimitError(err) {
+				writeJSON(w, http.StatusPaymentRequired, map[string]string{"error": err.Error()})
+				return
+			}
+			h.logger.Error("check crew limit", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 	}
 
 	var req createCrewRequest
