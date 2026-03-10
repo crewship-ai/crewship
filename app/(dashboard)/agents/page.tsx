@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Bot, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AgentCard } from "@/components/features/agents/agent-card"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
 
 interface AgentCrew {
@@ -41,37 +42,37 @@ export default function AgentsPage() {
   const [error, setError] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState("All")
 
+  const fetchAgents = useCallback(async (silent = false) => {
+    if (!workspaceId) return
+    if (!silent) {
+      setLoading(true)
+      setError(null)
+    }
+    try {
+      const res = await fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
+      if (!res.ok) {
+        if (!silent) setError("Failed to load agents")
+        return
+      }
+      const data = (await res.json()) as Agent[]
+      setAgents(data)
+    } catch {
+      if (!silent) setError("Failed to load agents")
+    } finally {
+      if (!silent) setLoading(false)
+    }
+  }, [workspaceId])
+
   useEffect(() => {
     if (!workspaceId) {
       if (!wsLoading) setLoading(false)
       return
     }
-
-    let cancelled = false
-
-    async function fetchAgents() {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
-        if (!res.ok) {
-          setError("Failed to load agents")
-          return
-        }
-        const data = (await res.json()) as Agent[]
-        if (!cancelled) setAgents(data)
-      } catch {
-        if (!cancelled) setError("Failed to load agents")
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
     fetchAgents()
-    return () => {
-      cancelled = true
-    }
-  }, [workspaceId, wsLoading])
+  }, [workspaceId, wsLoading, fetchAgents])
+
+  // Real-time: refetch agents when status changes
+  useRealtimeEvent("agent.status", useCallback(() => { fetchAgents(true) }, [fetchAgents]))
 
   const isLoading = wsLoading || loading
 

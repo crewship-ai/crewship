@@ -49,26 +49,32 @@ type execEntry struct {
 }
 
 // containerJSON is the structure returned by `container inspect`.
+// Apple Container CLI uses nested "configuration" and "networks" array.
 type containerJSON struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Image  string `json:"image"`
-	Status string `json:"status"` // "running", "stopped", "created"
-	Config struct {
-		Hostname string `json:"hostname"`
-	} `json:"config"`
-	Network struct {
-		IP      string `json:"ip"`
-		Gateway string `json:"gateway"`
-	} `json:"network"`
+	Status        string `json:"status"` // "running", "stopped", "created"
+	Configuration struct {
+		ID    string `json:"id"`
+		Image struct {
+			Reference string `json:"reference"`
+		} `json:"image"`
+	} `json:"configuration"`
+	Networks []struct {
+		IPv4Address string `json:"ipv4Address"` // e.g. "192.168.67.4/24"
+		IPv4Gateway string `json:"ipv4Gateway"` // e.g. "192.168.67.1"
+		Hostname    string `json:"hostname"`
+	} `json:"networks"`
 }
 
 // containerListEntry is one item from `container list --all --format json`.
+// The Apple Container CLI nests the container ID inside "configuration".
 type containerListEntry struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Image  string `json:"image"`
-	Status string `json:"status"`
+	Status        string `json:"status"`
+	Configuration struct {
+		ID    string `json:"id"`
+		Image struct {
+			Reference string `json:"reference"`
+		} `json:"image"`
+	} `json:"configuration"`
 }
 
 // New creates an Apple Container Provider. It verifies the `container` CLI
@@ -110,6 +116,8 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 // HostAddress returns the IP address that containers should use to reach the host.
 // Apple Containers run in dedicated VMs so they need the host's actual IP.
 func (p *Provider) HostAddress() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.hostIP
 }
 
@@ -197,13 +205,13 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	existing, err := p.findContainer(ctx, containerName)
 	if err == nil && existing != nil {
 		if existing.Status == "running" {
-			return existing.ID, nil
+			return existing.Configuration.ID, nil
 		}
 		// Start stopped container
-		if _, err := runCLI(ctx, "start", existing.ID); err != nil {
+		if _, err := runCLI(ctx, "start", existing.Configuration.ID); err != nil {
 			return "", fmt.Errorf("start existing container: %w", err)
 		}
-		return existing.ID, nil
+		return existing.Configuration.ID, nil
 	}
 
 	// Set up resources
@@ -283,11 +291,11 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 			existing, findErr := p.findContainer(ctx, containerName)
 			if findErr == nil && existing != nil {
 				if existing.Status != "running" {
-					if _, startErr := runCLI(ctx, "start", existing.ID); startErr != nil {
+					if _, startErr := runCLI(ctx, "start", existing.Configuration.ID); startErr != nil {
 						return "", fmt.Errorf("start existing container after race: %w", startErr)
 					}
 				}
-				return existing.ID, nil
+				return existing.Configuration.ID, nil
 			}
 		}
 		return "", fmt.Errorf("container create: %w (output: %s)", err, string(out))
@@ -305,12 +313,14 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	// Get actual container ID from inspect
 	info, err := p.inspectContainer(ctx, containerID)
-	if err == nil && info.ID != "" {
-		containerID = info.ID
+	if err == nil && info.Configuration.ID != "" {
+		containerID = info.Configuration.ID
 		// Discover host IP from gateway if not already known
-		if p.hostIP == "" && info.Network.Gateway != "" {
-			p.hostIP = info.Network.Gateway
+		p.mu.Lock()
+		if p.hostIP == "" && len(info.Networks) > 0 && info.Networks[0].IPv4Gateway != "" {
+			p.hostIP = info.Networks[0].IPv4Gateway
 		}
+		p.mu.Unlock()
 	}
 
 	p.logger.Info("crew container started",
@@ -332,8 +342,10 @@ func (p *Provider) findContainer(ctx context.Context, name string) (*containerLi
 		return nil, fmt.Errorf("parse container list: %w", err)
 	}
 
+	// In Apple Containers, configuration.id IS the container name (set via --name on create).
+	// There is no separate "name" field in the CLI output.
 	for _, c := range containers {
-		if c.Name == name || c.ID == name {
+		if c.Configuration.ID == name {
 			return &c, nil
 		}
 	}

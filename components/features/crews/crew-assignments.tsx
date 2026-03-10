@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import { RefreshCw, CheckCircle2, Loader2, Clock, XCircle, ClipboardList } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -19,6 +19,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { Assignment } from "@/lib/types/assignment"
 
 interface CrewAssignmentsProps {
@@ -89,9 +90,11 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  async function fetchAssignments(showRefresh = false) {
-    if (showRefresh) setRefreshing(true)
-    else setLoading(true)
+  const fetchAssignments = useCallback(async (showRefresh = false, silent = false) => {
+    if (!silent) {
+      if (showRefresh) setRefreshing(true)
+      else setLoading(true)
+    }
     try {
       const res = await fetch(
         `/api/v1/crews/${crewId}/assignments?workspace_id=${workspaceId}&limit=50`
@@ -103,15 +106,19 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
     } catch {
       // Silently fail — component shows empty state
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (!silent) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
-  }
+  }, [crewId, workspaceId])
 
   useEffect(() => {
     fetchAssignments()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crewId, workspaceId])
+  }, [fetchAssignments])
+
+  // Real-time: refetch when assignment status changes
+  useRealtimeEvent("assignment.updated", useCallback(() => { fetchAssignments(false, true) }, [fetchAssignments]))
 
   if (loading) {
     return (

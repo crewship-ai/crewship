@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Activity, Clock, AlertTriangle, CheckCircle, XCircle, Play, ExternalLink } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
 
 interface RunAgent {
@@ -81,39 +82,43 @@ export default function RunsPage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [triggerFilter, setTriggerFilter] = useState("all")
 
+  const fetchRuns = useCallback(async (showLoading = true) => {
+    if (!workspaceId) return
+    if (showLoading) {
+      setLoading(true)
+      setError(null)
+    }
+    try {
+      const params = new URLSearchParams({ workspace_id: workspaceId })
+      if (statusFilter !== "all") params.set("status", statusFilter)
+      if (triggerFilter !== "all") params.set("trigger", triggerFilter)
+
+      const res = await fetch(`/api/v1/runs?${params}`)
+      if (!res.ok) {
+        if (showLoading) setError("Failed to load runs")
+        return
+      }
+      const result = (await res.json()) as RunsResponse
+      setData(result)
+    } catch {
+      if (showLoading) setError("Failed to load runs")
+    } finally {
+      if (showLoading) setLoading(false)
+    }
+  }, [workspaceId, statusFilter, triggerFilter])
+
   useEffect(() => {
     if (!workspaceId) {
       if (!wsLoading) setLoading(false)
       return
     }
-
-    let cancelled = false
-
-    async function fetchRuns() {
-      setLoading(true)
-      setError(null)
-      try {
-        const params = new URLSearchParams({ workspace_id: workspaceId as string })
-        if (statusFilter !== "all") params.set("status", statusFilter)
-        if (triggerFilter !== "all") params.set("trigger", triggerFilter)
-
-        const res = await fetch(`/api/v1/runs?${params}`)
-        if (!res.ok) {
-          setError("Failed to load runs")
-          return
-        }
-        const result = (await res.json()) as RunsResponse
-        if (!cancelled) setData(result)
-      } catch {
-        if (!cancelled) setError("Failed to load runs")
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
     fetchRuns()
-    return () => { cancelled = true }
-  }, [workspaceId, wsLoading, statusFilter, triggerFilter])
+  }, [workspaceId, wsLoading, fetchRuns])
+
+  // Real-time: refetch runs when run events arrive
+  useRealtimeEvent("run.started", useCallback(() => { fetchRuns(false) }, [fetchRuns]))
+  useRealtimeEvent("run.completed", useCallback(() => { fetchRuns(false) }, [fetchRuns]))
+  useRealtimeEvent("run.failed", useCallback(() => { fetchRuns(false) }, [fetchRuns]))
 
   const isLoading = wsLoading || loading
 

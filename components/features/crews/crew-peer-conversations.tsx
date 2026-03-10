@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import { RefreshCw, CheckCircle2, Loader2, XCircle, MessageSquare, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -20,6 +20,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { peerConversationSchema, type PeerConversation } from "@/lib/types/peer-conversation"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { z } from "zod"
 
 interface CrewPeerConversationsProps {
@@ -81,8 +82,9 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  async function fetchConversations(showRefresh = false) {
-    if (showRefresh) setRefreshing(true)
+  const fetchConversations = useCallback(async (showRefresh = false, silent = false) => {
+    if (silent) { /* no loading state change */ }
+    else if (showRefresh) setRefreshing(true)
     else setLoading(true)
     try {
       const res = await fetch(
@@ -101,12 +103,14 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [crewId, workspaceId])
 
   useEffect(() => {
     fetchConversations()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crewId, workspaceId])
+  }, [fetchConversations])
+
+  // Real-time: refetch when peer conversations finish
+  useRealtimeEvent("peer_conversation.updated", useCallback(() => { fetchConversations(false, true) }, [fetchConversations]))
 
   if (loading) {
     return (

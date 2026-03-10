@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { SetupNudge } from "@/components/features/onboarding/setup-nudge"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useTick } from "@/hooks/use-tick"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
 
 interface AgentCrew {
@@ -119,53 +120,54 @@ export default function DashboardPage() {
       .catch(() => setOnboardingChecked(true))
   }, [router])
 
-  useEffect(() => {
-    if (!workspaceId || !onboardingChecked) return
-
-    let cancelled = false
-
-    async function fetchData() {
+  const fetchData = useCallback(async (showLoading = true) => {
+    if (!workspaceId) return
+    if (showLoading) {
       setLoading(true)
       setError(null)
-      try {
-        const [agentsRes, credsRes, crewsRes, runsRes] = await Promise.all([
-          fetch(`/api/v1/agents?workspace_id=${workspaceId}`),
-          fetch(`/api/v1/credentials?workspace_id=${workspaceId}`),
-          fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
-          fetch(`/api/v1/runs?workspace_id=${workspaceId}&limit=50`),
-        ])
+    }
+    try {
+      const [agentsRes, credsRes, crewsRes, runsRes] = await Promise.all([
+        fetch(`/api/v1/agents?workspace_id=${workspaceId}`),
+        fetch(`/api/v1/credentials?workspace_id=${workspaceId}`),
+        fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
+        fetch(`/api/v1/runs?workspace_id=${workspaceId}&limit=50`),
+      ])
 
-        if (!agentsRes.ok || !credsRes.ok) {
-          setError("Failed to load dashboard data")
-          return
-        }
-
-        const [agentsData, credsData] = await Promise.all([
-          agentsRes.json() as Promise<Agent[]>,
-          credsRes.json() as Promise<Credential[]>,
-        ])
-
-        const crewsData = crewsRes.ok ? ((await crewsRes.json()) as unknown[]) : []
-        const runsResult = runsRes.ok ? ((await runsRes.json()) as RunsResponse) : null
-
-        if (!cancelled) {
-          setAgents(agentsData)
-          setCredentials(credsData)
-          setCrewCount(crewsData.length)
-          setRunsData(runsResult)
-        }
-      } catch {
-        if (!cancelled) setError("Failed to load dashboard data")
-      } finally {
-        if (!cancelled) setLoading(false)
+      if (!agentsRes.ok || !credsRes.ok) {
+        setError("Failed to load dashboard data")
+        return
       }
-    }
 
-    fetchData()
-    return () => {
-      cancelled = true
+      const [agentsData, credsData] = await Promise.all([
+        agentsRes.json() as Promise<Agent[]>,
+        credsRes.json() as Promise<Credential[]>,
+      ])
+
+      const crewsData = crewsRes.ok ? ((await crewsRes.json()) as unknown[]) : []
+      const runsResult = runsRes.ok ? ((await runsRes.json()) as RunsResponse) : null
+
+      setAgents(agentsData)
+      setCredentials(credsData)
+      setCrewCount(crewsData.length)
+      setRunsData(runsResult)
+    } catch {
+      if (showLoading) setError("Failed to load dashboard data")
+    } finally {
+      if (showLoading) setLoading(false)
     }
-  }, [workspaceId, onboardingChecked])
+  }, [workspaceId])
+
+  useEffect(() => {
+    if (!workspaceId || !onboardingChecked) return
+    fetchData()
+  }, [workspaceId, onboardingChecked, fetchData])
+
+  // Real-time: refetch dashboard data when agent/run events arrive
+  useRealtimeEvent("run.started", useCallback(() => { fetchData(false) }, [fetchData]))
+  useRealtimeEvent("run.completed", useCallback(() => { fetchData(false) }, [fetchData]))
+  useRealtimeEvent("run.failed", useCallback(() => { fetchData(false) }, [fetchData]))
+  useRealtimeEvent("agent.status", useCallback(() => { fetchData(false) }, [fetchData]))
 
   const isLoading = wsLoading || loading
 
