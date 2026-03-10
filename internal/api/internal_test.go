@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 func setTestEncryptionKey(t *testing.T) {
@@ -521,5 +522,281 @@ func TestResolveChat_Skills(t *testing.T) {
 
 			tt.assert(t, sysPrompt)
 		})
+	}
+}
+
+func TestCreateRun_UpdatesAgentStatus(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	_, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug, status) VALUES ('a1', ?, 'Bot', 'bot', 'IDLE')`, wsID)
+	if err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('c1', 'a1', ?, 'CHAT', 'ACTIVE')`, wsID); err != nil {
+		t.Fatalf("insert chat: %v", err)
+	}
+
+	handler := NewInternalHandler(db, "test-token", logger)
+	// Hub is nil — broadcasts are skipped, but DB updates still happen
+	body := strings.NewReader(`{"id":"run1","agent_id":"a1","chat_id":"c1","workspace_id":"` + wsID + `","trigger_type":"USER"}`)
+	req := httptest.NewRequest("POST", "/api/v1/internal/runs", body)
+	rr := httptest.NewRecorder()
+	handler.CreateRun(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusCreated, rr.Body.String())
+	}
+
+	// Verify agent status was updated to RUNNING
+	var status string
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
+	if status != "RUNNING" {
+		t.Errorf("agent status = %q, want RUNNING", status)
+	}
+}
+
+func TestUpdateRun_UpdatesAgentStatusOnCompletion(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	_, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug, status) VALUES ('a1', ?, 'Bot', 'bot', 'RUNNING')`, wsID)
+	if err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+
+	now := "2026-01-01T00:00:00Z"
+	_, err = db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now)
+	if err != nil {
+		t.Fatalf("insert run: %v", err)
+	}
+
+	handler := NewInternalHandler(db, "test-token", logger)
+	// Use real hub for broadcast testing
+	hub := ws.NewHub(logger, nil)
+	handler.SetHub(hub)
+
+	body := strings.NewReader(`{"status":"COMPLETED","exit_code":0}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/internal/runs/run1", body)
+	req.SetPathValue("runId", "run1")
+	rr := httptest.NewRecorder()
+	handler.UpdateRun(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	// Verify agent status was updated to IDLE
+	var status string
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
+	if status != "IDLE" {
+		t.Errorf("agent status = %q, want IDLE", status)
+	}
+
+	// Verify run was marked completed
+	var runStatus string
+	if err := db.QueryRow("SELECT status FROM agent_runs WHERE id = 'run1'").Scan(&runStatus); err != nil {
+		t.Fatalf("query run status: %v", err)
+	}
+	if runStatus != "COMPLETED" {
+		t.Errorf("run status = %q, want COMPLETED", runStatus)
+	}
+}
+
+func TestUpdateRun_FailedSetsAgentError(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	_, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug, status) VALUES ('a1', ?, 'Bot', 'bot', 'RUNNING')`, wsID)
+	if err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+
+	now := "2026-01-01T00:00:00Z"
+	_, err = db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now)
+	if err != nil {
+		t.Fatalf("insert run: %v", err)
+	}
+
+	handler := NewInternalHandler(db, "test-token", logger)
+	hub := ws.NewHub(logger, nil)
+	handler.SetHub(hub)
+
+	body := strings.NewReader(`{"status":"FAILED","error_message":"OOM killed"}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/internal/runs/run1", body)
+	req.SetPathValue("runId", "run1")
+	rr := httptest.NewRecorder()
+	handler.UpdateRun(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	// Verify agent status was set to ERROR on failure
+	var status string
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
+	if status != "ERROR" {
+		t.Errorf("agent status = %q, want ERROR", status)
+	}
+}
+
+func TestUpdateRun_StaysRunningIfOtherRunActive(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	_, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug, status) VALUES ('a1', ?, 'Bot', 'bot', 'RUNNING')`, wsID)
+	if err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+
+	now := "2026-01-01T00:00:00Z"
+	// Two running runs for the same agent
+	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
+		t.Fatalf("insert run1: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES ('run2', 'a1', ?, 'ASSIGNMENT', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
+		t.Fatalf("insert run2: %v", err)
+	}
+
+	handler := NewInternalHandler(db, "test-token", logger)
+	hub := ws.NewHub(logger, nil)
+	handler.SetHub(hub)
+
+	// Complete run1, but run2 is still active
+	body := strings.NewReader(`{"status":"COMPLETED","exit_code":0}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/internal/runs/run1", body)
+	req.SetPathValue("runId", "run1")
+	rr := httptest.NewRecorder()
+	handler.UpdateRun(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	// Agent should stay RUNNING since run2 is still active
+	var status string
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
+	if status != "RUNNING" {
+		t.Errorf("agent status = %q, want RUNNING (other run still active)", status)
+	}
+}
+
+func TestUpdateRun_FailedStaysRunningIfOtherRunActive(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	_, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug, status) VALUES ('a1', ?, 'Bot', 'bot', 'RUNNING')`, wsID)
+	if err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+
+	now := "2026-01-01T00:00:00Z"
+	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
+		t.Fatalf("insert run1: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES ('run2', 'a1', ?, 'ASSIGNMENT', 'RUNNING', ?, ?)`, wsID, now, now); err != nil {
+		t.Fatalf("insert run2: %v", err)
+	}
+
+	handler := NewInternalHandler(db, "test-token", logger)
+	hub := ws.NewHub(logger, nil)
+	handler.SetHub(hub)
+
+	// Fail run1, but run2 is still active — agent should stay RUNNING, not ERROR
+	body := strings.NewReader(`{"status":"FAILED","error_message":"crash"}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/internal/runs/run1", body)
+	req.SetPathValue("runId", "run1")
+	rr := httptest.NewRecorder()
+	handler.UpdateRun(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var status string
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
+	if status != "RUNNING" {
+		t.Errorf("agent status = %q, want RUNNING (other run still active despite failure)", status)
+	}
+}
+
+func TestUpdateRun_CancelledSetsAgentIdle(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	_, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug, status) VALUES ('a1', ?, 'Bot', 'bot', 'RUNNING')`, wsID)
+	if err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+
+	now := "2026-01-01T00:00:00Z"
+	_, err = db.Exec(`INSERT INTO agent_runs (id, agent_id, workspace_id, trigger_type, status, started_at, created_at)
+		VALUES ('run1', 'a1', ?, 'USER', 'RUNNING', ?, ?)`, wsID, now, now)
+	if err != nil {
+		t.Fatalf("insert run: %v", err)
+	}
+
+	handler := NewInternalHandler(db, "test-token", logger)
+	hub := ws.NewHub(logger, nil)
+	handler.SetHub(hub)
+
+	body := strings.NewReader(`{"status":"CANCELLED"}`)
+	req := httptest.NewRequest("PATCH", "/api/v1/internal/runs/run1", body)
+	req.SetPathValue("runId", "run1")
+	rr := httptest.NewRecorder()
+	handler.UpdateRun(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body: %s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var status string
+	if err := db.QueryRow("SELECT status FROM agents WHERE id = 'a1'").Scan(&status); err != nil {
+		t.Fatalf("query agent status: %v", err)
+	}
+	if status != "IDLE" {
+		t.Errorf("agent status = %q, want IDLE", status)
+	}
+
+	var runStatus string
+	if err := db.QueryRow("SELECT status FROM agent_runs WHERE id = 'run1'").Scan(&runStatus); err != nil {
+		t.Fatalf("query run status: %v", err)
+	}
+	if runStatus != "CANCELLED" {
+		t.Errorf("run status = %q, want CANCELLED", runStatus)
 	}
 }

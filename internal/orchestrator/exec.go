@@ -192,9 +192,10 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 }
 
 // resolveEnvVar returns the correct env var name for a credential.
-// AI_CLI_TOKEN (OAuth setup tokens) use CLAUDE_CODE_OAUTH_TOKEN for Claude Code.
+// OAuth tokens (type AI_CLI_TOKEN or value prefix sk-ant-oat) must be set as
+// CLAUDE_CODE_OAUTH_TOKEN -- Claude Code ignores them in ANTHROPIC_API_KEY.
 func resolveEnvVar(cred *Credential) string {
-	if cred.Type == "AI_CLI_TOKEN" {
+	if cred.Type == "AI_CLI_TOKEN" || strings.HasPrefix(cred.PlainValue, "sk-ant-oat") {
 		return "CLAUDE_CODE_OAUTH_TOKEN"
 	}
 	return cred.EnvVarName

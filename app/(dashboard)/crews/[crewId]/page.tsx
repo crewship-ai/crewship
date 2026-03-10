@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
   ArrowLeft, AlertTriangle, Info, Paintbrush, RefreshCw, Loader2,
@@ -22,6 +22,7 @@ import { AvatarPicker } from "@/components/avatar-picker"
 import { AVATAR_STYLES } from "@/lib/agent-avatar"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { CrewMember } from "@/lib/types/crew"
 import { toast } from "sonner"
 import Link from "next/link"
@@ -71,42 +72,43 @@ export default function CrewDetailPage() {
   const [avatarStyle, setAvatarStyle] = useState("")
   const [applying, setApplying] = useState(false)
 
+  const fetchData = useCallback(async (silent = false) => {
+    if (!workspaceId) return
+    if (!silent) {
+      setLoading(true)
+      setError(null)
+    }
+    try {
+      const [crewRes, membersRes, agentsRes] = await Promise.all([
+        fetch(`/api/v1/crews/${params.crewId}?workspace_id=${workspaceId}`),
+        fetch(`/api/v1/crews/${params.crewId}/members?workspace_id=${workspaceId}`),
+        fetch(`/api/v1/agents?workspace_id=${workspaceId}&crew_id=${params.crewId}`),
+      ])
+
+      if (!crewRes.ok) { if (!silent) setError("Crew not found"); return }
+
+      const crewData = (await crewRes.json()) as Crew
+      setCrew(crewData)
+      setAvatarStyle(crewData.avatar_style ?? "")
+      if (membersRes.ok) setMembers(await membersRes.json())
+      if (agentsRes.ok) setAgents(await agentsRes.json())
+    } catch {
+      if (!silent) setError("Failed to load crew")
+    } finally {
+      if (!silent) setLoading(false)
+    }
+  }, [workspaceId, params.crewId])
+
   useEffect(() => {
     if (!workspaceId) {
       if (!wsLoading) setLoading(false)
       return
     }
-    let cancelled = false
-
-    async function fetchData() {
-      setLoading(true)
-      setError(null)
-      try {
-        const [crewRes, membersRes, agentsRes] = await Promise.all([
-          fetch(`/api/v1/crews/${params.crewId}?workspace_id=${workspaceId}`),
-          fetch(`/api/v1/crews/${params.crewId}/members?workspace_id=${workspaceId}`),
-          fetch(`/api/v1/agents?workspace_id=${workspaceId}&crew_id=${params.crewId}`),
-        ])
-
-        if (!crewRes.ok) { setError("Crew not found"); return }
-
-        const crewData = (await crewRes.json()) as Crew
-        if (!cancelled) {
-          setCrew(crewData)
-          setAvatarStyle(crewData.avatar_style ?? "")
-        }
-        if (membersRes.ok && !cancelled) setMembers(await membersRes.json())
-        if (agentsRes.ok && !cancelled) setAgents(await agentsRes.json())
-      } catch {
-        if (!cancelled) setError("Failed to load crew")
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
     fetchData()
-    return () => { cancelled = true }
-  }, [workspaceId, wsLoading, params.crewId])
+  }, [workspaceId, wsLoading, fetchData])
+
+  // Real-time: refetch agents when agent status changes
+  useRealtimeEvent("agent.status", useCallback(() => { fetchData(true) }, [fetchData]))
 
   async function patchCrew(body: Record<string, unknown>) {
     if (!workspaceId || !crew) return

@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { MissionStatusBadge } from "@/components/features/missions/mission-status-badge"
 import { CreateMissionDialog } from "@/components/features/missions/create-mission-dialog"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { Mission } from "@/lib/types/mission"
 
 interface CrewMissionsProps {
@@ -22,8 +23,9 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
-  const fetchMissions = useCallback(async (showRefresh = false) => {
-    if (showRefresh) setRefreshing(true)
+  const fetchMissions = useCallback(async (showRefresh = false, silent = false) => {
+    if (silent) { /* no loading state change */ }
+    else if (showRefresh) setRefreshing(true)
     else setLoading(true)
     try {
       const res = await fetch(
@@ -44,6 +46,10 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
   useEffect(() => {
     fetchMissions()
   }, [fetchMissions])
+
+  // Real-time: refetch when mission or task status changes
+  useRealtimeEvent("mission.updated", useCallback(() => { fetchMissions(false, true) }, [fetchMissions]))
+  useRealtimeEvent("task.updated", useCallback(() => { fetchMissions(false, true) }, [fetchMissions]))
 
   if (loading) {
     return (
