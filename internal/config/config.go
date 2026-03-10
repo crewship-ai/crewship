@@ -22,6 +22,11 @@ type Config struct {
 	Auth      AuthConfig      `yaml:"auth"`
 	LLMProxy  LLMProxyConfig  `yaml:"llm_proxy"`
 	Keeper    KeeperConfig    `yaml:"keeper"`
+	License   LicenseConfig   `yaml:"license"`
+}
+
+type LicenseConfig struct {
+	FilePath string `yaml:"file_path"`
 }
 
 type ServerConfig struct {
@@ -284,6 +289,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("KEEPER_MODEL"); v != "" {
 		cfg.Keeper.Model = v
+	}
+	if v := os.Getenv("CREWSHIP_LICENSE_FILE"); v != "" {
+		cfg.License.FilePath = v
 	}
 }
 

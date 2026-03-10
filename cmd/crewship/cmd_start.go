@@ -13,6 +13,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/provider/apple"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
@@ -87,6 +88,28 @@ var startCmd = &cobra.Command{
 			logger.Warn("failed to seed bundled skills", "error", err)
 		}
 
+		lic := license.New()
+		if cfg.License.FilePath != "" {
+			if err := lic.LoadFromFile(cfg.License.FilePath); err != nil {
+				logger.Warn("failed to load license file, using community defaults", "error", err, "path", cfg.License.FilePath)
+			} else {
+				c := lic.Claims()
+				logger.Info("license loaded",
+					"edition", c.Edition,
+					"licensee", c.LicenseeOrg,
+					"max_crews", c.MaxCrews,
+					"max_agents_per_crew", c.MaxAgents,
+					"max_members", c.MaxMembers,
+				)
+			}
+		} else {
+			logger.Info("no license file configured, using community defaults",
+				"max_crews", lic.MaxCrews(),
+				"max_agents_per_crew", lic.MaxAgentsPerCrew(),
+				"max_members", lic.MaxMembers(),
+			)
+		}
+
 		logger.Info("crewship starting",
 			"version", version,
 			"database", db.Path(),
@@ -118,6 +141,7 @@ var startCmd = &cobra.Command{
 		defer deps.Close()
 		deps.DebugLogs = debugBuffer
 		deps.DB = db.DB
+		deps.License = lic
 
 		webFS, err := web.FS()
 		if err != nil {

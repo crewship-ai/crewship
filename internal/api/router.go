@@ -9,6 +9,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -43,6 +44,7 @@ type Router struct {
 	keeperConfig     *config.KeeperConfig
 	keeperConvReader ConversationReader
 	allowSignup      bool
+	license          *license.License
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -147,6 +149,12 @@ func WithKeeperConversations(cr ConversationReader) RouterOption {
 	}
 }
 
+func WithLicense(lic *license.License) RouterOption {
+	return func(r *Router) {
+		r.license = lic
+	}
+}
+
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)
 }
@@ -155,6 +163,12 @@ func (r *Router) registerRoutes() {
 	ws := NewWorkspaceHandler(r.db, r.logger)
 	crews := NewCrewHandler(r.db, r.logger)
 	agents := NewAgentHandler(r.db, r.logger)
+
+	if r.license != nil {
+		ws.SetLicense(r.license)
+		crews.SetLicense(r.license)
+		agents.SetLicense(r.license)
+	}
 	creds := NewCredentialHandler(r.db, r.logger)
 	skills := NewSkillHandler(r.db, r.logger)
 	runs := NewRunHandler(r.db, r.logger)
@@ -171,6 +185,10 @@ func (r *Router) registerRoutes() {
 	// System info (auth required)
 	system := NewSystemHandler(r.logger)
 	r.mux.Handle("GET /api/v1/system/runtime", authed(http.HandlerFunc(system.Runtime)))
+
+	// License info (auth required)
+	licenseH := NewLicenseHandler(r.license)
+	r.mux.Handle("GET /api/v1/system/license", authed(http.HandlerFunc(licenseH.Status)))
 
 	// Keeper status (auth required)
 	keeperStatus := NewKeeperStatusHandler(r.db, r.keeperConfig, r.keeperGK, r.logger)
