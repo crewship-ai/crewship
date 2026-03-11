@@ -39,6 +39,7 @@ type Proxy struct {
 	scrubber  *scrubber.Scrubber
 	logger    *slog.Logger
 	transport http.RoundTripper
+	freeMode  bool
 }
 
 // ProxyConfig configures the sidecar proxy.
@@ -47,6 +48,7 @@ type ProxyConfig struct {
 	Allowlist *DomainAllowlist
 	Scrubber  *scrubber.Scrubber
 	Logger    *slog.Logger
+	FreeMode  bool // When true, skip domain allowlist checks (allow all domains)
 }
 
 // NewProxy creates a forward proxy with credential injection.
@@ -56,6 +58,7 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 		allowlist: cfg.Allowlist,
 		scrubber:  cfg.Scrubber,
 		logger:    cfg.Logger,
+		freeMode:  cfg.FreeMode,
 		transport: &http.Transport{
 			DialContext: (&net.Dialer{
 				Timeout:   10 * time.Second,
@@ -91,7 +94,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !p.allowlist.IsAllowed(host) {
+	if !p.freeMode && !p.allowlist.IsAllowed(host) {
 		p.logger.Warn("blocked request to non-allowed domain", "host", host)
 		http.Error(w, "domain not allowed", http.StatusForbidden)
 		return
@@ -160,7 +163,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	host := r.Host
 
-	if !p.allowlist.IsAllowed(host) {
+	if !p.freeMode && !p.allowlist.IsAllowed(host) {
 		p.logger.Warn("blocked CONNECT to non-allowed domain", "host", host)
 		http.Error(w, "domain not allowed", http.StatusForbidden)
 		return
@@ -197,11 +200,16 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) handleLocal(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/health" || r.URL.Path == "/healthz":
+		networkMode := "free"
+		if !p.freeMode {
+			networkMode = "restricted"
+		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","anthropic_creds":%d,"openai_creds":%d,"google_creds":%d}`,
+		fmt.Fprintf(w, `{"status":"ok","anthropic_creds":%d,"openai_creds":%d,"google_creds":%d,"network_mode":"%s"}`,
 			p.credStore.Count(ProviderAnthropic),
 			p.credStore.Count(ProviderOpenAI),
 			p.credStore.Count(ProviderGoogle),
+			networkMode,
 		)
 	case strings.HasPrefix(r.URL.Path, "/v1/"):
 		// Reverse-proxy to api.anthropic.com.

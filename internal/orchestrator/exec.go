@@ -274,24 +274,37 @@ func PreRunInstallPackages(
 	return nil
 }
 
-// isSidecarRunning checks if a sidecar proxy is already listening on port 9119
-// inside the given container. Used to avoid port conflicts when multiple agents
-// in the same crew container start concurrently.
-func isSidecarRunning(ctx context.Context, ctr provider.ContainerProvider, containerID string) bool {
+// sidecarHealth holds the parsed health response from a running sidecar.
+type sidecarHealth struct {
+	Status      string `json:"status"`
+	NetworkMode string `json:"network_mode"`
+}
+
+// checkSidecar checks if a sidecar proxy is already listening on port 9119
+// inside the given container. Returns nil if not running. If running, returns
+// its current health state including network_mode.
+func checkSidecar(ctx context.Context, ctr provider.ContainerProvider, containerID string) *sidecarHealth {
 	if ctr == nil {
-		return false
+		return nil
 	}
 	result, err := ctr.Exec(ctx, provider.ExecConfig{
 		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", "curl -sf http://127.0.0.1:9119/healthz 2>/dev/null || wget -q -O - http://127.0.0.1:9119/healthz 2>/dev/null"},
+		Cmd:         []string{"sh", "-c", "curl -sf http://127.0.0.1:9119/health 2>/dev/null || wget -q -O - http://127.0.0.1:9119/health 2>/dev/null"},
 		User:        "1002:1002",
 	})
 	if err != nil {
-		return false
+		return nil
 	}
 	output, _ := io.ReadAll(result.Reader)
 	result.Reader.Close()
-	return strings.Contains(string(output), "ok")
+	var h sidecarHealth
+	if err := json.Unmarshal(output, &h); err != nil {
+		return nil
+	}
+	if h.Status != "ok" {
+		return nil
+	}
+	return &h
 }
 
 // startSidecar launches the crewship-sidecar proxy inside the container.
@@ -328,6 +341,12 @@ type SidecarCrewMember struct {
 	ChatID    string `json:"chat_id,omitempty"`
 }
 
+// SidecarNetworkPolicy configures crew-level network access for the sidecar.
+type SidecarNetworkPolicy struct {
+	Mode           string   `json:"mode"`
+	AllowedDomains []string `json:"allowed_domains,omitempty"`
+}
+
 func startSidecar(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -336,6 +355,7 @@ func startSidecar(
 	memoryCfg *SidecarMemoryConfig,
 	ipcCfg *SidecarIPCConfig,
 	crewMembers []SidecarCrewMember,
+	networkPolicy *SidecarNetworkPolicy,
 	logger *slog.Logger,
 ) error {
 	type sidecarCred struct {
@@ -364,16 +384,18 @@ func startSidecar(
 
 	// Build the input payload (new object format that includes memory config and IPC config)
 	type sidecarInput struct {
-		Credentials []sidecarCred       `json:"credentials"`
-		Memory      *SidecarMemoryConfig `json:"memory,omitempty"`
-		IPC         *SidecarIPCConfig    `json:"ipc,omitempty"`
-		CrewMembers []SidecarCrewMember  `json:"crew_members,omitempty"`
+		Credentials   []sidecarCred          `json:"credentials"`
+		Memory        *SidecarMemoryConfig   `json:"memory,omitempty"`
+		IPC           *SidecarIPCConfig      `json:"ipc,omitempty"`
+		CrewMembers   []SidecarCrewMember    `json:"crew_members,omitempty"`
+		NetworkPolicy *SidecarNetworkPolicy  `json:"network_policy,omitempty"`
 	}
 	input := sidecarInput{
-		Credentials: sc,
-		Memory:      memoryCfg,
-		IPC:         ipcCfg,
-		CrewMembers: crewMembers,
+		Credentials:   sc,
+		Memory:        memoryCfg,
+		IPC:           ipcCfg,
+		CrewMembers:   crewMembers,
+		NetworkPolicy: networkPolicy,
 	}
 
 	credsJSON, err := json.Marshal(input)

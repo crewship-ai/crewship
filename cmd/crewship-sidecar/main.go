@@ -16,10 +16,11 @@ import (
 // sidecarInput is the JSON payload piped via stdin from the orchestrator.
 // It carries credentials, optional memory configuration, and IPC config for assignment routing.
 type sidecarInput struct {
-	Credentials []sidecar.Credential  `json:"credentials"`
-	Memory      *sidecar.MemoryConfig `json:"memory,omitempty"`
-	IPC         *sidecar.IPCConfig    `json:"ipc,omitempty"`
-	CrewMembers []sidecar.CrewMember  `json:"crew_members,omitempty"`
+	Credentials   []sidecar.Credential        `json:"credentials"`
+	Memory        *sidecar.MemoryConfig        `json:"memory,omitempty"`
+	IPC           *sidecar.IPCConfig           `json:"ipc,omitempty"`
+	CrewMembers   []sidecar.CrewMember         `json:"crew_members,omitempty"`
+	NetworkPolicy *sidecar.NetworkPolicyConfig `json:"network_policy,omitempty"`
 }
 
 func main() {
@@ -58,21 +59,31 @@ func main() {
 		input.Credentials = creds
 	}
 
+	if input.NetworkPolicy != nil && input.NetworkPolicy.Mode == "" {
+		input.NetworkPolicy.Mode = "free"
+	}
+	networkMode := "free"
+	if input.NetworkPolicy != nil {
+		networkMode = input.NetworkPolicy.Mode
+	}
+
 	logger.Info("sidecar starting",
 		"addr", *addr,
 		"credentials", len(input.Credentials),
 		"memory_enabled", input.Memory != nil && input.Memory.Enabled,
 		"ipc_enabled", input.IPC != nil,
 		"crew_members", len(input.CrewMembers),
+		"network_mode", networkMode,
 	)
 
 	srv := sidecar.NewServer(sidecar.ServerConfig{
-		Addr:        *addr,
-		Credentials: input.Credentials,
-		Memory:      input.Memory,
-		IPC:         input.IPC,
-		CrewMembers: input.CrewMembers,
-		Logger:      logger,
+		Addr:          *addr,
+		Credentials:   input.Credentials,
+		Memory:        input.Memory,
+		IPC:           input.IPC,
+		CrewMembers:   input.CrewMembers,
+		NetworkPolicy: input.NetworkPolicy,
+		Logger:        logger,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
