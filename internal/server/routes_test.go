@@ -59,6 +59,9 @@ func (m *mockContainer) Exec(_ context.Context, _ provider.ExecConfig) (*provide
 func (m *mockContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return false, 0, nil
 }
+func (m *mockContainer) CrewContainerName(slug string) string {
+	return "crewship-team-" + slug
+}
 
 func newTestServerWithDeps() *Server {
 	cfg := config.Default()

@@ -58,6 +58,9 @@ func (m *mockContainerExec) Exec(_ context.Context, _ provider.ExecConfig) (*pro
 func (m *mockContainerExec) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return false, m.exitCode, nil
 }
+func (m *mockContainerExec) CrewContainerName(slug string) string {
+	return "crewship-team-" + slug
+}
 
 // doKeeperExecute posts a keeper execute body and returns the recorder.
 func doKeeperExecute(h *KeeperHandler, body keeperExecuteBody) *httptest.ResponseRecorder {

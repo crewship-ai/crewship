@@ -1,18 +1,55 @@
 package api
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
 )
 
+// normalizeDomain extracts and validates a bare hostname from a domain entry.
+// It handles inputs like "https://api.github.com/path", "api.github.com:443",
+// and "api.github.com" — always returning just the hostname (lowercase, trimmed).
+// Returns empty string for invalid entries.
+func normalizeDomain(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	// If it looks like a URL (has scheme or slashes), parse it.
+	if strings.Contains(s, "://") || strings.HasPrefix(s, "//") {
+		u, err := url.Parse(s)
+		if err != nil {
+			return ""
+		}
+		s = u.Hostname()
+	}
+	// Strip port if present (e.g. "api.github.com:443")
+	host, _, err := net.SplitHostPort(s)
+	if err == nil {
+		s = host
+	}
+	s = strings.ToLower(s)
+	// Basic validation: must contain at least one dot, no spaces/newlines
+	if !strings.Contains(s, ".") || strings.ContainsAny(s, " \t\n\r") {
+		return ""
+	}
+	return s
+}
+
 type CrewHandler struct {
-	db      *sql.DB
-	logger  *slog.Logger
-	license *license.License
+	db         *sql.DB
+	logger     *slog.Logger
+	license    *license.License
+	socketPath string
 }
 
 func NewCrewHandler(db *sql.DB, logger *slog.Logger) *CrewHandler {
@@ -20,6 +57,37 @@ func NewCrewHandler(db *sql.DB, logger *slog.Logger) *CrewHandler {
 }
 
 func (h *CrewHandler) SetLicense(lic *license.License) { h.license = lic }
+
+func (h *CrewHandler) SetSocketPath(path string) { h.socketPath = path }
+
+// restartCrewContainer stops the crew container via IPC so it gets recreated
+// with the new network policy on the next agent run.
+func (h *CrewHandler) restartCrewContainer(crewID string) {
+	if h.socketPath == "" {
+		return
+	}
+	client := &http.Client{
+		Timeout: 60 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", h.socketPath)
+			},
+		},
+	}
+	url := fmt.Sprintf("http://crewshipd/crews/%s/container/stop", crewID)
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		h.logger.Warn("failed to build container stop request", "error", err)
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		h.logger.Debug("container stop via IPC (may not be running)", "crew_id", crewID, "error", err)
+		return
+	}
+	resp.Body.Close()
+	h.logger.Info("crew container stopped after network policy change", "crew_id", crewID, "status", resp.StatusCode)
+}
 
 type crewCountResponse struct {
 	Agents  int `json:"agents"`
@@ -37,6 +105,8 @@ type crewResponse struct {
 	AvatarStyle       *string          `json:"avatar_style"`
 	ContainerMemoryMB int              `json:"container_memory_mb"`
 	ContainerCPUs     float64          `json:"container_cpus"`
+	NetworkMode       string           `json:"network_mode"`
+	AllowedDomains    []string         `json:"allowed_domains"`
 	CreatedAt         string           `json:"created_at"`
 	UpdatedAt         string           `json:"updated_at"`
 	Count             crewCountResponse `json:"_count"`
@@ -51,7 +121,8 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.created_at, c.updated_at,
+			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
@@ -68,13 +139,16 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	var result []crewResponse
 	for rows.Next() {
 		var c crewResponse
+		var allowedDomainsJSON *string
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 			&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
+			&c.NetworkMode, &allowedDomainsJSON,
 			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
 			h.logger.Error("scan crew", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
+		c.AllowedDomains = parseAllowedDomains(allowedDomainsJSON)
 		result = append(result, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -91,11 +165,13 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type createCrewRequest struct {
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	Description *string `json:"description"`
-	Color       *string `json:"color"`
-	Icon        *string `json:"icon"`
+	Name           string   `json:"name"`
+	Slug           string   `json:"slug"`
+	Description    *string  `json:"description"`
+	Color          *string  `json:"color"`
+	Icon           *string  `json:"icon"`
+	NetworkMode    *string  `json:"network_mode"`
+	AllowedDomains []string `json:"allowed_domains"`
 }
 
 func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -147,13 +223,50 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate and prepare network policy fields
+	networkMode := "free"
+	var allowedDomainsDB *string
+	if req.NetworkMode != nil && *req.NetworkMode != "" {
+		mode := strings.ToLower(*req.NetworkMode)
+		if mode != "free" && mode != "restricted" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "network_mode must be 'free' or 'restricted'"})
+			return
+		}
+		networkMode = mode
+	}
+	// Only persist allowed_domains when mode is restricted;
+	// free mode ignores any supplied domains to avoid hidden DB state.
+	var allowedDomainsOut []string
+	if networkMode == "restricted" && len(req.AllowedDomains) > 0 {
+		normalized := make([]string, 0, len(req.AllowedDomains))
+		for _, d := range req.AllowedDomains {
+			h := normalizeDomain(d)
+			if h == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid domain: %q", d)})
+				return
+			}
+			normalized = append(normalized, h)
+		}
+		domainsJSON, err := json.Marshal(normalized)
+		if err != nil {
+			h.logger.Error("marshal allowed_domains", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		s := string(domainsJSON)
+		allowedDomainsDB = &s
+		allowedDomainsOut = normalized
+	} else {
+		allowedDomainsOut = []string{}
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	crewID := generateCUID()
 
 	_, err = h.db.ExecContext(r.Context(),
-		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, now, now)
+		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, network_mode, allowed_domains, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, networkMode, allowedDomainsDB, now, now)
 	if err != nil {
 		h.logger.Error("insert crew", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -170,6 +283,8 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Icon:              req.Icon,
 		ContainerMemoryMB: 4096,
 		ContainerCPUs:     2.0,
+		NetworkMode:       networkMode,
+		AllowedDomains:    allowedDomainsOut,
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	})
@@ -185,15 +300,18 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var c crewResponse
+	var allowedDomainsJSON *string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.created_at, c.updated_at,
+			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
 	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
+		&c.NetworkMode, &allowedDomainsJSON,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -205,18 +323,21 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	c.AllowedDomains = parseAllowedDomains(allowedDomainsJSON)
 	writeJSON(w, http.StatusOK, c)
 }
 
 type updateCrewRequest struct {
-	Name              *string  `json:"name"`
-	Slug              *string  `json:"slug"`
-	Description       *string  `json:"description"`
-	Color             *string  `json:"color"`
-	Icon              *string  `json:"icon"`
-	AvatarStyle       *string  `json:"avatar_style"`
-	ContainerMemoryMB *int     `json:"container_memory_mb"`
-	ContainerCPUs     *float64 `json:"container_cpus"`
+	Name              *string   `json:"name"`
+	Slug              *string   `json:"slug"`
+	Description       *string   `json:"description"`
+	Color             *string   `json:"color"`
+	Icon              *string   `json:"icon"`
+	AvatarStyle       *string   `json:"avatar_style"`
+	ContainerMemoryMB *int      `json:"container_memory_mb"`
+	ContainerCPUs     *float64  `json:"container_cpus"`
+	NetworkMode       *string   `json:"network_mode"`
+	AllowedDomains    *[]string `json:"allowed_domains"`
 }
 
 func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -318,6 +439,52 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		query += ", container_cpus = ?"
 		args = append(args, *req.ContainerCPUs)
 	}
+	// Track whether the resolved mode is free — if so, always clear allowed_domains.
+	updatedModeFree := false
+	if req.NetworkMode != nil {
+		mode := strings.ToLower(*req.NetworkMode)
+		if mode != "free" && mode != "restricted" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "network_mode must be 'free' or 'restricted'"})
+			return
+		}
+		query += ", network_mode = ?"
+		args = append(args, mode)
+		if mode == "free" {
+			updatedModeFree = true
+			query += ", allowed_domains = NULL"
+		}
+	}
+	// If mode was not explicitly set in this request, check the current DB mode.
+	// Skip persisting allowed_domains when effective mode is free to prevent hidden state.
+	if !updatedModeFree && req.NetworkMode == nil && req.AllowedDomains != nil {
+		var currentMode string
+		if err := h.db.QueryRowContext(r.Context(), "SELECT network_mode FROM crews WHERE id = ?", crewID).Scan(&currentMode); err == nil && currentMode == "free" {
+			updatedModeFree = true
+		}
+	}
+	if !updatedModeFree && req.AllowedDomains != nil {
+		if len(*req.AllowedDomains) == 0 {
+			query += ", allowed_domains = NULL"
+		} else {
+			normalized := make([]string, 0, len(*req.AllowedDomains))
+			for _, d := range *req.AllowedDomains {
+				h := normalizeDomain(d)
+				if h == "" {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid domain: %q", d)})
+					return
+				}
+				normalized = append(normalized, h)
+			}
+			domainsJSON, err := json.Marshal(normalized)
+			if err != nil {
+				h.logger.Error("marshal allowed_domains", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
+			query += ", allowed_domains = ?"
+			args = append(args, string(domainsJSON))
+		}
+	}
 
 	query += " WHERE id = ?"
 	args = append(args, crewID)
@@ -331,15 +498,18 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Return updated crew
 	var c crewResponse
+	var updatedDomainsJSON *string
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.created_at, c.updated_at,
+			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
 		WHERE c.id = ? AND c.deleted_at IS NULL
 	`, crewID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
+		&c.NetworkMode, &updatedDomainsJSON,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		h.logger.Error("get crew after update", "error", err)
@@ -347,7 +517,15 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	c.AllowedDomains = parseAllowedDomains(updatedDomainsJSON)
 	writeJSON(w, http.StatusOK, c)
+
+	// Restart crew container when network policy changes so the sidecar
+	// picks up the new config on the next agent run. Runs after response
+	// is sent to avoid SQLite lock contention.
+	if req.NetworkMode != nil || req.AllowedDomains != nil {
+		go h.restartCrewContainer(crewID)
+	}
 }
 
 func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -693,4 +871,15 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 		"updated": affected,
 		"style":   body.AvatarStyle,
 	})
+}
+
+func parseAllowedDomains(raw *string) []string {
+	if raw == nil || *raw == "" {
+		return []string{}
+	}
+	var domains []string
+	if err := json.Unmarshal([]byte(*raw), &domains); err != nil {
+		return []string{}
+	}
+	return domains
 }
