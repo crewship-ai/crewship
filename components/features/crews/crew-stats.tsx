@@ -19,7 +19,7 @@ export function CrewStats({ agentCount, memberCount, memoryMb, cpus, ttlHours }:
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground">
               <Bot className="h-4 w-4" />
-              <span className="text-xs">Agents</span>
+              <span className="text-label">Agents</span>
             </div>
             <p className="text-2xl font-bold mt-1">{agentCount}</p>
           </CardContent>
@@ -28,7 +28,7 @@ export function CrewStats({ agentCount, memberCount, memoryMb, cpus, ttlHours }:
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground">
               <Users className="h-4 w-4" />
-              <span className="text-xs">Members</span>
+              <span className="text-label">Members</span>
             </div>
             <p className="text-2xl font-bold mt-1">{memberCount}</p>
           </CardContent>
@@ -37,7 +37,7 @@ export function CrewStats({ agentCount, memberCount, memoryMb, cpus, ttlHours }:
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground">
               <HardDrive className="h-4 w-4" />
-              <span className="text-xs">Memory</span>
+              <span className="text-label">Memory</span>
             </div>
             <p className="text-2xl font-bold mt-1">{memoryMb} MB</p>
           </CardContent>
@@ -46,7 +46,7 @@ export function CrewStats({ agentCount, memberCount, memoryMb, cpus, ttlHours }:
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground">
               <Cpu className="h-4 w-4" />
-              <span className="text-xs">CPUs</span>
+              <span className="text-label">CPUs</span>
             </div>
             <p className="text-2xl font-bold mt-1">{cpus}</p>
           </CardContent>
@@ -54,7 +54,7 @@ export function CrewStats({ agentCount, memberCount, memoryMb, cpus, ttlHours }:
       </div>
 
       {ttlHours != null && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2 text-body text-muted-foreground">
           <Clock className="h-4 w-4" />
           <span>Container TTL: {ttlHours}h</span>
         </div>

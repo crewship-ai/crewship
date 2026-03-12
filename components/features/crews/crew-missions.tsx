@@ -65,8 +65,8 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
   if (loading) {
     return (
       <div>
-        <h2 className="text-base font-semibold mb-3">Missions</h2>
-        <div className="text-sm text-muted-foreground">Loading missions...</div>
+        <h2 className="text-default font-semibold mb-3">Missions</h2>
+        <div className="text-body text-muted-foreground">Loading missions...</div>
       </div>
     )
   }
@@ -74,9 +74,9 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Missions</h2>
+        <h2 className="text-default font-semibold">Missions</h2>
         <div className="flex items-center gap-2">
-          <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
+          <span role="status" aria-live="polite" className="text-label text-muted-foreground">
             {refreshing ? "Updating..." : "Live"}
           </span>
           {canCreate && (
@@ -94,8 +94,8 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <Target className="h-8 w-8 text-muted-foreground/50" />
           <div>
-            <p className="text-sm text-muted-foreground">No missions yet.</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">
+            <p className="text-body text-muted-foreground">No missions yet.</p>
+            <p className="text-label text-muted-foreground/70 mt-1">
               Missions organize complex tasks into trackable subtasks for the crew.
             </p>
           </div>
@@ -119,15 +119,15 @@ export function CrewMissions({ crewId, workspaceId, canCreate, leadAgents }: Cre
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <h3 className="text-sm font-medium truncate">{mission.title}</h3>
+                          <h3 className="text-body font-medium truncate">{mission.title}</h3>
                           <MissionStatusBadge status={mission.status} />
                         </div>
                         <div className="flex items-center gap-3 mt-1">
-                          <span className="text-xs text-muted-foreground">
+                          <span className="text-label text-muted-foreground">
                             Lead: @{mission.lead_agent_slug}
                           </span>
                           {stats && stats.total > 0 && (
-                            <span className="text-xs text-muted-foreground">
+                            <span className="text-label text-muted-foreground">
                               {stats.completed}/{stats.total} tasks
                             </span>
                           )}

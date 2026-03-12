@@ -63,8 +63,8 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
   if (tasks.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-8 text-center">
-        <p className="text-sm text-muted-foreground">No tasks defined yet.</p>
-        <p className="text-xs text-muted-foreground/70">
+        <p className="text-body text-muted-foreground">No tasks defined yet.</p>
+        <p className="text-label text-muted-foreground/70">
           Tasks will appear here when the lead agent plans the mission.
         </p>
       </div>
@@ -117,14 +117,14 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
                         <TableCell>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <span className="text-sm line-clamp-1">{task.title}</span>
+                              <span className="text-body line-clamp-1">{task.title}</span>
                             </TooltipTrigger>
                             <TooltipContent className="max-w-sm">
                               <p className="whitespace-pre-wrap">{task.description ?? task.title}</p>
                             </TooltipContent>
                           </Tooltip>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="text-body text-muted-foreground">
                           {task.agent_slug ? `@${task.agent_slug}` : "—"}
                         </TableCell>
                         <TableCell>
@@ -138,22 +138,22 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
                             <TaskStatusBadge status={task.status} />
                           </div>
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="text-label text-muted-foreground">
                           {formatTime(task.started_at)}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground tabular-nums">
+                        <TableCell className="text-label text-muted-foreground tabular-nums">
                           {task.status === "IN_PROGRESS" && task.started_at
                             ? <LiveDuration startedAt={task.started_at} />
                             : formatDuration(task.started_at, task.completed_at, task.duration_ms)}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="text-label text-muted-foreground">
                           {formatCost(task.estimated_cost)}
                         </TableCell>
                       </TableRow>
                       {isExpanded && hasDetail && (
                         <TableRow>
                           <TableCell colSpan={7} className="bg-muted/30">
-                            <div className="text-sm whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
+                            <div className="text-body whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
                               {task.error_message && (
                                 <div className="text-destructive mb-2">
                                   <span className="font-medium">Error: </span>
@@ -209,7 +209,7 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
               )}
             </div>
           )}
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <div className="flex items-center gap-4 text-label text-muted-foreground">
             <span><AnimatedNumber value={taskStats.completed} /> / {taskStats.total} tasks</span>
             {taskStats.in_progress > 0 && (
               <span className="text-blue-600 flex items-center gap-1">

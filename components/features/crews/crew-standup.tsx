@@ -54,8 +54,8 @@ export function CrewStandup({ crewId, workspaceId }: CrewStandupProps) {
   if (loading) {
     return (
       <div>
-        <h2 className="text-base font-semibold mb-3">Standup Summary</h2>
-        <div className="text-sm text-muted-foreground">Loading standup...</div>
+        <h2 className="text-default font-semibold mb-3">Standup Summary</h2>
+        <div className="text-body text-muted-foreground">Loading standup...</div>
       </div>
     )
   }
@@ -65,7 +65,7 @@ export function CrewStandup({ crewId, workspaceId }: CrewStandupProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Standup Summary (last 24h)</h2>
+        <h2 className="text-default font-semibold">Standup Summary (last 24h)</h2>
         <Button
           variant="outline"
           size="sm"
@@ -82,8 +82,8 @@ export function CrewStandup({ crewId, workspaceId }: CrewStandupProps) {
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <Sun className="h-8 w-8 text-muted-foreground/50" />
           <div>
-            <p className="text-sm text-muted-foreground">No activity in the last 24 hours.</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">
+            <p className="text-body text-muted-foreground">No activity in the last 24 hours.</p>
+            <p className="text-label text-muted-foreground/70 mt-1">
               Standup summaries appear after agents interact with each other.
             </p>
           </div>
@@ -91,13 +91,13 @@ export function CrewStandup({ crewId, workspaceId }: CrewStandupProps) {
       ) : (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <CardTitle className="text-body font-medium flex items-center gap-2">
               <Sun className="h-4 w-4" />
               Crew Activity Report
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <pre className="text-sm whitespace-pre-wrap font-sans">{standup}</pre>
+            <pre className="text-body whitespace-pre-wrap font-sans">{standup}</pre>
           </CardContent>
         </Card>
       )}

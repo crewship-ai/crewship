@@ -359,7 +359,7 @@ export default function AdminPage() {
             ].map((s) => (
               <Card key={s.label}>
                 <CardContent className="p-4">
-                  <div className="text-[10px] text-muted-foreground uppercase font-medium">{s.label}</div>
+                  <div className="text-micro text-muted-foreground uppercase font-medium">{s.label}</div>
                   <div className={cn("text-2xl font-bold mt-1", s.color)}>{s.value}</div>
                 </CardContent>
               </Card>
@@ -468,14 +468,14 @@ export default function AdminPage() {
                       <TableCell>
                         <div>
                           <div className="text-sm font-medium">{u.full_name ?? "—"}</div>
-                          <div className="text-[10px] text-muted-foreground">{u.email}</div>
+                          <div className="text-micro text-muted-foreground">{u.email}</div>
                         </div>
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {u.workspace?.name ?? "—"}
                       </TableCell>
                       <TableCell>
-                        {u.role && <Badge variant="outline" className="text-[10px]">{u.role}</Badge>}
+                        {u.role && <Badge variant="outline" className="text-micro">{u.role}</Badge>}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
                         {new Date(u.created_at).toLocaleDateString()}
@@ -653,7 +653,7 @@ export default function AdminPage() {
                 ].map((s) => (
                   <Card key={s.label}>
                     <CardContent className="p-4">
-                      <div className="text-[10px] text-muted-foreground uppercase font-medium">{s.label}</div>
+                      <div className="text-micro text-muted-foreground uppercase font-medium">{s.label}</div>
                       <div className={cn("text-2xl font-bold mt-1", s.color)}>{s.value}</div>
                     </CardContent>
                   </Card>
@@ -665,7 +665,7 @@ export default function AdminPage() {
                 <div className="flex items-center gap-2">
                   <Radio className={cn("h-3.5 w-3.5", keeperWsStatus === "connected" ? "text-emerald-500" : "text-muted-foreground")} />
                   <h4 className="text-xs font-medium">Live Activity</h4>
-                  <span className={cn("text-[10px]",
+                  <span className={cn("text-micro",
                     keeperWsStatus === "connected" ? "text-emerald-600" : "text-muted-foreground"
                   )}>
                     {keeperWsStatus === "connected" ? "Streaming" : keeperWsStatus === "connecting" ? "Connecting..." : "Disconnected"}
@@ -683,7 +683,7 @@ export default function AdminPage() {
                           <div key={evt.request_id} className="flex items-start gap-2 py-1.5 border-b last:border-0">
                             <Badge
                               variant="outline"
-                              className={cn("text-[10px] shrink-0 mt-0.5",
+                              className={cn("text-micro shrink-0 mt-0.5",
                                 evt.decision === "ALLOW" && "bg-emerald-50 text-emerald-700 border-emerald-200",
                                 evt.decision === "DENY" && "bg-red-50 text-red-700 border-red-200",
                                 evt.decision === "ESCALATE" && "bg-amber-50 text-amber-700 border-amber-200",
@@ -697,15 +697,15 @@ export default function AdminPage() {
                                 <span className="text-muted-foreground"> requested </span>
                                 <span className="font-mono text-[10px]">{evt.credential_name}</span>
                                 {evt.request_type === "execute" && (
-                                  <Badge variant="outline" className="ml-1 text-[9px] py-0">exec</Badge>
+                                  <Badge variant="outline" className="ml-1 text-micro py-0">exec</Badge>
                                 )}
                               </div>
-                              <div className="text-[10px] text-muted-foreground truncate">{evt.intent}</div>
+                              <div className="text-micro text-muted-foreground truncate">{evt.intent}</div>
                               {evt.reason && (
-                                <div className="text-[10px] text-muted-foreground/70 truncate italic">{evt.reason}</div>
+                                <div className="text-micro text-muted-foreground/70 truncate italic">{evt.reason}</div>
                               )}
                             </div>
-                            <div className="text-[10px] text-muted-foreground shrink-0">
+                            <div className="text-micro text-muted-foreground shrink-0">
                               {evt.risk_score}/10
                             </div>
                           </div>
@@ -745,14 +745,14 @@ export default function AdminPage() {
                             <TableCell className="text-xs font-medium">{entry.agent_name}</TableCell>
                             <TableCell className="text-xs text-muted-foreground">{entry.credential_name}</TableCell>
                             <TableCell>
-                              <Badge variant="outline" className="text-[10px]">
+                              <Badge variant="outline" className="text-micro">
                                 {entry.request_type === "execute" ? "Execute" : "Access"}
                               </Badge>
                             </TableCell>
                             <TableCell>
                               <Badge
                                 variant="outline"
-                                className={cn("text-[10px]",
+                                className={cn("text-micro",
                                   entry.decision === "ALLOW" && "bg-emerald-50 text-emerald-700 border-emerald-200",
                                   entry.decision === "DENY" && "bg-red-50 text-red-700 border-red-200",
                                   entry.decision === "ESCALATE" && "bg-amber-50 text-amber-700 border-amber-200",
@@ -790,18 +790,18 @@ export default function AdminPage() {
                       {/* Summary */}
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Agent</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium">Agent</div>
                           <div className="text-xs font-medium mt-0.5">{selectedKeeperEntry.agent_name}</div>
                         </div>
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Credential</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium">Credential</div>
                           <div className="text-xs font-mono mt-0.5">{selectedKeeperEntry.credential_name}</div>
                         </div>
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Decision</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium">Decision</div>
                           <Badge
                             variant="outline"
-                            className={cn("text-[10px] mt-0.5",
+                            className={cn("text-micro mt-0.5",
                               selectedKeeperEntry.decision === "ALLOW" && "bg-emerald-50 text-emerald-700 border-emerald-200",
                               selectedKeeperEntry.decision === "DENY" && "bg-red-50 text-red-700 border-red-200",
                               selectedKeeperEntry.decision === "ESCALATE" && "bg-amber-50 text-amber-700 border-amber-200",
@@ -811,29 +811,29 @@ export default function AdminPage() {
                           </Badge>
                         </div>
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Risk Score</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium">Risk Score</div>
                           <div className="text-xs font-medium mt-0.5">{selectedKeeperEntry.risk_score != null ? `${selectedKeeperEntry.risk_score}/10` : "—"}</div>
                         </div>
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Type</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium">Type</div>
                           <div className="text-xs mt-0.5">{selectedKeeperEntry.request_type === "execute" ? "Execute" : "Access"}</div>
                         </div>
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium">Time</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium">Time</div>
                           <div className="text-xs text-muted-foreground mt-0.5">{new Date(selectedKeeperEntry.created_at).toLocaleString()}</div>
                         </div>
                       </div>
 
                       {/* Intent */}
                       <div>
-                        <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Intent</div>
+                        <div className="text-micro text-muted-foreground uppercase font-medium mb-1">Intent</div>
                         <div className="text-xs bg-muted/50 rounded-md p-3">{redactSecrets(selectedKeeperEntry.intent)}</div>
                       </div>
 
                       {/* Reason */}
                       {selectedKeeperEntry.reason && (
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Reason</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium mb-1">Reason</div>
                           <div className="text-xs bg-muted/50 rounded-md p-3">{redactSecrets(selectedKeeperEntry.reason)}</div>
                         </div>
                       )}
@@ -841,7 +841,7 @@ export default function AdminPage() {
                       {/* Command (execute requests) */}
                       {selectedKeeperEntry.command && (
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Command</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium mb-1">Command</div>
                           <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto font-mono">{redactSecrets(selectedKeeperEntry.command)}</pre>
                         </div>
                       )}
@@ -849,12 +849,12 @@ export default function AdminPage() {
                       {/* Ollama Prompt */}
                       {selectedKeeperEntry.ollama_prompt ? (
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Ollama Prompt (sent to LLM)</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium mb-1">Ollama Prompt (sent to LLM)</div>
                           <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">{redactSecrets(selectedKeeperEntry.ollama_prompt)}</pre>
                         </div>
                       ) : (
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Ollama Prompt</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium mb-1">Ollama Prompt</div>
                           <div className="text-xs text-muted-foreground italic bg-muted/50 rounded-md p-3">Not available (L1 auto-allow or pre-observability request)</div>
                         </div>
                       )}
@@ -862,19 +862,19 @@ export default function AdminPage() {
                       {/* Ollama Raw Response */}
                       {selectedKeeperEntry.ollama_raw_response ? (
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Ollama Raw Response</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium mb-1">Ollama Raw Response</div>
                           <pre className="text-[11px] bg-zinc-900 text-zinc-100 rounded-md p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">{redactSecrets(selectedKeeperEntry.ollama_raw_response)}</pre>
                         </div>
                       ) : (
                         <div>
-                          <div className="text-[10px] text-muted-foreground uppercase font-medium mb-1">Ollama Raw Response</div>
+                          <div className="text-micro text-muted-foreground uppercase font-medium mb-1">Ollama Raw Response</div>
                           <div className="text-xs text-muted-foreground italic bg-muted/50 rounded-md p-3">Not available (L1 auto-allow or pre-observability request)</div>
                         </div>
                       )}
 
                       {/* Request ID */}
                       <div className="pt-3 border-t">
-                        <div className="text-[10px] text-muted-foreground">Request ID: <span className="font-mono">{selectedKeeperEntry.id}</span></div>
+                        <div className="text-micro text-muted-foreground">Request ID: <span className="font-mono">{selectedKeeperEntry.id}</span></div>
                       </div>
                     </div>
                   )}
@@ -907,7 +907,7 @@ export default function AdminPage() {
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4 text-amber-700" />
             <span className="text-xs font-semibold">Admin Console</span>
-            <Badge variant="outline" className="text-[9px] ml-auto bg-amber-50 text-amber-700 border-amber-200">
+            <Badge variant="outline" className="text-micro ml-auto bg-amber-50 text-amber-700 border-amber-200">
               OWNER
             </Badge>
           </div>
@@ -916,7 +916,7 @@ export default function AdminPage() {
           {sections.map((s, i) => {
             if (s.type === "section") {
               return (
-                <div key={i} className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider px-3 pt-3 pb-1">
+                <div key={i} className="text-micro font-semibold text-muted-foreground uppercase tracking-wider px-3 pt-3 pb-1">
                   {s.label}
                 </div>
               )

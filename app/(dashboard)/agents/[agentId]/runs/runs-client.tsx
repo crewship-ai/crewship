@@ -111,7 +111,7 @@ export function RunsPageClient() {
       <div className="p-4 sm:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
-          <p className="text-sm">{error}</p>
+          <p className="text-body">{error}</p>
         </div>
       </div>
     )
@@ -126,15 +126,15 @@ export function RunsPageClient() {
       {runs.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">No runs yet</p>
-          <p className="text-xs text-muted-foreground mt-1">Runs will appear here when the agent is triggered.</p>
+          <p className="text-body font-medium text-muted-foreground">No runs yet</p>
+          <p className="text-label text-muted-foreground mt-1">Runs will appear here when the agent is triggered.</p>
         </div>
       ) : (
         <>
           <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-body">
               <thead>
-                <tr className="border-b bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
+                <tr className="border-b bg-muted/50 text-label text-muted-foreground uppercase tracking-wide">
                   <th className="text-left px-4 sm:px-6 py-3 font-medium">Status</th>
                   <th className="text-left px-4 sm:px-6 py-3 font-medium">Trigger</th>
                   <th className="text-left px-4 sm:px-6 py-3 font-medium">Duration</th>
@@ -148,7 +148,7 @@ export function RunsPageClient() {
                   return (
                     <tr key={r.id} className="hover:bg-muted/50">
                       <td className="px-4 sm:px-6 py-3">
-                        <Badge variant="secondary" className={`${statusStyle.class} text-xs gap-1.5`}>
+                        <Badge variant="secondary" className={`${statusStyle.class} text-label gap-1.5`}>
                           {statusStyle.pulse && (
                             <span className="relative flex h-1.5 w-1.5">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
@@ -159,7 +159,7 @@ export function RunsPageClient() {
                         </Badge>
                       </td>
                       <td className="px-4 sm:px-6 py-3">
-                        <Badge variant="secondary" className={`${TRIGGER_STYLES[r.trigger_type] ?? ""} text-xs`}>
+                        <Badge variant="secondary" className={`${TRIGGER_STYLES[r.trigger_type] ?? ""} text-label`}>
                           {r.trigger_type}
                         </Badge>
                       </td>
@@ -168,12 +168,12 @@ export function RunsPageClient() {
                           ? <LiveDuration startedAt={r.started_at} />
                           : formatDuration(r.started_at, r.finished_at)}
                       </td>
-                      <td className="px-4 sm:px-6 py-3 text-xs text-muted-foreground hidden sm:table-cell">
+                      <td className="px-4 sm:px-6 py-3 text-label text-muted-foreground hidden sm:table-cell">
                         {formatRelativeTime(r.started_at)}
                       </td>
                       <td className="px-4 sm:px-6 py-3 hidden md:table-cell">
                         {r.status === "FAILED" && r.error_message && (
-                          <span className="text-xs text-red-600 dark:text-red-400 truncate block max-w-[200px]" title={r.error_message}>
+                          <span className="text-label text-red-600 dark:text-red-400 truncate block max-w-[200px]" title={r.error_message}>
                             {r.error_message}
                           </span>
                         )}
@@ -186,7 +186,7 @@ export function RunsPageClient() {
           </div>
 
           {/* Footer */}
-          <p className="text-xs text-muted-foreground">
+          <p className="text-label text-muted-foreground">
             {runs.length} run{runs.length !== 1 ? "s" : ""} total
             {completedCount > 0 && ` · ${completedCount} completed`}
             {runningCount > 0 && ` · ${runningCount} running`}

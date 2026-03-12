@@ -144,7 +144,7 @@ export function DebugPageClient() {
       <div className="p-4 sm:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
-          <p className="text-sm">{error ?? "Failed to load debug data"}</p>
+          <p className="text-body">{error ?? "Failed to load debug data"}</p>
         </div>
       </div>
     )
@@ -166,8 +166,8 @@ export function DebugPageClient() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-medium">Debug & Diagnostics</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <h2 className="text-body font-medium">Debug & Diagnostics</h2>
+          <p className="text-label text-muted-foreground mt-0.5">
             Engine service status, agent runtime, and live logs
           </p>
         </div>
@@ -175,7 +175,7 @@ export function DebugPageClient() {
           <Button
             variant={autoRefresh ? "default" : "outline"}
             size="sm"
-            className="text-xs"
+            className="text-label"
             onClick={() => setAutoRefresh((v) => !v)}
           >
             {autoRefresh ? "Polling..." : "Auto-refresh"}
@@ -183,7 +183,7 @@ export function DebugPageClient() {
           <Button
             variant="outline"
             size="sm"
-            className="gap-1.5 text-xs"
+            className="gap-1.5 text-label"
             onClick={handleRefresh}
             disabled={refreshing}
           >
@@ -198,7 +198,7 @@ export function DebugPageClient() {
         {/* Engine health */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium flex items-center gap-2">
+            <CardTitle className="text-label font-medium flex items-center gap-2">
               <Server className="h-3.5 w-3.5" />
               Engine
             </CardTitle>
@@ -206,30 +206,30 @@ export function DebugPageClient() {
           <CardContent className="space-y-2">
             <div className="flex items-center gap-2">
               <StatusIcon ok={engineOk} />
-              <span className="text-sm font-medium">
+              <span className="text-body font-medium">
                 {engineOk ? "Running" : "Unreachable"}
               </span>
             </div>
             {engineOk && data.crewshipd.uptime && (
-              <div className="flex justify-between text-xs">
+              <div className="flex justify-between text-label">
                 <span className="text-muted-foreground">Uptime</span>
                 <span className="font-mono">{data.crewshipd.uptime}</span>
               </div>
             )}
             {engineOk && data.crewshipd.connections !== undefined && (
-              <div className="flex justify-between text-xs">
+              <div className="flex justify-between text-label">
                 <span className="text-muted-foreground">WS Connections</span>
                 <span className="font-mono">{data.crewshipd.connections}</span>
               </div>
             )}
             {engineOk && data.crewshipd.started_at && (
-              <div className="flex justify-between text-xs">
+              <div className="flex justify-between text-label">
                 <span className="text-muted-foreground">Started</span>
-                <span className="font-mono text-[10px]">{formatTime(data.crewshipd.started_at)}</span>
+                <span className="font-mono text-micro">{formatTime(data.crewshipd.started_at)}</span>
               </div>
             )}
             {!engineOk && (
-              <p className="text-xs text-destructive">
+              <p className="text-label text-destructive">
                 Cannot connect to the Engine. Make sure it is running.
               </p>
             )}
@@ -239,7 +239,7 @@ export function DebugPageClient() {
         {/* Agent runtime */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium flex items-center gap-2">
+            <CardTitle className="text-label font-medium flex items-center gap-2">
               <Cpu className="h-3.5 w-3.5" />
               Agent Runtime
             </CardTitle>
@@ -248,43 +248,43 @@ export function DebugPageClient() {
             <div className="flex items-center gap-2">
               <Badge
                 variant="secondary"
-                className={`text-xs ${runtimeStatus === "running" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400" : runtimeStatus === "error" ? "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400" : ""}`}
+                className={`text-label ${runtimeStatus === "running" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400" : runtimeStatus === "error" ? "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400" : ""}`}
               >
                 {runtimeStatus}
               </Badge>
             </div>
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-label">
               <span className="text-muted-foreground">DB Status</span>
-              <Badge variant="outline" className="text-[10px]">{data.agent.db_status}</Badge>
+              <Badge variant="outline" className="text-micro">{data.agent.db_status}</Badge>
             </div>
-            <div className="flex justify-between text-xs">
+            <div className="flex justify-between text-label">
               <span className="text-muted-foreground">CLI Adapter</span>
-              <span className="font-mono text-[10px]">{data.agent.cli_adapter}</span>
+              <span className="font-mono text-micro">{data.agent.cli_adapter}</span>
             </div>
             {data.runtime.container_id && (
-              <div className="flex justify-between text-xs">
+              <div className="flex justify-between text-label">
                 <span className="text-muted-foreground">Container</span>
-                <code className="text-[10px] truncate max-w-[140px]" title={data.runtime.container_id}>
+                <code className="text-micro truncate max-w-[140px]" title={data.runtime.container_id}>
                   {data.runtime.container_id.slice(0, 12)}
                 </code>
               </div>
             )}
             {data.runtime.exec_id && (
-              <div className="flex justify-between text-xs">
+              <div className="flex justify-between text-label">
                 <span className="text-muted-foreground">Exec ID</span>
-                <code className="text-[10px] truncate max-w-[140px]">{data.runtime.exec_id.slice(0, 12)}</code>
+                <code className="text-micro truncate max-w-[140px]">{data.runtime.exec_id.slice(0, 12)}</code>
               </div>
             )}
             {data.runtime.session_id && (
-              <div className="flex justify-between text-xs">
+              <div className="flex justify-between text-label">
                 <span className="text-muted-foreground">Session</span>
-                <code className="text-[10px] truncate max-w-[140px]">{data.runtime.session_id.slice(0, 8)}</code>
+                <code className="text-micro truncate max-w-[140px]">{data.runtime.session_id.slice(0, 8)}</code>
               </div>
             )}
             {data.runtime.credential_id && (
-              <div className="flex justify-between text-xs">
+              <div className="flex justify-between text-label">
                 <span className="text-muted-foreground">Credential</span>
-                <code className="text-[10px] truncate max-w-[140px]">{data.runtime.credential_id.slice(0, 8)}</code>
+                <code className="text-micro truncate max-w-[140px]">{data.runtime.credential_id.slice(0, 8)}</code>
               </div>
             )}
           </CardContent>
@@ -293,7 +293,7 @@ export function DebugPageClient() {
         {/* Providers & Config */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium flex items-center gap-2">
+            <CardTitle className="text-label font-medium flex items-center gap-2">
               <Settings2 className="h-3.5 w-3.5" />
               Providers
             </CardTitle>
@@ -302,34 +302,34 @@ export function DebugPageClient() {
             {engineOk && data.crewshipd.providers ? (
               <>
                 {Object.entries(data.crewshipd.providers).map(([key, val]) => (
-                  <div key={key} className="flex justify-between text-xs">
+                  <div key={key} className="flex justify-between text-label">
                     <span className="text-muted-foreground capitalize">{key}</span>
                     <span className="font-mono">{val}</span>
                   </div>
                 ))}
-                <div className="flex justify-between text-xs">
+                <div className="flex justify-between text-label">
                   <span className="text-muted-foreground">Container</span>
                   <StatusIcon ok={!!data.crewshipd.container_available} />
                 </div>
-                <div className="flex justify-between text-xs">
+                <div className="flex justify-between text-label">
                   <span className="text-muted-foreground">Storage</span>
                   <StatusIcon ok={!!data.crewshipd.storage_available} />
                 </div>
-                <div className="flex justify-between text-xs">
+                <div className="flex justify-between text-label">
                   <span className="text-muted-foreground">State</span>
                   <StatusIcon ok={!!data.crewshipd.state_available} />
                 </div>
-                <div className="flex justify-between text-xs">
+                <div className="flex justify-between text-label">
                   <span className="text-muted-foreground">JWT</span>
                   <StatusIcon ok={!!(data.crewshipd.config as Record<string, unknown>)?.jwt_configured} />
                 </div>
-                <div className="flex justify-between text-xs">
+                <div className="flex justify-between text-label">
                   <span className="text-muted-foreground">LLM Proxy</span>
                   <StatusIcon ok={!!data.crewshipd.llm_proxy_enabled} />
                 </div>
               </>
             ) : (
-              <p className="text-xs text-muted-foreground">Engine not reachable</p>
+              <p className="text-label text-muted-foreground">Engine not reachable</p>
             )}
           </CardContent>
         </Card>
@@ -337,7 +337,7 @@ export function DebugPageClient() {
         {/* Last Run Stats */}
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-xs font-medium flex items-center gap-2">
+            <CardTitle className="text-label font-medium flex items-center gap-2">
               <Cpu className="h-3.5 w-3.5" />
               Last Run
             </CardTitle>
@@ -346,68 +346,68 @@ export function DebugPageClient() {
             {resultMeta ? (
               <>
                 {resultMeta.total_cost_usd != null && (
-                  <div className="flex justify-between text-xs">
+                  <div className="flex justify-between text-label">
                     <span className="text-muted-foreground">Cost</span>
                     <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">${Number(resultMeta.total_cost_usd).toFixed(4)}</span>
                   </div>
                 )}
                 {resultMeta.duration_ms != null && (
-                  <div className="flex justify-between text-xs">
+                  <div className="flex justify-between text-label">
                     <span className="text-muted-foreground">Duration</span>
                     <span className="font-mono">{(Number(resultMeta.duration_ms) / 1000).toFixed(1)}s</span>
                   </div>
                 )}
                 {resultMeta.num_turns != null && (
-                  <div className="flex justify-between text-xs">
+                  <div className="flex justify-between text-label">
                     <span className="text-muted-foreground">Turns</span>
                     <span className="font-mono">{String(resultMeta.num_turns)}</span>
                   </div>
                 )}
                 {resultMeta.usage && (
                   <>
-                    <div className="flex justify-between text-xs">
+                    <div className="flex justify-between text-label">
                       <span className="text-muted-foreground">Input Tokens</span>
                       <span className="font-mono">{String((resultMeta.usage as Record<string, number>).input_tokens ?? 0)}</span>
                     </div>
-                    <div className="flex justify-between text-xs">
+                    <div className="flex justify-between text-label">
                       <span className="text-muted-foreground">Output Tokens</span>
                       <span className="font-mono">{String((resultMeta.usage as Record<string, number>).output_tokens ?? 0)}</span>
                     </div>
                   </>
                 )}
                 {initMeta?.model && (
-                  <div className="flex justify-between text-xs">
+                  <div className="flex justify-between text-label">
                     <span className="text-muted-foreground">Model</span>
-                    <span className="font-mono text-[10px]">{String(initMeta.model)}</span>
+                    <span className="font-mono text-micro">{String(initMeta.model)}</span>
                   </div>
                 )}
                 {initMeta?.tools && (
-                  <div className="flex justify-between text-xs">
+                  <div className="flex justify-between text-label">
                     <span className="text-muted-foreground">Tools</span>
                     <span className="font-mono">{(initMeta.tools as string[]).length}</span>
                   </div>
                 )}
               </>
             ) : (
-              <p className="text-xs text-muted-foreground">No run data yet</p>
+              <p className="text-label text-muted-foreground">No run data yet</p>
             )}
           </CardContent>
         </Card>
       </div>
 
       {/* Log summary bar */}
-      <div className="flex items-center gap-4 text-xs">
+      <div className="flex items-center gap-4 text-label">
         <div className="flex items-center gap-1">
           <ScrollText className="h-3.5 w-3.5 text-muted-foreground" />
           <span className="text-muted-foreground">Service logs: {data.service_logs.length}</span>
         </div>
         {errorCount > 0 && (
-          <Badge variant="secondary" className="text-[10px] bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400">
+          <Badge variant="secondary" className="text-micro bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400">
             {errorCount} error{errorCount !== 1 ? "s" : ""}
           </Badge>
         )}
         {warnCount > 0 && (
-          <Badge variant="secondary" className="text-[10px] bg-yellow-50 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-400">
+          <Badge variant="secondary" className="text-micro bg-yellow-50 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-400">
             {warnCount} warning{warnCount !== 1 ? "s" : ""}
           </Badge>
         )}
@@ -429,7 +429,7 @@ export function DebugPageClient() {
           <Button
             variant={logTab === "service" ? "default" : "outline"}
             size="sm"
-            className="text-xs h-7 px-3"
+            className="text-label h-7 px-3"
             onClick={() => setLogTab("service")}
           >
             Engine Logs ({data.service_logs.length})
@@ -437,7 +437,7 @@ export function DebugPageClient() {
           <Button
             variant={logTab === "agent" ? "default" : "outline"}
             size="sm"
-            className="text-xs h-7 px-3"
+            className="text-label h-7 px-3"
             onClick={() => setLogTab("agent")}
           >
             Agent Output ({data.agent_logs.length})
@@ -459,7 +459,7 @@ export function DebugPageClient() {
                 return (
                   <div key={i} className="hover:bg-white/5 px-1 -mx-1 rounded">
                     <span className="text-neutral-600">[{formatTime(entry.time)}]</span>{" "}
-                    <Badge variant="outline" className={`${lc.badge} border-current/20 text-[10px] px-1 py-0 font-mono`}>
+                    <Badge variant="outline" className={`${lc.badge} border-current/20 text-micro px-1 py-0 font-mono`}>
                       {entry.level}
                     </Badge>{" "}
                     <span className={lc.text}>{entry.msg}</span>
@@ -491,7 +491,7 @@ export function DebugPageClient() {
                 return (
                   <div key={i} className="hover:bg-white/5 px-1 -mx-1 rounded">
                     <span className="text-neutral-600">[{formatTime(entry.ts)}]</span>{" "}
-                    <Badge variant="outline" className={`${lc.badge} border-current/20 text-[10px] px-1 py-0 font-mono`}>
+                    <Badge variant="outline" className={`${lc.badge} border-current/20 text-micro px-1 py-0 font-mono`}>
                       {entry.level}
                     </Badge>{" "}
                     {eventColor && <span className={`${eventColor} mr-1`}>[{entry.event}]</span>}
@@ -507,7 +507,7 @@ export function DebugPageClient() {
 
       {/* Raw data collapsible */}
       <details className="group">
-        <summary className="text-xs font-medium uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground">
+        <summary className="text-label font-medium uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground">
           Raw Debug Data
         </summary>
         <div className="mt-2 bg-neutral-950 rounded-lg p-3 sm:p-4 font-mono text-[11px] leading-relaxed overflow-x-auto max-h-[400px] overflow-y-auto">

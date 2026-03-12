@@ -5,6 +5,7 @@ import { Cpu, Key, MessageSquare } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { getCrewDotColor } from "@/lib/crew-icon"
 
 interface AgentCrew {
   name: string
@@ -60,7 +61,7 @@ export function AgentCard({ agent }: { agent: AgentData }) {
 
   return (
     <Link href={`/agents/${agent.id}`}>
-      <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
+      <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full border-border/80 shadow-md">
         <CardContent className="p-4 sm:p-5">
           <div className="flex items-start gap-3">
             <img
@@ -70,8 +71,8 @@ export function AgentCard({ agent }: { agent: AgentData }) {
             />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm font-semibold truncate">{agent.name}</h3>
-                <Badge variant="secondary" className={`text-[10px] shrink-0 gap-1.5 ${status.className}`}>
+                <h3 className="text-body font-semibold truncate">{agent.name}</h3>
+                <Badge variant="secondary" className={`text-micro shrink-0 gap-1.5 ${status.className}`}>
                   {agent.status === "RUNNING" && (
                     <span className="relative flex h-1.5 w-1.5">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
@@ -81,7 +82,7 @@ export function AgentCard({ agent }: { agent: AgentData }) {
                   {status.label}
                 </Badge>
               </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="text-label text-muted-foreground mt-0.5">
                 {agent.role_title ?? agent.agent_role}
               </p>
             </div>
@@ -89,20 +90,20 @@ export function AgentCard({ agent }: { agent: AgentData }) {
 
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             {agent.crew && (
-              <Badge variant="outline" className="text-[10px] gap-1">
+              <Badge variant="outline" className="text-micro gap-1">
                 <span
                   className="h-2 w-2 rounded-full shrink-0"
-                  style={{ backgroundColor: agent.crew.color ?? "#6b7280" }}
+                  style={{ backgroundColor: getCrewDotColor(agent.crew.color) }}
                 />
                 {agent.crew.name}
               </Badge>
             )}
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-micro text-muted-foreground">
               {agent.llm_provider} / {agent.llm_model}
             </span>
           </div>
 
-          <div className="mt-3 pt-3 border-t flex items-center gap-4 text-xs text-muted-foreground">
+          <div className="mt-3 pt-3 border-t flex items-center gap-4 text-label text-muted-foreground">
             <span className="flex items-center gap-1">
               <Cpu className="h-3 w-3" />
               {agent._count?.skills ?? 0} skills

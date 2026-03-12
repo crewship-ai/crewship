@@ -140,8 +140,8 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
   if (loading) {
     return (
       <div>
-        <h2 className="text-base font-semibold mb-3">Assignments</h2>
-        <div className="text-sm text-muted-foreground">Loading assignments...</div>
+        <h2 className="text-default font-semibold mb-3">Assignments</h2>
+        <div className="text-body text-muted-foreground">Loading assignments...</div>
       </div>
     )
   }
@@ -150,7 +150,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
     <div>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-base font-semibold">Assignments</h2>
+          <h2 className="text-default font-semibold">Assignments</h2>
           {assignments.some((a) => a.status === "RUNNING") && (
             <span aria-hidden="true" className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
@@ -158,7 +158,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
             </span>
           )}
         </div>
-        <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
+        <span role="status" aria-live="polite" className="text-label text-muted-foreground">
           {refreshing ? "Updating..." : "Live"}
         </span>
       </div>
@@ -167,8 +167,8 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <ClipboardList className="h-8 w-8 text-muted-foreground/50" />
           <div>
-            <p className="text-sm text-muted-foreground">No assignments yet.</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">
+            <p className="text-body text-muted-foreground">No assignments yet.</p>
+            <p className="text-label text-muted-foreground/70 mt-1">
               Assignments appear when a lead agent delegates tasks to crew members.
             </p>
           </div>
@@ -233,7 +233,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                               >
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <span className="text-sm line-clamp-1">{a.task}</span>
+                                    <span className="text-body line-clamp-1">{a.task}</span>
                                   </TooltipTrigger>
                                   <TooltipContent className="max-w-sm">
                                     <p className="whitespace-pre-wrap">{a.task}</p>
@@ -243,7 +243,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                             ) : (
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <span className="text-sm line-clamp-1">{a.task}</span>
+                                  <span className="text-body line-clamp-1">{a.task}</span>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-sm">
                                   <p className="whitespace-pre-wrap">{a.task}</p>
@@ -251,16 +251,16 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                               </Tooltip>
                             )}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
+                          <TableCell className="text-body text-muted-foreground">
                             @{a.assigned_by_slug}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
+                          <TableCell className="text-body text-muted-foreground">
                             @{a.assigned_to_slug}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
+                          <TableCell className="text-label text-muted-foreground">
                             {formatRelativeTime(a.created_at)}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground tabular-nums">
+                          <TableCell className="text-label text-muted-foreground tabular-nums">
                             {a.status === "RUNNING" && a.started_at
                               ? <LiveDuration startedAt={a.started_at} />
                               : formatDuration(a.started_at, a.finished_at)}
@@ -269,7 +269,7 @@ export function CrewAssignments({ crewId, workspaceId }: CrewAssignmentsProps) {
                         {isExpanded && hasDetail && (
                           <TableRow id={`assign-detail-${a.id}`}>
                             <TableCell colSpan={6} className="bg-muted/30">
-                              <div className="text-sm whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
+                              <div className="text-body whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
                                 {a.error_message && (
                                   <div className="text-destructive mb-2">
                                     <span className="font-medium">Error: </span>

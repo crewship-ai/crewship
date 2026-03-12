@@ -59,7 +59,7 @@ function ResultCard({ part }: { part: TurnPart }) {
 
   if (isError && errors?.length) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-700 dark:text-red-400 max-w-lg">
+      <div className="flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-label text-red-700 dark:text-red-400 max-w-lg">
         <AlertCircle className="h-4 w-4 shrink-0" />
         <span>{errors.join("; ")}</span>
       </div>
@@ -75,14 +75,14 @@ function ResultCard({ part }: { part: TurnPart }) {
 
   return (
     <details className="max-w-lg group">
-      <summary className="flex items-center gap-2 text-[11px] text-muted-foreground cursor-pointer hover:text-foreground select-none list-none">
+      <summary className="flex items-center gap-2 text-micro text-muted-foreground cursor-pointer hover:text-foreground select-none list-none">
         <DollarSign className="h-3 w-3 shrink-0" />
         <span>{summaryParts.join(" · ") || "Run complete"}</span>
-        <span className="text-[10px] opacity-60 group-open:hidden">&#9654;</span>
-        <span className="text-[10px] opacity-60 hidden group-open:inline">&#9660;</span>
+        <span className="text-micro opacity-60 group-open:hidden">&#9654;</span>
+        <span className="text-micro opacity-60 hidden group-open:inline">&#9660;</span>
       </summary>
       <div className="mt-1.5 bg-muted/30 border rounded-lg px-4 py-3 space-y-2">
-        <div className="flex items-center gap-4 flex-wrap text-xs">
+        <div className="flex items-center gap-4 flex-wrap text-label">
           {cost != null && cost > 0 && (
             <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
               <DollarSign className="h-3 w-3" />
@@ -102,13 +102,13 @@ function ResultCard({ part }: { part: TurnPart }) {
             </span>
           )}
           {modelName && (
-            <span className="text-muted-foreground font-mono text-[10px]">
+            <span className="text-muted-foreground font-mono text-micro">
               {modelName}
             </span>
           )}
         </div>
         {(inputTokens > 0 || outputTokens > 0) && (
-          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-3 text-micro text-muted-foreground">
             <span>In: <strong className="text-foreground">{formatTokens(inputTokens)}</strong></span>
             <span>Out: <strong className="text-foreground">{formatTokens(outputTokens)}</strong></span>
             {cacheRead > 0 && <span>Cache: <strong className="text-foreground">{formatTokens(cacheRead)}</strong></span>}
@@ -139,15 +139,15 @@ function AskUserCard({ part }: { part: TurnPart }) {
         <div key={qi} className="bg-primary/5 border border-primary/20 rounded-lg overflow-hidden">
           <div className="px-4 py-3 border-b border-primary/10 flex items-center gap-2">
             <HelpCircle className="h-3.5 w-3.5 text-primary" />
-            <span className="text-xs font-medium">{q.header}</span>
+            <span className="text-label font-medium">{q.header}</span>
           </div>
           <div className="px-4 py-3">
-            <p className="text-sm mb-2">{q.question}</p>
+            <p className="text-body mb-2">{q.question}</p>
             <div className="flex flex-wrap gap-1.5">
               {q.options.map((opt, oi) => (
                 <span
                   key={oi}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs bg-muted border cursor-default"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-label bg-muted border cursor-default"
                   title={opt.description}
                 >
                   <CircleDot className="h-3 w-3 text-muted-foreground" />
@@ -181,15 +181,15 @@ function TodoWriteCard({ part }: { part: TurnPart }) {
     <div className="max-w-md">
       <div className="bg-muted/30 border rounded-lg overflow-hidden">
         <div className="px-4 py-2.5 border-b flex items-center justify-between">
-          <span className="text-xs font-medium flex items-center gap-1.5">
+          <span className="text-label font-medium flex items-center gap-1.5">
             <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
             Agent Progress
           </span>
-          <span className="text-[11px] text-muted-foreground">{completed}/{todos.length}</span>
+          <span className="text-micro text-muted-foreground">{completed}/{todos.length}</span>
         </div>
         <div className="px-4 py-2 space-y-1">
           {todos.map((todo, i) => (
-            <div key={i} className="flex items-start gap-2 text-xs py-0.5">
+            <div key={i} className="flex items-start gap-2 text-label py-0.5">
               {todo.status === "completed" ? (
                 <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-0.5" />
               ) : todo.status === "in_progress" ? (
@@ -209,7 +209,7 @@ function TodoWriteCard({ part }: { part: TurnPart }) {
             className="h-1.5 w-full overflow-hidden rounded-full bg-muted [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-value]:bg-emerald-500 [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:transition-all [&::-moz-progress-bar]:bg-emerald-500 [&::-moz-progress-bar]:rounded-full"
           />
           {inProgress > 0 && (
-            <p className="text-[10px] text-amber-500 mt-1">{inProgress} in progress</p>
+            <p className="text-micro text-amber-500 mt-1">{inProgress} in progress</p>
           )}
         </div>
       </div>
@@ -228,22 +228,22 @@ function TaskCard({ part }: { part: TurnPart }) {
     <div className="max-w-lg">
       <div className="bg-primary/5 border border-primary/20 border-l-4 border-l-amber-400 rounded-lg overflow-hidden">
         <div className="px-4 py-3">
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-2 text-label">
             <Crown className="h-3.5 w-3.5 text-amber-500" />
             <span className="font-medium">Subagent: {input.subagent_type ?? "worker"}</span>
             {isCompleted ? (
-              <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400">
+              <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400">
                 <CheckCircle2 className="h-3 w-3" /> Done
               </span>
             ) : (
-              <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400">
+              <span className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400">
                 <Clock className="h-3 w-3 animate-spin" /> Working
               </span>
             )}
           </div>
-          <p className="text-sm font-medium mt-1.5">{input.description}</p>
+          <p className="text-body font-medium mt-1.5">{input.description}</p>
           {promptPreview && (
-            <p className="text-xs text-muted-foreground mt-1 bg-background rounded px-2.5 py-1.5 border">{promptPreview}</p>
+            <p className="text-label text-muted-foreground mt-1 bg-background rounded px-2.5 py-1.5 border">{promptPreview}</p>
           )}
         </div>
       </div>
@@ -335,24 +335,24 @@ function DelegationContent({ content }: { content: string }) {
     <div className="max-w-xl">
       <div className="bg-primary/5 border border-primary/20 border-l-4 border-l-[#4ECDC4] rounded-lg overflow-hidden">
         <div className="px-4 py-3">
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex items-center gap-2 text-label">
             <Crown className="h-3.5 w-3.5 text-amber-500" />
             <span className="font-medium text-muted-foreground">Delegated to</span>
             <span className="font-semibold">{targetMatch?.[1] ?? "Agent"}</span>
           </div>
           {taskMatch && (
-            <div className="mt-1.5 text-xs text-muted-foreground bg-background rounded px-2.5 py-1.5 border">
+            <div className="mt-1.5 text-label text-muted-foreground bg-background rounded px-2.5 py-1.5 border">
               {taskMatch[1]}
             </div>
           )}
           <div className="mt-2 flex items-center gap-2">
             {isCompleted ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro font-medium bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400">
                 <CheckCircle2 className="h-3 w-3" />
                 Completed in {completedMatch[1]}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-micro font-medium bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400">
                 <Clock className="h-3 w-3 animate-spin" />
                 In progress...
               </span>
@@ -410,7 +410,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps)
           case "error":
             if (part.content.toLowerCase().includes("rate limit") || part.content.toLowerCase().includes("429")) {
               return (
-                <div key={part.id} className="flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-700 dark:text-amber-400 max-w-md">
+                <div key={part.id} className="flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-label text-amber-700 dark:text-amber-400 max-w-md">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   <span>{part.content}</span>
                 </div>
@@ -418,7 +418,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps)
             }
             return (
               <MessageContent key={part.id} className="border-destructive/50 bg-destructive/5 rounded-lg px-4 py-3">
-                <div className="flex items-center gap-2 text-destructive text-sm">
+                <div className="flex items-center gap-2 text-destructive text-body">
                   <AlertCircle className="h-4 w-4 shrink-0" />
                   {part.content}
                 </div>
@@ -466,7 +466,7 @@ export function AssistantTurn({ turn, onCopy, onFileClick }: AssistantTurnProps)
       {fileMatch && !turn.isStreaming && (
         <button
           onClick={() => onFileClick(fileMatch[1])}
-          className="flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-lg text-xs text-primary hover:bg-primary/10 max-w-md transition-colors"
+          className="flex items-center gap-2 px-3 py-2 bg-primary/5 border border-primary/20 rounded-lg text-label text-primary hover:bg-primary/10 max-w-md transition-colors"
         >
           <FileText className="h-4 w-4" />
           <span>File created: <span className="font-mono font-medium">{fileMatch[1]}</span></span>

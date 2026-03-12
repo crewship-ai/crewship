@@ -114,8 +114,8 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   if (loading) {
     return (
       <div>
-        <h2 className="text-base font-semibold mb-3">Escalations</h2>
-        <div className="text-sm text-muted-foreground">Loading escalations...</div>
+        <h2 className="text-default font-semibold mb-3">Escalations</h2>
+        <div className="text-body text-muted-foreground">Loading escalations...</div>
       </div>
     )
   }
@@ -124,7 +124,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
     <div>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-base font-semibold">Escalations</h2>
+          <h2 className="text-default font-semibold">Escalations</h2>
           {escalations.some((e) => e.status === "PENDING") && (
             <span aria-hidden="true" className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
@@ -132,7 +132,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
             </span>
           )}
         </div>
-        <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
+        <span role="status" aria-live="polite" className="text-label text-muted-foreground">
           {refreshing ? "Updating..." : "Live"}
         </span>
       </div>
@@ -141,8 +141,8 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <AlertTriangle className="h-8 w-8 text-muted-foreground/50" />
           <div>
-            <p className="text-sm text-muted-foreground">No escalations yet.</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">
+            <p className="text-body text-muted-foreground">No escalations yet.</p>
+            <p className="text-label text-muted-foreground/70 mt-1">
               Escalations appear when agents need human intervention or encounter blockers.
             </p>
           </div>
@@ -199,24 +199,24 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                           <TableCell>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <span className="text-sm line-clamp-1">{e.reason}</span>
+                                <span className="text-body line-clamp-1">{e.reason}</span>
                               </TooltipTrigger>
                               <TooltipContent className="max-w-sm">
                                 <p className="whitespace-pre-wrap">{e.reason}</p>
                               </TooltipContent>
                             </Tooltip>
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
+                          <TableCell className="text-body text-muted-foreground">
                             @{e.from_slug}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
+                          <TableCell className="text-label text-muted-foreground">
                             {formatRelativeTime(e.created_at)}
                           </TableCell>
                         </TableRow>
                         {isExpanded && hasDetail && (
                           <TableRow id={detailId}>
                             <TableCell colSpan={4} className="bg-muted/30">
-                              <div className="text-sm whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
+                              <div className="text-body whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
                                 {e.context && (
                                   <div className="mb-2">
                                     <span className="font-medium text-muted-foreground">Context: </span>

@@ -31,7 +31,7 @@ export function CrewAgents({ agents, crewId, canCreate }: CrewAgentsProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Agents</h2>
+        <h2 className="text-default font-semibold">Agents</h2>
         {canCreate && agents.length > 0 && (
           <Button size="sm" asChild>
             <Link href={`/agents/new?crew_id=${crewId}`}>New Agent</Link>

@@ -82,7 +82,7 @@ export default function AgentsPage() {
       : agents.filter((a) => a.status === activeFilter.toUpperCase())
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+    <div className="p-4 sm:p-6 space-y-5 sm:space-y-8">
       <PageHeader title="Agents" description="Manage your AI virtual employees">
         {abilities.can("create", "Agent") && (
           <Button asChild>
@@ -100,7 +100,7 @@ export default function AgentsPage() {
         onFilter={setActiveFilter}
       />
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-body text-destructive">{error}</p>}
 
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">

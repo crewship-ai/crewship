@@ -38,6 +38,7 @@ func (s *Server) registerIPCRoutes() {
 	s.ipcMux.HandleFunc("GET /agents/{id}/logs", s.handleAgentLogs)
 	s.ipcMux.HandleFunc("GET /crews/{id}/files", s.handleFileList)
 	s.ipcMux.HandleFunc("GET /crews/{id}/files/download", s.handleFileDownload)
+	s.ipcMux.HandleFunc("PUT /crews/{id}/files/save", s.handleFileSave)
 	s.ipcMux.HandleFunc("GET /chats/{id}/messages", s.handleChatMessages)
 	s.ipcMux.HandleFunc("POST /credentials/sync", s.handleCredentialSync)
 	s.ipcMux.HandleFunc("GET /credentials/{workspaceId}/token", s.handleCredentialToken)
@@ -344,7 +345,25 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		dir = filepath.Join(crewID, clean)
 	}
 
-	files, err := s.storage.List(r.Context(), dir)
+	// Optional subdir parameter for lazy-loading subdirectories
+	if subdir := r.URL.Query().Get("subdir"); subdir != "" {
+		cleaned := filepath.Clean(subdir)
+		if strings.HasPrefix(cleaned, "..") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid subdir"})
+			return
+		}
+		dir = filepath.Join(dir, cleaned)
+	}
+
+	recursive := r.URL.Query().Get("recursive") == "true"
+
+	var files []provider.FileInfo
+	var err error
+	if recursive {
+		files, err = s.storage.ListRecursive(r.Context(), dir)
+	} else {
+		files, err = s.storage.List(r.Context(), dir)
+	}
 	if err != nil {
 		s.logger.Error("file list failed", "crew_id", crewID, "agent_slug", agentSlug, "error", err)
 		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": []interface{}{}})
@@ -354,7 +373,12 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 	// When listing an agent's namespace, also include root-level crew files
 	// (files the agent saved to /output/ instead of /output/<agent-slug>/)
 	if agentSlug != "" {
-		rootFiles, err := s.storage.List(r.Context(), crewID)
+		var rootFiles []provider.FileInfo
+		if recursive {
+			rootFiles, err = s.storage.ListRecursive(r.Context(), crewID)
+		} else {
+			rootFiles, err = s.storage.List(r.Context(), crewID)
+		}
 		if err == nil {
 			for _, f := range rootFiles {
 				if !f.IsDir {
@@ -407,6 +431,41 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, reader); err != nil {
 		s.logger.Error("file download stream error", "path", filePath, "error", err)
 	}
+}
+
+func (s *Server) handleFileSave(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("id")
+	filePath := r.URL.Query().Get("path")
+
+	if filePath == "" {
+		http.Error(w, "path query parameter required", http.StatusBadRequest)
+		return
+	}
+
+	cleanPath := filepath.Clean(filePath)
+	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	if !strings.HasPrefix(cleanPath, crewID+"/") {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	if s.storage == nil {
+		http.Error(w, "storage not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	defer r.Body.Close()
+	if err := s.storage.Write(r.Context(), cleanPath, r.Body); err != nil {
+		s.logger.Error("file save failed", "path", filePath, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save file"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved", "path": filePath})
 }
 
 func (s *Server) handleAgentLogs(w http.ResponseWriter, r *http.Request) {

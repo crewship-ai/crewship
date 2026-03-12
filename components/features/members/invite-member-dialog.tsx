@@ -118,10 +118,10 @@ export function InviteMemberDialog({ workspaceId, onInvited }: InviteMemberDialo
           </div>
 
           {status === "success" && (
-            <p className="text-sm text-emerald-600">Invitation sent successfully.</p>
+            <p className="text-body text-emerald-600">Invitation sent successfully.</p>
           )}
           {status === "error" && error && (
-            <p className="text-sm text-destructive">{error}</p>
+            <p className="text-body text-destructive">{error}</p>
           )}
 
           <div className="flex justify-end gap-2">
