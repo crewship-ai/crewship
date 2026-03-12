@@ -331,7 +331,7 @@ export function ChatPageClient() {
       )}
 
       {/* Desktop: Session sidebar */}
-      <div className="hidden md:flex w-52 border-r flex-col shrink-0">
+      <div className="hidden md:flex w-52 border-r flex-col shrink-0 h-full">
         {/* Header row -- aligned h-[41px] border-b with rail + chat + right panel */}
         <div className="flex items-end h-[41px] px-3 border-b shrink-0">
           <button
