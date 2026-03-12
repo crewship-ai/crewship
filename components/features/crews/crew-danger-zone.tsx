@@ -24,7 +24,7 @@ export function CrewDangerZone({ crewName, onDelete }: CrewDangerZoneProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Danger Zone</CardTitle>
+        <CardTitle className="text-default">Danger Zone</CardTitle>
         <CardDescription>Irreversible actions for this crew</CardDescription>
       </CardHeader>
       <CardContent>

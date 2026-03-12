@@ -45,8 +45,8 @@ export function SetupNudge({ crewCount, agentCount, credentialCount }: SetupNudg
       <CardContent className="p-4 sm:p-5">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h3 className="text-sm font-semibold">Get started with Crewship</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <h3 className="text-body font-semibold">Get started with Crewship</h3>
+            <p className="text-label text-muted-foreground mt-0.5">
               {completedCount} of {steps.length} steps completed
             </p>
           </div>
@@ -76,8 +76,8 @@ export function SetupNudge({ crewCount, agentCount, credentialCount }: SetupNudg
                   <step.icon className="h-4 w-4 text-muted-foreground" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{step.label}</p>
-                  <p className="text-xs text-muted-foreground">{step.description}</p>
+                  <p className="text-body font-medium">{step.label}</p>
+                  <p className="text-label text-muted-foreground">{step.description}</p>
                 </div>
                 <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0" />
               </Link>

@@ -92,7 +92,7 @@ export function SessionsPageClient() {
       <div className="p-4 sm:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
-          <p className="text-sm">{error}</p>
+          <p className="text-body">{error}</p>
         </div>
       </div>
     )
@@ -102,7 +102,7 @@ export function SessionsPageClient() {
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       {/* Header */}
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm text-muted-foreground">{sessions.length} session{sessions.length !== 1 ? "s" : ""} total</p>
+        <p className="text-body text-muted-foreground">{sessions.length} session{sessions.length !== 1 ? "s" : ""} total</p>
         <div className="ml-auto">
           <Button size="sm" className="gap-1.5" asChild>
             <Link href={`/agents/${agentId}/chat`}>
@@ -115,14 +115,14 @@ export function SessionsPageClient() {
       {sessions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">No chats yet</p>
-          <p className="text-xs text-muted-foreground mt-1">Start a chat to create the first session.</p>
+          <p className="text-body font-medium text-muted-foreground">No chats yet</p>
+          <p className="text-label text-muted-foreground mt-1">Start a chat to create the first session.</p>
         </div>
       ) : (
         <div className="border rounded-lg overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-body">
             <thead>
-              <tr className="border-b bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
+              <tr className="border-b bg-muted/50 text-label text-muted-foreground uppercase tracking-wide">
                 <th className="text-left px-4 sm:px-6 py-3 font-medium">Title</th>
                 <th className="text-left px-4 sm:px-6 py-3 font-medium">Mode</th>
                 <th className="text-left px-4 sm:px-6 py-3 font-medium">Status</th>
@@ -141,10 +141,10 @@ export function SessionsPageClient() {
                     </Link>
                   </td>
                   <td className="px-4 sm:px-6 py-3">
-                    <Badge variant={s.mode === "CHAT" ? "secondary" : "outline"} className="text-xs">{s.mode}</Badge>
+                    <Badge variant={s.mode === "CHAT" ? "secondary" : "outline"} className="text-label">{s.mode}</Badge>
                   </td>
                   <td className="px-4 sm:px-6 py-3">
-                    <Badge variant="secondary" className={`${STATUS_STYLES[s.status] ?? ""} text-xs`}>
+                    <Badge variant="secondary" className={`${STATUS_STYLES[s.status] ?? ""} text-label`}>
                       {s.status === "ACTIVE" && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse mr-1" />}
                       {s.status}
                     </Badge>
@@ -153,7 +153,7 @@ export function SessionsPageClient() {
                   <td className="px-4 sm:px-6 py-3 font-mono text-xs hidden sm:table-cell">
                     {formatDuration(s.started_at, s.ended_at)}
                   </td>
-                  <td className="px-4 sm:px-6 py-3 text-xs text-muted-foreground hidden md:table-cell">
+                  <td className="px-4 sm:px-6 py-3 text-label text-muted-foreground hidden md:table-cell">
                     {formatRelativeTime(s.started_at)}
                   </td>
                 </tr>

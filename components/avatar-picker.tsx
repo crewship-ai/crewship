@@ -62,7 +62,7 @@ export function AvatarPicker({ seed, style, onSeedChange, onStyleChange, lockedS
                 <RefreshCw className="h-3.5 w-3.5" />
               </Button>
             </div>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-micro text-muted-foreground">
               Different seeds produce different faces. Leave empty to use agent name.
             </p>
           </div>
@@ -90,7 +90,7 @@ export function AvatarPicker({ seed, style, onSeedChange, onStyleChange, lockedS
                     alt={entry.label}
                     className="h-10 w-10 rounded-lg"
                   />
-                  <span className="text-[9px] text-muted-foreground leading-tight text-center">
+                  <span className="text-micro text-muted-foreground leading-tight text-center">
                     {entry.label}
                   </span>
                 </button>
@@ -98,7 +98,7 @@ export function AvatarPicker({ seed, style, onSeedChange, onStyleChange, lockedS
             })}
           </div>
           {!styleOnly && (
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-micro text-muted-foreground">
               Crew can override style for all its agents. Agent-level style takes priority.
             </p>
           )}
@@ -106,7 +106,7 @@ export function AvatarPicker({ seed, style, onSeedChange, onStyleChange, lockedS
       )}
 
       {lockedStyle && (
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-micro text-muted-foreground">
           Style is set by crew template ({AVATAR_STYLES[lockedStyle]?.label ?? lockedStyle}). Change it in crew settings.
         </p>
       )}

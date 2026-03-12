@@ -236,7 +236,7 @@ export function SettingsPageClient() {
       <div className="p-4 sm:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
-          <p className="text-sm">{error}</p>
+          <p className="text-body">{error}</p>
         </div>
       </div>
     )
@@ -248,7 +248,7 @@ export function SettingsPageClient() {
         {/* General */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">General</CardTitle>
+            <CardTitle className="text-default">General</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -331,7 +331,7 @@ export function SettingsPageClient() {
                     <SelectItem value="passive" disabled>Passive (Phase 2)</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-label text-muted-foreground">
                   Active: Lead receives crew context and can orchestrate tasks.
                 </p>
               </div>
@@ -342,7 +342,7 @@ export function SettingsPageClient() {
         {/* Avatar */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Avatar</CardTitle>
+            <CardTitle className="text-default">Avatar</CardTitle>
           </CardHeader>
           <CardContent>
             <AvatarPicker
@@ -358,7 +358,7 @@ export function SettingsPageClient() {
         {/* Runtime */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Runtime</CardTitle>
+            <CardTitle className="text-default">Runtime</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -379,8 +379,8 @@ export function SettingsPageClient() {
                     >
                       <Icon className={`h-5 w-5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
                       <div className="min-w-0">
-                        <div className="text-sm font-medium">{cfg.label}</div>
-                        <div className="text-[10px] text-muted-foreground">{cfg.description}</div>
+                        <div className="text-body font-medium">{cfg.label}</div>
+                        <div className="text-micro text-muted-foreground">{cfg.description}</div>
                       </div>
                     </button>
                   )
@@ -456,7 +456,7 @@ export function SettingsPageClient() {
         {/* System Prompt */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">System Prompt</CardTitle>
+            <CardTitle className="text-default">System Prompt</CardTitle>
           </CardHeader>
           <CardContent>
             <Textarea
@@ -473,13 +473,13 @@ export function SettingsPageClient() {
         {error && (
           <div className="flex items-center gap-2 text-destructive">
             <AlertCircle className="h-4 w-4" />
-            <p className="text-sm">{error}</p>
+            <p className="text-body">{error}</p>
           </div>
         )}
         {success && (
           <div className="flex items-center gap-2 text-emerald-600">
             <CheckCircle2 className="h-4 w-4" />
-            <p className="text-sm">{success}</p>
+            <p className="text-body">{success}</p>
           </div>
         )}
 

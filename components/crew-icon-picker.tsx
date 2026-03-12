@@ -4,7 +4,9 @@ import { useState, useMemo } from "react"
 import { Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { getCrewIconUrl, searchCrewIcons, CREW_ICON_CATEGORIES } from "@/lib/crew-icon"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { searchCrewIcons, getCrewIconDef, CREW_ICON_CATEGORIES } from "@/lib/crew-icon"
+import { cn } from "@/lib/utils"
 
 interface CrewIconPickerProps {
   selected: string
@@ -20,11 +22,7 @@ export function CrewIconPicker({ selected, onSelect }: CrewIconPickerProps) {
     <div className="space-y-3">
       <div className="flex items-start gap-3">
         {selected && (
-          <img
-            src={getCrewIconUrl(selected)}
-            alt={selected}
-            className="h-14 w-14 rounded-xl border shrink-0"
-          />
+          <CrewIcon icon={selected} size="xl" className="border" />
         )}
         <div className="flex-1 space-y-2">
           <div className="relative">
@@ -41,7 +39,7 @@ export function CrewIconPicker({ selected, onSelect }: CrewIconPickerProps) {
               <Badge
                 key={cat}
                 variant={query === cat ? "default" : "outline"}
-                className="cursor-pointer text-[10px] capitalize"
+                className="cursor-pointer text-micro capitalize"
                 onClick={() => setQuery(query === cat ? "" : cat)}
               >
                 {cat}
@@ -52,23 +50,24 @@ export function CrewIconPicker({ selected, onSelect }: CrewIconPickerProps) {
       </div>
 
       <div className="grid grid-cols-8 gap-1.5 max-h-48 overflow-y-auto">
-        {results.map((iconName) => (
-          <button
-            key={iconName}
-            type="button"
-            onClick={() => onSelect(iconName)}
-            title={iconName}
-            className={`rounded-lg border p-1.5 transition-colors hover:bg-muted ${
-              selected === iconName ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border"
-            }`}
-          >
-            <img
-              src={getCrewIconUrl(iconName)}
-              alt={iconName}
-              className="h-7 w-7 rounded mx-auto"
-            />
-          </button>
-        ))}
+        {results.map((iconName) => {
+          const def = getCrewIconDef(iconName)
+          const IconComp = def.icon
+          return (
+            <button
+              key={iconName}
+              type="button"
+              onClick={() => onSelect(iconName)}
+              title={def.label}
+              className={cn(
+                "rounded-lg border p-1.5 transition-colors hover:bg-muted flex items-center justify-center",
+                selected === iconName ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border",
+              )}
+            >
+              <IconComp className="h-5 w-5 text-muted-foreground" />
+            </button>
+          )
+        })}
         {results.length === 0 && (
           <p className="col-span-8 text-center text-xs text-muted-foreground py-4">No icons found</p>
         )}

@@ -162,7 +162,7 @@ export default function AuditPage() {
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       <PageHeader title="Audit Log" description="Track all actions in your workspace" />
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-body text-destructive">{error}</p>}
 
       {/* Filters */}
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -174,7 +174,7 @@ export default function AuditPage() {
                 key={cat.value}
                 variant={category === cat.value ? "default" : "ghost"}
                 size="sm"
-                className="text-xs h-7 px-2.5"
+                className="text-label h-7 px-2.5"
                 onClick={() => setCategory(cat.value)}
               >
                 {cat.label}
@@ -205,7 +205,7 @@ export default function AuditPage() {
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" className="h-7 text-xs" disabled>
+                <Button variant="outline" size="sm" className="h-7 text-label" disabled>
                   <Download className="mr-1.5 h-3.5 w-3.5" />
                   Export
                 </Button>
@@ -258,18 +258,18 @@ export default function AuditPage() {
                             )}
                           />
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="text-label text-muted-foreground">
                           {new Date(log.created_at).toLocaleString()}
                         </TableCell>
-                        <TableCell className="text-sm">
+                        <TableCell className="text-body">
                           {log.user?.full_name ?? log.user?.email ?? "System"}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="secondary" className={cn("text-[10px]", getActionColor(log.action))}>
+                          <Badge variant="secondary" className={cn("text-micro", getActionColor(log.action))}>
                             {log.action}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="text-body text-muted-foreground">
                           {log.entity_type}
                           {log.entity_id && (
                             <span className="ml-1 font-mono text-[10px]">
@@ -283,7 +283,7 @@ export default function AuditPage() {
                           <TableCell />
                           <TableCell colSpan={4} className="pb-4 pt-1">
                             <div className="bg-background rounded-md border p-4 max-w-2xl">
-                              <div className="grid grid-cols-2 gap-4 text-xs mb-3">
+                              <div className="grid grid-cols-2 gap-4 text-label mb-3">
                                 <div>
                                   <span className="text-muted-foreground">IP Address</span>
                                   <div className="font-mono text-foreground mt-0.5">
@@ -299,7 +299,7 @@ export default function AuditPage() {
                               </div>
                               {log.metadata && Object.keys(log.metadata).length > 0 && (
                                 <>
-                                  <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
+                                  <div className="text-micro font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
                                     Metadata
                                   </div>
                                   <pre className="bg-muted border rounded p-2.5 text-[11px] font-mono text-muted-foreground overflow-auto max-h-28">
@@ -307,7 +307,7 @@ export default function AuditPage() {
                                   </pre>
                                 </>
                               )}
-                              <div className="flex items-center gap-1.5 mt-3 text-[10px] text-muted-foreground">
+                              <div className="flex items-center gap-1.5 mt-3 text-micro text-muted-foreground">
                                 <Shield className="h-3 w-3" />
                                 This record is immutable — it cannot be edited or deleted.
                               </div>

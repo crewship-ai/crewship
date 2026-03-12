@@ -97,6 +97,46 @@ func (p *Provider) List(_ context.Context, dir string) ([]provider.FileInfo, err
 	return files, nil
 }
 
+func (p *Provider) ListRecursive(_ context.Context, dir string) ([]provider.FileInfo, error) {
+	full, err := p.resolve(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []provider.FileInfo
+	err = filepath.WalkDir(full, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if path == full {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil {
+			return nil
+		}
+		rel, relErr := filepath.Rel(p.basePath, path)
+		if relErr != nil {
+			return nil
+		}
+		files = append(files, provider.FileInfo{
+			Path:    rel,
+			Name:    d.Name(),
+			Size:    info.Size(),
+			IsDir:   d.IsDir(),
+			ModTime: info.ModTime(),
+		})
+		return nil
+	})
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("walk dir %s: %w", dir, err)
+	}
+	return files, nil
+}
+
 func (p *Provider) Delete(_ context.Context, path string) error {
 	full, err := p.resolve(path)
 	if err != nil {

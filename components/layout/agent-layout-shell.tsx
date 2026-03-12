@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react"
 import { AgentDetailProvider } from "@/hooks/use-agent-detail"
-import { AgentTabs } from "@/components/layout/agent-tabs"
+import { AgentDesktopRail, AgentMobileTabsBar } from "@/components/layout/agent-tabs"
 import { AgentHeader } from "@/components/layout/agent-header"
 
 interface AgentLayoutShellProps {
@@ -13,13 +13,21 @@ interface AgentLayoutShellProps {
 export function AgentLayoutShell({ agentId, children }: AgentLayoutShellProps) {
   return (
     <AgentDetailProvider agentId={agentId}>
-      <div className="flex flex-col h-full">
-        <div className="bg-background border-b shrink-0">
+      <div className="flex flex-col md:flex-row h-full overflow-hidden">
+        {/* Mobile: header + tabs bar */}
+        <div className="shrink-0 md:hidden">
           <AgentHeader agentId={agentId} />
-          <AgentTabs agentId={agentId} />
+          <AgentMobileTabsBar agentId={agentId} />
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {children}
+        {/* Desktop: side rail */}
+        <div className="hidden md:block shrink-0">
+          <AgentDesktopRail agentId={agentId} />
+        </div>
+        {/* Content area (single render) */}
+        <div className="flex-1 min-w-0 min-h-0 relative">
+          <div className="absolute inset-0 overflow-y-auto">
+            {children}
+          </div>
         </div>
       </div>
     </AgentDetailProvider>
