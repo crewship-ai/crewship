@@ -16,15 +16,21 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// MissionCallback is notified when assignments linked to mission tasks complete.
+type MissionCallback interface {
+	OnAssignmentCompleted(ctx context.Context, assignmentID, status, resultSummary, errorMessage string) error
+}
+
 // AssignmentHandler handles internal assignment API requests.
 // Assignments are created by the sidecar on behalf of lead agents and
 // executed as sub-agent runs in the crew container.
 type AssignmentHandler struct {
-	db            *sql.DB
-	orch          *orchestrator.Orchestrator
-	hub           *ws.Hub
-	logger        *slog.Logger
-	internalToken string
+	db              *sql.DB
+	orch            *orchestrator.Orchestrator
+	hub             *ws.Hub
+	logger          *slog.Logger
+	internalToken   string
+	missionCallback MissionCallback
 }
 
 func NewAssignmentHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, internalToken string, logger *slog.Logger) *AssignmentHandler {
@@ -35,6 +41,11 @@ func NewAssignmentHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.H
 		logger:        logger,
 		internalToken: internalToken,
 	}
+}
+
+// SetMissionCallback registers the MissionEngine to receive assignment completion events.
+func (h *AssignmentHandler) SetMissionCallback(cb MissionCallback) {
+	h.missionCallback = cb
 }
 
 type createAssignmentBody struct {
@@ -396,6 +407,13 @@ func (h *AssignmentHandler) finishAssignment(
 	}
 
 	h.logger.Info("assignment finished", "assignment_id", assignmentID, "status", status)
+
+	// Notify MissionEngine if this assignment is linked to a mission task
+	if h.missionCallback != nil {
+		if err := h.missionCallback.OnAssignmentCompleted(ctx, assignmentID, status, result, errMsg); err != nil {
+			h.logger.Error("mission callback failed", "error", err, "assignment_id", assignmentID)
+		}
+	}
 }
 
 // List handles GET /api/v1/crews/{crewId}/assignments.

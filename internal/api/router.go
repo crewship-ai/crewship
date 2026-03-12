@@ -43,6 +43,7 @@ type Router struct {
 	keeperContainer  provider.ContainerProvider
 	keeperConfig     *config.KeeperConfig
 	keeperConvReader ConversationReader
+	missionCallback  MissionCallback
 	allowSignup      bool
 	license          *license.License
 }
@@ -146,6 +147,12 @@ func WithAllowSignup(allow bool) RouterOption {
 func WithKeeperConversations(cr ConversationReader) RouterOption {
 	return func(r *Router) {
 		r.keeperConvReader = cr
+	}
+}
+
+func WithMissionCallback(cb MissionCallback) RouterOption {
+	return func(r *Router) {
+		r.missionCallback = cb
 	}
 }
 
@@ -360,8 +367,21 @@ func (r *Router) registerRoutes() {
 
 	// Assignment routes (internal auth, called by sidecar on behalf of lead agents)
 	assign := NewAssignmentHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
+	if r.missionCallback != nil {
+		assign.SetMissionCallback(r.missionCallback)
+	}
 	r.mux.Handle("POST /api/v1/internal/assignments", internalAuth(http.HandlerFunc(assign.Create)))
 	r.mux.Handle("GET /api/v1/internal/assignments/{assignmentId}", internalAuth(http.HandlerFunc(assign.Get)))
+
+	// Internal mission routes (called by sidecar on behalf of lead agents)
+	var missionEngineForInternal *orchestrator.MissionEngine
+	if mc, ok := r.missionCallback.(*orchestrator.MissionEngine); ok {
+		missionEngineForInternal = mc
+	}
+	internalMissions := NewInternalMissionHandler(r.db, r.hub, missionEngineForInternal, r.logger)
+	r.mux.Handle("POST /api/v1/internal/missions", internalAuth(http.HandlerFunc(internalMissions.Create)))
+	r.mux.Handle("GET /api/v1/internal/missions/{missionId}", internalAuth(http.HandlerFunc(internalMissions.Get)))
+	r.mux.Handle("POST /api/v1/internal/missions/{missionId}/start", internalAuth(http.HandlerFunc(internalMissions.Start)))
 
 	// Crew assignments (public, authenticated)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/assignments", authed(wsCtx(http.HandlerFunc(assign.List))))
