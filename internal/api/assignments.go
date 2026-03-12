@@ -532,3 +532,41 @@ func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, a)
 }
+
+// DispatchAssignment implements orchestrator.TaskDispatcher. It loads the
+// target agent's configuration and credentials, then runs the agent in the
+// correct crew container -- exactly like the Create handler but driven by the
+// MissionEngine instead of a sidecar HTTP call.
+func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestrator.DispatchRequest) error {
+	var target targetAgentInfo
+	err := h.db.QueryRowContext(ctx, `
+		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt,''),
+		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug
+		FROM agents a
+		JOIN crews c ON c.id = a.crew_id
+		WHERE a.id = ? AND a.deleted_at IS NULL
+	`, req.AgentID).Scan(
+		&target.ID, &target.Slug, &target.Name, &target.RoleTitle,
+		&target.SystemPrompt, &target.CLIAdapter, &target.LLMModel,
+		&target.ToolProfile, &target.TimeoutSeconds, &target.MemoryEnabled, &target.CrewSlug,
+	)
+	if err != nil {
+		return fmt.Errorf("lookup agent %s: %w", req.AgentID, err)
+	}
+
+	creds, err := h.loadAgentCredentials(ctx, target.ID)
+	if err != nil {
+		return fmt.Errorf("load credentials for agent %s: %w", target.ID, err)
+	}
+
+	body := createAssignmentBody{
+		TargetSlug:  target.Slug,
+		Task:        req.Task,
+		CrewID:      req.CrewID,
+		WorkspaceID: req.WorkspaceID,
+		ChatID:      req.ChatID,
+	}
+
+	h.runAssignment(ctx, req.AssignmentID, body, target, creds)
+	return nil
+}

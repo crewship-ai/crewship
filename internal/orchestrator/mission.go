@@ -14,20 +14,45 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// TaskDispatcher runs an assignment for a given agent. Implemented by the
+// AssignmentHandler in the api package to reuse credential loading, container
+// management, and the orchestrator's RunAgentForAssignment flow.
+type TaskDispatcher interface {
+	DispatchAssignment(ctx context.Context, req DispatchRequest) error
+}
+
+// DispatchRequest contains everything needed to dispatch a mission task.
+type DispatchRequest struct {
+	AssignmentID string
+	AgentID      string
+	AgentSlug    string
+	CrewID       string
+	CrewSlug     string
+	WorkspaceID  string
+	ChatID       string // mission ID used as pseudo-chat for grouping
+	Task         string
+}
+
 // MissionEngine manages the lifecycle of missions and their tasks.
 // It bridges the mission model (DB) with the assignment system (orchestrator)
 // by resolving task dependencies, scheduling ready tasks, and tracking completion.
 type MissionEngine struct {
-	db     *sql.DB
-	orch   *Orchestrator
-	hub    *ws.Hub
-	pw     *ProgressWriter
-	lc     *LoopController
-	logger *slog.Logger
+	db         *sql.DB
+	orch       *Orchestrator
+	hub        *ws.Hub
+	pw         *ProgressWriter
+	lc         *LoopController
+	dispatcher TaskDispatcher
+	logger     *slog.Logger
 
 	mu       sync.Mutex
 	active   map[string]*missionState // missionID -> state
 	stopping bool
+}
+
+// SetDispatcher registers the assignment dispatcher.
+func (e *MissionEngine) SetDispatcher(d TaskDispatcher) {
+	e.dispatcher = d
 }
 
 type missionState struct {
@@ -255,11 +280,41 @@ func (e *MissionEngine) scheduleReadyTasks(ctx context.Context, ms *missionState
 }
 
 // scheduleTask transitions a task to IN_PROGRESS and creates an assignment.
+// It resolves the target agent's crew (which may differ from the mission's
+// crew for cross-crew tasks) and dispatches the work via the TaskDispatcher.
 func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task TaskInfo) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Resolve the target agent's crew for cross-crew support
+	var agentCrewID, agentCrewSlug, agentSlug string
+	err := e.db.QueryRowContext(ctx, `
+		SELECT a.slug, a.crew_id, c.slug
+		FROM agents a
+		JOIN crews c ON c.id = a.crew_id
+		WHERE a.id = ? AND a.deleted_at IS NULL`,
+		*task.AssignedAgentID).Scan(&agentSlug, &agentCrewID, &agentCrewSlug)
+	if err != nil {
+		return fmt.Errorf("resolve agent crew: %w", err)
+	}
+
+	// For cross-crew tasks, verify the crews are connected
+	if agentCrewID != ms.CrewID {
+		connected, connErr := e.areCrewsConnected(ctx, ms.CrewID, agentCrewID)
+		if connErr != nil {
+			return fmt.Errorf("check crew connection: %w", connErr)
+		}
+		if !connected {
+			return fmt.Errorf("crew %s is not connected to crew %s — create a crew connection first", ms.CrewSlug, agentCrewSlug)
+		}
+		e.logger.Info("cross-crew task dispatch",
+			"mission_crew", ms.CrewSlug,
+			"target_crew", agentCrewSlug,
+			"agent", agentSlug,
+		)
+	}
+
 	// Transition task to IN_PROGRESS
-	_, err := e.db.ExecContext(ctx,
+	_, err = e.db.ExecContext(ctx,
 		`UPDATE mission_tasks SET status = 'IN_PROGRESS', started_at = ?, updated_at = ? WHERE id = ? AND status = 'PENDING'`,
 		now, now, task.ID)
 	if err != nil {
@@ -270,11 +325,11 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 	e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
 		Type:      "task_started",
 		TaskID:    task.ID,
-		AgentSlug: derefStr(task.AgentSlug),
+		AgentSlug: agentSlug,
 		Title:     task.Title,
 	})
 
-	// Create assignment via the existing internal assignment API flow
+	// Create assignment record
 	assignmentID := generateID()
 	_, err = e.db.ExecContext(ctx, `
 		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at)
@@ -296,14 +351,56 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		e.logger.Warn("link assignment to task", "task_id", task.ID, "error", err)
 	}
 
+	// Dispatch the assignment to the correct crew's container
+	if e.dispatcher != nil {
+		go func() {
+			dispatchErr := e.dispatcher.DispatchAssignment(context.Background(), DispatchRequest{
+				AssignmentID: assignmentID,
+				AgentID:      *task.AssignedAgentID,
+				AgentSlug:    agentSlug,
+				CrewID:       agentCrewID,
+				CrewSlug:     agentCrewSlug,
+				WorkspaceID:  ms.WorkspaceID,
+				ChatID:       ms.ID,
+				Task:         task.Title,
+			})
+			if dispatchErr != nil {
+				e.logger.Error("dispatch assignment failed",
+					"assignment_id", assignmentID,
+					"error", dispatchErr,
+				)
+				e.updateTaskStatus(ctx, ms, task.ID, "FAILED", dispatchErr.Error())
+			}
+		}()
+	}
+
 	e.logger.Info("task scheduled",
 		"mission_id", ms.ID,
 		"task_id", task.ID,
 		"assignment_id", assignmentID,
-		"agent_slug", derefStr(task.AgentSlug),
+		"agent_slug", agentSlug,
+		"agent_crew", agentCrewSlug,
 	)
 
 	return nil
+}
+
+// areCrewsConnected checks if two crews have an active connection.
+func (e *MissionEngine) areCrewsConnected(ctx context.Context, crewA, crewB string) (bool, error) {
+	var exists bool
+	err := e.db.QueryRowContext(ctx, `
+		SELECT 1 FROM crew_connections
+		WHERE status = 'active' AND (
+			(from_crew_id = ? AND to_crew_id = ?)
+			OR (from_crew_id = ? AND to_crew_id = ? AND direction = 'bidirectional')
+		)`, crewA, crewB, crewB, crewA).Scan(&exists)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // OnAssignmentCompleted is called when an assignment finishes.

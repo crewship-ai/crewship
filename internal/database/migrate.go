@@ -78,6 +78,7 @@ var migrations = []migration{
 	{17, "add_credential_crews", migrationAddCredentialCrews},
 	{18, "add_crew_network_policy", migrationAddCrewNetworkPolicy},
 	{19, "add_workflow_templates", migrationAddWorkflowTemplates},
+	{20, "add_crew_connections", migrationAddCrewConnections},
 }
 
 const migrationAddKeeperObservability = `
@@ -728,4 +729,21 @@ CREATE TABLE IF NOT EXISTS workflow_templates (
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_templates_ws ON workflow_templates(workspace_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_templates_name_ws ON workflow_templates(workspace_id, name);
+`
+
+const migrationAddCrewConnections = `
+CREATE TABLE IF NOT EXISTS crew_connections (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+	from_crew_id TEXT NOT NULL REFERENCES crews(id),
+	to_crew_id TEXT NOT NULL REFERENCES crews(id),
+	direction TEXT NOT NULL DEFAULT 'bidirectional' CHECK(direction IN ('unidirectional', 'bidirectional')),
+	status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'inactive')),
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE(from_crew_id, to_crew_id)
+);
+CREATE INDEX IF NOT EXISTS idx_crew_conn_from ON crew_connections(from_crew_id);
+CREATE INDEX IF NOT EXISTS idx_crew_conn_to ON crew_connections(to_crew_id);
+CREATE INDEX IF NOT EXISTS idx_crew_conn_ws ON crew_connections(workspace_id);
 `

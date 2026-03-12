@@ -379,3 +379,165 @@ func TestProgressWriter(t *testing.T) {
 		t.Error("BuildProgressContext returned empty string")
 	}
 }
+
+// mockDispatcher records dispatched assignments for testing.
+type mockDispatcher struct {
+	dispatched []DispatchRequest
+}
+
+func (m *mockDispatcher) DispatchAssignment(_ context.Context, req DispatchRequest) error {
+	m.dispatched = append(m.dispatched, req)
+	return nil
+}
+
+func TestScheduleTask_CrossCrew_Connected(t *testing.T) {
+	db := setupTestDB(t)
+	// Add crew_connections table
+	db.Exec(`CREATE TABLE crew_connections (
+		id TEXT PRIMARY KEY, workspace_id TEXT, from_crew_id TEXT, to_crew_id TEXT,
+		direction TEXT DEFAULT 'bidirectional', status TEXT DEFAULT 'active',
+		created_at TEXT, updated_at TEXT)`)
+
+	wsID := "ws-1"
+	crewA := "crew-a"
+	crewB := "crew-b"
+	leadID := "agent-lead"
+	crossAgentID := "agent-cross"
+
+	db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'WS', 'ws')`, wsID)
+	db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'Crew A', 'crew-a')`, crewA, wsID)
+	db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'Crew B', 'crew-b')`, crewB, wsID)
+	db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role) VALUES (?, ?, ?, 'Lead', 'lead', 'LEAD')`, leadID, wsID, crewA)
+	db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role) VALUES (?, ?, ?, 'Cross Agent', 'cross', 'AGENT')`, crossAgentID, wsID, crewB)
+
+	// Create connection between crews
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status, created_at, updated_at)
+		VALUES ('cc-1', ?, ?, ?, 'bidirectional', 'active', ?, ?)`, wsID, crewA, crewB, now, now)
+
+	// Create mission in crew A
+	missionID := "mission-cross"
+	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'trace-cross', 'Cross Crew Mission', 'IN_PROGRESS', ?, ?)`,
+		missionID, wsID, crewA, leadID, now, now)
+
+	// Create task assigned to agent in crew B
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-cross', ?, ?, 'Cross crew task', 'PENDING', 1, '[]', ?, ?)`,
+		missionID, crossAgentID, now, now)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	disp := &mockDispatcher{}
+	engine.SetDispatcher(disp)
+
+	ms := &missionState{
+		ID:          missionID,
+		CrewID:      crewA,
+		CrewSlug:    "crew-a",
+		LeadAgentID: leadID,
+		TraceID:     "trace-cross",
+		WorkspaceID: wsID,
+	}
+
+	task := TaskInfo{
+		ID:              "t-cross",
+		MissionID:       missionID,
+		AssignedAgentID: &crossAgentID,
+		Title:           "Cross crew task",
+		Status:          "PENDING",
+	}
+
+	err := engine.scheduleTask(context.Background(), ms, task)
+	if err != nil {
+		t.Fatalf("scheduleTask failed: %v", err)
+	}
+
+	// Give goroutine time to dispatch
+	time.Sleep(100 * time.Millisecond)
+
+	if len(disp.dispatched) != 1 {
+		t.Fatalf("expected 1 dispatch, got %d", len(disp.dispatched))
+	}
+	d := disp.dispatched[0]
+	if d.CrewID != crewB {
+		t.Errorf("expected dispatch to crew-b, got %s", d.CrewID)
+	}
+	if d.AgentSlug != "cross" {
+		t.Errorf("expected agent slug 'cross', got %s", d.AgentSlug)
+	}
+}
+
+func TestScheduleTask_CrossCrew_NotConnected(t *testing.T) {
+	db := setupTestDB(t)
+	db.Exec(`CREATE TABLE crew_connections (
+		id TEXT PRIMARY KEY, workspace_id TEXT, from_crew_id TEXT, to_crew_id TEXT,
+		direction TEXT DEFAULT 'bidirectional', status TEXT DEFAULT 'active',
+		created_at TEXT, updated_at TEXT)`)
+
+	wsID := "ws-1"
+	crewA := "crew-a"
+	crewB := "crew-b"
+	leadID := "agent-lead"
+	crossAgentID := "agent-cross"
+
+	db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'WS', 'ws')`, wsID)
+	db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'Crew A', 'crew-a')`, crewA, wsID)
+	db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'Crew B', 'crew-b')`, crewB, wsID)
+	db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role) VALUES (?, ?, ?, 'Lead', 'lead', 'LEAD')`, leadID, wsID, crewA)
+	db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role) VALUES (?, ?, ?, 'Cross Agent', 'cross', 'AGENT')`, crossAgentID, wsID, crewB)
+
+	// NO connection created between crews
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	missionID := "mission-cross2"
+	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'trace-cross2', 'Cross Crew Mission', 'IN_PROGRESS', ?, ?)`,
+		missionID, wsID, crewA, leadID, now, now)
+
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-cross2', ?, ?, 'Cross crew task', 'PENDING', 1, '[]', ?, ?)`,
+		missionID, crossAgentID, now, now)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	ms := &missionState{
+		ID:          missionID,
+		CrewID:      crewA,
+		CrewSlug:    "crew-a",
+		LeadAgentID: leadID,
+		TraceID:     "trace-cross2",
+		WorkspaceID: wsID,
+	}
+
+	task := TaskInfo{
+		ID:              "t-cross2",
+		MissionID:       missionID,
+		AssignedAgentID: &crossAgentID,
+		Title:           "Cross crew task",
+		Status:          "PENDING",
+	}
+
+	err := engine.scheduleTask(context.Background(), ms, task)
+	if err == nil {
+		t.Fatal("expected error for unconnected crews, got nil")
+	}
+	if !contains(err.Error(), "not connected") {
+		t.Errorf("expected 'not connected' error, got: %s", err)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && searchStr(s, substr)
+}
+
+func searchStr(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

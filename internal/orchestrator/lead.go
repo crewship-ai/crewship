@@ -68,6 +68,11 @@ func BuildLeadContext(members []CrewMember) string {
 	b.WriteString("List templates: curl -s http://localhost:9119/mission/templates\n")
 	b.WriteString("Available templates: sequential, parallel, dev-test-loop, pipeline\n")
 	b.WriteString("Tasks with max_iterations will auto-retry on failure (Ralph Loop pattern).\n")
+	b.WriteString("\n")
+	b.WriteString("CROSS-CREW MISSIONS:\n")
+	b.WriteString("Mission tasks can reference agents from connected crews.\n")
+	b.WriteString("The system auto-routes assignments to the correct crew container.\n")
+	b.WriteString("Crew connections must be established by workspace admins before use.\n")
 
 	b.WriteString("[END CREW CONTEXT]")
 	return b.String()

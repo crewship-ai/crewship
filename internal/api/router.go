@@ -237,6 +237,12 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/members/{memberId}", authed(wsCtx(http.HandlerFunc(crews.RemoveMember))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/apply-avatar-style", authed(wsCtx(http.HandlerFunc(crews.ApplyAvatarStyle))))
 
+	// Crew Connections
+	conns := NewCrewConnectionHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/crew-connections", authed(wsCtx(http.HandlerFunc(conns.List))))
+	r.mux.Handle("POST /api/v1/crew-connections", authed(wsCtx(http.HandlerFunc(conns.Create))))
+	r.mux.Handle("DELETE /api/v1/crew-connections/{connectionId}", authed(wsCtx(http.HandlerFunc(conns.Delete))))
+
 	// Workflow Templates
 	templates := NewTemplateHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/templates", authed(wsCtx(http.HandlerFunc(templates.List))))
@@ -377,6 +383,11 @@ func (r *Router) registerRoutes() {
 	assign := NewAssignmentHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
 	if r.missionCallback != nil {
 		assign.SetMissionCallback(r.missionCallback)
+		// Wire AssignmentHandler as the TaskDispatcher so the MissionEngine
+		// can dispatch tasks (including cross-crew) through the same code path.
+		if me, ok := r.missionCallback.(*orchestrator.MissionEngine); ok {
+			me.SetDispatcher(assign)
+		}
 	}
 	r.mux.Handle("POST /api/v1/internal/assignments", internalAuth(http.HandlerFunc(assign.Create)))
 	r.mux.Handle("GET /api/v1/internal/assignments/{assignmentId}", internalAuth(http.HandlerFunc(assign.Get)))
