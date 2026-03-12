@@ -2,6 +2,7 @@
 
 import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
+import { AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface AgentNodeData {
@@ -160,8 +161,16 @@ function AgentNodeComponent({ data }: NodeProps) {
             <div className="text-[13px] font-medium text-white/90 leading-tight truncate">
               {d.label}
             </div>
-            <div className="text-[11px] text-white/40 mt-0.5 truncate font-mono">
-              @{d.agentSlug || "unassigned"}
+            <div className="flex items-center gap-1 mt-0.5">
+              {!d.agentSlug && (
+                <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
+              )}
+              <span className={cn(
+                "text-[11px] truncate font-mono",
+                d.agentSlug ? "text-white/40" : "text-amber-400/70"
+              )}>
+                {d.agentSlug ? `@${d.agentSlug}` : "unassigned"}
+              </span>
             </div>
           </div>
         </div>

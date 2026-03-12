@@ -131,23 +131,29 @@ func TestResolveReadyTasks_WithDeps(t *testing.T) {
 
 func TestResolveReadyTasks_UnassignedSkipped(t *testing.T) {
 	db := setupTestDB(t)
-	wsID, crewID, leadID, _ := seedTestData(t, db)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
 	missionID := createTestMission(t, db, wsID, crewID, leadID)
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	// Unassigned task (assigned_agent_id IS NULL)
+	// Unassigned task (assigned_agent_id IS NULL) — should be auto-assigned
 	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
 		VALUES ('t1', ?, NULL, 'Unassigned', 'PENDING', 1, '[]', ?, ?)`, missionID, now, now)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	engine := NewMissionEngine(db, nil, nil, logger)
+	// Register mission as active so auto-assign failure path can broadcast
+	engine.active[missionID] = &missionState{ID: missionID, CrewID: crewID, CrewSlug: "dev-crew", WorkspaceID: wsID, TraceID: "t"}
 
 	ready, err := engine.ResolveReadyTasks(context.Background(), missionID)
 	if err != nil {
 		t.Fatalf("ResolveReadyTasks: %v", err)
 	}
-	if len(ready) != 0 {
-		t.Errorf("expected 0 ready tasks (unassigned), got %d", len(ready))
+	if len(ready) != 1 {
+		t.Fatalf("expected 1 ready task (auto-assigned), got %d", len(ready))
+	}
+	// The task should now be assigned to the worker agent (non-LEAD)
+	if ready[0].AssignedAgentID == nil || *ready[0].AssignedAgentID != agentID {
+		t.Errorf("expected task auto-assigned to %s, got %v", agentID, ready[0].AssignedAgentID)
 	}
 }
 
@@ -450,7 +456,7 @@ func TestScheduleTask_CrossCrew_Connected(t *testing.T) {
 		Status:          "PENDING",
 	}
 
-	err := engine.scheduleTask(context.Background(), ms, task)
+	err := engine.scheduleTask(context.Background(), ms, task, nil)
 	if err != nil {
 		t.Fatalf("scheduleTask failed: %v", err)
 	}
@@ -521,7 +527,7 @@ func TestScheduleTask_CrossCrew_NotConnected(t *testing.T) {
 		Status:          "PENDING",
 	}
 
-	err := engine.scheduleTask(context.Background(), ms, task)
+	err := engine.scheduleTask(context.Background(), ms, task, nil)
 	if err == nil {
 		t.Fatal("expected error for unconnected crews, got nil")
 	}
@@ -595,7 +601,7 @@ func TestCircuitBreaker_TripsAfterThreshold(t *testing.T) {
 		Status:          "PENDING",
 	}
 
-	err := engine.scheduleTask(context.Background(), ms, task)
+	err := engine.scheduleTask(context.Background(), ms, task, nil)
 	if err == nil {
 		t.Fatal("expected circuit breaker error, got nil")
 	}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -113,11 +114,13 @@ type TaskInfo struct {
 	AssignedAgentID *string
 	AgentSlug       *string
 	Title           string
+	Description     *string
 	Status          string
 	TaskOrder       int
 	DependsOn       string // JSON array of task IDs
 	Iteration       int
 	MaxIterations   *int
+	ResultSummary   *string // populated for completed tasks (context propagation)
 }
 
 // StartMission begins orchestrating a mission that is in IN_PROGRESS status.
@@ -246,6 +249,7 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 
 // ResolveReadyTasks returns tasks that have all dependencies completed
 // and are in PENDING status (ready to be scheduled).
+// Unassigned tasks are auto-assigned to an available crew member or the lead agent.
 func (e *MissionEngine) ResolveReadyTasks(ctx context.Context, missionID string) ([]TaskInfo, error) {
 	tasks, err := e.loadTasks(ctx, missionID)
 	if err != nil {
@@ -260,12 +264,9 @@ func (e *MissionEngine) ResolveReadyTasks(ctx context.Context, missionID string)
 	}
 
 	var ready []TaskInfo
-	for _, t := range tasks {
+	for i, t := range tasks {
 		if t.Status != "PENDING" {
 			continue
-		}
-		if t.AssignedAgentID == nil {
-			continue // unassigned tasks cannot be scheduled
 		}
 
 		deps, err := parseDependsOn(t.DependsOn)
@@ -281,11 +282,174 @@ func (e *MissionEngine) ResolveReadyTasks(ctx context.Context, missionID string)
 				break
 			}
 		}
-		if allDone {
-			ready = append(ready, t)
+		if !allDone {
+			continue
 		}
+
+		// Auto-assign unassigned tasks
+		if t.AssignedAgentID == nil {
+			agentID, agentSlug, autoErr := e.autoAssignTask(ctx, missionID, t.ID)
+			if autoErr != nil {
+				e.logger.Error("auto-assign failed, marking task FAILED",
+					"task_id", t.ID, "error", autoErr)
+				e.mu.Lock()
+				ms := e.active[missionID]
+				e.mu.Unlock()
+				if ms != nil {
+					e.updateTaskStatus(ctx, ms, t.ID, "FAILED",
+						"No agent assigned and auto-assignment failed: "+autoErr.Error())
+				}
+				continue
+			}
+			tasks[i].AssignedAgentID = &agentID
+			tasks[i].AgentSlug = &agentSlug
+			t = tasks[i]
+			e.logger.Info("task auto-assigned",
+				"task_id", t.ID, "agent", agentSlug)
+		}
+
+		ready = append(ready, t)
 	}
 	return ready, nil
+}
+
+// autoAssignTask picks an available agent from the mission's crew for an unassigned task.
+// Priority: non-LEAD agents first, then the LEAD agent as fallback.
+func (e *MissionEngine) autoAssignTask(ctx context.Context, missionID, taskID string) (string, string, error) {
+	var crewID, leadAgentID string
+	err := e.db.QueryRowContext(ctx,
+		`SELECT crew_id, lead_agent_id FROM missions WHERE id = ?`, missionID,
+	).Scan(&crewID, &leadAgentID)
+	if err != nil {
+		return "", "", fmt.Errorf("lookup mission: %w", err)
+	}
+
+	// Try to find a non-LEAD agent in the crew
+	rows, err := e.db.QueryContext(ctx, `
+		SELECT a.id, a.slug FROM agents a
+		WHERE a.crew_id = ? AND a.deleted_at IS NULL AND a.id != ?
+		ORDER BY a.name ASC`, crewID, leadAgentID)
+	if err != nil {
+		return "", "", fmt.Errorf("query crew agents: %w", err)
+	}
+	var candidates []struct{ id, slug string }
+	for rows.Next() {
+		var c struct{ id, slug string }
+		if err := rows.Scan(&c.id, &c.slug); err == nil {
+			candidates = append(candidates, c)
+		}
+	}
+	rows.Close()
+
+	var agentID, agentSlug string
+	if len(candidates) > 0 {
+		// Pick the first available (could be improved with load balancing)
+		agentID = candidates[0].id
+		agentSlug = candidates[0].slug
+	} else {
+		// Fallback: assign to the lead agent
+		err = e.db.QueryRowContext(ctx,
+			`SELECT id, slug FROM agents WHERE id = ? AND deleted_at IS NULL`, leadAgentID,
+		).Scan(&agentID, &agentSlug)
+		if err != nil {
+			return "", "", fmt.Errorf("lead agent not found: %w", err)
+		}
+	}
+
+	// Persist the assignment
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := e.db.ExecContext(ctx,
+		`UPDATE mission_tasks SET assigned_agent_id = ?, updated_at = ? WHERE id = ?`,
+		agentID, now, taskID); err != nil {
+		return "", "", fmt.Errorf("persist auto-assignment: %w", err)
+	}
+
+	return agentID, agentSlug, nil
+}
+
+// buildMissionBrief constructs a rich context prompt for an agent executing a mission task.
+// It includes: mission overview, the specific task, all sibling tasks (DAG awareness),
+// and the output from completed dependency tasks (cross-task context propagation).
+func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState, task TaskInfo, allTasks []TaskInfo) string {
+	var b strings.Builder
+
+	// Mission overview
+	var missionTitle, missionDesc sql.NullString
+	e.db.QueryRowContext(ctx,
+		`SELECT title, description FROM missions WHERE id = ?`, ms.ID,
+	).Scan(&missionTitle, &missionDesc)
+
+	b.WriteString("[MISSION CONTEXT]\n")
+	if missionTitle.Valid {
+		b.WriteString(fmt.Sprintf("Mission: %s\n", missionTitle.String))
+	}
+	if missionDesc.Valid && missionDesc.String != "" {
+		b.WriteString(fmt.Sprintf("Description: %s\n", missionDesc.String))
+	}
+
+	// DAG overview — list all tasks so the agent knows the bigger picture
+	b.WriteString(fmt.Sprintf("\nTotal tasks: %d\n", len(allTasks)))
+	for _, t := range allTasks {
+		marker := "  "
+		switch t.Status {
+		case "COMPLETED":
+			marker = "✓ "
+		case "IN_PROGRESS":
+			marker = "► "
+		case "FAILED":
+			marker = "✗ "
+		}
+		agentLabel := "unassigned"
+		if t.AgentSlug != nil {
+			agentLabel = "@" + *t.AgentSlug
+		}
+		b.WriteString(fmt.Sprintf("  %s#%d %s (%s, %s)\n", marker, t.TaskOrder, t.Title, agentLabel, t.Status))
+	}
+
+	// Current task details
+	b.WriteString(fmt.Sprintf("\n[YOUR TASK]\n"))
+	b.WriteString(fmt.Sprintf("Title: %s\n", task.Title))
+	if task.Description != nil && *task.Description != "" {
+		b.WriteString(fmt.Sprintf("Description: %s\n", *task.Description))
+	}
+	if task.Iteration > 1 {
+		b.WriteString(fmt.Sprintf("Iteration: %d (this is a retry — fix the issues from the previous attempt)\n", task.Iteration))
+	}
+
+	// Completed dependency outputs — critical for context chain
+	deps, _ := parseDependsOn(task.DependsOn)
+	if len(deps) > 0 {
+		depOutputs := make([]string, 0)
+		for _, depID := range deps {
+			for _, t := range allTasks {
+				if t.ID == depID && t.ResultSummary != nil && *t.ResultSummary != "" {
+					agentLabel := "unknown"
+					if t.AgentSlug != nil {
+						agentLabel = "@" + *t.AgentSlug
+					}
+					summary := *t.ResultSummary
+					if len(summary) > 4000 {
+						summary = summary[:4000] + "\n...(truncated)"
+					}
+					depOutputs = append(depOutputs,
+						fmt.Sprintf("Task #%d \"%s\" (%s):\n%s", t.TaskOrder, t.Title, agentLabel, summary))
+				}
+			}
+		}
+		if len(depOutputs) > 0 {
+			b.WriteString("\n[COMPLETED DEPENDENCIES — use these results as input]\n")
+			b.WriteString(strings.Join(depOutputs, "\n---\n"))
+			b.WriteString("\n")
+		}
+	}
+
+	b.WriteString("[END MISSION CONTEXT]\n\n")
+	b.WriteString(task.Title)
+	if task.Description != nil && *task.Description != "" {
+		b.WriteString("\n\n" + *task.Description)
+	}
+
+	return b.String()
 }
 
 // scheduleReadyTasks finds PENDING tasks with completed dependencies and creates assignments.
@@ -295,8 +459,14 @@ func (e *MissionEngine) scheduleReadyTasks(ctx context.Context, ms *missionState
 		return fmt.Errorf("resolve ready tasks: %w", err)
 	}
 
+	// Load all tasks once for mission brief context
+	allTasks, briefErr := e.loadTasks(ctx, ms.ID)
+	if briefErr != nil {
+		e.logger.Warn("load tasks for brief failed, continuing without context", "error", briefErr)
+	}
+
 	for _, task := range ready {
-		if err := e.scheduleTask(ctx, ms, task); err != nil {
+		if err := e.scheduleTask(ctx, ms, task, allTasks); err != nil {
 			e.logger.Error("schedule task", "task_id", task.ID, "error", err)
 			// Mark task as FAILED so the loop doesn't retry endlessly
 			e.updateTaskStatus(ctx, ms, task.ID, "FAILED", err.Error())
@@ -308,7 +478,8 @@ func (e *MissionEngine) scheduleReadyTasks(ctx context.Context, ms *missionState
 // scheduleTask transitions a task to IN_PROGRESS and creates an assignment.
 // It resolves the target agent's crew (which may differ from the mission's
 // crew for cross-crew tasks) and dispatches the work via the TaskDispatcher.
-func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task TaskInfo) error {
+// allTasks is used to build the mission brief context for the agent.
+func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task TaskInfo, allTasks []TaskInfo) error {
 	// Circuit breaker: skip agent if it has failed too many times consecutively
 	if task.AssignedAgentID != nil {
 		e.cbMu.Lock()
@@ -387,6 +558,9 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		e.logger.Warn("link assignment to task", "task_id", task.ID, "error", err)
 	}
 
+	// Build rich mission brief with full context for the agent
+	taskBrief := e.buildMissionBrief(ctx, ms, task, allTasks)
+
 	// Dispatch the assignment to the correct crew's container
 	if e.dispatcher != nil {
 		go func() {
@@ -398,7 +572,7 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 				CrewSlug:     agentCrewSlug,
 				WorkspaceID:  ms.WorkspaceID,
 				ChatID:       ms.ID,
-				Task:         task.Title,
+				Task:         taskBrief,
 				TraceID:      ms.TraceID,
 				MissionID:    ms.ID,
 			})
@@ -725,8 +899,9 @@ func (e *MissionEngine) getMissionStatus(ctx context.Context, missionID string) 
 
 func (e *MissionEngine) loadTasks(ctx context.Context, missionID string) ([]TaskInfo, error) {
 	rows, err := e.db.QueryContext(ctx, `
-		SELECT mt.id, mt.mission_id, mt.assigned_agent_id, a.slug, mt.title, mt.status,
-		       mt.task_order, mt.depends_on, COALESCE(mt.iteration, 1), mt.max_iterations
+		SELECT mt.id, mt.mission_id, mt.assigned_agent_id, a.slug, mt.title, mt.description,
+		       mt.status, mt.task_order, mt.depends_on, COALESCE(mt.iteration, 1),
+		       mt.max_iterations, mt.result_summary
 		FROM mission_tasks mt
 		LEFT JOIN agents a ON a.id = mt.assigned_agent_id
 		WHERE mt.mission_id = ?
@@ -740,7 +915,8 @@ func (e *MissionEngine) loadTasks(ctx context.Context, missionID string) ([]Task
 	for rows.Next() {
 		var t TaskInfo
 		if err := rows.Scan(&t.ID, &t.MissionID, &t.AssignedAgentID, &t.AgentSlug,
-			&t.Title, &t.Status, &t.TaskOrder, &t.DependsOn, &t.Iteration, &t.MaxIterations); err != nil {
+			&t.Title, &t.Description, &t.Status, &t.TaskOrder, &t.DependsOn,
+			&t.Iteration, &t.MaxIterations, &t.ResultSummary); err != nil {
 			return nil, fmt.Errorf("scan task: %w", err)
 		}
 		tasks = append(tasks, t)

@@ -49,11 +49,12 @@ func (h *AssignmentHandler) SetMissionCallback(cb MissionCallback) {
 }
 
 type createAssignmentBody struct {
-	TargetSlug  string `json:"target_slug"`
-	Task        string `json:"task"`
-	CrewID      string `json:"crew_id"`
-	WorkspaceID string `json:"workspace_id"`
-	ChatID      string `json:"chat_id"`
+	TargetSlug  string                    `json:"target_slug"`
+	Task        string                    `json:"task"`
+	CrewID      string                    `json:"crew_id"`
+	WorkspaceID string                    `json:"workspace_id"`
+	ChatID      string                    `json:"chat_id"`
+	CrewMembers []orchestrator.CrewMember `json:"-"` // populated internally for mission dispatches
 }
 
 // Create handles POST /api/v1/internal/assignments.
@@ -300,6 +301,7 @@ func (h *AssignmentHandler) runAssignment(
 		Credentials:     creds,
 		TimeoutSecs:     target.TimeoutSeconds,
 		MemoryEnabled:   target.MemoryEnabled,
+		CrewMembers:     body.CrewMembers, // peer context for mission agents
 		SkipSidecar:     true,  // Prevent port conflict with lead's sidecar on 9119
 		SkipConvHistory: true,  // Sub-agents start fresh without lead's conversation history
 	}
@@ -565,12 +567,16 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 		task = fmt.Sprintf("[trace:%s] %s", req.TraceID, req.Task)
 	}
 
+	// Load crew members for peer context (so the agent knows its teammates)
+	crewMembers := h.loadCrewMembers(ctx, req.CrewID, req.AgentID)
+
 	body := createAssignmentBody{
 		TargetSlug:  target.Slug,
 		Task:        task,
 		CrewID:      req.CrewID,
 		WorkspaceID: req.WorkspaceID,
 		ChatID:      req.ChatID,
+		CrewMembers: crewMembers,
 	}
 
 	h.logger.Info("dispatching mission assignment",
@@ -583,4 +589,28 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 
 	h.runAssignment(ctx, req.AssignmentID, body, target, creds)
 	return nil
+}
+
+// loadCrewMembers fetches all agents in a crew (except the given agent) for peer context.
+func (h *AssignmentHandler) loadCrewMembers(ctx context.Context, crewID, excludeAgentID string) []orchestrator.CrewMember {
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT a.id, a.slug, a.name, COALESCE(a.role_title, ''), COALESCE(a.description, '')
+		FROM agents a
+		WHERE a.crew_id = ? AND a.deleted_at IS NULL AND a.id != ?
+		ORDER BY a.name ASC`, crewID, excludeAgentID)
+	if err != nil {
+		h.logger.Warn("load crew members for dispatch", "error", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var members []orchestrator.CrewMember
+	for rows.Next() {
+		var m orchestrator.CrewMember
+		if err := rows.Scan(&m.ID, &m.Slug, &m.Name, &m.RoleTitle, &m.Description); err != nil {
+			continue
+		}
+		members = append(members, m)
+	}
+	return members
 }
