@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -19,29 +19,24 @@ interface ActivityEvent {
   status: string
   title: string
   subtitle: string
+  missionTitle: string
+  agentSlug: string
   missionId: string
 }
 
 function getStatusIcon(status: string) {
   switch (status) {
-    case "COMPLETED":
-      return <CheckCircle className="h-4 w-4 text-green-500" />
-    case "FAILED":
-      return <XCircle className="h-4 w-4 text-red-500" />
-    case "IN_PROGRESS":
-      return <Play className="h-4 w-4 text-blue-500" />
-    case "BLOCKED":
-      return <Pause className="h-4 w-4 text-amber-500" />
-    case "CANCELLED":
-      return <XCircle className="h-4 w-4 text-gray-500" />
-    default:
-      return <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+    case "COMPLETED": return <CheckCircle className="h-4 w-4 text-green-500" />
+    case "FAILED": return <XCircle className="h-4 w-4 text-red-500" />
+    case "IN_PROGRESS": return <Play className="h-4 w-4 text-blue-500" />
+    case "BLOCKED": return <Pause className="h-4 w-4 text-amber-500" />
+    case "CANCELLED": return <XCircle className="h-4 w-4 text-gray-500" />
+    default: return <AlertTriangle className="h-4 w-4 text-muted-foreground" />
   }
 }
 
 function buildActivityFeed(missions: Mission[]): ActivityEvent[] {
   const events: ActivityEvent[] = []
-
   for (const mission of missions) {
     events.push({
       id: `m-${mission.id}`,
@@ -50,12 +45,12 @@ function buildActivityFeed(missions: Mission[]): ActivityEvent[] {
       status: mission.status,
       title: mission.title,
       subtitle: `Lead: @${mission.lead_agent_slug}`,
+      missionTitle: mission.title,
+      agentSlug: mission.lead_agent_slug,
       missionId: mission.id,
     })
-
     for (const task of mission.tasks || []) {
       if (task.status === "PENDING") continue
-
       const ts = task.completed_at || task.started_at || task.created_at
       events.push({
         id: `t-${task.id}`,
@@ -64,11 +59,12 @@ function buildActivityFeed(missions: Mission[]): ActivityEvent[] {
         status: task.status,
         title: task.title,
         subtitle: `@${task.agent_slug || "unassigned"}${task.iteration && task.max_iterations && task.max_iterations > 1 ? ` (iter ${task.iteration}/${task.max_iterations})` : ""}`,
+        missionTitle: mission.title,
+        agentSlug: task.agent_slug || "",
         missionId: mission.id,
       })
     }
   }
-
   return events.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
 }
 
@@ -83,10 +79,34 @@ function timeAgo(date: Date): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
-export function OrchestrationActivity({ missions }: OrchestrationActivityProps) {
-  const events = useMemo(() => buildActivityFeed(missions), [missions])
+const statusFilters = ["ALL", "IN_PROGRESS", "COMPLETED", "FAILED", "BLOCKED"] as const
+type StatusFilter = (typeof statusFilters)[number]
 
-  if (events.length === 0) {
+export function OrchestrationActivity({ missions }: OrchestrationActivityProps) {
+  const allEvents = useMemo(() => buildActivityFeed(missions), [missions])
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL")
+  const [agentFilter, setAgentFilter] = useState<string>("all")
+
+  const agents = useMemo(() => {
+    const set = new Set<string>()
+    for (const e of allEvents) {
+      if (e.agentSlug) set.add(e.agentSlug)
+    }
+    return [...set].sort()
+  }, [allEvents])
+
+  const events = useMemo(() => {
+    let filtered = allEvents
+    if (statusFilter !== "ALL") {
+      filtered = filtered.filter((e) => e.status === statusFilter)
+    }
+    if (agentFilter !== "all") {
+      filtered = filtered.filter((e) => e.agentSlug === agentFilter)
+    }
+    return filtered
+  }, [allEvents, statusFilter, agentFilter])
+
+  if (allEvents.length === 0) {
     return (
       <Card>
         <CardContent className="py-12">
@@ -102,8 +122,44 @@ export function OrchestrationActivity({ missions }: OrchestrationActivityProps) 
 
   return (
     <Card>
-      <CardContent className="py-4">
+      <CardContent className="py-4 space-y-3">
+        {/* Filter chips */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {statusFilters.map((s) => (
+            <Badge
+              key={s}
+              variant={statusFilter === s ? "default" : "outline"}
+              className="cursor-pointer text-[11px] px-2 py-0.5"
+              onClick={() => setStatusFilter(s)}
+            >
+              {s === "ALL" ? "All" : s.replace("_", " ")}
+            </Badge>
+          ))}
+          <span className="text-muted-foreground text-xs">|</span>
+          <Badge
+            variant={agentFilter === "all" ? "default" : "outline"}
+            className="cursor-pointer text-[11px] px-2 py-0.5"
+            onClick={() => setAgentFilter("all")}
+          >
+            All agents
+          </Badge>
+          {agents.slice(0, 8).map((slug) => (
+            <Badge
+              key={slug}
+              variant={agentFilter === slug ? "default" : "outline"}
+              className="cursor-pointer text-[11px] px-2 py-0.5"
+              onClick={() => setAgentFilter(slug)}
+            >
+              @{slug}
+            </Badge>
+          ))}
+        </div>
+
+        {/* Events */}
         <div className="space-y-0">
+          {events.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-6">No matching events</p>
+          )}
           {events.slice(0, 100).map((event, idx) => (
             <div
               key={event.id}

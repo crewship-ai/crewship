@@ -281,6 +281,7 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	status := r.URL.Query().Get("status")
+	includeTasks := r.URL.Query().Get("include_tasks") == "true"
 
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -331,11 +332,6 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
-		stats, statsErr := h.getTaskStats(r, m.ID)
-		if statsErr != nil {
-			h.logger.Error("get task stats", "mission_id", m.ID, "error", statsErr)
-		}
-		m.TaskStats = stats
 		result = append(result, m)
 	}
 	if err := rows.Err(); err != nil {
@@ -344,10 +340,65 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load task stats and optionally tasks for each mission
+	for i, m := range result {
+		stats, statsErr := h.getTaskStats(r, m.ID)
+		if statsErr != nil {
+			h.logger.Error("get task stats", "mission_id", m.ID, "error", statsErr)
+		}
+		result[i].TaskStats = stats
+
+		if includeTasks {
+			tasks, tasksErr := h.loadTasksForMission(r, m.ID)
+			if tasksErr != nil {
+				h.logger.Error("load tasks for mission", "mission_id", m.ID, "error", tasksErr)
+				result[i].Tasks = []missionTaskResponse{}
+			} else {
+				result[i].Tasks = tasks
+			}
+		}
+	}
+
 	if result == nil {
 		result = []missionResponse{}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// loadTasksForMission loads all tasks for a mission with agent info.
+func (h *MissionHandler) loadTasksForMission(r *http.Request, missionID string) ([]missionTaskResponse, error) {
+	taskRows, err := h.db.QueryContext(r.Context(), `
+		SELECT mt.id, mt.mission_id, mt.assigned_agent_id, mt.title, mt.description,
+		       mt.status, mt.task_order, mt.depends_on, mt.iteration, mt.max_iterations,
+		       mt.result_summary, mt.output_path, mt.error_message, mt.assignment_id,
+		       mt.token_count, mt.estimated_cost, mt.started_at, mt.completed_at,
+		       mt.duration_ms, mt.created_at, mt.updated_at,
+		       ag.name, ag.slug
+		FROM mission_tasks mt
+		LEFT JOIN agents ag ON ag.id = mt.assigned_agent_id
+		WHERE mt.mission_id = ?
+		ORDER BY mt.task_order ASC`, missionID)
+	if err != nil {
+		return nil, err
+	}
+	defer taskRows.Close()
+
+	tasks := []missionTaskResponse{}
+	for taskRows.Next() {
+		var t missionTaskResponse
+		if err := taskRows.Scan(
+			&t.ID, &t.MissionID, &t.AssignedAgentID, &t.Title, &t.Description,
+			&t.Status, &t.TaskOrder, &t.DependsOn, &t.Iteration, &t.MaxIterations,
+			&t.ResultSummary, &t.OutputPath, &t.ErrorMessage, &t.AssignmentID,
+			&t.TokenCount, &t.EstimatedCost, &t.StartedAt, &t.CompletedAt,
+			&t.DurationMs, &t.CreatedAt, &t.UpdatedAt,
+			&t.AgentName, &t.AgentSlug,
+		); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, taskRows.Err()
 }
 
 // Get handles GET /api/v1/crews/{crewId}/missions/{missionId}
@@ -384,46 +435,13 @@ func (h *MissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load tasks
-	taskRows, err := h.db.QueryContext(r.Context(), `
-		SELECT mt.id, mt.mission_id, mt.assigned_agent_id, mt.title, mt.description,
-		       mt.status, mt.task_order, mt.depends_on, mt.iteration, mt.max_iterations,
-		       mt.result_summary, mt.output_path, mt.error_message, mt.assignment_id,
-		       mt.token_count, mt.estimated_cost, mt.started_at, mt.completed_at,
-		       mt.duration_ms, mt.created_at, mt.updated_at,
-		       ag.name, ag.slug
-		FROM mission_tasks mt
-		LEFT JOIN agents ag ON ag.id = mt.assigned_agent_id
-		WHERE mt.mission_id = ?
-		ORDER BY mt.task_order ASC`, missionID)
-	if err != nil {
-		h.logger.Error("get mission tasks", "error", err)
+	tasks, tasksErr := h.loadTasksForMission(r, missionID)
+	if tasksErr != nil {
+		h.logger.Error("get mission tasks", "error", tasksErr)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	defer taskRows.Close()
-
-	m.Tasks = []missionTaskResponse{}
-	for taskRows.Next() {
-		var t missionTaskResponse
-		if err := taskRows.Scan(
-			&t.ID, &t.MissionID, &t.AssignedAgentID, &t.Title, &t.Description,
-			&t.Status, &t.TaskOrder, &t.DependsOn, &t.Iteration, &t.MaxIterations,
-			&t.ResultSummary, &t.OutputPath, &t.ErrorMessage, &t.AssignmentID,
-			&t.TokenCount, &t.EstimatedCost, &t.StartedAt, &t.CompletedAt,
-			&t.DurationMs, &t.CreatedAt, &t.UpdatedAt,
-			&t.AgentName, &t.AgentSlug,
-		); err != nil {
-			h.logger.Error("scan mission task", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-		m.Tasks = append(m.Tasks, t)
-	}
-	if err := taskRows.Err(); err != nil {
-		h.logger.Error("rows iteration (tasks)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
+	m.Tasks = tasks
 
 	stats, statsErr := h.getTaskStats(r, missionID)
 	if statsErr != nil {

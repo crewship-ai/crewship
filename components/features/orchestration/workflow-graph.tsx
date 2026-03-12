@@ -1,14 +1,19 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import {
   ReactFlow,
   Background,
   Controls,
   MiniMap,
+  useNodesState,
+  useEdgesState,
+  useReactFlow,
+  ReactFlowProvider,
   type Node,
   type Edge,
   type NodeTypes,
+  type EdgeTypes,
   Position,
   MarkerType,
 } from "@xyflow/react"
@@ -18,32 +23,29 @@ import { EmptyState } from "@/components/layout/empty-state"
 import { Workflow } from "lucide-react"
 import type { Mission, MissionTask } from "@/lib/types/mission"
 import { AgentNode } from "./agent-node"
+import { AnimatedEdge } from "./animated-edge"
 import { TaskDetailPanel } from "./task-detail-panel"
+
+export interface WorkflowGraphRef {
+  focusActive: () => void
+}
 
 interface WorkflowGraphProps {
   missions: Mission[]
 }
 
-const nodeTypes: NodeTypes = {
-  agent: AgentNode,
-}
+const nodeTypes: NodeTypes = { agent: AgentNode }
+const edgeTypes: EdgeTypes = { animated: AnimatedEdge }
 
 function getStatusColor(status: string): string {
   switch (status) {
-    case "COMPLETED":
-      return "#22c55e"
-    case "IN_PROGRESS":
-      return "#3b82f6"
-    case "FAILED":
-      return "#ef4444"
-    case "BLOCKED":
-      return "#f59e0b"
-    case "PENDING":
-      return "#94a3b8"
-    case "SKIPPED":
-      return "#6b7280"
-    default:
-      return "#94a3b8"
+    case "COMPLETED": return "#22c55e"
+    case "IN_PROGRESS": return "#3b82f6"
+    case "FAILED": return "#ef4444"
+    case "BLOCKED": return "#f59e0b"
+    case "PENDING": return "#94a3b8"
+    case "SKIPPED": return "#6b7280"
+    default: return "#94a3b8"
   }
 }
 
@@ -68,55 +70,46 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
     const tasks = mission.tasks || []
     if (tasks.length === 0) continue
 
-    // Mission label node
+    const totalCost = tasks.reduce((sum, t) => sum + (t.estimated_cost || 0), 0)
+    const totalTokens = tasks.reduce((sum, t) => sum + (t.token_count || 0), 0)
+
     nodes.push({
       id: `mission-${mission.id}`,
       type: "default",
       position: { x: 0, y: missionY },
-      data: { label: mission.title },
+      data: { label: `${mission.title}${totalTokens > 0 ? ` (${(totalTokens / 1000).toFixed(1)}k tok · $${totalCost.toFixed(3)})` : ""}` },
       style: {
         background: "hsl(var(--muted))",
-        border: "1px solid hsl(var(--border))",
-        borderRadius: "8px",
+        border: `2px solid ${getStatusColor(mission.status)}`,
+        borderRadius: "10px",
         padding: "8px 16px",
         fontSize: "13px",
         fontWeight: 600,
         color: "hsl(var(--foreground))",
-        width: 200,
+        width: 220,
       },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
     })
 
-    // Position tasks in a grid
     const tasksByOrder = [...tasks].sort((a, b) => a.task_order - b.task_order)
     const deps = new Map<string, string[]>()
     for (const task of tasksByOrder) {
-      try {
-        const parsed = JSON.parse(task.depends_on || "[]")
-        deps.set(task.id, parsed)
-      } catch {
-        deps.set(task.id, [])
-      }
+      try { deps.set(task.id, JSON.parse(task.depends_on || "[]")) }
+      catch { deps.set(task.id, []) }
     }
 
-    // Compute columns via topological levels
     const levels = new Map<string, number>()
     function getLevel(taskId: string): number {
       if (levels.has(taskId)) return levels.get(taskId)!
       const taskDeps = deps.get(taskId) || []
-      if (taskDeps.length === 0) {
-        levels.set(taskId, 0)
-        return 0
-      }
-      const maxDepLevel = Math.max(...taskDeps.map(getLevel))
-      const level = maxDepLevel + 1
+      if (taskDeps.length === 0) { levels.set(taskId, 0); return 0 }
+      const level = Math.max(...taskDeps.map(getLevel)) + 1
       levels.set(taskId, level)
       return level
     }
     for (const task of tasksByOrder) getLevel(task.id)
 
-    // Group tasks by level
     const levelGroups = new Map<number, MissionTask[]>()
     for (const task of tasksByOrder) {
       const level = levels.get(task.id) || 0
@@ -124,12 +117,11 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
       levelGroups.get(level)!.push(task)
     }
 
-    // Create task nodes
-    const xOffset = 280
+    const xOffset = 300
     for (const [level, levelTasks] of levelGroups) {
       levelTasks.forEach((task, idx) => {
-        const x = xOffset + level * 280
-        const y = missionY + idx * 100
+        const x = xOffset + level * 300
+        const y = missionY + idx * 110
 
         nodes.push({
           id: task.id,
@@ -142,37 +134,37 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
             agentSlug: task.agent_slug,
             iteration: task.iteration,
             maxIterations: task.max_iterations,
+            tokenCount: task.token_count,
+            estimatedCost: task.estimated_cost,
             missionId: mission.id,
           },
           sourcePosition: Position.Right,
           targetPosition: Position.Left,
         })
 
-        // Edge from mission label to first-level tasks
         if (level === 0) {
           edges.push({
             id: `e-mission-${mission.id}-${task.id}`,
             source: `mission-${mission.id}`,
             target: task.id,
-            type: "smoothstep",
-            animated: mission.status === "IN_PROGRESS",
-            style: { stroke: "hsl(var(--border))", strokeWidth: 1.5 },
+            type: "animated",
+            animated: false,
+            data: { color: "hsl(var(--border))", active: mission.status === "IN_PROGRESS" },
+            style: { strokeWidth: 1.5 },
           })
         }
 
-        // Dependency edges
         const taskDeps = deps.get(task.id) || []
         for (const depId of taskDeps) {
+          const isActive = task.status === "IN_PROGRESS"
           edges.push({
             id: `e-${depId}-${task.id}`,
             source: depId,
             target: task.id,
-            type: "smoothstep",
-            animated: task.status === "IN_PROGRESS",
-            style: {
-              stroke: getStatusColor(task.status),
-              strokeWidth: 2,
-            },
+            type: "animated",
+            animated: false,
+            data: { color: getStatusColor(task.status), active: isActive },
+            style: { strokeWidth: 2 },
             markerEnd: {
               type: MarkerType.ArrowClosed,
               color: getStatusColor(task.status),
@@ -184,27 +176,46 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
       })
     }
 
-    // Offset next mission
     const maxLevelSize = Math.max(...[...levelGroups.values()].map((g) => g.length), 1)
-    missionY += maxLevelSize * 100 + 80
+    missionY += maxLevelSize * 110 + 80
   }
 
   return { nodes, edges }
 }
 
-export function WorkflowGraph({ missions }: WorkflowGraphProps) {
+function WorkflowGraphInner({ missions }: WorkflowGraphProps, ref: React.ForwardedRef<WorkflowGraphRef>) {
   const [selectedTask, setSelectedTask] = useState<MissionTask | null>(null)
-  const { nodes, edges } = useMemo(() => buildGraphData(missions), [missions])
+  const graphData = useMemo(() => buildGraphData(missions), [missions])
+  const [nodes, setNodes, onNodesChange] = useNodesState(graphData.nodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(graphData.edges)
+  const { fitView, setCenter } = useReactFlow()
+  const prevDataRef = useRef(graphData)
+
+  // Update nodes/edges when missions data changes, but preserve positions
+  useEffect(() => {
+    if (prevDataRef.current === graphData) return
+    prevDataRef.current = graphData
+    setNodes(graphData.nodes)
+    setEdges(graphData.edges)
+  }, [graphData, setNodes, setEdges])
+
+  useImperativeHandle(ref, () => ({
+    focusActive() {
+      const activeNode = nodes.find((n) => !n.id.startsWith("mission-") && (n.data as Record<string, unknown>)?.status === "IN_PROGRESS")
+      if (activeNode) {
+        setCenter(activeNode.position.x + 120, activeNode.position.y + 50, { zoom: 1.2, duration: 600 })
+      } else {
+        fitView({ duration: 600, padding: 0.2 })
+      }
+    },
+  }), [nodes, setCenter, fitView])
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       if (node.id.startsWith("mission-")) return
       for (const m of missions) {
         const task = m.tasks?.find((t) => t.id === node.id)
-        if (task) {
-          setSelectedTask(task)
-          return
-        }
+        if (task) { setSelectedTask(task); return }
       }
     },
     [missions]
@@ -232,6 +243,9 @@ export function WorkflowGraph({ missions }: WorkflowGraphProps) {
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
             onNodeClick={onNodeClick}
             fitView
             fitViewOptions={{ padding: 0.2 }}
@@ -260,3 +274,15 @@ export function WorkflowGraph({ missions }: WorkflowGraphProps) {
     </div>
   )
 }
+
+const WorkflowGraphWithRef = forwardRef(WorkflowGraphInner)
+
+export const WorkflowGraph = forwardRef<WorkflowGraphRef, WorkflowGraphProps>(
+  function WorkflowGraphWrapper(props, ref) {
+    return (
+      <ReactFlowProvider>
+        <WorkflowGraphWithRef {...props} ref={ref} />
+      </ReactFlowProvider>
+    )
+  }
+)

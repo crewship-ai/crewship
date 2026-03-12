@@ -77,6 +77,7 @@ var migrations = []migration{
 	{16, "add_agent_cli_tools", migrationAddAgentCLITools},
 	{17, "add_credential_crews", migrationAddCredentialCrews},
 	{18, "add_crew_network_policy", migrationAddCrewNetworkPolicy},
+	{19, "add_workflow_templates", migrationAddWorkflowTemplates},
 }
 
 const migrationAddKeeperObservability = `
@@ -710,4 +711,21 @@ WHERE c.scope = 'CREW' AND c.crew_id IS NOT NULL AND c.deleted_at IS NULL AND cr
 const migrationAddCrewNetworkPolicy = `
 ALTER TABLE crews ADD COLUMN network_mode TEXT NOT NULL DEFAULT 'free' CHECK(network_mode IN ('free', 'restricted'));
 ALTER TABLE crews ADD COLUMN allowed_domains TEXT;
+`
+
+const migrationAddWorkflowTemplates = `
+CREATE TABLE IF NOT EXISTS workflow_templates (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+	name TEXT NOT NULL,
+	description TEXT,
+	template_json TEXT NOT NULL,
+	icon TEXT,
+	color TEXT,
+	is_builtin INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_templates_ws ON workflow_templates(workspace_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_templates_name_ws ON workflow_templates(workspace_id, name);
 `
