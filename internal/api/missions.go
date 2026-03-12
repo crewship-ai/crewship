@@ -874,6 +874,9 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Status          *string  `json:"status"`
+		Title           *string  `json:"title"`
+		Description     *string  `json:"description"`
+		DependsOn       *string  `json:"depends_on"`
 		AssignedAgentID *string  `json:"assigned_agent_id"`
 		ResultSummary   *string  `json:"result_summary"`
 		ErrorMessage    *string  `json:"error_message"`
@@ -950,6 +953,36 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		}
 
 		unblockNeeded = newStatus == "COMPLETED"
+	}
+
+	// Editable fields — only when task hasn't started yet
+	if req.Title != nil || req.Description != nil || req.DependsOn != nil {
+		if currentStatus != "PENDING" && currentStatus != "BLOCKED" {
+			writeProblem(w, r, http.StatusBadRequest, "Can only edit title/description/depends_on for PENDING or BLOCKED tasks")
+			tx.Rollback() //nolint:errcheck
+			return
+		}
+	}
+	if req.Title != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET title = ?, updated_at = ? WHERE id = ?`, *req.Title, now, taskID); err != nil {
+			h.logger.Error("update task title", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+	}
+	if req.Description != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET description = ?, updated_at = ? WHERE id = ?`, *req.Description, now, taskID); err != nil {
+			h.logger.Error("update task description", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+	}
+	if req.DependsOn != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET depends_on = ?, updated_at = ? WHERE id = ?`, *req.DependsOn, now, taskID); err != nil {
+			h.logger.Error("update task depends_on", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 
 	if req.ResultSummary != nil {
@@ -1154,4 +1187,239 @@ func (h *MissionHandler) getTaskStats(r *http.Request, missionID string) (*taskS
 		}
 	}
 	return stats, rows.Err()
+}
+
+// Restart resets a FAILED/CANCELLED/REVIEW/COMPLETED mission: resets non-completed tasks,
+// increments their iteration, and re-starts. Completed tasks stay completed (no re-run).
+func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	crewID := r.PathValue("crewId")
+	missionID := r.PathValue("missionId")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	var currentStatus string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+		missionID, crewID, wsID).Scan(&currentStatus)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			return
+		}
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if currentStatus == "IN_PROGRESS" || currentStatus == "PLANNING" {
+		writeProblem(w, r, http.StatusBadRequest,
+			fmt.Sprintf("cannot restart mission in %s state", currentStatus))
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Reset mission to PLANNING
+	if _, err = tx.ExecContext(r.Context(),
+		`UPDATE missions SET status = 'PLANNING', updated_at = ?, completed_at = NULL WHERE id = ?`,
+		now, missionID); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to reset mission")
+		return
+	}
+
+	// Reset FAILED/PENDING/BLOCKED/SKIPPED tasks; increment iteration; clear errors
+	if _, err = tx.ExecContext(r.Context(),
+		`UPDATE mission_tasks SET
+			status = CASE WHEN depends_on = '[]' OR depends_on IS NULL THEN 'PENDING' ELSE 'BLOCKED' END,
+			iteration = iteration + 1,
+			error_message = NULL,
+			result_summary = CASE WHEN status = 'COMPLETED' THEN result_summary ELSE NULL END,
+			started_at = NULL,
+			completed_at = NULL,
+			duration_ms = NULL,
+			assignment_id = NULL,
+			updated_at = ?
+		WHERE mission_id = ? AND status != 'COMPLETED'`,
+		now, missionID); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to reset tasks")
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if h.hub != nil {
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "mission.updated",
+			Channel: wsChannel,
+			Payload: map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "PLANNING"},
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"id": missionID, "status": "PLANNING"})
+}
+
+// Clone creates a deep copy of a mission with all its tasks, assigning new IDs.
+func (h *MissionHandler) Clone(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	crewID := r.PathValue("crewId")
+	missionID := r.PathValue("missionId")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	// Read original mission
+	var m struct {
+		Title       string
+		Description sql.NullString
+		LeadAgentID string
+		Template    sql.NullString
+	}
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT title, description, lead_agent_id, workflow_template
+		 FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+		missionID, crewID, wsID).Scan(&m.Title, &m.Description, &m.LeadAgentID, &m.Template)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			return
+		}
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// Read original tasks
+	type taskRow struct {
+		ID          string
+		AgentID     sql.NullString
+		Title       string
+		Description sql.NullString
+		TaskOrder   int
+		DependsOn   string
+		MaxIter     sql.NullInt64
+	}
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT id, assigned_agent_id, title, description, task_order, depends_on, max_iterations
+		 FROM mission_tasks WHERE mission_id = ? ORDER BY task_order`, missionID)
+	if err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	var origTasks []taskRow
+	for rows.Next() {
+		var t taskRow
+		if err := rows.Scan(&t.ID, &t.AgentID, &t.Title, &t.Description, &t.TaskOrder, &t.DependsOn, &t.MaxIter); err != nil {
+			rows.Close()
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		origTasks = append(origTasks, t)
+	}
+	rows.Close()
+
+	// Create new IDs and remap dependencies
+	newMissionID := generateCUID()
+	idMap := make(map[string]string) // oldID -> newID
+	for _, t := range origTasks {
+		idMap[t.ID] = generateCUID()
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Create synthetic chat (same pattern as Create)
+	if _, err = tx.ExecContext(r.Context(),
+		`INSERT INTO chats (id, agent_id, workspace_id, title, mode, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 'MISSION', ?, ?)`,
+		newMissionID, m.LeadAgentID, wsID, "Mission: "+m.Title+" (clone)", now, now); err != nil {
+		h.logger.Error("create synthetic chat for clone", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to create mission")
+		return
+	}
+
+	// Insert new mission
+	if _, err = tx.ExecContext(r.Context(),
+		`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, title, description,
+		 status, workflow_template, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 'PLANNING', ?, ?, ?)`,
+		newMissionID, wsID, crewID, m.LeadAgentID,
+		m.Title+" (copy)", m.Description, m.Template, now, now); err != nil {
+		h.logger.Error("clone mission insert", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to clone mission")
+		return
+	}
+
+	// Insert cloned tasks with remapped dependencies
+	for _, t := range origTasks {
+		newTaskID := idMap[t.ID]
+		newDeps := remapDependencies(t.DependsOn, idMap)
+		status := "PENDING"
+		if newDeps != "[]" {
+			status = "BLOCKED"
+		}
+		if _, err = tx.ExecContext(r.Context(),
+			`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, description,
+			 status, task_order, depends_on, max_iterations, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			newTaskID, newMissionID, t.AgentID, t.Title, t.Description,
+			status, t.TaskOrder, newDeps, t.MaxIter, now, now); err != nil {
+			h.logger.Error("clone task insert", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Failed to clone task")
+			return
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if h.hub != nil {
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "mission.created",
+			Channel: wsChannel,
+			Payload: map[string]interface{}{"id": newMissionID, "crew_id": crewID, "status": "PLANNING"},
+		})
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"id": newMissionID, "status": "PLANNING"})
+}
+
+func remapDependencies(depsJSON string, idMap map[string]string) string {
+	var deps []string
+	if err := json.Unmarshal([]byte(depsJSON), &deps); err != nil || len(deps) == 0 {
+		return "[]"
+	}
+	newDeps := make([]string, 0, len(deps))
+	for _, d := range deps {
+		if newID, ok := idMap[d]; ok {
+			newDeps = append(newDeps, newID)
+		}
+	}
+	out, _ := json.Marshal(newDeps)
+	return string(out)
 }

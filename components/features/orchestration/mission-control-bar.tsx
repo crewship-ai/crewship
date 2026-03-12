@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import {
   Play, Square, Clock, Coins, CheckCircle2, AlertTriangle,
-  Loader2, ChevronRight,
+  Loader2, ChevronRight, RotateCcw, Copy,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -96,6 +96,48 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
     }
   }, [mission.id, mission.crew_id, workspaceId, onMissionChanged])
 
+  const handleRestart = useCallback(async () => {
+    setLoading("restart")
+    try {
+      const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+      const res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/restart${qs}`, {
+        method: "POST",
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        toast.error(body?.detail ?? "Failed to restart mission")
+        return
+      }
+      toast.success("Mission reset to Planning — incomplete tasks requeued")
+      onMissionChanged()
+    } catch {
+      toast.error("Failed to restart mission")
+    } finally {
+      setLoading(null)
+    }
+  }, [mission.id, mission.crew_id, workspaceId, onMissionChanged])
+
+  const handleClone = useCallback(async () => {
+    setLoading("clone")
+    try {
+      const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+      const res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/clone${qs}`, {
+        method: "POST",
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        toast.error(body?.detail ?? "Failed to clone mission")
+        return
+      }
+      toast.success("Mission cloned — select it from the dropdown")
+      onMissionChanged()
+    } catch {
+      toast.error("Failed to clone mission")
+    } finally {
+      setLoading(null)
+    }
+  }, [mission.id, mission.crew_id, workspaceId, onMissionChanged])
+
   return (
     <div className="rounded-xl border border-white/[0.06] bg-[#0d0f14] p-4">
       <div className="flex items-center justify-between gap-4">
@@ -182,6 +224,30 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
               Cancel
             </Button>
           )}
+          {/* Restart — available for finished/failed missions */}
+          {(mission.status === "COMPLETED" || mission.status === "FAILED" || mission.status === "CANCELLED" || mission.status === "REVIEW") && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRestart}
+              disabled={loading !== null}
+              className="gap-1.5 border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
+            >
+              {loading === "restart" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+              Restart
+            </Button>
+          )}
+          {/* Clone — always available */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleClone}
+            disabled={loading !== null}
+            className="gap-1.5 border-white/10 text-white/50 hover:bg-white/5"
+          >
+            {loading === "clone" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+            Clone
+          </Button>
         </div>
       </div>
     </div>

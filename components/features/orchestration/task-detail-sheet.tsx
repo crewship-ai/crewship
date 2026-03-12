@@ -1,9 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Clock, User, AlertCircle, CheckCircle, Repeat, Copy,
-  Play, SkipForward, Loader2, ArrowRight,
+  Play, SkipForward, Loader2, ArrowRight, Pencil, Save, X,
 } from "lucide-react"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
@@ -12,6 +12,12 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from "@/components/ui/collapsible"
@@ -61,23 +67,104 @@ function formatDuration(ms: number | null): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
+interface Agent {
+  id: string
+  name: string
+  slug: string
+}
+
 export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose, onTaskChanged }: TaskDetailSheetProps) {
   const [loading, setLoading] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [editTitle, setEditTitle] = useState("")
+  const [editDesc, setEditDesc] = useState("")
+  const [editAgentId, setEditAgentId] = useState("")
+  const [editDeps, setEditDeps] = useState<string[]>([])
+  const [agents, setAgents] = useState<Agent[]>([])
+
+  const isEditable = task?.status === "PENDING" || task?.status === "BLOCKED"
+
+  // Load agents when editing starts
+  useEffect(() => {
+    if (!editing || agents.length > 0) return
+    fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then(setAgents)
+      .catch(() => {})
+  }, [editing, workspaceId, agents.length])
+
+  const startEditing = useCallback(() => {
+    if (!task) return
+    setEditTitle(task.title)
+    setEditDesc(task.description || "")
+    setEditAgentId(task.assigned_agent_id || "")
+    try { setEditDeps(JSON.parse(task.depends_on || "[]")) }
+    catch { setEditDeps([]) }
+    setEditing(true)
+  }, [task])
+
+  const cancelEditing = useCallback(() => {
+    setEditing(false)
+  }, [])
+
+  const saveEdit = useCallback(async () => {
+    if (!task || !mission) return
+    setLoading("save")
+    try {
+      const body: Record<string, unknown> = {}
+      if (editTitle !== task.title) body.title = editTitle
+      if (editDesc !== (task.description || "")) body.description = editDesc
+      if (editAgentId !== (task.assigned_agent_id || "")) body.assigned_agent_id = editAgentId || null
+
+      const origDeps: string[] = (() => { try { return JSON.parse(task.depends_on || "[]") } catch { return [] } })()
+      if (JSON.stringify(editDeps.sort()) !== JSON.stringify(origDeps.sort())) {
+        body.depends_on = JSON.stringify(editDeps)
+      }
+
+      if (Object.keys(body).length === 0) {
+        setEditing(false)
+        return
+      }
+
+      const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+      const res = await fetch(
+        `/api/v1/crews/${mission.crew_id}/missions/${mission.id}/tasks/${task.id}${qs}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      )
+      if (!res.ok) {
+        const b = await res.json().catch(() => null)
+        toast.error(b?.detail ?? "Failed to save task")
+        return
+      }
+      toast.success("Task updated")
+      setEditing(false)
+      onTaskChanged()
+    } catch {
+      toast.error("Failed to save task")
+    } finally {
+      setLoading(null)
+    }
+  }, [task, mission, workspaceId, editTitle, editDesc, editAgentId, editDeps, onTaskChanged])
 
   const deps = (() => {
     if (!task) return []
     try { return JSON.parse(task.depends_on || "[]") as string[] }
     catch { return [] }
   })()
-
-  const depTasks = deps.map((depId) => allTasks.find((t) => t.id === depId)).filter(Boolean) as MissionTask[]
-
+  const depTasks = allTasks.filter((t) => deps.includes(t.id))
   const dependents = allTasks.filter((t) => {
-    try {
-      const d = JSON.parse(t.depends_on || "[]") as string[]
-      return task ? d.includes(task.id) : false
-    } catch { return false }
+    try { return (JSON.parse(t.depends_on || "[]") as string[]).includes(task?.id || "") }
+    catch { return false }
   })
+
+  const otherTasks = useMemo(
+    () => allTasks.filter((t) => t.id !== task?.id),
+    [allTasks, task?.id]
+  )
 
   const handleRetry = useCallback(async () => {
     if (!task || !mission) return
@@ -133,21 +220,38 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
 
   const style = task ? (statusStyles[task.status] || statusStyles.PENDING) : statusStyles.PENDING
 
+  // Reset editing when task changes
+  useEffect(() => { setEditing(false) }, [task?.id])
+
   return (
-    <Sheet open={!!task} onOpenChange={(open) => { if (!open) onClose() }}>
+    <Sheet open={!!task} onOpenChange={(open) => { if (!open) { setEditing(false); onClose() } }}>
       <SheetContent className="w-[420px] sm:w-[480px] p-0 bg-[#0d0f14] border-white/[0.06]">
         {task && (
           <>
             <SheetHeader className="px-6 pt-6 pb-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <SheetTitle className="text-base font-semibold text-white leading-tight">
-                    {task.title}
-                  </SheetTitle>
+                  {editing ? (
+                    <Input
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      className="text-base font-semibold bg-white/[0.05] border-white/[0.1] h-9"
+                      placeholder="Task title"
+                    />
+                  ) : (
+                    <SheetTitle className="text-base font-semibold text-white leading-tight">
+                      {task.title}
+                    </SheetTitle>
+                  )}
                   <SheetDescription className="mt-1">
                     Task #{task.task_order} · {mission?.title}
                   </SheetDescription>
                 </div>
+                {isEditable && !editing && (
+                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-white/30 hover:text-white/70" onClick={startEditing}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </div>
             </SheetHeader>
 
@@ -168,113 +272,195 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
 
                   <div className="flex-1" />
 
-                  {task.status === "FAILED" && (
-                    <Button size="sm" variant="outline" onClick={handleRetry} disabled={loading !== null}
-                      className="gap-1.5 h-7 text-xs border-blue-500/30 text-blue-400 hover:bg-blue-500/10">
-                      {loading === "retry" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-                      Retry
-                    </Button>
-                  )}
-                  {(task.status === "BLOCKED" || task.status === "PENDING") && (
-                    <Button size="sm" variant="outline" onClick={handleSkip} disabled={loading !== null}
-                      className="gap-1.5 h-7 text-xs border-gray-500/30 text-gray-400 hover:bg-gray-500/10">
-                      {loading === "skip" ? <Loader2 className="h-3 w-3 animate-spin" /> : <SkipForward className="h-3 w-3" />}
-                      Skip
-                    </Button>
+                  {editing ? (
+                    <>
+                      <Button size="sm" variant="outline" onClick={cancelEditing} disabled={loading !== null}
+                        className="gap-1 h-7 text-xs border-white/10 text-white/50">
+                        <X className="h-3 w-3" /> Cancel
+                      </Button>
+                      <Button size="sm" onClick={saveEdit} disabled={loading !== null || !editTitle.trim()}
+                        className="gap-1 h-7 text-xs bg-blue-600 hover:bg-blue-700">
+                        {loading === "save" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                        Save
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      {task.status === "FAILED" && (
+                        <Button size="sm" variant="outline" onClick={handleRetry} disabled={loading !== null}
+                          className="gap-1.5 h-7 text-xs border-blue-500/30 text-blue-400 hover:bg-blue-500/10">
+                          {loading === "retry" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                          Retry
+                        </Button>
+                      )}
+                      {(task.status === "BLOCKED" || task.status === "PENDING") && (
+                        <Button size="sm" variant="outline" onClick={handleSkip} disabled={loading !== null}
+                          className="gap-1.5 h-7 text-xs border-gray-500/30 text-gray-400 hover:bg-gray-500/10">
+                          {loading === "skip" ? <Loader2 className="h-3 w-3 animate-spin" /> : <SkipForward className="h-3 w-3" />}
+                          Skip
+                        </Button>
+                      )}
+                    </>
                   )}
                 </div>
 
-                {/* Description */}
-                {task.description && (
+                {/* Description — editable or static */}
+                {editing ? (
+                  <>
+                    <Separator className="bg-white/[0.06]" />
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium text-white/40 uppercase tracking-wider">Description</label>
+                      <Textarea
+                        value={editDesc}
+                        onChange={(e) => setEditDesc(e.target.value)}
+                        placeholder="Task description..."
+                        className="min-h-[80px] bg-white/[0.05] border-white/[0.1] text-sm"
+                      />
+                    </div>
+                  </>
+                ) : task.description ? (
                   <>
                     <Separator className="bg-white/[0.06]" />
                     <p className="text-sm text-white/60 leading-relaxed">{task.description}</p>
                   </>
-                )}
+                ) : null}
 
                 <Separator className="bg-white/[0.06]" />
 
-                {/* Agent & Timing */}
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-sm">
-                    <User className="h-4 w-4 text-white/30 shrink-0" />
-                    <span className="text-white/70">{task.agent_name || "Unassigned"}</span>
-                    {task.agent_slug && (
-                      <span className="text-xs text-white/30 font-mono">@{task.agent_slug}</span>
-                    )}
+                {/* Agent — editable or static */}
+                {editing ? (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-white/40 uppercase tracking-wider">Assigned Agent</label>
+                    <Select value={editAgentId || "unassigned"} onValueChange={(v) => setEditAgentId(v === "unassigned" ? "" : v)}>
+                      <SelectTrigger className="h-9 bg-white/[0.05] border-white/[0.1] text-sm">
+                        <SelectValue placeholder="Select agent..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                        {agents.map((a) => (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.name} <span className="text-white/30 ml-1">@{a.slug}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-
-                  <div className="flex items-center gap-2 text-sm">
-                    <Clock className="h-4 w-4 text-white/30 shrink-0" />
-                    {task.status === "IN_PROGRESS" && task.started_at ? (
-                      <LiveDuration startedAt={task.started_at} />
-                    ) : (
-                      <span className="text-white/70 font-mono">
-                        {task.duration_ms != null ? formatDuration(task.duration_ms) : "--"}
-                      </span>
-                    )}
-                  </div>
-
-                  {(task.token_count != null && task.token_count > 0) && (
-                    <div className="flex items-center gap-4 text-xs text-white/40">
-                      <span className="font-mono">{task.token_count.toLocaleString()} tokens</span>
-                      {task.estimated_cost != null && task.estimated_cost > 0 && (
-                        <span className="font-mono">${task.estimated_cost.toFixed(4)}</span>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      <User className="h-4 w-4 text-white/30 shrink-0" />
+                      <span className="text-white/70">{task.agent_name || "Unassigned"}</span>
+                      {task.agent_slug && (
+                        <span className="text-xs text-white/30 font-mono">@{task.agent_slug}</span>
                       )}
                     </div>
-                  )}
-                </div>
 
-                {/* Dependencies */}
-                {depTasks.length > 0 && (
-                  <>
-                    <Separator className="bg-white/[0.06]" />
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-semibold text-white/50 uppercase tracking-wider">
-                        Depends on ({depTasks.length})
-                      </h4>
-                      {depTasks.map((dep) => {
-                        const ds = statusStyles[dep.status] || statusStyles.PENDING
-                        return (
-                          <div key={dep.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.04]">
-                            <div className={cn("w-2 h-2 rounded-full shrink-0",
-                              dep.status === "COMPLETED" ? "bg-green-500" :
-                              dep.status === "IN_PROGRESS" ? "bg-blue-500 animate-pulse" :
-                              dep.status === "FAILED" ? "bg-red-500" : "bg-slate-500"
-                            )} />
-                            <span className="text-xs text-white/70 truncate flex-1">{dep.title}</span>
-                            <span className={cn("text-[10px] font-medium", ds.color)}>{ds.label}</span>
-                          </div>
-                        )
-                      })}
+                    <div className="flex items-center gap-2 text-sm">
+                      <Clock className="h-4 w-4 text-white/30 shrink-0" />
+                      {task.status === "IN_PROGRESS" && task.started_at ? (
+                        <LiveDuration startedAt={task.started_at} />
+                      ) : (
+                        <span className="text-white/70 font-mono">
+                          {task.duration_ms != null ? formatDuration(task.duration_ms) : "--"}
+                        </span>
+                      )}
                     </div>
-                  </>
+
+                    {(task.token_count != null && task.token_count > 0) && (
+                      <div className="flex items-center gap-4 text-xs text-white/40">
+                        <span className="font-mono">{task.token_count.toLocaleString()} tokens</span>
+                        {task.estimated_cost != null && task.estimated_cost > 0 && (
+                          <span className="font-mono">${task.estimated_cost.toFixed(4)}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
 
-                {/* Dependents */}
-                {dependents.length > 0 && (
+                {/* Dependencies — editable or static */}
+                {editing ? (
                   <>
                     <Separator className="bg-white/[0.06]" />
                     <div className="space-y-2">
-                      <h4 className="text-xs font-semibold text-white/50 uppercase tracking-wider">
-                        Blocks ({dependents.length})
-                      </h4>
-                      {dependents.map((dep) => {
-                        const ds = statusStyles[dep.status] || statusStyles.PENDING
-                        return (
-                          <div key={dep.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.04]">
-                            <ArrowRight className="h-3 w-3 text-white/20 shrink-0" />
-                            <span className="text-xs text-white/70 truncate flex-1">{dep.title}</span>
-                            <span className={cn("text-[10px] font-medium", ds.color)}>{ds.label}</span>
-                          </div>
-                        )
-                      })}
+                      <label className="text-xs font-medium text-white/40 uppercase tracking-wider">
+                        Dependencies
+                      </label>
+                      {otherTasks.length === 0 ? (
+                        <p className="text-xs text-white/30">No other tasks to depend on</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {otherTasks.map((t) => (
+                            <label key={t.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.04] cursor-pointer hover:bg-white/[0.05] transition-colors">
+                              <Checkbox
+                                checked={editDeps.includes(t.id)}
+                                onCheckedChange={(checked) => {
+                                  setEditDeps((prev) =>
+                                    checked ? [...prev, t.id] : prev.filter((d) => d !== t.id)
+                                  )
+                                }}
+                              />
+                              <span className="text-xs text-white/70 truncate flex-1">{t.title}</span>
+                              <span className={cn("text-[10px] font-medium", (statusStyles[t.status] || statusStyles.PENDING).color)}>
+                                {(statusStyles[t.status] || statusStyles.PENDING).label}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
                     </div>
+                  </>
+                ) : (
+                  <>
+                    {depTasks.length > 0 && (
+                      <>
+                        <Separator className="bg-white/[0.06]" />
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-semibold text-white/50 uppercase tracking-wider">
+                            Depends on ({depTasks.length})
+                          </h4>
+                          {depTasks.map((dep) => {
+                            const ds = statusStyles[dep.status] || statusStyles.PENDING
+                            return (
+                              <div key={dep.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.04]">
+                                <div className={cn("w-2 h-2 rounded-full shrink-0",
+                                  dep.status === "COMPLETED" ? "bg-green-500" :
+                                  dep.status === "IN_PROGRESS" ? "bg-blue-500 animate-pulse" :
+                                  dep.status === "FAILED" ? "bg-red-500" : "bg-slate-500"
+                                )} />
+                                <span className="text-xs text-white/70 truncate flex-1">{dep.title}</span>
+                                <span className={cn("text-[10px] font-medium", ds.color)}>{ds.label}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </>
+                    )}
+
+                    {dependents.length > 0 && (
+                      <>
+                        <Separator className="bg-white/[0.06]" />
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-semibold text-white/50 uppercase tracking-wider">
+                            Blocks ({dependents.length})
+                          </h4>
+                          {dependents.map((dep) => {
+                            const ds = statusStyles[dep.status] || statusStyles.PENDING
+                            return (
+                              <div key={dep.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.04]">
+                                <ArrowRight className="h-3 w-3 text-white/20 shrink-0" />
+                                <span className="text-xs text-white/70 truncate flex-1">{dep.title}</span>
+                                <span className={cn("text-[10px] font-medium", ds.color)}>{ds.label}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
 
                 {/* Output / Result */}
-                {task.result_summary && (
+                {!editing && task.result_summary && (
                   <>
                     <Separator className="bg-white/[0.06]" />
                     <Collapsible defaultOpen>
@@ -308,7 +494,7 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                 )}
 
                 {/* Error */}
-                {task.error_message && (
+                {!editing && task.error_message && (
                   <>
                     <Separator className="bg-white/[0.06]" />
                     <Collapsible defaultOpen>
@@ -342,14 +528,18 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                 )}
 
                 {/* Meta */}
-                <Separator className="bg-white/[0.06]" />
-                <div className="text-[11px] text-white/20 space-y-1 font-mono">
-                  <div>ID: {task.id}</div>
-                  {task.assignment_id && <div>Assignment: {task.assignment_id}</div>}
-                  <div>Created: {new Date(task.created_at).toLocaleString()}</div>
-                  {task.started_at && <div>Started: {new Date(task.started_at).toLocaleString()}</div>}
-                  {task.completed_at && <div>Completed: {new Date(task.completed_at).toLocaleString()}</div>}
-                </div>
+                {!editing && (
+                  <>
+                    <Separator className="bg-white/[0.06]" />
+                    <div className="text-[11px] text-white/20 space-y-1 font-mono">
+                      <div>ID: {task.id}</div>
+                      {task.assignment_id && <div>Assignment: {task.assignment_id}</div>}
+                      <div>Created: {new Date(task.created_at).toLocaleString()}</div>
+                      {task.started_at && <div>Started: {new Date(task.started_at).toLocaleString()}</div>}
+                      {task.completed_at && <div>Completed: {new Date(task.completed_at).toLocaleString()}</div>}
+                    </div>
+                  </>
+                )}
               </div>
             </ScrollArea>
           </>
