@@ -92,6 +92,9 @@ func (m *mockContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provi
 func (m *mockContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return m.inspectResult.running, m.inspectResult.exitCode, m.inspectErr
 }
+func (m *mockContainer) CrewContainerName(slug string) string {
+	return "crewship-team-" + slug
+}
 
 func TestNew(t *testing.T) {
 	o := New(nil, nil, slog.Default())

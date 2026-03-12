@@ -51,7 +51,7 @@ func TestIPCResolverResolveSession(t *testing.T) {
 		t.Errorf("expected agent_slug 'claude-dev', got %q", info.AgentSlug)
 	}
 	if info.CrewSlug != "engineering" {
-		t.Errorf("expected team_slug 'engineering', got %q", info.CrewSlug)
+		t.Errorf("expected crew_slug 'engineering', got %q", info.CrewSlug)
 	}
 	if info.CLIAdapter != "CLAUDE_CODE" {
 		t.Errorf("expected cli_adapter 'CLAUDE_CODE', got %q", info.CLIAdapter)

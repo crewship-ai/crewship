@@ -129,16 +129,18 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 type agentStartRequest struct {
-	CrewID       string                    `json:"crew_id"`
-	CrewSlug     string                    `json:"team_slug"`
-	AgentSlug    string                    `json:"agent_slug"`
-	ChatID    string                    `json:"session_id"`
-	CLIAdapter   string                    `json:"cli_adapter"`
-	SystemPrompt string                    `json:"system_prompt"`
-	UserMessage  string                    `json:"user_message"`
-	ToolProfile  string                    `json:"tool_profile"`
-	TimeoutSecs  int                       `json:"timeout_seconds"`
-	Credentials  []orchestrator.Credential `json:"credentials"`
+	CrewID         string                    `json:"crew_id"`
+	CrewSlug       string                    `json:"crew_slug"`
+	AgentSlug      string                    `json:"agent_slug"`
+	ChatID         string                    `json:"session_id"`
+	CLIAdapter     string                    `json:"cli_adapter"`
+	SystemPrompt   string                    `json:"system_prompt"`
+	UserMessage    string                    `json:"user_message"`
+	ToolProfile    string                    `json:"tool_profile"`
+	TimeoutSecs    int                       `json:"timeout_seconds"`
+	Credentials    []orchestrator.Credential `json:"credentials"`
+	NetworkMode    string                    `json:"network_mode"`
+	AllowedDomains []string                  `json:"allowed_domains"`
 }
 
 func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
@@ -169,18 +171,20 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runReq := orchestrator.AgentRunRequest{
-		AgentID:      agentID,
-		AgentSlug:    req.AgentSlug,
-		CrewID:       req.CrewID,
-		CrewSlug:     req.CrewSlug,
-		ChatID:    req.ChatID,
-		ContainerID:  containerID,
-		CLIAdapter:   req.CLIAdapter,
-		SystemPrompt: req.SystemPrompt,
-		UserMessage:  req.UserMessage,
-		ToolProfile:  req.ToolProfile,
-		Credentials:  req.Credentials,
-		TimeoutSecs:  req.TimeoutSecs,
+		AgentID:        agentID,
+		AgentSlug:      req.AgentSlug,
+		CrewID:         req.CrewID,
+		CrewSlug:       req.CrewSlug,
+		ChatID:         req.ChatID,
+		ContainerID:    containerID,
+		CLIAdapter:     req.CLIAdapter,
+		SystemPrompt:   req.SystemPrompt,
+		UserMessage:    req.UserMessage,
+		ToolProfile:    req.ToolProfile,
+		Credentials:    req.Credentials,
+		TimeoutSecs:    req.TimeoutSecs,
+		NetworkMode:    req.NetworkMode,
+		AllowedDomains: req.AllowedDomains,
 	}
 
 	go func() {
@@ -302,8 +306,18 @@ func (s *Server) handleContainerStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.container.StopCrewRuntime(r.Context(), id); err != nil {
-		s.logger.Error("container stop failed", "crew_id", id, "error", err)
+	// Resolve crew slug from DB so we can build the container name via provider.
+	var slug string
+	if s.db != nil {
+		_ = s.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", id).Scan(&slug)
+	}
+	containerName := id // fallback: use raw id (works for Docker container hashes)
+	if slug != "" {
+		containerName = s.container.CrewContainerName(slug)
+	}
+
+	if err := s.container.StopCrewRuntime(r.Context(), containerName); err != nil {
+		s.logger.Error("container stop failed", "crew_id", id, "container", containerName, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container stop failed"})
 		return
 	}
