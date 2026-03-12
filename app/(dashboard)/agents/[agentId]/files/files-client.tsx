@@ -57,6 +57,19 @@ function buildTopLevel(files: FileEntry[]): TreeNode[] {
   return roots
 }
 
+function mergeTopLevel(existing: TreeNode[], fresh: FileEntry[]): TreeNode[] {
+  const oldByPath = new Map(existing.map((n) => [n.path, n]))
+  const merged = fresh.map((f) => {
+    const prev = oldByPath.get(f.path)
+    if (prev && prev.is_dir && prev.childrenLoaded) {
+      return { ...prev, size: f.size, mod_time: f.mod_time }
+    }
+    return { ...f, children: [], childrenLoaded: !f.is_dir }
+  })
+  sortNodes(merged)
+  return merged
+}
+
 function insertChildren(tree: TreeNode[], parentPath: string, children: FileEntry[]): TreeNode[] {
   return tree.map((node) => {
     if (node.path === parentPath) {
@@ -228,11 +241,13 @@ export function FilesPageClient() {
   const [isDirty, setIsDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const editorSaveRef = useRef<(() => void) | null>(null)
+  const fileAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (wsLoading) return
     if (!workspaceId) { setLoading(false); setError("No workspace selected"); return }
     let cancelled = false
+    let isFirstLoad = true
     async function fetchFiles() {
       try {
         const res = await fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
@@ -240,7 +255,12 @@ export function FilesPageClient() {
         const data: FileEntry[] | null = await res.json()
         if (!cancelled) {
           const safeData = data ?? []
-          setTree(buildTopLevel(safeData))
+          if (isFirstLoad) {
+            setTree(buildTopLevel(safeData))
+            isFirstLoad = false
+          } else {
+            setTree((prev) => mergeTopLevel(prev, safeData))
+          }
           if (safeData.length > 0) {
             const first = safeData[0]
             const idx = first.path.lastIndexOf(first.name)
@@ -272,6 +292,9 @@ export function FilesPageClient() {
   const openFile = useCallback((path: string) => {
     const file = findNode(tree, path)
     if (!file || file.is_dir) return
+    fileAbortRef.current?.abort()
+    const ac = new AbortController()
+    fileAbortRef.current = ac
     setSelectedPath(path)
     setFileContent(null)
     setEditMode(false)
@@ -281,11 +304,11 @@ export function FilesPageClient() {
       return
     }
     setLoadingContent(true)
-    fetch(`/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`)
+    fetch(`/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`, { signal: ac.signal })
       .then((r) => r.ok ? r.text() : "(Unable to load)")
-      .then((text) => setFileContent(text))
-      .catch(() => setFileContent("(Network error)"))
-      .finally(() => setLoadingContent(false))
+      .then((text) => { if (!ac.signal.aborted) setFileContent(text) })
+      .catch((err) => { if (err.name !== "AbortError") setFileContent("(Network error)") })
+      .finally(() => { if (!ac.signal.aborted) setLoadingContent(false) })
   }, [agentId, workspaceId, tree])
 
   const handleSave = useCallback(async (content: string) => {

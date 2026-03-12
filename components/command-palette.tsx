@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   Bot, Network, Zap, Key, Activity, Shield, Settings,
@@ -94,28 +94,36 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [skills, setSkills] = useState<SkillResult[]>([])
   const [credentials, setCredentials] = useState<CredentialResult[]>([])
 
-  const fetchData = useCallback(async () => {
-    if (!workspaceId) return
-    const qs = `workspace_id=${workspaceId}`
-    const [agentsRes, crewsRes, skillsRes, credsRes] = await Promise.allSettled([
-      fetch(`/api/v1/agents?${qs}`),
-      fetch(`/api/v1/crews?${qs}`),
-      fetch(`/api/v1/skills?${qs}`),
-      fetch(`/api/v1/credentials?${qs}`),
-    ])
-    if (agentsRes.status === "fulfilled" && agentsRes.value.ok)
-      setAgents(await agentsRes.value.json())
-    if (crewsRes.status === "fulfilled" && crewsRes.value.ok)
-      setCrews(await crewsRes.value.json())
-    if (skillsRes.status === "fulfilled" && skillsRes.value.ok)
-      setSkills(await skillsRes.value.json())
-    if (credsRes.status === "fulfilled" && credsRes.value.ok)
-      setCredentials(await credsRes.value.json())
-  }, [workspaceId])
-
   useEffect(() => {
-    if (open) fetchData()
-  }, [open, fetchData])
+    if (!open || !workspaceId) return
+    const ac = new AbortController()
+    const qs = `workspace_id=${workspaceId}`
+
+    setAgents([])
+    setCrews([])
+    setSkills([])
+    setCredentials([])
+
+    const opts = { signal: ac.signal }
+    Promise.allSettled([
+      fetch(`/api/v1/agents?${qs}`, opts),
+      fetch(`/api/v1/crews?${qs}`, opts),
+      fetch(`/api/v1/skills?${qs}`, opts),
+      fetch(`/api/v1/credentials?${qs}`, opts),
+    ]).then(async ([agentsRes, crewsRes, skillsRes, credsRes]) => {
+      if (ac.signal.aborted) return
+      if (agentsRes.status === "fulfilled" && agentsRes.value.ok)
+        setAgents(await agentsRes.value.json())
+      if (crewsRes.status === "fulfilled" && crewsRes.value.ok)
+        setCrews(await crewsRes.value.json())
+      if (skillsRes.status === "fulfilled" && skillsRes.value.ok)
+        setSkills(await skillsRes.value.json())
+      if (credsRes.status === "fulfilled" && credsRes.value.ok)
+        setCredentials(await credsRes.value.json())
+    })
+
+    return () => ac.abort()
+  }, [open, workspaceId])
 
   function runCommand(fn: () => void) {
     onOpenChange(false)
