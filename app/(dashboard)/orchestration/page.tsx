@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Workflow, Clock, Activity, RefreshCw, Focus } from "lucide-react"
+import { Workflow, Clock, Activity, RefreshCw, Focus, LayoutTemplate } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
@@ -19,6 +19,7 @@ import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import { WorkflowGraph, type WorkflowGraphRef } from "@/components/features/orchestration/workflow-graph"
 import { MissionTimeline } from "@/components/features/orchestration/mission-timeline"
 import { OrchestrationActivity } from "@/components/features/orchestration/orchestration-activity"
+import { TemplateGallery } from "@/components/features/orchestration/template-gallery"
 import type { Mission } from "@/lib/types/mission"
 
 export default function OrchestrationPage() {
@@ -147,6 +148,10 @@ export default function OrchestrationPage() {
             <Activity className="h-4 w-4" />
             Activity
           </TabsTrigger>
+          <TabsTrigger value="templates" className="gap-2">
+            <LayoutTemplate className="h-4 w-4" />
+            Templates
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="graph" className="mt-0">
@@ -159,6 +164,10 @@ export default function OrchestrationPage() {
 
         <TabsContent value="activity" className="mt-0">
           <OrchestrationActivity missions={filteredMissions} />
+        </TabsContent>
+
+        <TabsContent value="templates" className="mt-0">
+          <TemplateGallery workspaceId={workspaceId!} />
         </TabsContent>
       </Tabs>
     </div>
