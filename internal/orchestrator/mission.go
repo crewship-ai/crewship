@@ -31,6 +31,8 @@ type DispatchRequest struct {
 	WorkspaceID  string
 	ChatID       string // mission ID used as pseudo-chat for grouping
 	Task         string
+	TraceID      string // mission trace ID for end-to-end observability
+	MissionID    string
 }
 
 // MissionEngine manages the lifecycle of missions and their tasks.
@@ -48,7 +50,17 @@ type MissionEngine struct {
 	mu       sync.Mutex
 	active   map[string]*missionState // missionID -> state
 	stopping bool
+
+	// Circuit breaker: tracks consecutive failures per agent
+	cbMu     sync.Mutex
+	failures map[string]int // agentID -> consecutive failure count
 }
+
+const (
+	circuitBreakerThreshold = 3 // consecutive failures before tripping
+	maxResultSummaryLen     = 8000
+	missionTimeoutDefault   = 2 * time.Hour
+)
 
 // SetDispatcher registers the assignment dispatcher.
 func (e *MissionEngine) SetDispatcher(d TaskDispatcher) {
@@ -68,13 +80,14 @@ type missionState struct {
 func NewMissionEngine(db *sql.DB, orch *Orchestrator, hub *ws.Hub, logger *slog.Logger) *MissionEngine {
 	pw := NewProgressWriter()
 	return &MissionEngine{
-		db:     db,
-		orch:   orch,
-		hub:    hub,
-		pw:     pw,
-		lc:     NewLoopController(db, pw, logger),
-		logger: logger,
-		active: make(map[string]*missionState),
+		db:       db,
+		orch:     orch,
+		hub:      hub,
+		pw:       pw,
+		lc:       NewLoopController(db, pw, logger),
+		logger:   logger,
+		active:   make(map[string]*missionState),
+		failures: make(map[string]int),
 	}
 }
 
@@ -138,7 +151,7 @@ func (e *MissionEngine) StartMission(ctx context.Context, missionID string) erro
 	}
 	ms.CrewSlug = crewSlug
 
-	mCtx, cancel := context.WithCancel(ctx)
+	mCtx, cancel := context.WithTimeout(ctx, missionTimeoutDefault)
 	ms.cancel = cancel
 
 	e.mu.Lock()
@@ -182,6 +195,19 @@ func (e *MissionEngine) Shutdown() {
 // It periodically checks for ready tasks and schedules them.
 func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 	defer func() {
+		// If context timed out, mark mission as FAILED
+		if ctx.Err() == context.DeadlineExceeded {
+			e.logger.Warn("mission timed out", "mission_id", ms.ID)
+			now := time.Now().UTC().Format(time.RFC3339)
+			e.db.ExecContext(context.Background(),
+				`UPDATE missions SET status = 'FAILED', updated_at = ?, completed_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
+				now, now, ms.ID)
+			e.broadcastMissionStatus(ms, "FAILED")
+			e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
+				Type:      "mission_timeout",
+				MissionID: ms.ID,
+			})
+		}
 		e.mu.Lock()
 		delete(e.active, ms.ID)
 		e.mu.Unlock()
@@ -283,6 +309,16 @@ func (e *MissionEngine) scheduleReadyTasks(ctx context.Context, ms *missionState
 // It resolves the target agent's crew (which may differ from the mission's
 // crew for cross-crew tasks) and dispatches the work via the TaskDispatcher.
 func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task TaskInfo) error {
+	// Circuit breaker: skip agent if it has failed too many times consecutively
+	if task.AssignedAgentID != nil {
+		e.cbMu.Lock()
+		failCount := e.failures[*task.AssignedAgentID]
+		e.cbMu.Unlock()
+		if failCount >= circuitBreakerThreshold {
+			return fmt.Errorf("circuit breaker: agent has %d consecutive failures (threshold: %d)", failCount, circuitBreakerThreshold)
+		}
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Resolve the target agent's crew for cross-crew support
@@ -363,6 +399,8 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 				WorkspaceID:  ms.WorkspaceID,
 				ChatID:       ms.ID,
 				Task:         task.Title,
+				TraceID:      ms.TraceID,
+				MissionID:    ms.ID,
 			})
 			if dispatchErr != nil {
 				e.logger.Error("dispatch assignment failed",
@@ -404,12 +442,14 @@ func (e *MissionEngine) areCrewsConnected(ctx context.Context, crewA, crewB stri
 }
 
 // OnAssignmentCompleted is called when an assignment finishes.
-// It updates the corresponding mission task status.
+// It updates the corresponding mission task status, tracks circuit breaker
+// state, and compresses output to prevent DB bloat.
 func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID, status, resultSummary, errorMessage string) error {
 	var taskID, missionID string
+	var assignedAgentID sql.NullString
 	err := e.db.QueryRowContext(ctx,
-		`SELECT id, mission_id FROM mission_tasks WHERE assignment_id = ?`,
-		assignmentID).Scan(&taskID, &missionID)
+		`SELECT id, mission_id, assigned_agent_id FROM mission_tasks WHERE assignment_id = ?`,
+		assignmentID).Scan(&taskID, &missionID, &assignedAgentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // assignment not linked to a mission task
@@ -423,6 +463,36 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		taskStatus = "FAILED"
 	}
 
+	// Circuit breaker: track consecutive failures per agent
+	if assignedAgentID.Valid {
+		e.cbMu.Lock()
+		if taskStatus == "FAILED" {
+			e.failures[assignedAgentID.String]++
+			e.logger.Warn("agent failure tracked",
+				"agent_id", assignedAgentID.String,
+				"consecutive_failures", e.failures[assignedAgentID.String],
+			)
+		} else {
+			delete(e.failures, assignedAgentID.String) // reset on success
+		}
+		e.cbMu.Unlock()
+	}
+
+	// Compress result summary to prevent DB bloat
+	if len(resultSummary) > maxResultSummaryLen {
+		resultSummary = resultSummary[:maxResultSummaryLen] + "\n...(truncated)"
+	}
+
+	// Calculate task duration
+	var startedAt sql.NullString
+	e.db.QueryRowContext(ctx, `SELECT started_at FROM mission_tasks WHERE id = ?`, taskID).Scan(&startedAt)
+	var durationMs int64
+	if startedAt.Valid {
+		if st, err := time.Parse(time.RFC3339, startedAt.String); err == nil {
+			durationMs = time.Since(st).Milliseconds()
+		}
+	}
+
 	updates := `status = ?, updated_at = ?, completed_at = ?`
 	args := []interface{}{taskStatus, now, now}
 	if resultSummary != "" {
@@ -432,6 +502,10 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 	if errorMessage != "" {
 		updates += `, error_message = ?`
 		args = append(args, errorMessage)
+	}
+	if durationMs > 0 {
+		updates += `, duration_ms = ?`
+		args = append(args, durationMs)
 	}
 	args = append(args, taskID)
 

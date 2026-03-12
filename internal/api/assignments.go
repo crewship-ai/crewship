@@ -559,13 +559,27 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 		return fmt.Errorf("load credentials for agent %s: %w", target.ID, err)
 	}
 
+	// Inject trace context into task for observability
+	task := req.Task
+	if req.TraceID != "" {
+		task = fmt.Sprintf("[trace:%s] %s", req.TraceID, req.Task)
+	}
+
 	body := createAssignmentBody{
 		TargetSlug:  target.Slug,
-		Task:        req.Task,
+		Task:        task,
 		CrewID:      req.CrewID,
 		WorkspaceID: req.WorkspaceID,
 		ChatID:      req.ChatID,
 	}
+
+	h.logger.Info("dispatching mission assignment",
+		"assignment_id", req.AssignmentID,
+		"mission_id", req.MissionID,
+		"trace_id", req.TraceID,
+		"agent", target.Slug,
+		"crew", target.CrewSlug,
+	)
 
 	h.runAssignment(ctx, req.AssignmentID, body, target, creds)
 	return nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -540,4 +541,145 @@ func searchStr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestCircuitBreaker_TripsAfterThreshold(t *testing.T) {
+	db := setupTestDB(t)
+	db.Exec(`CREATE TABLE crew_connections (
+		id TEXT PRIMARY KEY, workspace_id TEXT, from_crew_id TEXT, to_crew_id TEXT,
+		direction TEXT DEFAULT 'bidirectional', status TEXT DEFAULT 'active',
+		created_at TEXT, updated_at TEXT)`)
+
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	// Simulate consecutive failures
+	for i := 0; i < circuitBreakerThreshold; i++ {
+		assignID := fmt.Sprintf("assign-fail-%d", i)
+		taskIDStr := fmt.Sprintf("t-fail-%d", i)
+		db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, assignment_id, started_at, created_at, updated_at)
+			VALUES (?, ?, ?, 'Failing task', 'IN_PROGRESS', ?, '[]', ?, ?, ?, ?)`,
+			taskIDStr, missionID, agentID, i+1, assignID, now, now, now)
+		db.Exec(`INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at)
+			VALUES (?, ?, ?, ?, ?, 'fail task', 'FAILED', ?)`, assignID, wsID, missionID, leadID, agentID, now)
+
+		err := engine.OnAssignmentCompleted(context.Background(), assignID, "FAILED", "", "agent crashed")
+		if err != nil {
+			t.Fatalf("OnAssignmentCompleted failed: %v", err)
+		}
+	}
+
+	// Now try to schedule a task for the same agent -- should be blocked
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-blocked', ?, ?, 'Blocked task', 'PENDING', 10, '[]', ?, ?)`,
+		missionID, agentID, now, now)
+
+	ms := &missionState{
+		ID:          missionID,
+		CrewID:      crewID,
+		CrewSlug:    "dev-crew",
+		LeadAgentID: leadID,
+		TraceID:     "trace-cb",
+		WorkspaceID: wsID,
+	}
+
+	task := TaskInfo{
+		ID:              "t-blocked",
+		MissionID:       missionID,
+		AssignedAgentID: &agentID,
+		Title:           "Blocked task",
+		Status:          "PENDING",
+	}
+
+	err := engine.scheduleTask(context.Background(), ms, task)
+	if err == nil {
+		t.Fatal("expected circuit breaker error, got nil")
+	}
+	if !contains(err.Error(), "circuit breaker") {
+		t.Errorf("expected 'circuit breaker' in error, got: %s", err)
+	}
+}
+
+func TestCircuitBreaker_ResetsOnSuccess(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	// Two failures
+	for i := 0; i < 2; i++ {
+		assignID := fmt.Sprintf("assign-reset-%d", i)
+		taskIDStr := fmt.Sprintf("t-reset-%d", i)
+		db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, assignment_id, started_at, created_at, updated_at)
+			VALUES (?, ?, ?, 'Reset task', 'IN_PROGRESS', ?, '[]', ?, ?, ?, ?)`,
+			taskIDStr, missionID, agentID, i+1, assignID, now, now, now)
+		db.Exec(`INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at)
+			VALUES (?, ?, ?, ?, ?, 'reset task', 'FAILED', ?)`, assignID, wsID, missionID, leadID, agentID, now)
+		engine.OnAssignmentCompleted(context.Background(), assignID, "FAILED", "", "error")
+	}
+
+	// Check failure count is 2
+	engine.cbMu.Lock()
+	if engine.failures[agentID] != 2 {
+		t.Errorf("expected 2 failures, got %d", engine.failures[agentID])
+	}
+	engine.cbMu.Unlock()
+
+	// Success resets the counter
+	successAssignID := "assign-success"
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, assignment_id, started_at, created_at, updated_at)
+		VALUES ('t-success', ?, ?, 'Success task', 'IN_PROGRESS', 10, '[]', ?, ?, ?, ?)`,
+		missionID, agentID, successAssignID, now, now, now)
+	db.Exec(`INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at)
+		VALUES (?, ?, ?, ?, ?, 'success task', 'COMPLETED', ?)`, successAssignID, wsID, missionID, leadID, agentID, now)
+	engine.OnAssignmentCompleted(context.Background(), successAssignID, "COMPLETED", "done", "")
+
+	engine.cbMu.Lock()
+	if engine.failures[agentID] != 0 {
+		t.Errorf("expected 0 failures after success, got %d", engine.failures[agentID])
+	}
+	engine.cbMu.Unlock()
+}
+
+func TestOutputCompression(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	// Create assignment with a large result
+	assignID := "assign-large"
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, assignment_id, started_at, created_at, updated_at)
+		VALUES ('t-large', ?, ?, 'Large output task', 'IN_PROGRESS', 1, '[]', ?, ?, ?, ?)`,
+		missionID, agentID, assignID, now, now, now)
+	db.Exec(`INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at)
+		VALUES (?, ?, ?, ?, ?, 'large task', 'COMPLETED', ?)`, assignID, wsID, missionID, leadID, agentID, now)
+
+	// Create a result larger than maxResultSummaryLen
+	largeResult := ""
+	for i := 0; i < maxResultSummaryLen+1000; i++ {
+		largeResult += "x"
+	}
+
+	engine.OnAssignmentCompleted(context.Background(), assignID, "COMPLETED", largeResult, "")
+
+	// Verify it was truncated in DB
+	var stored string
+	db.QueryRow(`SELECT result_summary FROM mission_tasks WHERE id = 't-large'`).Scan(&stored)
+	if len(stored) > maxResultSummaryLen+50 {
+		t.Errorf("expected truncated result, got length %d", len(stored))
+	}
+	if !contains(stored, "truncated") {
+		t.Error("expected truncation marker in stored result")
+	}
 }
