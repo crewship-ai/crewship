@@ -89,8 +89,8 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
     const accent = statusColors[mission.status] || "#64748b"
 
     const totalTokens = tasks.reduce((sum, t) => sum + (t.token_count || 0), 0)
-    const statusLabel = tasks.length === 0 && mission.status === "PLANNING"
-      ? " — Planning..."
+    const statusLabel = tasks.length === 0 && (mission.status === "PLANNING" || mission.status === "IN_PROGRESS")
+      ? " — Lead is planning tasks..."
       : totalTokens > 0
         ? ` · ${(totalTokens / 1000).toFixed(1)}k tok`
         : ""

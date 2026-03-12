@@ -34,6 +34,7 @@ type DispatchRequest struct {
 	Task         string
 	TraceID      string // mission trace ID for end-to-end observability
 	MissionID    string
+	LeadPlanning bool   // when true, dispatch as LEAD with sidecar (for task planning phase)
 }
 
 // MissionEngine manages the lifecycle of missions and their tasks.
@@ -69,13 +70,14 @@ func (e *MissionEngine) SetDispatcher(d TaskDispatcher) {
 }
 
 type missionState struct {
-	ID          string
-	CrewID      string
-	CrewSlug    string
-	LeadAgentID string
-	TraceID     string
-	WorkspaceID string
-	cancel      context.CancelFunc
+	ID                 string
+	CrewID             string
+	CrewSlug           string
+	LeadAgentID        string
+	TraceID            string
+	WorkspaceID        string
+	cancel             context.CancelFunc
+	planningDispatched bool // true after lead planning dispatch (prevents re-dispatch)
 }
 
 func NewMissionEngine(db *sql.DB, orch *Orchestrator, hub *ws.Hub, logger *slog.Logger) *MissionEngine {
@@ -234,6 +236,19 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 			if status != "IN_PROGRESS" {
 				e.logger.Info("mission no longer in progress", "mission_id", ms.ID, "status", status)
 				return
+			}
+
+			// Lead planning phase: if mission has 0 tasks, dispatch to lead
+			// so they can plan and create tasks autonomously.
+			if !ms.planningDispatched {
+				taskCount, countErr := e.countTasks(ctx, ms.ID)
+				if countErr != nil {
+					e.logger.Error("count tasks", "mission_id", ms.ID, "error", countErr)
+				} else if taskCount == 0 {
+					e.dispatchLeadPlanning(ctx, ms)
+					ms.planningDispatched = true
+					continue // wait for lead to create tasks
+				}
 			}
 
 			if err := e.scheduleReadyTasks(ctx, ms); err != nil {
@@ -956,6 +971,127 @@ func (e *MissionEngine) broadcastMissionStatus(ms *missionState, status string) 
 		Channel: wsChannel,
 		Payload: map[string]string{"id": ms.ID, "crew_id": ms.CrewID, "status": status},
 	})
+}
+
+// countTasks returns the number of tasks in a mission.
+func (e *MissionEngine) countTasks(ctx context.Context, missionID string) (int, error) {
+	var count int
+	err := e.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM mission_tasks WHERE mission_id = ?`, missionID).Scan(&count)
+	return count, err
+}
+
+// dispatchLeadPlanning sends the mission to the lead agent for autonomous task planning.
+// The lead runs with full LEAD privileges (sidecar, crew context) so they can:
+// 1. Analyze the mission objective
+// 2. Break it into tasks using /mission/create or /assign
+// 3. Assign tasks to crew members based on their skills
+// The engine then picks up the created tasks on the next loop iteration.
+func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionState) {
+	// Load mission details for the planning prompt
+	var title, desc sql.NullString
+	e.db.QueryRowContext(ctx,
+		`SELECT title, description FROM missions WHERE id = ?`, ms.ID).Scan(&title, &desc)
+
+	// Resolve lead agent details
+	var agentSlug string
+	err := e.db.QueryRowContext(ctx,
+		`SELECT slug FROM agents WHERE id = ? AND deleted_at IS NULL`,
+		ms.LeadAgentID).Scan(&agentSlug)
+	if err != nil {
+		e.logger.Error("lead planning: resolve lead agent", "error", err, "mission_id", ms.ID)
+		return
+	}
+
+	// Build the planning prompt
+	var b strings.Builder
+	b.WriteString("[MISSION PLANNING REQUEST]\n")
+	b.WriteString("You are the Lead agent for this crew. A new mission has been assigned to you WITHOUT pre-defined tasks.\n")
+	b.WriteString("Your job is to analyze the objective, break it down into concrete tasks, and assign them to your crew members.\n\n")
+	b.WriteString(fmt.Sprintf("Mission: %s\n", title.String))
+	if desc.Valid && desc.String != "" {
+		b.WriteString(fmt.Sprintf("Description: %s\n", desc.String))
+	}
+	b.WriteString(fmt.Sprintf("Mission ID: %s\n\n", ms.ID))
+	b.WriteString("INSTRUCTIONS:\n")
+	b.WriteString("1. Review the mission objective and your crew members' capabilities\n")
+	b.WriteString("2. Break the work into specific, actionable tasks\n")
+	b.WriteString("3. Assign each task to the most suitable crew member (or yourself if solo)\n")
+	b.WriteString("4. Define task dependencies (which tasks must complete before others start)\n")
+	b.WriteString("5. Create the tasks using the mission API:\n\n")
+	b.WriteString("Option A — Add tasks to this existing mission:\n")
+	b.WriteString(fmt.Sprintf("  For each task, run:\n"))
+	b.WriteString(fmt.Sprintf("  curl -s -X POST http://localhost:9119/assign \\\n"))
+	b.WriteString(fmt.Sprintf("    -H 'Content-Type: application/json' \\\n"))
+	b.WriteString(fmt.Sprintf("    -d '{\"target\":\"<agent_slug>\",\"task\":\"<detailed task description>\"}'\n\n"))
+	b.WriteString("Option B — If you prefer structured mission with dependencies:\n")
+	b.WriteString(fmt.Sprintf("  Create a new sub-mission with dependency DAG:\n"))
+	b.WriteString(fmt.Sprintf("  curl -s -X POST http://localhost:9119/mission/create \\\n"))
+	b.WriteString(fmt.Sprintf("    -H 'Content-Type: application/json' \\\n"))
+	b.WriteString(fmt.Sprintf("    -d '{\"title\":\"...\",\"tasks\":[...]}'\n"))
+	b.WriteString(fmt.Sprintf("  Then start it: curl -s -X POST http://localhost:9119/mission/<id>/start\n\n"))
+	b.WriteString("Option C — If you can handle this yourself (solo crew / simple task):\n")
+	b.WriteString("  Just do the work directly and produce the result.\n\n")
+	b.WriteString("After creating tasks or completing the work, the system will handle the rest.\n")
+	b.WriteString("[END PLANNING REQUEST]")
+
+	// Create a planning assignment
+	now := time.Now().UTC().Format(time.RFC3339)
+	assignmentID := generateID()
+	_, err = e.db.ExecContext(ctx, `
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
+		assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, ms.LeadAgentID,
+		"[PLANNING] "+title.String,
+		ms.ID,
+		now,
+	)
+	if err != nil {
+		e.logger.Error("create planning assignment", "error", err, "mission_id", ms.ID)
+		return
+	}
+
+	e.logger.Info("dispatching lead planning",
+		"mission_id", ms.ID,
+		"lead", agentSlug,
+		"assignment_id", assignmentID,
+	)
+
+	e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
+		Type:      "lead_planning",
+		MissionID: ms.ID,
+		AgentSlug: agentSlug,
+		Title:     title.String,
+	})
+
+	// Dispatch as LEAD (with sidecar and crew context)
+	if e.dispatcher != nil {
+		go func() {
+			dispatchErr := e.dispatcher.DispatchAssignment(context.Background(), DispatchRequest{
+				AssignmentID: assignmentID,
+				AgentID:      ms.LeadAgentID,
+				AgentSlug:    agentSlug,
+				CrewID:       ms.CrewID,
+				CrewSlug:     ms.CrewSlug,
+				WorkspaceID:  ms.WorkspaceID,
+				ChatID:       ms.ID,
+				Task:         b.String(),
+				TraceID:      ms.TraceID,
+				MissionID:    ms.ID,
+				LeadPlanning: true, // run as LEAD with sidecar enabled
+			})
+			if dispatchErr != nil {
+				e.logger.Error("lead planning dispatch failed",
+					"assignment_id", assignmentID,
+					"error", dispatchErr,
+				)
+				// Don't fail the mission — the loop will retry on next tick
+				// (planningDispatched prevents re-dispatch, but we can reset it)
+			}
+		}()
+	}
+
+	e.broadcastMissionStatus(ms, "IN_PROGRESS")
 }
 
 func parseDependsOn(raw string) ([]string, error) {

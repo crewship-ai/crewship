@@ -49,12 +49,13 @@ func (h *AssignmentHandler) SetMissionCallback(cb MissionCallback) {
 }
 
 type createAssignmentBody struct {
-	TargetSlug  string                    `json:"target_slug"`
-	Task        string                    `json:"task"`
-	CrewID      string                    `json:"crew_id"`
-	WorkspaceID string                    `json:"workspace_id"`
-	ChatID      string                    `json:"chat_id"`
-	CrewMembers []orchestrator.CrewMember `json:"-"` // populated internally for mission dispatches
+	TargetSlug   string                    `json:"target_slug"`
+	Task         string                    `json:"task"`
+	CrewID       string                    `json:"crew_id"`
+	WorkspaceID  string                    `json:"workspace_id"`
+	ChatID       string                    `json:"chat_id"`
+	CrewMembers  []orchestrator.CrewMember `json:"-"` // populated internally for mission dispatches
+	LeadPlanning bool                      `json:"-"` // when true, run as LEAD with sidecar
 }
 
 // Create handles POST /api/v1/internal/assignments.
@@ -284,10 +285,17 @@ func (h *AssignmentHandler) runAssignment(
 		}
 	}
 
+	agentRole := "AGENT"
+	skipSidecar := true
+	if body.LeadPlanning {
+		agentRole = "LEAD" // Lead planning: full LEAD privileges with sidecar
+		skipSidecar = false
+	}
+
 	req := orchestrator.AgentRunRequest{
 		AgentID:         target.ID,
 		AgentSlug:       target.Slug,
-		AgentRole:       "AGENT", // Sub-agents run as AGENT, not as LEAD
+		AgentRole:       agentRole,
 		CrewID:          body.CrewID,
 		CrewSlug:        target.CrewSlug,
 		WorkspaceID:     body.WorkspaceID,
@@ -301,9 +309,9 @@ func (h *AssignmentHandler) runAssignment(
 		Credentials:     creds,
 		TimeoutSecs:     target.TimeoutSeconds,
 		MemoryEnabled:   target.MemoryEnabled,
-		CrewMembers:     body.CrewMembers, // peer context for mission agents
-		SkipSidecar:     true,  // Prevent port conflict with lead's sidecar on 9119
-		SkipConvHistory: true,  // Sub-agents start fresh without lead's conversation history
+		CrewMembers:     body.CrewMembers,
+		SkipSidecar:     skipSidecar,
+		SkipConvHistory: true,
 	}
 
 	if err := h.orch.RunAgentForAssignment(ctx, req, handler); err != nil {
@@ -571,12 +579,13 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 	crewMembers := h.loadCrewMembers(ctx, req.CrewID, req.AgentID)
 
 	body := createAssignmentBody{
-		TargetSlug:  target.Slug,
-		Task:        task,
-		CrewID:      req.CrewID,
-		WorkspaceID: req.WorkspaceID,
-		ChatID:      req.ChatID,
-		CrewMembers: crewMembers,
+		TargetSlug:   target.Slug,
+		Task:         task,
+		CrewID:       req.CrewID,
+		WorkspaceID:  req.WorkspaceID,
+		ChatID:       req.ChatID,
+		CrewMembers:  crewMembers,
+		LeadPlanning: req.LeadPlanning,
 	}
 
 	h.logger.Info("dispatching mission assignment",
