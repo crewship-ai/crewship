@@ -16,10 +16,12 @@ type missionCreateRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
 	Plan        string `json:"plan,omitempty"`
+	CrewID      string `json:"crew_id,omitempty"`      // Required for COORDINATOR (no default crew)
 	Tasks       []struct {
 		Title           string   `json:"title"`
 		Description     string   `json:"description,omitempty"`
-		AssignedTo      string   `json:"assigned_to"`
+		AssignedTo      string   `json:"assigned_to"`       // Slug (same crew only)
+		AssignedToID    string   `json:"assigned_to_id"`    // Agent ID (cross-crew)
 		TaskOrder       int      `json:"task_order"`
 		DependsOn       []string `json:"depends_on,omitempty"`
 		MaxIterations   *int     `json:"max_iterations,omitempty"`
@@ -70,7 +72,10 @@ func (s *Server) handleMissionCreate(w http.ResponseWriter, r *http.Request) {
 		if t.Description != "" {
 			it.Description = &t.Description
 		}
-		if t.AssignedTo != "" {
+		// Support both slug-based (same crew) and ID-based (cross-crew) assignment
+		if t.AssignedToID != "" {
+			it.AssignedAgentID = &t.AssignedToID
+		} else if t.AssignedTo != "" {
 			if m, ok := memberMap[t.AssignedTo]; ok {
 				it.AssignedAgentID = &m.ID
 			} else {
@@ -83,10 +88,22 @@ func (s *Server) handleMissionCreate(w http.ResponseWriter, r *http.Request) {
 		tasks = append(tasks, it)
 	}
 
+	// Use explicit crew_id if provided (COORDINATOR), otherwise use sidecar's crew
+	crewID := s.ipc.CrewID
+	if req.CrewID != "" {
+		crewID = req.CrewID
+	}
+	if crewID == "" {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+			"error": "crew_id required (COORDINATOR agents must specify crew_id explicitly)",
+		})
+		return
+	}
+
 	body := map[string]interface{}{
 		"title":         req.Title,
 		"lead_agent_id": s.ipc.AgentID,
-		"crew_id":       s.ipc.CrewID,
+		"crew_id":       crewID,
 		"workspace_id":  s.ipc.WorkspaceID,
 		"tasks":         tasks,
 	}

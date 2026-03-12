@@ -77,3 +77,64 @@ func BuildLeadContext(members []CrewMember) string {
 	b.WriteString("[END CREW CONTEXT]")
 	return b.String()
 }
+
+// CrewInfo represents a crew and its members for the coordinator context.
+type CrewInfo struct {
+	ID      string
+	Name    string
+	Slug    string
+	Members []CrewMember
+}
+
+// BuildCoordinatorContext formats a [COORDINATOR CONTEXT] block listing all
+// workspace crews and their agents. The coordinator can create cross-crew
+// missions that span multiple crews.
+func BuildCoordinatorContext(crews []CrewInfo) string {
+	if len(crews) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("[COORDINATOR CONTEXT]\n")
+	b.WriteString("You are the workspace Coordinator. You see ALL crews and their agents.\n")
+	b.WriteString("Your role: route complex tasks to the right crew, create cross-crew missions,\n")
+	b.WriteString("and ensure crews collaborate effectively.\n\n")
+
+	for _, c := range crews {
+		b.WriteString(fmt.Sprintf("## Crew: %s (@%s)\n", c.Name, c.Slug))
+		if len(c.Members) == 0 {
+			b.WriteString("  (no agents)\n")
+		}
+		for _, m := range c.Members {
+			if m.RoleTitle != "" {
+				b.WriteString(fmt.Sprintf("  - %s (@%s, %s)", m.Name, m.Slug, m.RoleTitle))
+			} else {
+				b.WriteString(fmt.Sprintf("  - %s (@%s)", m.Name, m.Slug))
+			}
+			if m.Description != "" {
+				b.WriteString(fmt.Sprintf(": %s", m.Description))
+			}
+			b.WriteString(fmt.Sprintf(" [crew_id=%s]\n", c.ID))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("CROSS-CREW MISSION COMMANDS:\n")
+	b.WriteString("Create a mission spanning multiple crews:\n")
+	b.WriteString("  curl -s -X POST http://localhost:9119/mission/create \\\n")
+	b.WriteString("    -H \"Content-Type: application/json\" \\\n")
+	b.WriteString("    -d '{\"title\":\"...\",\"description\":\"...\",\"crew_id\":\"<home_crew_id>\",\"tasks\":[\n")
+	b.WriteString("      {\"title\":\"...\",\"assigned_to_id\":\"<agent_id>\",\"task_order\":1},\n")
+	b.WriteString("      {\"title\":\"...\",\"assigned_to_id\":\"<agent_id>\",\"task_order\":2,\"depends_on\":[\"<task_id>\"]}]}'\n")
+	b.WriteString("Note: Use agent IDs (not slugs) for cross-crew tasks, since slugs may collide.\n")
+	b.WriteString("The system auto-routes each task to the agent's crew container.\n")
+	b.WriteString("Crew connections must exist between involved crews.\n\n")
+
+	b.WriteString("List crew connections:  curl -s http://localhost:9119/crew-connections\n")
+	b.WriteString("List all crews:         curl -s http://localhost:9119/crews\n")
+	b.WriteString("Check mission status:   curl -s http://localhost:9119/mission/<id>\n")
+	b.WriteString("List templates:         curl -s http://localhost:9119/mission/templates\n")
+
+	b.WriteString("[END COORDINATOR CONTEXT]")
+	return b.String()
+}

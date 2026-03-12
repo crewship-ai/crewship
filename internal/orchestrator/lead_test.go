@@ -118,3 +118,69 @@ func TestBuildLeadContext(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCoordinatorContext(t *testing.T) {
+	tests := []struct {
+		name         string
+		crews        []CrewInfo
+		wantEmpty    bool
+		wantContains []string
+	}{
+		{
+			name:      "nil crews returns empty",
+			crews:     nil,
+			wantEmpty: true,
+		},
+		{
+			name: "single crew with members",
+			crews: []CrewInfo{
+				{
+					ID: "c1", Name: "Dev Crew", Slug: "dev-crew",
+					Members: []CrewMember{
+						{Name: "Alice", Slug: "alice", RoleTitle: "Backend Dev"},
+						{Name: "Bob", Slug: "bob", RoleTitle: "Frontend Dev"},
+					},
+				},
+			},
+			wantContains: []string{
+				"[COORDINATOR CONTEXT]",
+				"[END COORDINATOR CONTEXT]",
+				"Dev Crew",
+				"@dev-crew",
+				"Alice",
+				"Bob",
+				"crew_id=c1",
+				"cross-crew",
+			},
+		},
+		{
+			name: "multiple crews",
+			crews: []CrewInfo{
+				{ID: "c1", Name: "Dev Crew", Slug: "dev"},
+				{ID: "c2", Name: "QA Crew", Slug: "qa", Members: []CrewMember{
+					{Name: "Tester", Slug: "tester"},
+				}},
+			},
+			wantContains: []string{"Dev Crew", "QA Crew", "Tester", "assigned_to_id"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := BuildCoordinatorContext(tt.crews)
+
+			if tt.wantEmpty {
+				if result != "" {
+					t.Errorf("expected empty, got %q", result)
+				}
+				return
+			}
+
+			for _, s := range tt.wantContains {
+				if !strings.Contains(result, s) {
+					t.Errorf("missing %q in result", s)
+				}
+			}
+		})
+	}
+}
