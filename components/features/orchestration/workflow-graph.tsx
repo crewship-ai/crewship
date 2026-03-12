@@ -271,8 +271,8 @@ function WorkflowGraphInner({ missions, onTaskClick }: WorkflowGraphProps, ref: 
   }
 
   return (
-    <div className="rounded-xl border border-white/[0.06] overflow-hidden bg-[#0a0c10]">
-      <div className="h-[calc(100vh-380px)] min-h-[450px] w-full">
+    <div className="h-full w-full overflow-hidden bg-[#0a0c10]">
+      <div className="h-full w-full">
         <ReactFlow
           nodes={nodes}
           edges={edges}

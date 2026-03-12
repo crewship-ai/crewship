@@ -1,11 +1,12 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Workflow, Clock, Activity, RefreshCw, Focus, LayoutTemplate, CheckCircle2, AlertTriangle, Settings2 } from "lucide-react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Workflow, Clock, Activity, RefreshCw, Focus, LayoutTemplate,
+  Settings2,
+} from "lucide-react"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { PageHeader } from "@/components/layout/page-header"
-import { StatCard } from "@/components/layout/stat-card"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
@@ -33,7 +34,7 @@ export default function OrchestrationPage() {
   const [loading, setLoading] = useState(true)
   const [selectedMissionId, setSelectedMissionId] = useState<string>("all")
   const [selectedTask, setSelectedTask] = useState<MissionTask | null>(null)
-  const [statusFilter, setStatusFilter] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState("graph")
   const graphRef = useRef<WorkflowGraphRef>(null)
 
   const fetchMissions = useCallback(async () => {
@@ -50,11 +51,8 @@ export default function OrchestrationPage() {
     }
   }, [workspaceId])
 
-  useEffect(() => {
-    fetchMissions()
-  }, [fetchMissions])
+  useEffect(() => { fetchMissions() }, [fetchMissions])
 
-  // Auto-poll every 3s when any mission is active (MissionEngine updates DB directly)
   const hasActive = useMemo(
     () => missions.some((m) => m.status === "IN_PROGRESS" || m.status === "REVIEW"),
     [missions]
@@ -80,30 +78,19 @@ export default function OrchestrationPage() {
     )
   }, [])
 
-  const handleMissionUpdate = useCallback(() => {
-    fetchMissions()
-  }, [fetchMissions])
-
   useRealtimeEvent("task.updated", handleTaskUpdate)
-  useRealtimeEvent("mission.updated", handleMissionUpdate)
+  useRealtimeEvent("mission.updated", useCallback(() => fetchMissions(), [fetchMissions]))
 
   const filteredMissions = useMemo(() => {
-    let result = missions
-    if (selectedMissionId !== "all") {
-      result = result.filter((m) => m.id === selectedMissionId)
-    }
-    if (statusFilter) {
-      result = result.filter((m) => m.status === statusFilter)
-    }
-    return result
-  }, [missions, selectedMissionId, statusFilter])
+    if (selectedMissionId === "all") return missions
+    return missions.filter((m) => m.id === selectedMissionId)
+  }, [missions, selectedMissionId])
 
   const selectedMission = useMemo(() => {
     if (selectedMissionId === "all") return null
     return missions.find((m) => m.id === selectedMissionId) || null
   }, [missions, selectedMissionId])
 
-  // Find mission for selected task
   const taskMission = useMemo(() => {
     if (!selectedTask) return null
     return missions.find((m) => m.tasks?.some((t) => t.id === selectedTask.id)) || null
@@ -122,27 +109,42 @@ export default function OrchestrationPage() {
 
   if (loading || wsLoading) {
     return (
-      <div className="p-6 space-y-6">
-        <Skeleton className="h-10 w-64" />
-        <div className="grid grid-cols-4 gap-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-24" />
-          ))}
-        </div>
-        <Skeleton className="h-[600px]" />
+      <div className="h-full flex items-center justify-center">
+        <Skeleton className="h-[600px] w-full m-6 rounded-xl" />
       </div>
     )
   }
 
   return (
-    <div className="p-6 space-y-5">
-      <PageHeader
-        title="Orchestration"
-        description="Real-time workflow visualization and mission coordination"
-      >
+    <div className="flex flex-col h-[calc(100vh-48px)]">
+      {/* Compact toolbar — n8n style */}
+      <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06] bg-[#0a0c10]/80 backdrop-blur-sm shrink-0">
+        <div className="flex items-center gap-3">
+          <h1 className="text-sm font-semibold text-white/80">Orchestration</h1>
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="h-7">
+              <TabsTrigger value="graph" className="text-xs h-6 px-2.5 gap-1">
+                <Workflow className="h-3 w-3" /> Graph
+              </TabsTrigger>
+              <TabsTrigger value="timeline" className="text-xs h-6 px-2.5 gap-1">
+                <Clock className="h-3 w-3" /> Timeline
+              </TabsTrigger>
+              <TabsTrigger value="activity" className="text-xs h-6 px-2.5 gap-1">
+                <Activity className="h-3 w-3" /> Activity
+              </TabsTrigger>
+              <TabsTrigger value="templates" className="text-xs h-6 px-2.5 gap-1">
+                <LayoutTemplate className="h-3 w-3" /> Templates
+              </TabsTrigger>
+              <TabsTrigger value="connections" className="text-xs h-6 px-2.5 gap-1">
+                <Settings2 className="h-3 w-3" /> Connections
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+
         <div className="flex items-center gap-2">
-          <Select value={selectedMissionId} onValueChange={(v) => { setSelectedMissionId(v); setStatusFilter(null) }}>
-            <SelectTrigger className="w-[200px] h-8 text-xs">
+          <Select value={selectedMissionId} onValueChange={setSelectedMissionId}>
+            <SelectTrigger className="w-[180px] h-7 text-xs bg-white/[0.03] border-white/[0.08]">
               <SelectValue placeholder="All missions" />
             </SelectTrigger>
             <SelectContent>
@@ -154,115 +156,93 @@ export default function OrchestrationPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={() => graphRef.current?.focusActive()}>
-            <Focus className="h-4 w-4 mr-1" />
-            Focus Active
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-white/40 hover:text-white/70" onClick={() => graphRef.current?.focusActive()}>
+            <Focus className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="outline" size="sm" onClick={fetchMissions}>
-            <RefreshCw className="h-4 w-4" />
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-white/40 hover:text-white/70" onClick={fetchMissions}>
+            <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           {workspaceId && (
             <CreateMissionWizard workspaceId={workspaceId} onCreated={fetchMissions} />
           )}
         </div>
-      </PageHeader>
-
-      {/* Stat cards — clickable to filter */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <button onClick={() => { setStatusFilter(statusFilter === "IN_PROGRESS" ? null : "IN_PROGRESS"); setSelectedMissionId("all") }} className="text-left">
-          <StatCard
-            title="Active"
-            value={stats.active}
-            subtitle="Currently running"
-            icon={Workflow}
-            iconClassName={cn("bg-blue-500/10 text-blue-500", statusFilter === "IN_PROGRESS" && "ring-2 ring-blue-500/40")}
-            className={cn(statusFilter === "IN_PROGRESS" && "ring-1 ring-blue-500/30",
-              stats.active > 0 && "border-blue-500/20")}
-          />
-        </button>
-        <button onClick={() => { setStatusFilter(statusFilter === "PLANNING" ? null : "PLANNING"); setSelectedMissionId("all") }} className="text-left">
-          <StatCard
-            title="Planning"
-            value={stats.planning}
-            subtitle="Being planned"
-            icon={Clock}
-            iconClassName={cn("bg-purple-500/10 text-purple-500", statusFilter === "PLANNING" && "ring-2 ring-purple-500/40")}
-            className={cn(statusFilter === "PLANNING" && "ring-1 ring-purple-500/30")}
-          />
-        </button>
-        <button onClick={() => { setStatusFilter(statusFilter === "COMPLETED" ? null : "COMPLETED"); setSelectedMissionId("all") }} className="text-left">
-          <StatCard
-            title="Completed"
-            value={stats.completed}
-            subtitle="Successfully finished"
-            icon={CheckCircle2}
-            iconClassName={cn("bg-green-500/10 text-green-500", statusFilter === "COMPLETED" && "ring-2 ring-green-500/40")}
-            className={cn(statusFilter === "COMPLETED" && "ring-1 ring-green-500/30")}
-          />
-        </button>
-        <button onClick={() => { setStatusFilter(statusFilter === "FAILED" ? null : "FAILED"); setSelectedMissionId("all") }} className="text-left">
-          <StatCard
-            title="Failed"
-            value={stats.failed}
-            subtitle="Need attention"
-            icon={AlertTriangle}
-            iconClassName={cn("bg-red-500/10 text-red-500", statusFilter === "FAILED" && "ring-2 ring-red-500/40")}
-            className={cn(statusFilter === "FAILED" && "ring-1 ring-red-500/30")}
-          />
-        </button>
       </div>
 
-      {/* Mission control bar when a specific mission is selected */}
+      {/* Mission control bar when selected */}
       {selectedMission && (
-        <MissionControlBar mission={selectedMission} onMissionChanged={fetchMissions} />
+        <div className="shrink-0">
+          <MissionControlBar mission={selectedMission} onMissionChanged={fetchMissions} />
+        </div>
       )}
 
-      <Tabs defaultValue="graph" className="space-y-3">
-        <TabsList>
-          <TabsTrigger value="graph" className="gap-1.5">
-            <Workflow className="h-3.5 w-3.5" />
-            Graph
-          </TabsTrigger>
-          <TabsTrigger value="timeline" className="gap-1.5">
-            <Clock className="h-3.5 w-3.5" />
-            Timeline
-          </TabsTrigger>
-          <TabsTrigger value="activity" className="gap-1.5">
-            <Activity className="h-3.5 w-3.5" />
-            Activity
-          </TabsTrigger>
-          <TabsTrigger value="templates" className="gap-1.5">
-            <LayoutTemplate className="h-3.5 w-3.5" />
-            Templates
-          </TabsTrigger>
-          <TabsTrigger value="connections" className="gap-1.5">
-            <Settings2 className="h-3.5 w-3.5" />
-            Connections
-          </TabsTrigger>
-        </TabsList>
+      {/* Main content area — full height */}
+      <div className="flex-1 relative overflow-hidden">
+        {activeTab === "graph" && (
+          <>
+            {/* Graph — fills entire area */}
+            <WorkflowGraph ref={graphRef} missions={filteredMissions} onTaskClick={handleNodeClick} />
 
-        <TabsContent value="graph" className="mt-0">
-          <WorkflowGraph ref={graphRef} missions={filteredMissions} onTaskClick={handleNodeClick} />
-        </TabsContent>
+            {/* Floating stats overlay — top-left of graph */}
+            <div className="absolute top-3 left-3 flex items-center gap-1.5 z-10">
+              {[
+                { key: "active", value: stats.active, label: "Active", color: "blue" },
+                { key: "planning", value: stats.planning, label: "Planning", color: "purple" },
+                { key: "completed", value: stats.completed, label: "Done", color: "green" },
+                { key: "failed", value: stats.failed, label: "Failed", color: "red" },
+              ].map(({ key, value, label, color }) => (
+                <div
+                  key={key}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
+                    "bg-[#0d0f14]/90 backdrop-blur-sm border border-white/[0.06]",
+                    "transition-all cursor-default",
+                    value > 0 && color === "blue" && "border-blue-500/30 text-blue-400",
+                    value > 0 && color === "green" && "border-green-500/30 text-green-400",
+                    value > 0 && color === "red" && "border-red-500/30 text-red-400",
+                    value > 0 && color === "purple" && "border-purple-500/30 text-purple-400",
+                    value === 0 && "text-white/30",
+                  )}
+                >
+                  <div className={cn(
+                    "w-1.5 h-1.5 rounded-full",
+                    color === "blue" && (value > 0 ? "bg-blue-500 animate-pulse" : "bg-blue-500/30"),
+                    color === "purple" && (value > 0 ? "bg-purple-500" : "bg-purple-500/30"),
+                    color === "green" && (value > 0 ? "bg-green-500" : "bg-green-500/30"),
+                    color === "red" && (value > 0 ? "bg-red-500" : "bg-red-500/30"),
+                  )} />
+                  <span>{value}</span>
+                  <span className="text-white/30">{label}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
-        <TabsContent value="timeline" className="mt-0">
-          <MissionTimeline missions={filteredMissions} />
-        </TabsContent>
+        {activeTab === "timeline" && (
+          <div className="p-4 h-full overflow-auto">
+            <MissionTimeline missions={filteredMissions} />
+          </div>
+        )}
 
-        <TabsContent value="activity" className="mt-0">
-          <OrchestrationActivity missions={filteredMissions} />
-        </TabsContent>
+        {activeTab === "activity" && (
+          <div className="p-4 h-full overflow-auto">
+            <OrchestrationActivity missions={filteredMissions} />
+          </div>
+        )}
 
-        <TabsContent value="templates" className="mt-0">
-          <TemplateGallery workspaceId={workspaceId!} />
-        </TabsContent>
+        {activeTab === "templates" && (
+          <div className="p-4 h-full overflow-auto">
+            <TemplateGallery workspaceId={workspaceId!} />
+          </div>
+        )}
 
-        <TabsContent value="connections" className="mt-0">
-          <CrewConnections workspaceId={workspaceId!} />
-        </TabsContent>
-      </Tabs>
+        {activeTab === "connections" && (
+          <div className="p-4 h-full overflow-auto">
+            <CrewConnections workspaceId={workspaceId!} />
+          </div>
+        )}
+      </div>
 
-      {/* Task detail sheet */}
       <TaskDetailSheet
         task={selectedTask}
         mission={taskMission}

@@ -1,6 +1,6 @@
 "use client"
 
-import { type EdgeProps, BaseEdge, getBezierPath } from "@xyflow/react"
+import { type EdgeProps, getBezierPath } from "@xyflow/react"
 
 interface AnimatedEdgeData {
   color?: string
@@ -16,7 +16,6 @@ export function AnimatedEdge({
   targetY,
   sourcePosition,
   targetPosition,
-  style = {},
   markerEnd,
   data,
 }: EdgeProps) {
@@ -25,74 +24,83 @@ export function AnimatedEdge({
   const active = edgeData?.active ?? false
 
   const [edgePath] = getBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
+    sourceX, sourceY, sourcePosition,
+    targetX, targetY, targetPosition,
   })
 
-  const filterId = `glow-${id}`
+  const glowId = `glow-${id}`
+  const gradId = `grad-${id}`
 
   return (
     <>
       <defs>
-        <filter id={filterId} x="-40%" y="-40%" width="180%" height="180%">
-          <feGaussianBlur stdDeviation={active ? "4" : "2"} result="blur" />
+        <filter id={glowId} x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation={active ? "3.5" : "1.5"} result="blur" />
           <feMerge>
             <feMergeNode in="blur" />
             <feMergeNode in="SourceGraphic" />
           </feMerge>
         </filter>
-        {active && (
-          <linearGradient id={`grad-${id}`} gradientUnits="userSpaceOnUse"
-            x1={sourceX} y1={sourceY} x2={targetX} y2={targetY}>
-            <stop offset="0%" stopColor={color} stopOpacity="0.4" />
-            <stop offset="50%" stopColor={color} stopOpacity="1" />
-            <stop offset="100%" stopColor={color} stopOpacity="0.4" />
-          </linearGradient>
-        )}
+        <linearGradient id={gradId} gradientUnits="userSpaceOnUse"
+          x1={sourceX} y1={sourceY} x2={targetX} y2={targetY}>
+          <stop offset="0%" stopColor={color} stopOpacity={active ? 0.6 : 0.2} />
+          <stop offset="50%" stopColor={color} stopOpacity={active ? 1 : 0.4} />
+          <stop offset="100%" stopColor={color} stopOpacity={active ? 0.6 : 0.2} />
+        </linearGradient>
       </defs>
 
-      {/* Glow layer underneath */}
+      {/* Broad glow underneath for active edges */}
       {active && (
         <path
           d={edgePath}
           fill="none"
           stroke={color}
-          strokeWidth={6}
-          strokeOpacity={0.15}
-          filter={`url(#${filterId})`}
+          strokeWidth={8}
+          strokeOpacity={0.08}
+          filter={`url(#${glowId})`}
         />
       )}
 
-      {/* Main edge line */}
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        markerEnd={markerEnd}
+      {/* Main dashed line — always visible, Bleu-style flowing dash animation */}
+      <path
+        d={edgePath}
+        fill="none"
+        stroke={`url(#${gradId})`}
+        strokeWidth={active ? 2.5 : 1.8}
+        strokeDasharray={active ? "8 6" : "6 4"}
+        strokeLinecap="round"
+        markerEnd={markerEnd as string}
+        filter={active ? `url(#${glowId})` : undefined}
         style={{
-          ...style,
-          stroke: active ? color : color,
-          strokeWidth: active ? 2.5 : 1.5,
-          strokeDasharray: active ? "none" : "6 4",
-          strokeOpacity: active ? 1 : 0.4,
-          filter: active ? `url(#${filterId})` : undefined,
+          animation: active
+            ? "edgeFlow 0.8s linear infinite"
+            : "edgeFlowSlow 3s linear infinite",
         }}
       />
 
-      {/* Animated particle */}
+      {/* Moving highlight dot on active edges */}
       {active && (
         <>
-          <circle r="5" fill={color} filter={`url(#${filterId})`} opacity="0.8">
-            <animateMotion dur="2s" repeatCount="indefinite" path={edgePath} />
+          <circle r="4" fill={color} opacity="0.7" filter={`url(#${glowId})`}>
+            <animateMotion dur="1.8s" repeatCount="indefinite" path={edgePath} />
           </circle>
-          <circle r="2.5" fill="white" opacity="0.9">
-            <animateMotion dur="2s" repeatCount="indefinite" path={edgePath} />
+          <circle r="2" fill="white" opacity="0.9">
+            <animateMotion dur="1.8s" repeatCount="indefinite" path={edgePath} />
           </circle>
         </>
       )}
+
+      {/* CSS keyframes injected once via style tag */}
+      <style>{`
+        @keyframes edgeFlow {
+          from { stroke-dashoffset: 28; }
+          to { stroke-dashoffset: 0; }
+        }
+        @keyframes edgeFlowSlow {
+          from { stroke-dashoffset: 20; }
+          to { stroke-dashoffset: 0; }
+        }
+      `}</style>
     </>
   )
 }
