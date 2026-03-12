@@ -23,6 +23,7 @@ interface TaskDetailSheetProps {
   task: MissionTask | null
   mission: Mission | null
   allTasks: MissionTask[]
+  workspaceId: string
   onClose: () => void
   onTaskChanged: () => void
 }
@@ -60,7 +61,7 @@ function formatDuration(ms: number | null): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-export function TaskDetailSheet({ task, mission, allTasks, onClose, onTaskChanged }: TaskDetailSheetProps) {
+export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose, onTaskChanged }: TaskDetailSheetProps) {
   const [loading, setLoading] = useState<string | null>(null)
 
   const deps = (() => {
@@ -83,7 +84,7 @@ export function TaskDetailSheet({ task, mission, allTasks, onClose, onTaskChange
     setLoading("retry")
     try {
       const res = await fetch(
-        `/api/v1/crews/${mission.crew_id}/missions/${mission.id}/tasks/${task.id}`,
+        `/api/v1/crews/${mission.crew_id}/missions/${mission.id}/tasks/${task.id}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -102,14 +103,14 @@ export function TaskDetailSheet({ task, mission, allTasks, onClose, onTaskChange
     } finally {
       setLoading(null)
     }
-  }, [task, mission, onTaskChanged])
+  }, [task, mission, workspaceId, onTaskChanged])
 
   const handleSkip = useCallback(async () => {
     if (!task || !mission) return
     setLoading("skip")
     try {
       const res = await fetch(
-        `/api/v1/crews/${mission.crew_id}/missions/${mission.id}/tasks/${task.id}`,
+        `/api/v1/crews/${mission.crew_id}/missions/${mission.id}/tasks/${task.id}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -128,7 +129,7 @@ export function TaskDetailSheet({ task, mission, allTasks, onClose, onTaskChange
     } finally {
       setLoading(null)
     }
-  }, [task, mission, onTaskChanged])
+  }, [task, mission, workspaceId, onTaskChanged])
 
   const style = task ? (statusStyles[task.status] || statusStyles.PENDING) : statusStyles.PENDING
 

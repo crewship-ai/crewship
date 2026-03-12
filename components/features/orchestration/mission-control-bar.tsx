@@ -14,6 +14,7 @@ import type { Mission } from "@/lib/types/mission"
 
 interface MissionControlBarProps {
   mission: Mission
+  workspaceId: string
   onMissionChanged: () => void
 }
 
@@ -45,7 +46,7 @@ function LiveDuration({ startedAt }: { startedAt: string }) {
   return <span className="font-mono tabular-nums">{elapsed}</span>
 }
 
-export function MissionControlBar({ mission, onMissionChanged }: MissionControlBarProps) {
+export function MissionControlBar({ mission, workspaceId, onMissionChanged }: MissionControlBarProps) {
   const [loading, setLoading] = useState<string | null>(null)
   const tasks = mission.tasks || []
   const completed = tasks.filter((t) => t.status === "COMPLETED").length
@@ -67,14 +68,15 @@ export function MissionControlBar({ mission, onMissionChanged }: MissionControlB
   const handleAction = useCallback(async (action: "start" | "cancel" | "complete") => {
     setLoading(action)
     try {
+      const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
       let res: Response
       if (action === "start") {
-        res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/start`, {
+        res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/start${qs}`, {
           method: "POST",
         })
       } else {
         const newStatus = action === "cancel" ? "CANCELLED" : "COMPLETED"
-        res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}`, {
+        res = await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}${qs}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: newStatus }),
@@ -92,7 +94,7 @@ export function MissionControlBar({ mission, onMissionChanged }: MissionControlB
     } finally {
       setLoading(null)
     }
-  }, [mission.id, mission.crew_id, onMissionChanged])
+  }, [mission.id, mission.crew_id, workspaceId, onMissionChanged])
 
   return (
     <div className="rounded-xl border border-white/[0.06] bg-[#0d0f14] p-4">

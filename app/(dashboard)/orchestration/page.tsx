@@ -171,7 +171,7 @@ export default function OrchestrationPage() {
       {/* Mission control bar when selected */}
       {selectedMission && (
         <div className="shrink-0">
-          <MissionControlBar mission={selectedMission} onMissionChanged={fetchMissions} />
+          <MissionControlBar mission={selectedMission} workspaceId={workspaceId!} onMissionChanged={fetchMissions} />
         </div>
       )}
 
@@ -247,6 +247,7 @@ export default function OrchestrationPage() {
         task={selectedTask}
         mission={taskMission}
         allTasks={taskMission?.tasks || []}
+        workspaceId={workspaceId!}
         onClose={() => setSelectedTask(null)}
         onTaskChanged={fetchMissions}
       />
