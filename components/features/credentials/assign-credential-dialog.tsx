@@ -126,11 +126,11 @@ export function AssignCredentialDialog({
             <div className="space-y-2">
               <Label htmlFor="credential">Credential</Label>
               {loadingCreds ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2 text-body text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading...
                 </div>
               ) : credentials.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-body text-muted-foreground">
                   No credentials available. Create one in the Credentials page first.
                 </p>
               ) : (
@@ -158,7 +158,7 @@ export function AssignCredentialDialog({
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="text-xs h-6 px-2"
+                    className="text-label h-6 px-2"
                     onClick={() => setEnvVarName(preset)}
                   >
                     {preset}
@@ -173,7 +173,7 @@ export function AssignCredentialDialog({
                 pattern="^[A-Z_][A-Z0-9_]*$"
                 required
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-label text-muted-foreground">
                 The credential value will be available as this env var inside the agent container.
               </p>
             </div>
@@ -188,13 +188,13 @@ export function AssignCredentialDialog({
                 value={priority}
                 onChange={(e) => setPriority(e.target.value)}
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-label text-muted-foreground">
                 Lower number = higher priority. Used for credential failover (0 = primary).
               </p>
             </div>
 
             {error && (
-              <p className="text-sm text-destructive">{error}</p>
+              <p className="text-body text-destructive">{error}</p>
             )}
           </div>
 

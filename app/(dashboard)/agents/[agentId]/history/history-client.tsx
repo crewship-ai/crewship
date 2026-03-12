@@ -102,7 +102,7 @@ export function HistoryPageClient() {
       <div className="p-4 md:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
-          <p className="text-sm">{error}</p>
+          <p className="text-body">{error}</p>
         </div>
       </div>
     )
@@ -113,8 +113,8 @@ export function HistoryPageClient() {
       <div className="p-4 md:p-6">
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">No history yet</p>
-          <p className="text-xs text-muted-foreground mt-1">Configuration changes will appear here as a timeline.</p>
+          <p className="text-body font-medium text-muted-foreground">No history yet</p>
+          <p className="text-label text-muted-foreground mt-1">Configuration changes will appear here as a timeline.</p>
         </div>
       </div>
     )
@@ -122,7 +122,7 @@ export function HistoryPageClient() {
 
   return (
     <div className="p-4 md:p-6 max-w-4xl space-y-0">
-      <p className="text-sm text-muted-foreground mb-6">Configuration change history</p>
+      <p className="text-body text-muted-foreground mb-6">Configuration change history</p>
 
       {/* Timeline */}
       <div className="relative">
@@ -157,12 +157,12 @@ export function HistoryPageClient() {
                 <div className="px-5 py-3 border-b flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     {isFirst && (
-                      <Badge className="bg-primary/10 text-primary text-[10px] font-semibold">CURRENT</Badge>
+                      <Badge className="bg-primary/10 text-primary text-micro font-semibold">CURRENT</Badge>
                     )}
-                    <Badge variant="outline" className={`${config.className} text-[10px]`}>{config.label}</Badge>
-                    <span className="text-sm font-medium">{formatEventTitle(event)}</span>
+                    <Badge variant="outline" className={`${config.className} text-micro`}>{config.label}</Badge>
+                    <span className="text-body font-medium">{formatEventTitle(event)}</span>
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-3 text-label text-muted-foreground">
                     {event.user_name && <span>{event.user_name}</span>}
                     <span>{formatDate(event.created_at)}</span>
                   </div>
@@ -171,7 +171,7 @@ export function HistoryPageClient() {
                 {/* Diff view */}
                 {event.changes && Object.keys(event.changes).length > 0 && (
                   <div className="px-5 py-3 space-y-2">
-                    <div className="text-xs text-muted-foreground font-medium">Changes:</div>
+                    <div className="text-label text-muted-foreground font-medium">Changes:</div>
                     {Object.entries(event.changes).map(([key, change]) => (
                       <div key={key} className="font-mono text-xs space-y-1">
                         {change.old !== undefined && (
@@ -194,7 +194,7 @@ export function HistoryPageClient() {
         })}
       </div>
 
-      <p className="text-xs text-muted-foreground pt-4">{events.length} event{events.length !== 1 ? "s" : ""} total</p>
+      <p className="text-label text-muted-foreground pt-4">{events.length} event{events.length !== 1 ? "s" : ""} total</p>
     </div>
   )
 }

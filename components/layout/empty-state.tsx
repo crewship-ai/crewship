@@ -14,8 +14,8 @@ export function EmptyState({ icon: Icon, title, description, children }: EmptySt
         <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted mb-4">
           <Icon className="h-6 w-6 text-muted-foreground" />
         </div>
-        <h3 className="text-sm font-semibold">{title}</h3>
-        <p className="mt-1 text-sm text-muted-foreground max-w-sm">{description}</p>
+        <h3 className="text-body font-semibold">{title}</h3>
+        <p className="mt-1 text-body text-muted-foreground max-w-sm">{description}</p>
         {children}
       </CardContent>
     </Card>

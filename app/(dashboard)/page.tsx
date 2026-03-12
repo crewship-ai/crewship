@@ -22,6 +22,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useTick } from "@/hooks/use-tick"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
+import { getCrewDotColor } from "@/lib/crew-icon"
 
 interface AgentCrew {
   name: string
@@ -299,7 +300,7 @@ export default function DashboardPage() {
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base font-semibold">Agents</CardTitle>
+            <CardTitle className="text-heading font-semibold">Agents</CardTitle>
             <Select value={activeFilter} onValueChange={setActiveFilter}>
               <SelectTrigger size="sm" className="w-[120px]">
                 <SelectValue />
@@ -362,9 +363,9 @@ export default function DashboardPage() {
                     <TableRow key={agent.id} className="transition-colors duration-500">
                       <TableCell>
                         <Link href={`/agents/${agent.id}`} className="hover:underline">
-                          <div className="font-medium text-sm">{agent.name}</div>
+                          <div className="font-medium text-body">{agent.name}</div>
                           {agent.role_title && (
-                            <div className="text-xs text-muted-foreground">{agent.role_title}</div>
+                            <div className="text-label text-muted-foreground">{agent.role_title}</div>
                           )}
                         </Link>
                       </TableCell>
@@ -373,12 +374,12 @@ export default function DashboardPage() {
                           <div className="flex items-center gap-1.5">
                             <span
                               className="h-2 w-2 rounded-full shrink-0"
-                              style={{ backgroundColor: agent.crew.color ?? "#6b7280" }}
+                              style={{ backgroundColor: getCrewDotColor(agent.crew.color) }}
                             />
-                            <span className="text-sm">{agent.crew.name}</span>
+                            <span className="text-body">{agent.crew.name}</span>
                           </div>
                         ) : (
-                          <span className="text-sm text-muted-foreground">&mdash;</span>
+                          <span className="text-body text-muted-foreground">&mdash;</span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -396,16 +397,16 @@ export default function DashboardPage() {
                         {lastRun ? (
                           <div className="flex items-center gap-1.5">
                             {RunIcon && <RunIcon className="h-3.5 w-3.5 text-muted-foreground" />}
-                            <span className="text-sm text-muted-foreground">
+                            <span className="text-body text-muted-foreground">
                               {runCfg!.label} {formatTimeAgo(lastRun.started_at ?? lastRun.created_at)}
                             </span>
                           </div>
                         ) : (
-                          <span className="text-sm text-muted-foreground">No activity</span>
+                          <span className="text-body text-muted-foreground">No activity</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <span className="text-sm text-muted-foreground">{agent._count.chats}</span>
+                        <span className="text-body text-muted-foreground">{agent._count.chats}</span>
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>

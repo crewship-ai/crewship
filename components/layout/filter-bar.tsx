@@ -1,6 +1,6 @@
 "use client"
 
-import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 
 interface FilterBarProps {
   filters: string[]
@@ -12,16 +12,20 @@ export function FilterBar({ filters, active, onFilter }: FilterBarProps) {
   const activeFilter = active ?? filters[0]
 
   return (
-    <div className="flex items-center gap-2 overflow-x-auto pb-1 -mb-1 scrollbar-none">
+    <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-card p-1">
       {filters.map((filter) => (
-        <Badge
+        <button
           key={filter}
-          variant={filter === activeFilter ? "secondary" : "outline"}
-          className="cursor-pointer shrink-0"
           onClick={() => onFilter?.(filter)}
+          className={cn(
+            "rounded-md px-3 py-1.5 text-label font-medium transition-all",
+            filter === activeFilter
+              ? "bg-accent text-foreground shadow-sm border border-border"
+              : "text-muted-foreground hover:text-foreground border border-transparent"
+          )}
         >
           {filter}
-        </Badge>
+        </button>
       ))}
     </div>
   )

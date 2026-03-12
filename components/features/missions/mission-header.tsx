@@ -29,15 +29,15 @@ export function MissionHeader({ mission }: MissionHeaderProps) {
     <div className="space-y-2">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-xl font-bold">{mission.title}</h1>
+          <h1 className="text-title font-bold">{mission.title}</h1>
           {mission.description && (
-            <p className="text-sm text-muted-foreground">{mission.description}</p>
+            <p className="text-body text-muted-foreground">{mission.description}</p>
           )}
         </div>
         <MissionStatusBadge status={mission.status} />
       </div>
 
-      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+      <div className="flex items-center gap-4 text-label text-muted-foreground">
         <span className="flex items-center gap-1">
           <User className="h-3 w-3" />
           Lead: @{mission.lead_agent_slug}

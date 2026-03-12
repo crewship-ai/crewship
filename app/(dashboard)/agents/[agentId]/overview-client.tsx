@@ -13,22 +13,10 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { getCrewDotColor } from "@/lib/crew-icon"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { CLI_ADAPTERS } from "@/lib/cli-adapters"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
-const AGENT_ROLE_COLORS: Record<string, string> = {
-  AGENT: "text-blue-600 border-blue-300 bg-blue-50 dark:bg-blue-950/30",
-  LEAD: "text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/30",
-  COORDINATOR: "text-purple-600 border-purple-300 bg-purple-50 dark:bg-purple-950/30",
-}
-
-const STATUS_STYLES: Record<string, { class: string; dot: string; pulse: boolean }> = {
-  IDLE: { class: "bg-muted text-muted-foreground", dot: "bg-gray-400", pulse: false },
-  RUNNING: { class: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400", dot: "bg-emerald-500", pulse: true },
-  ERROR: { class: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400", dot: "bg-red-500", pulse: false },
-  STOPPED: { class: "bg-neutral-100 text-neutral-600 dark:bg-neutral-900 dark:text-neutral-400", dot: "bg-neutral-400", pulse: false },
-}
 
 function formatTimeout(seconds: number): string {
   if (seconds >= 3600) return `${Math.round(seconds / 3600)}h`
@@ -128,46 +116,18 @@ export function AgentOverviewPageClient() {
       <div className="p-4 sm:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
-          <p className="text-sm">{error ?? "Agent not found"}</p>
+          <p className="text-body">{error ?? "Agent not found"}</p>
         </div>
       </div>
     )
   }
 
-  const statusStyle = STATUS_STYLES[agent.status] ?? STATUS_STYLES.IDLE
   const adapterCfg = CLI_ADAPTERS[agent.cli_adapter]
   const totalRuns = totalRunCount
   const activeChats = recentChats.filter((c) => c.status === "ACTIVE").length
 
   return (
     <div className="p-4 sm:p-6 space-y-5">
-      {/* Hero */}
-      <div className="flex items-start gap-4">
-        <img
-          src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
-          alt={agent.name}
-          className="h-14 w-14 rounded-2xl shrink-0"
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2.5 flex-wrap">
-            <h1 className="text-xl font-semibold">{agent.name}</h1>
-            <Badge variant="secondary" className={`${statusStyle.class} text-xs gap-1.5`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${statusStyle.dot} ${statusStyle.pulse ? "animate-pulse" : ""}`} />
-              {agent.status}
-            </Badge>
-            <Badge variant="outline" className={`${AGENT_ROLE_COLORS[agent.agent_role] ?? ""} text-xs`}>
-              {agent.agent_role}
-            </Badge>
-          </div>
-          {agent.role_title && (
-            <p className="text-sm text-muted-foreground mt-0.5">{agent.role_title}</p>
-          )}
-          {agent.description && (
-            <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">{agent.description}</p>
-          )}
-        </div>
-      </div>
-
       {/* Stats Row — 5 columns */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <Link href={`/agents/${agentId}/runs`} className="group">
@@ -175,10 +135,10 @@ export function AgentOverviewPageClient() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
                 <Zap className="h-3.5 w-3.5" />
-                <span className="text-[10px] uppercase tracking-wider font-semibold">Runs</span>
+                <span className="text-micro uppercase tracking-wider font-semibold">Runs</span>
               </div>
-              <div className="text-2xl font-bold">{totalRuns}</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">
+              <div className="text-title font-bold">{totalRuns}</div>
+              <div className="text-micro text-muted-foreground mt-0.5">
                 {totalCompletedRunCount} completed
               </div>
             </CardContent>
@@ -189,10 +149,10 @@ export function AgentOverviewPageClient() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
                 <MessagesSquare className="h-3.5 w-3.5" />
-                <span className="text-[10px] uppercase tracking-wider font-semibold">Sessions</span>
+                <span className="text-micro uppercase tracking-wider font-semibold">Sessions</span>
               </div>
-              <div className="text-2xl font-bold">{agent._count?.chats ?? 0}</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">
+              <div className="text-title font-bold">{agent._count?.chats ?? 0}</div>
+              <div className="text-micro text-muted-foreground mt-0.5">
                 {activeChats > 0 ? `${activeChats} active` : "none active"}
               </div>
             </CardContent>
@@ -203,10 +163,10 @@ export function AgentOverviewPageClient() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
                 <Puzzle className="h-3.5 w-3.5" />
-                <span className="text-[10px] uppercase tracking-wider font-semibold">Skills</span>
+                <span className="text-micro uppercase tracking-wider font-semibold">Skills</span>
               </div>
-              <div className="text-2xl font-bold">{agent._count?.skills ?? 0}</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">
+              <div className="text-title font-bold">{agent._count?.skills ?? 0}</div>
+              <div className="text-micro text-muted-foreground mt-0.5">
                 {(agent._count?.skills ?? 0) > 0 ? "assigned" : "none assigned"}
               </div>
             </CardContent>
@@ -217,10 +177,10 @@ export function AgentOverviewPageClient() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
                 <KeyRound className="h-3.5 w-3.5" />
-                <span className="text-[10px] uppercase tracking-wider font-semibold">Credentials</span>
+                <span className="text-micro uppercase tracking-wider font-semibold">Credentials</span>
               </div>
-              <div className="text-2xl font-bold">{agent._count?.credentials ?? 0}</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">
+              <div className="text-title font-bold">{agent._count?.credentials ?? 0}</div>
+              <div className="text-micro text-muted-foreground mt-0.5">
                 {(agent._count?.credentials ?? 0) > 0 ? `${agent._count.credentials} active` : "none"}
               </div>
             </CardContent>
@@ -231,10 +191,10 @@ export function AgentOverviewPageClient() {
             <CardContent className="p-4">
               <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
                 <FileText className="h-3.5 w-3.5" />
-                <span className="text-[10px] uppercase tracking-wider font-semibold">Files</span>
+                <span className="text-micro uppercase tracking-wider font-semibold">Files</span>
               </div>
-              <div className="text-2xl font-bold">&mdash;</div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">container off</div>
+              <div className="text-title font-bold">&mdash;</div>
+              <div className="text-micro text-muted-foreground mt-0.5">container off</div>
             </CardContent>
           </Card>
         </Link>
@@ -249,9 +209,9 @@ export function AgentOverviewPageClient() {
             <CardContent className="p-4 space-y-3">
               <div className="flex items-center gap-2 mb-1">
                 <Terminal className="h-4 w-4 text-muted-foreground" />
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Runtime</span>
+                <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">Runtime</span>
               </div>
-              <div className="space-y-2.5 text-sm">
+              <div className="space-y-2.5 text-body">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Adapter</span>
                   <span className="flex items-center gap-1.5 font-medium">
@@ -267,7 +227,7 @@ export function AgentOverviewPageClient() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Model</span>
-                  <code className="text-xs bg-muted px-2 py-0.5 rounded">
+                  <code className="text-label bg-muted px-2 py-0.5 rounded">
                     {agent.llm_model || adapterCfg?.defaultModel || "default"}
                   </code>
                 </div>
@@ -291,12 +251,12 @@ export function AgentOverviewPageClient() {
             <CardContent className="p-4 space-y-3">
               <div className="flex items-center gap-2 mb-1">
                 <Shield className="h-4 w-4 text-muted-foreground" />
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Identity</span>
+                <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">Identity</span>
               </div>
-              <div className="space-y-2.5 text-sm">
+              <div className="space-y-2.5 text-body">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Slug</span>
-                  <code className="text-xs bg-muted px-2 py-0.5 rounded">{agent.slug}</code>
+                  <code className="text-label bg-muted px-2 py-0.5 rounded">{agent.slug}</code>
                 </div>
                 {agent.crew && (
                   <div className="flex items-center justify-between">
@@ -304,7 +264,7 @@ export function AgentOverviewPageClient() {
                     <Link href={`/crews/${agent.crew_id}`} className="flex items-center gap-1.5 hover:underline">
                       <span
                         className="h-2 w-2 rounded-full"
-                        style={{ backgroundColor: agent.crew.color ?? "#6b7280" }}
+                        style={{ backgroundColor: getCrewDotColor(agent.crew.color) }}
                       />
                       {agent.crew.name}
                     </Link>
@@ -324,7 +284,7 @@ export function AgentOverviewPageClient() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Created</span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-label text-muted-foreground">
                     {new Date(agent.created_at).toLocaleDateString()}
                   </span>
                 </div>
@@ -338,7 +298,7 @@ export function AgentOverviewPageClient() {
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-center gap-2 mb-1">
                   <ScrollText className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">System Prompt</span>
+                  <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">System Prompt</span>
                 </div>
                 <div className="bg-muted/50 rounded-lg p-3 font-mono text-xs leading-relaxed max-h-64 overflow-y-auto whitespace-pre-wrap">
                   {agent.system_prompt}
@@ -356,14 +316,14 @@ export function AgentOverviewPageClient() {
               <div className="flex items-center justify-between px-4 py-3 border-b">
                 <div className="flex items-center gap-2">
                   <MessagesSquare className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Recent Sessions</span>
+                  <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">Recent Sessions</span>
                 </div>
-                <Link href={`/agents/${agentId}/chat`} className="text-[10px] text-primary font-medium hover:underline">
+                <Link href={`/agents/${agentId}/chat`} className="text-micro text-primary font-medium hover:underline">
                   View all
                 </Link>
               </div>
               {recentChats.length === 0 ? (
-                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                <div className="px-4 py-6 text-center text-body text-muted-foreground">
                   No sessions yet. Start a chat to begin.
                 </div>
               ) : (
@@ -375,20 +335,20 @@ export function AgentOverviewPageClient() {
                       className="flex items-center justify-between px-4 py-2.5 hover:bg-muted/50 transition-colors"
                     >
                       <div className="min-w-0">
-                        <div className="text-sm font-medium truncate">
+                        <div className="text-body font-medium truncate">
                           {chat.title || "Untitled session"}
                         </div>
-                        <div className="text-[11px] text-muted-foreground">
+                        <div className="text-micro text-muted-foreground">
                           {chat.message_count} messages &middot; {timeAgo(chat.created_at)}
                         </div>
                       </div>
                       {chat.status === "ACTIVE" ? (
-                        <Badge variant="secondary" className="text-[10px] bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 gap-1 shrink-0">
+                        <Badge variant="secondary" className="text-micro bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 gap-1 shrink-0">
                           <span className="h-1 w-1 rounded-full bg-emerald-500" />
                           active
                         </Badge>
                       ) : (
-                        <Badge variant="secondary" className="text-[10px] shrink-0">done</Badge>
+                        <Badge variant="secondary" className="text-micro shrink-0">done</Badge>
                       )}
                     </Link>
                   ))}
@@ -403,14 +363,14 @@ export function AgentOverviewPageClient() {
               <div className="flex items-center justify-between px-4 py-3 border-b">
                 <div className="flex items-center gap-2">
                   <Zap className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Recent Runs</span>
+                  <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">Recent Runs</span>
                 </div>
-                <Link href={`/agents/${agentId}/runs`} className="text-[10px] text-primary font-medium hover:underline">
+                <Link href={`/agents/${agentId}/runs`} className="text-micro text-primary font-medium hover:underline">
                   View all
                 </Link>
               </div>
               {recentRuns.length === 0 ? (
-                <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                <div className="px-4 py-6 text-center text-body text-muted-foreground">
                   No runs yet.
                 </div>
               ) : (
@@ -438,15 +398,15 @@ export function AgentOverviewPageClient() {
                             {isError ? <X className="h-3 w-3" /> : <Check className="h-3 w-3" />}
                           </span>
                           <div className="min-w-0">
-                            <div className="text-sm truncate">Run #{recentRuns.length - idx}</div>
-                            <div className="text-[11px] text-muted-foreground">
+                            <div className="text-body truncate">Run #{recentRuns.length - idx}</div>
+                            <div className="text-micro text-muted-foreground">
                               {timeAgo(run.started_at || run.created_at)}
                               {durationMs ? ` \u00B7 ${formatDuration(durationMs)}` : ""}
                               {cost ? ` \u00B7 $${cost.toFixed(2)}` : ""}
                             </div>
                           </div>
                         </div>
-                        <span className={`text-[10px] font-medium shrink-0 ${
+                        <span className={`text-micro font-medium shrink-0 ${
                           isError ? "text-red-600" : isSuccess ? "text-emerald-600" : "text-muted-foreground"
                         }`}>
                           {run.status.toLowerCase()}

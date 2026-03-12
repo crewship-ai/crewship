@@ -189,7 +189,7 @@ export default function NewAgentPage() {
         {/* General */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">General</CardTitle>
+            <CardTitle className="text-default">General</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -273,7 +273,7 @@ export default function NewAgentPage() {
         {/* Runtime */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Runtime</CardTitle>
+            <CardTitle className="text-default">Runtime</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
@@ -294,8 +294,8 @@ export default function NewAgentPage() {
                     >
                       <Icon className={`h-5 w-5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
                       <div className="min-w-0">
-                        <div className="text-sm font-medium">{cfg.label}</div>
-                        <div className="text-[10px] text-muted-foreground">{cfg.description}</div>
+                        <div className="text-body font-medium">{cfg.label}</div>
+                        <div className="text-micro text-muted-foreground">{cfg.description}</div>
                       </div>
                     </button>
                   )
@@ -360,7 +360,7 @@ export default function NewAgentPage() {
         {/* System Prompt */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">System Prompt</CardTitle>
+            <CardTitle className="text-default">System Prompt</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
@@ -378,7 +378,7 @@ export default function NewAgentPage() {
 
         {/* Error message */}
         {error && (
-          <p className="text-sm text-destructive">{error}</p>
+          <p className="text-body text-destructive">{error}</p>
         )}
 
         {/* Actions */}

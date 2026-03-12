@@ -424,7 +424,7 @@ export default function SettingsPage() {
                         <TableCell className="text-sm font-medium">{member.user.full_name ?? "—"}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">{member.user.email}</TableCell>
                         <TableCell>
-                          <Badge variant="secondary" className={cn("text-[10px]", roleCls[member.role] ?? "")}>
+                          <Badge variant="secondary" className={cn("text-micro", roleCls[member.role] ?? "")}>
                             {member.role}
                           </Badge>
                         </TableCell>
@@ -455,7 +455,7 @@ export default function SettingsPage() {
                 <TableRow>
                   <TableHead className="w-24">Role</TableHead>
                   {permHeaders.map((h) => (
-                    <TableHead key={h} className="text-center text-[10px]">{h}</TableHead>
+                    <TableHead key={h} className="text-center text-micro">{h}</TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
@@ -472,7 +472,7 @@ export default function SettingsPage() {
                         ) : v === false ? (
                           <X className="h-3.5 w-3.5 text-muted-foreground/30 mx-auto" />
                         ) : (
-                          <span className="text-[10px] text-muted-foreground">{v}</span>
+                          <span className="text-micro text-muted-foreground">{v}</span>
                         )}
                       </TableCell>
                     ))}
@@ -610,7 +610,7 @@ export default function SettingsPage() {
               <div className="w-5 h-5 rounded bg-primary flex items-center justify-center text-primary-foreground text-[8px] font-bold">
                 {org.name[0]?.toUpperCase()}
               </div>
-              <span className="text-[10px] text-muted-foreground">{org.name}</span>
+              <span className="text-micro text-muted-foreground">{org.name}</span>
             </div>
           )}
         </div>
@@ -620,7 +620,7 @@ export default function SettingsPage() {
           {tabs.map((t, i) => {
             if (t.type === "section") {
               return (
-                <div key={i} className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider px-3 pt-3 pb-1">
+                <div key={i} className="text-micro font-semibold text-muted-foreground uppercase tracking-wider px-3 pt-3 pb-1">
                   {t.label}
                 </div>
               )

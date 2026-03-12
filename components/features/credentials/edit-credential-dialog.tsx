@@ -247,13 +247,13 @@ export function EditCredentialDialog({
                   size="sm"
                   onClick={handleTest}
                   disabled={testing}
-                  className="h-7 text-xs"
+                  className="h-7 text-label"
                 >
                   {testing ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <FlaskConical className="mr-1.5 h-3 w-3" />}
                   Test Key
                 </Button>
                 {testResult && (
-                  <span className={`flex items-center gap-1 text-xs ${testResult.valid ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
+                  <span className={`flex items-center gap-1 text-label ${testResult.valid ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
                     {testResult.valid ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
                     {testResult.valid ? "Valid" : testResult.error || "Invalid"}
                   </span>
@@ -279,7 +279,7 @@ export function EditCredentialDialog({
             <div className="space-y-2">
               <Label>Crews</Label>
               {teamsLoading ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2 text-body text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Loading crews...
                 </div>
@@ -353,7 +353,7 @@ export function EditCredentialDialog({
           )}
 
           {error && (
-            <p className="text-sm text-destructive">{error}</p>
+            <p className="text-body text-destructive">{error}</p>
           )}
 
           <DialogFooter>

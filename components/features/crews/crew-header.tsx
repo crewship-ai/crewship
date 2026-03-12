@@ -2,12 +2,13 @@
 
 import { Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { getCrewIconUrl } from "@/lib/crew-icon"
+import { CrewIcon } from "@/components/ui/crew-icon"
 
 interface CrewHeaderProps {
   name: string
   slug: string
   icon: string | null
+  color?: string | null
   description: string | null
   editing: boolean
   canEdit: boolean
@@ -18,6 +19,7 @@ export function CrewHeader({
   name,
   slug,
   icon,
+  color,
   description,
   editing,
   canEdit,
@@ -26,14 +28,10 @@ export function CrewHeader({
   return (
     <div>
       <div className="flex items-center gap-4">
-        <img
-          src={getCrewIconUrl(icon || name)}
-          alt={name}
-          className="h-12 w-12 rounded-lg shrink-0"
-        />
+        <CrewIcon icon={icon || "briefcase"} color={color} size="lg" />
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-semibold truncate">{name}</h1>
-          <p className="text-sm text-muted-foreground font-mono">{slug}</p>
+          <h1 className="text-title font-semibold truncate">{name}</h1>
+          <p className="text-body text-muted-foreground font-mono">{slug}</p>
         </div>
         {canEdit && (
           <Button
@@ -49,7 +47,7 @@ export function CrewHeader({
         )}
       </div>
       {description && !editing && (
-        <p className="text-sm text-muted-foreground mt-2">{description}</p>
+        <p className="text-body text-muted-foreground mt-2">{description}</p>
       )}
     </div>
   )

@@ -19,7 +19,7 @@ export function StatusIndicator({ content }: StatusIndicatorProps) {
 
   return (
     <div
-      className="flex items-center gap-2 py-1 text-xs text-muted-foreground animate-in fade-in duration-300"
+      className="flex items-center gap-2 py-1 text-label text-muted-foreground animate-in fade-in duration-300"
       role="status"
       aria-live="polite"
     >

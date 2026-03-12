@@ -27,6 +27,7 @@ import {
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
+import { getCrewDotColor } from "@/lib/crew-icon"
 
 interface RunAgent {
   id: string
@@ -137,7 +138,7 @@ export default function RunsPage() {
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       <PageHeader title="Runs" description="Cross-agent run activity across your workspace" />
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-body text-destructive">{error}</p>}
 
       {/* Stats */}
       {data && (
@@ -145,7 +146,7 @@ export default function RunsPage() {
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
-                <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Running Now</div>
+                <div className="text-label text-muted-foreground uppercase tracking-wide font-medium">Running Now</div>
                 {data.stats.running > 0 && (
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
@@ -153,25 +154,25 @@ export default function RunsPage() {
                   </span>
                 )}
               </div>
-              <div className="text-2xl font-bold mt-1 text-emerald-600"><AnimatedNumber value={data.stats.running} /></div>
+              <div className="text-title font-bold mt-1 text-emerald-600"><AnimatedNumber value={data.stats.running} /></div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
-              <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Today&apos;s Runs</div>
-              <div className="text-2xl font-bold mt-1"><AnimatedNumber value={data.stats.today} /></div>
+              <div className="text-label text-muted-foreground uppercase tracking-wide font-medium">Today&apos;s Runs</div>
+              <div className="text-title font-bold mt-1"><AnimatedNumber value={data.stats.today} /></div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
-              <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Failed</div>
-              <div className="text-2xl font-bold mt-1 text-destructive"><AnimatedNumber value={data.stats.failed} /></div>
+              <div className="text-label text-muted-foreground uppercase tracking-wide font-medium">Failed</div>
+              <div className="text-title font-bold mt-1 text-destructive"><AnimatedNumber value={data.stats.failed} /></div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
-              <div className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Total</div>
-              <div className="text-2xl font-bold mt-1"><AnimatedNumber value={data.pagination.total} /></div>
+              <div className="text-label text-muted-foreground uppercase tracking-wide font-medium">Total</div>
+              <div className="text-title font-bold mt-1"><AnimatedNumber value={data.pagination.total} /></div>
             </CardContent>
           </Card>
         </div>
@@ -246,26 +247,26 @@ export default function RunsPage() {
                       <TableCell className="font-mono text-xs text-muted-foreground">
                         #{run.id.slice(0, 8)}
                       </TableCell>
-                      <TableCell className="text-sm font-medium">
+                      <TableCell className="text-body font-medium">
                         <Link href={`/agents/${run.agent_id}`} className="hover:underline">
                           {run.agent.name}
                         </Link>
                       </TableCell>
                       <TableCell>
                         {run.agent.crew ? (
-                          <span className="flex items-center gap-1.5 text-sm">
+                          <span className="flex items-center gap-1.5 text-body">
                             <span
                               className="h-2 w-2 rounded-full"
-                              style={{ backgroundColor: run.agent.crew.color ?? "#6b7280" }}
+                              style={{ backgroundColor: getCrewDotColor(run.agent.crew.color) }}
                             />
                             {run.agent.crew.name}
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <span className="text-label text-muted-foreground">—</span>
                         )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={config.variant} className="gap-1.5 text-[10px]">
+                        <Badge variant={config.variant} className="gap-1.5 text-micro">
                           {run.status === "RUNNING" ? (
                             <span className="relative flex h-2 w-2 shrink-0">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
@@ -277,7 +278,7 @@ export default function RunsPage() {
                           {config.label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-label text-muted-foreground">
                         <span className="flex items-center gap-1.5">
                           {run.trigger_type === "WEBHOOK" && <AnimatedRocket size={12} />}
                           {run.trigger_type}
@@ -288,7 +289,7 @@ export default function RunsPage() {
                           ? <LiveRunDuration startedAt={run.started_at} />
                           : formatDuration(run.started_at, run.finished_at)}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-label text-muted-foreground">
                         {run.started_at
                           ? new Date(run.started_at).toLocaleString()
                           : new Date(run.created_at).toLocaleString()}

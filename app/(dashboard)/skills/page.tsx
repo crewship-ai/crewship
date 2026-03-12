@@ -157,7 +157,7 @@ export default function SkillsPage() {
         onFilter={setActiveFilter}
       />
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-body text-destructive">{error}</p>}
 
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
@@ -187,29 +187,29 @@ export default function SkillsPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-semibold truncate">
+                        <h3 className="text-body font-semibold truncate">
                           {skill.display_name ?? skill.name}
                         </h3>
-                        <Badge variant="secondary" className="text-[10px] shrink-0">
+                        <Badge variant="secondary" className="text-micro shrink-0">
                           {skill.source}
                         </Badge>
                       </div>
                       {skill.description && (
-                        <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                        <p className="mt-1 text-label text-muted-foreground line-clamp-2">
                           {skill.description}
                         </p>
                       )}
                       <div className="mt-2 flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-micro">
                           {skill.category}
                         </Badge>
                         {skill.version && (
-                          <span className="text-[10px] text-muted-foreground">
+                          <span className="text-micro text-muted-foreground">
                             v{skill.version}
                           </span>
                         )}
                         {skill.tool_count != null && skill.tool_count > 0 && (
-                          <span className="text-[10px] text-muted-foreground">
+                          <span className="text-micro text-muted-foreground">
                             {skill.tool_count} tools
                           </span>
                         )}

@@ -67,7 +67,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Members</h2>
+        <h2 className="text-default font-semibold">Members</h2>
         {canEdit && (
           <Button variant="outline" size="sm" className="gap-2" onClick={() => setAddDialogOpen(true)}>
             <UserPlus className="h-3.5 w-3.5" />
@@ -77,7 +77,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
       </div>
 
       {members.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No crew members yet.</p>
+        <p className="text-body text-muted-foreground">No crew members yet.</p>
       ) : (
         <Card>
           <CardContent className="p-0">
@@ -93,13 +93,13 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
               <TableBody>
                 {members.map((member) => (
                   <TableRow key={member.id}>
-                    <TableCell className="text-sm font-medium">
+                    <TableCell className="text-body font-medium">
                       {member.user.full_name ?? "—"}
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
+                    <TableCell className="text-body text-muted-foreground">
                       {member.user.email}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
+                    <TableCell className="text-label text-muted-foreground">
                       {new Date(member.created_at).toLocaleDateString()}
                     </TableCell>
                     {canEdit && (
