@@ -1,6 +1,6 @@
 "use client"
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react"
 import {
   ReactFlow,
   Background,
@@ -24,7 +24,6 @@ import { Workflow } from "lucide-react"
 import type { Mission, MissionTask } from "@/lib/types/mission"
 import { AgentNode } from "./agent-node"
 import { AnimatedEdge } from "./animated-edge"
-import { TaskDetailPanel } from "./task-detail-panel"
 
 export interface WorkflowGraphRef {
   focusActive: () => void
@@ -32,6 +31,7 @@ export interface WorkflowGraphRef {
 
 interface WorkflowGraphProps {
   missions: Mission[]
+  onTaskClick?: (task: MissionTask) => void
 }
 
 const nodeTypes: NodeTypes = { agent: AgentNode }
@@ -219,8 +219,7 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
   return { nodes, edges }
 }
 
-function WorkflowGraphInner({ missions }: WorkflowGraphProps, ref: React.ForwardedRef<WorkflowGraphRef>) {
-  const [selectedTask, setSelectedTask] = useState<MissionTask | null>(null)
+function WorkflowGraphInner({ missions, onTaskClick }: WorkflowGraphProps, ref: React.ForwardedRef<WorkflowGraphRef>) {
   const graphData = useMemo(() => buildGraphData(missions), [missions])
   const [nodes, setNodes, onNodesChange] = useNodesState(graphData.nodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(graphData.edges)
@@ -250,12 +249,13 @@ function WorkflowGraphInner({ missions }: WorkflowGraphProps, ref: React.Forward
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       if (node.id.startsWith("mission-")) return
+      if (!onTaskClick) return
       for (const m of missions) {
         const task = m.tasks?.find((t) => t.id === node.id)
-        if (task) { setSelectedTask(task); return }
+        if (task) { onTaskClick(task); return }
       }
     },
-    [missions]
+    [missions, onTaskClick]
   )
 
   if (missions.length === 0) {
@@ -271,52 +271,46 @@ function WorkflowGraphInner({ missions }: WorkflowGraphProps, ref: React.Forward
   }
 
   return (
-    <div className="flex gap-4">
-      <div className="flex-1 rounded-xl border border-white/[0.06] overflow-hidden bg-[#0a0c10]">
-        <div className="h-[calc(100vh-320px)] min-h-[500px] w-full">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeClick={onNodeClick}
-            fitView
-            fitViewOptions={{ padding: 0.3 }}
-            minZoom={0.2}
-            maxZoom={2.5}
-            proOptions={{ hideAttribution: true }}
-            className="!bg-transparent"
-            defaultEdgeOptions={{ type: "animated" }}
-          >
-            <Background
-              variant={BackgroundVariant.Dots}
-              gap={24}
-              size={1.5}
-              color="rgba(100, 116, 139, 0.15)"
-            />
-            <Controls
-              showInteractive={false}
-              className="!bg-[#1a1d23] !border-white/10 !rounded-lg !shadow-xl [&_button]:!bg-[#1a1d23] [&_button]:!border-white/10 [&_button]:!text-white/60 [&_button:hover]:!bg-white/10"
-            />
-            <MiniMap
-              nodeColor={(n) => {
-                if (n.id.startsWith("mission-")) return "#1e2332"
-                return statusColors[(n.data?.status as string) || "PENDING"] || "#64748b"
-              }}
-              maskColor="rgba(10, 12, 16, 0.85)"
-              className="!bg-[#0d0f14] !border-white/[0.06] !rounded-lg"
-              pannable
-              zoomable
-            />
-          </ReactFlow>
-        </div>
+    <div className="rounded-xl border border-white/[0.06] overflow-hidden bg-[#0a0c10]">
+      <div className="h-[calc(100vh-380px)] min-h-[450px] w-full">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onNodeClick={onNodeClick}
+          fitView
+          fitViewOptions={{ padding: 0.3 }}
+          minZoom={0.2}
+          maxZoom={2.5}
+          proOptions={{ hideAttribution: true }}
+          className="!bg-transparent"
+          defaultEdgeOptions={{ type: "animated" }}
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={24}
+            size={1.5}
+            color="rgba(100, 116, 139, 0.15)"
+          />
+          <Controls
+            showInteractive={false}
+            className="!bg-[#1a1d23] !border-white/10 !rounded-lg !shadow-xl [&_button]:!bg-[#1a1d23] [&_button]:!border-white/10 [&_button]:!text-white/60 [&_button:hover]:!bg-white/10"
+          />
+          <MiniMap
+            nodeColor={(n) => {
+              if (n.id.startsWith("mission-")) return "#1e2332"
+              return statusColors[(n.data?.status as string) || "PENDING"] || "#64748b"
+            }}
+            maskColor="rgba(10, 12, 16, 0.85)"
+            className="!bg-[#0d0f14] !border-white/[0.06] !rounded-lg"
+            pannable
+            zoomable
+          />
+        </ReactFlow>
       </div>
-
-      {selectedTask && (
-        <TaskDetailPanel task={selectedTask} onClose={() => setSelectedTask(null)} />
-      )}
     </div>
   )
 }
