@@ -258,7 +258,7 @@ export function AddCredentialDialog({
                     key={t}
                     type="button"
                     onClick={() => handleTypeChange(t)}
-                    className={`flex flex-col items-center gap-1.5 rounded-md border p-3 text-xs transition-colors ${
+                    className={`flex flex-col items-center gap-1.5 rounded-md border p-3 text-label transition-colors ${
                       isActive
                         ? "border-primary bg-primary/5 text-primary"
                         : "border-border hover:bg-muted"
@@ -343,7 +343,7 @@ export function AddCredentialDialog({
           )}
 
           {type === "AI_CLI_TOKEN" && (
-            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200 space-y-1">
+            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-label text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200 space-y-1">
               <p className="font-medium">How to get a setup token:</p>
               <ol className="list-decimal list-inside space-y-0.5">
                 <li>Open terminal on your computer</li>
@@ -394,13 +394,13 @@ export function AddCredentialDialog({
                   size="sm"
                   onClick={handleTest}
                   disabled={testing}
-                  className="h-7 text-xs"
+                  className="h-7 text-label"
                 >
                   {testing ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <FlaskConical className="mr-1.5 h-3 w-3" />}
                   Test Key
                 </Button>
                 {testResult && (
-                  <span className={`flex items-center gap-1 text-xs ${testResult.valid ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
+                  <span className={`flex items-center gap-1 text-label ${testResult.valid ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
                     {testResult.valid ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
                     {testResult.valid ? "Valid" : testResult.error || "Invalid"}
                   </span>
@@ -445,7 +445,7 @@ export function AddCredentialDialog({
             <div className="space-y-2">
               <Label>Crews</Label>
               {teamsLoading ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2 text-body text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Loading crews...
                 </div>
@@ -519,7 +519,7 @@ export function AddCredentialDialog({
           )}
 
           {error && (
-            <p className="text-sm text-destructive">{error}</p>
+            <p className="text-body text-destructive">{error}</p>
           )}
 
           <DialogFooter>

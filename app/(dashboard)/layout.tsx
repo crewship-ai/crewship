@@ -35,14 +35,14 @@ export default function DashboardLayout({
 
   return (
     <RealtimeProvider>
-      <SidebarProvider defaultOpen>
+      <SidebarProvider defaultOpen={false}>
         <AppSidebar />
         <SidebarInset>
           <AppToolbar />
           <RuntimeBanner />
-          <main className="flex-1 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-4xl mr-2">
             {children}
-          </main>
+          </div>
         </SidebarInset>
       </SidebarProvider>
       <RealtimeToasts />

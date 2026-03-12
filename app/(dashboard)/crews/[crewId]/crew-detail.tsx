@@ -4,7 +4,8 @@ import { useEffect, useState, type FormEvent } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { Bot, Users, Pencil, Trash2, ArrowLeft, Clock, Cpu, HardDrive, RefreshCw, AlertTriangle } from "lucide-react"
 import { AVATAR_STYLES, getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { getCrewIconUrl } from "@/lib/crew-icon"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import { getCrewIconDef } from "@/lib/crew-icon"
 import { AvatarPicker } from "@/components/avatar-picker"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -224,7 +225,7 @@ export function CrewDetailClient() {
         <Button variant="ghost" size="sm" asChild>
           <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
         </Button>
-        <p className="text-sm text-destructive">{error}</p>
+        <p className="text-body text-destructive">{error}</p>
       </div>
     )
   }
@@ -252,20 +253,12 @@ export function CrewDetailClient() {
           <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
         </Button>
         <div className="flex items-center gap-4">
-          <img
-            src={getCrewIconUrl(crew.icon || crew.name)}
-            alt={crew.name}
-            className="h-12 w-12 rounded-lg shrink-0"
-          />
+          <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="lg" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
-              <h1 className="text-xl font-semibold truncate">{crew.name}</h1>
-              <span
-                className="h-3 w-3 rounded-full shrink-0"
-                style={{ backgroundColor: crew.color ?? "#6b7280" }}
-              />
+              <h1 className="text-title font-semibold truncate">{crew.name}</h1>
             </div>
-            <p className="text-sm text-muted-foreground font-mono">{crew.slug}</p>
+            <p className="text-body text-muted-foreground font-mono">{crew.slug}</p>
           </div>
           {canEdit && (
             <Button variant="outline" size="sm" onClick={() => setEditing(!editing)}>
@@ -275,7 +268,7 @@ export function CrewDetailClient() {
           )}
         </div>
         {crew.description && !editing && (
-          <p className="text-sm text-muted-foreground mt-2">{crew.description}</p>
+          <p className="text-body text-muted-foreground mt-2">{crew.description}</p>
         )}
       </div>
 
@@ -283,7 +276,7 @@ export function CrewDetailClient() {
       {editing && canEdit && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Edit Crew</CardTitle>
+            <CardTitle className="text-default">Edit Crew</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSave} className="space-y-6">
@@ -302,13 +295,9 @@ export function CrewDetailClient() {
               <div className="space-y-2">
                 <Label>Crew Icon</Label>
                 <div className="flex items-start gap-4">
-                  <img
-                    src={getCrewIconUrl(formAvatarSeed || formName || "preview")}
-                    alt="Crew icon"
-                    className="h-16 w-16 rounded-xl border shrink-0"
-                  />
+                  <CrewIcon icon={formAvatarSeed || "briefcase"} color={crew.color} size="xl" className="border" />
                   <div className="space-y-2 flex-1">
-                    <Label className="text-xs text-muted-foreground font-normal">Icon Seed</Label>
+                    <Label className="text-label text-muted-foreground font-normal">Icon Seed</Label>
                     <div className="flex gap-2">
                       <Input
                         value={formAvatarSeed}
@@ -329,18 +318,22 @@ export function CrewDetailClient() {
                   </div>
                 </div>
                 <div className="grid grid-cols-8 gap-2 mt-2">
-                  {["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"].map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setFormAvatarSeed(s)}
-                      className={`rounded-lg border p-1.5 transition-colors hover:bg-muted ${
-                        formAvatarSeed === s ? "border-primary bg-primary/5" : "border-border"
-                      }`}
-                    >
-                      <img src={getCrewIconUrl(s)} alt={s} className="h-8 w-8 rounded" />
-                    </button>
-                  ))}
+                  {["code", "shield", "megaphone", "chart", "rocket", "brain", "briefcase", "globe"].map((s) => {
+                    const def = getCrewIconDef(s)
+                    const IconComp = def.icon
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setFormAvatarSeed(s)}
+                        className={`rounded-lg border p-1.5 transition-colors hover:bg-muted flex items-center justify-center ${
+                          formAvatarSeed === s ? "border-primary bg-primary/5" : "border-border"
+                        }`}
+                      >
+                        <IconComp className="h-5 w-5 text-muted-foreground" />
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
@@ -349,7 +342,7 @@ export function CrewDetailClient() {
               {/* Agent Avatar Style — same picker as agent settings */}
               <div className="space-y-3">
                 <Label>Agent Avatar Style</Label>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-label text-muted-foreground">
                   New style for agents in this crew. Agents with custom styles keep theirs unless you apply below.
                 </p>
                 <AvatarPicker
@@ -367,8 +360,8 @@ export function CrewDetailClient() {
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Apply style to all agents</p>
-                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                    <p className="text-body font-medium text-amber-800 dark:text-amber-200">Apply style to all agents</p>
+                    <p className="text-label text-amber-700 dark:text-amber-300 mt-1">
                       This will overwrite avatar style on all {agents.length} agent{agents.length !== 1 ? "s" : ""} in this crew,
                       including any custom styles they may have set individually. This cannot be undone.
                     </p>
@@ -420,8 +413,8 @@ export function CrewDetailClient() {
                 </Button>
               </div>
 
-              {saveStatus === "success" && <p className="text-sm text-emerald-600">Changes saved.</p>}
-              {saveStatus === "error" && saveError && <p className="text-sm text-destructive">{saveError}</p>}
+              {saveStatus === "success" && <p className="text-body text-emerald-600">Changes saved.</p>}
+              {saveStatus === "error" && saveError && <p className="text-body text-destructive">{saveError}</p>}
 
               <Button type="submit" disabled={saveStatus === "saving"}>
                 {saveStatus === "saving" ? "Saving..." : "Save Changes"}
@@ -437,7 +430,7 @@ export function CrewDetailClient() {
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground">
               <Bot className="h-4 w-4" />
-              <span className="text-xs">Agents</span>
+              <span className="text-label">Agents</span>
             </div>
             <p className="text-2xl font-bold mt-1">{crew._count_agents ?? 0}</p>
           </CardContent>
@@ -446,7 +439,7 @@ export function CrewDetailClient() {
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground">
               <Users className="h-4 w-4" />
-              <span className="text-xs">Members</span>
+              <span className="text-label">Members</span>
             </div>
             <p className="text-2xl font-bold mt-1">{crew._count_members ?? 0}</p>
           </CardContent>
@@ -455,7 +448,7 @@ export function CrewDetailClient() {
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground">
               <HardDrive className="h-4 w-4" />
-              <span className="text-xs">Memory</span>
+              <span className="text-label">Memory</span>
             </div>
             <p className="text-2xl font-bold mt-1">{crew.container_memory_mb} MB</p>
           </CardContent>
@@ -464,7 +457,7 @@ export function CrewDetailClient() {
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground">
               <Cpu className="h-4 w-4" />
-              <span className="text-xs">CPUs</span>
+              <span className="text-label">CPUs</span>
             </div>
             <p className="text-2xl font-bold mt-1">{crew.container_cpus}</p>
           </CardContent>
@@ -473,7 +466,7 @@ export function CrewDetailClient() {
 
       {/* Container config */}
       {crew.container_ttl_hours && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2 text-body text-muted-foreground">
           <Clock className="h-4 w-4" />
           <span>Container TTL: {crew.container_ttl_hours}h</span>
         </div>
@@ -482,7 +475,7 @@ export function CrewDetailClient() {
       {/* Agents */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold">Agents</h2>
+          <h2 className="text-default font-semibold">Agents</h2>
           {abilities.can("create", "Agent") && (
             <Button size="sm" asChild>
               <Link href={`/agents/new?crew_id=${crew.id}`}>New Agent</Link>
@@ -490,7 +483,7 @@ export function CrewDetailClient() {
           )}
         </div>
         {agents.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No agents in this crew yet.</p>
+          <p className="text-body text-muted-foreground">No agents in this crew yet.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {agents.map((agent) => (
@@ -505,10 +498,10 @@ export function CrewDetailClient() {
       {/* Members */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-base font-semibold">Members</h2>
+          <h2 className="text-default font-semibold">Members</h2>
         </div>
         {members.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No crew members yet.</p>
+          <p className="text-body text-muted-foreground">No crew members yet.</p>
         ) : (
           <Card>
             <CardContent className="p-0">
@@ -524,13 +517,13 @@ export function CrewDetailClient() {
                 <TableBody>
                   {members.map((member) => (
                     <TableRow key={member.id}>
-                      <TableCell className="text-sm font-medium">
+                      <TableCell className="text-body font-medium">
                         {member.user.full_name ?? "—"}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
+                      <TableCell className="text-body text-muted-foreground">
                         {member.user.email}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
+                      <TableCell className="text-label text-muted-foreground">
                         {new Date(member.created_at).toLocaleDateString()}
                       </TableCell>
                       {canEdit && (
@@ -560,7 +553,7 @@ export function CrewDetailClient() {
           <Separator />
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Danger Zone</CardTitle>
+              <CardTitle className="text-default">Danger Zone</CardTitle>
               <CardDescription>Irreversible actions for this crew</CardDescription>
             </CardHeader>
             <CardContent>
@@ -573,7 +566,7 @@ export function CrewDetailClient() {
         </>
       )}
 
-      <div className="text-xs text-muted-foreground">
+      <div className="text-micro text-muted-foreground">
         Created {new Date(crew.created_at).toLocaleDateString()}
       </div>
     </div>

@@ -81,7 +81,7 @@ export function CredentialsPageClient() {
       <div className="p-4 sm:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
-          <p className="text-sm">{error}</p>
+          <p className="text-body">{error}</p>
         </div>
       </div>
     )
@@ -93,7 +93,7 @@ export function CredentialsPageClient() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
+          <p className="text-body text-muted-foreground">
             {credentials.length} credential{credentials.length !== 1 ? "s" : ""} assigned · AES-256-GCM encrypted
           </p>
         </div>
@@ -106,14 +106,14 @@ export function CredentialsPageClient() {
       {credentials.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">No credentials assigned</p>
-          <p className="text-xs text-muted-foreground mt-1">Assign credentials so the agent can access external services.</p>
+          <p className="text-body font-medium text-muted-foreground">No credentials assigned</p>
+          <p className="text-label text-muted-foreground mt-1">Assign credentials so the agent can access external services.</p>
         </div>
       ) : (
         <div className="border rounded-lg overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-body">
             <thead>
-              <tr className="border-b bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
+              <tr className="border-b bg-muted/50 text-label text-muted-foreground uppercase tracking-wide">
                 <th className="text-left px-4 sm:px-6 py-3 font-medium">Name</th>
                 <th className="text-left px-4 sm:px-6 py-3 font-medium">Env Variable</th>
                 <th className="text-left px-4 sm:px-6 py-3 font-medium">Priority</th>
@@ -136,7 +136,7 @@ export function CredentialsPageClient() {
                   <td className="px-4 sm:px-6 py-3 font-mono text-xs">{c.env_var_name}</td>
                   <td className="px-4 sm:px-6 py-3 text-center font-mono text-xs">{c.priority}</td>
                   <td className="px-4 sm:px-6 py-3 hidden sm:table-cell">
-                    <Badge variant="secondary" className="text-xs">
+                    <Badge variant="secondary" className="text-label">
                       {c.credential_type}
                     </Badge>
                   </td>
@@ -163,7 +163,7 @@ export function CredentialsPageClient() {
       )}
 
       {/* Info */}
-      <p className="text-xs text-muted-foreground">
+      <p className="text-label text-muted-foreground">
         Credentials are injected at container start. Priority-based failover rotates keys automatically on rate limit errors.
       </p>
 

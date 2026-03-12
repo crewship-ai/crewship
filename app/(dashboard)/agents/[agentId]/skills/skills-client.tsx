@@ -137,7 +137,7 @@ export function SkillsPageClient() {
       <div className="p-4 sm:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
-          <p className="text-sm">{error}</p>
+          <p className="text-body">{error}</p>
         </div>
       </div>
     )
@@ -146,7 +146,7 @@ export function SkillsPageClient() {
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
+        <p className="text-body text-muted-foreground">
           {skills.length} skill{skills.length !== 1 ? "s" : ""} assigned
         </p>
         <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)} disabled={!workspaceId}>
@@ -158,8 +158,8 @@ export function SkillsPageClient() {
       {skills.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">No skills assigned</p>
-          <p className="text-xs text-muted-foreground mt-1">Click "Add Skill" to enable agent capabilities.</p>
+          <p className="text-body font-medium text-muted-foreground">No skills assigned</p>
+          <p className="text-label text-muted-foreground mt-1">Click "Add Skill" to enable agent capabilities.</p>
         </div>
       ) : (
         <div className="grid gap-3">
@@ -172,24 +172,24 @@ export function SkillsPageClient() {
                   </div>
                   <div className="space-y-1 min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm font-medium">
+                      <h3 className="text-body font-medium">
                         {agentSkill.skill.display_name ?? agentSkill.skill.name}
                       </h3>
                       {agentSkill.skill.category && (
-                        <Badge variant="outline" className="text-xs">{agentSkill.skill.category}</Badge>
+                        <Badge variant="outline" className="text-label">{agentSkill.skill.category}</Badge>
                       )}
                       <Badge
                         variant="secondary"
-                        className={`text-xs ${SOURCE_STYLES[agentSkill.skill.source] ?? ""}`}
+                        className={`text-label ${SOURCE_STYLES[agentSkill.skill.source] ?? ""}`}
                       >
                         {agentSkill.skill.source}
                       </Badge>
                       {!agentSkill.enabled && (
-                        <Badge variant="secondary" className="text-xs">Disabled</Badge>
+                        <Badge variant="secondary" className="text-label">Disabled</Badge>
                       )}
                     </div>
                     {agentSkill.skill.description && (
-                      <p className="text-xs text-muted-foreground leading-relaxed">{agentSkill.skill.description}</p>
+                      <p className="text-label text-muted-foreground leading-relaxed">{agentSkill.skill.description}</p>
                     )}
                   </div>
                   <Button
@@ -289,7 +289,7 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
         </DialogHeader>
 
         {addError && (
-          <div className="flex items-center gap-2 text-destructive text-sm">
+          <div className="flex items-center gap-2 text-destructive text-body">
             <AlertCircle className="h-4 w-4" />
             <span>{addError}</span>
           </div>
@@ -304,7 +304,7 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
         ) : unassigned.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <Puzzle className="h-8 w-8 text-muted-foreground/50 mb-2" />
-            <p className="text-sm text-muted-foreground">
+            <p className="text-body text-muted-foreground">
               {available.length === 0 ? "No skills available" : "All skills are already assigned"}
             </p>
           </div>
@@ -319,9 +319,9 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
                   <Puzzle className="h-4 w-4 text-primary" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{skill.display_name ?? skill.name}</p>
+                  <p className="text-body font-medium truncate">{skill.display_name ?? skill.name}</p>
                   {skill.description && (
-                    <p className="text-xs text-muted-foreground line-clamp-1">{skill.description}</p>
+                    <p className="text-label text-muted-foreground line-clamp-1">{skill.description}</p>
                   )}
                 </div>
                 <Button

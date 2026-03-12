@@ -2,7 +2,13 @@
 
 import { motion, useAnimation } from "motion/react";
 import type { HTMLAttributes } from "react";
-import { forwardRef, useCallback, useImperativeHandle, useRef } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -27,16 +33,30 @@ const WifiIcon = forwardRef<WifiIconHandle, WifiIconProps>(
     const controls = useAnimation();
 
     const isControlledRef = useRef(false);
+    const mountedRef = useRef(false);
+
+    useEffect(() => {
+      mountedRef.current = true;
+      return () => { mountedRef.current = false; };
+    }, []);
 
     useImperativeHandle(ref, () => {
       isControlledRef.current = true;
 
       return {
         startAnimation: async () => {
-          await controls.start("fadeOut");
-          controls.start("fadeIn");
+          if (!mountedRef.current) return;
+          try {
+            await controls.start("fadeOut");
+            if (mountedRef.current) controls.start("fadeIn");
+          } catch { /* animation cancelled */ }
         },
-        stopAnimation: () => controls.start("fadeIn"),
+        stopAnimation: () => {
+          if (!mountedRef.current) return;
+          try {
+            controls.start("fadeIn");
+          } catch { /* animation cancelled */ }
+        },
       };
     });
 

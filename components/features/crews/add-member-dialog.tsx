@@ -118,7 +118,7 @@ export function AddMemberDialog({
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : users.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4 text-center">
+          <p className="text-body text-muted-foreground py-4 text-center">
             All workspace members are already in this crew.
           </p>
         ) : (

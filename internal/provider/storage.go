@@ -26,6 +26,7 @@ type StorageProvider interface {
 	Read(ctx context.Context, path string) (io.ReadCloser, error)
 	Write(ctx context.Context, path string, r io.Reader) error
 	List(ctx context.Context, dir string) ([]FileInfo, error)
+	ListRecursive(ctx context.Context, dir string) ([]FileInfo, error)
 	Delete(ctx context.Context, path string) error
 	Exists(ctx context.Context, path string) (bool, error)
 	EnsureDir(ctx context.Context, path string) error

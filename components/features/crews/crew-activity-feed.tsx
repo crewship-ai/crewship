@@ -106,8 +106,8 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
   if (loading) {
     return (
       <div>
-        <h2 className="text-base font-semibold mb-3">Recent Activity</h2>
-        <div className="text-sm text-muted-foreground">Loading activity...</div>
+        <h2 className="text-default font-semibold mb-3">Recent Activity</h2>
+        <div className="text-body text-muted-foreground">Loading activity...</div>
       </div>
     )
   }
@@ -115,12 +115,12 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
   if (items.length === 0) {
     return (
       <div>
-        <h2 className="text-base font-semibold mb-3">Recent Activity</h2>
+        <h2 className="text-default font-semibold mb-3">Recent Activity</h2>
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <Activity className="h-8 w-8 text-muted-foreground/50" />
           <div>
-            <p className="text-sm text-muted-foreground">No activity yet.</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">
+            <p className="text-body text-muted-foreground">No activity yet.</p>
+            <p className="text-label text-muted-foreground/70 mt-1">
               Activity appears when agents work on assignments, query peers, or raise escalations.
             </p>
           </div>
@@ -132,8 +132,8 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Recent Activity</h2>
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <h2 className="text-default font-semibold">Recent Activity</h2>
+        <div className="flex items-center gap-1.5 text-label text-muted-foreground">
           <span className="relative flex h-1.5 w-1.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
@@ -195,17 +195,17 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
                         <TableCell>
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <span className="text-sm line-clamp-1">{item.summary}</span>
+                              <span className="text-body line-clamp-1">{item.summary}</span>
                             </TooltipTrigger>
                             <TooltipContent className="max-w-sm">
                               <p className="whitespace-pre-wrap">{item.summary}</p>
                             </TooltipContent>
                           </Tooltip>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="text-body text-muted-foreground">
                           @{item.from_slug}
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="text-body text-muted-foreground">
                           {item.to_slug ? `@${item.to_slug}` : "—"}
                         </TableCell>
                         <TableCell>
@@ -218,19 +218,19 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
                                 className="inline-block h-2 w-2 rounded-full shrink-0 bg-[var(--crew-color)]"
                               />
                             )}
-                            <span className="text-sm text-muted-foreground truncate">
+                            <span className="text-body text-muted-foreground truncate">
                               {item.crew_name}
                             </span>
                           </div>
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="text-label text-muted-foreground">
                           {formatRelativeTime(item.created_at)}
                         </TableCell>
                       </TableRow>
                       {isExpanded && hasDetail && (
                         <TableRow id={detailId}>
                           <TableCell colSpan={6} className="bg-muted/30">
-                            <div className="text-sm whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
+                            <div className="text-body whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
                               {item.detail}
                             </div>
                           </TableCell>

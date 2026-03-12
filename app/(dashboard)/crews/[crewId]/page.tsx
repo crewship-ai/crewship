@@ -195,8 +195,8 @@ export default function CrewDetailPage() {
       {/* Hero */}
       <div className="flex items-start gap-4 mb-6">
         <CrewIconPopover
-          icon={crew.icon || crew.name}
-          color={crew.color || "90caf9"}
+          icon={crew.icon || "briefcase"}
+          color={crew.color || "blue"}
           onIconChange={(icon) => patchCrew({ icon })}
           onColorChange={(color) => patchCrew({ color })}
         />
@@ -228,18 +228,18 @@ export default function CrewDetailPage() {
             <CardContent className="p-4 space-y-1">
               <div className="flex items-center gap-2 mb-2">
                 <Info className="h-4 w-4 text-muted-foreground" />
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Identity</span>
+                <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">Identity</span>
               </div>
               <div className="flex justify-between items-center py-2">
-                <span className="text-[13px] text-muted-foreground">Name</span>
-                <span className="text-[13px] font-medium">{crew.name}</span>
+                <span className="text-body text-muted-foreground">Name</span>
+                <span className="text-body font-medium">{crew.name}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-t">
-                <span className="text-[13px] text-muted-foreground">Slug</span>
+                <span className="text-body text-muted-foreground">Slug</span>
                 <span className="text-xs font-mono text-muted-foreground">{crew.slug}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-t">
-                <span className="text-[13px] text-muted-foreground">Created</span>
+                <span className="text-body text-muted-foreground">Created</span>
                 <span className="text-xs text-muted-foreground">{new Date(crew.created_at).toLocaleDateString()}</span>
               </div>
             </CardContent>
@@ -251,7 +251,7 @@ export default function CrewDetailPage() {
               <CardContent className="p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <Paintbrush className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Appearance</span>
+                  <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">Appearance</span>
                 </div>
                 <p className="text-xs text-muted-foreground mb-2">Agent avatar style</p>
                 <AvatarPicker
@@ -269,7 +269,7 @@ export default function CrewDetailPage() {
                     type="button"
                     onClick={handleApplyToAll}
                     disabled={applying}
-                    className="mt-3 text-[11px] font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 inline-flex items-center gap-1 disabled:opacity-50"
+                    className="mt-3 text-micro font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 inline-flex items-center gap-1 disabled:opacity-50"
                   >
                     {applying ? (
                       <Loader2 className="h-3 w-3 animate-spin" />

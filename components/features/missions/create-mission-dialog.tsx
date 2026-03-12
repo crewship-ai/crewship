@@ -143,7 +143,7 @@ export function CreateMissionDialog({
               </SelectContent>
             </Select>
             {leadAgents.length === 0 && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-label text-muted-foreground">
                 No lead agents in this crew. Promote an agent to LEAD role first.
               </p>
             )}

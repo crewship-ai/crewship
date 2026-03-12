@@ -236,21 +236,21 @@ export default function CredentialsPage() {
                         <div className="min-w-0">
                           <p className="font-medium font-mono text-sm">{cred.name}</p>
                           {cred.account_label && (
-                            <p className="text-xs text-muted-foreground">{cred.account_label}</p>
+                            <p className="text-label text-muted-foreground">{cred.account_label}</p>
                           )}
                           {!cred.account_label && cred.description && (
-                            <p className="text-xs text-muted-foreground truncate max-w-48">{cred.description}</p>
+                            <p className="text-label text-muted-foreground truncate max-w-48">{cred.description}</p>
                           )}
                         </div>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="text-xs font-normal">
+                      <Badge variant="outline" className="text-label font-normal">
                         {typeConfig.label}
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm text-muted-foreground">
+                      <span className="text-body text-muted-foreground">
                         {PROVIDER_LABELS[cred.provider]}
                       </span>
                     </TableCell>
@@ -258,10 +258,10 @@ export default function CredentialsPage() {
                       {showStatus ? (
                         <div className="flex items-center gap-1.5">
                           <StatusIcon className={`h-3.5 w-3.5 ${statusConfig.color}`} />
-                          <span className="text-xs">{statusConfig.label}</span>
+                          <span className="text-label">{statusConfig.label}</span>
                         </div>
                       ) : (
-                        <span className="text-xs text-muted-foreground">--</span>
+                        <span className="text-label text-muted-foreground">--</span>
                       )}
                     </TableCell>
                     <TableCell>

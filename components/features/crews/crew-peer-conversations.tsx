@@ -118,8 +118,8 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
   if (loading) {
     return (
       <div>
-        <h2 className="text-base font-semibold mb-3">Peer Conversations</h2>
-        <div className="text-sm text-muted-foreground">Loading peer conversations...</div>
+        <h2 className="text-default font-semibold mb-3">Peer Conversations</h2>
+        <div className="text-body text-muted-foreground">Loading peer conversations...</div>
       </div>
     )
   }
@@ -128,7 +128,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
     <div>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-base font-semibold">Peer Conversations</h2>
+          <h2 className="text-default font-semibold">Peer Conversations</h2>
           {conversations.some((c) => c.status === "RUNNING") && (
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
@@ -136,7 +136,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
             </span>
           )}
         </div>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-label text-muted-foreground">
           Live
         </span>
       </div>
@@ -145,8 +145,8 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <MessageSquare className="h-8 w-8 text-muted-foreground/50" />
           <div>
-            <p className="text-sm text-muted-foreground">No peer conversations yet.</p>
-            <p className="text-xs text-muted-foreground/70 mt-1">
+            <p className="text-body text-muted-foreground">No peer conversations yet.</p>
+            <p className="text-label text-muted-foreground/70 mt-1">
               Peer conversations appear when agents communicate with each other.
             </p>
           </div>
@@ -213,7 +213,7 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                             <div className="flex items-center gap-2">
                               <Tooltip>
                                 <TooltipTrigger asChild>
-                                  <span className="text-sm line-clamp-1">{c.question}</span>
+                                  <span className="text-body line-clamp-1">{c.question}</span>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-sm">
                                   <p className="whitespace-pre-wrap">{c.question}</p>
@@ -227,23 +227,23 @@ export function CrewPeerConversations({ crewId, workspaceId }: CrewPeerConversat
                               )}
                             </div>
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
+                          <TableCell className="text-body text-muted-foreground">
                             @{c.from_slug}
                           </TableCell>
-                          <TableCell className="text-sm text-muted-foreground">
+                          <TableCell className="text-body text-muted-foreground">
                             @{c.to_slug}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
+                          <TableCell className="text-label text-muted-foreground">
                             {formatRelativeTime(c.created_at)}
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
+                          <TableCell className="text-label text-muted-foreground">
                             {formatDurationMs(c.duration_ms)}
                           </TableCell>
                         </TableRow>
                         {isExpanded && hasDetail && (
                           <TableRow id={detailId}>
                             <TableCell colSpan={6} className="bg-muted/30">
-                              <div className="text-sm whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
+                              <div className="text-body whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
                                 <span className="font-medium text-muted-foreground">Response: </span>
                                 {c.response}
                               </div>

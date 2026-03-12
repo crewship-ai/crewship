@@ -55,6 +55,14 @@ func (h *ProxyHandler) ipcPost(ctx context.Context, path string, body io.Reader)
 	return h.ipcClient().Do(req)
 }
 
+func (h *ProxyHandler) ipcPut(ctx context.Context, path string, body io.Reader) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, "PUT", "http://crewshipd"+path, body)
+	if err != nil {
+		return nil, err
+	}
+	return h.ipcClient().Do(req)
+}
+
 func (h *ProxyHandler) proxyJSON(w http.ResponseWriter, resp *http.Response) {
 	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")
@@ -165,8 +173,14 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := fmt.Sprintf("/crews/%s/files?agent_slug=%s", crewID.String, slug.String)
-	resp, err := h.ipcGet(r.Context(), path)
+	ipcPath := fmt.Sprintf("/crews/%s/files?agent_slug=%s", crewID.String, slug.String)
+	if r.URL.Query().Get("recursive") == "true" {
+		ipcPath += "&recursive=true"
+	}
+	if subdir := r.URL.Query().Get("subdir"); subdir != "" {
+		ipcPath += "&subdir=" + url.QueryEscape(subdir)
+	}
+	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to fetch files"})
 		return
@@ -228,6 +242,41 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 		w.Header().Set("Content-Length", cl)
 	}
 	io.Copy(w, resp.Body)
+}
+
+func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	filePath := r.URL.Query().Get("path")
+
+	if filePath == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path parameter required"})
+		return
+	}
+
+	var slug, crewID sql.NullString
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&slug, &crewID)
+	if err != nil || !crewID.Valid {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
+
+	cleanPath := filepath.Clean(filePath)
+	if strings.HasPrefix(cleanPath, "..") || filepath.IsAbs(cleanPath) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid file path"})
+		return
+	}
+
+	ipcPath := fmt.Sprintf("/crews/%s/files/save?path=%s", crewID.String, url.QueryEscape(cleanPath))
+
+	resp, err := h.ipcPut(r.Context(), ipcPath, r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to save file"})
+		return
+	}
+	h.proxyJSON(w, resp)
 }
 
 func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
