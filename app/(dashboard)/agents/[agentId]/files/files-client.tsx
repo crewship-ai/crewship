@@ -126,14 +126,14 @@ const PREVIEWABLE_EXTENSIONS = new Set([
   "json", "yaml", "yml", "toml", "xml", "csv", "ini", "cfg",
   "html", "css", "scss", "less", "svg",
   "sql", "graphql", "prisma",
-  "env", "gitignore", "gitattributes", "editorconfig", "prettierrc",
+  "gitignore", "gitattributes", "editorconfig", "prettierrc",
   "dockerfile", "makefile", "cmakelists",
   "c", "cpp", "h", "hpp", "java", "kt", "swift", "dart", "lua", "r",
   "tf", "hcl", "proto",
 ])
 
 const PREVIEWABLE_FILENAMES = new Set([
-  "dockerfile", "makefile", "cmakelists.txt", ".env", ".gitignore",
+  "dockerfile", "makefile", "cmakelists.txt", ".gitignore",
   ".gitattributes", ".editorconfig", ".prettierrc", ".eslintrc",
   "license", "readme", "changelog", "authors",
 ])
@@ -232,6 +232,7 @@ export function FilesPageClient() {
   const [error, setError] = useState<string | null>(null)
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<string | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
   const [loadingContent, setLoadingContent] = useState(false)
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set())
@@ -303,6 +304,7 @@ export function FilesPageClient() {
     fileAbortRef.current = ac
     setSelectedPath(path)
     setFileContent(null)
+    setFileError(null)
     setEditMode(false)
     setIsDirty(false)
     if (!isPreviewable(file.name)) {
@@ -311,9 +313,9 @@ export function FilesPageClient() {
     }
     setLoadingContent(true)
     fetch(`/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`, { signal: ac.signal })
-      .then((r) => r.ok ? r.text() : "(Unable to load)")
+      .then((r) => { if (!r.ok) throw new Error("Unable to load"); return r.text() })
       .then((text) => { if (!ac.signal.aborted) setFileContent(text) })
-      .catch((err) => { if (err.name !== "AbortError") setFileContent("(Network error)") })
+      .catch((err) => { if (err.name !== "AbortError") { setFileContent(null); setFileError(err.message ?? "Network error") } })
       .finally(() => { if (!ac.signal.aborted) setLoadingContent(false) })
   }, [agentId, workspaceId, tree])
 
@@ -543,6 +545,11 @@ export function FilesPageClient() {
             ) : fileContent !== null ? (
               <div className="h-full overflow-y-auto dark bg-[#24292e]">
                 <CodeBlock code={fileContent} language={getLang(selectedFile.name) as BundledLanguage} showLineNumbers />
+              </div>
+            ) : fileError ? (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                <FileIcon className="h-10 w-10 mb-3 opacity-30" />
+                <p className="text-body font-medium">{fileError}</p>
               </div>
             ) : null}
           </div>
