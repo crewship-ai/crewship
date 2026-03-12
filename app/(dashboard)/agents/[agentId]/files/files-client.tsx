@@ -246,6 +246,12 @@ export function FilesPageClient() {
   useEffect(() => {
     if (wsLoading) return
     if (!workspaceId) { setLoading(false); setError("No workspace selected"); return }
+    fileAbortRef.current?.abort()
+    setTree([])
+    setSelectedPath(null)
+    setFileContent(null)
+    setEditMode(false)
+    setIsDirty(false)
     let cancelled = false
     let isFirstLoad = true
     async function fetchFiles() {
