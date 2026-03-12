@@ -114,11 +114,11 @@ if __name__ == "__main__":
     credentials = GoogleAdsClient.load_from_storage("google-ads.yaml")
     main(credentials, args.customer_id)
 `,
-  "google-ads.yaml": `developer_token: "ABcdEfGhIjKlMnOp"
-client_id: "123456789.apps.googleusercontent.com"
-client_secret: "GOCSPX-xxxxxxxxxxxxxxxxx"
-refresh_token: "1//0xxxxxxxxxxxxxxxxxxxxxxxxx"
-login_customer_id: "1234567890"
+  "google-ads.yaml": `developer_token: "REDACTED_DEVELOPER_TOKEN"
+client_id: "REDACTED_CLIENT_ID.apps.googleusercontent.com"
+client_secret: "REDACTED_CLIENT_SECRET"
+refresh_token: "REDACTED_REFRESH_TOKEN"
+login_customer_id: "REDACTED_CUSTOMER_ID"
 # use_proto_plus: True
 `,
   "NAVOD.md": `# Google Ads API - Navod

@@ -12,7 +12,7 @@ export function FilterBar({ filters, active, onFilter }: FilterBarProps) {
   const activeFilter = active ?? filters[0]
 
   return (
-    <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-card p-1">
+    <div className="inline-flex max-w-full overflow-x-auto items-center gap-0.5 rounded-lg border border-border bg-card p-1">
       {filters.map((filter) => (
         <button
           key={filter}

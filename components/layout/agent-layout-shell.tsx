@@ -13,22 +13,18 @@ interface AgentLayoutShellProps {
 export function AgentLayoutShell({ agentId, children }: AgentLayoutShellProps) {
   return (
     <AgentDetailProvider agentId={agentId}>
-      {/* Mobile: stacked layout (header + mobile bar + content) */}
-      <div className="flex flex-col h-full md:hidden">
-        <div className="shrink-0">
+      <div className="flex flex-col md:flex-row h-full overflow-hidden">
+        {/* Mobile: header + tabs bar */}
+        <div className="shrink-0 md:hidden">
           <AgentHeader agentId={agentId} />
           <AgentMobileTabsBar agentId={agentId} />
         </div>
-        <div className="flex-1 min-h-0 relative">
-          <div className="absolute inset-0 overflow-y-auto">
-            {children}
-          </div>
+        {/* Desktop: side rail */}
+        <div className="hidden md:block shrink-0">
+          <AgentDesktopRail agentId={agentId} />
         </div>
-      </div>
-      {/* Desktop: rail + content side by side */}
-      <div className="hidden md:flex h-full overflow-hidden">
-        <AgentDesktopRail agentId={agentId} />
-        <div className="flex-1 min-w-0 relative">
+        {/* Content area (single render) */}
+        <div className="flex-1 min-w-0 min-h-0 relative">
           <div className="absolute inset-0 overflow-y-auto">
             {children}
           </div>

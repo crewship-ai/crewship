@@ -45,6 +45,7 @@ export function FileEditor({ code, language, onSave, onDirtyChange, saveRef }: F
 
   onSaveRef.current = onSave
   onDirtyChangeRef.current = onDirtyChange
+  initialCodeRef.current = code
 
   const handleSave = useCallback(() => {
     if (viewRef.current) {
@@ -101,7 +102,7 @@ export function FileEditor({ code, language, onSave, onDirtyChange, saveRef }: F
 
     return () => { view.destroy(); viewRef.current = null }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [language])
+  }, [code, language])
 
   return <div ref={containerRef} className="h-full w-full overflow-hidden" />
 }
