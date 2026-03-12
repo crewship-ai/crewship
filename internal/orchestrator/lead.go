@@ -65,6 +65,9 @@ func BuildLeadContext(members []CrewMember) string {
 	b.WriteString("      {\"title\":\"...\",\"assigned_to\":\"<slug>\",\"task_order\":2,\"depends_on\":[\"<task_id>\"]}]}'\n")
 	b.WriteString("Then start it: curl -s -X POST http://localhost:9119/mission/<id>/start\n")
 	b.WriteString("Check status:  curl -s http://localhost:9119/mission/<id>\n")
+	b.WriteString("List templates: curl -s http://localhost:9119/mission/templates\n")
+	b.WriteString("Available templates: sequential, parallel, dev-test-loop, pipeline\n")
+	b.WriteString("Tasks with max_iterations will auto-retry on failure (Ralph Loop pattern).\n")
 
 	b.WriteString("[END CREW CONTEXT]")
 	return b.String()

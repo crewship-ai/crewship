@@ -22,6 +22,7 @@ type MissionEngine struct {
 	orch   *Orchestrator
 	hub    *ws.Hub
 	pw     *ProgressWriter
+	lc     *LoopController
 	logger *slog.Logger
 
 	mu       sync.Mutex
@@ -40,11 +41,13 @@ type missionState struct {
 }
 
 func NewMissionEngine(db *sql.DB, orch *Orchestrator, hub *ws.Hub, logger *slog.Logger) *MissionEngine {
+	pw := NewProgressWriter()
 	return &MissionEngine{
 		db:     db,
 		orch:   orch,
 		hub:    hub,
-		pw:     NewProgressWriter(),
+		pw:     pw,
+		lc:     NewLoopController(db, pw, logger),
 		logger: logger,
 		active: make(map[string]*missionState),
 	}
@@ -340,8 +343,35 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		return fmt.Errorf("update task %s: %w", taskID, err)
 	}
 
-	// Unblock dependent tasks
-	e.unblockDependentTasks(ctx, missionID, taskID)
+	// If the task failed, attempt retry via LoopController before proceeding
+	if taskStatus == "FAILED" && e.lc != nil {
+		retried, retryErr := e.lc.RetryLoopBack(ctx, taskID, missionID)
+		if retryErr != nil {
+			e.logger.Error("loop controller retry check failed", "error", retryErr, "task_id", taskID)
+		}
+		if retried {
+			e.logger.Info("task retry initiated by loop controller",
+				"task_id", taskID, "mission_id", missionID)
+			// Task was reset to PENDING — broadcast and return without checking completion
+			e.mu.Lock()
+			ms := e.active[missionID]
+			e.mu.Unlock()
+			if ms != nil {
+				e.broadcastTaskStatus(ms, taskID, "PENDING")
+				e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
+					Type:   "task_retry",
+					TaskID: taskID,
+					Error:  errorMessage,
+				})
+			}
+			return nil
+		}
+	}
+
+	// Unblock dependent tasks (only for completed tasks)
+	if taskStatus == "COMPLETED" {
+		e.unblockDependentTasks(ctx, missionID, taskID)
+	}
 
 	// Get mission state for broadcasting
 	e.mu.Lock()

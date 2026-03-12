@@ -200,6 +200,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/mission/create":
 				s.handleMissionCreate(w, r)
 				return
+			case r.Method == http.MethodGet && r.URL.Path == "/mission/templates":
+				s.handleMissionTemplates(w, r)
+				return
 			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/mission/") && !strings.Contains(r.URL.Path[len("/mission/"):], "/"):
 				s.handleMissionStatus(w, r)
 				return

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
 
 type missionCreateRequest struct {
@@ -216,4 +218,10 @@ func (s *Server) handleMissionStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSONResponse(w, resp.StatusCode, result)
+}
+
+// handleMissionTemplates handles GET /mission/templates
+// Returns available workflow templates that lead agents can use.
+func (s *Server) handleMissionTemplates(w http.ResponseWriter, _ *http.Request) {
+	writeJSONResponse(w, http.StatusOK, orchestrator.ListTemplates())
 }
