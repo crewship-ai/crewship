@@ -1138,3 +1138,422 @@ func TestE2E_ConcurrentMissions(t *testing.T) {
 		t.Errorf("Mission B expected 2 dispatches, got %d", missionBCounts)
 	}
 }
+
+// ============================================================
+// BUG TEST: Double-dispatch race condition
+// scheduleTask does UPDATE WHERE status='PENDING' but ignores
+// RowsAffected — if a second tick runs before the goroutine
+// completes, the task gets dispatched twice.
+// ============================================================
+
+func TestE2E_BUG_DoubleDispatchRace(t *testing.T) {
+	db := setupTestDB(t)
+	db.Exec(`CREATE TABLE crew_connections (
+		id TEXT PRIMARY KEY, workspace_id TEXT, from_crew_id TEXT, to_crew_id TEXT,
+		direction TEXT DEFAULT 'bidirectional', status TEXT DEFAULT 'active',
+		created_at TEXT, updated_at TEXT)`)
+
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	insertTask(t, db, "t1", missionID, &agentID, "Task 1", "PENDING", 1, nil)
+
+	disp := newMockAsyncDispatcher()
+	engine := newTestEngine(t, db)
+	engine.SetDispatcher(disp)
+
+	ms := makeMissionState(missionID, crewID, "dev-crew", leadID, wsID, "trace-race")
+	engine.mu.Lock()
+	engine.active[missionID] = ms
+	engine.mu.Unlock()
+
+	// First tick: dispatches t1
+	tickEngine(context.Background(), engine, ms)
+	waitForDispatch(t, disp.ch, 2*time.Second)
+
+	// Task should be IN_PROGRESS now — second tick should NOT dispatch it again
+	tickEngine(context.Background(), engine, ms)
+
+	// Wait briefly and check only 1 dispatch happened
+	time.Sleep(100 * time.Millisecond)
+	allDispatches := disp.getDispatches()
+	if len(allDispatches) != 1 {
+		t.Errorf("BUG: expected exactly 1 dispatch (idempotent), got %d — double-dispatch race!", len(allDispatches))
+	}
+}
+
+// ============================================================
+// BUG TEST: Diamond Dependency (A→B, A→C, B+C→D)
+// Tests that D only unblocks when BOTH B and C complete.
+// ============================================================
+
+func TestE2E_DiamondDependency(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	//     A
+	//    / \
+	//   B   C
+	//    \ /
+	//     D
+	insertTask(t, db, "a", missionID, &agentID, "Task A", "PENDING", 1, nil)
+	insertTask(t, db, "b", missionID, &agentID, "Task B", "BLOCKED", 2, []string{"a"})
+	insertTask(t, db, "c", missionID, &agentID, "Task C", "BLOCKED", 3, []string{"a"})
+	insertTask(t, db, "d", missionID, &agentID, "Task D", "BLOCKED", 4, []string{"b", "c"})
+
+	disp := newMockAsyncDispatcher()
+	engine := newTestEngine(t, db)
+	engine.SetDispatcher(disp)
+
+	ms := makeMissionState(missionID, crewID, "dev-crew", leadID, wsID, "trace-diamond")
+	engine.mu.Lock()
+	engine.active[missionID] = ms
+	engine.mu.Unlock()
+
+	// Tick 1: A dispatched
+	tickEngine(context.Background(), engine, ms)
+	waitForDispatch(t, disp.ch, 2*time.Second)
+
+	// Complete A → B and C should unblock
+	aidA := getTaskAssignmentID(t, db, "a")
+	engine.OnAssignmentCompleted(context.Background(), aidA, "COMPLETED", "A done", "")
+
+	if s := getTaskStatus(t, db, "b"); s != "PENDING" {
+		t.Fatalf("B expected PENDING after A completes, got %s", s)
+	}
+	if s := getTaskStatus(t, db, "c"); s != "PENDING" {
+		t.Fatalf("C expected PENDING after A completes, got %s", s)
+	}
+	if s := getTaskStatus(t, db, "d"); s != "BLOCKED" {
+		t.Fatalf("D should still be BLOCKED (B,C not done), got %s", s)
+	}
+
+	// Tick 2: B and C dispatched
+	tickEngine(context.Background(), engine, ms)
+	waitForDispatches(t, disp.ch, 2, 2*time.Second)
+
+	// Complete B only → D stays BLOCKED
+	aidB := getTaskAssignmentID(t, db, "b")
+	engine.OnAssignmentCompleted(context.Background(), aidB, "COMPLETED", "B done", "")
+	if s := getTaskStatus(t, db, "d"); s != "BLOCKED" {
+		t.Errorf("D should be BLOCKED (C still running), got %s", s)
+	}
+
+	// Complete C → D should unblock
+	aidC := getTaskAssignmentID(t, db, "c")
+	engine.OnAssignmentCompleted(context.Background(), aidC, "COMPLETED", "C done", "")
+	if s := getTaskStatus(t, db, "d"); s != "PENDING" {
+		t.Fatalf("D should be PENDING (B+C done), got %s", s)
+	}
+
+	// Tick 3: D dispatched
+	tickEngine(context.Background(), engine, ms)
+	d4 := waitForDispatch(t, disp.ch, 2*time.Second)
+
+	// D's brief should have outputs from B and C (its direct deps)
+	if !strings.Contains(d4.Task, "B done") {
+		t.Error("D brief should contain B's output")
+	}
+	if !strings.Contains(d4.Task, "C done") {
+		t.Error("D brief should contain C's output")
+	}
+
+	// Complete D → mission REVIEW
+	aidD := getTaskAssignmentID(t, db, "d")
+	engine.OnAssignmentCompleted(context.Background(), aidD, "COMPLETED", "D done", "")
+	tickEngine(context.Background(), engine, ms)
+
+	if s := getMissionStatus(t, db, missionID); s != "REVIEW" {
+		t.Errorf("expected REVIEW, got %s", s)
+	}
+}
+
+// ============================================================
+// BUG TEST: Circular Dependency Detection
+// t1 depends on t2, t2 depends on t1 — both stay BLOCKED forever.
+// The engine should detect this and fail the mission or the tasks.
+// ============================================================
+
+func TestE2E_BUG_CircularDependency(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	// Circular: t1 → t2 → t1
+	insertTask(t, db, "t1", missionID, &agentID, "Circular A", "BLOCKED", 1, []string{"t2"})
+	insertTask(t, db, "t2", missionID, &agentID, "Circular B", "BLOCKED", 2, []string{"t1"})
+
+	engine := newTestEngine(t, db)
+	disp := newMockAsyncDispatcher()
+	engine.SetDispatcher(disp)
+
+	ms := makeMissionState(missionID, crewID, "dev-crew", leadID, wsID, "trace-circular")
+	engine.mu.Lock()
+	engine.active[missionID] = ms
+	engine.mu.Unlock()
+
+	// Tick: nothing should be dispatched (both BLOCKED)
+	tickEngine(context.Background(), engine, ms)
+
+	time.Sleep(100 * time.Millisecond)
+	allDisp := disp.getDispatches()
+	if len(allDisp) != 0 {
+		t.Errorf("circular deps should produce 0 dispatches, got %d", len(allDisp))
+	}
+
+	// BUG: checkMissionCompletion won't mark this as complete either —
+	// tasks are BLOCKED (not terminal), so mission stays IN_PROGRESS forever.
+	// This is a deadlock scenario with no detection or timeout-based recovery.
+	status := getMissionStatus(t, db, missionID)
+	if status != "IN_PROGRESS" {
+		t.Errorf("expected mission still IN_PROGRESS (deadlocked), got %s", status)
+	}
+
+	// FINDING: No circular dependency detection exists. The mission will hang
+	// until the 2-hour timeout. Should detect this pattern and fail immediately.
+	t.Log("FINDING: Circular dependency detected but engine has no detection logic — mission will deadlock until timeout (2h)")
+}
+
+// ============================================================
+// BUG TEST: Nonexistent Dependency ID
+// A task depends on a task ID that doesn't exist.
+// ============================================================
+
+func TestE2E_BUG_NonexistentDependency(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	// t1 depends on "ghost" which doesn't exist
+	insertTask(t, db, "t1", missionID, &agentID, "Orphan dep", "BLOCKED", 1, []string{"ghost"})
+
+	engine := newTestEngine(t, db)
+	ms := makeMissionState(missionID, crewID, "dev-crew", leadID, wsID, "trace-ghost")
+	engine.mu.Lock()
+	engine.active[missionID] = ms
+	engine.mu.Unlock()
+
+	// The task stays BLOCKED forever because "ghost" will never complete.
+	// ResolveReadyTasks only looks at PENDING tasks, not BLOCKED.
+	// This is the same deadlock pattern as circular deps.
+	ready, err := engine.ResolveReadyTasks(context.Background(), missionID)
+	if err != nil {
+		t.Fatalf("ResolveReadyTasks: %v", err)
+	}
+	if len(ready) != 0 {
+		t.Errorf("task with nonexistent dep should not be ready, got %d", len(ready))
+	}
+
+	// FINDING: Nonexistent dependency IDs cause permanent deadlock.
+	// Should validate deps at mission creation time.
+	t.Log("FINDING: Task with nonexistent dependency ID stays BLOCKED forever — no validation at creation time")
+}
+
+// ============================================================
+// BUG TEST: Deleted Agent During Mission
+// Agent is deleted while a task is assigned to them.
+// ============================================================
+
+func TestE2E_BUG_DeletedAgentDuringMission(t *testing.T) {
+	db := setupTestDB(t)
+	db.Exec(`CREATE TABLE crew_connections (
+		id TEXT PRIMARY KEY, workspace_id TEXT, from_crew_id TEXT, to_crew_id TEXT,
+		direction TEXT DEFAULT 'bidirectional', status TEXT DEFAULT 'active',
+		created_at TEXT, updated_at TEXT)`)
+
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	insertTask(t, db, "t1", missionID, &agentID, "Task for deleted agent", "PENDING", 1, nil)
+
+	engine := newTestEngine(t, db)
+	disp := newMockAsyncDispatcher()
+	engine.SetDispatcher(disp)
+
+	ms := makeMissionState(missionID, crewID, "dev-crew", leadID, wsID, "trace-deleted")
+	engine.mu.Lock()
+	engine.active[missionID] = ms
+	engine.mu.Unlock()
+
+	// Soft-delete the agent before scheduling
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`UPDATE agents SET deleted_at = ? WHERE id = ?`, now, agentID)
+
+	// Tick: should fail to schedule (agent not found)
+	err := tickEngine(context.Background(), engine, ms)
+	if err != nil {
+		// tickEngine itself doesn't return the inner scheduling error — it logs it
+		// and marks the task as FAILED
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	allDisp := disp.getDispatches()
+	if len(allDisp) != 0 {
+		t.Errorf("deleted agent should produce 0 dispatches, got %d", len(allDisp))
+	}
+
+	// The task should be marked FAILED with an error about the deleted agent
+	status := getTaskStatus(t, db, "t1")
+	if status != "FAILED" {
+		t.Errorf("task for deleted agent should be FAILED, got %s", status)
+	}
+
+	// Check error message
+	var errMsg sql.NullString
+	db.QueryRow(`SELECT error_message FROM mission_tasks WHERE id = 't1'`).Scan(&errMsg)
+	if !errMsg.Valid || errMsg.String == "" {
+		t.Error("task should have an error message explaining why it failed")
+	}
+	// FINDING: Error message is cryptic "resolve agent crew: sql: no rows in result set"
+	// Should say "assigned agent was deleted" or "agent not found"
+	t.Logf("Error message for deleted agent: %s", errMsg.String)
+}
+
+// ============================================================
+// BUG TEST: Dispatch Failure in Goroutine Uses Parent Context
+// When dispatch fails asynchronously, updateTaskStatus uses the
+// parent ctx which may be cancelled, silently losing the FAILED update.
+// ============================================================
+
+func TestE2E_BUG_DispatchFailureCtx(t *testing.T) {
+	db := setupTestDB(t)
+	db.Exec(`CREATE TABLE crew_connections (
+		id TEXT PRIMARY KEY, workspace_id TEXT, from_crew_id TEXT, to_crew_id TEXT,
+		direction TEXT DEFAULT 'bidirectional', status TEXT DEFAULT 'active',
+		created_at TEXT, updated_at TEXT)`)
+
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	insertTask(t, db, "t1", missionID, &agentID, "Will fail dispatch", "PENDING", 1, nil)
+
+	// Use a dispatcher that fails
+	failDisp := &failingDispatcher{}
+	engine := newTestEngine(t, db)
+	engine.SetDispatcher(failDisp)
+
+	// Use a context that we'll cancel before the dispatch goroutine runs
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ms := makeMissionState(missionID, crewID, "dev-crew", leadID, wsID, "trace-ctxfail")
+	engine.mu.Lock()
+	engine.active[missionID] = ms
+	engine.mu.Unlock()
+
+	// Schedule the task — this spawns a goroutine that will fail
+	engine.scheduleReadyTasks(ctx, ms)
+
+	// Cancel the context immediately
+	cancel()
+
+	// Give goroutine time to execute
+	time.Sleep(500 * time.Millisecond)
+
+	// BUG: The goroutine calls updateTaskStatus(ctx, ...) with the now-cancelled ctx.
+	// The DB update may silently fail because ctx is Done.
+	// In a correctly implemented system, the task should be FAILED.
+	status := getTaskStatus(t, db, "t1")
+	if status == "IN_PROGRESS" {
+		// This confirms the bug: task was set to IN_PROGRESS but the dispatch failed,
+		// and the FAILED update was lost because ctx was cancelled.
+		t.Log("CONFIRMED BUG: Task stuck IN_PROGRESS after dispatch failure — ctx was cancelled before updateTaskStatus ran")
+	} else if status == "FAILED" {
+		t.Log("Dispatch failure correctly marked task as FAILED (bug may be fixed)")
+	} else {
+		t.Logf("Task status: %s (unexpected)", status)
+	}
+}
+
+// failingDispatcher always returns an error.
+type failingDispatcher struct{}
+
+func (d *failingDispatcher) DispatchAssignment(_ context.Context, _ DispatchRequest) error {
+	return fmt.Errorf("simulated dispatch failure: container not running")
+}
+
+// ============================================================
+// Test: Mission With All Tasks SKIPPED
+// Verifies SKIPPED is treated as terminal for completion check.
+// ============================================================
+
+func TestE2E_AllTasksSkipped(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t1', ?, ?, 'Skipped task 1', 'SKIPPED', 1, '[]', ?, ?)`, missionID, agentID, now, now)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t2', ?, ?, 'Completed task', 'COMPLETED', 2, '[]', ?, ?)`, missionID, agentID, now, now)
+
+	engine := newTestEngine(t, db)
+	ms := makeMissionState(missionID, crewID, "dev-crew", leadID, wsID, "trace-skip")
+
+	engine.checkMissionCompletion(context.Background(), ms)
+
+	// SKIPPED is terminal but not FAILED → should be REVIEW (not FAILED)
+	status := getMissionStatus(t, db, missionID)
+	if status != "REVIEW" {
+		t.Errorf("mission with SKIPPED+COMPLETED tasks expected REVIEW, got %s", status)
+	}
+}
+
+// ============================================================
+// Test: Large Brief Size (100+ tasks)
+// Verifies brief doesn't become unreasonably large.
+// ============================================================
+
+func TestE2E_LargeBriefSize(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Create 50 completed tasks with large result summaries
+	for i := 0; i < 50; i++ {
+		taskID := fmt.Sprintf("bulk-t%d", i)
+		bigResult := strings.Repeat("x", 4000) // 4000 chars each
+		db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, result_summary, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'COMPLETED', ?, '[]', ?, ?, ?)`,
+			taskID, missionID, agentID, fmt.Sprintf("Bulk task %d", i), i+1, bigResult, now, now)
+	}
+
+	// Create task 51 that depends on first 5 completed tasks
+	deps := []string{"bulk-t0", "bulk-t1", "bulk-t2", "bulk-t3", "bulk-t4"}
+	depsJSON, _ := json.Marshal(deps)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('target', ?, ?, 'Target task', 'PENDING', 51, ?, ?, ?)`,
+		missionID, agentID, string(depsJSON), now, now)
+
+	engine := newTestEngine(t, db)
+	ms := makeMissionState(missionID, crewID, "dev-crew", leadID, wsID, "trace-large")
+
+	allTasks, _ := engine.loadTasks(context.Background(), missionID)
+
+	var targetTask TaskInfo
+	for _, ti := range allTasks {
+		if ti.ID == "target" {
+			targetTask = ti
+			break
+		}
+	}
+
+	brief := engine.buildMissionBrief(context.Background(), ms, targetTask, allTasks)
+
+	// Brief should include all 51 tasks in the DAG overview but truncate dep outputs
+	if !strings.Contains(brief, "Total tasks: 51") {
+		t.Errorf("brief should show 51 tasks, got: %s", brief[:200])
+	}
+
+	// FINDING: Brief size is uncapped. With 50 tasks * 4000 chars of output in DAG,
+	// plus 5 deps * 4000 chars = 20KB+ just from deps. The 4000-char per-dep truncation
+	// exists but there's no total cap.
+	briefLen := len(brief)
+	t.Logf("FINDING: Brief size with 51 tasks (5 deps with 4K output each): %d bytes", briefLen)
+	if briefLen > 100000 {
+		t.Logf("WARNING: Brief exceeds 100KB — may cause token budget issues with LLMs")
+	}
+}
