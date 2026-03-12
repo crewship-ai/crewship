@@ -152,6 +152,9 @@ func (f *failContainer) Exec(_ context.Context, _ provider.ExecConfig) (*provide
 func (f *failContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return false, 1, nil
 }
+func (f *failContainer) CrewContainerName(slug string) string {
+	return "crewship-team-" + slug
+}
 
 func testBridgeWithContainer(t *testing.T, resolver ChatResolver, ctr provider.ContainerProvider) *Bridge {
 	t.Helper()

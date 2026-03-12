@@ -38,6 +38,8 @@ type ContainerProvider interface {
 	ContainerStatus(ctx context.Context, containerID string) (*ContainerStatus, error)
 	Exec(ctx context.Context, cfg ExecConfig) (*ExecResult, error)
 	ExecInspect(ctx context.Context, execID string) (bool, int, error)
+	// CrewContainerName returns the container name for a given crew slug.
+	CrewContainerName(slug string) string
 }
 
 // HostAddressProvider is an optional interface that container providers can

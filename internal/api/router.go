@@ -162,6 +162,11 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (r *Router) registerRoutes() {
 	ws := NewWorkspaceHandler(r.db, r.logger)
 	crews := NewCrewHandler(r.db, r.logger)
+	crewSocket := r.socketPath
+	if crewSocket == "" {
+		crewSocket = "/tmp/crewship.sock"
+	}
+	crews.SetSocketPath(crewSocket)
 	agents := NewAgentHandler(r.db, r.logger)
 
 	if r.license != nil {

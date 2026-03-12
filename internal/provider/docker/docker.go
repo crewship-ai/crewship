@@ -263,6 +263,14 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
+func (p *Provider) CrewContainerName(slug string) string {
+	prefix := p.cfg.ContainerPrefix
+	if prefix == "" {
+		prefix = "crewship"
+	}
+	return prefix + "-team-" + slug
+}
+
 // EnsureCrewRuntime creates or starts a Docker container for the given crew.
 // It applies security isolation (non-root UID, cap-drop ALL, read-only rootfs)
 // and resource limits (memory, CPU, PID). Returns the container ID.
@@ -276,11 +284,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
-	prefix := p.cfg.ContainerPrefix
-	if prefix == "" {
-		prefix = "crewship"
-	}
-	containerName := prefix + "-team-" + team.Slug
+	containerName := p.CrewContainerName(team.Slug)
 
 	p.logger.Debug("listing containers")
 	// Check if container already exists
