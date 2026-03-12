@@ -47,6 +47,17 @@ export default function OrchestrationPage() {
     fetchMissions()
   }, [fetchMissions])
 
+  // Auto-poll every 3s when any mission is active (MissionEngine updates DB directly)
+  const hasActive = useMemo(
+    () => missions.some((m) => m.status === "IN_PROGRESS" || m.status === "REVIEW"),
+    [missions]
+  )
+  useEffect(() => {
+    if (!hasActive) return
+    const interval = setInterval(fetchMissions, 3000)
+    return () => clearInterval(interval)
+  }, [hasActive, fetchMissions])
+
   const handleTaskUpdate = useCallback((event: RealtimeEvent) => {
     const { id, status, mission_id } = event.payload
     if (!id || !status) return

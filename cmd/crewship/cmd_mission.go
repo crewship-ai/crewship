@@ -179,6 +179,7 @@ var missionCreateCmd = &cobra.Command{
 		title, _ := cmd.Flags().GetString("title")
 		description, _ := cmd.Flags().GetString("description")
 		crewSlug, _ := cmd.Flags().GetString("crew")
+		leadSlug, _ := cmd.Flags().GetString("lead")
 
 		if title == "" {
 			return fmt.Errorf("--title is required")
@@ -193,7 +194,23 @@ var missionCreateCmd = &cobra.Command{
 			return err
 		}
 
-		body := map[string]interface{}{"title": title}
+		var leadAgentID string
+		if leadSlug != "" {
+			leadAgentID, err = resolveAgentID(client, leadSlug)
+			if err != nil {
+				return err
+			}
+		} else {
+			leadAgentID, err = findLeadAgent(client, crewID)
+			if err != nil {
+				return err
+			}
+		}
+
+		body := map[string]interface{}{
+			"title":         title,
+			"lead_agent_id": leadAgentID,
+		}
 		if description != "" {
 			body["description"] = description
 		}
@@ -329,6 +346,33 @@ func resolveMission(client *cli.Client, missionID string) (crewID, fullMissionID
 	return "", "", fmt.Errorf("mission not found: %s", missionID)
 }
 
+func findLeadAgent(client *cli.Client, crewID string) (string, error) {
+	resp, err := client.Get("/api/v1/agents")
+	if err != nil {
+		return "", fmt.Errorf("list agents: %w", err)
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return "", err
+	}
+
+	var agents []struct {
+		ID     string `json:"id"`
+		Slug   string `json:"slug"`
+		Role   string `json:"agent_role"`
+		CrewID string `json:"crew_id"`
+	}
+	if err := cli.ReadJSON(resp, &agents); err != nil {
+		return "", err
+	}
+
+	for _, a := range agents {
+		if a.CrewID == crewID && a.Role == "LEAD" {
+			return a.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no LEAD agent found in crew; use --lead to specify one")
+}
+
 var missionStartCmd = &cobra.Command{
 	Use:   "start <id>",
 	Short: "Start a PLANNING mission (kicks off the MissionEngine DAG loop)",
@@ -441,6 +485,7 @@ func init() {
 	missionCreateCmd.Flags().String("title", "", "Mission title (required)")
 	missionCreateCmd.Flags().String("description", "", "Mission description")
 	missionCreateCmd.Flags().String("crew", "", "Crew slug or ID (required)")
+	missionCreateCmd.Flags().String("lead", "", "Lead agent slug or ID (auto-detected if omitted)")
 
 	missionUpdateCmd.Flags().String("title", "", "Mission title")
 	missionUpdateCmd.Flags().String("description", "", "Mission description")

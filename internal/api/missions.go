@@ -159,12 +159,37 @@ func (h *MissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	traceID := "mission-" + generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err = h.db.ExecContext(r.Context(), `
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("begin tx", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, description, status, workflow_template, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'PLANNING', ?, ?, ?)`,
 		id, wsID, crewID, req.LeadAgentID, traceID, req.Title, req.Description, req.WorkflowTemplate, now, now)
 	if err != nil {
 		h.logger.Error("create mission", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// Create a synthetic chat so assignments can reference it (FK on chat_id)
+	_, err = tx.ExecContext(r.Context(), `
+		INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		id, req.LeadAgentID, wsID, "Mission: "+req.Title, now, now, now)
+	if err != nil {
+		h.logger.Error("create synthetic chat for mission", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("commit mission", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
@@ -694,7 +719,14 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	if h.hub != nil {
 		h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
 			Type:    "mission.updated",
+			Channel: "mission:" + missionID,
 			Payload: map[string]interface{}{"id": missionID, "status": "IN_PROGRESS"},
+		})
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "mission.updated",
+			Channel: wsChannel,
+			Payload: map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "IN_PROGRESS"},
 		})
 	}
 
@@ -815,6 +847,12 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 			Type:    "task.created",
 			Channel: "mission:" + missionID,
 			Payload: map[string]string{"id": id, "title": req.Title, "status": status},
+		})
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "task.updated",
+			Channel: wsChannel,
+			Payload: map[string]string{"id": id, "mission_id": missionID, "status": status},
 		})
 	}
 
@@ -1014,6 +1052,7 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 // unblockDependentTasks finds BLOCKED tasks whose all dependencies are now completed
 // and transitions them to PENDING.
 func (h *MissionHandler) unblockDependentTasks(r *http.Request, missionID, completedTaskID string) {
+	wsID := WorkspaceIDFromContext(r.Context())
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT id, depends_on FROM mission_tasks WHERE mission_id = ? AND status = 'BLOCKED'`,
 		missionID)
@@ -1070,6 +1109,12 @@ func (h *MissionHandler) unblockDependentTasks(r *http.Request, missionID, compl
 					Type:    "task.status",
 					Channel: "mission:" + missionID,
 					Payload: map[string]string{"id": id, "status": "PENDING"},
+				})
+				wsChannel := "workspace:" + wsID
+				h.hub.Broadcast(wsChannel, ws.ServerMessage{
+					Type:    "task.updated",
+					Channel: wsChannel,
+					Payload: map[string]string{"id": id, "mission_id": missionID, "status": "PENDING"},
 				})
 			}
 		}
