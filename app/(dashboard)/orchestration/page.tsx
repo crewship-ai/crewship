@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Workflow, Clock, Activity, RefreshCw, Focus, LayoutTemplate } from "lucide-react"
+import { Workflow, Clock, Activity, RefreshCw, Focus, LayoutTemplate, CheckCircle2, AlertTriangle } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
@@ -47,7 +47,6 @@ export default function OrchestrationPage() {
     fetchMissions()
   }, [fetchMissions])
 
-  // Granular WS update: patch single task status in local state
   const handleTaskUpdate = useCallback((event: RealtimeEvent) => {
     const { id, status, mission_id } = event.payload
     if (!id || !status) return
@@ -63,7 +62,6 @@ export default function OrchestrationPage() {
     )
   }, [])
 
-  // Mission-level events: full refetch (rare, important)
   const handleMissionUpdate = useCallback(() => {
     fetchMissions()
   }, [fetchMissions])
@@ -92,13 +90,13 @@ export default function OrchestrationPage() {
             <Skeleton key={i} className="h-24" />
           ))}
         </div>
-        <Skeleton className="h-[500px]" />
+        <Skeleton className="h-[600px]" />
       </div>
     )
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-5">
       <PageHeader
         title="Orchestration"
         description="Real-time workflow visualization and mission coordination"
@@ -127,29 +125,53 @@ export default function OrchestrationPage() {
         </div>
       </PageHeader>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="Active" value={stats.active} subtitle="Currently running" icon={Workflow} />
-        <StatCard title="Planning" value={stats.planning} subtitle="Being planned" icon={Clock} />
-        <StatCard title="Completed" value={stats.completed} subtitle="Successfully finished" icon={Activity} />
-        <StatCard title="Failed" value={stats.failed} subtitle="Need attention" icon={Activity} />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <StatCard
+          title="Active"
+          value={stats.active}
+          subtitle="Currently running"
+          icon={Workflow}
+          iconClassName="bg-blue-500/10 text-blue-500"
+        />
+        <StatCard
+          title="Planning"
+          value={stats.planning}
+          subtitle="Being planned"
+          icon={Clock}
+          iconClassName="bg-purple-500/10 text-purple-500"
+        />
+        <StatCard
+          title="Completed"
+          value={stats.completed}
+          subtitle="Successfully finished"
+          icon={CheckCircle2}
+          iconClassName="bg-green-500/10 text-green-500"
+        />
+        <StatCard
+          title="Failed"
+          value={stats.failed}
+          subtitle="Need attention"
+          icon={AlertTriangle}
+          iconClassName="bg-red-500/10 text-red-500"
+        />
       </div>
 
-      <Tabs defaultValue="graph" className="space-y-4">
+      <Tabs defaultValue="graph" className="space-y-3">
         <TabsList>
-          <TabsTrigger value="graph" className="gap-2">
-            <Workflow className="h-4 w-4" />
+          <TabsTrigger value="graph" className="gap-1.5">
+            <Workflow className="h-3.5 w-3.5" />
             Graph
           </TabsTrigger>
-          <TabsTrigger value="timeline" className="gap-2">
-            <Clock className="h-4 w-4" />
+          <TabsTrigger value="timeline" className="gap-1.5">
+            <Clock className="h-3.5 w-3.5" />
             Timeline
           </TabsTrigger>
-          <TabsTrigger value="activity" className="gap-2">
-            <Activity className="h-4 w-4" />
+          <TabsTrigger value="activity" className="gap-1.5">
+            <Activity className="h-3.5 w-3.5" />
             Activity
           </TabsTrigger>
-          <TabsTrigger value="templates" className="gap-2">
-            <LayoutTemplate className="h-4 w-4" />
+          <TabsTrigger value="templates" className="gap-1.5">
+            <LayoutTemplate className="h-3.5 w-3.5" />
             Templates
           </TabsTrigger>
         </TabsList>

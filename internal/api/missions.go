@@ -1,25 +1,29 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 type MissionHandler struct {
-	db     *sql.DB
-	hub    *ws.Hub
-	logger *slog.Logger
+	db            *sql.DB
+	hub           *ws.Hub
+	missionEngine *orchestrator.MissionEngine
+	logger        *slog.Logger
 }
 
-func NewMissionHandler(db *sql.DB, hub *ws.Hub, logger *slog.Logger) *MissionHandler {
-	return &MissionHandler{db: db, hub: hub, logger: logger}
+func NewMissionHandler(db *sql.DB, hub *ws.Hub, me *orchestrator.MissionEngine, logger *slog.Logger) *MissionHandler {
+	return &MissionHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }
 
 type missionResponse struct {
@@ -637,6 +641,64 @@ func (h *MissionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Start handles POST /api/v1/crews/{crewId}/missions/{missionId}/start
+// Transitions a PLANNING mission to IN_PROGRESS and kicks off the MissionEngine.
+func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	crewID := r.PathValue("crewId")
+	missionID := r.PathValue("missionId")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	var currentStatus string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+		missionID, crewID, wsID).Scan(&currentStatus)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			return
+		}
+		h.logger.Error("get mission for start", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if currentStatus != "PLANNING" {
+		writeProblem(w, r, http.StatusBadRequest,
+			fmt.Sprintf("cannot start mission in %s state, must be PLANNING", currentStatus))
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.ExecContext(r.Context(),
+		`UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ?`,
+		now, missionID); err != nil {
+		h.logger.Error("update mission status", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to start mission")
+		return
+	}
+
+	if h.missionEngine != nil {
+		if err := h.missionEngine.StartMission(context.Background(), missionID); err != nil {
+			h.logger.Error("mission engine start failed", "error", err, "mission_id", missionID)
+		}
+	}
+
+	if h.hub != nil {
+		h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
+			Type:    "mission.updated",
+			Payload: map[string]interface{}{"id": missionID, "status": "IN_PROGRESS"},
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"id": missionID, "status": "IN_PROGRESS"})
 }
 
 // CreateTask handles POST /api/v1/crews/{crewId}/missions/{missionId}/tasks

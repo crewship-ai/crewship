@@ -42,7 +42,7 @@ func TestMissionCreate(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	body := bytes.NewBufferString(`{"title":"Build Feature X","description":"Implement feature X","lead_agent_id":"` + leadID + `"}`)
 	req := httptest.NewRequest("POST", "/api/v1/crews/"+crewID+"/missions", body)
@@ -83,7 +83,7 @@ func TestMissionCreate_Forbidden(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	leadID := seedMissionAgent(t, db, wsID, crewID, "lead-1", "LEAD")
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	body := bytes.NewBufferString(`{"title":"Test","lead_agent_id":"` + leadID + `"}`)
 	req := httptest.NewRequest("POST", "/api/v1/crews/"+crewID+"/missions", body)
@@ -108,7 +108,7 @@ func TestMissionCreate_MissingFields(t *testing.T) {
 	wsID := seedTestWorkspace(t, db, userID)
 	crewID := seedMissionCrew(t, db, wsID)
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	body := bytes.NewBufferString(`{"description":"no title"}`)
 	req := httptest.NewRequest("POST", "/api/v1/crews/"+crewID+"/missions", body)
@@ -134,7 +134,7 @@ func TestMissionCreate_LeadRequired(t *testing.T) {
 	crewID := seedMissionCrew(t, db, wsID)
 	agentID := seedMissionAgent(t, db, wsID, crewID, "agent-1", "AGENT")
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	body := bytes.NewBufferString(`{"title":"Test","lead_agent_id":"` + agentID + `"}`)
 	req := httptest.NewRequest("POST", "/api/v1/crews/"+crewID+"/missions", body)
@@ -168,7 +168,7 @@ func TestMissionList(t *testing.T) {
 		t.Fatalf("insert mission: %v", err)
 	}
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	req := httptest.NewRequest("GET", "/api/v1/crews/"+crewID+"/missions?workspace_id="+wsID, nil)
 	req.SetPathValue("crewId", crewID)
@@ -213,7 +213,7 @@ func TestMissionList_StatusFilter(t *testing.T) {
 		t.Fatalf("insert mission m2: %v", err)
 	}
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	req := httptest.NewRequest("GET", "/api/v1/crews/"+crewID+"/missions?status=IN_PROGRESS", nil)
 	req.SetPathValue("crewId", crewID)
@@ -255,7 +255,7 @@ func TestMissionGet(t *testing.T) {
 		t.Fatalf("insert task: %v", err)
 	}
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	req := httptest.NewRequest("GET", "/api/v1/crews/"+crewID+"/missions/m1", nil)
 	req.SetPathValue("crewId", crewID)
@@ -292,7 +292,7 @@ func TestMissionGet_NotFound(t *testing.T) {
 	wsID := seedTestWorkspace(t, db, userID)
 	crewID := seedMissionCrew(t, db, wsID)
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	req := httptest.NewRequest("GET", "/api/v1/crews/"+crewID+"/missions/nonexistent", nil)
 	req.SetPathValue("crewId", crewID)
@@ -323,7 +323,7 @@ func TestMissionUpdate(t *testing.T) {
 		t.Fatalf("insert mission: %v", err)
 	}
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	body := bytes.NewBufferString(`{"status":"IN_PROGRESS"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/crews/"+crewID+"/missions/m1", body)
@@ -363,7 +363,7 @@ func TestMissionUpdate_InvalidTransition(t *testing.T) {
 		t.Fatalf("insert mission: %v", err)
 	}
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	body := bytes.NewBufferString(`{"status":"COMPLETED"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/crews/"+crewID+"/missions/m1", body)
@@ -395,7 +395,7 @@ func TestMissionTaskCreate(t *testing.T) {
 		t.Fatalf("insert mission: %v", err)
 	}
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	body := bytes.NewBufferString(`{"title":"Write tests","task_order":1}`)
 	req := httptest.NewRequest("POST", "/api/v1/crews/"+crewID+"/missions/m1/tasks", body)
@@ -442,7 +442,7 @@ func TestMissionTaskUpdate(t *testing.T) {
 		t.Fatalf("insert task: %v", err)
 	}
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	body := bytes.NewBufferString(`{"status":"IN_PROGRESS"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/crews/"+crewID+"/missions/m1/tasks/mt1", body)
@@ -493,7 +493,7 @@ func TestMissionTaskUpdate_UnblocksDependents(t *testing.T) {
 		t.Fatalf("insert task mt2: %v", err)
 	}
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	// Complete mt1
 	body := bytes.NewBufferString(`{"status":"COMPLETED","result_summary":"Done"}`)
@@ -537,7 +537,7 @@ func TestMissionListAll(t *testing.T) {
 		t.Fatalf("insert mission: %v", err)
 	}
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	req := httptest.NewRequest("GET", "/api/v1/missions?workspace_id="+wsID, nil)
 	ctx := withUser(req.Context(), &AuthUser{ID: userID})
@@ -574,7 +574,7 @@ func TestMissionDelete(t *testing.T) {
 		t.Fatalf("insert mission: %v", err)
 	}
 
-	handler := NewMissionHandler(db, nil, logger)
+	handler := NewMissionHandler(db, nil, nil, logger)
 
 	req := httptest.NewRequest("DELETE", "/api/v1/crews/"+crewID+"/missions/m1", nil)
 	req.SetPathValue("crewId", crewID)

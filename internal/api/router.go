@@ -252,13 +252,20 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("DELETE /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Delete))))
 
 	// Missions
-	missions := NewMissionHandler(r.db, r.hub, r.logger)
+	var missionEngineForPublic *orchestrator.MissionEngine
+	if r.missionCallback != nil {
+		if mc, ok := r.missionCallback.(*orchestrator.MissionEngine); ok {
+			missionEngineForPublic = mc
+		}
+	}
+	missions := NewMissionHandler(r.db, r.hub, missionEngineForPublic, r.logger)
 	r.mux.Handle("GET /api/v1/missions", authed(wsCtx(http.HandlerFunc(missions.ListAll))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/missions", authed(wsCtx(http.HandlerFunc(missions.List))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/missions", authed(wsCtx(http.HandlerFunc(missions.Create))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/missions/{missionId}", authed(wsCtx(http.HandlerFunc(missions.Get))))
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/missions/{missionId}", authed(wsCtx(http.HandlerFunc(missions.Update))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/missions/{missionId}", authed(wsCtx(http.HandlerFunc(missions.Delete))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/missions/{missionId}/start", authed(wsCtx(http.HandlerFunc(missions.Start))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/missions/{missionId}/tasks", authed(wsCtx(http.HandlerFunc(missions.CreateTask))))
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}", authed(wsCtx(http.HandlerFunc(missions.UpdateTask))))
 

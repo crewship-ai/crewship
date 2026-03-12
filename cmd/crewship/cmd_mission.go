@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -328,6 +329,112 @@ func resolveMission(client *cli.Client, missionID string) (crewID, fullMissionID
 	return "", "", fmt.Errorf("mission not found: %s", missionID)
 }
 
+var missionStartCmd = &cobra.Command{
+	Use:   "start <id>",
+	Short: "Start a PLANNING mission (kicks off the MissionEngine DAG loop)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		crewID, fullID, err := resolveMission(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		resp, err := client.Post("/api/v1/crews/"+crewID+"/missions/"+fullID+"/start", nil)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+
+		cli.PrintSuccess(fmt.Sprintf("Mission %s started — MissionEngine DAG loop is running.", args[0]))
+		return nil
+	},
+}
+
+var missionAddTaskCmd = &cobra.Command{
+	Use:   "add-task <missionId>",
+	Short: "Add a task to a mission",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		title, _ := cmd.Flags().GetString("title")
+		if title == "" {
+			return fmt.Errorf("--title is required")
+		}
+
+		client := newAPIClient()
+		crewID, fullMissionID, err := resolveMission(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		body := map[string]interface{}{
+			"title": title,
+		}
+
+		if desc, _ := cmd.Flags().GetString("description"); desc != "" {
+			body["description"] = desc
+		}
+		if order, _ := cmd.Flags().GetInt("order"); order > 0 {
+			body["task_order"] = order
+		}
+		if agentSlug, _ := cmd.Flags().GetString("agent"); agentSlug != "" {
+			agentID, err := resolveAgentID(client, agentSlug)
+			if err != nil {
+				return err
+			}
+			body["assigned_agent_id"] = agentID
+		}
+		if deps, _ := cmd.Flags().GetString("depends-on"); deps != "" {
+			var depIDs []string
+			for _, d := range strings.Split(deps, ",") {
+				d = strings.TrimSpace(d)
+				if d != "" {
+					depIDs = append(depIDs, d)
+				}
+			}
+			if len(depIDs) > 0 {
+				body["depends_on"] = depIDs
+			}
+		}
+
+		resp, err := client.Post("/api/v1/crews/"+crewID+"/missions/"+fullMissionID+"/tasks", body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var created struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		}
+		if err := cli.ReadJSON(resp, &created); err != nil {
+			return err
+		}
+
+		cli.PrintSuccess(fmt.Sprintf("Task added: %s (%s)", created.Title, created.ID))
+		return nil
+	},
+}
+
 func init() {
 	missionListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
 
@@ -341,9 +448,17 @@ func init() {
 
 	missionDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
+	missionAddTaskCmd.Flags().String("title", "", "Task title (required)")
+	missionAddTaskCmd.Flags().String("description", "", "Task description")
+	missionAddTaskCmd.Flags().String("agent", "", "Agent slug or ID to assign")
+	missionAddTaskCmd.Flags().Int("order", 0, "Task order (1-based)")
+	missionAddTaskCmd.Flags().String("depends-on", "", "Comma-separated task IDs this task depends on")
+
 	missionCmd.AddCommand(missionListCmd)
 	missionCmd.AddCommand(missionGetCmd)
 	missionCmd.AddCommand(missionCreateCmd)
 	missionCmd.AddCommand(missionUpdateCmd)
 	missionCmd.AddCommand(missionDeleteCmd)
+	missionCmd.AddCommand(missionStartCmd)
+	missionCmd.AddCommand(missionAddTaskCmd)
 }
