@@ -214,7 +214,7 @@ function getChatFileIcon(name: string, isDir: boolean, isOpen?: boolean) {
   }
 }
 
-const PREVIEWABLE_EXTS = new Set(["py","js","jsx","ts","tsx","json","yaml","yml","md","txt","sh","bash","html","css","xml","svg","go","rs","toml","sql","cfg","ini","env","log","csv"])
+const PREVIEWABLE_EXTS = new Set(["py","js","jsx","ts","tsx","json","yaml","yml","md","txt","sh","bash","html","css","xml","svg","go","rs","toml","sql","cfg","ini","log","csv"])
 
 function isPreviewable(name: string): boolean {
   const ext = name.split(".").pop()?.toLowerCase() ?? ""
@@ -317,9 +317,9 @@ function RightPanel({ agentId, workspaceId, files, initialTab, style }: RightPan
         const relPath = path.startsWith(basePrefix) ? path.slice(basePrefix.length) : path
         setLoadingDirs((p) => new Set(p).add(path))
         fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(relPath)}`)
-          .then((r) => r.ok ? r.json() : [])
+          .then((r) => { if (!r.ok) throw new Error("Failed"); return r.json() })
           .then((data: FileEntry[] | null) => setTree((prev) => insertTreeChildren(prev, path, data ?? [])))
-          .catch(() => {})
+          .catch(() => { toast.error("Failed to load folder") })
           .finally(() => setLoadingDirs((p) => { const n = new Set(p); n.delete(path); return n }))
       }
       return next
