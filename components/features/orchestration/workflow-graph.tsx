@@ -44,6 +44,9 @@ function getStatusColor(status: string): string {
     case "FAILED": return "#ef4444"
     case "BLOCKED": return "#f59e0b"
     case "PENDING": return "#94a3b8"
+    case "PLANNING": return "#94a3b8"
+    case "REVIEW": return "#a855f7"
+    case "CANCELLED": return "#6b7280"
     case "SKIPPED": return "#6b7280"
     default: return "#94a3b8"
   }
@@ -68,16 +71,20 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
 
   for (const mission of activeMissions) {
     const tasks = mission.tasks || []
-    if (tasks.length === 0) continue
 
     const totalCost = tasks.reduce((sum, t) => sum + (t.estimated_cost || 0), 0)
     const totalTokens = tasks.reduce((sum, t) => sum + (t.token_count || 0), 0)
+    const statusLabel = tasks.length === 0 && mission.status === "PLANNING"
+      ? ` — Planning...`
+      : totalTokens > 0
+        ? ` (${(totalTokens / 1000).toFixed(1)}k tok · $${totalCost.toFixed(3)})`
+        : ""
 
     nodes.push({
       id: `mission-${mission.id}`,
       type: "default",
       position: { x: 0, y: missionY },
-      data: { label: `${mission.title}${totalTokens > 0 ? ` (${(totalTokens / 1000).toFixed(1)}k tok · $${totalCost.toFixed(3)})` : ""}` },
+      data: { label: `${mission.title}${statusLabel}` },
       style: {
         background: "hsl(var(--muted))",
         border: `2px solid ${getStatusColor(mission.status)}`,
@@ -86,11 +93,16 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
         fontSize: "13px",
         fontWeight: 600,
         color: "hsl(var(--foreground))",
-        width: 220,
+        width: 240,
       },
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
     })
+
+    if (tasks.length === 0) {
+      missionY += 80
+      continue
+    }
 
     const tasksByOrder = [...tasks].sort((a, b) => a.task_order - b.task_order)
     const deps = new Map<string, string[]>()
