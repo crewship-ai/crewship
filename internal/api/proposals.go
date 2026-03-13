@@ -279,7 +279,9 @@ func (h *ProposalHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("create missions from proposal", "error", err)
 		// Rollback the approval since mission creation failed
-		h.db.ExecContext(r.Context(), `UPDATE mission_proposals SET status = 'PENDING', reviewed_by = NULL, reviewed_at = NULL, review_notes = NULL, updated_at = ? WHERE id = ?`, now, proposalID) //nolint:errcheck
+		if _, rbErr := h.db.ExecContext(r.Context(), `UPDATE mission_proposals SET status = 'PENDING', reviewed_by = NULL, reviewed_at = NULL, review_notes = NULL, updated_at = ? WHERE id = ?`, now, proposalID); rbErr != nil {
+			h.logger.Error("rollback proposal approval", "proposalID", proposalID, "error", rbErr)
+		}
 		writeProblem(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to create missions: %v", err))
 		return
 	}
@@ -309,29 +311,26 @@ func (h *ProposalHandler) Reject(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	p, err := h.loadProposal(r.Context(), wsID, proposalID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Proposal not found")
-			return
-		}
-		h.logger.Error("load proposal for reject", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if p.Status != "PENDING" {
-		writeProblem(w, r, http.StatusConflict, fmt.Sprintf("proposal is %s, only PENDING proposals can be rejected", p.Status))
-		return
-	}
-
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = h.db.ExecContext(r.Context(), `
+
+	// Atomic claim: only one reject can succeed (WHERE status = 'PENDING')
+	res, err := h.db.ExecContext(r.Context(), `
 		UPDATE mission_proposals SET status = 'REJECTED', reviewed_by = ?, reviewed_at = ?, review_notes = ?, updated_at = ?
-		WHERE id = ?`,
-		nilIfEmpty(req.ReviewedBy), now, nilIfEmpty(req.ReviewNotes), now, proposalID)
+		WHERE id = ? AND workspace_id = ? AND status = 'PENDING'`,
+		nilIfEmpty(req.ReviewedBy), now, nilIfEmpty(req.ReviewNotes), now, proposalID, wsID)
 	if err != nil {
 		h.logger.Error("reject proposal", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		p, loadErr := h.loadProposal(r.Context(), wsID, proposalID)
+		if loadErr != nil {
+			writeProblem(w, r, http.StatusNotFound, "Proposal not found")
+			return
+		}
+		writeProblem(w, r, http.StatusConflict, fmt.Sprintf("proposal is %s, only PENDING proposals can be rejected", p.Status))
 		return
 	}
 
@@ -405,9 +404,9 @@ func (h *ProposalHandler) createMissionsFromProposal(ctx context.Context, wsID, 
 		// Create synthetic chat for FK
 		chatID := missionID
 		_, err = tx.ExecContext(ctx, `
-			INSERT INTO chats (id, workspace_id, agent_id, status, created_at, updated_at)
-			VALUES (?, ?, ?, 'active', ?, ?)`,
-			chatID, wsID, leadAgentID, now, now)
+			INSERT INTO chats (id, workspace_id, agent_id, title, mode, status, started_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'MISSION', 'active', ?, ?, ?)`,
+			chatID, wsID, leadAgentID, "Mission: "+pm.Title, now, now, now)
 		if err != nil {
 			return nil, fmt.Errorf("insert chat for mission %q: %w", pm.Title, err)
 		}
@@ -427,12 +426,17 @@ func (h *ProposalHandler) createMissionsFromProposal(ctx context.Context, wsID, 
 				assignedAgentID = &t.AssignedAgentID
 			}
 
+			taskStatus := "PENDING"
+			if len(t.DependsOn) > 0 {
+				taskStatus = "BLOCKED"
+			}
+
 			_, err = tx.ExecContext(ctx, `
 				INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, description,
 				                           status, task_order, depends_on, max_iterations, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?)`,
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				taskID, missionID, assignedAgentID, t.Title,
-				nilIfEmpty(t.Description), t.TaskOrder, depsJSON, t.MaxIterations, now, now)
+				nilIfEmpty(t.Description), taskStatus, t.TaskOrder, depsJSON, t.MaxIterations, now, now)
 			if err != nil {
 				return nil, fmt.Errorf("insert task %q: %w", t.Title, err)
 			}

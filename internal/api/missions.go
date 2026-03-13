@@ -720,7 +720,14 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	if h.missionEngine != nil {
 		if err := h.missionEngine.StartMission(context.Background(), missionID); err != nil {
-			h.logger.Error("mission engine start failed", "error", err, "mission_id", missionID)
+			h.logger.Error("mission engine start failed, rolling back to PLANNING", "error", err, "mission_id", missionID)
+			if _, rbErr := h.db.ExecContext(r.Context(),
+				`UPDATE missions SET status = 'PLANNING', updated_at = ? WHERE id = ?`,
+				now, missionID); rbErr != nil {
+				h.logger.Error("rollback mission status", "error", rbErr, "mission_id", missionID)
+			}
+			writeProblem(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to start mission engine: %v", err))
+			return
 		}
 	}
 
@@ -1415,9 +1422,9 @@ func (h *MissionHandler) Clone(w http.ResponseWriter, r *http.Request) {
 
 	// Create synthetic chat (same pattern as Create)
 	if _, err = tx.ExecContext(r.Context(),
-		`INSERT INTO chats (id, agent_id, workspace_id, title, mode, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, 'MISSION', ?, ?)`,
-		newMissionID, m.LeadAgentID, wsID, "Mission: "+m.Title+" (clone)", now, now); err != nil {
+		`INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 'MISSION', 'active', ?, ?, ?)`,
+		newMissionID, m.LeadAgentID, wsID, "Mission: "+m.Title+" (clone)", now, now, now); err != nil {
 		h.logger.Error("create synthetic chat for clone", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Failed to create mission")
 		return

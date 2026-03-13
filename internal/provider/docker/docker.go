@@ -370,12 +370,12 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	p.logger.Debug("image ok, creating dirs")
 	outputPath := filepath.Join(p.cfg.OutputBasePath, team.ID)
-	if err := os.MkdirAll(outputPath, 0750); err != nil {
+	if err := os.MkdirAll(outputPath, 0777); err != nil {
 		return "", fmt.Errorf("create output dir: %w", err)
 	}
 
 	workspacePath := filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID)
-	if err := os.MkdirAll(workspacePath, 0750); err != nil {
+	if err := os.MkdirAll(workspacePath, 0777); err != nil {
 		return "", fmt.Errorf("create workspace dir: %w", err)
 	}
 	// Best-effort chown so container user (1001:1001) can write
@@ -385,7 +385,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	crewPath := filepath.Join(p.cfg.OutputBasePath, "crews", team.ID)
 	for _, sub := range []string{"shared", "agents"} {
-		if err := os.MkdirAll(filepath.Join(crewPath, sub), 0750); err != nil {
+		if err := os.MkdirAll(filepath.Join(crewPath, sub), 0777); err != nil {
 			return "", fmt.Errorf("create crew dir %s: %w", sub, err)
 		}
 	}
