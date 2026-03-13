@@ -717,11 +717,7 @@ var crewConnectionsCmd = &cobra.Command{
 		headers := []string{"ID", "FROM", "TO", "DIRECTION", "STATUS", "CREATED"}
 		var rows [][]string
 		for _, c := range conns {
-			id := c.ID
-			if len(id) > 12 {
-				id = id[:12]
-			}
-			rows = append(rows, []string{id, c.FromCrewSlug, c.ToCrewSlug, c.Direction, c.Status, c.CreatedAt})
+			rows = append(rows, []string{c.ID, c.FromCrewSlug, c.ToCrewSlug, c.Direction, c.Status, c.CreatedAt})
 		}
 		return f.Auto(conns, headers, rows)
 	},

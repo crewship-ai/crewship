@@ -90,17 +90,6 @@ export function AnimatedEdge({
         </>
       )}
 
-      {/* CSS keyframes injected once via style tag */}
-      <style>{`
-        @keyframes edgeFlow {
-          from { stroke-dashoffset: 28; }
-          to { stroke-dashoffset: 0; }
-        }
-        @keyframes edgeFlowSlow {
-          from { stroke-dashoffset: 20; }
-          to { stroke-dashoffset: 0; }
-        }
-      `}</style>
     </>
   )
 }

@@ -41,7 +41,7 @@ export function TaskDetailPanel({ task, onClose }: TaskDetailPanelProps) {
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <CardTitle className="text-sm font-semibold leading-tight pr-2">{task.title}</CardTitle>
-          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={onClose}>
+          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={onClose} aria-label="Close task details">
             <X className="h-4 w-4" />
           </Button>
         </div>

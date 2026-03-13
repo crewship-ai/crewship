@@ -139,6 +139,8 @@ func (e *MissionEngine) StartMission(ctx context.Context, missionID string) erro
 		e.mu.Unlock()
 		return fmt.Errorf("mission %s is already active", missionID)
 	}
+	// Insert sentinel to prevent concurrent starts (TOCTOU race)
+	e.active[missionID] = &missionState{ID: missionID}
 	e.mu.Unlock()
 
 	var ms missionState
@@ -151,6 +153,9 @@ func (e *MissionEngine) StartMission(ctx context.Context, missionID string) erro
 		&ms.ID, &ms.CrewID, &ms.LeadAgentID, &ms.TraceID, &ms.WorkspaceID, &crewSlug,
 	)
 	if err != nil {
+		e.mu.Lock()
+		delete(e.active, missionID)
+		e.mu.Unlock()
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("mission not found: %s", missionID)
 		}
@@ -247,8 +252,11 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 				if countErr != nil {
 					e.logger.Error("count tasks", "mission_id", ms.ID, "error", countErr)
 				} else if taskCount == 0 {
-					e.dispatchLeadPlanning(ctx, ms)
-					ms.planningDispatched = true
+					if planErr := e.dispatchLeadPlanning(ctx, ms); planErr != nil {
+						e.logger.Error("lead planning failed", "mission_id", ms.ID, "error", planErr)
+					} else {
+						ms.planningDispatched = true
+					}
 					continue // wait for lead to create tasks
 				}
 			}
@@ -1042,7 +1050,7 @@ func (e *MissionEngine) countTasks(ctx context.Context, missionID string) (int, 
 // 2. Break it into tasks using /mission/create or /assign
 // 3. Assign tasks to crew members based on their skills
 // The engine then picks up the created tasks on the next loop iteration.
-func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionState) {
+func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionState) error {
 	// Load mission details for the planning prompt
 	var title, desc sql.NullString
 	e.db.QueryRowContext(ctx,
@@ -1055,7 +1063,7 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 		ms.LeadAgentID).Scan(&agentSlug)
 	if err != nil {
 		e.logger.Error("lead planning: resolve lead agent", "error", err, "mission_id", ms.ID)
-		return
+		return fmt.Errorf("resolve lead agent: %w", err)
 	}
 
 	// Build the planning prompt
@@ -1103,7 +1111,7 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	)
 	if err != nil {
 		e.logger.Error("create planning assignment", "error", err, "mission_id", ms.ID)
-		return
+		return fmt.Errorf("create planning assignment: %w", err)
 	}
 
 	e.logger.Info("dispatching lead planning",
@@ -1149,6 +1157,7 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	}
 
 	e.broadcastMissionStatus(ms, "IN_PROGRESS")
+	return nil
 }
 
 // ValidateDAG checks all mission tasks for:

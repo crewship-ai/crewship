@@ -359,7 +359,9 @@ func TestE2E_LeadPlanning_EmptyMission(t *testing.T) {
 		t.Fatalf("expected 0 tasks, got %d", taskCount)
 	}
 
-	engine.dispatchLeadPlanning(context.Background(), ms)
+	if err := engine.dispatchLeadPlanning(context.Background(), ms); err != nil {
+		t.Fatalf("dispatchLeadPlanning: %v", err)
+	}
 	ms.planningDispatched = true
 
 	d := waitForDispatch(t, disp.ch, 2*time.Second)

@@ -106,15 +106,23 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Verify both crews exist in this workspace
 	var fromExists, toExists bool
-	h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		req.FromCrewID, wsID).Scan(&fromExists)
-	h.db.QueryRowContext(r.Context(),
+		req.FromCrewID, wsID).Scan(&fromExists); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		h.logger.Error("check from_crew", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		req.ToCrewID, wsID).Scan(&toExists)
+		req.ToCrewID, wsID).Scan(&toExists); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		h.logger.Error("check to_crew", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 
 	if !fromExists || !toExists {
-		writeProblem(w, r, http.StatusNotFound, "One or both crews not found")
+		writeProblem(w, r, http.StatusNotFound, "One or both crews not found in this workspace")
 		return
 	}
 
@@ -199,7 +207,7 @@ func ConnectedCrewIDs(ctx context.Context, db *sql.DB, crewID string) ([]string,
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			continue
+			return nil, fmt.Errorf("scan connected crew: %w", err)
 		}
 		ids = append(ids, id)
 	}

@@ -376,6 +376,13 @@ func (h *AssignmentHandler) finishAssignment(
 		}
 	}
 
+	// Notify MissionEngine first — must run regardless of websocket availability
+	if h.missionCallback != nil {
+		if err := h.missionCallback.OnAssignmentCompleted(ctx, assignmentID, status, result, errMsg); err != nil {
+			h.logger.Error("mission callback failed", "error", err, "assignment_id", assignmentID)
+		}
+	}
+
 	if h.hub == nil {
 		return
 	}
@@ -403,7 +410,7 @@ func (h *AssignmentHandler) finishAssignment(
 	}
 
 	// Broadcast to workspace channel for real-time dashboard updates
-	if h.hub != nil && workspaceID != "" {
+	if workspaceID != "" {
 		wsChannel := "workspace:" + workspaceID
 		h.hub.Broadcast(wsChannel, ws.ServerMessage{
 			Type:    "assignment.updated",
@@ -417,13 +424,6 @@ func (h *AssignmentHandler) finishAssignment(
 	}
 
 	h.logger.Info("assignment finished", "assignment_id", assignmentID, "status", status)
-
-	// Notify MissionEngine if this assignment is linked to a mission task
-	if h.missionCallback != nil {
-		if err := h.missionCallback.OnAssignmentCompleted(ctx, assignmentID, status, result, errMsg); err != nil {
-			h.logger.Error("mission callback failed", "error", err, "assignment_id", assignmentID)
-		}
-	}
 }
 
 // List handles GET /api/v1/crews/{crewId}/assignments.
@@ -588,19 +588,13 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 		LeadPlanning: req.LeadPlanning,
 	}
 
-	briefLen := len(body.Task)
-	briefPreview := body.Task
-	if len(briefPreview) > 300 {
-		briefPreview = briefPreview[:300] + "..."
-	}
 	h.logger.Info("dispatching mission assignment",
 		"assignment_id", req.AssignmentID,
 		"mission_id", req.MissionID,
 		"trace_id", req.TraceID,
 		"agent", target.Slug,
 		"crew", target.CrewSlug,
-		"brief_len", briefLen,
-		"brief_preview", briefPreview,
+		"brief_len", len(body.Task),
 	)
 
 	h.runAssignment(ctx, req.AssignmentID, body, target, creds)

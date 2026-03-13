@@ -49,22 +49,38 @@ func (s *Server) handleListCrews(w http.ResponseWriter, r *http.Request) {
 // handleListCrewConnections proxies GET /crew-connections to the crewshipd API.
 // Used by COORDINATOR agents to discover crew connection topology.
 func (s *Server) handleListCrewConnections(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
 	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/crew-connections?workspace_id="+s.ipc.WorkspaceID)
 }
 
 // handleCreateProposal proxies POST /proposal to the crewshipd API.
 // Used by COORDINATOR agents to submit mission proposals for human review.
 func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
 	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/mission-proposals?workspace_id="+s.ipc.WorkspaceID)
 }
 
 // handleListProposals proxies GET /proposals to the crewshipd API.
 func (s *Server) handleListProposals(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
 	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/mission-proposals?workspace_id="+s.ipc.WorkspaceID)
 }
 
 // handleListAllMissions proxies GET /missions/all to the crewshipd API.
 func (s *Server) handleListAllMissions(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
 	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/missions?workspace_id="+s.ipc.WorkspaceID)
 }
 

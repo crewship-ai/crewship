@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -405,6 +406,46 @@ var missionStartCmd = &cobra.Command{
 	},
 }
 
+var missionResumeCmd = &cobra.Command{
+	Use:   "resume <id>",
+	Short: "Resume a FAILED mission from the point of failure (resets only failed tasks + dependents)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		crewID, fullID, err := resolveMission(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		resp, err := client.Post("/api/v1/crews/"+crewID+"/missions/"+fullID+"/resume", nil)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
+
+		resetCount := 0
+		if v, ok := result["reset_tasks"]; ok {
+			if f, ok := v.(float64); ok {
+				resetCount = int(f)
+			}
+		}
+		cli.PrintSuccess(fmt.Sprintf("Mission %s resumed — %d task(s) reset, DAG engine running.", args[0], resetCount))
+		return nil
+	},
+}
+
 var missionAddTaskCmd = &cobra.Command{
 	Use:   "add-task <missionId>",
 	Short: "Add a task to a mission",
@@ -505,5 +546,6 @@ func init() {
 	missionCmd.AddCommand(missionUpdateCmd)
 	missionCmd.AddCommand(missionDeleteCmd)
 	missionCmd.AddCommand(missionStartCmd)
+	missionCmd.AddCommand(missionResumeCmd)
 	missionCmd.AddCommand(missionAddTaskCmd)
 }

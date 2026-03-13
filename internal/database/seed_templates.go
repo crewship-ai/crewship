@@ -107,7 +107,7 @@ func SeedBuiltinTemplates(ctx context.Context, db *sql.DB, workspaceID string, l
 		id := generateSeedID("wt")
 		now := time.Now().UTC().Format(time.RFC3339)
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO workflow_templates (id, workspace_id, name, description, template_json, icon, color, is_builtin, created_at, updated_at)
+			INSERT OR IGNORE INTO workflow_templates (id, workspace_id, name, description, template_json, icon, color, is_builtin, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
 			id, workspaceID, bt.name, bt.description, string(tmplJSON), bt.icon, bt.color, now, now); err != nil {
 			logger.Warn("failed to seed builtin template", "name", bt.name, "error", err)

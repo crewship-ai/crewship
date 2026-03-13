@@ -726,7 +726,7 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 				now, missionID); rbErr != nil {
 				h.logger.Error("rollback mission status", "error", rbErr, "mission_id", missionID)
 			}
-			writeProblem(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to start mission engine: %v", err))
+			writeProblem(w, r, http.StatusInternalServerError, "Failed to start mission engine")
 			return
 		}
 	}
@@ -993,7 +993,39 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.DependsOn != nil {
-		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET depends_on = ?, updated_at = ? WHERE id = ?`, *req.DependsOn, now, taskID); err != nil {
+		var depIDs []string
+		if err := json.Unmarshal([]byte(*req.DependsOn), &depIDs); err != nil {
+			writeProblem(w, r, http.StatusBadRequest, "depends_on must be a JSON array of task IDs")
+			return
+		}
+		for _, dep := range depIDs {
+			if dep == taskID {
+				writeProblem(w, r, http.StatusBadRequest, "Task cannot depend on itself")
+				return
+			}
+			var depExists bool
+			if qErr := tx.QueryRowContext(r.Context(),
+				`SELECT 1 FROM mission_tasks WHERE id = ? AND mission_id = ?`, dep, missionID).Scan(&depExists); qErr != nil {
+				writeProblem(w, r, http.StatusBadRequest, fmt.Sprintf("Dependency task %s not found in this mission", dep))
+				return
+			}
+		}
+		// Update status based on deps: BLOCKED if any dep is not COMPLETED
+		newStatus := "PENDING"
+		for _, dep := range depIDs {
+			var depStatus string
+			tx.QueryRowContext(r.Context(), `SELECT status FROM mission_tasks WHERE id = ?`, dep).Scan(&depStatus)
+			if depStatus != "COMPLETED" {
+				newStatus = "BLOCKED"
+				break
+			}
+		}
+		if len(depIDs) == 0 {
+			newStatus = "PENDING"
+		}
+		if _, err = tx.ExecContext(r.Context(),
+			`UPDATE mission_tasks SET depends_on = ?, status = ?, updated_at = ? WHERE id = ?`,
+			*req.DependsOn, newStatus, now, taskID); err != nil {
 			h.logger.Error("update task depends_on", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
@@ -1341,6 +1373,217 @@ func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"id": missionID, "status": "PLANNING"})
+}
+
+// Resume restarts a FAILED mission from the point of failure. Only the FAILED
+// task(s) and their downstream dependents are reset; COMPLETED tasks stay.
+// The DAG engine is started automatically — no separate Start call needed.
+func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	crewID := r.PathValue("crewId")
+	missionID := r.PathValue("missionId")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	var currentStatus string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+		missionID, crewID, wsID).Scan(&currentStatus)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			return
+		}
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if currentStatus != "FAILED" {
+		writeProblem(w, r, http.StatusBadRequest,
+			fmt.Sprintf("can only resume FAILED missions, current status: %s", currentStatus))
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Collect all tasks to build dependency graph
+	type taskRow struct {
+		ID        string
+		Status    string
+		DependsOn string
+	}
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT id, status, depends_on FROM mission_tasks WHERE mission_id = ?`, missionID)
+	if err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	var tasks []taskRow
+	for rows.Next() {
+		var t taskRow
+		if err := rows.Scan(&t.ID, &t.Status, &t.DependsOn); err != nil {
+			rows.Close()
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		tasks = append(tasks, t)
+	}
+	rows.Close()
+
+	// Build reverse dependency map: taskID -> list of tasks that depend on it
+	reverseDeps := make(map[string][]string)
+	for _, t := range tasks {
+		var deps []string
+		if t.DependsOn != "" && t.DependsOn != "[]" {
+			_ = json.Unmarshal([]byte(t.DependsOn), &deps)
+		}
+		for _, dep := range deps {
+			reverseDeps[dep] = append(reverseDeps[dep], t.ID)
+		}
+	}
+
+	// Find FAILED tasks and cascade downstream via BFS
+	toReset := make(map[string]bool)
+	queue := []string{}
+	for _, t := range tasks {
+		if t.Status == "FAILED" {
+			toReset[t.ID] = true
+			queue = append(queue, t.ID)
+		}
+	}
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+		for _, child := range reverseDeps[curr] {
+			if !toReset[child] {
+				toReset[child] = true
+				queue = append(queue, child)
+			}
+		}
+	}
+
+	if len(toReset) == 0 {
+		writeProblem(w, r, http.StatusBadRequest, "No failed tasks to resume from")
+		return
+	}
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Reset the identified tasks
+	resetIDs := make([]string, 0, len(toReset))
+	for id := range toReset {
+		resetIDs = append(resetIDs, id)
+	}
+
+	// Build task status map for checking deps
+	statusMap := make(map[string]string)
+	for _, t := range tasks {
+		if toReset[t.ID] {
+			statusMap[t.ID] = "RESET"
+		} else {
+			statusMap[t.ID] = t.Status
+		}
+	}
+
+	// Parse deps map
+	depsMap := make(map[string][]string)
+	for _, t := range tasks {
+		var deps []string
+		if t.DependsOn != "" && t.DependsOn != "[]" {
+			_ = json.Unmarshal([]byte(t.DependsOn), &deps)
+		}
+		depsMap[t.ID] = deps
+	}
+
+	for _, id := range resetIDs {
+		// Determine correct initial status: PENDING if all deps are COMPLETED, BLOCKED otherwise
+		newStatus := "PENDING"
+		for _, dep := range depsMap[id] {
+			if statusMap[dep] != "COMPLETED" {
+				newStatus = "BLOCKED"
+				break
+			}
+		}
+		if _, err = tx.ExecContext(r.Context(),
+			`UPDATE mission_tasks SET
+				status = ?,
+				iteration = iteration + 1,
+				error_message = NULL,
+				result_summary = NULL,
+				started_at = NULL,
+				completed_at = NULL,
+				duration_ms = NULL,
+				assignment_id = NULL,
+				updated_at = ?
+			WHERE id = ?`,
+			newStatus, now, id); err != nil {
+			writeProblem(w, r, http.StatusInternalServerError, "Failed to reset task")
+			return
+		}
+	}
+
+	// Set mission to IN_PROGRESS directly (skip PLANNING)
+	if _, err = tx.ExecContext(r.Context(),
+		`UPDATE missions SET status = 'IN_PROGRESS', updated_at = ?, completed_at = NULL WHERE id = ?`,
+		now, missionID); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to update mission")
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// Start DAG engine immediately
+	if h.missionEngine != nil {
+		if err := h.missionEngine.StartMission(context.Background(), missionID); err != nil {
+			h.logger.Error("resume: mission engine start failed, rolling back", "error", err, "mission_id", missionID)
+			if _, rbErr := h.db.ExecContext(r.Context(),
+				`UPDATE missions SET status = 'FAILED', updated_at = ? WHERE id = ?`,
+				now, missionID); rbErr != nil {
+				h.logger.Error("resume: rollback mission status", "error", rbErr)
+			}
+			writeProblem(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to start engine: %v", err))
+			return
+		}
+	}
+
+	if h.hub != nil {
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "mission.updated",
+			Channel: wsChannel,
+			Payload: map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "IN_PROGRESS"},
+		})
+		for _, id := range resetIDs {
+			h.hub.Broadcast(wsChannel, ws.ServerMessage{
+				Type:    "task.updated",
+				Channel: wsChannel,
+				Payload: map[string]string{"id": id, "mission_id": missionID, "status": "PENDING"},
+			})
+		}
+	}
+
+	h.logger.Info("mission resumed from failure",
+		"mission_id", missionID,
+		"reset_tasks", len(toReset),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":          missionID,
+		"status":      "IN_PROGRESS",
+		"reset_tasks": len(toReset),
+	})
 }
 
 // Clone creates a deep copy of a mission with all its tasks, assigning new IDs.
