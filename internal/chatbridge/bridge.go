@@ -41,6 +41,7 @@ type ChatInfo struct {
 	MemoryEnabled  bool
 	CrewMembers    []orchestrator.CrewMember
 	AllCrews       []orchestrator.CrewInfo
+	ActiveMissions []orchestrator.MissionSummary
 	NetworkMode    string
 	AllowedDomains []string
 }
@@ -219,6 +220,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		MemoryEnabled:  info.MemoryEnabled,
 		CrewMembers:    info.CrewMembers,
 		AllCrews:       info.AllCrews,
+		ActiveMissions: info.ActiveMissions,
 		NetworkMode:    info.NetworkMode,
 		AllowedDomains: info.AllowedDomains,
 	}

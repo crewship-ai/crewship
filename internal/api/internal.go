@@ -648,6 +648,34 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(allCrews) > 0 {
 		resp["all_crews"] = allCrews
+
+		// Load active missions for COORDINATOR context
+		missionRows, err := h.db.QueryContext(r.Context(), `
+			SELECT m.id, c.slug, m.title, m.status
+			FROM missions m
+			JOIN crews c ON c.id = m.crew_id
+			WHERE m.workspace_id = ? AND m.status IN ('PLANNING', 'IN_PROGRESS', 'REVIEW')
+			ORDER BY m.created_at DESC LIMIT 20`,
+			wsID)
+		if err == nil {
+			defer missionRows.Close()
+			type missionEntry struct {
+				ID       string `json:"id"`
+				CrewSlug string `json:"crew_slug"`
+				Title    string `json:"title"`
+				Status   string `json:"status"`
+			}
+			var activeMissions []missionEntry
+			for missionRows.Next() {
+				var me missionEntry
+				if err := missionRows.Scan(&me.ID, &me.CrewSlug, &me.Title, &me.Status); err == nil {
+					activeMissions = append(activeMissions, me)
+				}
+			}
+			if len(activeMissions) > 0 {
+				resp["active_missions"] = activeMissions
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

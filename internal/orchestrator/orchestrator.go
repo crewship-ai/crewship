@@ -37,7 +37,8 @@ type AgentRunRequest struct {
 	TimeoutSecs     int
 	MemoryEnabled   bool
 	CrewMembers     []CrewMember // Populated by bridge for LEAD agents
-	AllCrews        []CrewInfo   // Populated by bridge for COORDINATOR agents
+	AllCrews        []CrewInfo        // Populated by bridge for COORDINATOR agents
+	ActiveMissions  []MissionSummary  // Active missions in workspace (for COORDINATOR)
 	SkipSidecar     bool         // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
 	SkipConvHistory bool         // When true, skip injecting conversation history (used by assignment sub-agents)
 	NetworkMode     string       // "free" (default) or "restricted" — crew-level network policy
@@ -217,7 +218,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 
 	// Inject coordinator context listing all workspace crews
 	if req.AgentRole == "COORDINATOR" && len(req.AllCrews) > 0 {
-		coordCtx := BuildCoordinatorContext(req.AllCrews)
+		coordCtx := BuildCoordinatorContext(req.AllCrews, req.ActiveMissions)
 		if coordCtx != "" {
 			req.SystemPrompt = req.SystemPrompt + "\n\n" + coordCtx
 		}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Workflow, Clock, Activity, RefreshCw, Focus, LayoutTemplate,
-  Settings2,
+  Settings2, FileText,
 } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -26,6 +26,7 @@ import { MissionControlBar } from "@/components/features/orchestration/mission-c
 import { TaskDetailSheet } from "@/components/features/orchestration/task-detail-sheet"
 import { CreateMissionWizard } from "@/components/features/orchestration/create-mission-wizard"
 import { CrewConnections } from "@/components/features/orchestration/crew-connections"
+import { ProposalReview } from "@/components/features/orchestration/proposal-review"
 import type { Mission, MissionTask } from "@/lib/types/mission"
 
 export default function OrchestrationPage() {
@@ -135,6 +136,9 @@ export default function OrchestrationPage() {
               <TabsTrigger value="templates" className="text-xs h-6 px-2.5 gap-1">
                 <LayoutTemplate className="h-3 w-3" /> Templates
               </TabsTrigger>
+              <TabsTrigger value="proposals" className="text-xs h-6 px-2.5 gap-1">
+                <FileText className="h-3 w-3" /> Proposals
+              </TabsTrigger>
               <TabsTrigger value="connections" className="text-xs h-6 px-2.5 gap-1">
                 <Settings2 className="h-3 w-3" /> Connections
               </TabsTrigger>
@@ -233,6 +237,12 @@ export default function OrchestrationPage() {
         {activeTab === "templates" && (
           <div className="p-4 h-full overflow-auto">
             <TemplateGallery workspaceId={workspaceId!} />
+          </div>
+        )}
+
+        {activeTab === "proposals" && (
+          <div className="p-4 h-full overflow-auto">
+            <ProposalReview workspaceId={workspaceId!} />
           </div>
         )}
 

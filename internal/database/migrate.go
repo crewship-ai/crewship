@@ -79,6 +79,7 @@ var migrations = []migration{
 	{18, "add_crew_network_policy", migrationAddCrewNetworkPolicy},
 	{19, "add_workflow_templates", migrationAddWorkflowTemplates},
 	{20, "add_crew_connections", migrationAddCrewConnections},
+	{21, "add_mission_proposals", migrationAddMissionProposals},
 }
 
 const migrationAddKeeperObservability = `
@@ -746,4 +747,28 @@ CREATE TABLE IF NOT EXISTS crew_connections (
 CREATE INDEX IF NOT EXISTS idx_crew_conn_from ON crew_connections(from_crew_id);
 CREATE INDEX IF NOT EXISTS idx_crew_conn_to ON crew_connections(to_crew_id);
 CREATE INDEX IF NOT EXISTS idx_crew_conn_ws ON crew_connections(workspace_id);
+`
+
+const migrationAddMissionProposals = `
+ALTER TABLE missions ADD COLUMN scope TEXT NOT NULL DEFAULT 'crew' CHECK(scope IN ('crew', 'workspace'));
+ALTER TABLE missions ADD COLUMN proposal_id TEXT REFERENCES mission_proposals(id);
+
+CREATE TABLE IF NOT EXISTS mission_proposals (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+	proposed_by_id TEXT REFERENCES agents(id),
+	title TEXT NOT NULL,
+	description TEXT,
+	plan TEXT,
+	status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED')),
+	missions_json TEXT,
+	reviewed_by TEXT,
+	reviewed_at TEXT,
+	review_notes TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_proposal_ws ON mission_proposals(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_status ON mission_proposals(status);
+CREATE INDEX IF NOT EXISTS idx_mission_proposal ON missions(proposal_id);
 `

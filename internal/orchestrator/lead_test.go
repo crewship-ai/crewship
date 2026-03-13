@@ -150,7 +150,7 @@ func TestBuildCoordinatorContext(t *testing.T) {
 				"Alice",
 				"Bob",
 				"crew_id=c1",
-				"cross-crew",
+				"PROPOSAL WORKFLOW",
 			},
 		},
 		{
@@ -161,13 +161,13 @@ func TestBuildCoordinatorContext(t *testing.T) {
 					{Name: "Tester", Slug: "tester"},
 				}},
 			},
-			wantContains: []string{"Dev Crew", "QA Crew", "Tester", "assigned_to_id"},
+			wantContains: []string{"Dev Crew", "QA Crew", "Tester", "PROPOSAL WORKFLOW"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := BuildCoordinatorContext(tt.crews)
+			result := BuildCoordinatorContext(tt.crews, nil)
 
 			if tt.wantEmpty {
 				if result != "" {
