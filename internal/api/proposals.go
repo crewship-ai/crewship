@@ -148,6 +148,11 @@ func (h *ProposalHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // Create handles POST /api/v1/mission-proposals
 func (h *ProposalHandler) Create(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Insufficient permissions")
+		return
+	}
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
@@ -223,6 +228,11 @@ func (h *ProposalHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Approve handles POST /api/v1/mission-proposals/{proposalId}/approve
 func (h *ProposalHandler) Approve(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeProblem(w, r, http.StatusForbidden, "Insufficient permissions")
+		return
+	}
 	wsID := WorkspaceIDFromContext(r.Context())
 	proposalID := r.PathValue("proposalId")
 
@@ -232,39 +242,45 @@ func (h *ProposalHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	p, err := h.loadProposal(r.Context(), wsID, proposalID)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Atomic claim: only one approve can succeed (WHERE status = 'PENDING')
+	res, err := h.db.ExecContext(r.Context(), `
+		UPDATE mission_proposals SET status = 'APPROVED', reviewed_by = ?, reviewed_at = ?, review_notes = ?, updated_at = ?
+		WHERE id = ? AND workspace_id = ? AND status = 'PENDING'`,
+		nilIfEmpty(req.ReviewedBy), now, nilIfEmpty(req.ReviewNotes), now, proposalID, wsID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Proposal not found")
-			return
-		}
-		h.logger.Error("load proposal for approve", "error", err)
+		h.logger.Error("approve proposal claim", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	if p.Status != "PENDING" {
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		// Either not found or already processed
+		p, loadErr := h.loadProposal(r.Context(), wsID, proposalID)
+		if loadErr != nil {
+			writeProblem(w, r, http.StatusNotFound, "Proposal not found")
+			return
+		}
 		writeProblem(w, r, http.StatusConflict, fmt.Sprintf("proposal is %s, only PENDING proposals can be approved", p.Status))
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	// Load proposal to get missions JSON
+	p, err := h.loadProposal(r.Context(), wsID, proposalID)
+	if err != nil {
+		h.logger.Error("load proposal after claim", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 
 	// Create missions from the proposal
 	missionIDs, err := h.createMissionsFromProposal(r.Context(), wsID, proposalID, p.Missions)
 	if err != nil {
 		h.logger.Error("create missions from proposal", "error", err)
+		// Rollback the approval since mission creation failed
+		h.db.ExecContext(r.Context(), `UPDATE mission_proposals SET status = 'PENDING', reviewed_by = NULL, reviewed_at = NULL, review_notes = NULL, updated_at = ? WHERE id = ?`, now, proposalID) //nolint:errcheck
 		writeProblem(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to create missions: %v", err))
-		return
-	}
-
-	// Update proposal status
-	_, err = h.db.ExecContext(r.Context(), `
-		UPDATE mission_proposals SET status = 'APPROVED', reviewed_by = ?, reviewed_at = ?, review_notes = ?, updated_at = ?
-		WHERE id = ?`,
-		nilIfEmpty(req.ReviewedBy), now, nilIfEmpty(req.ReviewNotes), now, proposalID)
-	if err != nil {
-		h.logger.Error("approve proposal", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
@@ -279,6 +295,11 @@ func (h *ProposalHandler) Approve(w http.ResponseWriter, r *http.Request) {
 
 // Reject handles POST /api/v1/mission-proposals/{proposalId}/reject
 func (h *ProposalHandler) Reject(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeProblem(w, r, http.StatusForbidden, "Insufficient permissions")
+		return
+	}
 	wsID := WorkspaceIDFromContext(r.Context())
 	proposalID := r.PathValue("proposalId")
 
@@ -321,6 +342,11 @@ func (h *ProposalHandler) Reject(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /api/v1/mission-proposals/{proposalId}
 func (h *ProposalHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeProblem(w, r, http.StatusForbidden, "Insufficient permissions")
+		return
+	}
 	wsID := WorkspaceIDFromContext(r.Context())
 	proposalID := r.PathValue("proposalId")
 

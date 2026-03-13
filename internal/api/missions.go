@@ -1424,11 +1424,12 @@ func (h *MissionHandler) Clone(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Insert new mission
+	traceID := "mission-" + generateCUID()
 	if _, err = tx.ExecContext(r.Context(),
-		`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, title, description,
+		`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, description,
 		 status, workflow_template, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, 'PLANNING', ?, ?, ?)`,
-		newMissionID, wsID, crewID, m.LeadAgentID,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 'PLANNING', ?, ?, ?)`,
+		newMissionID, wsID, crewID, m.LeadAgentID, traceID,
 		m.Title+" (copy)", m.Description, m.Template, now, now); err != nil {
 		h.logger.Error("clone mission insert", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Failed to clone mission")
