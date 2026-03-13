@@ -1553,7 +1553,7 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 				now, missionID); rbErr != nil {
 				h.logger.Error("resume: rollback mission status", "error", rbErr)
 			}
-			writeProblem(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to start engine: %v", err))
+			writeProblem(w, r, http.StatusInternalServerError, "Failed to start mission engine")
 			return
 		}
 	}
