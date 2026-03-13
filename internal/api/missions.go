@@ -701,6 +701,14 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate DAG before starting (circular deps, nonexistent dep IDs)
+	if h.missionEngine != nil {
+		if dagErr := h.missionEngine.ValidateDAG(r.Context(), missionID); dagErr != nil {
+			writeProblem(w, r, http.StatusBadRequest, "Invalid task DAG: "+dagErr.Error())
+			return
+		}
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := h.db.ExecContext(r.Context(),
 		`UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ?`,
@@ -1154,6 +1162,56 @@ func (h *MissionHandler) unblockDependentTasks(r *http.Request, missionID, compl
 	}
 }
 
+// unblockCompletedDeps iterates all BLOCKED tasks in a mission and transitions
+// those whose dependencies are all COMPLETED to PENDING. Used after restart
+// to fix tasks that were blindly set to BLOCKED despite having met deps.
+func (h *MissionHandler) unblockCompletedDeps(r *http.Request, missionID string) {
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT id, depends_on FROM mission_tasks WHERE mission_id = ? AND status = 'BLOCKED'`,
+		missionID)
+	if err != nil {
+		h.logger.Error("unblockCompletedDeps: query", "error", err)
+		return
+	}
+
+	type blockedTask struct {
+		id   string
+		deps []string
+	}
+	var candidates []blockedTask
+	for rows.Next() {
+		var id, depsJSON string
+		if err := rows.Scan(&id, &depsJSON); err != nil {
+			continue
+		}
+		var deps []string
+		if err := json.Unmarshal([]byte(depsJSON), &deps); err != nil || len(deps) == 0 {
+			continue
+		}
+		candidates = append(candidates, blockedTask{id: id, deps: deps})
+	}
+	rows.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, bt := range candidates {
+		allDone := true
+		for _, dep := range bt.deps {
+			var depStatus string
+			err := h.db.QueryRowContext(r.Context(),
+				`SELECT status FROM mission_tasks WHERE id = ?`, dep).Scan(&depStatus)
+			if err != nil || depStatus != "COMPLETED" {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			h.db.ExecContext(r.Context(),
+				`UPDATE mission_tasks SET status = 'PENDING', updated_at = ? WHERE id = ?`,
+				now, bt.id)
+		}
+	}
+}
+
 func (h *MissionHandler) getTaskStats(r *http.Request, missionID string) (*taskStats, error) {
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT status, COUNT(*) FROM mission_tasks WHERE mission_id = ? GROUP BY status`,
@@ -1260,6 +1318,11 @@ func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+
+	// Post-reset: unblock tasks whose dependencies are all COMPLETED.
+	// The SQL above blindly sets tasks with deps to BLOCKED, but some deps
+	// may already be COMPLETED (they were not reset). Unblock those now.
+	h.unblockCompletedDeps(r, missionID)
 
 	if h.hub != nil {
 		wsChannel := "workspace:" + wsID

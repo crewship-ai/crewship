@@ -59,8 +59,10 @@ type MissionEngine struct {
 }
 
 const (
-	circuitBreakerThreshold = 3 // consecutive failures before tripping
+	circuitBreakerThreshold = 3     // consecutive failures before tripping
 	maxResultSummaryLen     = 8000
+	maxBriefTotalLen        = 32000 // total brief size cap (bytes) to avoid LLM token budget issues
+	maxDepOutputLen         = 4000  // per-dependency output truncation
 	missionTimeoutDefault   = 2 * time.Hour
 )
 
@@ -258,6 +260,22 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 			if err := e.checkMissionCompletion(ctx, ms); err != nil {
 				e.logger.Error("check mission completion", "mission_id", ms.ID, "error", err)
 			}
+
+			// Deadlock detection: all tasks BLOCKED with nothing making progress
+			if e.detectDeadlock(ctx, ms.ID) {
+				e.logger.Error("deadlock detected — all tasks BLOCKED with no progress possible",
+					"mission_id", ms.ID)
+				now := time.Now().UTC().Format(time.RFC3339)
+				e.db.ExecContext(context.Background(),
+					`UPDATE missions SET status = 'FAILED', updated_at = ?, completed_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
+					now, now, ms.ID)
+				e.broadcastMissionStatus(ms, "FAILED")
+				e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
+					Type:      "mission_deadlock",
+					MissionID: ms.ID,
+				})
+				return
+			}
 		}
 	}
 }
@@ -339,18 +357,22 @@ func (e *MissionEngine) autoAssignTask(ctx context.Context, missionID, taskID st
 		return "", "", fmt.Errorf("lookup mission: %w", err)
 	}
 
-	// Try to find a non-LEAD agent in the crew
+	// Find non-LEAD agents, pick the one with fewest assigned tasks in this mission (round-robin)
 	rows, err := e.db.QueryContext(ctx, `
-		SELECT a.id, a.slug FROM agents a
+		SELECT a.id, a.slug, COUNT(mt.id) AS task_count
+		FROM agents a
+		LEFT JOIN mission_tasks mt ON mt.assigned_agent_id = a.id AND mt.mission_id = ?
 		WHERE a.crew_id = ? AND a.deleted_at IS NULL AND a.id != ?
-		ORDER BY a.name ASC`, crewID, leadAgentID)
+		GROUP BY a.id, a.slug
+		ORDER BY task_count ASC, a.name ASC`, missionID, crewID, leadAgentID)
 	if err != nil {
 		return "", "", fmt.Errorf("query crew agents: %w", err)
 	}
 	var candidates []struct{ id, slug string }
 	for rows.Next() {
 		var c struct{ id, slug string }
-		if err := rows.Scan(&c.id, &c.slug); err == nil {
+		var cnt int
+		if err := rows.Scan(&c.id, &c.slug, &cnt); err == nil {
 			candidates = append(candidates, c)
 		}
 	}
@@ -358,7 +380,7 @@ func (e *MissionEngine) autoAssignTask(ctx context.Context, missionID, taskID st
 
 	var agentID, agentSlug string
 	if len(candidates) > 0 {
-		// Pick the first available (could be improved with load balancing)
+		// First candidate has the fewest tasks (round-robin / least-loaded)
 		agentID = candidates[0].id
 		agentSlug = candidates[0].slug
 	} else {
@@ -443,8 +465,8 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 						agentLabel = "@" + *t.AgentSlug
 					}
 					summary := *t.ResultSummary
-					if len(summary) > 4000 {
-						summary = summary[:4000] + "\n...(truncated)"
+					if len(summary) > maxDepOutputLen {
+						summary = summary[:maxDepOutputLen] + "\n...(truncated)"
 					}
 					depOutputs = append(depOutputs,
 						fmt.Sprintf("Task #%d \"%s\" (%s):\n%s", t.TaskOrder, t.Title, agentLabel, summary))
@@ -464,7 +486,11 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 		b.WriteString("\n\n" + *task.Description)
 	}
 
-	return b.String()
+	result := b.String()
+	if len(result) > maxBriefTotalLen {
+		result = result[:maxBriefTotalLen] + "\n...(brief truncated to 32KB)"
+	}
+	return result
 }
 
 // scheduleReadyTasks finds PENDING tasks with completed dependencies and creates assignments.
@@ -516,6 +542,9 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		WHERE a.id = ? AND a.deleted_at IS NULL`,
 		*task.AssignedAgentID).Scan(&agentSlug, &agentCrewID, &agentCrewSlug)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("assigned agent %s not found (deleted or invalid)", *task.AssignedAgentID)
+		}
 		return fmt.Errorf("resolve agent crew: %w", err)
 	}
 
@@ -535,12 +564,16 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		)
 	}
 
-	// Transition task to IN_PROGRESS
-	_, err = e.db.ExecContext(ctx,
+	// Transition task to IN_PROGRESS (idempotency: only if still PENDING)
+	res, err := e.db.ExecContext(ctx,
 		`UPDATE mission_tasks SET status = 'IN_PROGRESS', started_at = ?, updated_at = ? WHERE id = ? AND status = 'PENDING'`,
 		now, now, task.ID)
 	if err != nil {
 		return fmt.Errorf("update task status: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return nil // already claimed by another tick — skip silently
 	}
 
 	e.broadcastTaskStatus(ms, task.ID, "IN_PROGRESS")
@@ -596,7 +629,8 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 					"assignment_id", assignmentID,
 					"error", dispatchErr,
 				)
-				e.updateTaskStatus(ctx, ms, task.ID, "FAILED", dispatchErr.Error())
+				// Use Background ctx — parent ctx may be cancelled by the time this goroutine runs
+				e.updateTaskStatus(context.Background(), ms, task.ID, "FAILED", dispatchErr.Error())
 			}
 		}()
 	}
@@ -1085,13 +1119,115 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 					"assignment_id", assignmentID,
 					"error", dispatchErr,
 				)
-				// Don't fail the mission — the loop will retry on next tick
-				// (planningDispatched prevents re-dispatch, but we can reset it)
+				// Reset planningDispatched so the loop will retry on next tick
+				e.mu.Lock()
+				ms.planningDispatched = false
+				e.mu.Unlock()
 			}
 		}()
 	}
 
 	e.broadcastMissionStatus(ms, "IN_PROGRESS")
+}
+
+// ValidateDAG checks all mission tasks for:
+// 1. Circular dependencies (topological sort)
+// 2. References to nonexistent task IDs
+// Returns nil if the DAG is valid.
+func (e *MissionEngine) ValidateDAG(ctx context.Context, missionID string) error {
+	tasks, err := e.loadTasks(ctx, missionID)
+	if err != nil {
+		return fmt.Errorf("load tasks: %w", err)
+	}
+	if len(tasks) == 0 {
+		return nil // empty mission — lead will plan
+	}
+
+	taskIDs := make(map[string]bool, len(tasks))
+	for _, t := range tasks {
+		taskIDs[t.ID] = true
+	}
+
+	// Build adjacency list and check for nonexistent deps
+	graph := make(map[string][]string, len(tasks))     // taskID → deps
+	inDegree := make(map[string]int, len(tasks))
+	for _, t := range tasks {
+		graph[t.ID] = nil
+		inDegree[t.ID] = 0
+	}
+	for _, t := range tasks {
+		deps, parseErr := parseDependsOn(t.DependsOn)
+		if parseErr != nil {
+			return fmt.Errorf("task %s has invalid depends_on: %w", t.ID, parseErr)
+		}
+		for _, dep := range deps {
+			if !taskIDs[dep] {
+				return fmt.Errorf("task %q depends on nonexistent task %q", t.Title, dep)
+			}
+			graph[t.ID] = append(graph[t.ID], dep)
+			inDegree[t.ID]++
+		}
+	}
+
+	// Kahn's algorithm for cycle detection
+	var queue []string
+	for id, deg := range inDegree {
+		if deg == 0 {
+			queue = append(queue, id)
+		}
+	}
+
+	visited := 0
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		visited++
+		// Find tasks that depend on this node
+		for _, t := range tasks {
+			deps, _ := parseDependsOn(t.DependsOn)
+			for _, dep := range deps {
+				if dep == node {
+					inDegree[t.ID]--
+					if inDegree[t.ID] == 0 {
+						queue = append(queue, t.ID)
+					}
+				}
+			}
+		}
+	}
+
+	if visited != len(tasks) {
+		return fmt.Errorf("circular dependency detected: %d tasks involved in cycle", len(tasks)-visited)
+	}
+	return nil
+}
+
+// detectDeadlock checks if a mission is deadlocked: all tasks are BLOCKED
+// with no PENDING or IN_PROGRESS tasks to make progress. Returns true if deadlocked.
+func (e *MissionEngine) detectDeadlock(ctx context.Context, missionID string) bool {
+	tasks, err := e.loadTasks(ctx, missionID)
+	if err != nil || len(tasks) == 0 {
+		return false
+	}
+	for _, t := range tasks {
+		switch t.Status {
+		case "PENDING", "IN_PROGRESS":
+			return false // can still make progress
+		case "COMPLETED", "SKIPPED":
+			continue // terminal, OK
+		case "FAILED":
+			continue // terminal, handled elsewhere
+		case "BLOCKED":
+			continue // potential deadlock member
+		}
+	}
+	// All tasks are terminal or BLOCKED. If any are BLOCKED, it's a deadlock.
+	for _, t := range tasks {
+		if t.Status == "BLOCKED" {
+			return true
+		}
+	}
+	return false
 }
 
 func parseDependsOn(raw string) ([]string, error) {

@@ -1285,42 +1285,18 @@ func TestE2E_BUG_CircularDependency(t *testing.T) {
 	insertTask(t, db, "t2", missionID, &agentID, "Circular B", "BLOCKED", 2, []string{"t1"})
 
 	engine := newTestEngine(t, db)
-	disp := newMockAsyncDispatcher()
-	engine.SetDispatcher(disp)
 
-	ms := makeMissionState(missionID, crewID, "dev-crew", leadID, wsID, "trace-circular")
-	engine.mu.Lock()
-	engine.active[missionID] = ms
-	engine.mu.Unlock()
-
-	// Tick: nothing should be dispatched (both BLOCKED)
-	tickEngine(context.Background(), engine, ms)
-
-	time.Sleep(100 * time.Millisecond)
-	allDisp := disp.getDispatches()
-	if len(allDisp) != 0 {
-		t.Errorf("circular deps should produce 0 dispatches, got %d", len(allDisp))
+	// FIXED: ValidateDAG should detect the cycle before engine starts
+	err := engine.ValidateDAG(context.Background(), missionID)
+	if err == nil {
+		t.Fatal("expected ValidateDAG to detect circular dependency, got nil")
 	}
-
-	// BUG: checkMissionCompletion won't mark this as complete either —
-	// tasks are BLOCKED (not terminal), so mission stays IN_PROGRESS forever.
-	// This is a deadlock scenario with no detection or timeout-based recovery.
-	status := getMissionStatus(t, db, missionID)
-	if status != "IN_PROGRESS" {
-		t.Errorf("expected mission still IN_PROGRESS (deadlocked), got %s", status)
+	if !strings.Contains(err.Error(), "circular dependency") {
+		t.Errorf("expected 'circular dependency' error, got: %s", err)
 	}
-
-	// FINDING: No circular dependency detection exists. The mission will hang
-	// until the 2-hour timeout. Should detect this pattern and fail immediately.
-	t.Log("FINDING: Circular dependency detected but engine has no detection logic — mission will deadlock until timeout (2h)")
 }
 
-// ============================================================
-// BUG TEST: Nonexistent Dependency ID
-// A task depends on a task ID that doesn't exist.
-// ============================================================
-
-func TestE2E_BUG_NonexistentDependency(t *testing.T) {
+func TestE2E_ValidateDAG_NonexistentDep(t *testing.T) {
 	db := setupTestDB(t)
 	wsID, crewID, leadID, agentID := seedTestData(t, db)
 	missionID := createTestMission(t, db, wsID, crewID, leadID)
@@ -1329,25 +1305,45 @@ func TestE2E_BUG_NonexistentDependency(t *testing.T) {
 	insertTask(t, db, "t1", missionID, &agentID, "Orphan dep", "BLOCKED", 1, []string{"ghost"})
 
 	engine := newTestEngine(t, db)
-	ms := makeMissionState(missionID, crewID, "dev-crew", leadID, wsID, "trace-ghost")
-	engine.mu.Lock()
-	engine.active[missionID] = ms
-	engine.mu.Unlock()
 
-	// The task stays BLOCKED forever because "ghost" will never complete.
-	// ResolveReadyTasks only looks at PENDING tasks, not BLOCKED.
-	// This is the same deadlock pattern as circular deps.
-	ready, err := engine.ResolveReadyTasks(context.Background(), missionID)
-	if err != nil {
-		t.Fatalf("ResolveReadyTasks: %v", err)
+	// FIXED: ValidateDAG should detect the nonexistent dependency
+	err := engine.ValidateDAG(context.Background(), missionID)
+	if err == nil {
+		t.Fatal("expected ValidateDAG to detect nonexistent dep, got nil")
 	}
-	if len(ready) != 0 {
-		t.Errorf("task with nonexistent dep should not be ready, got %d", len(ready))
+	if !strings.Contains(err.Error(), "nonexistent") {
+		t.Errorf("expected 'nonexistent' in error, got: %s", err)
+	}
+}
+
+// ============================================================
+// BUG TEST: Nonexistent Dependency ID
+// A task depends on a task ID that doesn't exist.
+// ============================================================
+
+func TestE2E_DeadlockDetection(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	// Create tasks that are all BLOCKED (simulating a state where deps can't be met)
+	insertTask(t, db, "t1", missionID, &agentID, "Blocked A", "BLOCKED", 1, []string{"t2"})
+	insertTask(t, db, "t2", missionID, &agentID, "Blocked B", "BLOCKED", 2, []string{"t1"})
+
+	engine := newTestEngine(t, db)
+
+	// FIXED: detectDeadlock should catch this
+	deadlocked := engine.detectDeadlock(context.Background(), missionID)
+	if !deadlocked {
+		t.Error("expected deadlock detection to return true for all-BLOCKED tasks")
 	}
 
-	// FINDING: Nonexistent dependency IDs cause permanent deadlock.
-	// Should validate deps at mission creation time.
-	t.Log("FINDING: Task with nonexistent dependency ID stays BLOCKED forever — no validation at creation time")
+	// Not deadlocked if any task is PENDING or IN_PROGRESS
+	db.Exec(`UPDATE mission_tasks SET status = 'PENDING' WHERE id = 't1'`)
+	deadlocked = engine.detectDeadlock(context.Background(), missionID)
+	if deadlocked {
+		t.Error("should not detect deadlock when a PENDING task exists")
+	}
 }
 
 // ============================================================
@@ -1399,15 +1395,15 @@ func TestE2E_BUG_DeletedAgentDuringMission(t *testing.T) {
 		t.Errorf("task for deleted agent should be FAILED, got %s", status)
 	}
 
-	// Check error message
+	// FIXED: Error message should be descriptive
 	var errMsg sql.NullString
 	db.QueryRow(`SELECT error_message FROM mission_tasks WHERE id = 't1'`).Scan(&errMsg)
 	if !errMsg.Valid || errMsg.String == "" {
 		t.Error("task should have an error message explaining why it failed")
 	}
-	// FINDING: Error message is cryptic "resolve agent crew: sql: no rows in result set"
-	// Should say "assigned agent was deleted" or "agent not found"
-	t.Logf("Error message for deleted agent: %s", errMsg.String)
+	if !strings.Contains(errMsg.String, "not found") {
+		t.Errorf("expected 'not found' in error message, got: %s", errMsg.String)
+	}
 }
 
 // ============================================================
@@ -1450,18 +1446,99 @@ func TestE2E_BUG_DispatchFailureCtx(t *testing.T) {
 	// Give goroutine time to execute
 	time.Sleep(500 * time.Millisecond)
 
-	// BUG: The goroutine calls updateTaskStatus(ctx, ...) with the now-cancelled ctx.
-	// The DB update may silently fail because ctx is Done.
-	// In a correctly implemented system, the task should be FAILED.
+	// FIXED: The goroutine now uses context.Background() for updateTaskStatus,
+	// so the FAILED update should succeed even if the parent ctx is cancelled.
 	status := getTaskStatus(t, db, "t1")
-	if status == "IN_PROGRESS" {
-		// This confirms the bug: task was set to IN_PROGRESS but the dispatch failed,
-		// and the FAILED update was lost because ctx was cancelled.
-		t.Log("CONFIRMED BUG: Task stuck IN_PROGRESS after dispatch failure — ctx was cancelled before updateTaskStatus ran")
-	} else if status == "FAILED" {
-		t.Log("Dispatch failure correctly marked task as FAILED (bug may be fixed)")
-	} else {
-		t.Logf("Task status: %s (unexpected)", status)
+	if status != "FAILED" {
+		t.Errorf("expected task FAILED after dispatch failure (ctx leak fix), got %s", status)
+	}
+}
+
+// ============================================================
+// Test: ValidateDAG on valid DAGs (should pass)
+// ============================================================
+
+func TestE2E_ValidateDAG_ValidChain(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	insertTask(t, db, "t1", missionID, &agentID, "Step 1", "PENDING", 1, nil)
+	insertTask(t, db, "t2", missionID, &agentID, "Step 2", "BLOCKED", 2, []string{"t1"})
+	insertTask(t, db, "t3", missionID, &agentID, "Step 3", "BLOCKED", 3, []string{"t1", "t2"})
+
+	engine := newTestEngine(t, db)
+	if err := engine.ValidateDAG(context.Background(), missionID); err != nil {
+		t.Errorf("expected valid DAG, got error: %v", err)
+	}
+}
+
+func TestE2E_ValidateDAG_EmptyMission(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, _ := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	engine := newTestEngine(t, db)
+	if err := engine.ValidateDAG(context.Background(), missionID); err != nil {
+		t.Errorf("empty mission should be valid, got error: %v", err)
+	}
+}
+
+// ============================================================
+// Test: Round-robin auto-assign
+// ============================================================
+
+func TestE2E_AutoAssign_RoundRobin(t *testing.T) {
+	db := setupTestDB(t)
+	wsID := "ws-1"
+	crewID := "crew-rr"
+	leadID := "agent-lead-rr"
+	agentA := "agent-a"
+	agentB := "agent-b"
+
+	db.Exec(`INSERT INTO workspaces (id, name, slug) VALUES (?, 'RR WS', 'rr-ws')`, wsID)
+	db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'RR Crew', 'rr-crew')`, crewID, wsID)
+	db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role) VALUES (?, ?, ?, 'Lead', 'lead', 'LEAD')`, leadID, wsID, crewID)
+	db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role) VALUES (?, ?, ?, 'Alice', 'alice', 'AGENT')`, agentA, wsID, crewID)
+	db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug, agent_role) VALUES (?, ?, ?, 'Bob', 'bob', 'AGENT')`, agentB, wsID, crewID)
+
+	missionID := "mission-rr"
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'trace-rr', 'RR Mission', 'IN_PROGRESS', ?, ?)`,
+		missionID, wsID, crewID, leadID, now, now)
+
+	// Pre-assign 2 tasks to Alice, 0 to Bob
+	insertTask(t, db, "existing-1", missionID, &agentA, "Alice task 1", "COMPLETED", 1, nil)
+	insertTask(t, db, "existing-2", missionID, &agentA, "Alice task 2", "IN_PROGRESS", 2, nil)
+
+	// 2 unassigned tasks — should go to Bob first (fewer tasks)
+	insertTask(t, db, "u1", missionID, nil, "Unassigned 1", "PENDING", 3, nil)
+	insertTask(t, db, "u2", missionID, nil, "Unassigned 2", "PENDING", 4, nil)
+
+	engine := newTestEngine(t, db)
+	ms := makeMissionState(missionID, crewID, "rr-crew", leadID, wsID, "trace-rr")
+	engine.mu.Lock()
+	engine.active[missionID] = ms
+	engine.mu.Unlock()
+
+	ready, err := engine.ResolveReadyTasks(context.Background(), missionID)
+	if err != nil {
+		t.Fatalf("ResolveReadyTasks: %v", err)
+	}
+
+	// Find the unassigned tasks in the ready list
+	for _, task := range ready {
+		if task.ID == "u1" {
+			// u1 should be assigned to Bob (fewer tasks: 0 vs 2)
+			if task.AssignedAgentID == nil || *task.AssignedAgentID != agentB {
+				assigned := "<nil>"
+				if task.AssignedAgentID != nil {
+					assigned = *task.AssignedAgentID
+				}
+				t.Errorf("u1 should be assigned to Bob (%s, fewer tasks), got %s", agentB, assigned)
+			}
+		}
 	}
 }
 
@@ -1548,12 +1625,9 @@ func TestE2E_LargeBriefSize(t *testing.T) {
 		t.Errorf("brief should show 51 tasks, got: %s", brief[:200])
 	}
 
-	// FINDING: Brief size is uncapped. With 50 tasks * 4000 chars of output in DAG,
-	// plus 5 deps * 4000 chars = 20KB+ just from deps. The 4000-char per-dep truncation
-	// exists but there's no total cap.
+	// FIXED: Brief should be capped at maxBriefTotalLen (32KB)
 	briefLen := len(brief)
-	t.Logf("FINDING: Brief size with 51 tasks (5 deps with 4K output each): %d bytes", briefLen)
-	if briefLen > 100000 {
-		t.Logf("WARNING: Brief exceeds 100KB — may cause token budget issues with LLMs")
+	if briefLen > maxBriefTotalLen+50 { // +50 for the truncation message
+		t.Errorf("brief exceeds cap: %d bytes (max %d)", briefLen, maxBriefTotalLen)
 	}
 }
