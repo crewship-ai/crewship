@@ -153,11 +153,11 @@ func (o *Orchestrator) GetOrCreateContainer(ctx context.Context, crewSlug, crewI
 	})
 }
 
-// RunAgentForAssignment runs a sub-agent as part of a lead assignment.
-// It skips conversation history injection and sidecar startup to avoid port conflicts
-// when the lead agent's sidecar is already running on port 9119 in the same container.
+// RunAgentForAssignment runs a sub-agent as part of a mission assignment.
+// It skips conversation history injection (each task gets a clean context via the mission brief).
+// SkipSidecar is respected from the caller — regular AGENT tasks skip sidecar,
+// while LEAD planning tasks need sidecar for mission management API access.
 func (o *Orchestrator) RunAgentForAssignment(ctx context.Context, req AgentRunRequest, handler EventHandler) error {
-	req.SkipSidecar = true
 	req.SkipConvHistory = true
 	return o.RunAgent(ctx, req, handler)
 }

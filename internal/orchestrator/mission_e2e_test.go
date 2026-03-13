@@ -209,8 +209,8 @@ func TestE2E_LinearDAG_ThreeTaskChain(t *testing.T) {
 	if !strings.Contains(d2.Task, "Research found 10 sources on Go concurrency") {
 		t.Error("t2 brief should contain t1's result output")
 	}
-	if !strings.Contains(d2.Task, "[COMPLETED DEPENDENCIES") {
-		t.Error("t2 brief should contain [COMPLETED DEPENDENCIES] section")
+	if !strings.Contains(d2.Task, "[INPUT FROM PREVIOUS TASKS]") {
+		t.Error("t2 brief should contain [INPUT FROM PREVIOUS TASKS] section")
 	}
 
 	// Complete t2
@@ -234,8 +234,8 @@ func TestE2E_LinearDAG_ThreeTaskChain(t *testing.T) {
 	if !strings.Contains(d3.Task, "Article draft: 2000 words on Go channels") {
 		t.Error("t3 brief should contain t2's result output")
 	}
-	if !strings.Contains(d3.Task, "[MISSION CONTEXT]") {
-		t.Error("t3 brief should contain [MISSION CONTEXT] header")
+	if !strings.Contains(d3.Task, "[MISSION]") {
+		t.Error("t3 brief should contain [MISSION] header")
 	}
 
 	// Complete t3
@@ -530,9 +530,9 @@ func TestE2E_MissionBrief_ContextPropagation(t *testing.T) {
 
 	brief := engine.buildMissionBrief(context.Background(), ms, t2Info, allTasks)
 
-	// Verify mission context header
-	if !strings.Contains(brief, "[MISSION CONTEXT]") {
-		t.Error("brief missing [MISSION CONTEXT] header")
+	// Verify mission header
+	if !strings.Contains(brief, "[MISSION]") {
+		t.Error("brief missing [MISSION] header")
 	}
 	if !strings.Contains(brief, "Build REST API") {
 		t.Error("brief missing mission title")
@@ -542,7 +542,7 @@ func TestE2E_MissionBrief_ContextPropagation(t *testing.T) {
 	}
 
 	// Verify DAG overview shows all tasks
-	if !strings.Contains(brief, "Total tasks: 3") {
+	if !strings.Contains(brief, "Tasks in pipeline: 3") {
 		t.Error("brief missing total tasks count")
 	}
 	if !strings.Contains(brief, "Design database schema") {
@@ -552,9 +552,9 @@ func TestE2E_MissionBrief_ContextPropagation(t *testing.T) {
 		t.Error("brief missing task t3 in DAG overview")
 	}
 
-	// Verify YOUR TASK section
-	if !strings.Contains(brief, "[YOUR TASK]") {
-		t.Error("brief missing [YOUR TASK] section")
+	// Verify YOUR ASSIGNMENT section
+	if !strings.Contains(brief, "[YOUR ASSIGNMENT]") {
+		t.Error("brief missing [YOUR ASSIGNMENT] section")
 	}
 	if !strings.Contains(brief, "Implement CRUD endpoints") {
 		t.Error("brief missing current task title")
@@ -564,8 +564,8 @@ func TestE2E_MissionBrief_ContextPropagation(t *testing.T) {
 	}
 
 	// Verify dependency output propagation
-	if !strings.Contains(brief, "[COMPLETED DEPENDENCIES") {
-		t.Error("brief missing [COMPLETED DEPENDENCIES] section")
+	if !strings.Contains(brief, "[INPUT FROM PREVIOUS TASKS]") {
+		t.Error("brief missing [INPUT FROM PREVIOUS TASKS] section")
 	}
 	if !strings.Contains(brief, "schema.sql") {
 		t.Error("brief missing t1's result_summary content")
@@ -1621,7 +1621,7 @@ func TestE2E_LargeBriefSize(t *testing.T) {
 	brief := engine.buildMissionBrief(context.Background(), ms, targetTask, allTasks)
 
 	// Brief should include all 51 tasks in the DAG overview but truncate dep outputs
-	if !strings.Contains(brief, "Total tasks: 51") {
+	if !strings.Contains(brief, "Tasks in pipeline: 51") {
 		t.Errorf("brief should show 51 tasks, got: %s", brief[:200])
 	}
 

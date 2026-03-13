@@ -588,12 +588,19 @@ func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestr
 		LeadPlanning: req.LeadPlanning,
 	}
 
+	briefLen := len(body.Task)
+	briefPreview := body.Task
+	if len(briefPreview) > 300 {
+		briefPreview = briefPreview[:300] + "..."
+	}
 	h.logger.Info("dispatching mission assignment",
 		"assignment_id", req.AssignmentID,
 		"mission_id", req.MissionID,
 		"trace_id", req.TraceID,
 		"agent", target.Slug,
 		"crew", target.CrewSlug,
+		"brief_len", briefLen,
+		"brief_preview", briefPreview,
 	)
 
 	h.runAssignment(ctx, req.AssignmentID, body, target, creds)

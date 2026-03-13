@@ -407,8 +407,40 @@ func (e *MissionEngine) autoAssignTask(ctx context.Context, missionID, taskID st
 // buildMissionBrief constructs a rich context prompt for an agent executing a mission task.
 // It includes: mission overview, the specific task, all sibling tasks (DAG awareness),
 // and the output from completed dependency tasks (cross-task context propagation).
+//
+// The format is designed to prevent agents from asking clarifying questions —
+// dependency outputs appear BEFORE the task instructions with explicit directives
+// to use them as input.
 func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState, task TaskInfo, allTasks []TaskInfo) string {
 	var b strings.Builder
+
+	// Collect dependency outputs first — we need to know if they exist for the preamble
+	deps, _ := parseDependsOn(task.DependsOn)
+	depOutputs := make([]string, 0)
+	for _, depID := range deps {
+		for _, t := range allTasks {
+			if t.ID == depID && t.ResultSummary != nil && *t.ResultSummary != "" {
+				agentLabel := "unknown"
+				if t.AgentSlug != nil {
+					agentLabel = "@" + *t.AgentSlug
+				}
+				summary := *t.ResultSummary
+				if len(summary) > maxDepOutputLen {
+					summary = summary[:maxDepOutputLen] + "\n...(truncated)"
+				}
+				depOutputs = append(depOutputs,
+					fmt.Sprintf("--- Output from Task #%d \"%s\" (by %s) ---\n%s", t.TaskOrder, t.Title, agentLabel, summary))
+			}
+		}
+	}
+
+	// Assertive preamble — prevents "I need more info" responses
+	if len(depOutputs) > 0 {
+		b.WriteString("IMPORTANT: You are part of a multi-agent mission pipeline. ")
+		b.WriteString("Previous tasks have already been completed and their outputs are provided below. ")
+		b.WriteString("DO NOT ask for additional information or clarification — everything you need is in this prompt. ")
+		b.WriteString("Use the dependency outputs below as your input and execute your task immediately.\n\n")
+	}
 
 	// Mission overview
 	var missionTitle, missionDesc sql.NullString
@@ -416,16 +448,16 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 		`SELECT title, description FROM missions WHERE id = ?`, ms.ID,
 	).Scan(&missionTitle, &missionDesc)
 
-	b.WriteString("[MISSION CONTEXT]\n")
+	b.WriteString("[MISSION]\n")
 	if missionTitle.Valid {
-		b.WriteString(fmt.Sprintf("Mission: %s\n", missionTitle.String))
+		b.WriteString(fmt.Sprintf("Name: %s\n", missionTitle.String))
 	}
 	if missionDesc.Valid && missionDesc.String != "" {
-		b.WriteString(fmt.Sprintf("Description: %s\n", missionDesc.String))
+		b.WriteString(fmt.Sprintf("Goal: %s\n", missionDesc.String))
 	}
 
 	// DAG overview — list all tasks so the agent knows the bigger picture
-	b.WriteString(fmt.Sprintf("\nTotal tasks: %d\n", len(allTasks)))
+	b.WriteString(fmt.Sprintf("Tasks in pipeline: %d\n", len(allTasks)))
 	for _, t := range allTasks {
 		marker := "  "
 		switch t.Status {
@@ -442,48 +474,30 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 		}
 		b.WriteString(fmt.Sprintf("  %s#%d %s (%s, %s)\n", marker, t.TaskOrder, t.Title, agentLabel, t.Status))
 	}
+	b.WriteString("\n")
 
-	// Current task details
-	b.WriteString(fmt.Sprintf("\n[YOUR TASK]\n"))
-	b.WriteString(fmt.Sprintf("Title: %s\n", task.Title))
+	// Dependency outputs — BEFORE the task assignment so agent reads context first
+	if len(depOutputs) > 0 {
+		b.WriteString("[INPUT FROM PREVIOUS TASKS]\n")
+		b.WriteString("The following outputs were produced by tasks that yours depends on.\n")
+		b.WriteString("You MUST use this information to complete your task:\n\n")
+		b.WriteString(strings.Join(depOutputs, "\n\n"))
+		b.WriteString("\n\n")
+	}
+
+	// Current task details — the actual assignment
+	b.WriteString("[YOUR ASSIGNMENT]\n")
+	b.WriteString(fmt.Sprintf("Task: %s\n", task.Title))
 	if task.Description != nil && *task.Description != "" {
-		b.WriteString(fmt.Sprintf("Description: %s\n", *task.Description))
+		b.WriteString(fmt.Sprintf("Instructions: %s\n", *task.Description))
 	}
 	if task.Iteration > 1 {
-		b.WriteString(fmt.Sprintf("Iteration: %d (this is a retry — fix the issues from the previous attempt)\n", task.Iteration))
+		b.WriteString(fmt.Sprintf("Iteration: %d — this is a retry. Fix the issues from the previous attempt.\n", task.Iteration))
 	}
 
-	// Completed dependency outputs — critical for context chain
-	deps, _ := parseDependsOn(task.DependsOn)
-	if len(deps) > 0 {
-		depOutputs := make([]string, 0)
-		for _, depID := range deps {
-			for _, t := range allTasks {
-				if t.ID == depID && t.ResultSummary != nil && *t.ResultSummary != "" {
-					agentLabel := "unknown"
-					if t.AgentSlug != nil {
-						agentLabel = "@" + *t.AgentSlug
-					}
-					summary := *t.ResultSummary
-					if len(summary) > maxDepOutputLen {
-						summary = summary[:maxDepOutputLen] + "\n...(truncated)"
-					}
-					depOutputs = append(depOutputs,
-						fmt.Sprintf("Task #%d \"%s\" (%s):\n%s", t.TaskOrder, t.Title, agentLabel, summary))
-				}
-			}
-		}
-		if len(depOutputs) > 0 {
-			b.WriteString("\n[COMPLETED DEPENDENCIES — use these results as input]\n")
-			b.WriteString(strings.Join(depOutputs, "\n---\n"))
-			b.WriteString("\n")
-		}
-	}
-
-	b.WriteString("[END MISSION CONTEXT]\n\n")
-	b.WriteString(task.Title)
-	if task.Description != nil && *task.Description != "" {
-		b.WriteString("\n\n" + *task.Description)
+	// Closing directive
+	if len(depOutputs) > 0 {
+		b.WriteString("\nExecute this task NOW using the input from previous tasks above. Do not ask questions.")
 	}
 
 	result := b.String()
@@ -584,13 +598,23 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 		Title:     task.Title,
 	})
 
-	// Create assignment record
+	// Build rich mission brief with full context for the agent
+	taskBrief := e.buildMissionBrief(ctx, ms, task, allTasks)
+
+	e.logger.Info("mission brief built",
+		"task_id", task.ID,
+		"brief_len", len(taskBrief),
+		"has_input_section", strings.Contains(taskBrief, "[INPUT FROM PREVIOUS TASKS]"),
+		"has_assignment", strings.Contains(taskBrief, "[YOUR ASSIGNMENT]"),
+	)
+
+	// Create assignment record — store full brief for audit trail
 	assignmentID := generateID()
 	_, err = e.db.ExecContext(ctx, `
 		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)`,
 		assignmentID, ms.WorkspaceID, ms.ID, ms.LeadAgentID, *task.AssignedAgentID,
-		task.Title,
+		taskBrief,
 		ms.ID, // group_id = mission_id for grouping
 		now,
 	)
@@ -605,9 +629,6 @@ func (e *MissionEngine) scheduleTask(ctx context.Context, ms *missionState, task
 	if err != nil {
 		e.logger.Warn("link assignment to task", "task_id", task.ID, "error", err)
 	}
-
-	// Build rich mission brief with full context for the agent
-	taskBrief := e.buildMissionBrief(ctx, ms, task, allTasks)
 
 	// Dispatch the assignment to the correct crew's container
 	if e.dispatcher != nil {
