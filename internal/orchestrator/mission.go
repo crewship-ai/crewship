@@ -247,7 +247,10 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 
 			// Lead planning phase: if mission has 0 tasks, dispatch to lead
 			// so they can plan and create tasks autonomously.
-			if !ms.planningDispatched {
+			e.mu.Lock()
+			alreadyPlanning := ms.planningDispatched
+			e.mu.Unlock()
+			if !alreadyPlanning {
 				taskCount, countErr := e.countTasks(ctx, ms.ID)
 				if countErr != nil {
 					e.logger.Error("count tasks", "mission_id", ms.ID, "error", countErr)
@@ -255,7 +258,9 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 					if planErr := e.dispatchLeadPlanning(ctx, ms); planErr != nil {
 						e.logger.Error("lead planning failed", "mission_id", ms.ID, "error", planErr)
 					} else {
+						e.mu.Lock()
 						ms.planningDispatched = true
+						e.mu.Unlock()
 					}
 					continue // wait for lead to create tasks
 				}

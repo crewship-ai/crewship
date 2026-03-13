@@ -1339,7 +1339,7 @@ func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	if _, err = tx.ExecContext(r.Context(),
 		`UPDATE mission_tasks SET
 			status = CASE WHEN depends_on = '[]' OR depends_on IS NULL THEN 'PENDING' ELSE 'BLOCKED' END,
-			iteration = iteration + 1,
+			iteration = COALESCE(iteration, 0) + 1,
 			error_message = NULL,
 			result_summary = CASE WHEN status = 'COMPLETED' THEN result_summary ELSE NULL END,
 			started_at = NULL,
@@ -1504,6 +1504,7 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		depsMap[t.ID] = deps
 	}
 
+	resetStatusMap := make(map[string]string, len(resetIDs))
 	for _, id := range resetIDs {
 		// Determine correct initial status: PENDING if all deps are COMPLETED, BLOCKED otherwise
 		newStatus := "PENDING"
@@ -1513,10 +1514,11 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
+		resetStatusMap[id] = newStatus
 		if _, err = tx.ExecContext(r.Context(),
 			`UPDATE mission_tasks SET
 				status = ?,
-				iteration = iteration + 1,
+				iteration = COALESCE(iteration, 0) + 1,
 				error_message = NULL,
 				result_summary = NULL,
 				started_at = NULL,
@@ -1569,7 +1571,7 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 			h.hub.Broadcast(wsChannel, ws.ServerMessage{
 				Type:    "task.updated",
 				Channel: wsChannel,
-				Payload: map[string]string{"id": id, "mission_id": missionID, "status": "PENDING"},
+				Payload: map[string]string{"id": id, "mission_id": missionID, "status": resetStatusMap[id]},
 			})
 		}
 	}
@@ -1666,7 +1668,7 @@ func (h *MissionHandler) Clone(w http.ResponseWriter, r *http.Request) {
 	// Create synthetic chat (same pattern as Create)
 	if _, err = tx.ExecContext(r.Context(),
 		`INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, 'MISSION', 'active', ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, 'MISSION', 'ACTIVE', ?, ?, ?)`,
 		newMissionID, m.LeadAgentID, wsID, "Mission: "+m.Title+" (clone)", now, now, now); err != nil {
 		h.logger.Error("create synthetic chat for clone", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Failed to create mission")
