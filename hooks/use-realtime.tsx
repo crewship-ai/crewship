@@ -18,6 +18,7 @@ export type RealtimeEventType =
   | "agent.status"
   | "assignment.updated"
   | "escalation.created"
+  | "escalation.resolved"
   | "mission.updated"
   | "task.updated"
   | "peer_conversation.updated"
