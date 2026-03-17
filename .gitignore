@@ -69,3 +69,5 @@ ehthumbs.db
 *.key
 *.db-shm
 *.db-wal
+data/
+internal/orchestrator/data/

@@ -26,29 +26,30 @@ import (
 )
 
 type Server struct {
-	httpServer   *http.Server
-	ipcServer    *http.Server
-	mux          *http.ServeMux
-	ipcMux       *http.ServeMux
-	spaHandler   http.Handler
-	cfg          *config.Config
-	logger       *slog.Logger
-	wsHub        *ws.Hub
-	orchestrator *orchestrator.Orchestrator
-	container    provider.ContainerProvider
-	storage      provider.StorageProvider
-	state        provider.StateProvider
-	logWriter    *logcollector.Writer
-	logReader    *logcollector.Reader
-	convStore    *conversation.Store
-	tokenPool    *llmproxy.TokenPool
-	tokenSyncer  *llmproxy.TokenSyncer
-	credMonitor  *llmproxy.CredentialMonitor
-	debugLogs    *logging.RingBuffer
-	db           *sql.DB
-	startedAt    time.Time
-	runCtx       context.Context
-	runCancel    context.CancelFunc
+	httpServer    *http.Server
+	ipcServer     *http.Server
+	mux           *http.ServeMux
+	ipcMux        *http.ServeMux
+	spaHandler    http.Handler
+	cfg           *config.Config
+	logger        *slog.Logger
+	wsHub         *ws.Hub
+	orchestrator  *orchestrator.Orchestrator
+	missionEngine *orchestrator.MissionEngine
+	container     provider.ContainerProvider
+	storage       provider.StorageProvider
+	state         provider.StateProvider
+	logWriter     *logcollector.Writer
+	logReader     *logcollector.Reader
+	convStore     *conversation.Store
+	tokenPool     *llmproxy.TokenPool
+	tokenSyncer   *llmproxy.TokenSyncer
+	credMonitor   *llmproxy.CredentialMonitor
+	debugLogs     *logging.RingBuffer
+	db            *sql.DB
+	startedAt     time.Time
+	runCtx        context.Context
+	runCancel     context.CancelFunc
 }
 
 type Deps struct {
@@ -167,23 +168,30 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		})
 	}
 
+	// Create MissionEngine for orchestrating multi-task missions
+	var missionEngine *orchestrator.MissionEngine
+	if deps != nil && deps.DB != nil {
+		missionEngine = orchestrator.NewMissionEngine(deps.DB, orch, wsHub, logger)
+	}
+
 	s := &Server{
-		mux:          mux,
-		ipcMux:       ipcMux,
-		cfg:          cfg,
-		logger:       logger,
-		wsHub:        wsHub,
-		orchestrator: orch,
-		container:    ctr,
-		storage:      sto,
-		state:        sta,
-		logWriter:    logW,
-		logReader:    logR,
-		convStore:    convStore,
-		tokenPool:    tokenPool,
-		tokenSyncer:  tokenSyncer,
-		credMonitor:  credMonitor,
-		debugLogs:    debugLogs,
+		mux:           mux,
+		ipcMux:        ipcMux,
+		cfg:           cfg,
+		logger:        logger,
+		wsHub:         wsHub,
+		orchestrator:  orch,
+		missionEngine: missionEngine,
+		container:     ctr,
+		storage:       sto,
+		state:         sta,
+		logWriter:     logW,
+		logReader:     logR,
+		convStore:     convStore,
+		tokenPool:     tokenPool,
+		tokenSyncer:   tokenSyncer,
+		credMonitor:   credMonitor,
+		debugLogs:     debugLogs,
 	}
 	if deps != nil {
 		s.db = deps.DB
@@ -202,6 +210,9 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		opts = append(opts, goapi.WithInternalToken(cfg.Auth.InternalToken))
 		opts = append(opts, goapi.WithHub(wsHub))
 		opts = append(opts, goapi.WithOrchestrator(orch))
+		if missionEngine != nil {
+			opts = append(opts, goapi.WithMissionCallback(missionEngine))
+		}
 		opts = append(opts, goapi.WithAllowSignup(cfg.Auth.AllowSignup))
 
 		// Wire Keeper gatekeeper (Ollama-based credential access control)
@@ -287,6 +298,10 @@ func (s *Server) Orchestrator() *orchestrator.Orchestrator {
 	return s.orchestrator
 }
 
+func (s *Server) MissionEngine() *orchestrator.MissionEngine {
+	return s.missionEngine
+}
+
 func (s *Server) TokenPool() *llmproxy.TokenPool {
 	return s.tokenPool
 }
@@ -350,6 +365,9 @@ func (s *Server) Shutdown() error {
 	s.logger.Info("shutting down servers")
 
 	s.orchestrator.StopAccepting()
+	if s.missionEngine != nil {
+		s.missionEngine.Shutdown()
+	}
 	if s.runCancel != nil {
 		s.runCancel()
 	}

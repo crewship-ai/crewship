@@ -522,6 +522,52 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// For COORDINATOR agents, load all workspace crews and their agents
+	type crewInfoEntry struct {
+		ID      string           `json:"id"`
+		Name    string           `json:"name"`
+		Slug    string           `json:"slug"`
+		Members []crewMemberEntry `json:"members"`
+	}
+	var allCrews []crewInfoEntry
+	if roleStr == "COORDINATOR" {
+		crewRows, err := h.db.QueryContext(r.Context(), `
+			SELECT id, name, slug FROM crews WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY name`,
+			wsID)
+		if err != nil {
+			h.logger.Error("query crews for coordinator", "error", err)
+		} else {
+			defer crewRows.Close()
+			for crewRows.Next() {
+				var ci crewInfoEntry
+				if err := crewRows.Scan(&ci.ID, &ci.Name, &ci.Slug); err != nil {
+					h.logger.Error("scan crew for coordinator", "error", err)
+					continue
+				}
+				agentRows, err := h.db.QueryContext(r.Context(), `
+					SELECT a.id, a.name, a.slug, COALESCE(a.role_title, ''), COALESCE(a.description, ''), a.status,
+					       COALESCE((SELECT c.id FROM chats c WHERE c.agent_id = a.id AND c.status = 'ACTIVE' ORDER BY c.created_at DESC LIMIT 1), '')
+					FROM agents a
+					WHERE a.crew_id = ? AND a.deleted_at IS NULL
+					ORDER BY a.name`, ci.ID)
+				if err != nil {
+					h.logger.Error("query agents for coordinator crew", "error", err, "crew_id", ci.ID)
+				} else {
+					for agentRows.Next() {
+						var m crewMemberEntry
+						if err := agentRows.Scan(&m.ID, &m.Name, &m.Slug, &m.RoleTitle, &m.Description, &m.Status, &m.ChatID); err != nil {
+							h.logger.Error("scan agent for coordinator", "error", err)
+							continue
+						}
+						ci.Members = append(ci.Members, m)
+					}
+					agentRows.Close()
+				}
+				allCrews = append(allCrews, ci)
+			}
+		}
+	}
+
 	// [KEEPER] section — credential access control instructions
 	if h.keeperEnabled.Load() {
 		// Collect SECRET credentials for this agent and redact their values
@@ -581,7 +627,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"agent_id":        agentID,
 		"agent_slug":      agentSlug,
 		"agent_role":      roleStr,
@@ -599,7 +645,39 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		"crew_members":    crewMembers,
 		"network_mode":    networkMode,
 		"allowed_domains": allowedDomains,
-	})
+	}
+	if len(allCrews) > 0 {
+		resp["all_crews"] = allCrews
+
+		// Load active missions for COORDINATOR context
+		missionRows, err := h.db.QueryContext(r.Context(), `
+			SELECT m.id, c.slug, m.title, m.status
+			FROM missions m
+			JOIN crews c ON c.id = m.crew_id
+			WHERE m.workspace_id = ? AND m.status IN ('PLANNING', 'IN_PROGRESS', 'REVIEW')
+			ORDER BY m.created_at DESC LIMIT 20`,
+			wsID)
+		if err == nil {
+			defer missionRows.Close()
+			type missionEntry struct {
+				ID       string `json:"id"`
+				CrewSlug string `json:"crew_slug"`
+				Title    string `json:"title"`
+				Status   string `json:"status"`
+			}
+			var activeMissions []missionEntry
+			for missionRows.Next() {
+				var me missionEntry
+				if err := missionRows.Scan(&me.ID, &me.CrewSlug, &me.Title, &me.Status); err == nil {
+					activeMissions = append(activeMissions, me)
+				}
+			}
+			if len(activeMissions) > 0 {
+				resp["active_missions"] = activeMissions
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
@@ -875,4 +953,87 @@ func WriteAuditLog(ctx context.Context, db *sql.DB, action, entityType, entityID
 	if err != nil {
 		slog.Debug("audit log write failed", "error", err, "action", action)
 	}
+}
+
+// ListCrews handles GET /api/v1/internal/crews?workspace_id=...
+// Used by the sidecar on behalf of COORDINATOR agents.
+func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
+	wsID := r.URL.Query().Get("workspace_id")
+	if wsID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id required"})
+		return
+	}
+
+	type crewEntry struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	}
+
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT id, name, slug FROM crews WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY name`, wsID)
+	if err != nil {
+		h.logger.Error("list crews internal", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	result := []crewEntry{}
+	for rows.Next() {
+		var c crewEntry
+		if err := rows.Scan(&c.ID, &c.Name, &c.Slug); err != nil {
+			continue
+		}
+		result = append(result, c)
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ListCrewConnections handles GET /api/v1/internal/crew-connections?workspace_id=...
+// Used by the sidecar on behalf of COORDINATOR agents.
+func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Request) {
+	wsID := r.URL.Query().Get("workspace_id")
+	if wsID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id required"})
+		return
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT cc.id, cc.from_crew_id, cc.to_crew_id, cc.direction, cc.status,
+		       fc.name, fc.slug, tc.name, tc.slug
+		FROM crew_connections cc
+		JOIN crews fc ON fc.id = cc.from_crew_id
+		JOIN crews tc ON tc.id = cc.to_crew_id
+		WHERE cc.workspace_id = ? AND cc.status = 'active'
+		ORDER BY cc.created_at DESC`, wsID)
+	if err != nil {
+		h.logger.Error("list crew connections internal", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	type connEntry struct {
+		ID           string `json:"id"`
+		FromCrewID   string `json:"from_crew_id"`
+		FromCrewName string `json:"from_crew_name"`
+		FromCrewSlug string `json:"from_crew_slug"`
+		ToCrewID     string `json:"to_crew_id"`
+		ToCrewName   string `json:"to_crew_name"`
+		ToCrewSlug   string `json:"to_crew_slug"`
+		Direction    string `json:"direction"`
+		Status       string `json:"status"`
+	}
+
+	result := []connEntry{}
+	for rows.Next() {
+		var c connEntry
+		if err := rows.Scan(&c.ID, &c.FromCrewID, &c.ToCrewID, &c.Direction, &c.Status,
+			&c.FromCrewName, &c.FromCrewSlug, &c.ToCrewName, &c.ToCrewSlug); err != nil {
+			continue
+		}
+		result = append(result, c)
+	}
+	writeJSON(w, http.StatusOK, result)
 }

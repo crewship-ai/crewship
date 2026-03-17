@@ -21,6 +21,19 @@ pnpm lint && pnpm build                  # Frontend — must pass for UI changes
 - **Never amend commits after pre-commit hook failure** — create a new commit.
 - **Never `git checkout .` or `git clean` on WIP** — always stash first.
 
+## Remote development server
+
+All development happens on a **remote Proxmox VM** via SSH. Never build or run services locally on the Mac Mini.
+
+- **Connect:** `ssh crewship-dev` (alias for `ubuntu@192.168.1.201`)
+- **Repo path:** `/opt/crewship`
+- **Backend:** `http://192.168.1.201:8080`
+- **Frontend:** `http://192.168.1.201:3001`
+- **Resources:** 12 vCPU, 64 GB RAM, 200 GB NVMe, Docker container provider
+- **Start services:** `cd /opt/crewship && ./dev.sh start` (inside tmux to survive SSH disconnect)
+- **VS Code / Cursor:** `code --remote ssh-remote+crewship-dev /opt/crewship`
+- Go PATH on the server requires: `export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin` (already in `.bashrc`)
+
 ## Project-specific knowledge (not derivable from code)
 
 - Single binary: `make build` → Next.js static export (`out/`) → `web/out/` → Go `//go:embed`. No Node.js at runtime.
