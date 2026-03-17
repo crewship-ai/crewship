@@ -442,6 +442,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/peer-conversations", authed(wsCtx(http.HandlerFunc(queries.ListPeerConversations))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/standup", authed(wsCtx(http.HandlerFunc(queries.Standup))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/escalations", authed(wsCtx(http.HandlerFunc(queries.ListEscalations))))
+	r.mux.Handle("PATCH /api/v1/escalations/{escalationId}/resolve", authed(wsCtx(http.HandlerFunc(queries.ResolveEscalation))))
 
 	// Cross-crew activity feed (public, authenticated)
 	r.mux.Handle("GET /api/v1/activity", authed(wsCtx(http.HandlerFunc(queries.ListAllActivity))))

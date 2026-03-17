@@ -80,6 +80,7 @@ var migrations = []migration{
 	{19, "add_workflow_templates", migrationAddWorkflowTemplates},
 	{20, "add_crew_connections", migrationAddCrewConnections},
 	{21, "add_mission_proposals", migrationAddMissionProposals},
+	{22, "add_escalation_type_and_resolve", migrationAddEscalationTypeAndResolve},
 }
 
 const migrationAddKeeperObservability = `
@@ -771,4 +772,16 @@ CREATE TABLE IF NOT EXISTS mission_proposals (
 CREATE INDEX IF NOT EXISTS idx_proposal_ws ON mission_proposals(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_proposal_status ON mission_proposals(status);
 CREATE INDEX IF NOT EXISTS idx_mission_proposal ON missions(proposal_id);
+`
+
+const migrationAddEscalationTypeAndResolve = `
+-- Add type column to distinguish escalation kinds (TEXT, CREDENTIAL, LINK).
+-- Default to TEXT for backwards compatibility with existing escalations.
+ALTER TABLE escalations ADD COLUMN type TEXT NOT NULL DEFAULT 'TEXT' CHECK(type IN ('TEXT', 'CREDENTIAL', 'LINK'));
+
+-- Add metadata column for structured data (e.g. link URL, credential env var name).
+ALTER TABLE escalations ADD COLUMN metadata TEXT;
+
+-- Add resolved_by to track who resolved the escalation (user/workspace member).
+ALTER TABLE escalations ADD COLUMN resolved_by TEXT;
 `

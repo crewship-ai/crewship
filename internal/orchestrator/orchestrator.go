@@ -362,10 +362,13 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	crewAgentDir := path.Join("/crew", "agents", req.AgentSlug)
 	crewSharedDir := "/crew/shared"
 
-	// Create scratch, output, and per-agent crew directories
+	secretsAgentDir := path.Join("/secrets", req.AgentSlug)
+	secretsSharedDir := "/secrets/shared"
+
+	// Create scratch, output, per-agent crew, and secrets directories
 	mkdirCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,
-		Cmd:         []string{"mkdir", "-p", scratchDir, outputDir, crewAgentDir, crewSharedDir},
+		Cmd:         []string{"mkdir", "-p", scratchDir, outputDir, crewAgentDir, crewSharedDir, secretsAgentDir, secretsSharedDir},
 		User:        "1001:1001",
 	}
 	mkResult, err := o.container.Exec(ctx, mkdirCfg)
@@ -415,10 +418,18 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		}
 	}
 
+	// Create per-agent secrets directory and write credential files.
+	// Files are written as root (UID 0) with ownership 1001:1001 and mode 0400
+	// so the agent can read but not modify them.
+	if err := writeCredentialFiles(ctx, o.container, req.ContainerID, req.AgentSlug, req.Credentials, secretsAgentDir, secretsSharedDir, o.logger); err != nil {
+		o.logger.Warn("failed to write credential files", "error", err, "agent_id", req.AgentID)
+	}
+	env = append(env, "CREWSHIP_SECRETS_DIR="+secretsAgentDir)
+
 	env = append(env, "CREWSHIP_OUTPUT_DIR="+outputDir)
 
 	// Write non-secret Claude config (skip onboarding). Credentials are
-	// passed ONLY via env vars -- never written to disk in the container.
+	// also available as files in /secrets/{agent-slug}/ for CLI tools.
 	if err := setupClaudeConfig(ctx, o.container, req.ContainerID, req.AgentSlug, o.logger); err != nil {
 		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
 	}
