@@ -129,3 +129,17 @@ func extractToken(r *http.Request) string {
 
 	return ""
 }
+
+// internalWsCtx extracts workspace_id from query params and sets it in context.
+// Used for internal routes called by sidecar (no JWT auth, just X-Internal-Token).
+func internalWsCtx(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wsID := r.URL.Query().Get("workspace_id")
+		if wsID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id query parameter required"})
+			return
+		}
+		ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}

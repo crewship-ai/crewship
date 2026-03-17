@@ -10,14 +10,15 @@ interface StatCardProps {
   subtitle: string
   icon: React.ElementType
   iconClassName?: string
+  className?: string
   /** Optional animated icon component (lucide-animated). Renders instead of static icon. */
   animatedIcon?: React.ReactNode
 }
 
-export function StatCard({ title, value, subtitle, icon: Icon, iconClassName, animatedIcon }: StatCardProps) {
+export function StatCard({ title, value, subtitle, icon: Icon, iconClassName, className, animatedIcon }: StatCardProps) {
   return (
     <FlashHighlight trigger={value}>
-      <Card>
+      <Card className={className}>
         <CardContent className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div className="text-label text-muted-foreground uppercase tracking-wide font-medium">{title}</div>

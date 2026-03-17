@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,7 +22,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
+import type { WorkflowTemplate } from "@/lib/types/template"
 
 interface LeadAgent {
   id: string
@@ -47,7 +49,17 @@ export function CreateMissionDialog({
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
   const [leadAgentId, setLeadAgentId] = useState("")
+  const [templateId, setTemplateId] = useState<string>("none")
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    fetch(`/api/v1/templates?workspace_id=${workspaceId}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setTemplates)
+      .catch(() => {})
+  }, [open, workspaceId])
 
   async function handleSubmit() {
     if (!title.trim()) {
@@ -70,6 +82,7 @@ export function CreateMissionDialog({
             title: title.trim(),
             description: description.trim() || undefined,
             lead_agent_id: leadAgentId,
+            workflow_template: templateId !== "none" ? templateId : undefined,
           }),
         }
       )
@@ -85,6 +98,7 @@ export function CreateMissionDialog({
       setTitle("")
       setDescription("")
       setLeadAgentId("")
+      setTemplateId("none")
       onCreated()
     } catch {
       toast.error("Failed to create mission")
@@ -148,6 +162,32 @@ export function CreateMissionDialog({
               </p>
             )}
           </div>
+          {templates.length > 0 && (
+            <div className="space-y-2">
+              <Label>Workflow Template (optional)</Label>
+              <Select value={templateId} onValueChange={setTemplateId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="No template" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No template (lead plans freely)</SelectItem>
+                  {templates.map((tmpl) => (
+                    <SelectItem key={tmpl.id} value={tmpl.name}>
+                      <div className="flex items-center gap-2">
+                        <span>{tmpl.name}</span>
+                        {tmpl.is_builtin && (
+                          <Badge variant="outline" className="text-[9px] px-1 py-0">builtin</Badge>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-label text-muted-foreground">
+                Templates pre-define task structure. The lead agent can still modify the plan.
+              </p>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
