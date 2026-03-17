@@ -5,32 +5,68 @@
 set -euo pipefail
 
 SERVER="${1:-http://localhost:8080}"
-CLI="./crewship"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+CLI="${CLI:-$REPO_ROOT/crewship}"
+
+if [[ ! -x "$CLI" ]]; then
+  echo "ERROR: crewship CLI not found or not executable at: $CLI" >&2
+  exit 1
+fi
+
+# Idempotent helpers — skip creation if resource already exists
+ensure_crew() {
+  local slug="$1"; shift
+  if "$CLI" crew list -s "$SERVER" -f quiet 2>/dev/null | grep -qw "$slug"; then
+    echo "  crew '$slug' already exists, skipping"
+  else
+    "$CLI" crew create "$@" -s "$SERVER"
+  fi
+}
+
+ensure_agent() {
+  local slug="$1"; shift
+  if "$CLI" agent list -s "$SERVER" -f quiet 2>/dev/null | grep -qw "$slug"; then
+    echo "  agent '$slug' already exists, skipping"
+  else
+    "$CLI" agent create "$@" -s "$SERVER"
+  fi
+}
+
+ensure_connection() {
+  local from="$1" to="$2"
+  if "$CLI" crew connections -s "$SERVER" -f quiet 2>/dev/null | grep -qE "${from}.*${to}|${to}.*${from}"; then
+    echo "  connection '$from' <-> '$to' already exists, skipping"
+  else
+    "$CLI" crew connect "$from" "$to" -s "$SERVER"
+  fi
+}
 
 echo "========================================"
 echo "  ShipFast — Virtual Startup Setup"
 echo "  Server: $SERVER"
+echo "  CLI:    $CLI"
 echo "========================================"
 echo ""
 
 # --- 1. Create Crews ---
 echo ">>> Creating crews..."
 
-$CLI crew create --name "Product" --slug product \
+ensure_crew product --name "Product" --slug product \
   --description "Product management, UX design, technical writing. Every feature starts here." \
-  --icon "📋" --color "#8B5CF6" -s "$SERVER"
+  --icon "📋" --color "#8B5CF6"
 
-$CLI crew create --name "Dev" --slug dev \
+ensure_crew dev --name "Dev" --slug dev \
   --description "Full-stack engineering. Go backend, React/Next.js frontend, architecture decisions." \
-  --icon "⚡" --color "#3B82F6" -s "$SERVER"
+  --icon "⚡" --color "#3B82F6"
 
-$CLI crew create --name "QA" --slug qa \
+ensure_crew qa --name "QA" --slug qa \
   --description "Quality assurance, test engineering, security audits, performance benchmarks." \
-  --icon "🔍" --color "#10B981" -s "$SERVER"
+  --icon "🔍" --color "#10B981"
 
-$CLI crew create --name "DevOps" --slug devops \
+ensure_crew devops --name "DevOps" --slug devops \
   --description "CI/CD, Docker, infrastructure, monitoring, deployment, reliability." \
-  --icon "🚀" --color "#F59E0B" -s "$SERVER"
+  --icon "🚀" --color "#F59E0B"
 
 echo ""
 echo ">>> Crews created."
@@ -40,7 +76,7 @@ echo ""
 echo ">>> Creating agents..."
 
 # -- Product Crew --
-$CLI agent create --name "Petra" --slug petra --crew product --role LEAD \
+ensure_agent petra --name "Petra" --slug petra --crew product --role LEAD \
   --role-title "Product Manager" \
   --system-prompt "Jsi Petra, Product Manager ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -64,10 +100,9 @@ $CLI agent create --name "Petra" --slug petra --crew product --role LEAD \
 ## Komunikační styl
 - Stručná, strukturovaná, orientovaná na výsledek
 - Používej bullet pointy a tabulky
-- Vždy uveď priority (P0/P1/P2) a timeline" \
-  -s "$SERVER"
+- Vždy uveď priority (P0/P1/P2) a timeline"
 
-$CLI agent create --name "Marek" --slug marek --crew product --role AGENT \
+ensure_agent marek --name "Marek" --slug marek --crew product --role AGENT \
   --role-title "UX Designer" \
   --system-prompt "Jsi Marek, UX Designer ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -91,10 +126,9 @@ Navrhuješ uživatelské rozhraní a zážitek. Myslíš na uživatele v každé
 ## Komunikační styl
 - Vizuálně orientovaný, popisuješ co uživatel vidí a dělá
 - Používej ASCII wireframy když je to užitečné
-- Vždy zdůvodni designová rozhodnutí z pohledu uživatele" \
-  -s "$SERVER"
+- Vždy zdůvodni designová rozhodnutí z pohledu uživatele"
 
-$CLI agent create --name "Lucy" --slug lucy --crew product --role AGENT \
+ensure_agent lucy --name "Lucy" --slug lucy --crew product --role AGENT \
   --role-title "Technical Writer" \
   --system-prompt "Jsi Lucy, Technical Writer ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -118,11 +152,10 @@ Píšeš dokumentaci. Vše co tým vytvoří, ty zdokumentuješ tak, aby to poch
 ## Komunikační styl
 - Jasná, srozumitelná, bez žargonu kde to není nutné
 - Krátké věty, hodně příkladů
-- Bullet pointy > odstavce" \
-  -s "$SERVER"
+- Bullet pointy > odstavce"
 
 # -- Dev Crew --
-$CLI agent create --name "Tomas" --slug tomas --crew dev --role LEAD \
+ensure_agent tomas --name "Tomas" --slug tomas --crew dev --role LEAD \
   --role-title "Tech Lead" \
   --system-prompt "Jsi Tomáš, Tech Lead a Architekt ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -153,10 +186,9 @@ $CLI agent create --name "Tomas" --slug tomas --crew dev --role LEAD \
 ## Komunikační styl
 - Technicky přesný, strukturovaný
 - Navrhuj řešení s pros/cons
-- Odhaduj effort v hodinách" \
-  -s "$SERVER"
+- Odhaduj effort v hodinách"
 
-$CLI agent create --name "Viktor" --slug viktor --crew dev --role AGENT \
+ensure_agent viktor --name "Viktor" --slug viktor --crew dev --role AGENT \
   --role-title "Backend Developer" \
   --system-prompt "Jsi Viktor, Backend Developer ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -186,10 +218,9 @@ Píšeš Go backend kód. API endpointy, DB migrace, business logiku, CLI přík
 
 ## Komunikační styl
 - Kód mluví za sebe, komentáře jen kde je to nutné
-- Výstup: implementace + stručný popis co a proč" \
-  -s "$SERVER"
+- Výstup: implementace + stručný popis co a proč"
 
-$CLI agent create --name "Nela" --slug nela --crew dev --role AGENT \
+ensure_agent nela --name "Nela" --slug nela --crew dev --role AGENT \
   --role-title "Frontend Developer" \
   --system-prompt "Jsi Nela, Frontend Developer ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -219,11 +250,10 @@ Píšeš React/Next.js frontend. UI komponenty, stránky, state management.
 
 ## Komunikační styl
 - Vizuálně orientovaná, popisuješ co uživatel uvidí
-- Výstup: kód + screenshot/popis výsledku" \
-  -s "$SERVER"
+- Výstup: kód + screenshot/popis výsledku"
 
 # -- QA Crew --
-$CLI agent create --name "Eva" --slug eva --crew qa --role LEAD \
+ensure_agent eva --name "Eva" --slug eva --crew qa --role LEAD \
   --role-title "QA Lead" \
   --system-prompt "Jsi Eva, QA Lead ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -247,10 +277,9 @@ $CLI agent create --name "Eva" --slug eva --crew qa --role LEAD \
 ## Komunikační styl
 - Precizní, metodická, důkladná
 - Vždy structured: tabulky, checklists, pass/fail
-- Nestyď se říct NE pokud kvalita není dostatečná" \
-  -s "$SERVER"
+- Nestyď se říct NE pokud kvalita není dostatečná"
 
-$CLI agent create --name "Daniel" --slug daniel --crew qa --role AGENT \
+ensure_agent daniel --name "Daniel" --slug daniel --crew qa --role AGENT \
   --role-title "Test Engineer" \
   --system-prompt "Jsi Daniel, Test Engineer ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -274,10 +303,9 @@ Píšeš testy. Unit testy, integration testy, E2E scénáře. Hledáš bugy dř
 
 ## Komunikační styl
 - Analytický, detailní
-- Výstup: test kód + coverage report + nalezené bugy" \
-  -s "$SERVER"
+- Výstup: test kód + coverage report + nalezené bugy"
 
-$CLI agent create --name "Jakub" --slug jakub --crew qa --role AGENT \
+ensure_agent jakub --name "Jakub" --slug jakub --crew qa --role AGENT \
   --role-title "Security & Performance Engineer" \
   --system-prompt "Jsi Jakub, Security & Performance Engineer ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -301,11 +329,10 @@ Hlídáš bezpečnost a výkon. Hledáš zranitelnosti, optimalizuješ performan
 ## Komunikační styl
 - Severity-based: Critical > High > Medium > Low
 - Každý finding: Description, Impact, Reproduction, Recommendation
-- Stručný ale důrazný u kritických nálezů" \
-  -s "$SERVER"
+- Stručný ale důrazný u kritických nálezů"
 
 # -- DevOps Crew --
-$CLI agent create --name "Filip" --slug filip --crew devops --role LEAD \
+ensure_agent filip --name "Filip" --slug filip --crew devops --role LEAD \
   --role-title "DevOps Lead" \
   --system-prompt "Jsi Filip, DevOps Lead ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -336,10 +363,9 @@ $CLI agent create --name "Filip" --slug filip --crew devops --role LEAD \
 
 ## Komunikační styl
 - Pragmatický, oriented na automatizaci
-- Výstup: konfigurace + skripty + runbooky" \
-  -s "$SERVER"
+- Výstup: konfigurace + skripty + runbooky"
 
-$CLI agent create --name "Ondra" --slug ondra --crew devops --role AGENT \
+ensure_agent ondra --name "Ondra" --slug ondra --crew devops --role AGENT \
   --role-title "Platform Engineer" \
   --system-prompt "Jsi Ondra, Platform Engineer ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -362,10 +388,9 @@ Stavíš a udržuješ platformu na které Crewship běží. Docker, deployment, 
 
 ## Komunikační styl
 - Hands-on, kód a konfigurace nad teorií
-- Výstup: Dockerfile, docker-compose.yml, deploy.sh, README" \
-  -s "$SERVER"
+- Výstup: Dockerfile, docker-compose.yml, deploy.sh, README"
 
-$CLI agent create --name "Martin" --slug martin --crew devops --role AGENT \
+ensure_agent martin --name "Martin" --slug martin --crew devops --role AGENT \
   --role-title "Site Reliability Engineer" \
   --system-prompt "Jsi Martin, SRE (Site Reliability Engineer) ve startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -389,11 +414,10 @@ Zajišťuješ spolehlivost a pozorovatelnost systému. Monitoring, alerting, inc
 ## Komunikační styl
 - Data-driven, metriky a čísla
 - Severity levels: SEV1 (outage) → SEV4 (cosmetic)
-- Výstup: monitoring config, alerting rules, runbooky, post-mortem template" \
-  -s "$SERVER"
+- Výstup: monitoring config, alerting rules, runbooky, post-mortem template"
 
 # -- CEO Coordinator --
-$CLI agent create --name "Chief" --slug chief --role COORDINATOR \
+ensure_agent chief --name "Chief" --slug chief --role COORDINATOR \
   --role-title "CEO" \
   --system-prompt "Jsi Chief, CEO startupu ShipFast, který vyvíjí platformu Crewship.
 
@@ -422,8 +446,7 @@ Koordinuješ práci napříč všemi crews. Rozhoduješ o strategických priorit
 ## Komunikační styl
 - Strategický, přímý, decision-oriented
 - Vždy uveď PROČ, ne jen CO
-- Prioritizuj: P0 (must-have now) → P1 (this sprint) → P2 (next sprint)" \
-  -s "$SERVER"
+- Prioritizuj: P0 (must-have now) → P1 (this sprint) → P2 (next sprint)"
 
 echo ""
 echo ">>> Agents created."
@@ -432,12 +455,12 @@ echo ""
 # --- 3. Crew Connections ---
 echo ">>> Creating crew connections (full mesh)..."
 
-$CLI crew connect product dev -s "$SERVER"
-$CLI crew connect dev qa -s "$SERVER"
-$CLI crew connect dev devops -s "$SERVER"
-$CLI crew connect qa devops -s "$SERVER"
-$CLI crew connect product qa -s "$SERVER"
-$CLI crew connect product devops -s "$SERVER"
+ensure_connection product dev
+ensure_connection dev qa
+ensure_connection dev devops
+ensure_connection qa devops
+ensure_connection product qa
+ensure_connection product devops
 
 echo ""
 echo ">>> Connections created."

@@ -112,6 +112,7 @@ var missionGetCmd = &cobra.Command{
 			CreatedAt   string  `json:"created_at"`
 			CompletedAt *string `json:"completed_at"`
 			Tasks       []struct {
+				ID        string  `json:"id"`
 				Title     string  `json:"title"`
 				Status    string  `json:"status"`
 				AgentSlug *string `json:"agent_slug"`
@@ -145,7 +146,7 @@ var missionGetCmd = &cobra.Command{
 
 		if len(mission.Tasks) > 0 && f.Format == "table" {
 			fmt.Printf("\n%sTASKS (%d):%s\n", cli.Bold, len(mission.Tasks), cli.Reset)
-			headers := []string{"#", "TITLE", "STATUS", "AGENT"}
+			headers := []string{"#", "TASK ID", "TITLE", "STATUS", "AGENT"}
 			var rows [][]string
 			for _, t := range mission.Tasks {
 				agent := "-"
@@ -156,7 +157,7 @@ var missionGetCmd = &cobra.Command{
 				if len(title) > 50 {
 					title = title[:47] + "..."
 				}
-				rows = append(rows, []string{fmt.Sprintf("%d", t.TaskOrder), title, t.Status, agent})
+				rows = append(rows, []string{fmt.Sprintf("%d", t.TaskOrder), t.ID, title, t.Status, agent})
 			}
 			w := cli.NewFormatter("table")
 			w.Table(headers, rows)
@@ -432,7 +433,10 @@ var missionResumeCmd = &cobra.Command{
 			return err
 		}
 		var result map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&result)
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			resp.Body.Close()
+			return fmt.Errorf("decode response: %w", err)
+		}
 		resp.Body.Close()
 
 		resetCount := 0

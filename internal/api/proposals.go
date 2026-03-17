@@ -270,6 +270,11 @@ func (h *ProposalHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	p, err := h.loadProposal(r.Context(), wsID, proposalID)
 	if err != nil {
 		h.logger.Error("load proposal after claim", "error", err)
+		if _, rbErr := h.db.ExecContext(r.Context(),
+			`UPDATE mission_proposals SET status = 'PENDING', reviewed_by = NULL, reviewed_at = NULL, review_notes = NULL, updated_at = ? WHERE id = ?`,
+			now, proposalID); rbErr != nil {
+			h.logger.Error("rollback proposal to PENDING after failed reload", "proposalID", proposalID, "error", rbErr)
+		}
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
@@ -282,7 +287,7 @@ func (h *ProposalHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		if _, rbErr := h.db.ExecContext(r.Context(), `UPDATE mission_proposals SET status = 'PENDING', reviewed_by = NULL, reviewed_at = NULL, review_notes = NULL, updated_at = ? WHERE id = ?`, now, proposalID); rbErr != nil {
 			h.logger.Error("rollback proposal approval", "proposalID", proposalID, "error", rbErr)
 		}
-		writeProblem(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to create missions: %v", err))
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to create missions from proposal")
 		return
 	}
 
@@ -405,7 +410,7 @@ func (h *ProposalHandler) createMissionsFromProposal(ctx context.Context, wsID, 
 		chatID := missionID
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO chats (id, workspace_id, agent_id, title, mode, status, started_at, created_at, updated_at)
-			VALUES (?, ?, ?, ?, 'MISSION', 'active', ?, ?, ?)`,
+			VALUES (?, ?, ?, ?, 'MISSION', 'ACTIVE', ?, ?, ?)`,
 			chatID, wsID, leadAgentID, "Mission: "+pm.Title, now, now, now)
 		if err != nil {
 			return nil, fmt.Errorf("insert chat for mission %q: %w", pm.Title, err)
