@@ -16,15 +16,21 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// MissionCallback is notified when assignments linked to mission tasks complete.
+type MissionCallback interface {
+	OnAssignmentCompleted(ctx context.Context, assignmentID, status, resultSummary, errorMessage string) error
+}
+
 // AssignmentHandler handles internal assignment API requests.
 // Assignments are created by the sidecar on behalf of lead agents and
 // executed as sub-agent runs in the crew container.
 type AssignmentHandler struct {
-	db            *sql.DB
-	orch          *orchestrator.Orchestrator
-	hub           *ws.Hub
-	logger        *slog.Logger
-	internalToken string
+	db              *sql.DB
+	orch            *orchestrator.Orchestrator
+	hub             *ws.Hub
+	logger          *slog.Logger
+	internalToken   string
+	missionCallback MissionCallback
 }
 
 func NewAssignmentHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, internalToken string, logger *slog.Logger) *AssignmentHandler {
@@ -37,12 +43,19 @@ func NewAssignmentHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.H
 	}
 }
 
+// SetMissionCallback registers the MissionEngine to receive assignment completion events.
+func (h *AssignmentHandler) SetMissionCallback(cb MissionCallback) {
+	h.missionCallback = cb
+}
+
 type createAssignmentBody struct {
-	TargetSlug  string `json:"target_slug"`
-	Task        string `json:"task"`
-	CrewID      string `json:"crew_id"`
-	WorkspaceID string `json:"workspace_id"`
-	ChatID      string `json:"chat_id"`
+	TargetSlug   string                    `json:"target_slug"`
+	Task         string                    `json:"task"`
+	CrewID       string                    `json:"crew_id"`
+	WorkspaceID  string                    `json:"workspace_id"`
+	ChatID       string                    `json:"chat_id"`
+	CrewMembers  []orchestrator.CrewMember `json:"-"` // populated internally for mission dispatches
+	LeadPlanning bool                      `json:"-"` // when true, run as LEAD with sidecar
 }
 
 // Create handles POST /api/v1/internal/assignments.
@@ -272,10 +285,17 @@ func (h *AssignmentHandler) runAssignment(
 		}
 	}
 
+	agentRole := "AGENT"
+	skipSidecar := true
+	if body.LeadPlanning {
+		agentRole = "LEAD" // Lead planning: full LEAD privileges with sidecar
+		skipSidecar = false
+	}
+
 	req := orchestrator.AgentRunRequest{
 		AgentID:         target.ID,
 		AgentSlug:       target.Slug,
-		AgentRole:       "AGENT", // Sub-agents run as AGENT, not as LEAD
+		AgentRole:       agentRole,
 		CrewID:          body.CrewID,
 		CrewSlug:        target.CrewSlug,
 		WorkspaceID:     body.WorkspaceID,
@@ -289,8 +309,9 @@ func (h *AssignmentHandler) runAssignment(
 		Credentials:     creds,
 		TimeoutSecs:     target.TimeoutSeconds,
 		MemoryEnabled:   target.MemoryEnabled,
-		SkipSidecar:     true,  // Prevent port conflict with lead's sidecar on 9119
-		SkipConvHistory: true,  // Sub-agents start fresh without lead's conversation history
+		CrewMembers:     body.CrewMembers,
+		SkipSidecar:     skipSidecar,
+		SkipConvHistory: true,
 	}
 
 	if err := h.orch.RunAgentForAssignment(ctx, req, handler); err != nil {
@@ -355,6 +376,13 @@ func (h *AssignmentHandler) finishAssignment(
 		}
 	}
 
+	// Notify MissionEngine first — must run regardless of websocket availability
+	if h.missionCallback != nil {
+		if err := h.missionCallback.OnAssignmentCompleted(ctx, assignmentID, status, result, errMsg); err != nil {
+			h.logger.Error("mission callback failed", "error", err, "assignment_id", assignmentID)
+		}
+	}
+
 	if h.hub == nil {
 		return
 	}
@@ -382,7 +410,7 @@ func (h *AssignmentHandler) finishAssignment(
 	}
 
 	// Broadcast to workspace channel for real-time dashboard updates
-	if h.hub != nil && workspaceID != "" {
+	if workspaceID != "" {
 		wsChannel := "workspace:" + workspaceID
 		h.hub.Broadcast(wsChannel, ws.ServerMessage{
 			Type:    "assignment.updated",
@@ -513,4 +541,86 @@ func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, a)
+}
+
+// DispatchAssignment implements orchestrator.TaskDispatcher. It loads the
+// target agent's configuration and credentials, then runs the agent in the
+// correct crew container -- exactly like the Create handler but driven by the
+// MissionEngine instead of a sidecar HTTP call.
+func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestrator.DispatchRequest) error {
+	var target targetAgentInfo
+	err := h.db.QueryRowContext(ctx, `
+		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt,''),
+		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug
+		FROM agents a
+		JOIN crews c ON c.id = a.crew_id
+		WHERE a.id = ? AND a.deleted_at IS NULL
+	`, req.AgentID).Scan(
+		&target.ID, &target.Slug, &target.Name, &target.RoleTitle,
+		&target.SystemPrompt, &target.CLIAdapter, &target.LLMModel,
+		&target.ToolProfile, &target.TimeoutSeconds, &target.MemoryEnabled, &target.CrewSlug,
+	)
+	if err != nil {
+		return fmt.Errorf("lookup agent %s: %w", req.AgentID, err)
+	}
+
+	creds, err := h.loadAgentCredentials(ctx, target.ID)
+	if err != nil {
+		return fmt.Errorf("load credentials for agent %s: %w", target.ID, err)
+	}
+
+	// Inject trace context into task for observability
+	task := req.Task
+	if req.TraceID != "" {
+		task = fmt.Sprintf("[trace:%s] %s", req.TraceID, req.Task)
+	}
+
+	// Load crew members for peer context (so the agent knows its teammates)
+	crewMembers := h.loadCrewMembers(ctx, req.CrewID, req.AgentID)
+
+	body := createAssignmentBody{
+		TargetSlug:   target.Slug,
+		Task:         task,
+		CrewID:       req.CrewID,
+		WorkspaceID:  req.WorkspaceID,
+		ChatID:       req.ChatID,
+		CrewMembers:  crewMembers,
+		LeadPlanning: req.LeadPlanning,
+	}
+
+	h.logger.Info("dispatching mission assignment",
+		"assignment_id", req.AssignmentID,
+		"mission_id", req.MissionID,
+		"trace_id", req.TraceID,
+		"agent", target.Slug,
+		"crew", target.CrewSlug,
+		"brief_len", len(body.Task),
+	)
+
+	h.runAssignment(ctx, req.AssignmentID, body, target, creds)
+	return nil
+}
+
+// loadCrewMembers fetches all agents in a crew (except the given agent) for peer context.
+func (h *AssignmentHandler) loadCrewMembers(ctx context.Context, crewID, excludeAgentID string) []orchestrator.CrewMember {
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT a.id, a.slug, a.name, COALESCE(a.role_title, ''), COALESCE(a.description, '')
+		FROM agents a
+		WHERE a.crew_id = ? AND a.deleted_at IS NULL AND a.id != ?
+		ORDER BY a.name ASC`, crewID, excludeAgentID)
+	if err != nil {
+		h.logger.Warn("load crew members for dispatch", "error", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var members []orchestrator.CrewMember
+	for rows.Next() {
+		var m orchestrator.CrewMember
+		if err := rows.Scan(&m.ID, &m.Slug, &m.Name, &m.RoleTitle, &m.Description); err != nil {
+			continue
+		}
+		members = append(members, m)
+	}
+	return members
 }

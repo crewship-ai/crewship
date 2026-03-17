@@ -52,7 +52,7 @@ const navSections = [
     label: "Work",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Orchestration", href: "/orchestration", icon: Workflow, badge: "FUTURE" as const },
+      { title: "Orchestration", href: "/orchestration", icon: Workflow },
       { title: "Crews", href: "/crews", icon: Network },
       { title: "Agents", href: "/agents", icon: Bot },
     ],

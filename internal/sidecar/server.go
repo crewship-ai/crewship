@@ -197,11 +197,41 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/escalate":
 				s.handleEscalate(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/mission/create":
+				s.handleMissionCreate(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/mission/templates":
+				s.handleMissionTemplates(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/mission/") && !strings.Contains(r.URL.Path[len("/mission/"):], "/"):
+				s.handleMissionStatus(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/mission/") && strings.HasSuffix(r.URL.Path, "/start"):
+				s.handleMissionStart(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/keeper/request":
 				s.handleKeeperRequest(w, r)
 				return
 			case r.Method == http.MethodPost && r.URL.Path == "/keeper/execute":
 				s.handleKeeperExecute(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/crews":
+				s.handleListCrews(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/crew-connections":
+				s.handleListCrewConnections(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/proposal":
+				s.handleCreateProposal(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/proposals":
+				s.handleListProposals(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/missions/all":
+				s.handleListAllMissions(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/missions/all/summary":
+				s.handleAllMissionsSummary(w, r)
 				return
 			}
 		}

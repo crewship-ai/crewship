@@ -43,6 +43,7 @@ type Router struct {
 	keeperContainer  provider.ContainerProvider
 	keeperConfig     *config.KeeperConfig
 	keeperConvReader ConversationReader
+	missionCallback  MissionCallback
 	allowSignup      bool
 	license          *license.License
 }
@@ -149,6 +150,12 @@ func WithKeeperConversations(cr ConversationReader) RouterOption {
 	}
 }
 
+func WithMissionCallback(cb MissionCallback) RouterOption {
+	return func(r *Router) {
+		r.missionCallback = cb
+	}
+}
+
 func WithLicense(lic *license.License) RouterOption {
 	return func(r *Router) {
 		r.license = lic
@@ -230,16 +237,49 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/members/{memberId}", authed(wsCtx(http.HandlerFunc(crews.RemoveMember))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/apply-avatar-style", authed(wsCtx(http.HandlerFunc(crews.ApplyAvatarStyle))))
 
+	// Crew Connections
+	conns := NewCrewConnectionHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/crew-connections", authed(wsCtx(http.HandlerFunc(conns.List))))
+	r.mux.Handle("POST /api/v1/crew-connections", authed(wsCtx(http.HandlerFunc(conns.Create))))
+	r.mux.Handle("DELETE /api/v1/crew-connections/{connectionId}", authed(wsCtx(http.HandlerFunc(conns.Delete))))
+
+	// Workflow Templates
+	templates := NewTemplateHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/templates", authed(wsCtx(http.HandlerFunc(templates.List))))
+	r.mux.Handle("POST /api/v1/templates", authed(wsCtx(http.HandlerFunc(templates.Create))))
+	r.mux.Handle("GET /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Get))))
+	r.mux.Handle("PATCH /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Update))))
+	r.mux.Handle("DELETE /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Delete))))
+
 	// Missions
-	missions := NewMissionHandler(r.db, r.hub, r.logger)
+	var missionEngineForPublic *orchestrator.MissionEngine
+	if r.missionCallback != nil {
+		if mc, ok := r.missionCallback.(*orchestrator.MissionEngine); ok {
+			missionEngineForPublic = mc
+		}
+	}
+	missions := NewMissionHandler(r.db, r.hub, missionEngineForPublic, r.logger)
 	r.mux.Handle("GET /api/v1/missions", authed(wsCtx(http.HandlerFunc(missions.ListAll))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/missions", authed(wsCtx(http.HandlerFunc(missions.List))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/missions", authed(wsCtx(http.HandlerFunc(missions.Create))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/missions/{missionId}", authed(wsCtx(http.HandlerFunc(missions.Get))))
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/missions/{missionId}", authed(wsCtx(http.HandlerFunc(missions.Update))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/missions/{missionId}", authed(wsCtx(http.HandlerFunc(missions.Delete))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/missions/{missionId}/start", authed(wsCtx(http.HandlerFunc(missions.Start))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/missions/{missionId}/restart", authed(wsCtx(http.HandlerFunc(missions.Restart))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/missions/{missionId}/resume", authed(wsCtx(http.HandlerFunc(missions.Resume))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/missions/{missionId}/clone", authed(wsCtx(http.HandlerFunc(missions.Clone))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/missions/{missionId}/tasks", authed(wsCtx(http.HandlerFunc(missions.CreateTask))))
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}", authed(wsCtx(http.HandlerFunc(missions.UpdateTask))))
+
+	// Mission Proposals (workspace-scoped)
+	proposals := NewProposalHandler(r.db, r.hub, missionEngineForPublic, r.logger)
+	r.mux.Handle("GET /api/v1/mission-proposals", authed(wsCtx(http.HandlerFunc(proposals.List))))
+	r.mux.Handle("POST /api/v1/mission-proposals", authed(wsCtx(http.HandlerFunc(proposals.Create))))
+	r.mux.Handle("GET /api/v1/mission-proposals/{proposalId}", authed(wsCtx(http.HandlerFunc(proposals.Get))))
+	r.mux.Handle("POST /api/v1/mission-proposals/{proposalId}/approve", authed(wsCtx(http.HandlerFunc(proposals.Approve))))
+	r.mux.Handle("POST /api/v1/mission-proposals/{proposalId}/reject", authed(wsCtx(http.HandlerFunc(proposals.Reject))))
+	r.mux.Handle("DELETE /api/v1/mission-proposals/{proposalId}", authed(wsCtx(http.HandlerFunc(proposals.Delete))))
 
 	// Agents (require workspace context)
 	r.mux.Handle("GET /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.List))))
@@ -357,11 +397,37 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("PATCH /api/v1/internal/runs/{runId}", internalAuth(http.HandlerFunc(internal.UpdateRun)))
 	r.mux.Handle("PATCH /api/v1/internal/chats/{chatId}/message-count", internalAuth(http.HandlerFunc(internal.IncrementMessageCount)))
 	r.mux.Handle("PATCH /api/v1/internal/chats/{chatId}/title", internalAuth(http.HandlerFunc(internal.UpdateChatTitle)))
+	r.mux.Handle("GET /api/v1/internal/crews", internalAuth(http.HandlerFunc(internal.ListCrews)))
+	r.mux.Handle("GET /api/v1/internal/crew-connections", internalAuth(http.HandlerFunc(internal.ListCrewConnections)))
 
 	// Assignment routes (internal auth, called by sidecar on behalf of lead agents)
 	assign := NewAssignmentHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
+	if r.missionCallback != nil {
+		assign.SetMissionCallback(r.missionCallback)
+		// Wire AssignmentHandler as the TaskDispatcher so the MissionEngine
+		// can dispatch tasks (including cross-crew) through the same code path.
+		if me, ok := r.missionCallback.(*orchestrator.MissionEngine); ok {
+			me.SetDispatcher(assign)
+		}
+	}
 	r.mux.Handle("POST /api/v1/internal/assignments", internalAuth(http.HandlerFunc(assign.Create)))
 	r.mux.Handle("GET /api/v1/internal/assignments/{assignmentId}", internalAuth(http.HandlerFunc(assign.Get)))
+
+	// Internal mission routes (called by sidecar on behalf of lead agents)
+	var missionEngineForInternal *orchestrator.MissionEngine
+	if mc, ok := r.missionCallback.(*orchestrator.MissionEngine); ok {
+		missionEngineForInternal = mc
+	}
+	internalMissions := NewInternalMissionHandler(r.db, r.hub, missionEngineForInternal, r.logger)
+	r.mux.Handle("POST /api/v1/internal/missions", internalAuth(http.HandlerFunc(internalMissions.Create)))
+	r.mux.Handle("GET /api/v1/internal/missions/{missionId}", internalAuth(http.HandlerFunc(internalMissions.Get)))
+	r.mux.Handle("POST /api/v1/internal/missions/{missionId}/start", internalAuth(http.HandlerFunc(internalMissions.Start)))
+
+	// Internal mission proposal routes (called by sidecar on behalf of COORDINATOR agents)
+	internalProposals := NewProposalHandler(r.db, r.hub, missionEngineForInternal, r.logger)
+	r.mux.Handle("GET /api/v1/internal/mission-proposals", internalAuth(internalWsCtx(http.HandlerFunc(internalProposals.List))))
+	r.mux.Handle("POST /api/v1/internal/mission-proposals", internalAuth(internalWsCtx(http.HandlerFunc(internalProposals.Create))))
+	r.mux.Handle("GET /api/v1/internal/mission-proposals/{proposalId}", internalAuth(internalWsCtx(http.HandlerFunc(internalProposals.Get))))
 
 	// Crew assignments (public, authenticated)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/assignments", authed(wsCtx(http.HandlerFunc(assign.List))))

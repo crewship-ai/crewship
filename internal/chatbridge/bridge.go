@@ -40,6 +40,8 @@ type ChatInfo struct {
 	WorkspaceID    string
 	MemoryEnabled  bool
 	CrewMembers    []orchestrator.CrewMember
+	AllCrews       []orchestrator.CrewInfo
+	ActiveMissions []orchestrator.MissionSummary
 	NetworkMode    string
 	AllowedDomains []string
 }
@@ -137,11 +139,21 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	b.logger.Debug("chat resolved", "agent_id", info.AgentID, "crew_id", info.CrewID)
 
+	// For COORDINATOR agents (no crew), use a synthetic crew identity for container management
+	containerKey := info.CrewID
+	containerSlug := info.CrewSlug
+	if info.AgentRole == "COORDINATOR" && info.CrewID == "" {
+		containerKey = "coordinator-" + info.WorkspaceID
+		containerSlug = "coordinator"
+		info.CrewID = containerKey
+		info.CrewSlug = containerSlug
+	}
+
 	// Look up cached container ID for this crew (avoids status noise on repeat messages)
 	b.containerMu.RLock()
-	containerID := b.containerCache[info.CrewID]
+	containerID := b.containerCache[containerKey]
 	b.containerMu.RUnlock()
-	b.logger.Debug("container cache lookup", "crew_id", info.CrewID, "cached_id", containerID)
+	b.logger.Debug("container cache lookup", "crew_id", containerKey, "cached_id", containerID)
 
 	// Verify cached container still exists and is running.
 	// A stopped container (e.g. after network policy change) must be recreated.
@@ -156,7 +168,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 				"container_id", truncateID(containerID, 12), "state", reason)
 			containerID = ""
 			b.containerMu.Lock()
-			delete(b.containerCache, info.CrewID)
+			delete(b.containerCache, containerKey)
 			b.containerMu.Unlock()
 		}
 	}
@@ -178,7 +190,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		containerID = cID
 		b.containerMu.Lock()
-		b.containerCache[info.CrewID] = containerID
+		b.containerCache[containerKey] = containerID
 		b.containerMu.Unlock()
 		streamFn(ws.ChatEvent{Type: "status", Content: "Container ready"})
 		b.logger.Info("team container ensured", "crew_id", info.CrewID, "container_id", truncateID(containerID, 12))
@@ -207,6 +219,8 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		TimeoutSecs:    info.TimeoutSecs,
 		MemoryEnabled:  info.MemoryEnabled,
 		CrewMembers:    info.CrewMembers,
+		AllCrews:       info.AllCrews,
+		ActiveMissions: info.ActiveMissions,
 		NetworkMode:    info.NetworkMode,
 		AllowedDomains: info.AllowedDomains,
 	}
