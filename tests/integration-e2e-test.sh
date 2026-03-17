@@ -16,7 +16,7 @@
 #   - crewship server running on :8080 (fresh DB with bootstrap)
 #   - curl, jq, sqlite3
 #
-set -euo pipefail
+set -uo pipefail
 
 PORT="${PORT:-8080}"
 BASE="http://localhost:${PORT}"
@@ -47,7 +47,8 @@ cleanup() {
   echo ""
   echo "Cleanup..."
   docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
-  rm -rf "$DATA_DIR"
+  # Use docker to clean up files owned by UID 1001 (agent) that host user can't delete
+  docker run --rm -v "$DATA_DIR:/data" alpine rm -rf /data 2>/dev/null || rm -rf "$DATA_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -171,13 +172,15 @@ echo "$ENV_VAL" | grep -q "GH_TOKEN=/secrets/nela/GH_TOKEN" && ok ".env file map
 echo "$ENV_VAL" | grep -q "SLACK_TOKEN=/secrets/nela/SLACK_TOKEN" && ok ".env file maps SLACK_TOKEN" || fail ".env SLACK_TOKEN"
 
 # Verify file permissions (0400 = read-only for owner)
-PERMS=$(docker exec -u 1001:1001 "$CONTAINER_NAME" stat -c '%a' /secrets/nela/GH_TOKEN 2>/dev/null || \
-        docker exec -u 1001:1001 "$CONTAINER_NAME" stat -f '%Lp' /secrets/nela/GH_TOKEN 2>/dev/null)
+PERMS=$(docker exec "$CONTAINER_NAME" stat -c '%a' /secrets/nela/GH_TOKEN 2>/dev/null || echo "unknown")
 [ "$PERMS" = "400" ] && ok "GH_TOKEN mode 0400" || fail "GH_TOKEN permissions" "got: $PERMS"
 
-# Verify agent cannot write to secrets
-docker exec -u 1001:1001 "$CONTAINER_NAME" sh -c "echo 'hack' > /secrets/nela/GH_TOKEN" 2>/dev/null
-if [ $? -ne 0 ]; then ok "Agent cannot overwrite credential files"; else fail "Agent CAN write to credential files"; fi
+# Verify agent cannot write to secrets (mode 0400)
+if docker exec -u 1001:1001 "$CONTAINER_NAME" sh -c "echo 'hack' > /secrets/nela/GH_TOKEN" 2>/dev/null; then
+  fail "Agent CAN write to credential files"
+else
+  ok "Agent cannot overwrite credential files"
+fi
 
 # Verify secrets persist on host
 [ -f "$DATA_DIR/secrets/nela/GH_TOKEN" ] && ok "Credential files persist on host" || fail "No credential files on host"
@@ -226,8 +229,10 @@ echo "$DISK_MANIFEST" | jq -e '.packages.apt | contains(["gh","jq","ripgrep"])' 
 
 # GET /manifest — should return updated state
 FINAL_MANIFEST=$(docker exec -u 1001:1001 "$CONTAINER_NAME" curl -sf http://127.0.0.1:9119/manifest 2>/dev/null || echo "{}")
-echo "$FINAL_MANIFEST" | jq -e '.packages.apt | length == 3 and .setup_commands | length == 1' >/dev/null 2>&1 \
-  && ok "GET /manifest returns updated state" || fail "Final manifest" "$FINAL_MANIFEST"
+APT_COUNT=$(echo "$FINAL_MANIFEST" | jq '.packages.apt | length' 2>/dev/null)
+CMD_COUNT=$(echo "$FINAL_MANIFEST" | jq '.setup_commands | length' 2>/dev/null)
+[ "$APT_COUNT" = "3" ] && [ "$CMD_COUNT" = "1" ] \
+  && ok "GET /manifest returns updated state" || fail "Final manifest" "apt=$APT_COUNT cmds=$CMD_COUNT"
 
 # ----------------------------------------------------------
 # 6. CRE-21: Escalation — full flow via API
