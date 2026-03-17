@@ -284,3 +284,12 @@ body {
   font-size: 0.85em;
   background: oklch(0 0 0 / 0.1);
 }
+
+@keyframes edgeFlow {
+  from { stroke-dashoffset: 28; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes edgeFlowSlow {
+  from { stroke-dashoffset: 20; }
+  to { stroke-dashoffset: 0; }
+}
