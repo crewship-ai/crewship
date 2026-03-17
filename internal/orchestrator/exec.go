@@ -22,8 +22,14 @@ FILESYSTEM:
 - HOME (~/) = /crew/agents/{your-slug}/ — persistent, personal (config, memory)
 - Working dir = /output/{your-slug}/ — visible in Files panel
 - Shared crew space = /crew/shared/ — all crew members can read/write
+- Secrets = /secrets/{your-slug}/ — read-only credential files (one file per credential, named by env var)
 - Scratch = /workspace/ — temporary, not persistent
 Do NOT attempt to write outside these directories -- the filesystem is read-only elsewhere.
+
+CREDENTIALS:
+- CLI tokens and secrets are available as files in /secrets/{your-slug}/ (e.g., /secrets/{your-slug}/GH_TOKEN)
+- The .env file in /secrets/{your-slug}/.env maps env var names to file paths
+- API keys for LLM providers are injected automatically via the sidecar proxy
 `
 
 func BuildCLICommand(req AgentRunRequest) []string {
@@ -270,6 +276,90 @@ func PreRunInstallPackages(
 	logger.Info("pre-run packages installed",
 		"container_id", containerID[:min(12, len(containerID))],
 		"packages", packages,
+	)
+	return nil
+}
+
+// writeCredentialFiles writes CLI_TOKEN and SECRET credentials as individual files
+// into the agent's secrets directory. Each credential is written as a separate file
+// named after its env var (e.g., /secrets/{agent-slug}/GH_TOKEN). A combined .env
+// file is also generated for tools that source environment files.
+// Files are written as root (UID 0) then chowned to 1001:1001 with mode 0400 (read-only).
+func writeCredentialFiles(
+	ctx context.Context,
+	ctr provider.ContainerProvider,
+	containerID string,
+	agentSlug string,
+	creds []Credential,
+	secretsAgentDir string,
+	secretsSharedDir string,
+	logger *slog.Logger,
+) error {
+	// Collect credentials that should be written as files.
+	// API_KEY and AI_CLI_TOKEN are handled by the sidecar proxy — not written to disk.
+	type credFile struct {
+		EnvVar string
+		Value  string
+	}
+	var files []credFile
+	for _, c := range creds {
+		if (c.Type == "CLI_TOKEN" || c.Type == "SECRET") && c.EnvVarName != "" && c.PlainValue != "" {
+			files = append(files, credFile{EnvVar: c.EnvVarName, Value: c.PlainValue})
+		}
+	}
+
+	if len(files) == 0 {
+		return nil
+	}
+
+	// Build a shell script that writes each credential as a file and generates .env.
+	// Uses base64 encoding to prevent shell injection from credential values.
+	var scriptParts []string
+	var envLines []string
+
+	for _, f := range files {
+		valB64 := base64.StdEncoding.EncodeToString([]byte(f.Value))
+		filePath := secretsAgentDir + "/" + f.EnvVar
+		scriptParts = append(scriptParts,
+			fmt.Sprintf("echo '%s' | base64 -d > %s", valB64, filePath),
+			fmt.Sprintf("chmod 0400 %s", filePath),
+		)
+		envLines = append(envLines, f.EnvVar+"="+filePath)
+	}
+
+	// Write .env file (maps env var names to file paths, not raw values)
+	envContent := strings.Join(envLines, "\n") + "\n"
+	envB64 := base64.StdEncoding.EncodeToString([]byte(envContent))
+	envPath := secretsAgentDir + "/.env"
+	scriptParts = append(scriptParts,
+		fmt.Sprintf("echo '%s' | base64 -d > %s", envB64, envPath),
+		fmt.Sprintf("chmod 0400 %s", envPath),
+	)
+
+	// Chown the entire secrets agent dir to 1001:1001 so the agent can read
+	scriptParts = append(scriptParts,
+		fmt.Sprintf("chown -R 1001:1001 %s", secretsAgentDir),
+	)
+
+	script := strings.Join(scriptParts, " && ")
+
+	cfg := provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", script},
+		User:        "0:0",
+	}
+
+	result, err := ctr.Exec(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("write credential files: %w", err)
+	}
+	io.Copy(io.Discard, result.Reader)
+	result.Reader.Close()
+
+	logger.Info("credential files written",
+		"agent_slug", agentSlug,
+		"secrets_dir", secretsAgentDir,
+		"file_count", len(files),
 	)
 	return nil
 }

@@ -1,10 +1,13 @@
 "use client"
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
-import { CheckCircle2, AlertTriangle } from "lucide-react"
+import { CheckCircle2, AlertTriangle, Send, ExternalLink, KeyRound } from "lucide-react"
 import { BadgeAlertIcon } from "@/components/ui/badge-alert"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Table,
   TableBody,
@@ -49,6 +52,12 @@ const STATUS_CONFIG: Record<Escalation["status"], {
   },
 }
 
+const TYPE_LABELS: Record<string, { label: string; icon: React.ComponentType<{ className?: string }> }> = {
+  TEXT: { label: "Text", icon: Send },
+  CREDENTIAL: { label: "Credential", icon: KeyRound },
+  LINK: { label: "Link", icon: ExternalLink },
+}
+
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now()
   const date = new Date(dateStr).getTime()
@@ -62,6 +71,121 @@ function formatRelativeTime(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
   return `${days}d ago`
+}
+
+function parseMetadataUrl(metadata: string | null): string | null {
+  if (!metadata) return null
+  try {
+    const parsed = JSON.parse(metadata)
+    return parsed.url || null
+  } catch {
+    if (metadata.startsWith("http://") || metadata.startsWith("https://")) return metadata
+    return null
+  }
+}
+
+function ResolveForm({ escalation, onResolved }: { escalation: Escalation; onResolved: () => void }) {
+  const [resolution, setResolution] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleResolve = async () => {
+    if (!resolution.trim()) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/v1/escalations/${escalation.id}/resolve`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolution: resolution.trim() }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Failed to resolve" }))
+        setError(err.error || "Failed to resolve")
+        return
+      }
+      setResolution("")
+      onResolved()
+    } catch {
+      setError("Network error")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const metadataUrl = parseMetadataUrl(escalation.metadata)
+
+  return (
+    <div className="space-y-3 p-3">
+      {escalation.context && (
+        <div className="text-body">
+          <span className="font-medium text-muted-foreground">Context: </span>
+          <span className="whitespace-pre-wrap">{escalation.context}</span>
+        </div>
+      )}
+
+      {escalation.type === "LINK" && metadataUrl && (
+        <div>
+          <a
+            href={metadataUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Open link
+          </a>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        {escalation.type === "CREDENTIAL" ? (
+          <Input
+            type="password"
+            placeholder="Paste credential value..."
+            value={resolution}
+            onChange={(e) => setResolution(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                handleResolve()
+              }
+            }}
+            disabled={submitting}
+            className="flex-1 font-mono text-sm"
+          />
+        ) : (
+          <Textarea
+            placeholder={escalation.type === "LINK" ? "Confirm completion..." : "Type your response..."}
+            value={resolution}
+            onChange={(e) => setResolution(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                handleResolve()
+              }
+            }}
+            disabled={submitting}
+            rows={2}
+            className="flex-1 text-sm resize-none"
+          />
+        )}
+        <Button
+          size="sm"
+          onClick={handleResolve}
+          disabled={submitting || !resolution.trim()}
+          className="self-end"
+        >
+          <Send className="h-3.5 w-3.5 mr-1" />
+          {submitting ? "Sending..." : "Resolve"}
+        </Button>
+      </div>
+
+      {error && (
+        <p className="text-sm text-destructive">{error}</p>
+      )}
+    </div>
+  )
 }
 
 export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
@@ -97,7 +221,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
         setEscalations(parsed.data)
       }
     } catch {
-      // Silently fail — component shows empty state
+      // Silently fail
     } finally {
       if (ownsLoading && loadingOwnerRef.current === requestId) setLoading(false)
       if (ownsRefresh && refreshingOwnerRef.current === requestId) setRefreshing(false)
@@ -108,8 +232,8 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
     fetchEscalations()
   }, [fetchEscalations])
 
-  // Real-time: refetch when escalations are created
   useRealtimeEvent("escalation.created", useCallback(() => { fetchEscalations(false, true) }, [fetchEscalations]))
+  useRealtimeEvent("escalation.resolved", useCallback(() => { fetchEscalations(false, true) }, [fetchEscalations]))
 
   if (loading) {
     return (
@@ -165,8 +289,10 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                     const config = STATUS_CONFIG[e.status]
                     const StatusIcon = config.icon
                     const isExpanded = expandedId === e.id
-                    const hasDetail = e.context || e.resolution
+                    const isPending = e.status === "PENDING"
+                    const hasDetail = isPending || e.context || e.resolution
                     const detailId = `esc-detail-${e.id}`
+                    const typeInfo = TYPE_LABELS[e.type] || TYPE_LABELS.TEXT
 
                     return (
                       <Fragment key={e.id}>
@@ -188,13 +314,21 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                           }}
                         >
                           <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={`gap-1 border-0 ${config.className}`}
-                            >
-                              <StatusIcon className="h-3 w-3" />
-                              {config.label}
-                            </Badge>
+                            <div className="flex flex-col gap-1">
+                              <Badge
+                                variant="outline"
+                                className={`gap-1 border-0 ${config.className}`}
+                              >
+                                <StatusIcon className="h-3 w-3" />
+                                {config.label}
+                              </Badge>
+                              {e.type !== "TEXT" && (
+                                <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                  <typeInfo.icon className="h-2.5 w-2.5" />
+                                  {typeInfo.label}
+                                </span>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell>
                             <Tooltip>
@@ -215,21 +349,28 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                         </TableRow>
                         {isExpanded && hasDetail && (
                           <TableRow id={detailId}>
-                            <TableCell colSpan={4} className="bg-muted/30">
-                              <div className="text-body whitespace-pre-wrap max-h-60 overflow-y-auto p-2">
-                                {e.context && (
-                                  <div className="mb-2">
-                                    <span className="font-medium text-muted-foreground">Context: </span>
-                                    {e.context}
-                                  </div>
-                                )}
-                                {e.resolution && (
-                                  <div>
-                                    <span className="font-medium text-muted-foreground">Resolution: </span>
-                                    {e.resolution}
-                                  </div>
-                                )}
-                              </div>
+                            <TableCell colSpan={4} className="bg-muted/30 p-0">
+                              {isPending ? (
+                                <ResolveForm
+                                  escalation={e}
+                                  onResolved={() => fetchEscalations(false, true)}
+                                />
+                              ) : (
+                                <div className="text-body whitespace-pre-wrap max-h-60 overflow-y-auto p-3">
+                                  {e.context && (
+                                    <div className="mb-2">
+                                      <span className="font-medium text-muted-foreground">Context: </span>
+                                      {e.context}
+                                    </div>
+                                  )}
+                                  {e.resolution && (
+                                    <div>
+                                      <span className="font-medium text-muted-foreground">Resolution: </span>
+                                      {e.resolution}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </TableCell>
                           </TableRow>
                         )}

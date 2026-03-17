@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -343,6 +344,135 @@ func TestListEscalations_ReturnsData(t *testing.T) {
 	}
 	if result[0]["status"] != "PENDING" {
 		t.Errorf("expected status=PENDING, got %v", result[0]["status"])
+	}
+}
+
+func TestResolveEscalation_NotFound(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	body := strings.NewReader(`{"resolution":"done"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/nonexistent/resolve", body)
+	req.SetPathValue("escalationId", "nonexistent")
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.ResolveEscalation(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestResolveEscalation_Success(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Nela', 'nela')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, created_at)
+		 VALUES ('esc1', ?, 'crew1', 'chat1', 'ag1', 'Need GitHub token', 'PENDING', '2025-01-01T15:00:00Z')`, wsID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	body := strings.NewReader(`{"resolution":"Here is the token: done"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
+	req.SetPathValue("escalationId", "esc1")
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.ResolveEscalation(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result map[string]string
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["status"] != "RESOLVED" {
+		t.Errorf("expected RESOLVED, got %s", result["status"])
+	}
+
+	// Verify DB
+	var status, resolution string
+	err := db.QueryRowContext(context.Background(),
+		`SELECT status, resolution FROM escalations WHERE id = 'esc1'`,
+	).Scan(&status, &resolution)
+	if err != nil {
+		t.Fatalf("DB query error: %v", err)
+	}
+	if status != "RESOLVED" {
+		t.Errorf("expected status=RESOLVED, got %s", status)
+	}
+	if resolution != "Here is the token: done" {
+		t.Errorf("expected resolution text, got %s", resolution)
+	}
+}
+
+func TestResolveEscalation_AlreadyResolved(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Nela', 'nela')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, resolution, resolved_at, created_at)
+		 VALUES ('esc1', ?, 'crew1', 'chat1', 'ag1', 'Old issue', 'RESOLVED', 'Fixed', '2025-01-01T16:00:00Z', '2025-01-01T15:00:00Z')`, wsID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	body := strings.NewReader(`{"resolution":"try again"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
+	req.SetPathValue("escalationId", "esc1")
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.ResolveEscalation(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestResolveEscalation_MissingResolution(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	body := strings.NewReader(`{}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
+	req.SetPathValue("escalationId", "esc1")
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.ResolveEscalation(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

@@ -233,6 +233,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodGet && r.URL.Path == "/missions/all/summary":
 				s.handleAllMissionsSummary(w, r)
 				return
+			case r.Method == http.MethodGet && r.URL.Path == "/manifest":
+				s.handleGetManifest(w, r)
+				return
+			case r.Method == http.MethodPatch && r.URL.Path == "/manifest":
+				s.handleUpdateManifest(w, r)
+				return
 			}
 		}
 		proxy.ServeHTTP(w, r)
