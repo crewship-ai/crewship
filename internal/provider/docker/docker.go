@@ -370,29 +370,59 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 
 	p.logger.Debug("image ok, creating dirs")
 	outputPath := filepath.Join(p.cfg.OutputBasePath, team.ID)
-	if err := os.MkdirAll(outputPath, 0750); err != nil {
-		return "", fmt.Errorf("create output dir: %w", err)
-	}
-
 	workspacePath := filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID)
-	if err := os.MkdirAll(workspacePath, 0750); err != nil {
-		return "", fmt.Errorf("create workspace dir: %w", err)
-	}
-	// Best-effort chown so container user (1001:1001) can write
-	if err := os.Chown(workspacePath, 1001, 1001); err != nil {
-		p.logger.Debug("chown workspace (non-fatal)", "path", workspacePath, "error", err)
-	}
-
 	crewPath := filepath.Join(p.cfg.OutputBasePath, "crews", team.ID)
-	for _, sub := range []string{"shared", "agents"} {
-		if err := os.MkdirAll(filepath.Join(crewPath, sub), 0750); err != nil {
-			return "", fmt.Errorf("create crew dir %s: %w", sub, err)
+
+	allDirs := []string{
+		outputPath,
+		workspacePath,
+		crewPath,
+		filepath.Join(crewPath, "shared"),
+		filepath.Join(crewPath, "agents"),
+	}
+	for _, dir := range allDirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return "", fmt.Errorf("create dir %s: %w", dir, err)
 		}
 	}
-	// Best-effort chown so container user (1001:1001) can write
-	for _, dir := range []string{crewPath, filepath.Join(crewPath, "shared"), filepath.Join(crewPath, "agents")} {
+
+	// Fix ownership for container user (1001:1001). The host process may not
+	// run as root, so os.Chown can fail. In that case we use a short-lived
+	// Docker container (running as root) to chown the bind-mount paths.
+	needsDockerChown := false
+	for _, dir := range allDirs {
 		if err := os.Chown(dir, 1001, 1001); err != nil {
-			p.logger.Debug("chown crew dir (non-fatal)", "path", dir, "error", err)
+			needsDockerChown = true
+			break
+		}
+	}
+	if needsDockerChown {
+		chownCmd := "chown -R 1001:1001"
+		for _, dir := range allDirs {
+			chownCmd += " /mnt" + dir
+		}
+		var mounts []mount.Mount
+		for _, dir := range allDirs {
+			mounts = append(mounts, mount.Mount{Type: mount.TypeBind, Source: dir, Target: "/mnt" + dir})
+		}
+		initResp, initErr := p.client.ContainerCreate(ctx,
+			&container.Config{
+				Image:      p.cfg.RuntimeImage,
+				User:       "0:0",
+				Entrypoint: []string{"sh", "-c", chownCmd},
+			},
+			&container.HostConfig{Mounts: mounts},
+			nil, nil, "")
+		if initErr == nil {
+			_ = p.client.ContainerStart(ctx, initResp.ID, container.StartOptions{})
+			p.client.ContainerWait(ctx, initResp.ID, container.WaitConditionNotRunning)
+			_ = p.client.ContainerRemove(ctx, initResp.ID, container.RemoveOptions{})
+			p.logger.Debug("init container fixed bind-mount ownership")
+		} else {
+			p.logger.Warn("init container chown failed, falling back to 0777", "error", initErr)
+			for _, dir := range allDirs {
+				os.Chmod(dir, 0777) //nolint:errcheck
+			}
 		}
 	}
 

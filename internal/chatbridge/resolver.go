@@ -48,8 +48,24 @@ type chatResolveResponse struct {
 	WorkspaceID    string               `json:"workspace_id"`
 	MemoryEnabled  bool                 `json:"memory_enabled"`
 	CrewMembers    []crewMemberResponse `json:"crew_members"`
-	NetworkMode    string               `json:"network_mode"`
+	AllCrews       []crewInfoResponse      `json:"all_crews,omitempty"`
+	ActiveMissions []missionSummaryResponse `json:"active_missions,omitempty"`
+	NetworkMode    string                  `json:"network_mode"`
 	AllowedDomains []string             `json:"allowed_domains"`
+}
+
+type crewInfoResponse struct {
+	ID      string               `json:"id"`
+	Name    string               `json:"name"`
+	Slug    string               `json:"slug"`
+	Members []crewMemberResponse `json:"members"`
+}
+
+type missionSummaryResponse struct {
+	ID       string `json:"id"`
+	CrewSlug string `json:"crew_slug"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
 }
 
 type crewMemberResponse struct {
@@ -269,6 +285,38 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 		allowedDomains = []string{}
 	}
 
+	// Convert all_crews for COORDINATOR agents
+	var allCrews []orchestrator.CrewInfo
+	for _, c := range data.AllCrews {
+		ci := orchestrator.CrewInfo{
+			ID:   c.ID,
+			Name: c.Name,
+			Slug: c.Slug,
+		}
+		for _, m := range c.Members {
+			ci.Members = append(ci.Members, orchestrator.CrewMember{
+				ID:          m.ID,
+				Name:        m.Name,
+				Slug:        m.Slug,
+				RoleTitle:   m.RoleTitle,
+				Description: m.Description,
+				Status:      m.Status,
+				ChatID:      m.ChatID,
+			})
+		}
+		allCrews = append(allCrews, ci)
+	}
+
+	var activeMissions []orchestrator.MissionSummary
+	for _, m := range data.ActiveMissions {
+		activeMissions = append(activeMissions, orchestrator.MissionSummary{
+			ID:       m.ID,
+			CrewSlug: m.CrewSlug,
+			Title:    m.Title,
+			Status:   m.Status,
+		})
+	}
+
 	return &ChatInfo{
 		AgentID:        data.AgentID,
 		AgentSlug:      data.AgentSlug,
@@ -285,6 +333,8 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 		WorkspaceID:    data.WorkspaceID,
 		MemoryEnabled:  data.MemoryEnabled,
 		CrewMembers:    crewMembers,
+		AllCrews:       allCrews,
+		ActiveMissions: activeMissions,
 		NetworkMode:    networkMode,
 		AllowedDomains: allowedDomains,
 	}, nil

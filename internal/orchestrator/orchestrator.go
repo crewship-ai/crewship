@@ -37,6 +37,8 @@ type AgentRunRequest struct {
 	TimeoutSecs     int
 	MemoryEnabled   bool
 	CrewMembers     []CrewMember // Populated by bridge for LEAD agents
+	AllCrews        []CrewInfo        // Populated by bridge for COORDINATOR agents
+	ActiveMissions  []MissionSummary  // Active missions in workspace (for COORDINATOR)
 	SkipSidecar     bool         // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
 	SkipConvHistory bool         // When true, skip injecting conversation history (used by assignment sub-agents)
 	NetworkMode     string       // "free" (default) or "restricted" — crew-level network policy
@@ -152,11 +154,11 @@ func (o *Orchestrator) GetOrCreateContainer(ctx context.Context, crewSlug, crewI
 	})
 }
 
-// RunAgentForAssignment runs a sub-agent as part of a lead assignment.
-// It skips conversation history injection and sidecar startup to avoid port conflicts
-// when the lead agent's sidecar is already running on port 9119 in the same container.
+// RunAgentForAssignment runs a sub-agent as part of a mission assignment.
+// It skips conversation history injection (each task gets a clean context via the mission brief).
+// SkipSidecar is respected from the caller — regular AGENT tasks skip sidecar,
+// while LEAD planning tasks need sidecar for mission management API access.
 func (o *Orchestrator) RunAgentForAssignment(ctx context.Context, req AgentRunRequest, handler EventHandler) error {
-	req.SkipSidecar = true
 	req.SkipConvHistory = true
 	return o.RunAgent(ctx, req, handler)
 }
@@ -211,6 +213,14 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		leadCtx := BuildLeadContext(req.CrewMembers)
 		if leadCtx != "" {
 			req.SystemPrompt = req.SystemPrompt + "\n\n" + leadCtx
+		}
+	}
+
+	// Inject coordinator context listing all workspace crews
+	if req.AgentRole == "COORDINATOR" && len(req.AllCrews) > 0 {
+		coordCtx := BuildCoordinatorContext(req.AllCrews, req.ActiveMissions)
+		if coordCtx != "" {
+			req.SystemPrompt = req.SystemPrompt + "\n\n" + coordCtx
 		}
 	}
 

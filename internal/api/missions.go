@@ -1,25 +1,29 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 type MissionHandler struct {
-	db     *sql.DB
-	hub    *ws.Hub
-	logger *slog.Logger
+	db            *sql.DB
+	hub           *ws.Hub
+	missionEngine *orchestrator.MissionEngine
+	logger        *slog.Logger
 }
 
-func NewMissionHandler(db *sql.DB, hub *ws.Hub, logger *slog.Logger) *MissionHandler {
-	return &MissionHandler{db: db, hub: hub, logger: logger}
+func NewMissionHandler(db *sql.DB, hub *ws.Hub, me *orchestrator.MissionEngine, logger *slog.Logger) *MissionHandler {
+	return &MissionHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }
 
 type missionResponse struct {
@@ -155,12 +159,37 @@ func (h *MissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	traceID := "mission-" + generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err = h.db.ExecContext(r.Context(), `
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.logger.Error("begin tx", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, description, status, workflow_template, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'PLANNING', ?, ?, ?)`,
 		id, wsID, crewID, req.LeadAgentID, traceID, req.Title, req.Description, req.WorkflowTemplate, now, now)
 	if err != nil {
 		h.logger.Error("create mission", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// Create a synthetic chat so assignments can reference it (FK on chat_id)
+	_, err = tx.ExecContext(r.Context(), `
+		INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		id, req.LeadAgentID, wsID, "Mission: "+req.Title, now, now, now)
+	if err != nil {
+		h.logger.Error("create synthetic chat for mission", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		h.logger.Error("commit mission", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
@@ -281,6 +310,7 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	status := r.URL.Query().Get("status")
+	includeTasks := r.URL.Query().Get("include_tasks") == "true"
 
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -331,11 +361,6 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
-		stats, statsErr := h.getTaskStats(r, m.ID)
-		if statsErr != nil {
-			h.logger.Error("get task stats", "mission_id", m.ID, "error", statsErr)
-		}
-		m.TaskStats = stats
 		result = append(result, m)
 	}
 	if err := rows.Err(); err != nil {
@@ -344,10 +369,65 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load task stats and optionally tasks for each mission
+	for i, m := range result {
+		stats, statsErr := h.getTaskStats(r, m.ID)
+		if statsErr != nil {
+			h.logger.Error("get task stats", "mission_id", m.ID, "error", statsErr)
+		}
+		result[i].TaskStats = stats
+
+		if includeTasks {
+			tasks, tasksErr := h.loadTasksForMission(r, m.ID)
+			if tasksErr != nil {
+				h.logger.Error("load tasks for mission", "mission_id", m.ID, "error", tasksErr)
+				result[i].Tasks = []missionTaskResponse{}
+			} else {
+				result[i].Tasks = tasks
+			}
+		}
+	}
+
 	if result == nil {
 		result = []missionResponse{}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// loadTasksForMission loads all tasks for a mission with agent info.
+func (h *MissionHandler) loadTasksForMission(r *http.Request, missionID string) ([]missionTaskResponse, error) {
+	taskRows, err := h.db.QueryContext(r.Context(), `
+		SELECT mt.id, mt.mission_id, mt.assigned_agent_id, mt.title, mt.description,
+		       mt.status, mt.task_order, mt.depends_on, mt.iteration, mt.max_iterations,
+		       mt.result_summary, mt.output_path, mt.error_message, mt.assignment_id,
+		       mt.token_count, mt.estimated_cost, mt.started_at, mt.completed_at,
+		       mt.duration_ms, mt.created_at, mt.updated_at,
+		       ag.name, ag.slug
+		FROM mission_tasks mt
+		LEFT JOIN agents ag ON ag.id = mt.assigned_agent_id
+		WHERE mt.mission_id = ?
+		ORDER BY mt.task_order ASC`, missionID)
+	if err != nil {
+		return nil, err
+	}
+	defer taskRows.Close()
+
+	tasks := []missionTaskResponse{}
+	for taskRows.Next() {
+		var t missionTaskResponse
+		if err := taskRows.Scan(
+			&t.ID, &t.MissionID, &t.AssignedAgentID, &t.Title, &t.Description,
+			&t.Status, &t.TaskOrder, &t.DependsOn, &t.Iteration, &t.MaxIterations,
+			&t.ResultSummary, &t.OutputPath, &t.ErrorMessage, &t.AssignmentID,
+			&t.TokenCount, &t.EstimatedCost, &t.StartedAt, &t.CompletedAt,
+			&t.DurationMs, &t.CreatedAt, &t.UpdatedAt,
+			&t.AgentName, &t.AgentSlug,
+		); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, taskRows.Err()
 }
 
 // Get handles GET /api/v1/crews/{crewId}/missions/{missionId}
@@ -384,46 +464,13 @@ func (h *MissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load tasks
-	taskRows, err := h.db.QueryContext(r.Context(), `
-		SELECT mt.id, mt.mission_id, mt.assigned_agent_id, mt.title, mt.description,
-		       mt.status, mt.task_order, mt.depends_on, mt.iteration, mt.max_iterations,
-		       mt.result_summary, mt.output_path, mt.error_message, mt.assignment_id,
-		       mt.token_count, mt.estimated_cost, mt.started_at, mt.completed_at,
-		       mt.duration_ms, mt.created_at, mt.updated_at,
-		       ag.name, ag.slug
-		FROM mission_tasks mt
-		LEFT JOIN agents ag ON ag.id = mt.assigned_agent_id
-		WHERE mt.mission_id = ?
-		ORDER BY mt.task_order ASC`, missionID)
-	if err != nil {
-		h.logger.Error("get mission tasks", "error", err)
+	tasks, tasksErr := h.loadTasksForMission(r, missionID)
+	if tasksErr != nil {
+		h.logger.Error("get mission tasks", "error", tasksErr)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	defer taskRows.Close()
-
-	m.Tasks = []missionTaskResponse{}
-	for taskRows.Next() {
-		var t missionTaskResponse
-		if err := taskRows.Scan(
-			&t.ID, &t.MissionID, &t.AssignedAgentID, &t.Title, &t.Description,
-			&t.Status, &t.TaskOrder, &t.DependsOn, &t.Iteration, &t.MaxIterations,
-			&t.ResultSummary, &t.OutputPath, &t.ErrorMessage, &t.AssignmentID,
-			&t.TokenCount, &t.EstimatedCost, &t.StartedAt, &t.CompletedAt,
-			&t.DurationMs, &t.CreatedAt, &t.UpdatedAt,
-			&t.AgentName, &t.AgentSlug,
-		); err != nil {
-			h.logger.Error("scan mission task", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-		m.Tasks = append(m.Tasks, t)
-	}
-	if err := taskRows.Err(); err != nil {
-		h.logger.Error("rows iteration (tasks)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
+	m.Tasks = tasks
 
 	stats, statsErr := h.getTaskStats(r, missionID)
 	if statsErr != nil {
@@ -621,6 +668,86 @@ func (h *MissionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Start handles POST /api/v1/crews/{crewId}/missions/{missionId}/start
+// Transitions a PLANNING mission to IN_PROGRESS and kicks off the MissionEngine.
+func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	crewID := r.PathValue("crewId")
+	missionID := r.PathValue("missionId")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	var currentStatus string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+		missionID, crewID, wsID).Scan(&currentStatus)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			return
+		}
+		h.logger.Error("get mission for start", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if currentStatus != "PLANNING" {
+		writeProblem(w, r, http.StatusBadRequest,
+			fmt.Sprintf("cannot start mission in %s state, must be PLANNING", currentStatus))
+		return
+	}
+
+	// Validate DAG before starting (circular deps, nonexistent dep IDs)
+	if h.missionEngine != nil {
+		if dagErr := h.missionEngine.ValidateDAG(r.Context(), missionID); dagErr != nil {
+			writeProblem(w, r, http.StatusBadRequest, "Invalid task DAG: "+dagErr.Error())
+			return
+		}
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.ExecContext(r.Context(),
+		`UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ?`,
+		now, missionID); err != nil {
+		h.logger.Error("update mission status", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to start mission")
+		return
+	}
+
+	if h.missionEngine != nil {
+		if err := h.missionEngine.StartMission(context.Background(), missionID); err != nil {
+			h.logger.Error("mission engine start failed, rolling back to PLANNING", "error", err, "mission_id", missionID)
+			if _, rbErr := h.db.ExecContext(r.Context(),
+				`UPDATE missions SET status = 'PLANNING', updated_at = ? WHERE id = ?`,
+				now, missionID); rbErr != nil {
+				h.logger.Error("rollback mission status", "error", rbErr, "mission_id", missionID)
+			}
+			writeProblem(w, r, http.StatusInternalServerError, "Failed to start mission engine")
+			return
+		}
+	}
+
+	if h.hub != nil {
+		h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
+			Type:    "mission.updated",
+			Channel: "mission:" + missionID,
+			Payload: map[string]interface{}{"id": missionID, "status": "IN_PROGRESS"},
+		})
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "mission.updated",
+			Channel: wsChannel,
+			Payload: map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "IN_PROGRESS"},
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"id": missionID, "status": "IN_PROGRESS"})
+}
+
 // CreateTask handles POST /api/v1/crews/{crewId}/missions/{missionId}/tasks
 func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
@@ -736,6 +863,12 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 			Channel: "mission:" + missionID,
 			Payload: map[string]string{"id": id, "title": req.Title, "status": status},
 		})
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "task.updated",
+			Channel: wsChannel,
+			Payload: map[string]string{"id": id, "mission_id": missionID, "status": status},
+		})
 	}
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -756,6 +889,9 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Status          *string  `json:"status"`
+		Title           *string  `json:"title"`
+		Description     *string  `json:"description"`
+		DependsOn       *string  `json:"depends_on"`
 		AssignedAgentID *string  `json:"assigned_agent_id"`
 		ResultSummary   *string  `json:"result_summary"`
 		ErrorMessage    *string  `json:"error_message"`
@@ -832,6 +968,68 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		}
 
 		unblockNeeded = newStatus == "COMPLETED"
+	}
+
+	// Editable fields — only when task hasn't started yet
+	if req.Title != nil || req.Description != nil || req.DependsOn != nil {
+		if currentStatus != "PENDING" && currentStatus != "BLOCKED" {
+			writeProblem(w, r, http.StatusBadRequest, "Can only edit title/description/depends_on for PENDING or BLOCKED tasks")
+			tx.Rollback() //nolint:errcheck
+			return
+		}
+	}
+	if req.Title != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET title = ?, updated_at = ? WHERE id = ?`, *req.Title, now, taskID); err != nil {
+			h.logger.Error("update task title", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+	}
+	if req.Description != nil {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE mission_tasks SET description = ?, updated_at = ? WHERE id = ?`, *req.Description, now, taskID); err != nil {
+			h.logger.Error("update task description", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+	}
+	if req.DependsOn != nil {
+		var depIDs []string
+		if err := json.Unmarshal([]byte(*req.DependsOn), &depIDs); err != nil {
+			writeProblem(w, r, http.StatusBadRequest, "depends_on must be a JSON array of task IDs")
+			return
+		}
+		for _, dep := range depIDs {
+			if dep == taskID {
+				writeProblem(w, r, http.StatusBadRequest, "Task cannot depend on itself")
+				return
+			}
+			var depExists bool
+			if qErr := tx.QueryRowContext(r.Context(),
+				`SELECT 1 FROM mission_tasks WHERE id = ? AND mission_id = ?`, dep, missionID).Scan(&depExists); qErr != nil {
+				writeProblem(w, r, http.StatusBadRequest, fmt.Sprintf("Dependency task %s not found in this mission", dep))
+				return
+			}
+		}
+		// Update status based on deps: BLOCKED if any dep is not COMPLETED
+		newStatus := "PENDING"
+		for _, dep := range depIDs {
+			var depStatus string
+			tx.QueryRowContext(r.Context(), `SELECT status FROM mission_tasks WHERE id = ?`, dep).Scan(&depStatus)
+			if depStatus != "COMPLETED" {
+				newStatus = "BLOCKED"
+				break
+			}
+		}
+		if len(depIDs) == 0 {
+			newStatus = "PENDING"
+		}
+		if _, err = tx.ExecContext(r.Context(),
+			`UPDATE mission_tasks SET depends_on = ?, status = ?, updated_at = ? WHERE id = ?`,
+			*req.DependsOn, newStatus, now, taskID); err != nil {
+			h.logger.Error("update task depends_on", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 
 	if req.ResultSummary != nil {
@@ -934,6 +1132,7 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 // unblockDependentTasks finds BLOCKED tasks whose all dependencies are now completed
 // and transitions them to PENDING.
 func (h *MissionHandler) unblockDependentTasks(r *http.Request, missionID, completedTaskID string) {
+	wsID := WorkspaceIDFromContext(r.Context())
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT id, depends_on FROM mission_tasks WHERE mission_id = ? AND status = 'BLOCKED'`,
 		missionID)
@@ -991,7 +1190,63 @@ func (h *MissionHandler) unblockDependentTasks(r *http.Request, missionID, compl
 					Channel: "mission:" + missionID,
 					Payload: map[string]string{"id": id, "status": "PENDING"},
 				})
+				wsChannel := "workspace:" + wsID
+				h.hub.Broadcast(wsChannel, ws.ServerMessage{
+					Type:    "task.updated",
+					Channel: wsChannel,
+					Payload: map[string]string{"id": id, "mission_id": missionID, "status": "PENDING"},
+				})
 			}
+		}
+	}
+}
+
+// unblockCompletedDeps iterates all BLOCKED tasks in a mission and transitions
+// those whose dependencies are all COMPLETED to PENDING. Used after restart
+// to fix tasks that were blindly set to BLOCKED despite having met deps.
+func (h *MissionHandler) unblockCompletedDeps(r *http.Request, missionID string) {
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT id, depends_on FROM mission_tasks WHERE mission_id = ? AND status = 'BLOCKED'`,
+		missionID)
+	if err != nil {
+		h.logger.Error("unblockCompletedDeps: query", "error", err)
+		return
+	}
+
+	type blockedTask struct {
+		id   string
+		deps []string
+	}
+	var candidates []blockedTask
+	for rows.Next() {
+		var id, depsJSON string
+		if err := rows.Scan(&id, &depsJSON); err != nil {
+			continue
+		}
+		var deps []string
+		if err := json.Unmarshal([]byte(depsJSON), &deps); err != nil || len(deps) == 0 {
+			continue
+		}
+		candidates = append(candidates, blockedTask{id: id, deps: deps})
+	}
+	rows.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, bt := range candidates {
+		allDone := true
+		for _, dep := range bt.deps {
+			var depStatus string
+			err := h.db.QueryRowContext(r.Context(),
+				`SELECT status FROM mission_tasks WHERE id = ?`, dep).Scan(&depStatus)
+			if err != nil || depStatus != "COMPLETED" {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			h.db.ExecContext(r.Context(),
+				`UPDATE mission_tasks SET status = 'PENDING', updated_at = ? WHERE id = ?`,
+				now, bt.id)
 		}
 	}
 }
@@ -1029,4 +1284,458 @@ func (h *MissionHandler) getTaskStats(r *http.Request, missionID string) (*taskS
 		}
 	}
 	return stats, rows.Err()
+}
+
+// Restart resets a FAILED/CANCELLED/REVIEW/COMPLETED mission: resets non-completed tasks,
+// increments their iteration, and re-starts. Completed tasks stay completed (no re-run).
+func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	crewID := r.PathValue("crewId")
+	missionID := r.PathValue("missionId")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	var currentStatus string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+		missionID, crewID, wsID).Scan(&currentStatus)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			return
+		}
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if currentStatus == "IN_PROGRESS" || currentStatus == "PLANNING" {
+		writeProblem(w, r, http.StatusBadRequest,
+			fmt.Sprintf("cannot restart mission in %s state", currentStatus))
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Reset mission to PLANNING
+	if _, err = tx.ExecContext(r.Context(),
+		`UPDATE missions SET status = 'PLANNING', updated_at = ?, completed_at = NULL WHERE id = ?`,
+		now, missionID); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to reset mission")
+		return
+	}
+
+	// Reset FAILED/PENDING/BLOCKED/SKIPPED tasks; increment iteration; clear errors
+	if _, err = tx.ExecContext(r.Context(),
+		`UPDATE mission_tasks SET
+			status = CASE WHEN depends_on = '[]' OR depends_on IS NULL THEN 'PENDING' ELSE 'BLOCKED' END,
+			iteration = COALESCE(iteration, 0) + 1,
+			error_message = NULL,
+			result_summary = CASE WHEN status = 'COMPLETED' THEN result_summary ELSE NULL END,
+			started_at = NULL,
+			completed_at = NULL,
+			duration_ms = NULL,
+			assignment_id = NULL,
+			updated_at = ?
+		WHERE mission_id = ? AND status != 'COMPLETED'`,
+		now, missionID); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to reset tasks")
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// Post-reset: unblock tasks whose dependencies are all COMPLETED.
+	// The SQL above blindly sets tasks with deps to BLOCKED, but some deps
+	// may already be COMPLETED (they were not reset). Unblock those now.
+	h.unblockCompletedDeps(r, missionID)
+
+	if h.hub != nil {
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "mission.updated",
+			Channel: wsChannel,
+			Payload: map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "PLANNING"},
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"id": missionID, "status": "PLANNING"})
+}
+
+// Resume restarts a FAILED mission from the point of failure. Only the FAILED
+// task(s) and their downstream dependents are reset; COMPLETED tasks stay.
+// The DAG engine is started automatically — no separate Start call needed.
+func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	crewID := r.PathValue("crewId")
+	missionID := r.PathValue("missionId")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	var currentStatus string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+		missionID, crewID, wsID).Scan(&currentStatus)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			return
+		}
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if currentStatus != "FAILED" {
+		writeProblem(w, r, http.StatusBadRequest,
+			fmt.Sprintf("can only resume FAILED missions, current status: %s", currentStatus))
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Collect all tasks to build dependency graph
+	type taskRow struct {
+		ID        string
+		Status    string
+		DependsOn string
+	}
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT id, status, depends_on FROM mission_tasks WHERE mission_id = ?`, missionID)
+	if err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	var tasks []taskRow
+	for rows.Next() {
+		var t taskRow
+		if err := rows.Scan(&t.ID, &t.Status, &t.DependsOn); err != nil {
+			rows.Close()
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		tasks = append(tasks, t)
+	}
+	rows.Close()
+
+	// Build reverse dependency map: taskID -> list of tasks that depend on it
+	reverseDeps := make(map[string][]string)
+	for _, t := range tasks {
+		var deps []string
+		if t.DependsOn != "" && t.DependsOn != "[]" {
+			_ = json.Unmarshal([]byte(t.DependsOn), &deps)
+		}
+		for _, dep := range deps {
+			reverseDeps[dep] = append(reverseDeps[dep], t.ID)
+		}
+	}
+
+	// Find FAILED tasks and cascade downstream via BFS
+	toReset := make(map[string]bool)
+	queue := []string{}
+	for _, t := range tasks {
+		if t.Status == "FAILED" {
+			toReset[t.ID] = true
+			queue = append(queue, t.ID)
+		}
+	}
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+		for _, child := range reverseDeps[curr] {
+			if !toReset[child] {
+				toReset[child] = true
+				queue = append(queue, child)
+			}
+		}
+	}
+
+	if len(toReset) == 0 {
+		writeProblem(w, r, http.StatusBadRequest, "No failed tasks to resume from")
+		return
+	}
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Reset the identified tasks
+	resetIDs := make([]string, 0, len(toReset))
+	for id := range toReset {
+		resetIDs = append(resetIDs, id)
+	}
+
+	// Build task status map for checking deps
+	statusMap := make(map[string]string)
+	for _, t := range tasks {
+		if toReset[t.ID] {
+			statusMap[t.ID] = "RESET"
+		} else {
+			statusMap[t.ID] = t.Status
+		}
+	}
+
+	// Parse deps map
+	depsMap := make(map[string][]string)
+	for _, t := range tasks {
+		var deps []string
+		if t.DependsOn != "" && t.DependsOn != "[]" {
+			_ = json.Unmarshal([]byte(t.DependsOn), &deps)
+		}
+		depsMap[t.ID] = deps
+	}
+
+	resetStatusMap := make(map[string]string, len(resetIDs))
+	for _, id := range resetIDs {
+		// Determine correct initial status: PENDING if all deps are COMPLETED, BLOCKED otherwise
+		newStatus := "PENDING"
+		for _, dep := range depsMap[id] {
+			if statusMap[dep] != "COMPLETED" {
+				newStatus = "BLOCKED"
+				break
+			}
+		}
+		resetStatusMap[id] = newStatus
+		if _, err = tx.ExecContext(r.Context(),
+			`UPDATE mission_tasks SET
+				status = ?,
+				iteration = COALESCE(iteration, 0) + 1,
+				error_message = NULL,
+				result_summary = NULL,
+				started_at = NULL,
+				completed_at = NULL,
+				duration_ms = NULL,
+				assignment_id = NULL,
+				updated_at = ?
+			WHERE id = ?`,
+			newStatus, now, id); err != nil {
+			writeProblem(w, r, http.StatusInternalServerError, "Failed to reset task")
+			return
+		}
+	}
+
+	// Set mission to IN_PROGRESS directly (skip PLANNING)
+	if _, err = tx.ExecContext(r.Context(),
+		`UPDATE missions SET status = 'IN_PROGRESS', updated_at = ?, completed_at = NULL WHERE id = ?`,
+		now, missionID); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to update mission")
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// Start DAG engine immediately
+	if h.missionEngine != nil {
+		if err := h.missionEngine.StartMission(context.Background(), missionID); err != nil {
+			h.logger.Error("resume: mission engine start failed, rolling back", "error", err, "mission_id", missionID)
+			if _, rbErr := h.db.ExecContext(r.Context(),
+				`UPDATE missions SET status = 'FAILED', updated_at = ? WHERE id = ?`,
+				now, missionID); rbErr != nil {
+				h.logger.Error("resume: rollback mission status", "error", rbErr)
+			}
+			writeProblem(w, r, http.StatusInternalServerError, "Failed to start mission engine")
+			return
+		}
+	}
+
+	if h.hub != nil {
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "mission.updated",
+			Channel: wsChannel,
+			Payload: map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "IN_PROGRESS"},
+		})
+		for _, id := range resetIDs {
+			h.hub.Broadcast(wsChannel, ws.ServerMessage{
+				Type:    "task.updated",
+				Channel: wsChannel,
+				Payload: map[string]string{"id": id, "mission_id": missionID, "status": resetStatusMap[id]},
+			})
+		}
+	}
+
+	h.logger.Info("mission resumed from failure",
+		"mission_id", missionID,
+		"reset_tasks", len(toReset),
+	)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"id":          missionID,
+		"status":      "IN_PROGRESS",
+		"reset_tasks": len(toReset),
+	})
+}
+
+// Clone creates a deep copy of a mission with all its tasks, assigning new IDs.
+func (h *MissionHandler) Clone(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	crewID := r.PathValue("crewId")
+	missionID := r.PathValue("missionId")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	// Read original mission
+	var m struct {
+		Title       string
+		Description sql.NullString
+		LeadAgentID string
+		Template    sql.NullString
+	}
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT title, description, lead_agent_id, workflow_template
+		 FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+		missionID, crewID, wsID).Scan(&m.Title, &m.Description, &m.LeadAgentID, &m.Template)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			return
+		}
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// Read original tasks
+	type taskRow struct {
+		ID          string
+		AgentID     sql.NullString
+		Title       string
+		Description sql.NullString
+		TaskOrder   int
+		DependsOn   string
+		MaxIter     sql.NullInt64
+	}
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT id, assigned_agent_id, title, description, task_order, depends_on, max_iterations
+		 FROM mission_tasks WHERE mission_id = ? ORDER BY task_order`, missionID)
+	if err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	var origTasks []taskRow
+	for rows.Next() {
+		var t taskRow
+		if err := rows.Scan(&t.ID, &t.AgentID, &t.Title, &t.Description, &t.TaskOrder, &t.DependsOn, &t.MaxIter); err != nil {
+			rows.Close()
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		origTasks = append(origTasks, t)
+	}
+	rows.Close()
+
+	// Create new IDs and remap dependencies
+	newMissionID := generateCUID()
+	idMap := make(map[string]string) // oldID -> newID
+	for _, t := range origTasks {
+		idMap[t.ID] = generateCUID()
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Create synthetic chat (same pattern as Create)
+	if _, err = tx.ExecContext(r.Context(),
+		`INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 'MISSION', 'ACTIVE', ?, ?, ?)`,
+		newMissionID, m.LeadAgentID, wsID, "Mission: "+m.Title+" (clone)", now, now, now); err != nil {
+		h.logger.Error("create synthetic chat for clone", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to create mission")
+		return
+	}
+
+	// Insert new mission
+	traceID := "mission-" + generateCUID()
+	if _, err = tx.ExecContext(r.Context(),
+		`INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id, title, description,
+		 status, workflow_template, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 'PLANNING', ?, ?, ?)`,
+		newMissionID, wsID, crewID, m.LeadAgentID, traceID,
+		m.Title+" (copy)", m.Description, m.Template, now, now); err != nil {
+		h.logger.Error("clone mission insert", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to clone mission")
+		return
+	}
+
+	// Insert cloned tasks with remapped dependencies
+	for _, t := range origTasks {
+		newTaskID := idMap[t.ID]
+		newDeps := remapDependencies(t.DependsOn, idMap)
+		status := "PENDING"
+		if newDeps != "[]" {
+			status = "BLOCKED"
+		}
+		if _, err = tx.ExecContext(r.Context(),
+			`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, description,
+			 status, task_order, depends_on, max_iterations, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			newTaskID, newMissionID, t.AgentID, t.Title, t.Description,
+			status, t.TaskOrder, newDeps, t.MaxIter, now, now); err != nil {
+			h.logger.Error("clone task insert", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Failed to clone task")
+			return
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if h.hub != nil {
+		wsChannel := "workspace:" + wsID
+		h.hub.Broadcast(wsChannel, ws.ServerMessage{
+			Type:    "mission.created",
+			Channel: wsChannel,
+			Payload: map[string]interface{}{"id": newMissionID, "crew_id": crewID, "status": "PLANNING"},
+		})
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"id": newMissionID, "status": "PLANNING"})
+}
+
+func remapDependencies(depsJSON string, idMap map[string]string) string {
+	var deps []string
+	if err := json.Unmarshal([]byte(depsJSON), &deps); err != nil || len(deps) == 0 {
+		return "[]"
+	}
+	newDeps := make([]string, 0, len(deps))
+	for _, d := range deps {
+		if newID, ok := idMap[d]; ok {
+			newDeps = append(newDeps, newID)
+		}
+	}
+	out, _ := json.Marshal(newDeps)
+	return string(out)
 }
