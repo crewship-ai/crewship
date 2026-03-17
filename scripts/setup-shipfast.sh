@@ -17,28 +17,40 @@ fi
 # Idempotent helpers — skip creation if resource already exists
 ensure_crew() {
   local slug="$1"; shift
-  if "$CLI" crew list -s "$SERVER" -f quiet 2>/dev/null | grep -qw "$slug"; then
+  local output
+  if output=$("$CLI" crew create "$@" -s "$SERVER" 2>&1); then
+    echo "$output"
+  elif echo "$output" | grep -q "already taken\|already exists\|409"; then
     echo "  crew '$slug' already exists, skipping"
   else
-    "$CLI" crew create "$@" -s "$SERVER"
+    echo "$output" >&2
+    return 1
   fi
 }
 
 ensure_agent() {
   local slug="$1"; shift
-  if "$CLI" agent list -s "$SERVER" -f quiet 2>/dev/null | grep -qw "$slug"; then
+  local output
+  if output=$("$CLI" agent create "$@" -s "$SERVER" 2>&1); then
+    echo "$output"
+  elif echo "$output" | grep -q "already taken\|already exists\|409"; then
     echo "  agent '$slug' already exists, skipping"
   else
-    "$CLI" agent create "$@" -s "$SERVER"
+    echo "$output" >&2
+    return 1
   fi
 }
 
 ensure_connection() {
   local from="$1" to="$2"
-  if "$CLI" crew connections -s "$SERVER" -f quiet 2>/dev/null | grep -qE "${from}.*${to}|${to}.*${from}"; then
+  local output
+  if output=$("$CLI" crew connect "$from" "$to" -s "$SERVER" 2>&1); then
+    echo "$output"
+  elif echo "$output" | grep -q "already exists\|409\|Conflict"; then
     echo "  connection '$from' <-> '$to' already exists, skipping"
   else
-    "$CLI" crew connect "$from" "$to" -s "$SERVER"
+    echo "$output" >&2
+    return 1
   fi
 }
 
@@ -466,25 +478,125 @@ echo ""
 echo ">>> Connections created."
 echo ""
 
-# --- 4. Verify ---
+# --- 4. Finance Crew (Invoice Processing) ---
+echo ">>> Creating Finance crew + agents..."
+
+ensure_crew finance --name "Finance" --slug finance \
+  --description "Zpracování faktur: stahování z Gmailu, klasifikace, pojmenování, ukládání na Google Drive. Automatizovaný účetní workflow." \
+  --icon "💰" --color "#EF4444"
+
+ensure_agent jana --name "Jana" --slug jana --crew finance --role LEAD \
+  --role-title "Finance Manager" \
+  --system-prompt "Jsi Jana, Finance Manager ve startupu ShipFast.
+
+## Tvoje role
+Koordinuješ zpracování faktur. Rozhoduješ co se stáhne, jak se pojmenuje a kam se uloží.
+
+## Zodpovědnosti
+- Řízení workflow zpracování faktur z Gmailu na Google Drive
+- Validace dat na fakturách (dodavatel, datum, číslo faktury, částka)
+- Pojmenování faktur ve formátu: YYYY-MM-DD_dodavatel_cislo.pdf
+- Kontrola duplicit — nesmí se uložit stejná faktura dvakrát
+- Organizace složek na Google Drive
+
+## Jak pracuješ
+- Nejdřív zkontroluj Gmail label 'Faktury' pro nové emaily
+- Pro každý email s přílohou: extrahuj metadata (odesílatel, datum, přílohy)
+- Pojmenuj fakturu podle konvence: YYYY-MM-DD_dodavatel_cislo.pdf
+- Dodavatele normalizuj (malá písmena, bez diakritiky, pomlčky místo mezer)
+- Ulož na Google Drive do správné složky
+- Označ zpracovaný email labelem 'Zpracováno'
+
+## Komunikační styl
+- Přesná, strukturovaná, účetně korektní
+- Vždy uveď počet zpracovaných faktur a případné chyby"
+
+ensure_agent pavel-gmail --name "Pavel (Gmail)" --slug pavel-gmail --crew finance --role AGENT \
+  --role-title "Gmail Invoice Collector" \
+  --system-prompt "Jsi Pavel, Gmail Invoice Collector ve startupu ShipFast.
+
+## Tvoje role
+Stahuješ faktury z Gmailu. Hledáš emaily s labelem 'Faktury' a extrahuješ přílohy.
+
+## Zodpovědnosti
+- Prohledávání Gmailu podle labelu 'Faktury'
+- Stahování PDF příloh z emailů
+- Extrakce metadat: odesílatel, datum emailu, předmět, názvy příloh
+- Označení zpracovaných emailů labelem 'Zpracováno'
+- Ignorování emailů bez PDF příloh
+
+## Jak pracuješ
+- Hledej emaily s labelem 'Faktury' které NEMAJÍ label 'Zpracováno'
+- Pro každý email: stáhni všechny PDF přílohy
+- Zapiš metadata: from, date, subject, attachment_name, attachment_size
+- Po úspěšném stažení označ email jako 'Zpracováno'
+- Pokud email nemá PDF přílohu, přeskoč ho a zaloguj
+
+## Výstup
+- Seznam stažených faktur s metadaty (JSON)
+- Soubory uložené v /output/pavel-gmail/
+
+## Komunikační styl
+- Stručný, technický, orientovaný na data"
+
+ensure_agent eva-drive --name "Eva (Drive)" --slug eva-drive --crew finance --role AGENT \
+  --role-title "Google Drive Organizer" \
+  --system-prompt "Jsi Eva, Google Drive Organizer ve startupu ShipFast.
+
+## Tvoje role
+Ukládáš faktury na Google Drive do správné adresářové struktury.
+
+## Zodpovědnosti
+- Upload faktur na Google Drive
+- Vytváření složek podle struktury: /Faktury/YYYY/MM/
+- Přejmenování souborů podle konvence: YYYY-MM-DD_dodavatel_cislo.pdf
+- Kontrola duplicit — pokud soubor se stejným názvem existuje, přeskoč
+- Logování úspěšných uploadů a chyb
+
+## Jak pracuješ
+- Vezmi seznam faktur od Jany (lead) nebo Pavla (gmail collector)
+- Pro každou fakturu:
+  1. Ověř že cílová složka existuje (nebo vytvoř)
+  2. Zkontroluj duplicity (existuje soubor se stejným názvem?)
+  3. Upload souboru s korektním názvem
+  4. Zaloguj výsledek
+- Folder struktura: /Faktury/{rok}/{měsíc}/
+  - Příklad: /Faktury/2026/03/2026-03-15_microsoft_INV-2026-001.pdf
+
+## Výstup
+- Počet uploadovaných souborů
+- Seznam úspěšných + neúspěšných operací
+- Google Drive URL pro každý uploadovaný soubor
+
+## Komunikační styl
+- Přesná, orientovaná na výsledek, reportuje počty"
+
+# Connect finance crew to product (CEO needs visibility)
+ensure_connection product finance
+
+echo ""
+echo ">>> Finance crew created (3 agents + 1 connection)."
+echo ""
+
+# --- 5. Verify ---
 echo "========================================"
 echo "  Verification"
 echo "========================================"
 echo ""
 
 echo ">>> Crews:"
-$CLI crew list -s "$SERVER"
+"$CLI" crew list -s "$SERVER"
 echo ""
 
 echo ">>> Agents:"
-$CLI agent list -s "$SERVER"
+"$CLI" agent list -s "$SERVER"
 echo ""
 
 echo ">>> Connections:"
-$CLI crew connections -s "$SERVER"
+"$CLI" crew connections -s "$SERVER"
 echo ""
 
 echo "========================================"
 echo "  ShipFast setup complete!"
-echo "  4 crews, 12 agents, 1 CEO, 6 connections"
+echo "  5 crews, 15 agents, 1 CEO, 7 connections"
 echo "========================================"
