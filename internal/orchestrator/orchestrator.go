@@ -379,6 +379,20 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		mkResult.Reader.Close()
 	}
 
+	// Pre-create /crew/manifest.json writable by both agent (1001) and sidecar (1002).
+	manifestCfg := provider.ExecConfig{
+		ContainerID: req.ContainerID,
+		Cmd:         []string{"sh", "-c", `test -f /crew/manifest.json || echo '{"version":1,"packages":{"apt":[],"npm":[],"pip":[]},"credentials":[],"setup_commands":[]}' > /crew/manifest.json; chmod 0666 /crew/manifest.json`},
+		User:        "0:0",
+	}
+	mfResult, err := o.container.Exec(ctx, manifestCfg)
+	if err != nil {
+		o.logger.Debug("manifest pre-create skipped", "error", err)
+	} else {
+		io.Copy(io.Discard, mfResult.Reader)
+		mfResult.Reader.Close()
+	}
+
 	// Create .memory/ directories for persistent agent memory (in crew HOME)
 	if req.MemoryEnabled {
 		memoryDir := path.Join(crewAgentDir, ".memory")
