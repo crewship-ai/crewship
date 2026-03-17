@@ -191,6 +191,9 @@ fi
 echo ""
 echo "5. CRE-41: Crew manifest via sidecar"
 
+# Ensure /crew is writable by sidecar (UID 1002) for manifest.json
+docker exec -u 0:0 "$CONTAINER_NAME" chmod 1777 /crew
+
 # Start sidecar with minimal config (no real credentials needed for manifest test)
 SIDECAR_INPUT='{"credentials":[]}'
 SIDECAR_B64=$(echo -n "$SIDECAR_INPUT" | base64)

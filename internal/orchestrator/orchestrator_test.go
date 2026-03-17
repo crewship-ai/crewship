@@ -160,9 +160,10 @@ func TestRunAgentSuccess(t *testing.T) {
 
 	mc := &mockContainer{
 		execResults: []*provider.ExecResult{
-			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},   // createAgentDirs
-			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},  // setupClaudeConfig
-			{ExecID: "exec-1", Reader: r},                                      // agent exec
+			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},      // createAgentDirs
+			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},   // manifest pre-create
+			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},     // setupClaudeConfig
+			{ExecID: "exec-1", Reader: r},                                         // agent exec
 		},
 		inspectResult: struct {
 			running  bool
@@ -364,6 +365,7 @@ func TestRunAgentScrubsCredentials(t *testing.T) {
 	mc := &mockContainer{
 		execResults: []*provider.ExecResult{
 			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
+			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "exec-1", Reader: r},
 		},
@@ -418,11 +420,12 @@ func TestRunAgentWithSidecar(t *testing.T) {
 
 	mc := &mockContainer{
 		execResults: []*provider.ExecResult{
-			{ExecID: "health-1", Reader: io.NopCloser(strings.NewReader(""))},   // isSidecarRunning check (empty = not running)
-			{ExecID: "sidecar-1", Reader: io.NopCloser(strings.NewReader(""))},  // startSidecar
-			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},    // createAgentDirs
-			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},   // setupClaudeConfig
-			{ExecID: "exec-1", Reader: r},                                       // agent exec
+			{ExecID: "health-1", Reader: io.NopCloser(strings.NewReader(""))},      // isSidecarRunning check (empty = not running)
+			{ExecID: "sidecar-1", Reader: io.NopCloser(strings.NewReader(""))},   // startSidecar
+			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},     // createAgentDirs
+			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},  // manifest pre-create
+			{ExecID: "config-1", Reader: io.NopCloser(strings.NewReader(""))},    // setupClaudeConfig
+			{ExecID: "exec-1", Reader: r},                                        // agent exec
 		},
 		inspectResult: struct {
 			running  bool
