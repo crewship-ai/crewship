@@ -89,9 +89,9 @@ func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 
 	cred, err := h.getAnthropicCred(r.Context(), wsID)
 	if err != nil {
-		h.logger.Warn("no anthropic credential for crew AI suggest", "workspace", wsID, "error", err)
+		h.logger.Warn("no anthropic API key for crew AI suggest", "workspace", wsID, "error", err)
 		writeProblem(w, r, http.StatusUnprocessableEntity,
-			"No Anthropic API key found. Add one in Settings → Credentials first.")
+			"No Anthropic API key found. Add a credential of type API_KEY / provider ANTHROPIC in Settings → Credentials. Note: Claude Code OAuth tokens cannot be used here — a plain API key (sk-ant-api*) is required.")
 		return
 	}
 
@@ -106,23 +106,23 @@ func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 }
 
 type anthropicCred struct {
-	plain   string
-	isOAuth bool // true = AI_CLI_TOKEN (sk-ant-oat*), use Authorization: Bearer
+	plain string
 }
 
-// getAnthropicCred fetches and decrypts the first active Anthropic credential for the workspace.
-// Prefers API_KEY; falls back to AI_CLI_TOKEN (OAuth) which also works with the Messages API.
+// getAnthropicCred fetches and decrypts the first active Anthropic API_KEY for the workspace.
+// Note: AI_CLI_TOKEN (OAuth sk-ant-oat*) cannot be used for direct Messages API calls —
+// Anthropic does not support OAuth for their REST API. Only API_KEY works here.
 func (h *CrewAIHandler) getAnthropicCred(ctx context.Context, wsID string) (*anthropicCred, error) {
-	var encryptedValue, credType string
+	var encryptedValue string
 	err := h.db.QueryRowContext(ctx, `
-		SELECT encrypted_value, type FROM credentials
+		SELECT encrypted_value FROM credentials
 		WHERE workspace_id = ?
 		  AND provider = 'ANTHROPIC'
-		  AND type IN ('API_KEY', 'AI_CLI_TOKEN')
+		  AND type = 'API_KEY'
 		  AND status = 'ACTIVE'
 		  AND deleted_at IS NULL
-		ORDER BY CASE type WHEN 'API_KEY' THEN 0 ELSE 1 END, created_at ASC
-		LIMIT 1`, wsID).Scan(&encryptedValue, &credType)
+		ORDER BY created_at ASC
+		LIMIT 1`, wsID).Scan(&encryptedValue)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("no active Anthropic credential in workspace")
@@ -133,7 +133,7 @@ func (h *CrewAIHandler) getAnthropicCred(ctx context.Context, wsID string) (*ant
 	if err != nil {
 		return nil, fmt.Errorf("decrypt credential: %w", err)
 	}
-	return &anthropicCred{plain: plain, isOAuth: credType == "AI_CLI_TOKEN"}, nil
+	return &anthropicCred{plain: plain}, nil
 }
 
 // callAnthropic sends the user description to Claude and parses the JSON response.
@@ -156,12 +156,7 @@ func (h *CrewAIHandler) callAnthropic(ctx context.Context, cred *anthropicCred, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
-	if cred.isOAuth {
-		// OAuth tokens (sk-ant-oat*) use Authorization: Bearer
-		req.Header.Set("Authorization", "Bearer "+cred.plain)
-	} else {
-		req.Header.Set("x-api-key", cred.plain)
-	}
+	req.Header.Set("x-api-key", cred.plain)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -175,7 +170,7 @@ func (h *CrewAIHandler) callAnthropic(ctx context.Context, cred *anthropicCred, 
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("invalid Anthropic API key")
+		return nil, fmt.Errorf("invalid Anthropic API key — update the credential in Settings → Credentials")
 	}
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return nil, fmt.Errorf("Anthropic rate limit exceeded, try again in a moment")

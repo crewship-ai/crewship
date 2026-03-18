@@ -433,7 +433,7 @@ export default function NewCrewPage() {
               <Link href="/settings/credentials" className="underline hover:no-underline">
                 Add one in Settings → Credentials
               </Link>
-              {" "}to use the AI wizard.
+              {" "}(type: <code className="text-xs bg-yellow-500/20 px-1 rounded">API_KEY</code>, provider: <code className="text-xs bg-yellow-500/20 px-1 rounded">ANTHROPIC</code>). Claude Code OAuth tokens cannot be used here.
             </div>
           </div>
         )}
