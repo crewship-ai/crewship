@@ -3,7 +3,9 @@
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { ArrowLeft, Loader2, Users, Sparkles, Bot, ChevronRight, ChevronDown } from "lucide-react"
+import {
+  ArrowLeft, Loader2, Users, Sparkles, Bot, ChevronRight, ChevronDown, RefreshCw, AlertTriangle,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -14,6 +16,8 @@ import { PageHeader } from "@/components/layout/page-header"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { slugify } from "@/lib/utils/slugify"
 import { toast } from "sonner"
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CrewTemplateAgent {
   name: string
@@ -35,10 +39,26 @@ interface CrewTemplate {
   is_builtin: boolean
 }
 
-type Mode = "choose" | "template" | "manual"
+interface AISuggestedAgent {
+  name: string
+  slug: string
+  role_title: string
+  agent_role: string
+  system_prompt: string
+}
 
-// Expandable agent row showing system prompt on demand
-function AgentRow({ agent }: { agent: CrewTemplateAgent }) {
+interface AISuggestion {
+  crew_name: string
+  crew_slug: string
+  description: string
+  agents: AISuggestedAgent[]
+}
+
+type Mode = "choose" | "ai" | "ai-preview" | "template" | "manual"
+
+// ─── AgentRow (expandable system prompt) ─────────────────────────────────────
+
+function AgentRow({ agent }: { agent: { name: string; slug: string; role_title: string; agent_role: string; system_prompt: string } }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="rounded-lg border border-border overflow-hidden">
@@ -56,20 +76,18 @@ function AgentRow({ agent }: { agent: CrewTemplateAgent }) {
             <span className="text-xs text-muted-foreground">{agent.role_title}</span>
           </div>
         </div>
-        <ChevronDown
-          className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-        />
+        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
         <div className="px-3 pb-3 border-t border-border bg-muted/30">
-          <p className="text-xs text-muted-foreground mt-2 whitespace-pre-wrap leading-relaxed">
-            {agent.system_prompt}
-          </p>
+          <p className="text-xs text-muted-foreground mt-2 whitespace-pre-wrap leading-relaxed">{agent.system_prompt}</p>
         </div>
       )}
     </div>
   )
 }
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NewCrewPage() {
   const router = useRouter()
@@ -78,12 +96,18 @@ export default function NewCrewPage() {
   const [mode, setMode] = useState<Mode>("choose")
   const [submitting, setSubmitting] = useState(false)
 
-  // Templates fetched once on mount (BUG 3 fix)
+  // Template state
   const [templates, setTemplates] = useState<CrewTemplate[]>([])
   const [loadingTemplates, setLoadingTemplates] = useState(true)
   const [selectedTemplate, setSelectedTemplate] = useState<CrewTemplate | null>(null)
 
-  // Form state
+  // AI wizard state
+  const [aiDescription, setAiDescription] = useState("")
+  const [aiSuggesting, setAiSuggesting] = useState(false)
+  const [aiSuggestion, setAiSuggestion] = useState<AISuggestion | null>(null)
+  const [hasAnthropicKey, setHasAnthropicKey] = useState<boolean | null>(null) // null = unknown
+
+  // Form state (shared between manual + deploy modes)
   const [name, setName] = useState("")
   const [slug, setSlug] = useState("")
   const [slugManual, setSlugManual] = useState(false)
@@ -95,7 +119,7 @@ export default function NewCrewPage() {
     if (!slugManual) setSlug(slugify(name))
   }, [name, slugManual])
 
-  // Fetch once workspaceId is available
+  // Fetch templates once workspaceId is available
   useEffect(() => {
     if (!workspaceId) return
     fetch(`/api/v1/crew-templates?workspace_id=${workspaceId}`)
@@ -103,6 +127,14 @@ export default function NewCrewPage() {
       .then((data) => setTemplates(Array.isArray(data) ? data : []))
       .catch(() => setTemplates([]))
       .finally(() => setLoadingTemplates(false))
+  }, [workspaceId])
+
+  // Check if workspace has an Anthropic key (by attempting a probe — we get 422 if not)
+  useEffect(() => {
+    if (!workspaceId) return
+    // We infer key presence from whether /crew-ai-suggest returns 422
+    // Don't call it yet — just mark as unknown; we'll know on first attempt
+    setHasAnthropicKey(null)
   }, [workspaceId])
 
   const handleSelectTemplate = (t: CrewTemplate) => {
@@ -114,6 +146,101 @@ export default function NewCrewPage() {
     setIcon(t.icon || "")
     setMode("template")
   }
+
+  // ── AI suggest ──────────────────────────────────────────────────────────────
+
+  const handleAISuggest = async () => {
+    if (!workspaceId || !aiDescription.trim()) return
+    setAiSuggesting(true)
+    setAiSuggestion(null)
+
+    try {
+      const res = await fetch(`/api/v1/crew-ai-suggest?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: aiDescription }),
+      })
+      const data = await res.json()
+      if (res.status === 422) {
+        setHasAnthropicKey(false)
+        toast.error("No Anthropic API key found. Add one in Settings → Credentials.")
+        setAiSuggesting(false)
+        return
+      }
+      if (!res.ok) {
+        toast.error(data.detail || data.error || "AI suggestion failed")
+        setAiSuggesting(false)
+        return
+      }
+      setHasAnthropicKey(true)
+      setAiSuggestion(data)
+      // Pre-fill name/slug from suggestion
+      setName(data.crew_name)
+      setSlugManual(false)
+      setMode("ai-preview")
+    } catch {
+      toast.error("Network error. Please try again.")
+    } finally {
+      setAiSuggesting(false)
+    }
+  }
+
+  const handleDeployAI = async () => {
+    if (!workspaceId || !aiSuggestion) return
+    setSubmitting(true)
+
+    try {
+      // 1. Create the crew
+      const crewRes = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          slug,
+          description: aiSuggestion.description,
+          color,
+        }),
+      })
+      if (!crewRes.ok) {
+        const d = await crewRes.json()
+        toast.error(typeof d.error === "string" ? d.error : "Failed to create crew")
+        setSubmitting(false)
+        return
+      }
+      const crew = await crewRes.json()
+
+      // 2. Create each agent
+      for (const a of aiSuggestion.agents) {
+        const agentSlug = a.slug + "-" + slug
+        await fetch(`/api/v1/agents?workspace_id=${workspaceId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            crew_id: crew.id,
+            name: a.name,
+            slug: agentSlug,
+            role_title: a.role_title,
+            agent_role: a.agent_role,
+            system_prompt: a.system_prompt,
+            cli_adapter: "CLAUDE_CODE",
+            llm_provider: "ANTHROPIC",
+            llm_model: "claude-sonnet-4-20250514",
+            tool_profile: a.agent_role === "LEAD" ? "FULL" : "CODING",
+            timeout_seconds: 1800,
+            memory_enabled: true,
+          }),
+        })
+      }
+
+      toast.success(`Crew "${name}" created with ${aiSuggestion.agents.length} agents`)
+      router.push(`/crews/${crew.id}`)
+    } catch {
+      toast.error("Network error. Please try again.")
+      setSubmitting(false)
+    }
+  }
+
+  // ── Template deploy ──────────────────────────────────────────────────────────
 
   const handleDeployTemplate = async () => {
     if (!workspaceId || !selectedTemplate) return
@@ -130,14 +257,10 @@ export default function NewCrewPage() {
       )
       const data = await res.json()
       if (!res.ok) {
-        // BUG 2: map backend errors to friendly messages
-        const detail: string = data.detail || data.error || ""
         if (res.status === 409) {
           toast.error(`A crew with slug "${slug}" already exists. Change the crew name and try again.`)
-        } else if (detail.includes("already exists")) {
-          toast.error(detail)
         } else {
-          toast.error("Failed to deploy template. Please try again.")
+          toast.error(data.detail || data.error || "Failed to deploy template")
         }
         setSubmitting(false)
         return
@@ -149,6 +272,8 @@ export default function NewCrewPage() {
       setSubmitting(false)
     }
   }
+
+  // ── Manual create ────────────────────────────────────────────────────────────
 
   const handleManualSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -183,6 +308,8 @@ export default function NewCrewPage() {
     [workspaceId, name, slug, description, color, icon, router]
   )
 
+  // ── Loading ──────────────────────────────────────────────────────────────────
+
   if (wsLoading) {
     return (
       <div className="flex items-center justify-center p-12">
@@ -191,48 +318,63 @@ export default function NewCrewPage() {
     )
   }
 
-  // Step 1: Choose mode
+  // ── Step 1: Choose mode ──────────────────────────────────────────────────────
+
   if (mode === "choose") {
     return (
       <div className="p-4 sm:p-6 space-y-6 max-w-3xl">
         <PageHeader title="New Crew" description="Create a new crew to organize your agents">
           <Button variant="outline" size="sm" asChild>
-            <Link href="/crews">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back
-            </Link>
+            <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back</Link>
           </Button>
         </PageHeader>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Create with AI */}
+          <button
+            onClick={() => setMode("ai")}
+            className="flex flex-col items-start gap-3 rounded-lg border border-primary/40 bg-primary/5 p-5 text-left transition-all hover:bg-primary/10 hover:border-primary/70"
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              <span className="font-semibold">Create with AI</span>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Describe what your crew should do and AI will design the agents, roles, and prompts for you.
+            </p>
+            <Badge className="text-xs">Recommended</Badge>
+          </button>
+
+          {/* Start from Template */}
           <button
             onClick={() => setMode("template")}
             className="flex flex-col items-start gap-3 rounded-lg border border-border p-5 text-left transition-all hover:bg-accent hover:border-primary/50"
           >
             <div className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-primary" />
+              <Bot className="h-5 w-5 text-muted-foreground" />
               <span className="font-semibold">Start from Template</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              Choose a pre-built crew blueprint with agents, roles, and system prompts ready to go.
+              Choose a pre-built crew blueprint with agents and system prompts ready to deploy.
             </p>
-            <Badge variant="secondary" className="text-xs">Recommended</Badge>
           </button>
 
+          {/* Create from Scratch */}
           <button
             onClick={() => setMode("manual")}
             className="flex flex-col items-start gap-3 rounded-lg border border-border p-5 text-left transition-all hover:bg-accent hover:border-primary/50"
           >
             <div className="flex items-center gap-2">
               <Users className="h-5 w-5 text-muted-foreground" />
-              <span className="font-semibold">Create from Scratch</span>
+              <span className="font-semibold">From Scratch</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              Set up an empty crew and add agents manually. Full control over every setting.
+              Set up an empty crew and configure every agent manually.
             </p>
           </button>
         </div>
 
+        {/* Quick start template grid */}
         {loadingTemplates ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading templates...
@@ -259,7 +401,6 @@ export default function NewCrewPage() {
                         <Bot className="h-3 w-3 text-muted-foreground" />
                         <span className="text-xs text-muted-foreground">{t.agents.length} agents</span>
                       </div>
-                      {/* UX 3: category badge on compact cards */}
                       <Badge variant="outline" className="text-xs py-0">{t.category}</Badge>
                     </div>
                   </div>
@@ -272,50 +413,102 @@ export default function NewCrewPage() {
     )
   }
 
-  // Step 2a: Template preview + deploy
-  if (mode === "template" && selectedTemplate) {
+  // ── Step 2: AI description input ─────────────────────────────────────────────
+
+  if (mode === "ai") {
+    return (
+      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
+        <PageHeader title="Create with AI" description="Describe your crew and AI will design it for you">
+          <Button variant="outline" size="sm" onClick={() => setMode("choose")}>
+            <ArrowLeft className="mr-2 h-4 w-4" />Back
+          </Button>
+        </PageHeader>
+
+        {hasAnthropicKey === false && (
+          <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-4">
+            <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
+            <div className="text-sm">
+              <span className="font-medium text-yellow-600 dark:text-yellow-400">Anthropic API key required.</span>
+              {" "}
+              <Link href="/settings/credentials" className="underline hover:no-underline">
+                Add one in Settings → Credentials
+              </Link>
+              {" "}to use the AI wizard.
+            </div>
+          </div>
+        )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">What should this crew do?</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Textarea
+              value={aiDescription}
+              onChange={(e) => setAiDescription(e.target.value)}
+              placeholder="e.g. I need a team to automate our accounting — process invoices, reconcile transactions, prepare monthly financial reports, and handle tax filing prep."
+              rows={5}
+              className="resize-none"
+            />
+            <p className="text-xs text-muted-foreground">
+              Be specific about the tasks, tools, and domain. The more detail, the better the agents.
+            </p>
+            <Button
+              onClick={handleAISuggest}
+              disabled={aiSuggesting || aiDescription.trim().length < 10}
+              className="gap-2"
+            >
+              {aiSuggesting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Designing your crew...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Suggest Crew
+                </>
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ── Step 3: AI preview + deploy ──────────────────────────────────────────────
+
+  if (mode === "ai-preview" && aiSuggestion) {
     return (
       <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
         <PageHeader
-          title={`Deploy: ${selectedTemplate.name}`}
-          description={selectedTemplate.description || "Deploy this crew template"}
+          title="AI-Designed Crew"
+          description={aiSuggestion.description || "Review and deploy your AI-designed crew"}
         >
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => { setMode("choose"); setSelectedTemplate(null) }}
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back
+          <Button variant="outline" size="sm" onClick={() => setMode("ai")}>
+            <ArrowLeft className="mr-2 h-4 w-4" />Back
           </Button>
         </PageHeader>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Crew Name</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-base">Crew Name</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="name">Name *</Label>
+                <Label htmlFor="ai-name">Name *</Label>
                 <Input
-                  id="name"
+                  id="ai-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={selectedTemplate.name}
                   required
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="slug">Slug</Label>
-                {/* BUG 5: live slugify */}
+                <Label htmlFor="ai-slug">Slug</Label>
                 <Input
-                  id="slug"
+                  id="ai-slug"
                   value={slug}
-                  onChange={(e) => {
-                    setSlugManual(true)
-                    setSlug(slugify(e.target.value))
-                  }}
+                  onChange={(e) => { setSlugManual(true); setSlug(slugify(e.target.value)) }}
                   className="font-mono text-sm"
                   required
                 />
@@ -324,15 +517,90 @@ export default function NewCrewPage() {
           </CardContent>
         </Card>
 
-        {/* BUG 4: expandable system prompts */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Bot className="h-4 w-4" />
+              Agents ({aiSuggestion.agents.length})
+              <span className="text-xs font-normal text-muted-foreground ml-1">— click to preview system prompt</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {aiSuggestion.agents.map((a) => (
+                <AgentRow key={a.slug} agent={a} />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="flex items-center gap-3 pt-2">
+          <Button onClick={handleDeployAI} disabled={submitting || !name.trim()} className="gap-2">
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            Deploy Crew ({aiSuggestion.agents.length} agents)
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => { setAiSuggestion(null); setMode("ai") }}
+            className="gap-2"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Regenerate
+          </Button>
+          <Button variant="ghost" onClick={() => setMode("choose")}>Cancel</Button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Step 2a: Template preview + deploy ───────────────────────────────────────
+
+  if (mode === "template" && selectedTemplate) {
+    return (
+      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
+        <PageHeader
+          title={`Deploy: ${selectedTemplate.name}`}
+          description={selectedTemplate.description || "Deploy this crew template"}
+        >
+          <Button variant="outline" size="sm" onClick={() => { setMode("choose"); setSelectedTemplate(null) }}>
+            <ArrowLeft className="mr-2 h-4 w-4" />Back
+          </Button>
+        </PageHeader>
+
+        <Card>
+          <CardHeader><CardTitle className="text-base">Crew Name</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="tmpl-name">Name *</Label>
+                <Input
+                  id="tmpl-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={selectedTemplate.name}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="tmpl-slug">Slug</Label>
+                <Input
+                  id="tmpl-slug"
+                  value={slug}
+                  onChange={(e) => { setSlugManual(true); setSlug(slugify(e.target.value)) }}
+                  className="font-mono text-sm"
+                  required
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <Bot className="h-4 w-4" />
               Agents ({selectedTemplate.agents.length})
-              <span className="text-xs font-normal text-muted-foreground ml-1">
-                — click to preview system prompt
-              </span>
+              <span className="text-xs font-normal text-muted-foreground ml-1">— click to preview system prompt</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -345,22 +613,11 @@ export default function NewCrewPage() {
         </Card>
 
         <div className="flex items-center gap-3 pt-2">
-          <Button
-            onClick={handleDeployTemplate}
-            disabled={submitting || !name.trim()}
-            className="gap-2"
-          >
-            {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
+          <Button onClick={handleDeployTemplate} disabled={submitting || !name.trim()} className="gap-2">
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             Deploy Crew ({selectedTemplate.agents.length} agents)
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => { setMode("choose"); setSelectedTemplate(null) }}
-          >
+          <Button variant="outline" onClick={() => { setMode("choose"); setSelectedTemplate(null) }}>
             Cancel
           </Button>
         </div>
@@ -368,14 +625,14 @@ export default function NewCrewPage() {
     )
   }
 
-  // Step 2b: Template gallery (no template selected yet)
+  // ── Step 2b: Template gallery ────────────────────────────────────────────────
+
   if (mode === "template" && !selectedTemplate) {
     return (
       <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
         <PageHeader title="Choose a Template" description="Pick a crew blueprint to get started quickly">
           <Button variant="outline" size="sm" onClick={() => setMode("choose")}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back
+            <ArrowLeft className="mr-2 h-4 w-4" />Back
           </Button>
         </PageHeader>
 
@@ -403,11 +660,7 @@ export default function NewCrewPage() {
                 </div>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {t.agents.map((a) => (
-                    <Badge
-                      key={a.slug}
-                      variant={a.agent_role === "LEAD" ? "default" : "secondary"}
-                      className="text-xs"
-                    >
+                    <Badge key={a.slug} variant={a.agent_role === "LEAD" ? "default" : "secondary"} className="text-xs">
                       {a.name}
                     </Badge>
                   ))}
@@ -420,91 +673,51 @@ export default function NewCrewPage() {
     )
   }
 
-  // Step 2c: Manual form
+  // ── Step 2c: Manual form ─────────────────────────────────────────────────────
+
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
       <PageHeader title="New Crew" description="Create a new crew from scratch">
         <Button variant="outline" size="sm" onClick={() => setMode("choose")}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Back
+          <ArrowLeft className="mr-2 h-4 w-4" />Back
         </Button>
       </PageHeader>
 
       <form onSubmit={handleManualSubmit} className="space-y-4 sm:space-y-6">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Crew Details</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-base">Crew Details</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Name *</Label>
-                <Input
-                  id="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Marketing"
-                  required
-                />
+                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Marketing" required />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="slug">Slug *</Label>
-                <Input
-                  id="slug"
-                  value={slug}
-                  onChange={(e) => { setSlugManual(true); setSlug(e.target.value) }}
-                  placeholder="marketing"
-                  className="font-mono text-sm"
-                  required
-                />
+                <Input id="slug" value={slug} onChange={(e) => { setSlugManual(true); setSlug(e.target.value) }} placeholder="marketing" className="font-mono text-sm" required />
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="What is this crew responsible for?"
-                rows={3}
-              />
+              <Textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What is this crew responsible for?" rows={3} />
             </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Appearance</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-base">Appearance</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="color">Color</Label>
                 <div className="flex items-center gap-3">
-                  <Input
-                    id="color"
-                    type="color"
-                    value={color}
-                    onChange={(e) => setColor(e.target.value)}
-                    className="h-9 w-14 cursor-pointer p-1"
-                  />
-                  <Input
-                    value={color}
-                    onChange={(e) => setColor(e.target.value)}
-                    placeholder="#3B82F6"
-                    className="font-mono text-sm"
-                  />
+                  <Input id="color" type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-9 w-14 cursor-pointer p-1" />
+                  <Input value={color} onChange={(e) => setColor(e.target.value)} placeholder="#3B82F6" className="font-mono text-sm" />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="icon">Icon (emoji)</Label>
-                <Input
-                  id="icon"
-                  value={icon}
-                  onChange={(e) => setIcon(e.target.value)}
-                  placeholder="e.g. 🚀"
-                  maxLength={10}
-                />
+                <Input id="icon" value={icon} onChange={(e) => setIcon(e.target.value)} placeholder="e.g. 🚀" maxLength={10} />
               </div>
             </div>
           </CardContent>
@@ -512,16 +725,10 @@ export default function NewCrewPage() {
 
         <div className="flex items-center gap-3 pt-2">
           <Button type="submit" disabled={submitting || !workspaceId} className="gap-2">
-            {submitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Users className="h-4 w-4" />
-            )}
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
             Create Crew
           </Button>
-          <Button type="button" variant="outline" onClick={() => setMode("choose")}>
-            Cancel
-          </Button>
+          <Button type="button" variant="outline" onClick={() => setMode("choose")}>Cancel</Button>
         </div>
       </form>
     </div>
