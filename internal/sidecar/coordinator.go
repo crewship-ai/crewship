@@ -140,6 +140,26 @@ func (s *Server) handleAllMissionsSummary(w http.ResponseWriter, r *http.Request
 	writeJSONResponse(w, http.StatusOK, summary)
 }
 
+// handleCreateCrew proxies POST /crew/create to the crewshipd internal API.
+// Allows COORDINATOR agents to create new crews in the workspace.
+func (s *Server) handleCreateCrew(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
+	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/crews?workspace_id="+s.ipc.WorkspaceID)
+}
+
+// handleCreateAgent proxies POST /agent/create to the crewshipd internal API.
+// Allows COORDINATOR agents to create new agents within a crew.
+func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
+	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/agents?workspace_id="+s.ipc.WorkspaceID)
+}
+
 // proxyToAPI is a generic helper that proxies a request to the crewshipd internal API.
 func (s *Server) proxyToAPI(w http.ResponseWriter, r *http.Request, method, path string) {
 	if s.ipc == nil {

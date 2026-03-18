@@ -39,6 +39,7 @@ export function ChatPageClient() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const sessionParam = searchParams.get("session") ?? undefined
+  const prefillParam = searchParams.get("prefill") ?? undefined
   const wsParam = searchParams.get("workspace_id") ?? undefined
   const { workspaceId: storeWorkspaceId } = useWorkspace()
   const workspaceId = wsParam ?? storeWorkspaceId
@@ -297,6 +298,7 @@ export function ChatPageClient() {
             agentId={agentId}
             sessionId={activeSessionId}
             agentName={agent?.name}
+            initialInput={prefillParam}
             mobilePanel="files-only"
           />
         </div>
@@ -319,6 +321,7 @@ export function ChatPageClient() {
                 agentId={agentId}
                 sessionId={activeSessionId}
                 agentName={agent?.name}
+                initialInput={prefillParam}
                 mobilePanel="chat"
               />
             ) : (
@@ -424,6 +427,7 @@ export function ChatPageClient() {
               agentId={agentId}
               sessionId={activeSessionId}
               agentName={agent?.name}
+              initialInput={prefillParam}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-body text-muted-foreground">

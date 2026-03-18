@@ -75,6 +75,8 @@ interface ChatPanelProps {
   agentId: string
   sessionId: string
   agentName?: string
+  /** Pre-populate the chat input with this text on first render. */
+  initialInput?: string
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
   mobilePanel?: "chat" | "files" | "files-only" | "more"
 }
@@ -531,16 +533,21 @@ function findTreeNode(node: TreeNode, path: string): TreeNode | undefined {
 }
 
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
-export function ChatPanel({ agentId, sessionId, agentName, mobilePanel }: ChatPanelProps) {
+export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobilePanel }: ChatPanelProps) {
   const { workspaceId } = useWorkspace()
   const [token, setToken] = useState<string | null>(null)
   const [authError, setAuthError] = useState(false)
-  const [input, setInput] = useState("")
+  const [input, setInput] = useState(initialInput ?? "")
   const [sessionReady, setSessionReady] = useState(false)
 
   useEffect(() => {
     setSessionReady(false)
   }, [sessionId])
+
+  // Pre-populate input when a new session is started with a prefill value
+  useEffect(() => {
+    if (initialInput) setInput(initialInput)
+  }, [initialInput])
 
   const [showPreview, setShowPreview] = useState(true)
   const [files, setFiles] = useState<FileEntry[]>([])
