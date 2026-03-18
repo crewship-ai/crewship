@@ -38,6 +38,8 @@ type crewTemplateResponse struct {
 
 // List handles GET /api/v1/crew-templates
 func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
+	wsID := WorkspaceIDFromContext(r.Context())
+
 	// Lazy seed builtin crew templates
 	if err := database.SeedBuiltinCrewTemplates(r.Context(), h.db, h.logger); err != nil {
 		h.logger.Warn("seed crew templates", "error", err)
@@ -46,7 +48,8 @@ func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT id, name, slug, description, icon, color, category, agents_json, is_builtin, created_at
 		FROM crew_templates
-		ORDER BY is_builtin DESC, category ASC, name ASC`)
+		WHERE is_builtin = 1 OR workspace_id = ?
+		ORDER BY is_builtin DESC, category ASC, name ASC`, wsID)
 	if err != nil {
 		h.logger.Error("list crew templates", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
@@ -182,18 +185,21 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		agentID := generateCUID()
 		agentIDs = append(agentIDs, agentID)
 		webhookSecret := generateWebhookSecret()
+		// Suffix agent slug with crew slug to avoid workspace-wide uniqueness conflicts
+		// when the same template is deployed more than once.
+		agentSlug := a.Slug + "-" + body.CrewSlug
 
 		_, err = tx.ExecContext(r.Context(), `
 			INSERT INTO agents (id, workspace_id, crew_id, name, slug, role_title, agent_role,
 				cli_adapter, llm_provider, llm_model, tool_profile, system_prompt,
 				timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			agentID, wsID, crewID, a.Name, a.Slug, a.RoleTitle, a.AgentRole,
+			agentID, wsID, crewID, a.Name, agentSlug, a.RoleTitle, a.AgentRole,
 			a.CLIAdapter, a.LLMProvider, a.LLMModel, a.ToolProfile, a.SystemPrompt,
 			1800, true, webhookSecret, now, now)
 		if err != nil {
-			h.logger.Error("create agent from template", "agent", a.Slug, "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to create agent %s", a.Slug))
+			h.logger.Error("create agent from template", "agent", agentSlug, "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to create agent %s", a.Name))
 			return
 		}
 	}
