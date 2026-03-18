@@ -95,14 +95,15 @@ export default function NewCrewPage() {
     if (!slugManual) setSlug(slugify(name))
   }, [name, slugManual])
 
-  // Fetch once on mount — not on every mode change (BUG 3)
+  // Fetch once workspaceId is available
   useEffect(() => {
-    fetch("/api/v1/crew-templates")
+    if (!workspaceId) return
+    fetch(`/api/v1/crew-templates?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => setTemplates(Array.isArray(data) ? data : []))
       .catch(() => setTemplates([]))
       .finally(() => setLoadingTemplates(false))
-  }, [])
+  }, [workspaceId])
 
   const handleSelectTemplate = (t: CrewTemplate) => {
     setSelectedTemplate(t)
