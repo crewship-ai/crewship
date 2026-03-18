@@ -251,6 +251,12 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("PATCH /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Update))))
 	r.mux.Handle("DELETE /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Delete))))
 
+	// Crew Templates (blueprints)
+	crewTmpl := NewCrewTemplateHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/crew-templates", authed(http.HandlerFunc(crewTmpl.List)))
+	r.mux.Handle("GET /api/v1/crew-templates/{slug}", authed(http.HandlerFunc(crewTmpl.Get)))
+	r.mux.Handle("POST /api/v1/crew-templates/{slug}/deploy", authed(wsCtx(http.HandlerFunc(crewTmpl.Deploy))))
+
 	// Missions
 	var missionEngineForPublic *orchestrator.MissionEngine
 	if r.missionCallback != nil {

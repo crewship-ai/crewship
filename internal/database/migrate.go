@@ -81,6 +81,7 @@ var migrations = []migration{
 	{20, "add_crew_connections", migrationAddCrewConnections},
 	{21, "add_mission_proposals", migrationAddMissionProposals},
 	{22, "add_escalation_type_and_resolve", migrationAddEscalationTypeAndResolve},
+	{23, "add_crew_templates", migrationAddCrewTemplates},
 }
 
 const migrationAddKeeperObservability = `
@@ -784,4 +785,22 @@ ALTER TABLE escalations ADD COLUMN metadata TEXT;
 
 -- Add resolved_by to track who resolved the escalation (user/workspace member).
 ALTER TABLE escalations ADD COLUMN resolved_by TEXT;
+`
+
+const migrationAddCrewTemplates = `
+CREATE TABLE IF NOT EXISTS crew_templates (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	slug TEXT NOT NULL UNIQUE,
+	description TEXT,
+	icon TEXT,
+	color TEXT,
+	category TEXT NOT NULL DEFAULT 'GENERAL',
+	agents_json TEXT NOT NULL,
+	is_builtin INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_crew_templates_slug ON crew_templates(slug);
+CREATE INDEX IF NOT EXISTS idx_crew_templates_category ON crew_templates(category);
 `
