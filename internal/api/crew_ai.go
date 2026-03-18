@@ -87,15 +87,15 @@ func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiKey, err := h.getAnthropicKey(r.Context(), wsID)
+	cred, err := h.getAnthropicCred(r.Context(), wsID)
 	if err != nil {
-		h.logger.Warn("no anthropic key for crew AI suggest", "workspace", wsID, "error", err)
+		h.logger.Warn("no anthropic credential for crew AI suggest", "workspace", wsID, "error", err)
 		writeProblem(w, r, http.StatusUnprocessableEntity,
 			"No Anthropic API key found. Add one in Settings → Credentials first.")
 		return
 	}
 
-	suggestion, err := h.callAnthropic(r.Context(), apiKey, body.Description)
+	suggestion, err := h.callAnthropic(r.Context(), cred, body.Description)
 	if err != nil {
 		h.logger.Error("anthropic crew suggest", "error", err)
 		writeProblem(w, r, http.StatusBadGateway, "AI suggestion failed: "+err.Error())
@@ -105,33 +105,39 @@ func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, suggestion)
 }
 
-// getAnthropicKey fetches and decrypts the first active Anthropic API_KEY for the workspace.
-func (h *CrewAIHandler) getAnthropicKey(ctx context.Context, wsID string) (string, error) {
-	var encryptedValue string
+type anthropicCred struct {
+	plain   string
+	isOAuth bool // true = AI_CLI_TOKEN (sk-ant-oat*), use Authorization: Bearer
+}
+
+// getAnthropicCred fetches and decrypts the first active Anthropic credential for the workspace.
+// Prefers API_KEY; falls back to AI_CLI_TOKEN (OAuth) which also works with the Messages API.
+func (h *CrewAIHandler) getAnthropicCred(ctx context.Context, wsID string) (*anthropicCred, error) {
+	var encryptedValue, credType string
 	err := h.db.QueryRowContext(ctx, `
-		SELECT encrypted_value FROM credentials
+		SELECT encrypted_value, type FROM credentials
 		WHERE workspace_id = ?
 		  AND provider = 'ANTHROPIC'
-		  AND type = 'API_KEY'
+		  AND type IN ('API_KEY', 'AI_CLI_TOKEN')
 		  AND status = 'ACTIVE'
 		  AND deleted_at IS NULL
-		ORDER BY created_at ASC
-		LIMIT 1`, wsID).Scan(&encryptedValue)
+		ORDER BY CASE type WHEN 'API_KEY' THEN 0 ELSE 1 END, created_at ASC
+		LIMIT 1`, wsID).Scan(&encryptedValue, &credType)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("no active Anthropic API key in workspace")
+			return nil, fmt.Errorf("no active Anthropic credential in workspace")
 		}
-		return "", fmt.Errorf("query credential: %w", err)
+		return nil, fmt.Errorf("query credential: %w", err)
 	}
 	plain, err := encryption.Decrypt(encryptedValue)
 	if err != nil {
-		return "", fmt.Errorf("decrypt credential: %w", err)
+		return nil, fmt.Errorf("decrypt credential: %w", err)
 	}
-	return plain, nil
+	return &anthropicCred{plain: plain, isOAuth: credType == "AI_CLI_TOKEN"}, nil
 }
 
 // callAnthropic sends the user description to Claude and parses the JSON response.
-func (h *CrewAIHandler) callAnthropic(ctx context.Context, apiKey, description string) (*AISuggestResponse, error) {
+func (h *CrewAIHandler) callAnthropic(ctx context.Context, cred *anthropicCred, description string) (*AISuggestResponse, error) {
 	reqBody, err := json.Marshal(map[string]interface{}{
 		"model":      "claude-3-5-haiku-20241022",
 		"max_tokens": 2048,
@@ -149,8 +155,13 @@ func (h *CrewAIHandler) callAnthropic(ctx context.Context, apiKey, description s
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
+	if cred.isOAuth {
+		// OAuth tokens (sk-ant-oat*) use Authorization: Bearer
+		req.Header.Set("Authorization", "Bearer "+cred.plain)
+	} else {
+		req.Header.Set("x-api-key", cred.plain)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
