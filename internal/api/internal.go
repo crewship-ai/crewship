@@ -990,6 +990,160 @@ func (h *InternalHandler) ListCrews(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// CreateCrew handles POST /api/v1/internal/crews?workspace_id=...
+// Allows COORDINATOR agents (via sidecar) to create a new crew in the workspace.
+func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
+	wsID := r.URL.Query().Get("workspace_id")
+	if wsID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id required"})
+		return
+	}
+
+	var body struct {
+		Name        string `json:"name"`
+		Slug        string `json:"slug"`
+		Description string `json:"description"`
+		Icon        string `json:"icon"`
+		Color       string `json:"color"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if body.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	if body.Slug == "" {
+		body.Slug = slugify(body.Name)
+	}
+
+	var existing int
+	h.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM crews WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		body.Slug, wsID).Scan(&existing)
+	if existing > 0 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("crew with slug '%s' already exists", body.Slug)})
+		return
+	}
+
+	crewID := generateCUID()
+	now := time.Now().UTC().Format(time.RFC3339)
+	var icon, color *string
+	if body.Icon != "" {
+		icon = &body.Icon
+	}
+	if body.Color != "" {
+		color = &body.Color
+	}
+
+	_, err := h.db.ExecContext(r.Context(), `
+		INSERT INTO crews (id, workspace_id, name, slug, description, icon, color, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		crewID, wsID, body.Name, body.Slug, body.Description, icon, color, now, now)
+	if err != nil {
+		h.logger.Error("internal create crew", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create crew"})
+		return
+	}
+
+	h.logger.Info("crew created via coordinator", "crew_id", crewID, "name", body.Name, "workspace", wsID)
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"id":          crewID,
+		"name":        body.Name,
+		"slug":        body.Slug,
+		"workspace_id": wsID,
+	})
+}
+
+// CreateAgent handles POST /api/v1/internal/agents?workspace_id=...
+// Allows COORDINATOR agents (via sidecar) to create a new agent within a crew.
+func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
+	wsID := r.URL.Query().Get("workspace_id")
+	if wsID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id required"})
+		return
+	}
+
+	var body struct {
+		CrewID       string `json:"crew_id"`
+		Name         string `json:"name"`
+		Slug         string `json:"slug"`
+		RoleTitle    string `json:"role_title"`
+		AgentRole    string `json:"agent_role"`
+		Description  string `json:"description"`
+		SystemPrompt string `json:"system_prompt"`
+		CLIAdapter   string `json:"cli_adapter"`
+		LLMProvider  string `json:"llm_provider"`
+		LLMModel     string `json:"llm_model"`
+		ToolProfile  string `json:"tool_profile"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if body.Name == "" || body.CrewID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and crew_id are required"})
+		return
+	}
+	if body.Slug == "" {
+		body.Slug = slugify(body.Name)
+	}
+	if body.AgentRole == "" {
+		body.AgentRole = "AGENT"
+	}
+	if body.CLIAdapter == "" {
+		body.CLIAdapter = "CLAUDE_CODE"
+	}
+	if body.ToolProfile == "" {
+		body.ToolProfile = "CODING"
+	}
+
+	// Suffix slug with crew slug to prevent workspace-wide UNIQUE conflicts
+	var crewSlug string
+	h.db.QueryRowContext(r.Context(), `SELECT slug FROM crews WHERE id = ?`, body.CrewID).Scan(&crewSlug)
+	if crewSlug != "" {
+		body.Slug = body.Slug + "-" + crewSlug
+	}
+
+	var existing int
+	h.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM agents WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		body.Slug, wsID).Scan(&existing)
+	if existing > 0 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("agent with slug '%s' already exists", body.Slug)})
+		return
+	}
+
+	agentID := generateCUID()
+	webhookSecret := generateWebhookSecret()
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	_, err := h.db.ExecContext(r.Context(), `
+		INSERT INTO agents (id, workspace_id, crew_id, name, slug, description, role_title, agent_role,
+			cli_adapter, llm_provider, llm_model, tool_profile, system_prompt,
+			timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		agentID, wsID, body.CrewID, body.Name, body.Slug, body.Description,
+		body.RoleTitle, body.AgentRole,
+		body.CLIAdapter, nilIfEmpty(body.LLMProvider), nilIfEmpty(body.LLMModel), body.ToolProfile, body.SystemPrompt,
+		1800, true, webhookSecret, now, now)
+	if err != nil {
+		h.logger.Error("internal create agent", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create agent"})
+		return
+	}
+
+	h.logger.Info("agent created via coordinator", "agent_id", agentID, "name", body.Name, "crew_id", body.CrewID)
+	writeJSON(w, http.StatusCreated, map[string]interface{}{
+		"id":          agentID,
+		"name":        body.Name,
+		"slug":        body.Slug,
+		"crew_id":     body.CrewID,
+		"workspace_id": wsID,
+	})
+}
+
 // ListCrewConnections handles GET /api/v1/internal/crew-connections?workspace_id=...
 // Used by the sidecar on behalf of COORDINATOR agents.
 func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Request) {

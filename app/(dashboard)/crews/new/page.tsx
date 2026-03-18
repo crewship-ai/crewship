@@ -54,7 +54,7 @@ interface AISuggestion {
   agents: AISuggestedAgent[]
 }
 
-type Mode = "choose" | "ai" | "ai-preview" | "template" | "manual"
+type Mode = "choose" | "ai" | "ai-preview" | "template" | "manual" | "no-coordinator"
 
 // ─── AgentRow (expandable system prompt) ─────────────────────────────────────
 
@@ -106,6 +106,8 @@ export default function NewCrewPage() {
   const [aiSuggesting, setAiSuggesting] = useState(false)
   const [aiSuggestion, setAiSuggestion] = useState<AISuggestion | null>(null)
   const [hasAnthropicKey, setHasAnthropicKey] = useState<boolean | null>(null) // null = unknown
+  const [coordinatorId, setCoordinatorId] = useState<string | null>(null)
+  const [findingCoordinator, setFindingCoordinator] = useState(false)
 
   // Form state (shared between manual + deploy modes)
   const [name, setName] = useState("")
@@ -136,6 +138,32 @@ export default function NewCrewPage() {
     // Don't call it yet — just mark as unknown; we'll know on first attempt
     setHasAnthropicKey(null)
   }, [workspaceId])
+
+  const handleCreateWithAI = async () => {
+    if (!workspaceId) return
+    setFindingCoordinator(true)
+    try {
+      const res = await fetch(`/api/v1/agents?workspace_id=${workspaceId}&role=COORDINATOR`)
+      if (res.ok) {
+        const data = await res.json()
+        const agents: Array<{ id: string; agent_role: string }> = Array.isArray(data) ? data : []
+        const coordinator = agents.find((a) => a.agent_role === "COORDINATOR")
+        if (coordinator) {
+          setCoordinatorId(coordinator.id)
+          const prefill = encodeURIComponent(
+            "I need you to create a new crew for me. Please describe what kind of crew you want and I will design the agents, roles, and system prompts, then create everything for you.\n\nWhat should the crew do?"
+          )
+          router.push(`/agents/${coordinator.id}/chat?prefill=${prefill}&workspace_id=${workspaceId}`)
+          return
+        }
+      }
+      setMode("no-coordinator")
+    } catch {
+      setMode("no-coordinator")
+    } finally {
+      setFindingCoordinator(false)
+    }
+  }
 
   const handleSelectTemplate = (t: CrewTemplate) => {
     setSelectedTemplate(t)
@@ -332,15 +360,20 @@ export default function NewCrewPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {/* Create with AI */}
           <button
-            onClick={() => setMode("ai")}
-            className="flex flex-col items-start gap-3 rounded-lg border border-primary/40 bg-primary/5 p-5 text-left transition-all hover:bg-primary/10 hover:border-primary/70"
+            onClick={handleCreateWithAI}
+            disabled={findingCoordinator}
+            className="flex flex-col items-start gap-3 rounded-lg border border-primary/40 bg-primary/5 p-5 text-left transition-all hover:bg-primary/10 hover:border-primary/70 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <div className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-primary" />
+              {findingCoordinator ? (
+                <Loader2 className="h-5 w-5 text-primary animate-spin" />
+              ) : (
+                <Sparkles className="h-5 w-5 text-primary" />
+              )}
               <span className="font-semibold">Create with AI</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              Describe what your crew should do and AI will design the agents, roles, and prompts for you.
+              Chat with your Coordinator agent — describe what the crew should do and it will create it for you.
             </p>
             <Badge className="text-xs">Recommended</Badge>
           </button>
@@ -409,6 +442,40 @@ export default function NewCrewPage() {
             </div>
           </div>
         )}
+      </div>
+    )
+  }
+
+  // ── No coordinator found ──────────────────────────────────────────────────────
+
+  if (mode === "no-coordinator") {
+    return (
+      <div className="p-4 sm:p-6 space-y-6 max-w-3xl">
+        <PageHeader title="Coordinator Required" description="Create with AI needs a Coordinator agent">
+          <Button variant="outline" size="sm" onClick={() => setMode("choose")}>
+            <ArrowLeft className="mr-2 h-4 w-4" />Back
+          </Button>
+        </PageHeader>
+        <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-5 space-y-3">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-yellow-500 mt-0.5 shrink-0" />
+            <div className="space-y-2">
+              <p className="font-medium text-sm">No Coordinator agent found in this workspace.</p>
+              <p className="text-sm text-muted-foreground">
+                The &ldquo;Create with AI&rdquo; feature works by chatting with a COORDINATOR agent.
+                Create one first, then come back to use this feature.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                The Coordinator agent needs <code className="text-xs bg-muted px-1 rounded">agent_role = COORDINATOR</code>.
+                You can create one manually or deploy a crew template that includes a Coordinator.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" onClick={() => setMode("template")}>Browse Templates</Button>
+            <Button size="sm" variant="outline" onClick={() => setMode("manual")}>Create Manually</Button>
+          </div>
+        </div>
       </div>
     )
   }
