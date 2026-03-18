@@ -257,6 +257,10 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/crew-templates/{slug}", authed(wsCtx(http.HandlerFunc(crewTmpl.Get))))
 	r.mux.Handle("POST /api/v1/crew-templates/{slug}/deploy", authed(wsCtx(http.HandlerFunc(crewTmpl.Deploy))))
 
+	// AI crew wizard
+	crewAI := NewCrewAIHandler(r.db, r.logger)
+	r.mux.Handle("POST /api/v1/crew-ai-suggest", authed(wsCtx(http.HandlerFunc(crewAI.Suggest))))
+
 	// Missions
 	var missionEngineForPublic *orchestrator.MissionEngine
 	if r.missionCallback != nil {
