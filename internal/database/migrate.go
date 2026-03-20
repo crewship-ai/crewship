@@ -82,6 +82,7 @@ var migrations = []migration{
 	{21, "add_mission_proposals", migrationAddMissionProposals},
 	{22, "add_escalation_type_and_resolve", migrationAddEscalationTypeAndResolve},
 	{23, "add_crew_templates", migrationAddCrewTemplates},
+	{24, "add_agent_schedule", migrationAddAgentSchedule},
 }
 
 const migrationAddKeeperObservability = `
@@ -803,4 +804,12 @@ CREATE TABLE IF NOT EXISTS crew_templates (
 );
 CREATE INDEX IF NOT EXISTS idx_crew_templates_slug ON crew_templates(slug);
 CREATE INDEX IF NOT EXISTS idx_crew_templates_category ON crew_templates(category);
+`
+
+const migrationAddAgentSchedule = `
+ALTER TABLE agents ADD COLUMN schedule_cron TEXT;
+ALTER TABLE agents ADD COLUMN schedule_prompt TEXT;
+ALTER TABLE agents ADD COLUMN schedule_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE agents ADD COLUMN schedule_last_run TEXT;
+ALTER TABLE agents ADD COLUMN schedule_next_run TEXT;
 `

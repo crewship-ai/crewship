@@ -47,6 +47,7 @@ type Server struct {
 	credMonitor   *llmproxy.CredentialMonitor
 	debugLogs     *logging.RingBuffer
 	db            *sql.DB
+	apiRouter     *goapi.Router
 	startedAt     time.Time
 	runCtx        context.Context
 	runCancel     context.CancelFunc
@@ -243,6 +244,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		if err != nil {
 			logger.Error("failed to create API router", "error", err)
 		} else {
+			s.apiRouter = apiRouter
 			mux.Handle("/api/", apiRouter)
 			logger.Info("Go API routes mounted")
 		}
@@ -312,6 +314,10 @@ func (s *Server) ConversationStore() *conversation.Store {
 
 func (s *Server) LogWriter() *logcollector.Writer {
 	return s.logWriter
+}
+
+func (s *Server) APIRouter() *goapi.Router {
+	return s.apiRouter
 }
 
 func (s *Server) Start(ctx context.Context) error {

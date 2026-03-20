@@ -12,10 +12,16 @@ import (
 	"github.com/crewship-ai/crewship/internal/license"
 )
 
+// ScheduleUpdater is implemented by the scheduler to receive live schedule changes.
+type ScheduleUpdater interface {
+	UpdateSchedule(agentID, cronExpr, prompt string, enabled bool) error
+}
+
 type AgentHandler struct {
-	db      *sql.DB
-	logger  *slog.Logger
-	license *license.License
+	db               *sql.DB
+	logger           *slog.Logger
+	license          *license.License
+	scheduleUpdater  ScheduleUpdater
 }
 
 func NewAgentHandler(db *sql.DB, logger *slog.Logger) *AgentHandler {
@@ -23,6 +29,7 @@ func NewAgentHandler(db *sql.DB, logger *slog.Logger) *AgentHandler {
 }
 
 func (h *AgentHandler) SetLicense(lic *license.License) { h.license = lic }
+func (h *AgentHandler) SetScheduler(su ScheduleUpdater) { h.scheduleUpdater = su }
 
 var validAgentRoles = map[string]bool{
 	"AGENT":       true,
@@ -69,6 +76,11 @@ type agentResponse struct {
 	ToolProfile     string         `json:"tool_profile"`
 	MemoryEnabled   bool           `json:"memory_enabled"`
 	CLITools        *string        `json:"cli_tools"`
+	ScheduleCron    *string        `json:"schedule_cron"`
+	SchedulePrompt  *string        `json:"schedule_prompt"`
+	ScheduleEnabled bool           `json:"schedule_enabled"`
+	ScheduleLastRun *string        `json:"schedule_last_run"`
+	ScheduleNextRun *string        `json:"schedule_next_run"`
 	CreatedAt       string         `json:"created_at"`
 	UpdatedAt       string         `json:"updated_at"`
 	Crew            *agentCrewInfo `json:"crew"`
@@ -88,7 +100,9 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
 			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
-			a.tool_profile, a.memory_enabled, a.cli_tools, a.created_at, a.updated_at,
+			a.tool_profile, a.memory_enabled, a.cli_tools,
+			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
+			a.created_at, a.updated_at,
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
@@ -117,12 +131,13 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	var result []agentResponse
 	for rows.Next() {
 		var a agentResponse
-		var memEnabled int
+		var memEnabled, schedEnabled int
 		var crewName, crewSlug, crewColor, crewAvatarStyle *string
 		if err := rows.Scan(&a.ID, &a.CrewID, &a.WorkspaceID, &a.Name, &a.Slug,
 			&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
 			&a.TimeoutSeconds, &a.ToolProfile, &memEnabled, &a.CLITools,
+			&a.ScheduleCron, &a.SchedulePrompt, &schedEnabled, &a.ScheduleLastRun, &a.ScheduleNextRun,
 			&a.CreatedAt, &a.UpdatedAt,
 			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 			&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats); err != nil {
@@ -131,6 +146,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.MemoryEnabled = memEnabled == 1
+		a.ScheduleEnabled = schedEnabled == 1
 		if crewName != nil {
 			a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 		}
@@ -346,13 +362,15 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
 	var a agentResponse
-	var memEnabled int
+	var memEnabled, schedEnabled int
 	var crewName, crewSlug, crewColor, crewAvatarStyle *string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
 			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
-			a.tool_profile, a.memory_enabled, a.cli_tools, a.created_at, a.updated_at,
+			a.tool_profile, a.memory_enabled, a.cli_tools,
+			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
+			a.created_at, a.updated_at,
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
 			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
@@ -364,6 +382,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&a.Description, &a.RoleTitle, &a.AgentRole, &a.LeadMode, &a.Status, &a.CLIAdapter,
 		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
 		&a.TimeoutSeconds, &a.ToolProfile, &memEnabled, &a.CLITools,
+		&a.ScheduleCron, &a.SchedulePrompt, &schedEnabled, &a.ScheduleLastRun, &a.ScheduleNextRun,
 		&a.CreatedAt, &a.UpdatedAt,
 		&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats)
@@ -377,6 +396,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.MemoryEnabled = memEnabled == 1
+	a.ScheduleEnabled = schedEnabled == 1
 	if crewName != nil {
 		a.Crew = &agentCrewInfo{Name: *crewName, Slug: *crewSlug, Color: crewColor, AvatarStyle: crewAvatarStyle}
 	}
@@ -422,6 +442,8 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"avatar_seed": "avatar_seed", "avatar_style": "avatar_style",
 		"timeout_seconds": "timeout_seconds", "tool_profile": "tool_profile",
 		"memory_enabled": "memory_enabled", "cli_tools": "cli_tools", "crew_id": "crew_id",
+		"schedule_cron": "schedule_cron", "schedule_prompt": "schedule_prompt",
+		"schedule_enabled": "schedule_enabled",
 	}
 
 	// Validate agent_role if being updated
@@ -473,7 +495,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var args []interface{}
 	for jsonKey, col := range allowed {
 		if val, ok := body[jsonKey]; ok {
-			if col == "memory_enabled" {
+			if col == "memory_enabled" || col == "schedule_enabled" {
 				if b, ok := val.(bool); ok {
 					if b {
 						val = 1
@@ -515,6 +537,54 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	WriteAuditLog(r.Context(), h.db, "update", "AGENT", agentID, userID, workspaceID, changes)
+
+	// Notify scheduler of schedule changes
+	if h.scheduleUpdater != nil {
+		if _, hasCron := body["schedule_cron"]; hasCron {
+			cronStr, _ := body["schedule_cron"].(string)
+			promptStr, _ := body["schedule_prompt"].(string)
+			enabledVal, hasEnabled := body["schedule_enabled"]
+			enabled := false
+			if hasEnabled {
+				switch v := enabledVal.(type) {
+				case bool:
+					enabled = v
+				case float64:
+					enabled = v == 1
+				}
+			} else {
+				// schedule_cron changed but schedule_enabled wasn't in body — read from DB
+				var e int
+				h.db.QueryRowContext(r.Context(), "SELECT schedule_enabled FROM agents WHERE id = ?", agentID).Scan(&e)
+				enabled = e == 1
+			}
+			if err := h.scheduleUpdater.UpdateSchedule(agentID, cronStr, promptStr, enabled); err != nil {
+				h.logger.Warn("schedule update callback failed", "agent_id", agentID, "error", err)
+			}
+		} else if _, hasEnabled := body["schedule_enabled"]; hasEnabled {
+			var cronStr, promptStr sql.NullString
+			h.db.QueryRowContext(r.Context(), "SELECT schedule_cron, schedule_prompt FROM agents WHERE id = ?", agentID).Scan(&cronStr, &promptStr)
+			enabledVal := body["schedule_enabled"]
+			enabled := false
+			switch v := enabledVal.(type) {
+			case bool:
+				enabled = v
+			case float64:
+				enabled = v == 1
+			}
+			cron := ""
+			if cronStr.Valid {
+				cron = cronStr.String
+			}
+			prompt := ""
+			if promptStr.Valid {
+				prompt = promptStr.String
+			}
+			if err := h.scheduleUpdater.UpdateSchedule(agentID, cron, prompt, enabled); err != nil {
+				h.logger.Warn("schedule update callback failed", "agent_id", agentID, "error", err)
+			}
+		}
+	}
 
 	h.Get(w, r)
 }
