@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
 )
+
+var envVarNameRE = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
 const crewshipSystemPreamble = `You are running inside a Crewship agent container.
 Your working directory IS the output directory -- files you create or edit here are immediately visible to the user in the Files panel.
@@ -304,6 +307,10 @@ func writeCredentialFiles(
 	var files []credFile
 	for _, c := range creds {
 		if (c.Type == "CLI_TOKEN" || c.Type == "SECRET") && c.EnvVarName != "" && c.PlainValue != "" {
+			if !envVarNameRE.MatchString(c.EnvVarName) {
+				logger.Warn("skipping credential with invalid env var name", "env_var", c.EnvVarName)
+				continue
+			}
 			files = append(files, credFile{EnvVar: c.EnvVarName, Value: c.PlainValue})
 		}
 	}
@@ -322,6 +329,7 @@ func writeCredentialFiles(
 		filePath := secretsAgentDir + "/" + f.EnvVar
 		scriptParts = append(scriptParts,
 			fmt.Sprintf("echo '%s' | base64 -d > %s", valB64, filePath),
+			fmt.Sprintf("chown 1001:1001 %s", filePath),
 			fmt.Sprintf("chmod 0400 %s", filePath),
 		)
 		envLines = append(envLines, f.EnvVar+"="+filePath)
@@ -333,12 +341,15 @@ func writeCredentialFiles(
 	envPath := secretsAgentDir + "/.env"
 	scriptParts = append(scriptParts,
 		fmt.Sprintf("echo '%s' | base64 -d > %s", envB64, envPath),
+		fmt.Sprintf("chown 1001:1001 %s", envPath),
 		fmt.Sprintf("chmod 0400 %s", envPath),
 	)
 
-	// Chown the entire secrets agent dir to 1001:1001 so the agent can read
+	// Chown the secrets dir itself (not recursively) and each file individually.
+	// Chowning individual files rather than the parent dir prevents agents sharing
+	// UID 1001 from traversing or listing sibling agents' secret directories.
 	scriptParts = append(scriptParts,
-		fmt.Sprintf("chown -R 1001:1001 %s", secretsAgentDir),
+		fmt.Sprintf("chown 1001:1001 %s", secretsAgentDir),
 	)
 
 	script := strings.Join(scriptParts, " && ")

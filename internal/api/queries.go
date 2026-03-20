@@ -446,13 +446,13 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var status, chatID, crewID, fromSlug string
+	var status, chatID, crewID, fromSlug, escalationType string
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT e.status, e.chat_id, e.crew_id, a.slug
+		SELECT e.status, e.chat_id, e.crew_id, a.slug, e.type
 		FROM escalations e
 		JOIN agents a ON a.id = e.from_agent_id
 		WHERE e.id = ? AND e.workspace_id = ?
-	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug)
+	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug, &escalationType)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "escalation not found"})
@@ -469,23 +469,31 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err = h.db.ExecContext(r.Context(), `
+	result, err := h.db.ExecContext(r.Context(), `
 		UPDATE escalations SET status = 'RESOLVED', resolution = ?, resolved_at = ?, resolved_by = 'user'
-		WHERE id = ?
-	`, body.Resolution, now, escalationID)
+		WHERE id = ? AND workspace_id = ? AND status = 'PENDING'
+	`, body.Resolution, now, escalationID, workspaceID)
 	if err != nil {
 		h.logger.Error("resolve escalation update", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "escalation already resolved"})
+		return
+	}
 
 	if h.hub != nil {
+		broadcastResolution := body.Resolution
+		if escalationType == "CREDENTIAL" {
+			broadcastResolution = "[credential submitted]"
+		}
 		h.hub.Broadcast("session:"+chatID, ws.ServerMessage{
 			Type:    "escalation_resolved",
 			Channel: "session:" + chatID,
 			Payload: map[string]string{
 				"id":         escalationID,
-				"resolution": body.Resolution,
+				"resolution": broadcastResolution,
 			},
 		})
 		h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
@@ -958,6 +966,11 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 			h.logger.Error("scan escalation", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
+		}
+		// Never expose plaintext credential values to the list response
+		if item.Type == "CREDENTIAL" && item.Resolution != nil {
+			masked := "[credential submitted]"
+			item.Resolution = &masked
 		}
 		items = append(items, item)
 	}

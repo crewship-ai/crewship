@@ -238,7 +238,7 @@ export default function NewCrewPage() {
       // 2. Create each agent
       for (const a of aiSuggestion.agents) {
         const agentSlug = a.slug + "-" + slug
-        await fetch(`/api/v1/agents?workspace_id=${workspaceId}`, {
+        const agentRes = await fetch(`/api/v1/agents?workspace_id=${workspaceId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -256,6 +256,12 @@ export default function NewCrewPage() {
             memory_enabled: true,
           }),
         })
+        if (!agentRes.ok) {
+          const d = await agentRes.json().catch(() => ({ error: "Failed to create agent" }))
+          toast.error(typeof d.error === "string" ? d.error : `Failed to create agent "${a.name}"`)
+          setSubmitting(false)
+          return
+        }
       }
 
       toast.success(`Crew "${name}" created with ${aiSuggestion.agents.length} agents`)

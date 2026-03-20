@@ -112,25 +112,6 @@ async function main() {
   })
   console.log(`  ✓ ${user.email} → ${org.name} (OWNER)`)
 
-  // Step 3b: Seed Anthropic API key if SEED_ANTHROPIC_API_KEY is set
-  const seedAnthropicKey = process.env.SEED_ANTHROPIC_API_KEY
-  if (seedAnthropicKey) {
-    console.log("🔑 Seeding Anthropic API key credential...")
-    const encryptedKey = encrypt(seedAnthropicKey)
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO credentials (id, workspace_id, name, encrypted_value, scope, type, provider, status, created_by, created_at, updated_at)
-       VALUES (?, ?, 'ANTHROPIC_API_KEY', ?, 'WORKSPACE', 'API_KEY', 'ANTHROPIC', 'ACTIVE', ?, datetime('now'), datetime('now'))
-       ON CONFLICT(workspace_id, name) DO UPDATE SET encrypted_value = excluded.encrypted_value, status = 'ACTIVE', updated_at = datetime('now')`,
-      `cred-anthropic-seed`,
-      org.id,
-      encryptedKey,
-      user.id,
-    )
-    console.log("  ✓ Anthropic API_KEY seeded (SEED_ANTHROPIC_API_KEY)")
-  } else {
-    console.log("  ℹ SEED_ANTHROPIC_API_KEY not set — skipping Anthropic credential")
-  }
-
   // Step 4: Crews
   console.log("👥 Seeding crews...")
   const engineering = await prisma.crew.upsert({

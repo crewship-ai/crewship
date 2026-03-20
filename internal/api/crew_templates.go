@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
@@ -44,7 +45,7 @@ func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	seedTemplatesOnce.Do(func() {
-		if err := database.SeedBuiltinCrewTemplates(r.Context(), h.db, h.logger); err != nil {
+		if err := database.SeedBuiltinCrewTemplates(context.Background(), h.db, h.logger); err != nil {
 			h.logger.Warn("seed crew templates", "error", err)
 		}
 	})
@@ -243,7 +244,12 @@ func slugify(name string) string {
 			out = append(out, c)
 		}
 	}
-	return string(out)
+	// Collapse consecutive hyphens and trim leading/trailing hyphens (matches frontend)
+	result := string(out)
+	for strings.Contains(result, "--") {
+		result = strings.ReplaceAll(result, "--", "-")
+	}
+	return strings.Trim(result, "-")
 }
 
 func generateWebhookSecret() string {

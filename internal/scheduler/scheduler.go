@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,7 +154,7 @@ func (s *Scheduler) UpdateSchedule(agentID, cronExpr, prompt string, enabled boo
 
 	// Load agent info from DB for the new entry
 	var ag scheduledAgent
-	err := s.db.QueryRow(`
+	err := s.db.QueryRowContext(context.Background(), `
 		SELECT a.id, a.slug, a.name, COALESCE(a.crew_id, ''), COALESCE(c.slug, ''), a.workspace_id
 		FROM agents a LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.id = ?`, agentID).Scan(&ag.ID, &ag.Slug, &ag.Name, &ag.CrewID, &ag.CrewSlug, &ag.Workspace)
@@ -285,7 +286,7 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 
 	// 7. Run agent
 	startedAt := time.Now()
-	var fullResponse string
+	var fullResponse strings.Builder
 
 	var logBuf *logcollector.OutputBuffer
 	if s.logWriter != nil {
@@ -296,7 +297,7 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	var resultMeta map[string]interface{}
 	handler := func(event orchestrator.AgentEvent) {
 		if event.Type == "text" {
-			fullResponse += event.Content
+			fullResponse.WriteString(event.Content)
 		}
 		if event.Type == "result" {
 			if m, ok := event.Metadata.(map[string]interface{}); ok {
@@ -340,11 +341,11 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 	}
 
 	// Persist assistant response
-	if s.convStore != nil && fullResponse != "" {
+	if s.convStore != nil && fullResponse.Len() > 0 {
 		_ = s.convStore.Append(ctx, chatID, conversation.Message{
 			ID:        generateID(),
 			Role:      conversation.RoleAssistant,
-			Content:   fullResponse,
+			Content:   fullResponse.String(),
 			Timestamp: time.Now().UTC(),
 		})
 		_ = s.resolver.IncrementMessageCount(ctx, chatID, 2)
@@ -387,6 +388,8 @@ func (s *Scheduler) updateTimestamps(agentID, cronExpr string, errorOnly bool) {
 
 func generateID() string {
 	b := make([]byte, 12)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return fmt.Sprintf("sched_%d_%s", time.Now().UnixNano(), hex.EncodeToString(b))
 }

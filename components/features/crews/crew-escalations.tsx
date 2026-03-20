@@ -79,7 +79,7 @@ function parseMetadataUrl(metadata: string | null): string | null {
     const parsed = JSON.parse(metadata)
     return parsed.url || null
   } catch {
-    if (metadata.startsWith("http://") || metadata.startsWith("https://")) return metadata
+    if (metadata.startsWith("https://")) return metadata
     return null
   }
 }
@@ -143,6 +143,7 @@ function ResolveForm({ escalation, workspaceId, onResolved }: { escalation: Esca
           <Input
             type="password"
             placeholder="Paste credential value..."
+            aria-label="Credential value"
             value={resolution}
             onChange={(e) => setResolution(e.target.value)}
             onKeyDown={(e) => {
@@ -157,6 +158,7 @@ function ResolveForm({ escalation, workspaceId, onResolved }: { escalation: Esca
         ) : (
           <Textarea
             placeholder={escalation.type === "LINK" ? "Confirm completion..." : "Type your response..."}
+            aria-label="Resolution response"
             value={resolution}
             onChange={(e) => setResolution(e.target.value)}
             onKeyDown={(e) => {
