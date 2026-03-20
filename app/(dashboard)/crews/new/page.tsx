@@ -130,14 +130,6 @@ export default function NewCrewPage() {
       .finally(() => setLoadingTemplates(false))
   }, [workspaceId])
 
-  // Check if workspace has an Anthropic key (by attempting a probe — we get 422 if not)
-  useEffect(() => {
-    if (!workspaceId) return
-    // We infer key presence from whether /crew-ai-suggest returns 422
-    // Don't call it yet — just mark as unknown; we'll know on first attempt
-    setHasAnthropicKey(null)
-  }, [workspaceId])
-
   const handleCreateWithAI = async () => {
     if (!workspaceId) return
     setFindingCoordinator(true)
@@ -235,7 +227,7 @@ export default function NewCrewPage() {
       }
       const crew = await crewRes.json()
 
-      // 2. Create each agent
+      // 2. Create each agent; on failure compensate by deleting the crew
       for (const a of aiSuggestion.agents) {
         const agentSlug = a.slug + "-" + slug
         const agentRes = await fetch(`/api/v1/agents?workspace_id=${workspaceId}`, {
@@ -258,6 +250,8 @@ export default function NewCrewPage() {
         })
         if (!agentRes.ok) {
           const d = await agentRes.json().catch(() => ({ error: "Failed to create agent" }))
+          // Compensating delete to avoid orphaned crew
+          await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, { method: "DELETE" }).catch(() => {})
           toast.error(typeof d.error === "string" ? d.error : `Failed to create agent "${a.name}"`)
           setSubmitting(false)
           return
@@ -765,7 +759,7 @@ export default function NewCrewPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="slug">Slug *</Label>
-                <Input id="slug" value={slug} onChange={(e) => { setSlugManual(true); setSlug(e.target.value) }} placeholder="marketing" className="font-mono text-sm" required />
+                <Input id="slug" value={slug} onChange={(e) => { setSlugManual(true); setSlug(slugify(e.target.value)) }} placeholder="marketing" className="font-mono text-sm" required />
               </div>
             </div>
             <div className="space-y-2">

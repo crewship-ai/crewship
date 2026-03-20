@@ -308,8 +308,7 @@ func writeCredentialFiles(
 	for _, c := range creds {
 		if (c.Type == "CLI_TOKEN" || c.Type == "SECRET") && c.EnvVarName != "" && c.PlainValue != "" {
 			if !envVarNameRE.MatchString(c.EnvVarName) {
-				logger.Warn("skipping credential with invalid env var name", "env_var", c.EnvVarName)
-				continue
+				return fmt.Errorf("invalid credential env var name: %q", c.EnvVarName)
 			}
 			files = append(files, credFile{EnvVar: c.EnvVarName, Value: c.PlainValue})
 		}

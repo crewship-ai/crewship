@@ -45,7 +45,9 @@ func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	seedTemplatesOnce.Do(func() {
-		if err := database.SeedBuiltinCrewTemplates(context.Background(), h.db, h.logger); err != nil {
+		seedCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := database.SeedBuiltinCrewTemplates(seedCtx, h.db, h.logger); err != nil {
 			h.logger.Warn("seed crew templates", "error", err)
 		}
 	})
@@ -77,6 +79,11 @@ func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 			t.Agents = []database.CrewTemplateAgent{}
 		}
 		result = append(result, t)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate crew templates", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
 	}
 	if result == nil {
 		result = []crewTemplateResponse{}

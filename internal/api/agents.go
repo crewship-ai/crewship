@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -14,7 +15,7 @@ import (
 
 // ScheduleUpdater is implemented by the scheduler to receive live schedule changes.
 type ScheduleUpdater interface {
-	UpdateSchedule(agentID, cronExpr, prompt string, enabled bool) error
+	UpdateSchedule(ctx context.Context, agentID, cronExpr, prompt string, enabled bool) error
 }
 
 type AgentHandler struct {
@@ -560,7 +561,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 				}
 				enabled = e == 1
 			}
-			if err := h.scheduleUpdater.UpdateSchedule(agentID, cronStr, promptStr, enabled); err != nil {
+			if err := h.scheduleUpdater.UpdateSchedule(r.Context(), agentID, cronStr, promptStr, enabled); err != nil {
 				h.logger.Warn("schedule update callback failed", "agent_id", agentID, "error", err)
 			}
 		} else if _, hasEnabled := body["schedule_enabled"]; hasEnabled {
@@ -584,7 +585,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			if promptStr.Valid {
 				prompt = promptStr.String
 			}
-			if err := h.scheduleUpdater.UpdateSchedule(agentID, cron, prompt, enabled); err != nil {
+			if err := h.scheduleUpdater.UpdateSchedule(r.Context(), agentID, cron, prompt, enabled); err != nil {
 				h.logger.Warn("schedule update callback failed", "agent_id", agentID, "error", err)
 			}
 		}
