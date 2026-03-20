@@ -322,7 +322,8 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
-const streamdownPlugins = { cjk, code, math, mermaid };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- mermaid peer dep version mismatch between @streamdown/mermaid and streamdown
+const streamdownPlugins = { cjk, code, math, mermaid } as any;
 
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
