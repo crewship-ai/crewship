@@ -116,7 +116,7 @@ async function main() {
   const seedAnthropicKey = process.env.SEED_ANTHROPIC_API_KEY
   if (seedAnthropicKey) {
     console.log("🔑 Seeding Anthropic API key credential...")
-    const encryptedKey = await encrypt(seedAnthropicKey)
+    const encryptedKey = encrypt(seedAnthropicKey)
     await prisma.$executeRawUnsafe(
       `INSERT INTO credentials (id, workspace_id, name, encrypted_value, scope, type, provider, status, created_by, created_at, updated_at)
        VALUES (?, ?, 'ANTHROPIC_API_KEY', ?, 'WORKSPACE', 'API_KEY', 'ANTHROPIC', 'ACTIVE', ?, datetime('now'), datetime('now'))

@@ -9,10 +9,13 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
 )
+
+var seedTemplatesOnce sync.Once
 
 type CrewTemplateHandler struct {
 	db     *sql.DB
@@ -40,10 +43,11 @@ type crewTemplateResponse struct {
 func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	// Lazy seed builtin crew templates
-	if err := database.SeedBuiltinCrewTemplates(r.Context(), h.db, h.logger); err != nil {
-		h.logger.Warn("seed crew templates", "error", err)
-	}
+	seedTemplatesOnce.Do(func() {
+		if err := database.SeedBuiltinCrewTemplates(r.Context(), h.db, h.logger); err != nil {
+			h.logger.Warn("seed crew templates", "error", err)
+		}
+	})
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT id, name, slug, description, icon, color, category, agents_json, is_builtin, created_at
@@ -151,9 +155,13 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 
 	// Check crew slug uniqueness
 	var existing int
-	h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM crews WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		body.CrewSlug, wsID).Scan(&existing)
+		body.CrewSlug, wsID).Scan(&existing); err != nil {
+		h.logger.Error("check slug uniqueness", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 	if existing > 0 {
 		writeProblem(w, r, http.StatusConflict, fmt.Sprintf("Crew with slug '%s' already exists", body.CrewSlug))
 		return
@@ -240,6 +248,8 @@ func slugify(name string) string {
 
 func generateWebhookSecret() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	return fmt.Sprintf("%x", b)
 }

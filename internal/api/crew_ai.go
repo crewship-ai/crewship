@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
@@ -158,7 +159,8 @@ func (h *CrewAIHandler) callAnthropic(ctx context.Context, cred *anthropicCred, 
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("x-api-key", cred.plain)
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
 	}

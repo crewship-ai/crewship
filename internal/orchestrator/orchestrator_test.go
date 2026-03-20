@@ -217,6 +217,7 @@ func TestRunAgentExitCodeError(t *testing.T) {
 	mc := &mockContainer{
 		execResults: []*provider.ExecResult{
 			{ExecID: "mkdir-1", Reader: io.NopCloser(strings.NewReader(""))},
+			{ExecID: "manifest-1", Reader: io.NopCloser(strings.NewReader(""))},
 			{ExecID: "exec-1", Reader: r},
 		},
 		inspectResult: struct {

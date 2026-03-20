@@ -84,7 +84,7 @@ function parseMetadataUrl(metadata: string | null): string | null {
   }
 }
 
-function ResolveForm({ escalation, onResolved }: { escalation: Escalation; onResolved: () => void }) {
+function ResolveForm({ escalation, workspaceId, onResolved }: { escalation: Escalation; workspaceId: string; onResolved: () => void }) {
   const [resolution, setResolution] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -97,7 +97,7 @@ function ResolveForm({ escalation, onResolved }: { escalation: Escalation; onRes
       const res = await fetch(`/api/v1/escalations/${escalation.id}/resolve`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resolution: resolution.trim() }),
+        body: JSON.stringify({ resolution: resolution.trim(), workspace_id: workspaceId }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Failed to resolve" }))
@@ -353,6 +353,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                               {isPending ? (
                                 <ResolveForm
                                   escalation={e}
+                                  workspaceId={workspaceId}
                                   onResolved={() => fetchEscalations(false, true)}
                                 />
                               ) : (
@@ -366,7 +367,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                                   {e.resolution && (
                                     <div>
                                       <span className="font-medium text-muted-foreground">Resolution: </span>
-                                      {e.resolution}
+                                      {e.type === "CREDENTIAL" ? "Credential submitted" : e.resolution}
                                     </div>
                                   )}
                                 </div>
