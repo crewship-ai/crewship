@@ -106,7 +106,6 @@ export default function NewCrewPage() {
   const [aiSuggesting, setAiSuggesting] = useState(false)
   const [aiSuggestion, setAiSuggestion] = useState<AISuggestion | null>(null)
   const [hasAnthropicKey, setHasAnthropicKey] = useState<boolean | null>(null) // null = unknown
-  const [coordinatorId, setCoordinatorId] = useState<string | null>(null)
   const [findingCoordinator, setFindingCoordinator] = useState(false)
 
   // Form state (shared between manual + deploy modes)
@@ -149,7 +148,6 @@ export default function NewCrewPage() {
         const agents: Array<{ id: string; agent_role: string }> = Array.isArray(data) ? data : []
         const coordinator = agents.find((a) => a.agent_role === "COORDINATOR")
         if (coordinator) {
-          setCoordinatorId(coordinator.id)
           const prefill = encodeURIComponent(
             "I need you to create a new crew for me. Please describe what kind of crew you want and I will design the agents, roles, and system prompts, then create everything for you.\n\nWhat should the crew do?"
           )

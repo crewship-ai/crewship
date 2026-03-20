@@ -555,7 +555,9 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			} else {
 				// schedule_cron changed but schedule_enabled wasn't in body — read from DB
 				var e int
-				h.db.QueryRowContext(r.Context(), "SELECT schedule_enabled FROM agents WHERE id = ?", agentID).Scan(&e)
+				if err := h.db.QueryRowContext(r.Context(), "SELECT schedule_enabled FROM agents WHERE id = ?", agentID).Scan(&e); err != nil {
+					h.logger.Warn("read schedule_enabled", "agent_id", agentID, "error", err)
+				}
 				enabled = e == 1
 			}
 			if err := h.scheduleUpdater.UpdateSchedule(agentID, cronStr, promptStr, enabled); err != nil {
@@ -563,7 +565,9 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 		} else if _, hasEnabled := body["schedule_enabled"]; hasEnabled {
 			var cronStr, promptStr sql.NullString
-			h.db.QueryRowContext(r.Context(), "SELECT schedule_cron, schedule_prompt FROM agents WHERE id = ?", agentID).Scan(&cronStr, &promptStr)
+			if err := h.db.QueryRowContext(r.Context(), "SELECT schedule_cron, schedule_prompt FROM agents WHERE id = ?", agentID).Scan(&cronStr, &promptStr); err != nil {
+				h.logger.Warn("read schedule fields", "agent_id", agentID, "error", err)
+			}
 			enabledVal := body["schedule_enabled"]
 			enabled := false
 			switch v := enabledVal.(type) {

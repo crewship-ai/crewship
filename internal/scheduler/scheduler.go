@@ -172,8 +172,10 @@ func (s *Scheduler) UpdateSchedule(agentID, cronExpr, prompt string, enabled boo
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 	if sched, err := parser.Parse(cronExpr); err == nil {
 		next := sched.Next(time.Now())
-		s.db.Exec("UPDATE agents SET schedule_next_run = ? WHERE id = ?",
-			next.UTC().Format(time.RFC3339), agentID)
+		if _, err := s.db.ExecContext(context.Background(), "UPDATE agents SET schedule_next_run = ? WHERE id = ?",
+			next.UTC().Format(time.RFC3339), agentID); err != nil {
+			s.logger.Warn("update schedule_next_run", "agent_id", agentID, "error", err)
+		}
 	}
 	return nil
 }
@@ -364,16 +366,22 @@ func (s *Scheduler) updateTimestamps(agentID, cronExpr string, errorOnly bool) {
 
 	if errorOnly {
 		if nextRun != nil {
-			s.db.Exec("UPDATE agents SET schedule_next_run = ? WHERE id = ?", *nextRun, agentID)
+			if _, err := s.db.ExecContext(context.Background(), "UPDATE agents SET schedule_next_run = ? WHERE id = ?", *nextRun, agentID); err != nil {
+				s.logger.Warn("update schedule_next_run", "agent_id", agentID, "error", err)
+			}
 		}
 		return
 	}
 
 	if nextRun != nil {
-		s.db.Exec("UPDATE agents SET schedule_last_run = ?, schedule_next_run = ? WHERE id = ?",
-			now, *nextRun, agentID)
+		if _, err := s.db.ExecContext(context.Background(), "UPDATE agents SET schedule_last_run = ?, schedule_next_run = ? WHERE id = ?",
+			now, *nextRun, agentID); err != nil {
+			s.logger.Warn("update schedule timestamps", "agent_id", agentID, "error", err)
+		}
 	} else {
-		s.db.Exec("UPDATE agents SET schedule_last_run = ? WHERE id = ?", now, agentID)
+		if _, err := s.db.ExecContext(context.Background(), "UPDATE agents SET schedule_last_run = ? WHERE id = ?", now, agentID); err != nil {
+			s.logger.Warn("update schedule_last_run", "agent_id", agentID, "error", err)
+		}
 	}
 }
 

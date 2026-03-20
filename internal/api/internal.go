@@ -1016,12 +1016,22 @@ func (h *InternalHandler) CreateCrew(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Slug == "" {
 		body.Slug = slugify(body.Name)
+	} else {
+		body.Slug = slugify(body.Slug)
+	}
+	if body.Slug == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug is required (could not derive from name)"})
+		return
 	}
 
 	var existing int
-	h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM crews WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		body.Slug, wsID).Scan(&existing)
+		body.Slug, wsID).Scan(&existing); err != nil {
+		h.logger.Error("check crew slug uniqueness", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
 	if existing > 0 {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("crew with slug '%s' already exists", body.Slug)})
 		return
@@ -1088,6 +1098,12 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Slug == "" {
 		body.Slug = slugify(body.Name)
+	} else {
+		body.Slug = slugify(body.Slug)
+	}
+	if body.Slug == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug is required (could not derive from name)"})
+		return
 	}
 	if body.AgentRole == "" {
 		body.AgentRole = "AGENT"
@@ -1101,15 +1117,21 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Suffix slug with crew slug to prevent workspace-wide UNIQUE conflicts
 	var crewSlug string
-	h.db.QueryRowContext(r.Context(), `SELECT slug FROM crews WHERE id = ?`, body.CrewID).Scan(&crewSlug)
+	if err := h.db.QueryRowContext(r.Context(), `SELECT slug FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`, body.CrewID, wsID).Scan(&crewSlug); err != nil {
+		h.logger.Warn("lookup crew slug", "crew_id", body.CrewID, "error", err)
+	}
 	if crewSlug != "" {
 		body.Slug = body.Slug + "-" + crewSlug
 	}
 
 	var existing int
-	h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM agents WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		body.Slug, wsID).Scan(&existing)
+		body.Slug, wsID).Scan(&existing); err != nil {
+		h.logger.Error("check agent slug uniqueness", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return
+	}
 	if existing > 0 {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("agent with slug '%s' already exists", body.Slug)})
 		return

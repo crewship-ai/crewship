@@ -106,27 +106,33 @@ func (s *Server) handleUpdateManifest(w http.ResponseWriter, r *http.Request) {
 		m.Packages.Pip = mergeUnique(m.Packages.Pip, patch.Packages.Pip)
 	}
 	if len(patch.Credentials) > 0 {
-		m.Credentials = append(m.Credentials, patch.Credentials...)
+		m.Credentials = mergeCredentials(m.Credentials, patch.Credentials)
 	}
 	if len(patch.SetupCommands) > 0 {
 		m.SetupCommands = mergeUnique(m.SetupCommands, patch.SetupCommands)
 	}
 
-	outData, err := json.MarshalIndent(&m, "", "  ")
-	if err != nil {
-		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(manifestPath), 0755); err != nil {
-		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if err := os.WriteFile(manifestPath, outData, 0644); err != nil {
+	if err := writeManifest(&m); err != nil {
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
 	writeJSONResponse(w, http.StatusOK, m)
+}
+
+func mergeCredentials(existing, additions []ManifestCredEntry) []ManifestCredEntry {
+	seen := make(map[string]bool, len(existing))
+	for _, c := range existing {
+		seen[c.Name+"|"+c.Agent] = true
+	}
+	for _, c := range additions {
+		key := c.Name + "|" + c.Agent
+		if !seen[key] {
+			existing = append(existing, c)
+			seen[key] = true
+		}
+	}
+	return existing
 }
 
 func mergeUnique(existing, additions []string) []string {

@@ -39,7 +39,7 @@ export function ChatPageClient() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const sessionParam = searchParams.get("session") ?? undefined
-  const prefillParam = searchParams.get("prefill") ?? undefined
+  const [prefillParam] = useState(() => searchParams.get("prefill") ?? undefined)
   const wsParam = searchParams.get("workspace_id") ?? undefined
   const { workspaceId: storeWorkspaceId } = useWorkspace()
   const workspaceId = wsParam ?? storeWorkspaceId

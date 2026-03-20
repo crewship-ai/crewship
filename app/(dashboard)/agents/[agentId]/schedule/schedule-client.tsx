@@ -77,7 +77,10 @@ export function SchedulePageClient() {
   const [runsLoading, setRunsLoading] = useState(true)
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setLoading(false)
+      return
+    }
     fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
@@ -94,7 +97,10 @@ export function SchedulePageClient() {
   }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setRunsLoading(false)
+      return
+    }
     fetch(`/api/v1/agents/${agentId}/runs?workspace_id=${workspaceId}&trigger_type=SCHEDULED&limit=10`)
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
