@@ -10,13 +10,10 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
 )
-
-var seedTemplatesOnce sync.Once
 
 type CrewTemplateHandler struct {
 	db     *sql.DB
@@ -44,13 +41,11 @@ type crewTemplateResponse struct {
 func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	seedTemplatesOnce.Do(func() {
-		seedCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := database.SeedBuiltinCrewTemplates(seedCtx, h.db, h.logger); err != nil {
-			h.logger.Warn("seed crew templates", "error", err)
-		}
-	})
+	seedCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := database.SeedBuiltinCrewTemplates(seedCtx, h.db, h.logger); err != nil {
+		h.logger.Warn("seed crew templates", "error", err)
+	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT id, name, slug, description, icon, color, category, agents_json, is_builtin, created_at
@@ -132,12 +127,19 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
+	body.CrewName = strings.TrimSpace(body.CrewName)
 	if body.CrewName == "" {
 		writeProblem(w, r, http.StatusBadRequest, "crew_name is required")
 		return
 	}
 	if body.CrewSlug == "" {
 		body.CrewSlug = slugify(body.CrewName)
+	} else {
+		body.CrewSlug = slugify(body.CrewSlug)
+	}
+	if body.CrewSlug == "" {
+		writeProblem(w, r, http.StatusBadRequest, "crew_slug must contain only lowercase letters, numbers, and hyphens")
+		return
 	}
 
 	// Load template (scoped to workspace or builtins)
