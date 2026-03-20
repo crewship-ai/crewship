@@ -24,9 +24,11 @@ type queryRequest struct {
 }
 
 type escalateRequest struct {
-	From    string `json:"from"`
-	Reason  string `json:"reason"`
-	Context string `json:"context"`
+	From     string `json:"from"`
+	Reason   string `json:"reason"`
+	Context  string `json:"context"`
+	Type     string `json:"type"`
+	Metadata string `json:"metadata"`
 }
 
 // handleQuery handles POST /query from agents wanting to ask a peer a question.
@@ -190,6 +192,8 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 		"from_slug":    req.From,
 		"reason":       req.Reason,
 		"context":      req.Context,
+		"type":         req.Type,
+		"metadata":     req.Metadata,
 		"crew_id":      s.ipc.CrewID,
 		"workspace_id": s.ipc.WorkspaceID,
 		"chat_id":      s.ipc.ChatID,

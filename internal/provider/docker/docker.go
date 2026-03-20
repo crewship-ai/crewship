@@ -323,6 +323,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 					filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID),
 					filepath.Join(p.cfg.OutputBasePath, team.ID),
 					filepath.Join(p.cfg.OutputBasePath, "crews", team.ID),
+					filepath.Join(p.cfg.OutputBasePath, "secrets", team.ID),
 				}
 				bindsMissing := false
 				for _, d := range bindMountDirs {
@@ -372,6 +373,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	outputPath := filepath.Join(p.cfg.OutputBasePath, team.ID)
 	workspacePath := filepath.Join(p.cfg.OutputBasePath, "workspaces", team.ID)
 	crewPath := filepath.Join(p.cfg.OutputBasePath, "crews", team.ID)
+	secretsPath := filepath.Join(p.cfg.OutputBasePath, "secrets", team.ID)
 
 	allDirs := []string{
 		outputPath,
@@ -379,6 +381,8 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		crewPath,
 		filepath.Join(crewPath, "shared"),
 		filepath.Join(crewPath, "agents"),
+		secretsPath,
+		filepath.Join(secretsPath, "shared"),
 	}
 	for _, dir := range allDirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -461,6 +465,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				{Type: mount.TypeBind, Source: workspacePath, Target: "/workspace"},
 				{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
 				{Type: mount.TypeBind, Source: crewPath, Target: "/crew"},
+				{Type: mount.TypeBind, Source: secretsPath, Target: "/secrets"},
 			},
 			Tmpfs: map[string]string{
 				"/tmp":        "rw,size=500m",

@@ -17,6 +17,7 @@ import (
 )
 
 type ChatResolver interface {
+	CreateChat(ctx context.Context, req CreateChatRequest) error
 	ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error)
 	CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error
 	UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error

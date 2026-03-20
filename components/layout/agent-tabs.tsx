@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
   LayoutGrid, LayoutDashboard, MessageSquare, FolderOpen,
-  Activity, ScrollText, Zap, Key, Settings, Bug, History, X,
+  Activity, ScrollText, Zap, Key, Clock, Settings, Bug, History, X,
 } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
@@ -21,6 +21,7 @@ const tabs = [
   { label: "Logs", href: "/logs", icon: ScrollText },
   { label: "Skills", href: "/skills", icon: Zap },
   { label: "Credentials", href: "/credentials", icon: Key },
+  { label: "Schedule", href: "/schedule", icon: Clock },
   { label: "Settings", href: "/settings", icon: Settings },
   { label: "Debug", href: "/debug", icon: Bug },
   { label: "History", href: "/history", icon: History },

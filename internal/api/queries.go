@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -429,6 +430,106 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, items)
 }
 
+// ResolveEscalation handles PATCH /api/v1/escalations/{escalationId}/resolve.
+func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request) {
+	escalationID := r.PathValue("escalationId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	var body struct {
+		Resolution string `json:"resolution"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		return
+	}
+	if body.Resolution == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "resolution required"})
+		return
+	}
+
+	var status, chatID, crewID, fromSlug, escalationType string
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT e.status, e.chat_id, e.crew_id, a.slug, e.type
+		FROM escalations e
+		JOIN agents a ON a.id = e.from_agent_id
+		WHERE e.id = ? AND e.workspace_id = ?
+	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug, &escalationType)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "escalation not found"})
+			return
+		}
+		h.logger.Error("resolve escalation lookup", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if status != "PENDING" {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "escalation already resolved"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// For CREDENTIAL escalations encrypt the value at rest; for others store as-is.
+	storedResolution := body.Resolution
+	if escalationType == "CREDENTIAL" {
+		enc, encErr := encryption.Encrypt(body.Resolution)
+		if encErr != nil {
+			h.logger.Error("encrypt credential resolution", "error", encErr)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		storedResolution = enc
+	}
+
+	result, err := h.db.ExecContext(r.Context(), `
+		UPDATE escalations SET status = 'RESOLVED', resolution = ?, resolved_at = ?, resolved_by = 'user'
+		WHERE id = ? AND workspace_id = ? AND status = 'PENDING'
+	`, storedResolution, now, escalationID, workspaceID)
+	if err != nil {
+		h.logger.Error("resolve escalation update", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "escalation already resolved"})
+		return
+	}
+
+	if h.hub != nil {
+		broadcastResolution := body.Resolution
+		if escalationType == "CREDENTIAL" {
+			broadcastResolution = "[credential submitted]"
+		}
+		h.hub.Broadcast("session:"+chatID, ws.ServerMessage{
+			Type:    "escalation_resolved",
+			Channel: "session:" + chatID,
+			Payload: map[string]string{
+				"id":         escalationID,
+				"resolution": broadcastResolution,
+			},
+		})
+		h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
+			Type:    "escalation.resolved",
+			Channel: "workspace:" + workspaceID,
+			Payload: map[string]string{
+				"id":        escalationID,
+				"crew_id":   crewID,
+				"from_slug": fromSlug,
+			},
+		})
+	}
+
+	h.logger.Info("escalation resolved",
+		"escalation_id", escalationID,
+		"crew_id", crewID,
+	)
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"id":     escalationID,
+		"status": "RESOLVED",
+	})
+}
 // Standup handles GET /api/v1/internal/standup (internal) and GET /api/v1/crews/{crewId}/standup (public).
 func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	crewID := r.URL.Query().Get("crew_id")
@@ -580,6 +681,8 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		FromSlug    string `json:"from_slug"`
 		Reason      string `json:"reason"`
 		Context     string `json:"context"`
+		Type        string `json:"type"`
+		Metadata    string `json:"metadata"`
 		CrewID      string `json:"crew_id"`
 		WorkspaceID string `json:"workspace_id"`
 		ChatID      string `json:"chat_id"`
@@ -618,10 +721,36 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		contextVal = body.Context
 	}
 
+	escalationType := body.Type
+	if escalationType == "" {
+		escalationType = "TEXT"
+	}
+	if escalationType != "TEXT" && escalationType != "CREDENTIAL" && escalationType != "LINK" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "type must be TEXT, CREDENTIAL, or LINK"})
+		return
+	}
+
+	if escalationType == "LINK" {
+		if body.Metadata == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "metadata (https URL) required for LINK type"})
+			return
+		}
+		u, parseErr := url.ParseRequestURI(body.Metadata)
+		if parseErr != nil || u.Scheme != "https" || u.Host == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "metadata must be a valid https URL"})
+			return
+		}
+	}
+
+	var metadataVal interface{}
+	if body.Metadata != "" {
+		metadataVal = body.Metadata
+	}
+
 	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, status, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
-	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, now)
+		INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, status, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+	`, escalationID, body.WorkspaceID, body.CrewID, body.ChatID, fromAgentID, body.Reason, contextVal, escalationType, metadataVal, now)
 	if err != nil {
 		h.logger.Error("create escalation", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -820,20 +949,23 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 
 	type escalationItem struct {
 		ID                 string  `json:"id"`
+		Type               string  `json:"type"`
 		FromName           string  `json:"from_name"`
 		FromSlug           string  `json:"from_slug"`
 		Reason             string  `json:"reason"`
 		Context            *string `json:"context"`
+		Metadata           *string `json:"metadata"`
 		PeerConversationID *string `json:"peer_conversation_id"`
 		Status             string  `json:"status"`
 		Resolution         *string `json:"resolution"`
+		ResolvedBy         *string `json:"resolved_by"`
 		ResolvedAt         *string `json:"resolved_at"`
 		CreatedAt          string  `json:"created_at"`
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT e.id, e.reason, e.context, e.peer_conversation_id, e.status,
-		       e.resolution, e.resolved_at, e.created_at,
+		SELECT e.id, e.type, e.reason, e.context, e.metadata, e.peer_conversation_id, e.status,
+		       e.resolution, e.resolved_by, e.resolved_at, e.created_at,
 		       from_a.name, from_a.slug
 		FROM escalations e
 		JOIN agents from_a ON from_a.id = e.from_agent_id
@@ -852,13 +984,18 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item escalationItem
 		if err := rows.Scan(
-			&item.ID, &item.Reason, &item.Context, &item.PeerConversationID,
-			&item.Status, &item.Resolution, &item.ResolvedAt, &item.CreatedAt,
-			&item.FromName, &item.FromSlug,
+			&item.ID, &item.Type, &item.Reason, &item.Context, &item.Metadata,
+			&item.PeerConversationID, &item.Status, &item.Resolution, &item.ResolvedBy,
+			&item.ResolvedAt, &item.CreatedAt, &item.FromName, &item.FromSlug,
 		); err != nil {
 			h.logger.Error("scan escalation", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
+		}
+		// Never expose plaintext credential values to the list response
+		if item.Type == "CREDENTIAL" && item.Resolution != nil {
+			masked := "[credential submitted]"
+			item.Resolution = &masked
 		}
 		items = append(items, item)
 	}

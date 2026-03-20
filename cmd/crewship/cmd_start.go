@@ -19,6 +19,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
+	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/server"
 	"github.com/crewship-ai/crewship/web"
 	"github.com/spf13/cobra"
@@ -166,6 +167,27 @@ var startCmd = &cobra.Command{
 			logger,
 		)
 		srv.SetChatHandler(bridge)
+
+		// Start agent scheduler (cron-based scheduled runs)
+		if deps.DB != nil && deps.Container != nil {
+			sched := scheduler.New(
+				deps.DB, srv.Orchestrator(), deps.Container,
+				resolver, srv.LogWriter(), srv.ConversationStore(),
+				scheduler.Config{
+					DefaultMemoryMB: cfg.Container.DefaultMemoryMB,
+					DefaultCPUs:     cfg.Container.DefaultCPUs,
+				},
+				logger,
+			)
+			if err := sched.Start(ctx); err != nil {
+				logger.Error("scheduler failed to start", "error", err)
+			} else {
+				defer sched.Stop()
+				if apiRouter := srv.APIRouter(); apiRouter != nil {
+					apiRouter.SetScheduler(sched)
+				}
+			}
+		}
 
 		if err := srv.Start(ctx); err != nil {
 			return fmt.Errorf("server error: %w", err)

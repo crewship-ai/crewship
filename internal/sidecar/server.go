@@ -218,6 +218,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodGet && r.URL.Path == "/crews":
 				s.handleListCrews(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/crew/create":
+				s.handleCreateCrew(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/agent/create":
+				s.handleCreateAgent(w, r)
+				return
 			case r.Method == http.MethodGet && r.URL.Path == "/crew-connections":
 				s.handleListCrewConnections(w, r)
 				return
@@ -232,6 +238,12 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			case r.Method == http.MethodGet && r.URL.Path == "/missions/all/summary":
 				s.handleAllMissionsSummary(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/manifest":
+				s.handleGetManifest(w, r)
+				return
+			case r.Method == http.MethodPatch && r.URL.Path == "/manifest":
+				s.handleUpdateManifest(w, r)
 				return
 			}
 		}
