@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -727,6 +728,18 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	if escalationType != "TEXT" && escalationType != "CREDENTIAL" && escalationType != "LINK" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "type must be TEXT, CREDENTIAL, or LINK"})
 		return
+	}
+
+	if escalationType == "LINK" {
+		if body.Metadata == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "metadata (https URL) required for LINK type"})
+			return
+		}
+		u, parseErr := url.ParseRequestURI(body.Metadata)
+		if parseErr != nil || u.Scheme != "https" || u.Host == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "metadata must be a valid https URL"})
+			return
+		}
 	}
 
 	var metadataVal interface{}

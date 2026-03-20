@@ -122,34 +122,41 @@ export default function NewCrewPage() {
 
   // Fetch templates once workspaceId is available
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setTemplates([])
+      if (!wsLoading) setLoadingTemplates(false)
+      return
+    }
+    setLoadingTemplates(true)
     fetch(`/api/v1/crew-templates?workspace_id=${workspaceId}`)
       .then((r) => (r.ok ? r.json() : []))
       .then((data) => setTemplates(Array.isArray(data) ? data : []))
       .catch(() => setTemplates([]))
       .finally(() => setLoadingTemplates(false))
-  }, [workspaceId])
+  }, [workspaceId, wsLoading])
 
   const handleCreateWithAI = async () => {
     if (!workspaceId) return
     setFindingCoordinator(true)
     try {
       const res = await fetch(`/api/v1/agents?workspace_id=${workspaceId}&role=COORDINATOR`)
-      if (res.ok) {
-        const data = await res.json()
-        const agents: Array<{ id: string; agent_role: string }> = Array.isArray(data) ? data : []
-        const coordinator = agents.find((a) => a.agent_role === "COORDINATOR")
-        if (coordinator) {
-          const prefill = encodeURIComponent(
-            "I need you to create a new crew for me. Please describe what kind of crew you want and I will design the agents, roles, and system prompts, then create everything for you.\n\nWhat should the crew do?"
-          )
-          router.push(`/agents/${coordinator.id}/chat?prefill=${prefill}&workspace_id=${workspaceId}`)
-          return
-        }
+      if (!res.ok) {
+        toast.error("Failed to look up a Coordinator agent. Please try again.")
+        return
+      }
+      const data = await res.json()
+      const agents: Array<{ id: string; agent_role: string }> = Array.isArray(data) ? data : []
+      const coordinator = agents.find((a) => a.agent_role === "COORDINATOR")
+      if (coordinator) {
+        const prefill = encodeURIComponent(
+          "I need you to create a new crew for me. Please describe what kind of crew you want and I will design the agents, roles, and system prompts, then create everything for you.\n\nWhat should the crew do?"
+        )
+        router.push(`/agents/${coordinator.id}/chat?prefill=${prefill}&workspace_id=${workspaceId}`)
+        return
       }
       setMode("no-coordinator")
     } catch {
-      setMode("no-coordinator")
+      toast.error("Failed to look up a Coordinator agent. Please try again.")
     } finally {
       setFindingCoordinator(false)
     }
