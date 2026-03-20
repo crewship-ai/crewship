@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -125,7 +126,7 @@ func (h *CrewAIHandler) getAnthropicCred(ctx context.Context, wsID string) (*ant
 		ORDER BY created_at ASC
 		LIMIT 1`, wsID).Scan(&encryptedValue)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("no active Anthropic credential in workspace")
 		}
 		return nil, fmt.Errorf("query credential: %w", err)
@@ -233,18 +234,27 @@ func validateSuggestion(s *AISuggestResponse) error {
 		return fmt.Errorf("expected 2-6 agents, got %d", len(s.Agents))
 	}
 	leads := 0
-	for _, a := range s.Agents {
-		if a.AgentRole == "LEAD" {
+	for i := range s.Agents {
+		if s.Agents[i].AgentRole == "LEAD" {
 			leads++
 		}
-		if a.Name == "" || a.Slug == "" || a.SystemPrompt == "" {
+		if s.Agents[i].Name == "" || s.Agents[i].SystemPrompt == "" {
 			return fmt.Errorf("agent missing required fields")
+		}
+		// Normalize slug; fall back to name-derived slug if empty or invalid
+		s.Agents[i].Slug = slugify(s.Agents[i].Slug)
+		if s.Agents[i].Slug == "" {
+			s.Agents[i].Slug = slugify(s.Agents[i].Name)
+		}
+		if s.Agents[i].Slug == "" {
+			return fmt.Errorf("agent %q has invalid slug", s.Agents[i].Name)
 		}
 	}
 	if leads != 1 {
 		return fmt.Errorf("expected exactly 1 LEAD agent, got %d", leads)
 	}
-	// Auto-fill crew_slug if AI forgot it
+	// Normalize crew_slug
+	s.CrewSlug = slugify(s.CrewSlug)
 	if s.CrewSlug == "" {
 		s.CrewSlug = slugify(s.CrewName)
 	}

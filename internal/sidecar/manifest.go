@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -93,10 +94,15 @@ func (s *Server) handleUpdateManifest(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile(manifestPath)
 	var m CrewManifest
 	if err != nil {
+		if !os.IsNotExist(err) {
+			writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("read manifest: %s", err.Error())})
+			return
+		}
 		m = CrewManifest{Version: 1}
 	} else {
 		if jsonErr := json.Unmarshal(data, &m); jsonErr != nil {
-			m = CrewManifest{Version: 1}
+			writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("parse manifest: %s", jsonErr.Error())})
+			return
 		}
 	}
 
