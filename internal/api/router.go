@@ -44,8 +44,10 @@ type Router struct {
 	keeperConfig     *config.KeeperConfig
 	keeperConvReader ConversationReader
 	missionCallback  MissionCallback
+	scheduleUpdater  ScheduleUpdater
 	allowSignup      bool
 	license          *license.License
+	agentHandler     *AgentHandler
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -72,6 +74,14 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	r.registerRoutes()
 
 	return r, nil
+}
+
+// SetScheduler attaches a ScheduleUpdater after construction (used by cmd_start).
+func (r *Router) SetScheduler(su ScheduleUpdater) {
+	r.scheduleUpdater = su
+	if r.agentHandler != nil {
+		r.agentHandler.SetScheduler(su)
+	}
 }
 
 type RouterOption func(*Router)
@@ -104,6 +114,12 @@ func WithHub(hub *ws.Hub) RouterOption {
 func WithOrchestrator(orch *orchestrator.Orchestrator) RouterOption {
 	return func(r *Router) {
 		r.orch = orch
+	}
+}
+
+func WithScheduler(su ScheduleUpdater) RouterOption {
+	return func(r *Router) {
+		r.scheduleUpdater = su
 	}
 }
 
@@ -175,6 +191,10 @@ func (r *Router) registerRoutes() {
 	}
 	crews.SetSocketPath(crewSocket)
 	agents := NewAgentHandler(r.db, r.logger)
+	r.agentHandler = agents
+	if r.scheduleUpdater != nil {
+		agents.SetScheduler(r.scheduleUpdater)
+	}
 
 	if r.license != nil {
 		ws.SetLicense(r.license)
