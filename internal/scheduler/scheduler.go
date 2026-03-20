@@ -34,6 +34,10 @@ type Scheduler struct {
 	convStore *conversation.Store
 	logger    *slog.Logger
 	cfg       Config
+	parser    cron.Parser // shared, immutable after construction
+
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu       sync.Mutex
 	entryMap map[string]cron.EntryID // agentID → cron entry
@@ -55,6 +59,7 @@ func New(
 	if cfg.DefaultCPUs == 0 {
 		cfg.DefaultCPUs = 2.0
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Scheduler{
 		c:         cron.New(),
 		db:        db,
@@ -65,6 +70,9 @@ func New(
 		convStore: convStore,
 		logger:    logger,
 		cfg:       cfg,
+		parser:    cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow),
+		ctx:       ctx,
+		cancel:    cancel,
 		entryMap:  make(map[string]cron.EntryID),
 	}
 }
@@ -90,6 +98,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 }
 
 func (s *Scheduler) Stop() {
+	s.cancel() // signal in-flight triggerAgent goroutines to stop
 	stopCtx := s.c.Stop()
 	<-stopCtx.Done()
 	s.logger.Info("scheduler stopped")
@@ -139,22 +148,22 @@ func (s *Scheduler) addEntry(ag scheduledAgent) error {
 }
 
 // UpdateSchedule is called from the API when an agent's schedule changes.
-func (s *Scheduler) UpdateSchedule(agentID, cronExpr, prompt string, enabled bool) error {
-	s.mu.Lock()
-	if oldID, ok := s.entryMap[agentID]; ok {
-		s.c.Remove(oldID)
-		delete(s.entryMap, agentID)
-	}
-	s.mu.Unlock()
-
+func (s *Scheduler) UpdateSchedule(ctx context.Context, agentID, cronExpr, prompt string, enabled bool) error {
 	if !enabled || cronExpr == "" {
+		s.mu.Lock()
+		if oldID, ok := s.entryMap[agentID]; ok {
+			s.c.Remove(oldID)
+			delete(s.entryMap, agentID)
+		}
+		s.mu.Unlock()
 		s.logger.Info("schedule removed", "agent_id", agentID)
 		return nil
 	}
 
-	// Load agent info from DB for the new entry
+	// Load agent info from DB before touching the cron engine so the old entry
+	// remains active if the DB call fails.
 	var ag scheduledAgent
-	err := s.db.QueryRowContext(context.Background(), `
+	err := s.db.QueryRowContext(ctx, `
 		SELECT a.id, a.slug, a.name, COALESCE(a.crew_id, ''), COALESCE(c.slug, ''), a.workspace_id
 		FROM agents a LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.id = ?`, agentID).Scan(&ag.ID, &ag.Slug, &ag.Name, &ag.CrewID, &ag.CrewSlug, &ag.Workspace)
@@ -164,16 +173,27 @@ func (s *Scheduler) UpdateSchedule(agentID, cronExpr, prompt string, enabled boo
 	ag.Cron = cronExpr
 	ag.Prompt = prompt
 
-	if err := s.addEntry(ag); err != nil {
-		return err
+	// Register new entry first; only remove old one on success.
+	newEntryID, err := s.c.AddFunc(ag.Cron, func() {
+		s.triggerAgent(ag)
+	})
+	if err != nil {
+		return fmt.Errorf("invalid cron expression %q: %w", ag.Cron, err)
 	}
+
+	s.mu.Lock()
+	if oldID, ok := s.entryMap[agentID]; ok {
+		s.c.Remove(oldID)
+	}
+	s.entryMap[agentID] = newEntryID
+	s.mu.Unlock()
+
 	s.logger.Info("schedule updated", "agent", ag.Slug, "cron", cronExpr)
 
 	// Update next_run in DB
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-	if sched, err := parser.Parse(cronExpr); err == nil {
+	if sched, err := s.parser.Parse(cronExpr); err == nil {
 		next := sched.Next(time.Now())
-		if _, err := s.db.ExecContext(context.Background(), "UPDATE agents SET schedule_next_run = ? WHERE id = ?",
+		if _, err := s.db.ExecContext(ctx, "UPDATE agents SET schedule_next_run = ? WHERE id = ?",
 			next.UTC().Format(time.RFC3339), agentID); err != nil {
 			s.logger.Warn("update schedule_next_run", "agent_id", agentID, "error", err)
 		}
@@ -182,7 +202,7 @@ func (s *Scheduler) UpdateSchedule(agentID, cronExpr, prompt string, enabled boo
 }
 
 func (s *Scheduler) triggerAgent(ag scheduledAgent) {
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+	ctx, cancel := context.WithTimeout(s.ctx, 45*time.Minute)
 	defer cancel()
 
 	s.logger.Info("scheduled trigger", "agent", ag.Slug, "crew", ag.CrewSlug)
@@ -358,9 +378,8 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 func (s *Scheduler) updateTimestamps(agentID, cronExpr string, errorOnly bool) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 	var nextRun *string
-	if sched, err := parser.Parse(cronExpr); err == nil {
+	if sched, err := s.parser.Parse(cronExpr); err == nil {
 		next := sched.Next(time.Now()).UTC().Format(time.RFC3339)
 		nextRun = &next
 	}

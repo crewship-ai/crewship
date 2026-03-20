@@ -49,20 +49,37 @@ func readManifest() (*CrewManifest, error) {
 
 	var m CrewManifest
 	if err := json.Unmarshal(data, &m); err != nil {
-		return &CrewManifest{Version: 1}, nil
+		return nil, fmt.Errorf("decode manifest %s: %w", manifestPath, err)
 	}
 	return &m, nil
 }
 
 func writeManifest(m *CrewManifest) error {
-	if err := os.MkdirAll(filepath.Dir(manifestPath), 0755); err != nil {
+	dir := filepath.Dir(manifestPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(manifestPath, data, 0644)
+	// Atomic write: write to temp file then rename to avoid partial reads
+	tmp, err := os.CreateTemp(dir, ".manifest.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp manifest: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		tmp.Close()
+		os.Remove(tmpName) // no-op if rename succeeded
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write temp manifest: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp manifest: %w", err)
+	}
+	return os.Rename(tmpName, manifestPath)
 }
 
 // handleGetManifest returns the current crew manifest.

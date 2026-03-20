@@ -469,10 +469,22 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// For CREDENTIAL escalations encrypt the value at rest; for others store as-is.
+	storedResolution := body.Resolution
+	if escalationType == "CREDENTIAL" {
+		enc, encErr := encryption.Encrypt(body.Resolution)
+		if encErr != nil {
+			h.logger.Error("encrypt credential resolution", "error", encErr)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		storedResolution = enc
+	}
+
 	result, err := h.db.ExecContext(r.Context(), `
 		UPDATE escalations SET status = 'RESOLVED', resolution = ?, resolved_at = ?, resolved_by = 'user'
 		WHERE id = ? AND workspace_id = ? AND status = 'PENDING'
-	`, body.Resolution, now, escalationID, workspaceID)
+	`, storedResolution, now, escalationID, workspaceID)
 	if err != nil {
 		h.logger.Error("resolve escalation update", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
