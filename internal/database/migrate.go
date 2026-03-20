@@ -80,6 +80,9 @@ var migrations = []migration{
 	{19, "add_workflow_templates", migrationAddWorkflowTemplates},
 	{20, "add_crew_connections", migrationAddCrewConnections},
 	{21, "add_mission_proposals", migrationAddMissionProposals},
+	{22, "add_escalation_type_and_resolve", migrationAddEscalationTypeAndResolve},
+	{23, "add_crew_templates", migrationAddCrewTemplates},
+	{24, "add_agent_schedule", migrationAddAgentSchedule},
 }
 
 const migrationAddKeeperObservability = `
@@ -771,4 +774,42 @@ CREATE TABLE IF NOT EXISTS mission_proposals (
 CREATE INDEX IF NOT EXISTS idx_proposal_ws ON mission_proposals(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_proposal_status ON mission_proposals(status);
 CREATE INDEX IF NOT EXISTS idx_mission_proposal ON missions(proposal_id);
+`
+
+const migrationAddEscalationTypeAndResolve = `
+-- Add type column to distinguish escalation kinds (TEXT, CREDENTIAL, LINK).
+-- Default to TEXT for backwards compatibility with existing escalations.
+ALTER TABLE escalations ADD COLUMN type TEXT NOT NULL DEFAULT 'TEXT' CHECK(type IN ('TEXT', 'CREDENTIAL', 'LINK'));
+
+-- Add metadata column for structured data (e.g. link URL, credential env var name).
+ALTER TABLE escalations ADD COLUMN metadata TEXT;
+
+-- Add resolved_by to track who resolved the escalation (user/workspace member).
+ALTER TABLE escalations ADD COLUMN resolved_by TEXT;
+`
+
+const migrationAddCrewTemplates = `
+CREATE TABLE IF NOT EXISTS crew_templates (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	slug TEXT NOT NULL UNIQUE,
+	description TEXT,
+	icon TEXT,
+	color TEXT,
+	category TEXT NOT NULL DEFAULT 'GENERAL',
+	agents_json TEXT NOT NULL,
+	is_builtin INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_crew_templates_slug ON crew_templates(slug);
+CREATE INDEX IF NOT EXISTS idx_crew_templates_category ON crew_templates(category);
+`
+
+const migrationAddAgentSchedule = `
+ALTER TABLE agents ADD COLUMN schedule_cron TEXT;
+ALTER TABLE agents ADD COLUMN schedule_prompt TEXT;
+ALTER TABLE agents ADD COLUMN schedule_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE agents ADD COLUMN schedule_last_run TEXT;
+ALTER TABLE agents ADD COLUMN schedule_next_run TEXT;
 `

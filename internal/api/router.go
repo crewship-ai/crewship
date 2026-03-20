@@ -44,8 +44,10 @@ type Router struct {
 	keeperConfig     *config.KeeperConfig
 	keeperConvReader ConversationReader
 	missionCallback  MissionCallback
+	scheduleUpdater  ScheduleUpdater
 	allowSignup      bool
 	license          *license.License
+	agentHandler     *AgentHandler
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -72,6 +74,14 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	r.registerRoutes()
 
 	return r, nil
+}
+
+// SetScheduler attaches a ScheduleUpdater after construction (used by cmd_start).
+func (r *Router) SetScheduler(su ScheduleUpdater) {
+	r.scheduleUpdater = su
+	if r.agentHandler != nil {
+		r.agentHandler.SetScheduler(su)
+	}
 }
 
 type RouterOption func(*Router)
@@ -104,6 +114,12 @@ func WithHub(hub *ws.Hub) RouterOption {
 func WithOrchestrator(orch *orchestrator.Orchestrator) RouterOption {
 	return func(r *Router) {
 		r.orch = orch
+	}
+}
+
+func WithScheduler(su ScheduleUpdater) RouterOption {
+	return func(r *Router) {
+		r.scheduleUpdater = su
 	}
 }
 
@@ -175,6 +191,10 @@ func (r *Router) registerRoutes() {
 	}
 	crews.SetSocketPath(crewSocket)
 	agents := NewAgentHandler(r.db, r.logger)
+	r.agentHandler = agents
+	if r.scheduleUpdater != nil {
+		agents.SetScheduler(r.scheduleUpdater)
+	}
 
 	if r.license != nil {
 		ws.SetLicense(r.license)
@@ -250,6 +270,16 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Get))))
 	r.mux.Handle("PATCH /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Update))))
 	r.mux.Handle("DELETE /api/v1/templates/{templateId}", authed(wsCtx(http.HandlerFunc(templates.Delete))))
+
+	// Crew Templates (blueprints)
+	crewTmpl := NewCrewTemplateHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/crew-templates", authed(wsCtx(http.HandlerFunc(crewTmpl.List))))
+	r.mux.Handle("GET /api/v1/crew-templates/{slug}", authed(wsCtx(http.HandlerFunc(crewTmpl.Get))))
+	r.mux.Handle("POST /api/v1/crew-templates/{slug}/deploy", authed(wsCtx(http.HandlerFunc(crewTmpl.Deploy))))
+
+	// AI crew wizard
+	crewAI := NewCrewAIHandler(r.db, r.logger)
+	r.mux.Handle("POST /api/v1/crew-ai-suggest", authed(wsCtx(http.HandlerFunc(crewAI.Suggest))))
 
 	// Missions
 	var missionEngineForPublic *orchestrator.MissionEngine
@@ -398,6 +428,8 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("PATCH /api/v1/internal/chats/{chatId}/message-count", internalAuth(http.HandlerFunc(internal.IncrementMessageCount)))
 	r.mux.Handle("PATCH /api/v1/internal/chats/{chatId}/title", internalAuth(http.HandlerFunc(internal.UpdateChatTitle)))
 	r.mux.Handle("GET /api/v1/internal/crews", internalAuth(http.HandlerFunc(internal.ListCrews)))
+	r.mux.Handle("POST /api/v1/internal/crews", internalAuth(http.HandlerFunc(internal.CreateCrew)))
+	r.mux.Handle("POST /api/v1/internal/agents", internalAuth(http.HandlerFunc(internal.CreateAgent)))
 	r.mux.Handle("GET /api/v1/internal/crew-connections", internalAuth(http.HandlerFunc(internal.ListCrewConnections)))
 
 	// Assignment routes (internal auth, called by sidecar on behalf of lead agents)
@@ -442,6 +474,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/peer-conversations", authed(wsCtx(http.HandlerFunc(queries.ListPeerConversations))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/standup", authed(wsCtx(http.HandlerFunc(queries.Standup))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/escalations", authed(wsCtx(http.HandlerFunc(queries.ListEscalations))))
+	r.mux.Handle("PATCH /api/v1/escalations/{escalationId}/resolve", authed(wsCtx(http.HandlerFunc(queries.ResolveEscalation))))
 
 	// Cross-crew activity feed (public, authenticated)
 	r.mux.Handle("GET /api/v1/activity", authed(wsCtx(http.HandlerFunc(queries.ListAllActivity))))

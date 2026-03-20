@@ -55,7 +55,7 @@ func TestBuildMemoryInstructionsContent(t *testing.T) {
 // contents for cat commands. Files map keys are full container paths.
 func mockContainerForMemory(files map[string]string) *mockContainer {
 	// buildMemoryContext calls readContainerFile 3 times (AGENT.md, today, yesterday),
-	// then RunAgent calls mkdir (2x), setupClaudeConfig, and the agent exec.
+	// then RunAgent calls mkdir (2x), manifest pre-create, setupClaudeConfig, and the agent exec.
 	// We need to map cat calls to file contents.
 	mc := &mockContainer{}
 	mc.execFn = func(cfg provider.ExecConfig) (*provider.ExecResult, error) {
@@ -358,8 +358,8 @@ func TestRunAgentWithMemoryEnabled(t *testing.T) {
 	// The mock captures events; we can't directly inspect system prompt,
 	// but we verify the exec calls happened (cat calls for memory reading)
 	if callCount < 5 {
-		// Should have: 3 cat calls + 2 mkdir + setupClaudeConfig + agent exec = 7
-		t.Errorf("expected at least 5 exec calls (memory reads + dirs + exec), got %d", callCount)
+		// Should have: 3 cat calls + 2 mkdir + manifest + setupClaudeConfig + agent exec = 8
+		t.Errorf("expected at least 5 exec calls (memory reads + dirs + manifest + exec), got %d", callCount)
 	}
 }
 
@@ -378,7 +378,7 @@ func TestRunAgentMemoryDisabledNoExtraCalls(t *testing.T) {
 			if len(cfg.Cmd) == 2 && cfg.Cmd[0] == "cat" {
 				t.Errorf("unexpected cat call with memory disabled: %v", cfg.Cmd)
 			}
-			if callCount == 3 { // mkdir, setupClaudeConfig, agent exec
+			if callCount == 4 { // mkdir, manifest, setupClaudeConfig, agent exec
 				return &provider.ExecResult{ExecID: "exec-1", Reader: agentOutput}, nil
 			}
 			return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil

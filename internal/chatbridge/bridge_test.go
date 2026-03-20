@@ -19,6 +19,10 @@ type mockResolver struct {
 	err  error
 }
 
+func (m *mockResolver) CreateChat(_ context.Context, _ CreateChatRequest) error {
+	return nil
+}
+
 func (m *mockResolver) ResolveChat(_ context.Context, _ string) (*ChatInfo, error) {
 	return m.info, m.err
 }
