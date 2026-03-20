@@ -93,13 +93,14 @@ func (h *CrewTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Get handles GET /api/v1/crew-templates/{slug}
 func (h *CrewTemplateHandler) Get(w http.ResponseWriter, r *http.Request) {
+	wsID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 
 	var t crewTemplateResponse
 	var agentsJSON string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT id, name, slug, description, icon, color, category, agents_json, is_builtin, created_at
-		FROM crew_templates WHERE slug = ?`, slug).Scan(
+		FROM crew_templates WHERE slug = ? AND (is_builtin = 1 OR workspace_id = ?)`, slug, wsID).Scan(
 		&t.ID, &t.Name, &t.Slug, &t.Description, &t.Icon, &t.Color,
 		&t.Category, &agentsJSON, &t.IsBuiltin, &t.CreatedAt)
 	if err != nil {
@@ -139,11 +140,12 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		body.CrewSlug = slugify(body.CrewName)
 	}
 
-	// Load template
+	// Load template (scoped to workspace or builtins)
 	var agentsJSON string
 	var icon, color *string
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT agents_json, icon, color FROM crew_templates WHERE slug = ?`, slug).Scan(&agentsJSON, &icon, &color)
+		SELECT agents_json, icon, color FROM crew_templates
+		WHERE slug = ? AND (is_builtin = 1 OR workspace_id = ?)`, slug, wsID).Scan(&agentsJSON, &icon, &color)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Template not found")
