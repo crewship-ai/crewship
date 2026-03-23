@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure Go is on PATH when invoked via SSH non-login shell
+export PATH="$PATH:/usr/local/go/bin:$HOME/go/bin"
+
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # --- Multi-instance detection ---
