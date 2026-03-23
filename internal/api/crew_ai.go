@@ -1,19 +1,17 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/llm"
 )
 
 type CrewAIHandler struct {
@@ -89,17 +87,17 @@ func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cred, err := h.getAnthropicCred(r.Context(), wsID)
+	provider, err := h.getLLMProvider(r.Context(), wsID)
 	if err != nil {
-		h.logger.Warn("no anthropic API key for crew AI suggest", "workspace", wsID, "error", err)
+		h.logger.Warn("no LLM credential for crew AI suggest", "workspace", wsID, "error", err)
 		writeProblem(w, r, http.StatusUnprocessableEntity,
 			"No Anthropic API key found. Add a credential of type API_KEY / provider ANTHROPIC in Settings → Credentials. Note: Claude Code OAuth tokens cannot be used here — a plain API key (sk-ant-api*) is required.")
 		return
 	}
 
-	suggestion, err := h.callAnthropic(r.Context(), cred, body.Description)
+	suggestion, err := h.suggest(r.Context(), provider, body.Description)
 	if err != nil {
-		h.logger.Error("anthropic crew suggest", "error", err)
+		h.logger.Error("crew AI suggest", "error", err)
 		writeProblem(w, r, http.StatusBadGateway, "AI suggestion failed: "+err.Error())
 		return
 	}
@@ -107,14 +105,9 @@ func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, suggestion)
 }
 
-type anthropicCred struct {
-	plain string
-}
-
-// getAnthropicCred fetches and decrypts the first active Anthropic API_KEY for the workspace.
-// Note: AI_CLI_TOKEN (OAuth sk-ant-oat*) cannot be used for direct Messages API calls —
-// Anthropic does not support OAuth for their REST API. Only API_KEY works here.
-func (h *CrewAIHandler) getAnthropicCred(ctx context.Context, wsID string) (*anthropicCred, error) {
+// getLLMProvider fetches the first active Anthropic API_KEY for the workspace
+// and returns an llm.Provider ready to use.
+func (h *CrewAIHandler) getLLMProvider(ctx context.Context, wsID string) (llm.Provider, error) {
 	var encryptedValue string
 	err := h.db.QueryRowContext(ctx, `
 		SELECT encrypted_value FROM credentials
@@ -135,76 +128,26 @@ func (h *CrewAIHandler) getAnthropicCred(ctx context.Context, wsID string) (*ant
 	if err != nil {
 		return nil, fmt.Errorf("decrypt credential: %w", err)
 	}
-	return &anthropicCred{plain: plain}, nil
+	return llm.NewAnthropic(plain), nil
 }
 
-// callAnthropic sends the user description to Claude and parses the JSON response.
-func (h *CrewAIHandler) callAnthropic(ctx context.Context, cred *anthropicCred, description string) (*AISuggestResponse, error) {
-	reqBody, err := json.Marshal(map[string]interface{}{
-		"model":      "claude-3-5-haiku-20241022",
-		"max_tokens": 2048,
-		"system":     crewDesignerSystemPrompt,
-		"messages": []map[string]string{
-			{"role": "user", "content": description},
-		},
+// suggest calls the LLM provider to generate a crew definition from a description.
+func (h *CrewAIHandler) suggest(ctx context.Context, provider llm.Provider, description string) (*AISuggestResponse, error) {
+	resp, err := provider.Complete(ctx, llm.Request{
+		Model:     "claude-3-5-haiku-20241022",
+		System:    crewDesignerSystemPrompt,
+		MaxTokens: 2048,
+		Messages:  []llm.Message{{Role: llm.RoleUser, Content: description}},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("x-api-key", cred.plain)
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("invalid Anthropic API key — update the credential in Settings → Credentials")
-	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("Anthropic rate limit exceeded, try again in a moment")
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Anthropic API returned %d", resp.StatusCode)
-	}
-
-	// Parse Anthropic Messages API response
-	var anthropicResp struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(respBytes, &anthropicResp); err != nil {
-		return nil, fmt.Errorf("parse anthropic response: %w", err)
-	}
-
-	var rawJSON string
-	for _, block := range anthropicResp.Content {
-		if block.Type == "text" {
-			rawJSON = strings.TrimSpace(block.Text)
-			break
-		}
-	}
+	rawJSON := strings.TrimSpace(resp.Content)
 	if rawJSON == "" {
 		return nil, fmt.Errorf("empty response from AI")
 	}
 
-	// Strip any accidental markdown code fences
 	rawJSON = stripMarkdownFences(rawJSON)
 
 	var suggestion AISuggestResponse

@@ -17,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/llmproxy"
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/logging"
@@ -219,7 +220,8 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		// Wire Keeper gatekeeper (Ollama-based credential access control)
 		opts = append(opts, goapi.WithKeeperConfig(&cfg.Keeper))
 		if cfg.Keeper.Enabled {
-			gk := gatekeeper.New(cfg.Keeper.OllamaURL, cfg.Keeper.Model, logger)
+			provider := llm.NewOllama(cfg.Keeper.OllamaURL, cfg.Keeper.Model)
+			gk := gatekeeper.New(provider, cfg.Keeper.Model, logger)
 			opts = append(opts, goapi.WithKeeperGatekeeper(gk))
 			logger.Info("keeper gatekeeper enabled", "ollama_url", cfg.Keeper.OllamaURL, "model", cfg.Keeper.Model)
 		} else {

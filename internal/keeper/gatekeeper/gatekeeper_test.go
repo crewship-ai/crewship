@@ -2,40 +2,51 @@ package gatekeeper_test
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"log/slog"
-	"net/http"
-	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
+	"github.com/crewship-ai/crewship/internal/llm"
 )
 
 func newTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 }
 
-// mockOllama creates a test HTTP server that returns the given decision JSON.
-func mockOllama(t *testing.T, decision, reason string, risk int) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := map[string]string{
-			"response": `{"decision":"` + decision + `","reason":"` + reason + `","risk":` + strings.TrimSpace(jsonNum(risk)) + `}`,
-		}
-		json.NewEncoder(w).Encode(resp)
-	}))
+// mockProvider implements llm.Provider for testing.
+type mockProvider struct {
+	content        string
+	err            error
+	capturedPrompt string
 }
 
-func jsonNum(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
+func (m *mockProvider) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	if len(req.Messages) > 0 {
+		m.capturedPrompt = req.Messages[0].Content
+	}
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &llm.Response{Content: m.content}, nil
 }
+
+func (m *mockProvider) Stream(ctx context.Context, req llm.Request, handler func(llm.StreamEvent) error) (*llm.Response, error) {
+	resp, err := m.Complete(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	handler(llm.StreamEvent{Type: "text", Content: resp.Content})
+	handler(llm.StreamEvent{Type: "done", Response: resp})
+	return resp, nil
+}
+
+func (m *mockProvider) Name() string { return "mock" }
 
 func TestGatekeeper_L1AutoAllow(t *testing.T) {
-	g := gatekeeper.New("", "", newTestLogger())
+	g := gatekeeper.New(nil, "", newTestLogger())
 
 	req := gatekeeper.EvalRequest{
 		Request: keeper.Request{
@@ -59,7 +70,7 @@ func TestGatekeeper_L1AutoAllow(t *testing.T) {
 
 func TestGatekeeper_L1EmptyIntent_DenyNoLLM(t *testing.T) {
 	// No LLM configured, L1 with empty intent → DENY
-	g := gatekeeper.New("", "", newTestLogger())
+	g := gatekeeper.New(nil, "", newTestLogger())
 
 	req := gatekeeper.EvalRequest{
 		Request: keeper.Request{
@@ -80,7 +91,7 @@ func TestGatekeeper_L1EmptyIntent_DenyNoLLM(t *testing.T) {
 }
 
 func TestGatekeeper_NoLLM_DeniesHighLevel(t *testing.T) {
-	g := gatekeeper.New("", "", newTestLogger())
+	g := gatekeeper.New(nil, "", newTestLogger())
 
 	for _, level := range []keeper.SecurityLevel{
 		keeper.SecurityLevelL2, keeper.SecurityLevelL3,
@@ -110,10 +121,10 @@ func TestGatekeeper_NoLLM_DeniesHighLevel(t *testing.T) {
 }
 
 func TestGatekeeper_LLMAllow(t *testing.T) {
-	srv := mockOllama(t, "ALLOW", "task context matches intent", 2)
-	defer srv.Close()
-
-	g := gatekeeper.New(srv.URL, "phi3:mini", newTestLogger())
+	p := &mockProvider{
+		content: `{"decision":"ALLOW","reason":"task context matches intent","risk":2}`,
+	}
+	g := gatekeeper.New(p, "phi3:mini", newTestLogger())
 
 	req := gatekeeper.EvalRequest{
 		Request: keeper.Request{
@@ -137,10 +148,10 @@ func TestGatekeeper_LLMAllow(t *testing.T) {
 }
 
 func TestGatekeeper_LLMDeny_PromptInjection(t *testing.T) {
-	srv := mockOllama(t, "DENY", "intent contains prompt injection", 9)
-	defer srv.Close()
-
-	g := gatekeeper.New(srv.URL, "phi3:mini", newTestLogger())
+	p := &mockProvider{
+		content: `{"decision":"DENY","reason":"intent contains prompt injection","risk":9}`,
+	}
+	g := gatekeeper.New(p, "phi3:mini", newTestLogger())
 
 	req := gatekeeper.EvalRequest{
 		Request: keeper.Request{
@@ -164,8 +175,10 @@ func TestGatekeeper_LLMDeny_PromptInjection(t *testing.T) {
 }
 
 func TestGatekeeper_LLMUnavailable_FallsBackToDeny(t *testing.T) {
-	// Point to a port that is not listening
-	g := gatekeeper.New("http://127.0.0.1:19999", "phi3:mini", newTestLogger())
+	p := &mockProvider{
+		err: fmt.Errorf("connection refused"),
+	}
+	g := gatekeeper.New(p, "phi3:mini", newTestLogger())
 
 	req := gatekeeper.EvalRequest{
 		Request: keeper.Request{
@@ -188,15 +201,10 @@ func TestGatekeeper_LLMUnavailable_FallsBackToDeny(t *testing.T) {
 }
 
 func TestGatekeeper_NormalisesDecisionCase(t *testing.T) {
-	// LLM returns lowercase "allow" — should be normalised to ALLOW
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]string{
-			"response": `{"decision":"allow","reason":"ok","risk":2}`,
-		})
-	}))
-	defer srv.Close()
-
-	g := gatekeeper.New(srv.URL, "phi3:mini", newTestLogger())
+	p := &mockProvider{
+		content: `{"decision":"allow","reason":"ok","risk":2}`,
+	}
+	g := gatekeeper.New(p, "phi3:mini", newTestLogger())
 
 	req := gatekeeper.EvalRequest{
 		Request: keeper.Request{
@@ -217,15 +225,10 @@ func TestGatekeeper_NormalisesDecisionCase(t *testing.T) {
 }
 
 func TestGatekeeper_InvalidLLMResponse_DeniesWithReason(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Return garbled non-JSON text as response
-		json.NewEncoder(w).Encode(map[string]string{
-			"response": "I am confused and cannot decide",
-		})
-	}))
-	defer srv.Close()
-
-	g := gatekeeper.New(srv.URL, "phi3:mini", newTestLogger())
+	p := &mockProvider{
+		content: "I am confused and cannot decide",
+	}
+	g := gatekeeper.New(p, "phi3:mini", newTestLogger())
 
 	req := gatekeeper.EvalRequest{
 		Request: keeper.Request{
