@@ -5,6 +5,7 @@ const goPort = process.env.NEXT_PUBLIC_GO_PORT || "8080"
 
 const nextConfig: NextConfig = {
   ...(isDev ? {} : { output: "export" }),
+  allowedDevOrigins: ["10.0.0.1"],
   images: {
     unoptimized: true,
   },
