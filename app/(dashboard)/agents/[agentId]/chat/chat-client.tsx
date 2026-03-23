@@ -2,6 +2,7 @@
 
 import { useParams, useSearchParams } from "next/navigation"
 import { useState, useEffect, useCallback } from "react"
+import { nanoid } from "nanoid"
 import { Plus, Info, Search, User, Bot, LayoutGrid, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
@@ -103,7 +104,7 @@ export function ChatPageClient() {
 
   useEffect(() => {
     if (sessionsLoaded && !activeSessionId) {
-      setActiveSessionId(crypto.randomUUID())
+      setActiveSessionId(nanoid())
     }
   }, [sessionsLoaded, activeSessionId])
 
@@ -114,7 +115,7 @@ export function ChatPageClient() {
   }, [sessionsLoaded, workspaceId, refreshSessions])
 
   const handleNewSession = useCallback(() => {
-    setActiveSessionId(crypto.randomUUID())
+    setActiveSessionId(nanoid())
     setMobileView("chat")
   }, [])
 
