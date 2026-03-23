@@ -537,6 +537,7 @@ func init() {
 	missionUpdateCmd.Flags().String("status", "", "Status: PLANNING|IN_PROGRESS|COMPLETED|FAILED")
 
 	missionDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
+	missionRestartCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	missionAddTaskCmd.Flags().String("title", "", "Task title (required)")
 	missionAddTaskCmd.Flags().String("description", "", "Task description")
@@ -551,5 +552,41 @@ func init() {
 	missionCmd.AddCommand(missionDeleteCmd)
 	missionCmd.AddCommand(missionStartCmd)
 	missionCmd.AddCommand(missionResumeCmd)
+	missionCmd.AddCommand(missionRestartCmd)
 	missionCmd.AddCommand(missionAddTaskCmd)
+}
+
+var missionRestartCmd = &cobra.Command{
+	Use:   "restart <id>",
+	Short: "Restart a mission from the beginning (resets all tasks)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		if err := confirmAction(cmd, fmt.Sprintf("Restart mission %q from the beginning?", args[0])); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		crewID, fullID, err := resolveMission(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		resp, err := client.Post("/api/v1/crews/"+crewID+"/missions/"+fullID+"/restart", nil)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+
+		cli.PrintSuccess(fmt.Sprintf("Mission %s restarted — all tasks reset, DAG engine running.", args[0]))
+		return nil
+	},
 }

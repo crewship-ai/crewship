@@ -210,12 +210,15 @@ export default function NewAgentPage() {
                   value={slug}
                   onChange={(e) => {
                     setSlugManual(true)
-                    setSlug(e.target.value)
+                    setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))
                   }}
                   placeholder="claude-seo-writer"
                   className="font-mono text-sm"
+                  pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                  maxLength={60}
                   required
                 />
+                <p className="text-micro text-muted-foreground">Lowercase letters, numbers, and hyphens only.</p>
               </div>
             </div>
             <div className="space-y-2">

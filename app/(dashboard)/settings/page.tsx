@@ -585,8 +585,10 @@ export default function SettingsPage() {
       <div className="w-56 border-r bg-background flex flex-col flex-shrink-0 overflow-y-auto">
         {/* Scope switcher */}
         <div className="p-3 border-b">
-          <div className="flex gap-1 p-0.5 bg-muted rounded-lg">
+          <div className="flex gap-1 p-0.5 bg-muted rounded-lg" role="tablist" aria-label="Settings scope">
             <button
+              role="tab"
+              aria-selected={scope === "user"}
               className={cn(
                 "flex-1 text-xs py-1.5 rounded-md font-medium transition-colors",
                 scope === "user" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
@@ -596,6 +598,8 @@ export default function SettingsPage() {
               User
             </button>
             <button
+              role="tab"
+              aria-selected={scope === "org"}
               className={cn(
                 "flex-1 text-xs py-1.5 rounded-md font-medium transition-colors",
                 scope === "org" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"

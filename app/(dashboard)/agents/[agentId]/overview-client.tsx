@@ -11,39 +11,15 @@ import {
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { AnimatedNumber } from "@/components/ui/animated-number"
+import { FlashHighlight } from "@/components/ui/flash-highlight"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { getCrewDotColor } from "@/lib/crew-icon"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { CLI_ADAPTERS } from "@/lib/cli-adapters"
+import { timeAgo, formatDuration, formatTimeout } from "@/lib/time"
 
-
-function formatTimeout(seconds: number): string {
-  if (seconds >= 3600) return `${Math.round(seconds / 3600)}h`
-  return `${Math.round(seconds / 60)} min`
-}
-
-function timeAgo(dateStr: string): string {
-  const now = Date.now()
-  const then = new Date(dateStr).getTime()
-  const diff = now - then
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return "just now"
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days === 1) return "yesterday"
-  return `${days}d ago`
-}
-
-function formatDuration(ms: number): string {
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const remainder = s % 60
-  return remainder > 0 ? `${m}m ${remainder}s` : `${m}m`
-}
 
 interface RecentChat {
   id: string
@@ -60,6 +36,52 @@ interface RecentRun {
   finished_at: string | null
   metadata: Record<string, unknown> | null
   created_at: string
+}
+
+function StatMiniCard({
+  href,
+  icon: Icon,
+  label,
+  value,
+  subtitle,
+  disabled,
+}: {
+  href: string
+  icon: React.ElementType
+  label: string
+  value: number | string
+  subtitle: string
+  disabled?: boolean
+}) {
+  const content = (
+    <FlashHighlight trigger={value}>
+      <Card className={disabled ? "" : "transition-all duration-150 group-hover:border-primary/30 group-hover:bg-accent/30"}>
+        <CardContent className="p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
+            <Icon className="h-3.5 w-3.5" />
+            <span className="text-micro uppercase tracking-wider font-semibold">{label}</span>
+          </div>
+          <div className="text-title font-bold">
+            {typeof value === "number" ? <AnimatedNumber value={value} /> : value}
+          </div>
+          <div className="text-micro text-muted-foreground mt-0.5">{subtitle}</div>
+        </CardContent>
+      </Card>
+    </FlashHighlight>
+  )
+
+  if (disabled) {
+    return <div className="opacity-60">{content}</div>
+  }
+
+  return (
+    <Link
+      href={href}
+      className="group rounded-[var(--radius)] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 outline-none"
+    >
+      {content}
+    </Link>
+  )
 }
 
 export function AgentOverviewPageClient() {
@@ -129,84 +151,52 @@ export function AgentOverviewPageClient() {
   return (
     <div className="p-4 sm:p-6 space-y-5">
       {/* Stats Row — 5 columns */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <Link href={`/agents/${agentId}/runs`} className="group">
-          <Card className="transition-colors group-hover:border-primary/30">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
-                <Zap className="h-3.5 w-3.5" />
-                <span className="text-micro uppercase tracking-wider font-semibold">Runs</span>
-              </div>
-              <div className="text-title font-bold">{totalRuns}</div>
-              <div className="text-micro text-muted-foreground mt-0.5">
-                {totalCompletedRunCount} completed
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-        <Link href={`/agents/${agentId}/chat`} className="group">
-          <Card className="transition-colors group-hover:border-primary/30">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
-                <MessagesSquare className="h-3.5 w-3.5" />
-                <span className="text-micro uppercase tracking-wider font-semibold">Sessions</span>
-              </div>
-              <div className="text-title font-bold">{agent._count?.chats ?? 0}</div>
-              <div className="text-micro text-muted-foreground mt-0.5">
-                {activeChats > 0 ? `${activeChats} active` : "none active"}
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-        <Link href={`/agents/${agentId}/skills`} className="group">
-          <Card className="transition-colors group-hover:border-primary/30">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
-                <Puzzle className="h-3.5 w-3.5" />
-                <span className="text-micro uppercase tracking-wider font-semibold">Skills</span>
-              </div>
-              <div className="text-title font-bold">{agent._count?.skills ?? 0}</div>
-              <div className="text-micro text-muted-foreground mt-0.5">
-                {(agent._count?.skills ?? 0) > 0 ? "assigned" : "none assigned"}
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-        <Link href={`/agents/${agentId}/credentials`} className="group">
-          <Card className="transition-colors group-hover:border-primary/30">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
-                <KeyRound className="h-3.5 w-3.5" />
-                <span className="text-micro uppercase tracking-wider font-semibold">Credentials</span>
-              </div>
-              <div className="text-title font-bold">{agent._count?.credentials ?? 0}</div>
-              <div className="text-micro text-muted-foreground mt-0.5">
-                {(agent._count?.credentials ?? 0) > 0 ? `${agent._count.credentials} active` : "none"}
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-        <Link href={`/agents/${agentId}/files`} className="group col-span-2 sm:col-span-1">
-          <Card className="transition-colors group-hover:border-primary/30">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 text-muted-foreground mb-1.5">
-                <FileText className="h-3.5 w-3.5" />
-                <span className="text-micro uppercase tracking-wider font-semibold">Files</span>
-              </div>
-              <div className="text-title font-bold">&mdash;</div>
-              <div className="text-micro text-muted-foreground mt-0.5">container off</div>
-            </CardContent>
-          </Card>
-        </Link>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+        <StatMiniCard
+          href={`/agents/${agentId}/runs`}
+          icon={Zap}
+          label="Runs"
+          value={totalRuns}
+          subtitle={`${totalCompletedRunCount} completed`}
+        />
+        <StatMiniCard
+          href={`/agents/${agentId}/chat`}
+          icon={MessagesSquare}
+          label="Sessions"
+          value={agent._count?.chats ?? 0}
+          subtitle={activeChats > 0 ? `${activeChats} active` : "none active"}
+        />
+        <StatMiniCard
+          href={`/agents/${agentId}/skills`}
+          icon={Puzzle}
+          label="Skills"
+          value={agent._count?.skills ?? 0}
+          subtitle={(agent._count?.skills ?? 0) > 0 ? "assigned" : "none assigned"}
+        />
+        <StatMiniCard
+          href={`/agents/${agentId}/credentials`}
+          icon={KeyRound}
+          label="Credentials"
+          value={agent._count?.credentials ?? 0}
+          subtitle={(agent._count?.credentials ?? 0) > 0 ? `${agent._count.credentials} active` : "none"}
+        />
+        <StatMiniCard
+          href={`/agents/${agentId}/files`}
+          icon={FileText}
+          label="Files"
+          value="\u2014"
+          subtitle="container off"
+          disabled
+        />
       </div>
 
       {/* Config + Activity Grid: 1 col config, 2 cols activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* LEFT: Config cards stacked */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* LEFT: Config card (merged Runtime + Identity) + System Prompt */}
         <div className="space-y-4">
-          {/* Runtime */}
           <Card>
             <CardContent className="p-4 space-y-3">
+              {/* Runtime section */}
               <div className="flex items-center gap-2 mb-1">
                 <Terminal className="h-4 w-4 text-muted-foreground" />
                 <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">Runtime</span>
@@ -243,12 +233,11 @@ export function AgentOverviewPageClient() {
                   </span>
                 </div>
               </div>
-            </CardContent>
-          </Card>
 
-          {/* Identity */}
-          <Card>
-            <CardContent className="p-4 space-y-3">
+              {/* Divider */}
+              <div className="border-t" />
+
+              {/* Identity section */}
               <div className="flex items-center gap-2 mb-1">
                 <Shield className="h-4 w-4 text-muted-foreground" />
                 <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">Identity</span>
@@ -261,7 +250,7 @@ export function AgentOverviewPageClient() {
                 {agent.crew && (
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Crew</span>
-                    <Link href={`/crews/${agent.crew_id}`} className="flex items-center gap-1.5 hover:underline">
+                    <Link href={`/crews/${agent.crew_id}`} className="flex items-center gap-1.5 hover:underline" aria-label={`Go to ${agent.crew.name} crew`}>
                       <span
                         className="h-2 w-2 rounded-full"
                         style={{ backgroundColor: getCrewDotColor(agent.crew.color) }}
@@ -276,7 +265,7 @@ export function AgentOverviewPageClient() {
                     <Brain className="h-3.5 w-3.5 text-muted-foreground" />
                     <Badge
                       variant="secondary"
-                      className={`text-xs ${agent.memory_enabled ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400" : ""}`}
+                      className={`text-xs ${agent.memory_enabled ? "status-success" : ""}`}
                     >
                       {agent.memory_enabled ? "On" : "Off"}
                     </Badge>
@@ -309,7 +298,7 @@ export function AgentOverviewPageClient() {
         </div>
 
         {/* RIGHT: Recent Activity */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="md:col-span-1 lg:col-span-2 space-y-4">
           {/* Recent Sessions */}
           <Card>
             <CardContent className="p-0">
@@ -343,7 +332,7 @@ export function AgentOverviewPageClient() {
                         </div>
                       </div>
                       {chat.status === "ACTIVE" ? (
-                        <Badge variant="secondary" className="text-micro bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 gap-1 shrink-0">
+                        <Badge variant="secondary" className="text-micro status-success gap-1 shrink-0">
                           <span className="h-1 w-1 rounded-full bg-emerald-500" />
                           active
                         </Badge>
@@ -375,34 +364,36 @@ export function AgentOverviewPageClient() {
                 </div>
               ) : (
                 <div className="divide-y">
-                  {recentRuns.map((run, idx) => {
+                  {recentRuns.map((run) => {
                     const isSuccess = run.status === "COMPLETED"
                     const isError = run.status === "FAILED" || run.status === "ERROR"
                     const rawCost = run.metadata?.total_cost_usd
                     const cost = typeof rawCost === "number" && isFinite(rawCost) ? rawCost : undefined
                     const rawDur = run.metadata?.duration_api_ms
                     const durationMs = typeof rawDur === "number" && isFinite(rawDur) ? rawDur : undefined
+                    const runTs = run.started_at || run.created_at
                     return (
                       <div
                         key={run.id}
-                        className="flex items-center justify-between px-4 py-2.5 hover:bg-muted/50 transition-colors"
+                        className="flex items-center justify-between px-4 py-2.5"
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full shrink-0 ${
                             isError
-                              ? "bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400"
+                              ? "status-error"
                               : isSuccess
-                                ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400"
+                                ? "status-success"
                                 : "bg-muted text-muted-foreground"
                           }`}>
                             {isError ? <X className="h-3 w-3" /> : <Check className="h-3 w-3" />}
                           </span>
                           <div className="min-w-0">
-                            <div className="text-body truncate">Run #{recentRuns.length - idx}</div>
-                            <div className="text-micro text-muted-foreground">
-                              {timeAgo(run.started_at || run.created_at)}
+                            <div className="text-body truncate">
+                              {timeAgo(runTs)}
                               {durationMs ? ` \u00B7 ${formatDuration(durationMs)}` : ""}
-                              {cost ? ` \u00B7 $${cost.toFixed(2)}` : ""}
+                            </div>
+                            <div className="text-micro text-muted-foreground">
+                              {cost ? `$${cost.toFixed(2)}` : run.id.slice(0, 8)}
                             </div>
                           </div>
                         </div>
@@ -436,19 +427,18 @@ function OverviewSkeleton() {
           <Skeleton className="h-4 w-32" />
         </div>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={i} className="h-24 rounded-xl" />
+          <Skeleton key={i} className="h-24 rounded-[var(--radius)]" />
         ))}
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="space-y-4">
-          <Skeleton className="h-48 rounded-xl" />
-          <Skeleton className="h-40 rounded-xl" />
+          <Skeleton className="h-80 rounded-[var(--radius)]" />
         </div>
-        <div className="lg:col-span-2 space-y-4">
-          <Skeleton className="h-44 rounded-xl" />
-          <Skeleton className="h-44 rounded-xl" />
+        <div className="md:col-span-1 lg:col-span-2 space-y-4">
+          <Skeleton className="h-44 rounded-[var(--radius)]" />
+          <Skeleton className="h-44 rounded-[var(--radius)]" />
         </div>
       </div>
     </div>

@@ -544,6 +544,10 @@ func init() {
 
 	credDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
+	credTestCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|GITLAB|VERCEL|AWS|CUSTOM_CLI (required)")
+	credTestCmd.Flags().String("type", "", "Type: API_KEY|AI_CLI_TOKEN|SECRET|CLI_TOKEN")
+	credTestCmd.Flags().String("value", "", "Credential value to test (required)")
+
 	credentialCmd.AddCommand(credListCmd)
 	credentialCmd.AddCommand(credCreateCmd)
 	credentialCmd.AddCommand(credGetCmd)
@@ -551,4 +555,60 @@ func init() {
 	credentialCmd.AddCommand(credDeleteCmd)
 	credentialCmd.AddCommand(credAssignCmd)
 	credentialCmd.AddCommand(credUnassignCmd)
+	credentialCmd.AddCommand(credTestCmd)
+}
+
+var credTestCmd = &cobra.Command{
+	Use:   "test",
+	Short: "Test a credential value before saving (validates against the provider API)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+
+		provider, _ := cmd.Flags().GetString("provider")
+		credType, _ := cmd.Flags().GetString("type")
+		value, _ := cmd.Flags().GetString("value")
+
+		if provider == "" {
+			return fmt.Errorf("--provider is required (e.g. ANTHROPIC, OPENAI, GOOGLE)")
+		}
+		if value == "" {
+			return fmt.Errorf("--value is required")
+		}
+
+		client := newAPIClient()
+		client.WorkspaceID = ""
+		resp, err := client.Post("/api/v1/credentials/test", map[string]string{
+			"provider": provider,
+			"type":     credType,
+			"value":    value,
+		})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var result struct {
+			Valid  bool   `json:"valid"`
+			Status int    `json:"status"`
+			Error  string `json:"error"`
+		}
+		if err := cli.ReadJSON(resp, &result); err != nil {
+			return err
+		}
+
+		if result.Valid {
+			cli.PrintSuccess("Credential is valid.")
+		} else {
+			msg := result.Error
+			if msg == "" {
+				msg = "validation failed"
+			}
+			cli.PrintError(fmt.Sprintf("Credential invalid: %s", msg))
+		}
+		return nil
+	},
 }

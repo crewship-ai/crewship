@@ -185,8 +185,10 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 	o.mu.Unlock()
 
-	o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
-	defer o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
+	if req.ContainerID != "" {
+		o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
+		defer o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
+	}
 
 	runState := RunState{
 		ID:          req.ChatID,

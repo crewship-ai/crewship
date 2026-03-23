@@ -74,7 +74,19 @@ export function LogsPageClient() {
         return
       }
       const data: LogEntry[] = await res.json()
-      setLogs(data)
+      // Merge/dedupe with existing logs to avoid clobbering streamed entries
+      setLogs((prev) => {
+        if (prev.length === 0) return data
+        const existing = new Set(prev.map((l) => `${l.ts}|${l.agent}|${l.event}`))
+        const merged = [...prev]
+        for (const entry of data) {
+          if (!existing.has(`${entry.ts}|${entry.agent}|${entry.event}`)) {
+            merged.push(entry)
+          }
+        }
+        merged.sort((a, b) => a.ts.localeCompare(b.ts))
+        return merged
+      })
       setError(null)
     } catch {
       setError("Network error. Is the engine running?")
@@ -165,6 +177,7 @@ export function LogsPageClient() {
             <button
               key={lvl}
               aria-pressed={filter === lvl}
+              aria-label={`Filter by ${lvl}`}
               className={`px-2 py-0.5 rounded text-xs transition-colors ${
                 filter === lvl
                   ? "bg-neutral-700 text-white font-medium"

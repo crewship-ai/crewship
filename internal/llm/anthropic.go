@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -24,7 +26,12 @@ type Anthropic struct {
 func NewAnthropic(apiKey string) *Anthropic {
 	return &Anthropic{
 		apiKey: apiKey,
-		client: &http.Client{Timeout: 120 * time.Second},
+		client: &http.Client{
+			Timeout: 120 * time.Second,
+			Transport: &http.Transport{
+				DisableCompression: true, // SSE lines are small — gzip adds latency, not value
+			},
+		},
 	}
 }
 
@@ -35,13 +42,9 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (*Response, error
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := a.newHTTPRequest(ctx, body)
+	resp, err := a.doWithRetry(ctx, body)
 	if err != nil {
 		return nil, err
-	}
-	resp, err := a.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic http: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -61,13 +64,9 @@ func (a *Anthropic) Stream(ctx context.Context, req Request, handler func(Stream
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := a.newHTTPRequest(ctx, body)
+	resp, err := a.doWithRetry(ctx, body)
 	if err != nil {
 		return nil, err
-	}
-	resp, err := a.client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("anthropic http: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -85,6 +84,7 @@ func (a *Anthropic) newHTTPRequest(ctx context.Context, body []byte) (*http.Requ
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 	req.Header.Set("x-api-key", a.apiKey)
 	return req, nil
 }
@@ -100,7 +100,13 @@ func (a *Anthropic) buildRequestBody(req Request, stream bool) ([]byte, error) {
 		"messages": msgs,
 	}
 	if req.System != "" {
-		body["system"] = req.System
+		// Use structured system prompt with cache_control for prompt caching.
+		// This allows Anthropic to cache the system prompt across turns in a session.
+		body["system"] = []map[string]any{{
+			"type": "text",
+			"text": req.System,
+			"cache_control": map[string]string{"type": "ephemeral"},
+		}}
 	}
 	maxToks := req.MaxTokens
 	if maxToks == 0 {
@@ -170,7 +176,10 @@ func (r *anthropicResponse) toResponse() *Response {
 		case "text":
 			textParts = append(textParts, block.Text)
 		case "tool_use":
-			inputJSON, _ := json.Marshal(block.Input)
+			inputJSON, err := json.Marshal(block.Input)
+			if err != nil {
+				inputJSON = []byte("{}")
+			}
 			resp.ToolCalls = append(resp.ToolCalls, ToolCall{
 				ID:    block.ID,
 				Name:  block.Name,
@@ -200,7 +209,9 @@ func toAnthropicMessage(m Message) anthropicMessage {
 		}
 		for _, tc := range m.ToolCalls {
 			var input any
-			_ = json.Unmarshal([]byte(tc.Input), &input)
+			if err := json.Unmarshal([]byte(tc.Input), &input); err != nil {
+				input = map[string]any{}
+			}
 			blocks = append(blocks, anthropicContentBlock{
 				Type:  "tool_use",
 				ID:    tc.ID,
@@ -225,6 +236,14 @@ func toAnthropicTools(tools []ToolDef) []anthropicTool {
 	return out
 }
 
+// retryableStatusCodes are HTTP status codes that should trigger a retry.
+var retryableStatusCodes = map[int]bool{
+	429: true, // Rate limited
+	500: true, // Internal server error
+	503: true, // Service unavailable
+	529: true, // Overloaded
+}
+
 func checkAnthropicStatus(resp *http.Response) error {
 	if resp.StatusCode == http.StatusOK {
 		return nil
@@ -240,10 +259,58 @@ func checkAnthropicStatus(resp *http.Response) error {
 	}
 }
 
+// doWithRetry executes an HTTP request with exponential backoff retry on transient errors.
+// Max 3 attempts. Respects Retry-After header.
+func (a *Anthropic) doWithRetry(ctx context.Context, body []byte) (*http.Response, error) {
+	const maxRetries = 3
+	baseDelay := time.Second
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		httpReq, err := a.newHTTPRequest(ctx, body)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := a.client.Do(httpReq)
+		if err != nil {
+			lastErr = fmt.Errorf("anthropic http: %w", err)
+			if ctx.Err() != nil {
+				return nil, lastErr
+			}
+			// Network error — retry
+		} else if !retryableStatusCodes[resp.StatusCode] {
+			return resp, nil // Success or non-retryable error
+		} else {
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			resp.Body.Close()
+			lastErr = fmt.Errorf("Anthropic API returned %d: %s", resp.StatusCode, respBody)
+
+			// Check Retry-After header
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+					baseDelay = time.Duration(secs) * time.Second
+				}
+			}
+		}
+
+		if attempt < maxRetries-1 {
+			delay := baseDelay * (1 << attempt) // 1s, 2s, 4s
+			jitter := time.Duration(rand.Int63n(int64(delay / 4)))
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay + jitter):
+			}
+		}
+	}
+	return nil, fmt.Errorf("anthropic: max retries exceeded: %w", lastErr)
+}
+
 // parseSSEStream reads Anthropic's SSE stream and emits StreamEvents.
 func (a *Anthropic) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*Response, error) {
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Buffer(make([]byte, 0, 4*1024), 1024*1024) // 4KB initial (SSE lines are small), 1MB max for tool results
 
 	final := &Response{StopReason: StopEndTurn}
 	var textParts []string

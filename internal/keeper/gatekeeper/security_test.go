@@ -118,7 +118,9 @@ func TestGatekeeper_ConvHistory_Sanitized_In_Prompt(t *testing.T) {
 		CrewName:    "DevOps",
 	}
 
-	g.Evaluate(context.Background(), req)
+	if _, err := g.Evaluate(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if p.capturedPrompt == "" {
 		t.Fatal("expected LLM to be called, but prompt was empty")
@@ -232,7 +234,9 @@ func TestGatekeeper_PromptDoesNotContainRawIntent_Unquoted(t *testing.T) {
 		AgentName:      "DeployBot",
 	}
 
-	g.Evaluate(context.Background(), req)
+	if _, err := g.Evaluate(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if p.capturedPrompt == "" {
 		t.Fatal("expected LLM to be called")
