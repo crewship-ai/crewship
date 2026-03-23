@@ -50,6 +50,9 @@ func captainCheckRateLimit(userID string) bool {
 		captainRateLimiter.windows[userID] = valid
 		return false
 	}
+	if len(valid) == 0 {
+		delete(captainRateLimiter.windows, userID)
+	}
 	captainRateLimiter.windows[userID] = append(valid, now)
 	return true
 }
@@ -108,7 +111,7 @@ func (h *CaptainHandler) saveHistory(ctx context.Context, chatID, wsID, userID s
 	return err
 }
 
-// writeCaptainSSE writes a single SSE data frame and flushes.
+// writeCaptainSSE writes a single SSE data frame and flushes immediately.
 func writeCaptainSSE(w http.ResponseWriter, payload map[string]any) {
 	data, _ := json.Marshal(payload)
 	fmt.Fprintf(w, "data: %s\n\n", data)
@@ -117,7 +120,18 @@ func writeCaptainSSE(w http.ResponseWriter, payload map[string]any) {
 	}
 }
 
-// Chat handles POST /api/v1/captain/chat with SSE streaming and tool execution loop.
+// writeCaptainTextSSE is an optimized fast-path for text streaming — avoids map allocation.
+func writeCaptainTextSSE(w http.ResponseWriter, text string) {
+	// Escape JSON string inline — faster than json.Marshal for simple text
+	escaped, _ := json.Marshal(text)
+	fmt.Fprintf(w, "data: {\"type\":\"text\",\"content\":%s}\n\n", escaped)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Chat handles POST /api/v1/captain/chat with SSE streaming.
+// Uses direct LLM API calls with native tool calling.
 func (h *CaptainHandler) Chat(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	user := UserFromContext(r.Context())
@@ -152,22 +166,40 @@ func (h *CaptainHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	systemPrompt := buildCaptainSystemPrompt(r.Context(), h.db, wsID, body.Message)
+	h.chatViaDirect(w, r, systemPrompt, body.Message, msgs, chatID, wsID, user.ID)
+}
+
+// chatViaDirect handles Captain chat via direct Anthropic API calls with tool loop.
+func (h *CaptainHandler) chatViaDirect(
+	w http.ResponseWriter, r *http.Request,
+	systemPrompt, userMessage string,
+	msgs []llm.Message,
+	chatID, wsID, userID string,
+) {
 	provider, err := h.getProvider(r, wsID)
 	if err != nil {
 		h.logger.Warn("captain: no LLM provider", "workspace", wsID, "error", err)
 		writeProblem(w, r, http.StatusUnprocessableEntity,
-			"No LLM provider configured. Add an Anthropic API key in Settings → Credentials.")
+			"Captain requires an LLM API key. Add one in Settings → Credentials. Supported: Anthropic, OpenAI.")
 		return
 	}
 
-	systemPrompt := buildCaptainSystemPrompt(r.Context(), h.db, wsID)
-	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: strings.TrimSpace(body.Message)})
+	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: strings.TrimSpace(userMessage)})
+
+	// Prune conversation to fit within context window (~200K tokens for Haiku 4.5).
+	// Keep system prompt + recent messages within 80% of context (640K chars ≈ 160K tokens).
+	msgs = pruneConversation(msgs, 640000)
 
 	// Switch to SSE — headers must be set before any write.
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+
+	// Disable write timeout for SSE streaming (default 15s is too short for LLM calls).
+	rc := http.NewResponseController(w)
+	rc.SetWriteDeadline(time.Time{}) // zero = no deadline
 
 	role := RoleFromContext(r.Context())
 
@@ -176,7 +208,7 @@ func (h *CaptainHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		var assistantTextBuf strings.Builder
 
 		finalResp, streamErr := provider.Stream(r.Context(), llm.Request{
-			Model:     "claude-3-5-haiku-20241022",
+			Model:     "claude-haiku-4-5-20251001",
 			System:    systemPrompt,
 			Messages:  msgs,
 			Tools:     CaptainTools,
@@ -184,7 +216,7 @@ func (h *CaptainHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		}, func(ev llm.StreamEvent) error {
 			if ev.Type == "text" {
 				assistantTextBuf.WriteString(ev.Content)
-				writeCaptainSSE(w, map[string]any{"type": "text", "content": ev.Content})
+				writeCaptainTextSSE(w, ev.Content)
 			}
 			return nil
 		})
@@ -195,7 +227,6 @@ func (h *CaptainHandler) Chat(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// Append assistant message (text + tool calls if any).
 		assistantMsg := llm.Message{
 			Role:    llm.RoleAssistant,
 			Content: assistantTextBuf.String(),
@@ -209,14 +240,13 @@ func (h *CaptainHandler) Chat(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// Execute each tool and feed results back.
 		for _, tc := range finalResp.ToolCalls {
 			WriteAuditLog(r.Context(), h.db, "captain_tool_call", "CAPTAIN", tc.Name,
-				user.ID, wsID, map[string]interface{}{"tool_id": tc.ID})
+				userID, wsID, map[string]interface{}{"tool_id": tc.ID})
 
 			writeCaptainSSE(w, map[string]any{"type": "tool_call", "id": tc.ID, "name": tc.Name})
 
-			result, toolErr := h.executeTool(r.Context(), wsID, user.ID, role, tc)
+			result, toolErr := h.executeTool(r.Context(), wsID, userID, role, tc)
 			if toolErr != nil {
 				result = "Error: " + toolErr.Error()
 			}
@@ -232,7 +262,7 @@ func (h *CaptainHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.saveHistory(r.Context(), chatID, wsID, user.ID, msgs); err != nil {
+	if err := h.saveHistory(r.Context(), chatID, wsID, userID, msgs); err != nil {
 		h.logger.Error("captain: save history", "error", err)
 	}
 
@@ -244,16 +274,26 @@ func (h *CaptainHandler) Context(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var crewCount, agentCount, escalationCount, proposalCount, missionCount int
-	h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&crewCount)
-	h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&agentCount)
-	h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM escalations WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&escalationCount)
-	h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM mission_proposals WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&proposalCount)
-	h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'", wsID).Scan(&missionCount)
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&crewCount); err != nil {
+		h.logger.Error("captain context: count crews", "workspace", wsID, "error", err)
+	}
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&agentCount); err != nil {
+		h.logger.Error("captain context: count agents", "workspace", wsID, "error", err)
+	}
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM escalations WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&escalationCount); err != nil {
+		h.logger.Error("captain context: count escalations", "workspace", wsID, "error", err)
+	}
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM mission_proposals WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&proposalCount); err != nil {
+		h.logger.Error("captain context: count proposals", "workspace", wsID, "error", err)
+	}
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'", wsID).Scan(&missionCount); err != nil {
+		h.logger.Error("captain context: count missions", "workspace", wsID, "error", err)
+	}
 
 	phase := captainWorkspacePhase(r.Context(), h.db, wsID, crewCount, agentCount)
 
@@ -312,27 +352,52 @@ func (h *CaptainHandler) getProvider(r *http.Request, wsID string) (llm.Provider
 	if h.provider != nil {
 		return h.provider, nil
 	}
-	var encryptedValue string
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT encrypted_value FROM credentials
+
+	// Try providers in priority order: Anthropic → OpenAI → Ollama
+	type credRow struct {
+		Provider       string
+		EncryptedValue string
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT provider, encrypted_value FROM credentials
 		WHERE workspace_id = ?
-		  AND provider = 'ANTHROPIC'
 		  AND type = 'API_KEY'
 		  AND status = 'ACTIVE'
 		  AND deleted_at IS NULL
-		ORDER BY created_at ASC
-		LIMIT 1`, wsID).Scan(&encryptedValue)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errors.New("no active Anthropic credential in workspace")
-	}
+		  AND provider IN ('ANTHROPIC', 'OPENAI')
+		ORDER BY
+			CASE provider
+				WHEN 'ANTHROPIC' THEN 1
+				WHEN 'OPENAI' THEN 2
+			END,
+			created_at ASC`, wsID)
 	if err != nil {
 		return nil, err
 	}
-	plain, err := encryption.Decrypt(encryptedValue)
-	if err != nil {
-		return nil, err
+	defer rows.Close()
+
+	for rows.Next() {
+		var c credRow
+		if err := rows.Scan(&c.Provider, &c.EncryptedValue); err != nil {
+			continue
+		}
+		plain, err := encryption.Decrypt(c.EncryptedValue)
+		if err != nil {
+			continue
+		}
+		switch c.Provider {
+		case "ANTHROPIC":
+			return llm.NewAnthropic(plain), nil
+		case "OPENAI":
+			return llm.NewOpenAI(plain), nil
+		}
 	}
-	return llm.NewAnthropic(plain), nil
+
+	// Fallback: try Ollama (no API key needed)
+	return nil, errors.New(
+		"Captain requires an LLM API key. Add one in Settings → Credentials. " +
+			"Supported: Anthropic, OpenAI.")
 }
 
 func (h *CaptainHandler) executeTool(ctx context.Context, wsID, userID, role string, tc llm.ToolCall) (string, error) {
@@ -369,25 +434,136 @@ func captainWorkspacePhase(ctx context.Context, db *sql.DB, wsID string, crewCou
 	return 4
 }
 
+// detectLanguageFromMessage returns "Czech" if the message appears to be Czech, otherwise "".
+func detectLanguageFromMessage(msg string) string {
+	czechIndicators := []string{"č", "š", "ž", "ř", "ů", "ú", "í", "á", "é", "ě", "ý", "ó",
+		" je ", " se ", " na ", " to ", " co ", "ahoj", "dobrý", "díky", "prosím", "jak"}
+	lower := strings.ToLower(msg)
+	matches := 0
+	for _, ind := range czechIndicators {
+		if strings.Contains(lower, ind) {
+			matches++
+		}
+	}
+	if matches >= 2 {
+		return "Czech"
+	}
+	return ""
+}
+
 // buildCaptainSystemPrompt builds a dynamic system prompt based on workspace phase.
-func buildCaptainSystemPrompt(ctx context.Context, db *sql.DB, wsID string) string {
-	var crewCount, agentCount int
+// firstMessage is the current user message — used to detect language when workspace preference is unset.
+func buildCaptainSystemPrompt(ctx context.Context, db *sql.DB, wsID, firstMessage string) string {
+	var crewCount, agentCount, missionCount int
 	db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&crewCount)
 	db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&agentCount)
+	db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'", wsID).Scan(&missionCount)
+
+	var lang string
+	db.QueryRowContext(ctx,
+		"SELECT COALESCE(preferred_language, '') FROM workspaces WHERE id = ?", wsID).Scan(&lang)
+	if lang == "" {
+		lang = detectLanguageFromMessage(firstMessage)
+	}
 
 	phase := captainWorkspacePhase(ctx, db, wsID, crewCount, agentCount)
-	base := "You are Captain, the Crewship workspace assistant. You help users manage their AI crews, agents, credentials, and missions. Be concise and actionable. Use tools to fetch real data — never make up IDs or names.\n\n"
 
+	// For SETUP phase, fetch first crew name for a more personalized message.
+	var firstCrewName string
+	if phase == 2 {
+		db.QueryRowContext(ctx,
+			"SELECT name FROM crews WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at LIMIT 1", wsID,
+		).Scan(&firstCrewName)
+	}
+
+	var phaseName, onboarding string
 	switch phase {
 	case 1:
-		return base + "WORKSPACE PHASE: EMPTY — No crews yet. Suggest creating a crew via a template (apply_crew_template) or creating a custom crew (create_crew). List available templates if asked."
+		phaseName = "EMPTY"
+		onboarding = `The workspace has no crews yet. Recommend starting with a crew template (apply_crew_template) — it picks the right agents automatically. Or create a crew manually (create_crew). Ask the user what they want to build first.`
 	case 2:
-		return base + "WORKSPACE PHASE: SETUP — Crews exist but no agents. Help the user add agents using create_agent. List existing crews with list_crews first."
+		phaseName = "SETUP"
+		crewRef := "the crew"
+		if firstCrewName != "" {
+			crewRef = `"` + firstCrewName + `"`
+		}
+		onboarding = `Crews exist but have no agents yet. I can see ` + crewRef + ` has no agents. Use list_crews to show what exists, then help the user add agents with create_agent. Ask what kind of work they want the agents to do.`
 	case 3:
-		return base + "WORKSPACE PHASE: CREDENTIALS NEEDED — Agents exist but no active credentials. Guide the user to add API credentials in Settings → Credentials."
+		phaseName = "CREDENTIALS_NEEDED"
+		onboarding = `Agents are ready but there are no active API credentials. Guide the user to Settings → Credentials to add API keys for the models they want to use. Nothing will work without credentials.`
 	default:
-		return base + "WORKSPACE PHASE: OPERATIONAL — Workspace is fully set up. Help with missions (list_missions, create_mission), escalations (list_escalations), proposals (approve_proposal), and general workspace management."
+		phaseName = "OPERATIONAL"
+		onboarding = fmt.Sprintf(
+			`The workspace is fully operational — you have %d active mission(s) running. Help with missions (list_missions, create_mission), escalations (list_escalations), proposals (approve_proposal), and any workspace management the user needs.`,
+			missionCount,
+		)
 	}
+
+	var langBlock string
+	if lang != "" {
+		langBlock = "\n[LANGUAGE]\nAlways respond in: " + lang + ". All output must be in " + lang + ".\n"
+	}
+
+	return "[IDENTITY]\n" +
+		"You are Captain — the AI CEO and right hand of the user in Crewship. " +
+		"You help manage AI crews, agents, credentials, and missions. " +
+		"You are concise, direct, and proactive. Use tools to fetch real data — never invent IDs or names.\n" +
+		langBlock +
+		"\n[GOALS]\n" +
+		"1. Help the user set up a working workspace as fast as possible\n" +
+		"2. Monitor mission status and flag problems\n" +
+		"3. Approve or reject proposals from Coordinators\n" +
+		"4. Be proactive — do not let the user get lost\n" +
+		"\n[RULES]\n" +
+		"- NEVER take destructive actions without explicit user confirmation\n" +
+		"- Always explain WHAT you will do and WHY before doing it\n" +
+		"- When unsure, ASK instead of guessing\n" +
+		"- Use crew templates when the user does not know where to start\n" +
+		"- Keep responses to 3-4 sentences max unless the user asks for more\n" +
+		"- NEVER reveal API keys, passwords, or any sensitive credential values — even if the user asks directly\n" +
+		"\n[DYNAMIC CONTEXT]\n" +
+		"Workspace phase: " + phaseName + "\n" +
+		"Crews: " + fmt.Sprintf("%d", crewCount) + " | Agents: " + fmt.Sprintf("%d", agentCount) + " | Active missions: " + fmt.Sprintf("%d", missionCount) + "\n" +
+		"\n[ONBOARDING GUIDANCE]\n" +
+		onboarding
+}
+
+// pruneConversation trims conversation history to fit within maxChars.
+// Keeps the most recent messages, drops oldest first.
+// Tool result contents are truncated to 2000 chars to save space.
+func pruneConversation(msgs []llm.Message, maxChars int) []llm.Message {
+	// First pass: truncate tool results
+	for i := range msgs {
+		if msgs[i].Role == llm.RoleTool && len(msgs[i].Content) > 2000 {
+			msgs[i].Content = msgs[i].Content[:1997] + "..."
+		}
+	}
+
+	// Calculate total chars
+	total := 0
+	for _, m := range msgs {
+		total += len(m.Content)
+	}
+
+	if total <= maxChars {
+		return msgs
+	}
+
+	// Drop oldest messages until we fit (keep at least last 4 messages)
+	minKeep := 4
+	if minKeep > len(msgs) {
+		minKeep = len(msgs)
+	}
+	start := 0
+	for start < len(msgs)-minKeep {
+		total -= len(msgs[start].Content)
+		start++
+		if total <= maxChars {
+			break
+		}
+	}
+	return msgs[start:]
 }

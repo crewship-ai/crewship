@@ -163,11 +163,19 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	memoryMB := req.MemoryMB
+	if memoryMB <= 0 {
+		memoryMB = s.cfg.Container.DefaultMemoryMB
+	}
+	cpus := req.CPUs
+	if cpus <= 0 {
+		cpus = s.cfg.Container.DefaultCPUs
+	}
 	containerID, err := s.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
 		ID:       req.CrewID,
 		Slug:     req.CrewSlug,
-		MemoryMB: req.MemoryMB,
-		CPUs:     req.CPUs,
+		MemoryMB: memoryMB,
+		CPUs:     cpus,
 	})
 	if err != nil {
 		s.logger.Error("failed to ensure team runtime", "crew_id", req.CrewID, "error", err)
@@ -191,8 +199,8 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		TimeoutSecs:    req.TimeoutSecs,
 		NetworkMode:    req.NetworkMode,
 		AllowedDomains: req.AllowedDomains,
-		MemoryMB:       req.MemoryMB,
-		CPUs:           req.CPUs,
+		MemoryMB:       memoryMB,
+		CPUs:           cpus,
 		TTLHours:       req.TTLHours,
 	}
 
@@ -235,7 +243,12 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 						"agent_id": agentID,
 						"event":    event.Type,
 						"content":  event.Content,
-						"metadata": event.Metadata,
+						"metadata": sanitizeMetadata(func() map[string]interface{} {
+							if m, ok := event.Metadata.(map[string]interface{}); ok {
+								return m
+							}
+							return nil
+						}()),
 					},
 				})
 			}
@@ -666,6 +679,28 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		slog.Error("failed to encode JSON response", "error", err)
 	}
+}
+
+// sanitizeMetadata filters agent event metadata to a safe allowlist before
+// broadcasting to workspace WebSocket clients, preventing leakage of tool
+// inputs, error details, or MCP configuration.
+func sanitizeMetadata(raw any) map[string]interface{} {
+	m, ok := raw.(map[string]interface{})
+	if !ok || m == nil {
+		return nil
+	}
+	allowed := map[string]bool{
+		"source": true, "summary": true, "duration": true, "duration_ms": true,
+		"tool_name": true, "num_turns": true, "total_cost_usd": true,
+		"usage": true, "model": true, "session_id": true, "exit_code": true,
+	}
+	safe := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		if allowed[k] {
+			safe[k] = v
+		}
+	}
+	return safe
 }
 
 

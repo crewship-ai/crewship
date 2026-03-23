@@ -31,6 +31,14 @@ export function CrewContainerConfig({ memoryMb, cpus, ttlHours, canEdit, onSave 
   async function handleSave() {
     setSaving(true)
     try {
+      if (!Number.isInteger(mem) || mem < 256 || mem > 32768) {
+        toast.error("Memory must be between 256 MB and 32768 MB")
+        return
+      }
+      if (!Number.isFinite(cpu) || cpu < 0.1 || cpu > 32) {
+        toast.error("CPUs must be between 0.1 and 32")
+        return
+      }
       const ttlVal = ttl === "" ? null : parseInt(ttl)
       if (ttlVal !== null && (isNaN(ttlVal) || ttlVal < 1 || ttlVal > 720)) {
         toast.error("TTL must be between 1 and 720 hours")

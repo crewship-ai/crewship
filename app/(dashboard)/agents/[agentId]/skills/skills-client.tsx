@@ -2,7 +2,10 @@
 
 import { useParams } from "next/navigation"
 import { useState, useEffect, useCallback } from "react"
-import { Puzzle, AlertCircle, Inbox, Plus, Trash2, Loader2 } from "lucide-react"
+import {
+  Puzzle, AlertCircle, Inbox, Plus, Trash2, Loader2,
+  Blocks, Code, Search, Hammer, Server, MessageCircle, Settings,
+} from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -63,11 +66,29 @@ interface AgentSkill {
   skill: SkillData
 }
 
-const SOURCE_STYLES: Record<string, string> = {
-  BUILTIN: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400",
-  BUNDLED: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400",
-  CUSTOM: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
-  MARKETPLACE: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400",
+const SOURCE_STYLES: Record<string, { label: string; className: string }> = {
+  BUILTIN: { label: "Built-in", className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
+  BUNDLED: { label: "Bundled", className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
+  CUSTOM: { label: "Custom", className: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400" },
+  MARKETPLACE: { label: "Marketplace", className: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400" },
+}
+
+const CATEGORY_ICONS: Record<string, React.ElementType> = {
+  CODING: Code,
+  RESEARCH: Search,
+  DEVELOPMENT: Hammer,
+  DEVOPS: Server,
+  COMMUNICATION: MessageCircle,
+  CUSTOM: Settings,
+}
+
+function SkillIcon({ category }: { category: string | null }) {
+  const Icon = (category && CATEGORY_ICONS[category]) || Blocks
+  return (
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+      <Icon className="h-5 w-5 text-primary" />
+    </div>
+  )
 }
 
 export function SkillsPageClient() {
@@ -159,56 +180,57 @@ export function SkillsPageClient() {
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
           <p className="text-body font-medium text-muted-foreground">No skills assigned</p>
-          <p className="text-label text-muted-foreground mt-1">Click "Add Skill" to enable agent capabilities.</p>
+          <p className="text-label text-muted-foreground mt-1">Click &quot;Add Skill&quot; to enable agent capabilities.</p>
         </div>
       ) : (
         <div className="grid gap-3">
-          {skills.map((agentSkill) => (
-            <Card key={agentSkill.id} className="py-0">
-              <CardContent className="p-4 sm:p-5">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                    <Puzzle className="h-5 w-5 text-primary" />
-                  </div>
-                  <div className="space-y-1 min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-body font-medium">
-                        {agentSkill.skill.display_name ?? agentSkill.skill.name}
-                      </h3>
-                      {agentSkill.skill.category && (
-                        <Badge variant="outline" className="text-label">{agentSkill.skill.category}</Badge>
-                      )}
-                      <Badge
-                        variant="secondary"
-                        className={`text-label ${SOURCE_STYLES[agentSkill.skill.source] ?? ""}`}
-                      >
-                        {agentSkill.skill.source}
-                      </Badge>
-                      {!agentSkill.enabled && (
-                        <Badge variant="secondary" className="text-label">Disabled</Badge>
+          {skills.map((agentSkill) => {
+            const sourceCfg = SOURCE_STYLES[agentSkill.skill.source] ?? { label: agentSkill.skill.source, className: "" }
+            return (
+              <Card key={agentSkill.id} className="py-0">
+                <CardContent className="p-4 sm:p-5">
+                  <div className="flex items-start gap-3">
+                    <SkillIcon category={agentSkill.skill.category} />
+                    <div className="space-y-1 min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-body font-medium">
+                          {agentSkill.skill.display_name ?? agentSkill.skill.name}
+                        </h3>
+                        {agentSkill.skill.category && (
+                          <Badge variant="outline" className="text-micro">{agentSkill.skill.category.charAt(0) + agentSkill.skill.category.slice(1).toLowerCase()}</Badge>
+                        )}
+                        <Badge
+                          variant="secondary"
+                          className={`text-micro ${sourceCfg.className}`}
+                        >
+                          {sourceCfg.label}
+                        </Badge>
+                        {!agentSkill.enabled && (
+                          <Badge variant="secondary" className="text-micro">Disabled</Badge>
+                        )}
+                      </div>
+                      {agentSkill.skill.description && (
+                        <p className="text-label text-muted-foreground leading-relaxed">{agentSkill.skill.description}</p>
                       )}
                     </div>
-                    {agentSkill.skill.description && (
-                      <p className="text-label text-muted-foreground leading-relaxed">{agentSkill.skill.description}</p>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleRemove(agentSkill.skill_id)}
+                      disabled={removingId === agentSkill.skill_id}
+                    >
+                      {removingId === agentSkill.skill_id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="shrink-0 text-muted-foreground hover:text-destructive"
-                    onClick={() => handleRemove(agentSkill.skill_id)}
-                    disabled={removingId === agentSkill.skill_id}
-                  >
-                    {removingId === agentSkill.skill_id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       )}
 
@@ -315,9 +337,7 @@ function AddSkillDialog({ open, onOpenChange, agentId, workspaceId, assignedSkil
                 key={skill.id}
                 className="flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors"
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                  <Puzzle className="h-4 w-4 text-primary" />
-                </div>
+                <SkillIcon category={skill.category} />
                 <div className="flex-1 min-w-0">
                   <p className="text-body font-medium truncate">{skill.display_name ?? skill.name}</p>
                   {skill.description && (
@@ -358,7 +378,7 @@ function SkillsSkeleton() {
       </div>
       <div className="grid gap-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className="h-20 rounded-lg" />
+          <Skeleton key={i} className="h-20 rounded-[var(--radius)]" />
         ))}
       </div>
     </div>

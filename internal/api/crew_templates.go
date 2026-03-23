@@ -39,7 +39,7 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, wsID, templateSlug, cre
 		crewSlug = slugify(crewSlug)
 	}
 	if crewSlug == "" {
-		return nil, fmt.Errorf("crew_slug must contain only lowercase letters, numbers, and hyphens")
+		return nil, fmt.Errorf("%w: crew_slug must contain only lowercase letters, numbers, and hyphens", errCrewSlugConflict)
 	}
 
 	var agentsJSON string

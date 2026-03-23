@@ -40,7 +40,7 @@ export default function DashboardLayout({
         <SidebarInset>
           <AppToolbar />
           <RuntimeBanner />
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-4xl mr-2">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
             {children}
           </div>
         </SidebarInset>

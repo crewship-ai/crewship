@@ -84,7 +84,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           : {}),
         timestamp: new Date(),
       }
-      setLastEvent(event)
+      // Skip updating lastEvent for high-frequency log events to avoid
+      // re-rendering all useRealtime() consumers on every log frame.
+      if (msg.type !== "agent.log") {
+        setLastEvent(event)
+      }
 
       const callbacks = listenersRef.current.get(msg.type)
       if (callbacks) {

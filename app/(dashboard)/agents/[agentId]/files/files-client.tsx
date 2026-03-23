@@ -292,7 +292,7 @@ export function FilesPageClient() {
       if (!res.ok) return
       const data: FileEntry[] | null = await res.json()
       setTree((prev) => insertChildren(prev, dirPath, data ?? []))
-    } catch { /* silently fail, folder will just look empty */ }
+    } catch { /* folder contents unavailable — tree shows empty */ }
     finally { setLoadingDirs((prev) => { const next = new Set(prev); next.delete(dirPath); return next }) }
   }, [agentId, workspaceId, basePrefix])
 
@@ -439,6 +439,7 @@ export function FilesPageClient() {
             <input
               className="w-full h-7 rounded-md border bg-card pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
               placeholder="Filter files..."
+              aria-label="Filter files"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -505,14 +506,14 @@ export function FilesPageClient() {
                 <>
                   <span className="text-micro text-muted-foreground">{fmtSize(selectedFile.size)} · {fmtTime(selectedFile.mod_time)}</span>
                   {isPreviewable(selectedFile.name) && fileContent !== null && (
-                    <button onClick={() => setEditMode(true)} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Edit file">
+                    <button onClick={() => setEditMode(true)} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Edit file" aria-label="Edit file">
                       <Pencil className="h-3 w-3 text-muted-foreground" />
                     </button>
                   )}
-                  <button onClick={handleCopy} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Copy path">
+                  <button onClick={handleCopy} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Copy path" aria-label="Copy file path">
                     {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
                   </button>
-                  <button onClick={handleDownload} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Download">
+                  <button onClick={handleDownload} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Download" aria-label="Download file">
                     <Download className="h-3 w-3 text-muted-foreground" />
                   </button>
                 </>

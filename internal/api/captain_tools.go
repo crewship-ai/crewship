@@ -163,11 +163,21 @@ func strInput(input map[string]any, key string) string {
 
 func execGetWorkspaceStats(ctx context.Context, h *CaptainHandler, wsID, userID, role string, _ map[string]any) (string, error) {
 	var crews, agents, missions, escalations, proposals int
-	h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&crews)
-	h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&agents)
-	h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'", wsID).Scan(&missions)
-	h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM escalations WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&escalations)
-	h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM mission_proposals WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&proposals)
+	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&crews); err != nil {
+		return "", fmt.Errorf("count crews: %w", err)
+	}
+	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&agents); err != nil {
+		return "", fmt.Errorf("count agents: %w", err)
+	}
+	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'", wsID).Scan(&missions); err != nil {
+		return "", fmt.Errorf("count missions: %w", err)
+	}
+	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM escalations WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&escalations); err != nil {
+		return "", fmt.Errorf("count escalations: %w", err)
+	}
+	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM mission_proposals WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&proposals); err != nil {
+		return "", fmt.Errorf("count proposals: %w", err)
+	}
 	return fmt.Sprintf("Workspace stats:\n- Crews: %d\n- Agents: %d\n- Active missions: %d\n- Pending escalations: %d\n- Pending proposals: %d",
 		crews, agents, missions, escalations, proposals), nil
 }
@@ -188,7 +198,9 @@ func execListCrews(ctx context.Context, h *CaptainHandler, wsID, _, _ string, _ 
 	var result []row
 	for rows.Next() {
 		var r row
-		rows.Scan(&r.ID, &r.Name, &r.Slug, &r.Desc)
+		if err := rows.Scan(&r.ID, &r.Name, &r.Slug, &r.Desc); err != nil {
+			return "", fmt.Errorf("scan crew: %w", err)
+		}
 		result = append(result, r)
 	}
 	if len(result) == 0 {
@@ -222,7 +234,9 @@ func execListAgents(ctx context.Context, h *CaptainHandler, wsID, _, _ string, i
 	var result []row
 	for rows.Next() {
 		var r row
-		rows.Scan(&r.ID, &r.Name, &r.Slug, &r.RoleTitle, &r.AgentRole, &r.CrewID)
+		if err := rows.Scan(&r.ID, &r.Name, &r.Slug, &r.RoleTitle, &r.AgentRole, &r.CrewID); err != nil {
+			return "", fmt.Errorf("scan agent: %w", err)
+		}
 		result = append(result, r)
 	}
 	if len(result) == 0 {
@@ -249,7 +263,9 @@ func execListCredentials(ctx context.Context, h *CaptainHandler, wsID, _, _ stri
 	var result []row
 	for rows.Next() {
 		var r row
-		rows.Scan(&r.ID, &r.Name, &r.Provider, &r.Type, &r.Status)
+		if err := rows.Scan(&r.ID, &r.Name, &r.Provider, &r.Type, &r.Status); err != nil {
+			return "", fmt.Errorf("scan credential: %w", err)
+		}
 		result = append(result, r)
 	}
 	if len(result) == 0 {
@@ -282,7 +298,9 @@ func execListMissions(ctx context.Context, h *CaptainHandler, wsID, _, _ string,
 	var result []row
 	for rows.Next() {
 		var r row
-		rows.Scan(&r.ID, &r.Title, &r.Status, &r.CrewID, &r.CreatedAt)
+		if err := rows.Scan(&r.ID, &r.Title, &r.Status, &r.CrewID, &r.CreatedAt); err != nil {
+			return "", fmt.Errorf("scan mission: %w", err)
+		}
 		result = append(result, r)
 	}
 	if len(result) == 0 {
@@ -311,7 +329,9 @@ func execListEscalations(ctx context.Context, h *CaptainHandler, wsID, _, _ stri
 	var result []row
 	for rows.Next() {
 		var r row
-		rows.Scan(&r.ID, &r.Type, &r.Content, &r.Status, &r.CreatedAt)
+		if err := rows.Scan(&r.ID, &r.Type, &r.Content, &r.Status, &r.CreatedAt); err != nil {
+			return "", fmt.Errorf("scan escalation: %w", err)
+		}
 		result = append(result, r)
 	}
 	if len(result) == 0 {

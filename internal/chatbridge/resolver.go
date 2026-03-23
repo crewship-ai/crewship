@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,9 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 )
+
+// ErrNoWebhookSecret is returned when an agent has no webhook secret configured.
+var ErrNoWebhookSecret = errors.New("no webhook secret configured")
 
 type IPCResolver struct {
 	baseURL       string
@@ -258,6 +262,9 @@ func (r *IPCResolver) GetWebhookSecret(ctx context.Context, agentID string) (str
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return "", err
+	}
+	if data.Secret == "" {
+		return "", fmt.Errorf("%w: agent %s", ErrNoWebhookSecret, agentID)
 	}
 	return data.Secret, nil
 }

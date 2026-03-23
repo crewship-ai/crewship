@@ -181,14 +181,23 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 
 	coldStart := containerID == ""
 
+	memoryMB := info.MemoryMB
+	if memoryMB <= 0 {
+		memoryMB = b.cfg.DefaultMemoryMB
+	}
+	cpuVal := info.CPUs
+	if cpuVal <= 0 {
+		cpuVal = b.cfg.DefaultCPUs
+	}
+
 	if containerID == "" && b.container != nil {
 		b.logger.Info("creating container", "crew_slug", info.CrewSlug)
 		streamFn(ws.ChatEvent{Type: "status", Content: "Starting container..."})
 		cID, err := b.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
 			ID:       info.CrewID,
 			Slug:     info.CrewSlug,
-			MemoryMB: b.cfg.DefaultMemoryMB,
-			CPUs:     b.cfg.DefaultCPUs,
+			MemoryMB: memoryMB,
+			CPUs:     cpuVal,
 		})
 		if err != nil {
 			streamFn(ws.ChatEvent{Type: "error", Content: "failed to start agent container"})
@@ -229,8 +238,8 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		ActiveMissions: info.ActiveMissions,
 		NetworkMode:    info.NetworkMode,
 		AllowedDomains: info.AllowedDomains,
-		MemoryMB:       info.MemoryMB,
-		CPUs:           info.CPUs,
+		MemoryMB:       memoryMB,
+		CPUs:           cpuVal,
 		TTLHours:       info.TTLHours,
 	}
 

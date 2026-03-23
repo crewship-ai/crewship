@@ -285,6 +285,32 @@ body {
   background: oklch(0 0 0 / 0.1);
 }
 
+/* ── Status color utilities ── */
+.status-success {
+  background-color: oklch(0.96 0.04 155);
+  color: oklch(0.42 0.12 155);
+}
+.dark .status-success {
+  background-color: oklch(0.22 0.05 155);
+  color: oklch(0.72 0.15 160);
+}
+.status-error {
+  background-color: oklch(0.96 0.02 25);
+  color: oklch(0.50 0.15 25);
+}
+.dark .status-error {
+  background-color: oklch(0.22 0.05 25);
+  color: oklch(0.72 0.15 25);
+}
+.status-warning {
+  background-color: oklch(0.96 0.04 85);
+  color: oklch(0.50 0.12 70);
+}
+.dark .status-warning {
+  background-color: oklch(0.22 0.05 70);
+  color: oklch(0.72 0.12 70);
+}
+
 @keyframes edgeFlow {
   from { stroke-dashoffset: 28; }
   to { stroke-dashoffset: 0; }

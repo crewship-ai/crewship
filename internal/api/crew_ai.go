@@ -14,6 +14,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/llm"
 )
 
+var errNoActiveAnthropicCredential = errors.New("no active Anthropic credential in workspace")
+
 type CrewAIHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
@@ -89,16 +91,21 @@ func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 
 	provider, err := h.getLLMProvider(r.Context(), wsID)
 	if err != nil {
-		h.logger.Warn("no LLM credential for crew AI suggest", "workspace", wsID, "error", err)
-		writeProblem(w, r, http.StatusUnprocessableEntity,
-			"No Anthropic API key found. Add a credential of type API_KEY / provider ANTHROPIC in Settings → Credentials. Note: Claude Code OAuth tokens cannot be used here — a plain API key (sk-ant-api*) is required.")
+		if errors.Is(err, errNoActiveAnthropicCredential) {
+			h.logger.Warn("no LLM credential for crew AI suggest", "workspace", wsID)
+			writeProblem(w, r, http.StatusUnprocessableEntity,
+				"No Anthropic API key found. Add a credential of type API_KEY / provider ANTHROPIC in Settings → Credentials. Note: Claude Code OAuth tokens cannot be used here — a plain API key (sk-ant-api*) is required.")
+			return
+		}
+		h.logger.Error("load LLM provider for crew AI suggest", "workspace", wsID, "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Failed to load AI provider")
 		return
 	}
 
 	suggestion, err := h.suggest(r.Context(), provider, body.Description)
 	if err != nil {
 		h.logger.Error("crew AI suggest", "error", err)
-		writeProblem(w, r, http.StatusBadGateway, "AI suggestion failed: "+err.Error())
+		writeProblem(w, r, http.StatusBadGateway, "AI suggestion failed")
 		return
 	}
 
@@ -120,7 +127,7 @@ func (h *CrewAIHandler) getLLMProvider(ctx context.Context, wsID string) (llm.Pr
 		LIMIT 1`, wsID).Scan(&encryptedValue)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("no active Anthropic credential in workspace")
+			return nil, errNoActiveAnthropicCredential
 		}
 		return nil, fmt.Errorf("query credential: %w", err)
 	}
@@ -140,7 +147,7 @@ func (h *CrewAIHandler) suggest(ctx context.Context, provider llm.Provider, desc
 		Messages:  []llm.Message{{Role: llm.RoleUser, Content: description}},
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("provider complete: %w", err)
 	}
 
 	rawJSON := strings.TrimSpace(resp.Content)
