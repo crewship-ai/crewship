@@ -43,6 +43,9 @@ type AgentRunRequest struct {
 	SkipConvHistory bool         // When true, skip injecting conversation history (used by assignment sub-agents)
 	NetworkMode     string       // "free" (default) or "restricted" — crew-level network policy
 	AllowedDomains  []string     // Extra allowed domains for restricted mode
+	MemoryMB        int
+	CPUs            float64
+	TTLHours        int
 }
 
 type Credential struct {
@@ -87,6 +90,9 @@ type Orchestrator struct {
 	ipcToken       string
 	mu             sync.Mutex
 	accepting      bool
+	crewLastActivity map[string]time.Time
+	crewTTL          map[string]time.Duration
+	crewContainers   map[string]string
 }
 
 func New(
@@ -95,12 +101,15 @@ func New(
 	logger *slog.Logger,
 ) *Orchestrator {
 	return &Orchestrator{
-		container: container,
-		state:     state,
-		scrubber:  scrubber.New(),
-		logger:    logger,
-		cooldown:  NewCooldownManager(),
-		accepting: true,
+		container:        container,
+		state:            state,
+		scrubber:         scrubber.New(),
+		logger:           logger,
+		cooldown:         NewCooldownManager(),
+		accepting:        true,
+		crewLastActivity: make(map[string]time.Time),
+		crewTTL:          make(map[string]time.Duration),
+		crewContainers:   make(map[string]string),
 	}
 }
 
@@ -175,6 +184,9 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("orchestrator not accepting new runs")
 	}
 	o.mu.Unlock()
+
+	o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
+	defer o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
 
 	runState := RunState{
 		ID:          req.ChatID,
@@ -591,6 +603,68 @@ func (o *Orchestrator) selectCredential(creds []Credential) *Credential {
 		}
 	}
 	return &creds[0]
+}
+
+func (o *Orchestrator) Start(ctx context.Context) error {
+	o.logger.Info("starting orchestrator container TTL manager")
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			o.checkTTLs(ctx)
+		}
+	}
+}
+
+func (o *Orchestrator) refreshActivity(crewID, containerID string, ttlHours int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.crewLastActivity[crewID] = time.Now()
+	o.crewContainers[crewID] = containerID
+	if ttlHours > 0 {
+		o.crewTTL[crewID] = time.Duration(ttlHours) * time.Hour
+	} else {
+		delete(o.crewTTL, crewID)
+	}
+}
+
+func (o *Orchestrator) checkTTLs(ctx context.Context) {
+	o.mu.Lock()
+	var toStop []struct {
+		crewID      string
+		containerID string
+	}
+	now := time.Now()
+	for crewID, last := range o.crewLastActivity {
+		ttl, ok := o.crewTTL[crewID]
+		if !ok || ttl <= 0 {
+			continue
+		}
+		if now.Sub(last) > ttl {
+			toStop = append(toStop, struct {
+				crewID      string
+				containerID string
+			}{crewID: crewID, containerID: o.crewContainers[crewID]})
+			delete(o.crewLastActivity, crewID)
+			delete(o.crewContainers, crewID)
+			delete(o.crewTTL, crewID)
+		}
+	}
+	o.mu.Unlock()
+
+	for _, stop := range toStop {
+		if stop.containerID == "" {
+			continue
+		}
+		o.logger.Info("stopping idle crew container (TTL expired)", "crew_id", stop.crewID, "container_id", stop.containerID)
+		if err := o.container.StopCrewRuntime(ctx, stop.containerID); err != nil {
+			o.logger.Error("failed to stop idle crew container", "crew_id", stop.crewID, "error", err)
+		}
+	}
 }
 
 func (o *Orchestrator) updateRunStatus(ctx context.Context, runID, status string) {

@@ -20,6 +20,7 @@ import { CrewEscalations } from "@/components/features/crews/crew-escalations"
 import { CrewStandup } from "@/components/features/crews/crew-standup"
 import { CrewDangerZone } from "@/components/features/crews/crew-danger-zone"
 import { CrewNetworkPolicy } from "@/components/features/crews/crew-network-policy"
+import { CrewContainerConfig } from "@/components/features/crews/crew-container-config"
 import { AvatarPicker } from "@/components/avatar-picker"
 import { AVATAR_STYLES } from "@/lib/agent-avatar"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -194,6 +195,10 @@ export default function CrewDetailPage() {
     await patchCrew({ network_mode: mode, allowed_domains: domains })
   }
 
+  async function handleContainerSave(config: { container_memory_mb: number; container_cpus: number; container_ttl_hours: number | null }) {
+    await patchCrew(config)
+  }
+
   return (
     <div className="p-4 sm:p-6 space-y-6">
       <Button variant="ghost" size="sm" asChild>
@@ -229,6 +234,15 @@ export default function CrewDetailPage() {
         memoryMb={crew.container_memory_mb}
         cpus={crew.container_cpus}
         ttlHours={crew.container_ttl_hours}
+      />
+
+      {/* Container Config */}
+      <CrewContainerConfig
+        memoryMb={crew.container_memory_mb}
+        cpus={crew.container_cpus}
+        ttlHours={crew.container_ttl_hours}
+        canEdit={canEdit}
+        onSave={handleContainerSave}
       />
 
       {/* Network Policy */}

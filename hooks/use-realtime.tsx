@@ -22,10 +22,11 @@ export type RealtimeEventType =
   | "mission.updated"
   | "task.updated"
   | "peer_conversation.updated"
+  | "agent.log"
 
 export interface RealtimeEvent {
   type: RealtimeEventType
-  payload: Record<string, string>
+  payload: Record<string, any>
   timestamp: Date
 }
 
@@ -72,7 +73,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         "run.started", "run.completed", "run.failed",
         "agent.status", "assignment.updated", "escalation.created",
         "escalation.resolved", "mission.updated", "task.updated",
-        "peer_conversation.updated",
+        "peer_conversation.updated", "agent.log",
       ])
       if (!validTypes.has(msg.type)) return
 

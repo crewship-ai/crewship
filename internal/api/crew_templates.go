@@ -15,6 +15,108 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 )
 
+// errTemplateNotFound is returned by deployCrewTemplate when the slug doesn't exist.
+var errTemplateNotFound = errors.New("template not found")
+
+// errCrewSlugConflict is returned by deployCrewTemplate when the crew slug is already taken.
+var errCrewSlugConflict = errors.New("crew slug already exists")
+
+type deployCrewResult struct {
+	CrewID     string   `json:"crew_id"`
+	CrewName   string   `json:"crew_name"`
+	CrewSlug   string   `json:"crew_slug"`
+	AgentCount int      `json:"agent_count"`
+	AgentIDs   []string `json:"agent_ids"`
+}
+
+// deployCrewTemplate is a package-level helper shared by CrewTemplateHandler and captain tool executors.
+// crewSlugInput may be empty — if so, it is derived from crewName via slugify.
+func deployCrewTemplate(ctx context.Context, db *sql.DB, wsID, templateSlug, crewName, crewSlugInput string) (*deployCrewResult, error) {
+	crewSlug := crewSlugInput
+	if crewSlug == "" {
+		crewSlug = slugify(crewName)
+	} else {
+		crewSlug = slugify(crewSlug)
+	}
+	if crewSlug == "" {
+		return nil, fmt.Errorf("crew_slug must contain only lowercase letters, numbers, and hyphens")
+	}
+
+	var agentsJSON string
+	var icon, color *string
+	err := db.QueryRowContext(ctx, `
+		SELECT agents_json, icon, color FROM crew_templates
+		WHERE slug = ? AND (is_builtin = 1 OR workspace_id = ?)`, templateSlug, wsID).Scan(&agentsJSON, &icon, &color)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errTemplateNotFound
+		}
+		return nil, fmt.Errorf("load template: %w", err)
+	}
+
+	var agents []database.CrewTemplateAgent
+	if err := json.Unmarshal([]byte(agentsJSON), &agents); err != nil {
+		return nil, fmt.Errorf("parse template agents: %w", err)
+	}
+
+	var existing int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM crews WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		crewSlug, wsID).Scan(&existing); err != nil {
+		return nil, fmt.Errorf("check slug uniqueness: %w", err)
+	}
+	if existing > 0 {
+		return nil, fmt.Errorf("%w: '%s'", errCrewSlugConflict, crewSlug)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	crewID := generateCUID()
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	if _, err = tx.ExecContext(ctx, `
+		INSERT INTO crews (id, workspace_id, name, slug, icon, color, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		crewID, wsID, crewName, crewSlug, icon, color, now, now); err != nil {
+		return nil, fmt.Errorf("create crew: %w", err)
+	}
+
+	var agentIDs []string
+	for _, a := range agents {
+		agentID := generateCUID()
+		agentIDs = append(agentIDs, agentID)
+		webhookSecret := generateWebhookSecret()
+		agentSlug := a.Slug + "-" + crewSlug
+
+		if _, err = tx.ExecContext(ctx, `
+			INSERT INTO agents (id, workspace_id, crew_id, name, slug, role_title, agent_role,
+				cli_adapter, llm_provider, llm_model, tool_profile, system_prompt,
+				timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			agentID, wsID, crewID, a.Name, agentSlug, a.RoleTitle, a.AgentRole,
+			a.CLIAdapter, a.LLMProvider, a.LLMModel, a.ToolProfile, a.SystemPrompt,
+			1800, true, webhookSecret, now, now); err != nil {
+			return nil, fmt.Errorf("create agent %s: %w", a.Name, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit: %w", err)
+	}
+
+	return &deployCrewResult{
+		CrewID:     crewID,
+		CrewName:   crewName,
+		CrewSlug:   crewSlug,
+		AgentCount: len(agentIDs),
+		AgentIDs:   agentIDs,
+	}, nil
+}
+
 type CrewTemplateHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
@@ -132,118 +234,30 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusBadRequest, "crew_name is required")
 		return
 	}
-	if body.CrewSlug == "" {
-		body.CrewSlug = slugify(body.CrewName)
-	} else {
-		body.CrewSlug = slugify(body.CrewSlug)
-	}
-	if body.CrewSlug == "" {
-		writeProblem(w, r, http.StatusBadRequest, "crew_slug must contain only lowercase letters, numbers, and hyphens")
-		return
-	}
 
-	// Load template (scoped to workspace or builtins)
-	var agentsJSON string
-	var icon, color *string
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT agents_json, icon, color FROM crew_templates
-		WHERE slug = ? AND (is_builtin = 1 OR workspace_id = ?)`, slug, wsID).Scan(&agentsJSON, &icon, &color)
+	result, err := deployCrewTemplate(r.Context(), h.db, wsID, slug, body.CrewName, body.CrewSlug)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, errTemplateNotFound) {
 			writeProblem(w, r, http.StatusNotFound, "Template not found")
 			return
 		}
-		h.logger.Error("load crew template", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-
-	var agents []database.CrewTemplateAgent
-	if err := json.Unmarshal([]byte(agentsJSON), &agents); err != nil {
-		h.logger.Error("parse template agents", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Invalid template data")
-		return
-	}
-
-	// Check crew slug uniqueness
-	var existing int
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM crews WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		body.CrewSlug, wsID).Scan(&existing); err != nil {
-		h.logger.Error("check slug uniqueness", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if existing > 0 {
-		writeProblem(w, r, http.StatusConflict, fmt.Sprintf("Crew with slug '%s' already exists", body.CrewSlug))
-		return
-	}
-
-	tx, err := h.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		h.logger.Error("begin tx", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	defer tx.Rollback()
-
-	crewID := generateCUID()
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO crews (id, workspace_id, name, slug, icon, color, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, wsID, body.CrewName, body.CrewSlug, icon, color, now, now)
-	if err != nil {
-		h.logger.Error("create crew from template", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Failed to create crew")
-		return
-	}
-
-	var agentIDs []string
-	for _, a := range agents {
-		agentID := generateCUID()
-		agentIDs = append(agentIDs, agentID)
-		webhookSecret := generateWebhookSecret()
-		// Suffix agent slug with crew slug to avoid workspace-wide uniqueness conflicts
-		// when the same template is deployed more than once.
-		agentSlug := a.Slug + "-" + body.CrewSlug
-
-		_, err = tx.ExecContext(r.Context(), `
-			INSERT INTO agents (id, workspace_id, crew_id, name, slug, role_title, agent_role,
-				cli_adapter, llm_provider, llm_model, tool_profile, system_prompt,
-				timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			agentID, wsID, crewID, a.Name, agentSlug, a.RoleTitle, a.AgentRole,
-			a.CLIAdapter, a.LLMProvider, a.LLMModel, a.ToolProfile, a.SystemPrompt,
-			1800, true, webhookSecret, now, now)
-		if err != nil {
-			h.logger.Error("create agent from template", "agent", agentSlug, "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, fmt.Sprintf("Failed to create agent %s", a.Name))
+		if errors.Is(err, errCrewSlugConflict) {
+			writeProblem(w, r, http.StatusConflict, err.Error())
 			return
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit crew template deploy", "error", err)
+		h.logger.Error("deploy crew template", "template", slug, "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Failed to deploy template")
 		return
 	}
 
 	h.logger.Info("crew template deployed",
 		"template", slug,
-		"crew_id", crewID,
-		"crew_name", body.CrewName,
-		"agents", len(agents),
+		"crew_id", result.CrewID,
+		"crew_name", result.CrewName,
+		"agents", result.AgentCount,
 	)
 
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"crew_id":     crewID,
-		"crew_name":   body.CrewName,
-		"crew_slug":   body.CrewSlug,
-		"agent_count": len(agentIDs),
-		"agent_ids":   agentIDs,
-	})
+	writeJSON(w, http.StatusCreated, result)
 }
 
 func slugify(name string) string {

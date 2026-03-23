@@ -19,6 +19,8 @@ import (
 type ChatResolver interface {
 	CreateChat(ctx context.Context, req CreateChatRequest) error
 	ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error)
+	ResolveAgent(ctx context.Context, agentID string) (*ChatInfo, error)
+	GetWebhookSecret(ctx context.Context, agentID string) (string, error)
 	CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error
 	UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error
 	IncrementMessageCount(ctx context.Context, chatID string, delta int) error
@@ -45,6 +47,9 @@ type ChatInfo struct {
 	ActiveMissions []orchestrator.MissionSummary
 	NetworkMode    string
 	AllowedDomains []string
+	MemoryMB       int
+	CPUs           float64
+	TTLHours       int
 }
 
 type Bridge struct {
@@ -224,6 +229,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		ActiveMissions: info.ActiveMissions,
 		NetworkMode:    info.NetworkMode,
 		AllowedDomains: info.AllowedDomains,
+		MemoryMB:       info.MemoryMB,
+		CPUs:           info.CPUs,
+		TTLHours:       info.TTLHours,
 	}
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).
