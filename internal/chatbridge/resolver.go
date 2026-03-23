@@ -51,7 +51,10 @@ type chatResolveResponse struct {
 	AllCrews       []crewInfoResponse      `json:"all_crews,omitempty"`
 	ActiveMissions []missionSummaryResponse `json:"active_missions,omitempty"`
 	NetworkMode    string                  `json:"network_mode"`
-	AllowedDomains []string             `json:"allowed_domains"`
+	AllowedDomains []string                `json:"allowed_domains"`
+	MemoryMB       int                     `json:"memory_mb"`
+	CPUs           float64                 `json:"cpus"`
+	TTLHours       int                     `json:"ttl_hours"`
 }
 
 type crewInfoResponse struct {
@@ -224,7 +227,42 @@ func (r *IPCResolver) UpdateChatTitle(ctx context.Context, chatID, title string)
 
 func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error) {
 	resolveURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/resolve", r.baseURL, url.PathEscape(chatID))
+	return r.resolve(ctx, resolveURL)
+}
 
+func (r *IPCResolver) ResolveAgent(ctx context.Context, agentID string) (*ChatInfo, error) {
+	resolveURL := fmt.Sprintf("%s/api/v1/internal/agents/%s/resolve", r.baseURL, url.PathEscape(agentID))
+	return r.resolve(ctx, resolveURL)
+}
+
+func (r *IPCResolver) GetWebhookSecret(ctx context.Context, agentID string) (string, error) {
+	u := fmt.Sprintf("%s/api/v1/internal/agents/%s/webhook-secret", r.baseURL, url.PathEscape(agentID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("X-Internal-Token", r.internalToken)
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("get webhook secret returned %d", resp.StatusCode)
+	}
+
+	var data struct {
+		Secret string `json:"webhook_secret"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "", err
+	}
+	return data.Secret, nil
+}
+
+func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, resolveURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -233,7 +271,7 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("resolve chat %s: %w", chatID, err)
+		return nil, fmt.Errorf("resolve agent: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -243,8 +281,8 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		r.logger.Error("chat resolve failed", "chat_id", chatID, "status", resp.StatusCode)
-		return nil, fmt.Errorf("chat resolve returned %d", resp.StatusCode)
+		r.logger.Error("resolve failed", "url", resolveURL, "status", resp.StatusCode)
+		return nil, fmt.Errorf("resolve returned %d", resp.StatusCode)
 	}
 
 	var data chatResolveResponse
@@ -337,5 +375,8 @@ func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo
 		ActiveMissions: activeMissions,
 		NetworkMode:    networkMode,
 		AllowedDomains: allowedDomains,
+		MemoryMB:       data.MemoryMB,
+		CPUs:           data.CPUs,
+		TTLHours:       data.TTLHours,
 	}, nil
 }

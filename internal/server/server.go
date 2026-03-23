@@ -98,24 +98,25 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		orch.SetKeeperEnabled(true)
 	}
 
+	// Calculate IPC base URL for containers to reach this server.
+	hostAddr := "host.docker.internal" // default for Docker
+	if ctr != nil {
+		if hap, ok := ctr.(provider.HostAddressProvider); ok {
+			if addr := hap.HostAddress(); addr != "" {
+				hostAddr = addr
+			}
+		}
+	}
+	if strings.Contains(hostAddr, ":") {
+		hostAddr = "[" + hostAddr + "]"
+	}
+	ipcBase := fmt.Sprintf("http://%s:%d", hostAddr, cfg.Server.Port)
+
 	// Wire IPC config so lead agents can reach crewshipd for assignment routing.
 	// The host address depends on the container provider:
 	//   Docker: host.docker.internal (injected via ExtraHosts)
 	//   Apple:  actual host IP (containers run in their own VMs)
 	if cfg.Auth.InternalToken != "" {
-		hostAddr := "host.docker.internal" // default for Docker
-		if ctr != nil {
-			if hap, ok := ctr.(provider.HostAddressProvider); ok {
-				if addr := hap.HostAddress(); addr != "" {
-					hostAddr = addr
-				}
-			}
-		}
-		// Wrap IPv6 literals in brackets for URL construction
-		if strings.Contains(hostAddr, ":") {
-			hostAddr = "[" + hostAddr + "]"
-		}
-		ipcBase := fmt.Sprintf("http://%s:%d", hostAddr, cfg.Server.Port)
 		orch.SetIPCConfig(ipcBase, cfg.Auth.InternalToken)
 		logger.Info("orchestrator IPC config set", "base_url", ipcBase)
 	}
@@ -210,8 +211,10 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		}
 		opts = append(opts, goapi.WithSocketPath(cfg.IPC.SocketPath))
 		opts = append(opts, goapi.WithInternalToken(cfg.Auth.InternalToken))
+		opts = append(opts, goapi.WithInternalBaseURL(ipcBase))
 		opts = append(opts, goapi.WithHub(wsHub))
 		opts = append(opts, goapi.WithOrchestrator(orch))
+		opts = append(opts, goapi.WithLogWriter(logW))
 		if missionEngine != nil {
 			opts = append(opts, goapi.WithMissionCallback(missionEngine))
 		}
@@ -351,6 +354,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}()
 
 	go s.wsHub.Run(ctx)
+	go s.orchestrator.Start(ctx)
 
 	if s.tokenSyncer != nil {
 		go s.tokenSyncer.Run(ctx)

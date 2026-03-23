@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { Download, AlertCircle, Inbox, Search, Pause, Play } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 const SECRET_RE = /(?:sk-[a-zA-Z0-9_-]{10,}|ghp_[a-zA-Z0-9]{36,}|gho_[a-zA-Z0-9]{36,}|xoxb-[a-zA-Z0-9-]+|AIza[a-zA-Z0-9_-]{35}|eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]+)/g
 function redactSecrets(s: string): string { return s.replace(SECRET_RE, "***") }
@@ -94,9 +95,24 @@ export function LogsPageClient() {
 
   useEffect(() => {
     if (!autoRefresh || !workspaceId) return
-    const interval = setInterval(fetchLogs, 2000)
+    const interval = setInterval(fetchLogs, 5000) // Fallback polling, slower
     return () => clearInterval(interval)
   }, [autoRefresh, workspaceId, fetchLogs])
+
+  useRealtimeEvent("agent.log", (event) => {
+    if (!autoRefresh) return
+    const payload = event.payload
+    if (payload.agent_id === agentId) {
+      setLogs((prev) => [...prev, {
+        ts: payload.ts,
+        level: payload.level,
+        agent: payload.agent,
+        event: payload.event,
+        content: payload.content,
+        metadata: payload.metadata,
+      }])
+    }
+  })
 
   useEffect(() => {
     if (autoScroll && logContainerRef.current) {

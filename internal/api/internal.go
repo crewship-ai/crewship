@@ -260,32 +260,72 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 
-	var agentID, agentSlug, agentName, cliAdapter, toolProfile, wsID string
-	var systemPrompt, roleTitle, agentRole, llmModel sql.NullString
-	var timeoutSecs int
-	var memoryEnabled bool
-	var crewID, crewSlug, crewName sql.NullString
-	var crewNetworkMode, crewAllowedDomains sql.NullString
-
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT a.id, a.slug, a.name, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt,
-			a.tool_profile, a.timeout_seconds, a.memory_enabled,
-			c2.id, c2.slug, c2.name, c.workspace_id, a.llm_model,
-			c2.network_mode, c2.allowed_domains
-		FROM chats c
-		JOIN agents a ON a.id = c.agent_id
-		LEFT JOIN crews c2 ON c2.id = a.crew_id
-		WHERE c.id = ?
-	`, chatID).Scan(&agentID, &agentSlug, &agentName, &roleTitle, &agentRole, &cliAdapter, &systemPrompt,
-		&toolProfile, &timeoutSecs, &memoryEnabled,
-		&crewID, &crewSlug, &crewName, &wsID, &llmModel,
-		&crewNetworkMode, &crewAllowedDomains)
+	var agentID string
+	err := h.db.QueryRowContext(r.Context(), "SELECT agent_id FROM chats WHERE id = ?", chatID).Scan(&agentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Chat not found"})
 			return
 		}
-		h.logger.Error("resolve chat", "error", err)
+		h.logger.Error("resolve chat lookup", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	h.resolveAgentConfig(w, r, agentID)
+}
+
+func (h *InternalHandler) ResolveAgent(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	h.resolveAgentConfig(w, r, agentID)
+}
+
+func (h *InternalHandler) GetWebhookSecret(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	var secret sql.NullString
+	err := h.db.QueryRowContext(r.Context(), "SELECT webhook_secret FROM agents WHERE id = ?", agentID).Scan(&secret)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("webhook secret lookup", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"webhook_secret": secret.String})
+}
+
+func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Request, agentID string) {
+	var agentSlug, agentName, cliAdapter, toolProfile, wsID string
+	var systemPrompt, roleTitle, agentRole, llmModel sql.NullString
+	var timeoutSecs int
+	var memoryEnabled bool
+	var crewID, crewSlug, crewName sql.NullString
+	var crewNetworkMode, crewAllowedDomains sql.NullString
+	var crewMemoryMB, crewTTLHours sql.NullInt64
+	var crewCPUs sql.NullFloat64
+
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT a.slug, a.name, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt,
+			a.tool_profile, a.timeout_seconds, a.memory_enabled,
+			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model,
+			c2.network_mode, c2.allowed_domains,
+			c2.container_memory_mb, c2.container_cpus, c2.container_ttl_hours
+		FROM agents a
+		LEFT JOIN crews c2 ON c2.id = a.crew_id
+		WHERE a.id = ?
+	`, agentID).Scan(&agentSlug, &agentName, &roleTitle, &agentRole, &cliAdapter, &systemPrompt,
+		&toolProfile, &timeoutSecs, &memoryEnabled,
+		&crewID, &crewSlug, &crewName, &wsID, &llmModel,
+		&crewNetworkMode, &crewAllowedDomains,
+		&crewMemoryMB, &crewCPUs, &crewTTLHours)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("resolve agent config", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
@@ -298,7 +338,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		ORDER BY ac.priority ASC
 	`, agentID)
 	if err != nil {
-		h.logger.Error("resolve chat credentials", "error", err)
+		h.logger.Error("resolve agent credentials", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
@@ -410,7 +450,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		ORDER BY s.display_name
 	`, agentID)
 	if err != nil {
-		h.logger.Error("resolve chat skills", "error", err)
+		h.logger.Error("resolve agent skills", "error", err)
 	} else {
 		defer skillRows.Close()
 
@@ -627,6 +667,19 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	memoryMB := 4096
+	if crewMemoryMB.Valid {
+		memoryMB = int(crewMemoryMB.Int64)
+	}
+	cpus := 2.0
+	if crewCPUs.Valid {
+		cpus = crewCPUs.Float64
+	}
+	ttlHours := 0
+	if crewTTLHours.Valid {
+		ttlHours = int(crewTTLHours.Int64)
+	}
+
 	resp := map[string]interface{}{
 		"agent_id":        agentID,
 		"agent_slug":      agentSlug,
@@ -645,6 +698,9 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 		"crew_members":    crewMembers,
 		"network_mode":    networkMode,
 		"allowed_domains": allowedDomains,
+		"memory_mb":       memoryMB,
+		"cpus":            cpus,
+		"ttl_hours":       ttlHours,
 	}
 	if len(allCrews) > 0 {
 		resp["all_crews"] = allCrews
@@ -679,6 +735,7 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
+
 
 func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {

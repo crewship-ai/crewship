@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 func (s *Server) registerRoutes() {
@@ -129,6 +130,7 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 type agentStartRequest struct {
+	WorkspaceID    string                    `json:"workspace_id"`
 	CrewID         string                    `json:"crew_id"`
 	CrewSlug       string                    `json:"crew_slug"`
 	AgentSlug      string                    `json:"agent_slug"`
@@ -141,6 +143,9 @@ type agentStartRequest struct {
 	Credentials    []orchestrator.Credential `json:"credentials"`
 	NetworkMode    string                    `json:"network_mode"`
 	AllowedDomains []string                  `json:"allowed_domains"`
+	MemoryMB       int                       `json:"memory_mb"`
+	CPUs           float64                   `json:"cpus"`
+	TTLHours       int                       `json:"ttl_hours"`
 }
 
 func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
@@ -161,8 +166,8 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	containerID, err := s.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
 		ID:       req.CrewID,
 		Slug:     req.CrewSlug,
-		MemoryMB: s.cfg.Container.DefaultMemoryMB,
-		CPUs:     s.cfg.Container.DefaultCPUs,
+		MemoryMB: req.MemoryMB,
+		CPUs:     req.CPUs,
 	})
 	if err != nil {
 		s.logger.Error("failed to ensure team runtime", "crew_id", req.CrewID, "error", err)
@@ -175,6 +180,7 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		AgentSlug:      req.AgentSlug,
 		CrewID:         req.CrewID,
 		CrewSlug:       req.CrewSlug,
+		WorkspaceID:    req.WorkspaceID,
 		ChatID:         req.ChatID,
 		ContainerID:    containerID,
 		CLIAdapter:     req.CLIAdapter,
@@ -185,6 +191,9 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		TimeoutSecs:    req.TimeoutSecs,
 		NetworkMode:    req.NetworkMode,
 		AllowedDomains: req.AllowedDomains,
+		MemoryMB:       req.MemoryMB,
+		CPUs:           req.CPUs,
+		TTLHours:       req.TTLHours,
 	}
 
 	go func() {
@@ -209,6 +218,25 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 					Agent:     req.AgentSlug,
 					Event:     event.Type,
 					Content:   event.Content,
+					Metadata:  event.Metadata,
+				})
+			}
+
+			// Broadcast real-time log events to the workspace channel
+			if s.wsHub != nil {
+				channel := "workspace:" + req.WorkspaceID
+				s.wsHub.Broadcast(channel, ws.ServerMessage{
+					Type:    "agent.log",
+					Channel: channel,
+					Payload: map[string]interface{}{
+						"ts":       event.Timestamp,
+						"level":    "info",
+						"agent":    req.AgentSlug,
+						"agent_id": agentID,
+						"event":    event.Type,
+						"content":  event.Content,
+						"metadata": event.Metadata,
+					},
 				})
 			}
 		}
