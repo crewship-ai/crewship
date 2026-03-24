@@ -27,17 +27,6 @@ import {
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
-import { getCrewDotColor } from "@/lib/crew-icon"
-
-interface RunAgent {
-  id: string
-  name: string
-  slug: string
-  cli_adapter: string
-  llm_provider: string | null
-  crew: { id: string; name: string; color: string | null } | null
-}
-
 interface Run {
   id: string
   agent_id: string
@@ -48,7 +37,9 @@ interface Run {
   error_message: string | null
   exit_code: number | null
   created_at: string
-  agent: RunAgent
+  agent_name?: string
+  agent_slug?: string
+  crew_name?: string
   triggerer: { id: string; email: string; full_name: string | null } | null
 }
 
@@ -249,18 +240,12 @@ export default function RunsPage() {
                       </TableCell>
                       <TableCell className="text-body font-medium">
                         <Link href={`/agents/${run.agent_id}`} className="hover:underline">
-                          {run.agent.name}
+                          {run.agent_name ?? "Unknown"}
                         </Link>
                       </TableCell>
                       <TableCell>
-                        {run.agent.crew ? (
-                          <span className="flex items-center gap-1.5 text-body">
-                            <span
-                              className="h-2 w-2 rounded-full"
-                              style={{ backgroundColor: getCrewDotColor(run.agent.crew.color) }}
-                            />
-                            {run.agent.crew.name}
-                          </span>
+                        {run.crew_name ? (
+                          <span className="text-body">{run.crew_name}</span>
                         ) : (
                           <span className="text-label text-muted-foreground">—</span>
                         )}
