@@ -179,6 +179,12 @@ var agentCreateCmd = &cobra.Command{
 		if v, _ := flags.GetBool("memory"); v {
 			body["memory_enabled"] = true
 		}
+		if v, _ := flags.GetString("avatar-seed"); v != "" {
+			body["avatar_seed"] = v
+		}
+		if v, _ := flags.GetString("avatar-style"); v != "" {
+			body["avatar_style"] = v
+		}
 
 		// System prompt: inline or @file
 		if v, _ := flags.GetString("system-prompt"); v != "" {
@@ -655,6 +661,8 @@ func init() {
 	agentCreateCmd.Flags().Bool("memory", false, "Enable memory")
 	agentCreateCmd.Flags().String("lead-mode", "", "Lead mode: active|passive")
 	agentCreateCmd.Flags().Int("timeout", 0, "Timeout in seconds")
+	agentCreateCmd.Flags().String("avatar-seed", "", "Avatar seed (defaults to agent name)")
+	agentCreateCmd.Flags().String("avatar-style", "", "Avatar style: bottts-neutral|adventurer|fun-emoji|pixel-art|micah|notionists|thumbs|lorelei|big-smile|avataaars")
 
 	agentUpdateCmd.Flags().String("name", "", "Agent name")
 	agentUpdateCmd.Flags().String("role", "", "Agent role")
