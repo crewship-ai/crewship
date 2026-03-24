@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"io"
+	"time"
 )
 
 type CrewConfig struct {
@@ -31,11 +32,23 @@ type ContainerStatus struct {
 	Uptime string
 }
 
+type ContainerMetrics struct {
+	CPUPercent  float64   `json:"cpu_percent"`
+	MemoryUsed  int64     `json:"memory_used_bytes"`
+	MemoryLimit int64     `json:"memory_limit_bytes"`
+	MemoryPct   float64   `json:"memory_percent"`
+	NetRx       int64     `json:"net_rx_bytes"`
+	NetTx       int64     `json:"net_tx_bytes"`
+	PIDs        int       `json:"pids"`
+	Timestamp   time.Time `json:"timestamp"`
+}
+
 type ContainerProvider interface {
 	EnsureCrewRuntime(ctx context.Context, team CrewConfig) (string, error)
 	StopCrewRuntime(ctx context.Context, containerID string) error
 	RemoveCrewRuntime(ctx context.Context, containerID string) error
 	ContainerStatus(ctx context.Context, containerID string) (*ContainerStatus, error)
+	ContainerStats(ctx context.Context, containerID string) (*ContainerMetrics, error)
 	Exec(ctx context.Context, cfg ExecConfig) (*ExecResult, error)
 	ExecInspect(ctx context.Context, execID string) (bool, int, error)
 	// CrewContainerName returns the container name for a given crew slug.

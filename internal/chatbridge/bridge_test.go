@@ -164,6 +164,9 @@ func (f *failContainer) Exec(_ context.Context, _ provider.ExecConfig) (*provide
 func (f *failContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return false, 1, nil
 }
+func (f *failContainer) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
+	return nil, fmt.Errorf("stats unavailable")
+}
 func (f *failContainer) CrewContainerName(slug string) string {
 	return "crewship-team-" + slug
 }

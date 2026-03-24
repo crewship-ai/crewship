@@ -37,6 +37,7 @@ func (s *Server) registerIPCRoutes() {
 	s.ipcMux.HandleFunc("POST /crews/{id}/container/start", s.handleContainerStart)
 	s.ipcMux.HandleFunc("POST /crews/{id}/container/stop", s.handleContainerStop)
 	s.ipcMux.HandleFunc("GET /agents/{id}/logs", s.handleAgentLogs)
+	s.ipcMux.HandleFunc("GET /crews/{id}/stats", s.handleCrewStats)
 	s.ipcMux.HandleFunc("GET /crews/{id}/files", s.handleFileList)
 	s.ipcMux.HandleFunc("GET /crews/{id}/files/download", s.handleFileDownload)
 	s.ipcMux.HandleFunc("PUT /crews/{id}/files/save", s.handleFileSave)
@@ -181,6 +182,14 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("failed to ensure team runtime", "crew_id", req.CrewID, "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to start container"})
 		return
+	}
+
+	// Start file watcher for this crew's output directory (idempotent).
+	s.ensureFileWatcher(req.CrewID)
+
+	// Register container for stats collection.
+	if s.statsCollector != nil {
+		s.statsCollector.Register(containerID, req.CrewID, req.WorkspaceID)
 	}
 
 	runReq := orchestrator.AgentRunRequest{
@@ -330,6 +339,8 @@ func (s *Server) handleContainerStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "container start failed"})
 		return
 	}
+
+	s.ensureFileWatcher(id)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"crew_id":      id,
@@ -678,6 +689,52 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		slog.Error("failed to encode JSON response", "error", err)
+	}
+}
+
+func (s *Server) handleCrewStats(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("id")
+	containerID := r.URL.Query().Get("container_id")
+	if containerID == "" || s.container == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "stats": nil})
+		return
+	}
+	if s.statsCollector != nil {
+		if m := s.statsCollector.Latest(containerID); m != nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"crew_id": crewID, "container_id": containerID,
+				"cpu_percent": m.CPUPercent, "memory_used": m.MemoryUsed,
+				"memory_limit": m.MemoryLimit, "memory_percent": m.MemoryPct,
+				"net_rx_bytes": m.NetRx, "net_tx_bytes": m.NetTx,
+				"pids": m.PIDs, "timestamp": m.Timestamp,
+			})
+			return
+		}
+	}
+	metrics, err := s.container.ContainerStats(r.Context(), containerID)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "stats": nil, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"crew_id": crewID, "container_id": containerID,
+		"cpu_percent": metrics.CPUPercent, "memory_used": metrics.MemoryUsed,
+		"memory_limit": metrics.MemoryLimit, "memory_percent": metrics.MemoryPct,
+		"net_rx_bytes": metrics.NetRx, "net_tx_bytes": metrics.NetTx,
+		"pids": metrics.PIDs, "timestamp": metrics.Timestamp,
+	})
+}
+
+func (s *Server) ensureFileWatcher(crewID string) {
+	if s.fileWatcher == nil {
+		return
+	}
+	if _, loaded := s.watchedCrews.LoadOrStore(crewID, true); loaded {
+		return
+	}
+	if err := s.fileWatcher.Watch(s.runCtx, crewID); err != nil {
+		s.logger.Warn("failed to start file watcher", "crew_id", crewID, "error", err)
+		s.watchedCrews.Delete(crewID)
 	}
 }
 

@@ -20,7 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { SetupNudge } from "@/components/features/onboarding/setup-nudge"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useTick } from "@/hooks/use-tick"
-import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
 import { getCrewDotColor } from "@/lib/crew-icon"
 
@@ -106,6 +106,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState("all")
   const [onboardingChecked, setOnboardingChecked] = useState(false)
+  const [containerStats, setContainerStats] = useState<Map<string, { crew_id: string; cpu_percent: number; memory_used: number; memory_limit: number; memory_percent: number; pids: number }>>(new Map())
 
   useTick(1000)
 
@@ -174,6 +175,23 @@ export default function DashboardPage() {
   useRealtimeEvent("run.completed", useCallback(() => { fetchData(false) }, [fetchData]))
   useRealtimeEvent("run.failed", useCallback(() => { fetchData(false) }, [fetchData]))
   useRealtimeEvent("agent.status", useCallback(() => { fetchData(false) }, [fetchData]))
+
+  useRealtimeEvent("container.stats", useCallback((event: RealtimeEvent) => {
+    const p = event.payload
+    if (!p.container_id) return
+    setContainerStats(prev => {
+      const next = new Map(prev)
+      next.set(p.container_id as string, {
+        crew_id: p.crew_id as string,
+        cpu_percent: p.cpu_percent as number,
+        memory_used: p.memory_used as number,
+        memory_limit: p.memory_limit as number,
+        memory_percent: p.memory_percent as number,
+        pids: p.pids as number,
+      })
+      return next
+    })
+  }, []))
 
   const isLoading = wsLoading || loading
 
@@ -295,6 +313,42 @@ export default function DashboardPage() {
           agentCount={totalAgents}
           credentialCount={apiKeysActive}
         />
+      )}
+
+      {containerStats.size > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-heading font-semibold">Container Resources</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Crew</TableHead>
+                  <TableHead>CPU</TableHead>
+                  <TableHead>Memory</TableHead>
+                  <TableHead>PIDs</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {Array.from(containerStats.entries()).map(([containerId, stats]) => {
+                  const cpuColor = stats.cpu_percent > 80 ? "text-red-600" : stats.cpu_percent > 50 ? "text-amber-600" : "text-emerald-600"
+                  const memColor = stats.memory_percent > 80 ? "text-red-600" : stats.memory_percent > 50 ? "text-amber-600" : "text-emerald-600"
+                  const memMB = Math.round(stats.memory_used / 1024 / 1024)
+                  const memLimitMB = Math.round(stats.memory_limit / 1024 / 1024)
+                  return (
+                    <TableRow key={containerId}>
+                      <TableCell className="font-mono text-xs">{stats.crew_id.slice(0, 8)}…</TableCell>
+                      <TableCell className={cpuColor + " font-medium text-xs"}>{stats.cpu_percent.toFixed(1)}%</TableCell>
+                      <TableCell className={memColor + " text-xs"}>{memMB} / {memLimitMB} MB ({stats.memory_percent.toFixed(0)}%)</TableCell>
+                      <TableCell className="text-xs">{stats.pids}</TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       )}
 
       {/* Agents Table */}

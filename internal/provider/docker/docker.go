@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -540,6 +541,50 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 		ID:     containerID,
 		State:  state,
 		Uptime: inspect.State.StartedAt,
+	}, nil
+}
+
+func (p *Provider) ContainerStats(ctx context.Context, containerID string) (*provider.ContainerMetrics, error) {
+	resp, err := p.client.ContainerStats(ctx, containerID, false)
+	if err != nil {
+		return nil, fmt.Errorf("container stats: %w", err)
+	}
+	defer resp.Body.Close()
+	var stats container.StatsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+		return nil, fmt.Errorf("decode stats: %w", err)
+	}
+	var cpuPct float64
+	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
+	sysDelta := float64(stats.CPUStats.SystemUsage - stats.PreCPUStats.SystemUsage)
+	if sysDelta > 0 && cpuDelta >= 0 {
+		numCPUs := float64(stats.CPUStats.OnlineCPUs)
+		if numCPUs == 0 {
+			numCPUs = float64(len(stats.CPUStats.CPUUsage.PercpuUsage))
+		}
+		if numCPUs == 0 {
+			numCPUs = 1
+		}
+		cpuPct = (cpuDelta / sysDelta) * numCPUs * 100.0
+	}
+	memUsed := int64(stats.MemoryStats.Usage - stats.MemoryStats.Stats["cache"])
+	if memUsed < 0 {
+		memUsed = int64(stats.MemoryStats.Usage)
+	}
+	memLimit := int64(stats.MemoryStats.Limit)
+	var memPct float64
+	if memLimit > 0 {
+		memPct = float64(memUsed) / float64(memLimit) * 100.0
+	}
+	var netRx, netTx int64
+	for _, iface := range stats.Networks {
+		netRx += int64(iface.RxBytes)
+		netTx += int64(iface.TxBytes)
+	}
+	return &provider.ContainerMetrics{
+		CPUPercent: cpuPct, MemoryUsed: memUsed, MemoryLimit: memLimit,
+		MemoryPct: memPct, NetRx: netRx, NetTx: netTx,
+		PIDs: int(stats.PidsStats.Current), Timestamp: time.Now().UTC(),
 	}, nil
 }
 
