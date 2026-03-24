@@ -14,6 +14,61 @@ if [[ ! -x "$CLI" ]]; then
   exit 1
 fi
 
+# Load .env.local for bootstrap credentials
+if [[ -f "$REPO_ROOT/.env.local" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/.env.local"
+  set +a
+fi
+
+ADMIN_EMAIL="${SEED_ADMIN_EMAIL:-admin@crewship.local}"
+ADMIN_PASSWORD="${SEED_ADMIN_PASSWORD:-admin123}"
+ADMIN_NAME="${SEED_ADMIN_NAME:-Admin}"
+
+# --- Bootstrap: ensure admin user + workspace exist ---
+echo ">>> Bootstrapping admin user..."
+bootstrap_out=$(curl -sf -X POST "$SERVER/api/v1/bootstrap" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\",\"full_name\":\"$ADMIN_NAME\"}" 2>&1) || true
+
+if echo "$bootstrap_out" | grep -q "cli_token"; then
+  CLI_TOKEN=$(echo "$bootstrap_out" | grep -o '"cli_token":"[^"]*"' | cut -d'"' -f4)
+  echo "  Admin created. Configuring CLI..."
+  "$CLI" login --token "$CLI_TOKEN" -s "$SERVER"
+  WORKSPACE_ID=$(echo "$bootstrap_out" | grep -o '"workspace_id":"[^"]*"' | cut -d'"' -f4)
+  "$CLI" workspace use "$WORKSPACE_ID" -s "$SERVER"
+elif echo "$bootstrap_out" | grep -qi "already\|exists\|bootstrapped"; then
+  echo "  Admin already exists, checking CLI auth..."
+  if ! "$CLI" whoami -s "$SERVER" >/dev/null 2>&1; then
+    echo "  ERROR: Admin exists but CLI is not authenticated. Run: $CLI login -s $SERVER" >&2
+    exit 1
+  fi
+else
+  echo "  Bootstrap response: $bootstrap_out"
+  if ! "$CLI" whoami -s "$SERVER" >/dev/null 2>&1; then
+    echo "  ERROR: Cannot authenticate. Run: $CLI login -s $SERVER" >&2
+    exit 1
+  fi
+fi
+
+echo "  Authenticated as: $("$CLI" whoami -s "$SERVER" 2>&1 | head -1)"
+echo ""
+
+# --- Ensure CLAUDE_CODE_OAUTH_TOKEN credential exists ---
+if [[ -n "${SEED_ANTHROPIC_API_KEY:-}" ]]; then
+  if ! "$CLI" credential list -s "$SERVER" 2>/dev/null | grep -qi "CLAUDE_CODE_OAUTH_TOKEN"; then
+    echo ">>> Creating CLAUDE_CODE_OAUTH_TOKEN credential..."
+    "$CLI" credential create \
+      --name CLAUDE_CODE_OAUTH_TOKEN \
+      --type API_KEY \
+      --provider ANTHROPIC \
+      --value "$SEED_ANTHROPIC_API_KEY" \
+      -s "$SERVER" || echo "  (credential may already exist)"
+    echo ""
+  fi
+fi
+
 # Idempotent helpers — skip creation if resource already exists
 ensure_crew() {
   local slug="$1"; shift
