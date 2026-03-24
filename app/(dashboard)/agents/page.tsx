@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Bot, Plus } from "lucide-react"
+import { Bot, Plus, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -100,12 +100,17 @@ export default function AgentsPage() {
         onFilter={setActiveFilter}
       />
 
-      {error && <p className="text-body text-destructive">{error}</p>}
+      {error && (
+        <div className="flex items-center gap-3">
+          <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+          <p className="text-body text-destructive flex-1">{error}</p>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-[160px] rounded-xl" />
+            <Skeleton key={i} className="h-[160px] rounded-[var(--radius)]" />
           ))}
         </div>
       ) : filteredAgents.length === 0 ? (
@@ -118,12 +123,16 @@ export default function AgentsPage() {
               : "No agents match the current filter."
           }
         >
-          {agents.length === 0 && (
+          {agents.length === 0 ? (
             <Button className="mt-4" asChild>
               <Link href="/agents/new">
                 <Plus className="mr-2 h-4 w-4" />
                 Create Agent
               </Link>
+            </Button>
+          ) : (
+            <Button className="mt-4" variant="outline" onClick={() => setActiveFilter("All")}>
+              Clear filter
             </Button>
           )}
         </EmptyState>

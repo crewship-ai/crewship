@@ -751,6 +751,10 @@ func init() {
 
 	crewConnectCmd.Flags().String("direction", "bidirectional", "Connection direction: bidirectional or unidirectional")
 
+	crewStandupCmd.Flags().String("since", "", "Show activity since (RFC3339, default: 24h ago)")
+
+	crewPeerConvsCmd.Flags().Int("limit", 50, "Number of conversations to show")
+
 	crewCmd.AddCommand(crewListCmd)
 	crewCmd.AddCommand(crewGetCmd)
 	crewCmd.AddCommand(crewCreateCmd)
@@ -761,4 +765,118 @@ func init() {
 	crewCmd.AddCommand(crewConnectCmd)
 	crewCmd.AddCommand(crewDisconnectCmd)
 	crewCmd.AddCommand(crewConnectionsCmd)
+	crewCmd.AddCommand(crewStandupCmd)
+	crewCmd.AddCommand(crewPeerConvsCmd)
+}
+
+var crewStandupCmd = &cobra.Command{
+	Use:   "standup <slug-or-id>",
+	Short: "Show crew standup summary (last 24h activity)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		crewID, err := resolveCrewID(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		path := "/api/v1/crews/" + crewID + "/standup"
+		if since, _ := cmd.Flags().GetString("since"); since != "" {
+			path += "?since=" + since
+		}
+
+		resp, err := client.Get(path)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var result map[string]interface{}
+		if err := cli.ReadJSON(resp, &result); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		if f.Format == "json" {
+			return f.JSON(result)
+		}
+		// Standup returns a text summary
+		if text, ok := result["standup"].(string); ok {
+			fmt.Println(text)
+		} else {
+			return f.JSON(result)
+		}
+		return nil
+	},
+}
+
+var crewPeerConvsCmd = &cobra.Command{
+	Use:   "peer-conversations <slug-or-id>",
+	Short: "List peer conversations in a crew",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		crewID, err := resolveCrewID(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		limit, _ := cmd.Flags().GetInt("limit")
+		path := fmt.Sprintf("/api/v1/crews/%s/peer-conversations?limit=%d", crewID, limit)
+
+		resp, err := client.Get(path)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		type peerConv struct {
+			ID        string  `json:"id"`
+			FromName  string  `json:"from_name"`
+			ToName    string  `json:"to_name"`
+			Question  string  `json:"question"`
+			Response  *string `json:"response"`
+			Status    string  `json:"status"`
+			Escalated bool    `json:"escalated"`
+			CreatedAt string  `json:"created_at"`
+		}
+		var items []peerConv
+		if err := cli.ReadJSON(resp, &items); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		headers := []string{"ID", "FROM", "TO", "QUESTION", "STATUS", "ESCALATED", "CREATED"}
+		rows := make([][]string, len(items))
+		for i, item := range items {
+			q := item.Question
+			if len(q) > 60 {
+				q = q[:57] + "..."
+			}
+			esc := ""
+			if item.Escalated {
+				esc = "YES"
+			}
+			rows[i] = []string{item.ID[:8], item.FromName, item.ToName, q, item.Status, esc, item.CreatedAt}
+		}
+		return f.Auto(items, headers, rows)
+	},
 }

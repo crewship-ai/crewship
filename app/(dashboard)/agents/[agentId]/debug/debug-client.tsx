@@ -425,10 +425,12 @@ export function DebugPageClient() {
 
       {/* Log viewer tabs */}
       <div>
-        <div className="flex items-center gap-1 mb-2">
+        <div className="flex items-center gap-1 mb-2" role="tablist" aria-label="Log tabs">
           <Button
             variant={logTab === "service" ? "default" : "outline"}
             size="sm"
+            role="tab"
+            aria-selected={logTab === "service"}
             className="text-label h-7 px-3"
             onClick={() => setLogTab("service")}
           >
@@ -437,6 +439,8 @@ export function DebugPageClient() {
           <Button
             variant={logTab === "agent" ? "default" : "outline"}
             size="sm"
+            role="tab"
+            aria-selected={logTab === "agent"}
             className="text-label h-7 px-3"
             onClick={() => setLogTab("agent")}
           >

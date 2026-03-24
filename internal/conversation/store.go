@@ -27,9 +27,10 @@ type Message struct {
 	ChatID string    `json:"session_id"`
 	Role      Role      `json:"role"`
 	Content   string    `json:"content"`
-	ToolName  string    `json:"tool_name,omitempty"`
-	Metadata  any       `json:"metadata,omitempty"`
-	Timestamp time.Time `json:"ts"`
+	ToolName    string    `json:"tool_name,omitempty"`
+	ToolSummary string    `json:"tool_summary,omitempty"`
+	Metadata    any       `json:"metadata,omitempty"`
+	Timestamp   time.Time `json:"ts"`
 }
 
 type Store struct {

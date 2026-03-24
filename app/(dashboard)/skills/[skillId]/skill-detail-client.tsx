@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, AlertCircle } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -87,7 +87,10 @@ export function SkillDetailPageClient() {
             Back to Skills
           </Link>
         </Button>
-        <p className="text-sm text-destructive">{error}</p>
+        <div className="flex items-center gap-2 text-destructive">
+          <AlertCircle className="h-5 w-5" />
+          <p className="text-body">{error}</p>
+        </div>
       </div>
     )
   }
@@ -96,8 +99,20 @@ export function SkillDetailPageClient() {
     return (
       <div className="p-4 sm:p-6 space-y-4 max-w-3xl">
         <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-[80px] rounded-xl" />
-        <Skeleton className="h-[200px] rounded-xl" />
+        <div className="flex items-start gap-4">
+          <Skeleton className="h-14 w-14 rounded-xl" />
+          <div className="space-y-2 flex-1">
+            <Skeleton className="h-6 w-64" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-48" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-20 rounded-[var(--radius)]" />
+          ))}
+        </div>
+        <Skeleton className="h-[200px] rounded-[var(--radius)]" />
       </div>
     )
   }

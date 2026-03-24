@@ -1,11 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { Cpu, Key, MessageSquare } from "lucide-react"
+import { Cpu, Key, Clock, AlertCircle, Pause } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { getCrewDotColor } from "@/lib/crew-icon"
+import { timeAgo } from "@/lib/time"
 
 interface AgentCrew {
   name: string
@@ -35,9 +36,10 @@ interface AgentData {
   avatar_style?: string | null
   crew: AgentCrew | null
   _count: AgentCount
+  last_active_at?: string | null
 }
 
-const statusConfig: Record<string, { label: string; className: string }> = {
+const statusConfig: Record<string, { label: string; className: string; icon?: React.ElementType }> = {
   IDLE: {
     label: "Idle",
     className: "bg-muted text-muted-foreground",
@@ -49,28 +51,34 @@ const statusConfig: Record<string, { label: string; className: string }> = {
   ERROR: {
     label: "Error",
     className: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400",
+    icon: AlertCircle,
   },
   STOPPED: {
     label: "Stopped",
     className: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
+    icon: Pause,
   },
 }
 
 export function AgentCard({ agent }: { agent: AgentData }) {
   const status = statusConfig[agent.status] ?? statusConfig.IDLE
+  const StatusIcon = status.icon
 
   return (
-    <Link href={`/agents/${agent.id}`}>
-      <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full border-border/80 shadow-md">
+    <Link
+      href={`/agents/${agent.id}`}
+      className="rounded-[var(--radius)] focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 outline-none"
+    >
+      <Card className="hover:border-primary/50 hover:bg-accent/30 hover:shadow-md transition-all duration-150 cursor-pointer h-full border-border/80 shadow-md">
         <CardContent className="p-4 sm:p-5">
           <div className="flex items-start gap-3">
             <img
               src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)}
-              alt={agent.name}
+              alt=""
               className="h-10 w-10 rounded-lg shrink-0"
             />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center justify-between gap-2">
                 <h3 className="text-body font-semibold truncate">{agent.name}</h3>
                 <Badge variant="secondary" className={`text-micro shrink-0 gap-1.5 ${status.className}`}>
                   {agent.status === "RUNNING" && (
@@ -79,6 +87,7 @@ export function AgentCard({ agent }: { agent: AgentData }) {
                       <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
                     </span>
                   )}
+                  {StatusIcon && <StatusIcon className="h-3 w-3" />}
                   {status.label}
                 </Badge>
               </div>
@@ -98,9 +107,9 @@ export function AgentCard({ agent }: { agent: AgentData }) {
                 {agent.crew.name}
               </Badge>
             )}
-            <span className="text-micro text-muted-foreground">
+            <Badge variant="outline" className="text-micro gap-1 text-muted-foreground">
               {agent.llm_provider} / {agent.llm_model}
-            </span>
+            </Badge>
           </div>
 
           <div className="mt-3 pt-3 border-t flex items-center gap-4 text-label text-muted-foreground">
@@ -113,8 +122,8 @@ export function AgentCard({ agent }: { agent: AgentData }) {
               {agent._count?.credentials ?? 0} keys
             </span>
             <span className="flex items-center gap-1">
-              <MessageSquare className="h-3 w-3" />
-              {agent._count?.chats ?? 0} sessions
+              <Clock className="h-3 w-3" />
+              {agent.last_active_at ? timeAgo(agent.last_active_at) : "no activity"}
             </span>
           </div>
         </CardContent>

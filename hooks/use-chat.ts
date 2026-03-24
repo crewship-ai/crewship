@@ -618,6 +618,58 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
     })
   }, [send, sessionId])
 
+  // Regenerate the last assistant response by re-sending the last user message.
+  const regenerateLastTurn = useCallback(() => {
+    if (isStreaming) return
+    // Find the last user turn
+    const lastUserIdx = turns.map((t) => t.role).lastIndexOf("user")
+    if (lastUserIdx === -1) return
+    const lastUserContent = turns[lastUserIdx].parts.find((p) => p.type === "text")?.content
+    if (!lastUserContent) return
+
+    // Remove all turns after (and including) the last assistant turn
+    setTurns((prev) => prev.slice(0, lastUserIdx + 1))
+    setIsStreaming(true)
+    textBufferRef.current = ""
+    thinkingBufferRef.current = ""
+
+    send({
+      type: "send_message",
+      payload: JSON.stringify({
+        session_id: sessionId,
+        content: lastUserContent,
+      }),
+    })
+  }, [turns, sessionId, send, isStreaming])
+
+  // Edit a user message and resend — removes all subsequent turns.
+  const editAndResend = useCallback(
+    (turnId: string, newContent: string) => {
+      if (isStreaming || !newContent.trim()) return
+      const turnIdx = turns.findIndex((t) => t.id === turnId)
+      if (turnIdx === -1 || turns[turnIdx].role !== "user") return
+
+      // Replace the user turn content and remove everything after
+      const editedTurn: ChatTurn = {
+        ...turns[turnIdx],
+        parts: [{ id: crypto.randomUUID(), type: "text", content: newContent.trim(), timestamp: new Date() }],
+      }
+      setTurns(turns.slice(0, turnIdx).concat(editedTurn))
+      setIsStreaming(true)
+      textBufferRef.current = ""
+      thinkingBufferRef.current = ""
+
+      send({
+        type: "send_message",
+        payload: JSON.stringify({
+          session_id: sessionId,
+          content: newContent.trim(),
+        }),
+      })
+    },
+    [turns, sessionId, send, isStreaming],
+  )
+
   const loadHistory = useCallback((history: ChatMessage[]) => {
     setTurns(messagesToTurns(history))
     setIsStreaming(false)
@@ -643,6 +695,8 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
     messages,
     sendMessage,
     stopGeneration,
+    regenerateLastTurn,
+    editAndResend,
     loadHistory,
     isStreaming,
     connectionStatus: status as WSStatus,
