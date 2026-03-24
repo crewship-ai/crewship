@@ -108,6 +108,11 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, wsID, templateSlug, cre
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 
+	// Auto-assign workspace AI credentials to all new agents (best-effort, after commit).
+	for _, agentID := range agentIDs {
+		autoAssignCredentials(ctx, db, wsID, agentID, now)
+	}
+
 	return &deployCrewResult{
 		CrewID:     crewID,
 		CrewName:   crewName,
@@ -115,6 +120,30 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, wsID, templateSlug, cre
 		AgentCount: len(agentIDs),
 		AgentIDs:   agentIDs,
 	}, nil
+}
+
+// autoAssignCredentials assigns all workspace-scoped AI credentials (API_KEY, AI_CLI_TOKEN)
+// from Anthropic to the given agent. Errors are silently ignored since this is a best-effort
+// convenience — the agent can still be manually assigned credentials later.
+func autoAssignCredentials(ctx context.Context, db *sql.DB, wsID, agentID, now string) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT id, name FROM credentials
+		WHERE workspace_id = ? AND type IN ('API_KEY', 'AI_CLI_TOKEN')
+		  AND provider = 'ANTHROPIC' AND deleted_at IS NULL
+		ORDER BY created_at ASC`, wsID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var credID, credName string
+		if err := rows.Scan(&credID, &credName); err != nil {
+			continue
+		}
+		_, _ = db.ExecContext(ctx, `
+			INSERT OR IGNORE INTO agent_credentials (agent_id, credential_id, env_var_name, created_at)
+			VALUES (?, ?, ?, ?)`, agentID, credID, credName, now)
+	}
 }
 
 type CrewTemplateHandler struct {
