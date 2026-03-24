@@ -133,8 +133,53 @@ var tokenRevokeCmd = &cobra.Command{
 	},
 }
 
+var tokenValidateCmd = &cobra.Command{
+	Use:   "validate",
+	Short: "Validate the current CLI token",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		client.WorkspaceID = ""
+		resp, err := client.Get("/api/v1/auth/cli-token/validate")
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			return fmt.Errorf("token is invalid or expired")
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var result struct {
+			Valid     bool   `json:"valid"`
+			UserID    string `json:"user_id"`
+			Email     string `json:"email"`
+			ExpiresAt string `json:"expires_at"`
+		}
+		if err := cli.ReadJSON(resp, &result); err != nil {
+			return err
+		}
+
+		if result.Valid {
+			cli.PrintSuccess("Token is valid.")
+			fmt.Printf("  User: %s\n", result.Email)
+			if result.ExpiresAt != "" {
+				fmt.Printf("  Expires: %s\n", result.ExpiresAt)
+			}
+		} else {
+			return fmt.Errorf("token is invalid")
+		}
+		return nil
+	},
+}
+
 func init() {
 	tokenCmd.AddCommand(tokenListCmd)
 	tokenCmd.AddCommand(tokenCreateCmd)
 	tokenCmd.AddCommand(tokenRevokeCmd)
+	tokenCmd.AddCommand(tokenValidateCmd)
 }

@@ -545,6 +545,13 @@ func init() {
 	missionAddTaskCmd.Flags().Int("order", 0, "Task order (1-based)")
 	missionAddTaskCmd.Flags().String("depends-on", "", "Comma-separated task IDs this task depends on")
 
+	missionTaskUpdateCmd.Flags().String("title", "", "New task title")
+	missionTaskUpdateCmd.Flags().String("description", "", "New task description")
+	missionTaskUpdateCmd.Flags().String("status", "", "New status: PENDING|IN_PROGRESS|COMPLETED|FAILED")
+	missionTaskUpdateCmd.Flags().String("assigned-agent", "", "Agent ID to assign")
+
+	missionCloneCmd.Flags().String("title", "", "Override title for cloned mission")
+
 	missionCmd.AddCommand(missionListCmd)
 	missionCmd.AddCommand(missionGetCmd)
 	missionCmd.AddCommand(missionCreateCmd)
@@ -554,6 +561,8 @@ func init() {
 	missionCmd.AddCommand(missionResumeCmd)
 	missionCmd.AddCommand(missionRestartCmd)
 	missionCmd.AddCommand(missionAddTaskCmd)
+	missionCmd.AddCommand(missionTaskUpdateCmd)
+	missionCmd.AddCommand(missionCloneCmd)
 }
 
 var missionRestartCmd = &cobra.Command{
@@ -587,6 +596,106 @@ var missionRestartCmd = &cobra.Command{
 		resp.Body.Close()
 
 		cli.PrintSuccess(fmt.Sprintf("Mission %s restarted — all tasks reset, DAG engine running.", args[0]))
+		return nil
+	},
+}
+
+var missionTaskUpdateCmd = &cobra.Command{
+	Use:   "task-update <mission-id> <task-id>",
+	Short: "Update a mission task",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		crewID, missionID, err := resolveMission(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		body := map[string]interface{}{}
+		if v, _ := cmd.Flags().GetString("title"); v != "" {
+			body["title"] = v
+		}
+		if v, _ := cmd.Flags().GetString("description"); v != "" {
+			body["description"] = v
+		}
+		if v, _ := cmd.Flags().GetString("status"); v != "" {
+			body["status"] = strings.ToUpper(v)
+		}
+		if v, _ := cmd.Flags().GetString("assigned-agent"); v != "" {
+			body["assigned_agent_id"] = v
+		}
+		if len(body) == 0 {
+			return fmt.Errorf("no updates specified (use --title, --description, --status, or --assigned-agent)")
+		}
+
+		resp, err := client.Patch(
+			fmt.Sprintf("/api/v1/crews/%s/missions/%s/tasks/%s", crewID, missionID, args[1]),
+			body,
+		)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+
+		cli.PrintSuccess("Task updated.")
+		return nil
+	},
+}
+
+var missionCloneCmd = &cobra.Command{
+	Use:   "clone <mission-id>",
+	Short: "Clone a mission with all its tasks",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		crewID, missionID, err := resolveMission(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		body := map[string]interface{}{}
+		if v, _ := cmd.Flags().GetString("title"); v != "" {
+			body["title"] = v
+		}
+
+		resp, err := client.Post(
+			fmt.Sprintf("/api/v1/crews/%s/missions/%s/clone", crewID, missionID),
+			body,
+		)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var result struct {
+			ID     string `json:"id"`
+			Title  string `json:"title"`
+			Status string `json:"status"`
+		}
+		if err := cli.ReadJSON(resp, &result); err != nil {
+			return err
+		}
+
+		cli.PrintSuccess(fmt.Sprintf("Mission cloned: %s (%s)", result.ID, result.Title))
 		return nil
 	},
 }
