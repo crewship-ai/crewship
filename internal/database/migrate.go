@@ -86,6 +86,7 @@ var migrations = []migration{
 	{25, "add_captain_chats", migrationAddCaptainChats},
 	{26, "add_crew_templates_workspace_id", migrationAddCrewTemplatesWorkspaceID},
 	{27, "add_escalation_action", migrationAddEscalationAction},
+	{28, "add_task_scaling_and_handoff", migrationAddTaskScalingAndHandoff},
 }
 
 const migrationAddKeeperObservability = `
@@ -825,6 +826,28 @@ CREATE INDEX IF NOT EXISTS idx_captain_chat_user ON captain_chats(user_id);
 const migrationAddCrewTemplatesWorkspaceID = `
 ALTER TABLE crew_templates ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS idx_crew_templates_workspace ON crew_templates(workspace_id);
+`
+
+const migrationAddTaskScalingAndHandoff = `
+-- Mission-level orchestration metadata
+ALTER TABLE missions ADD COLUMN total_token_budget INTEGER;
+ALTER TABLE missions ADD COLUMN complexity TEXT DEFAULT 'MEDIUM';
+ALTER TABLE missions ADD COLUMN pattern TEXT DEFAULT 'ORCHESTRATOR';
+
+-- Task-level scaling, budget, and handoff tracking
+ALTER TABLE mission_tasks ADD COLUMN complexity TEXT DEFAULT 'MEDIUM';
+ALTER TABLE mission_tasks ADD COLUMN token_budget INTEGER DEFAULT 50000;
+ALTER TABLE mission_tasks ADD COLUMN tokens_used INTEGER DEFAULT 0;
+ALTER TABLE mission_tasks ADD COLUMN tool_calls_count INTEGER DEFAULT 0;
+ALTER TABLE mission_tasks ADD COLUMN tool_calls_budget INTEGER DEFAULT 15;
+ALTER TABLE mission_tasks ADD COLUMN confidence REAL;
+ALTER TABLE mission_tasks ADD COLUMN needs_review INTEGER DEFAULT 0;
+ALTER TABLE mission_tasks ADD COLUMN handoff_context TEXT;
+ALTER TABLE mission_tasks ADD COLUMN evaluation_status TEXT;
+ALTER TABLE mission_tasks ADD COLUMN evaluation_notes TEXT;
+ALTER TABLE mission_tasks ADD COLUMN retry_count INTEGER DEFAULT 0;
+ALTER TABLE mission_tasks ADD COLUMN priority INTEGER DEFAULT 3;
+ALTER TABLE mission_tasks ADD COLUMN labels TEXT;
 `
 
 const migrationAddAgentSchedule = `

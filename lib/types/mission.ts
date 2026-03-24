@@ -24,6 +24,9 @@ export interface TaskStats {
   skipped: number
 }
 
+export type TaskComplexity = "SIMPLE" | "MEDIUM" | "COMPLEX"
+export type EvaluationStatus = "PENDING" | "PASSED" | "FAILED"
+
 export interface MissionTask {
   id: string
   mission_id: string
@@ -48,7 +51,23 @@ export interface MissionTask {
   duration_ms: number | null
   created_at: string
   updated_at: string
+  // Scaling & handoff fields (migration 27)
+  complexity: TaskComplexity | null
+  token_budget: number | null
+  tokens_used: number | null
+  tool_calls_count: number | null
+  tool_calls_budget: number | null
+  confidence: number | null
+  needs_review: boolean
+  handoff_context: string | null
+  evaluation_status: EvaluationStatus | null
+  evaluation_notes: string | null
+  retry_count: number | null
+  priority: number | null
+  labels: string | null
 }
+
+export type MissionPattern = "CHAIN" | "PARALLEL" | "ORCHESTRATOR"
 
 export interface Mission {
   id: string
@@ -70,4 +89,8 @@ export interface Mission {
   completed_at: string | null
   task_stats: TaskStats | null
   tasks: MissionTask[]
+  // Scaling fields (migration 27)
+  total_token_budget: number | null
+  complexity: TaskComplexity | null
+  pattern: MissionPattern | null
 }
