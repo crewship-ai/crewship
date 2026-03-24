@@ -83,6 +83,8 @@ var migrations = []migration{
 	{22, "add_escalation_type_and_resolve", migrationAddEscalationTypeAndResolve},
 	{23, "add_crew_templates", migrationAddCrewTemplates},
 	{24, "add_agent_schedule", migrationAddAgentSchedule},
+	{25, "add_captain_chats", migrationAddCaptainChats},
+	{26, "add_crew_templates_workspace_id", migrationAddCrewTemplatesWorkspaceID},
 }
 
 const migrationAddKeeperObservability = `
@@ -804,6 +806,24 @@ CREATE TABLE IF NOT EXISTS crew_templates (
 );
 CREATE INDEX IF NOT EXISTS idx_crew_templates_slug ON crew_templates(slug);
 CREATE INDEX IF NOT EXISTS idx_crew_templates_category ON crew_templates(category);
+`
+
+const migrationAddCaptainChats = `
+CREATE TABLE IF NOT EXISTS captain_chats (
+	id TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	messages_json TEXT NOT NULL DEFAULT '[]',
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_captain_chat_ws ON captain_chats(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_captain_chat_user ON captain_chats(user_id);
+`
+
+const migrationAddCrewTemplatesWorkspaceID = `
+ALTER TABLE crew_templates ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_crew_templates_workspace ON crew_templates(workspace_id);
 `
 
 const migrationAddAgentSchedule = `

@@ -70,6 +70,11 @@ func init() {
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(tokenCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(captainCmd)
+	rootCmd.AddCommand(proposalCmd)
+	rootCmd.AddCommand(escalationCmd)
+	rootCmd.AddCommand(templateCmd)
+	rootCmd.AddCommand(systemCmd)
 }
 
 func main() {

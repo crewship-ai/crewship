@@ -102,7 +102,7 @@ func TestBuildMemoryContext_AllFiles(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	result := o.buildMemoryContext(ctx, req)
+	result := o.buildMemoryContext(ctx, req, 0)
 
 	// Should contain all memory sections
 	if !strings.Contains(result, "[AGENT MEMORY]") {
@@ -137,7 +137,7 @@ func TestBuildMemoryContext_OnlyAgentMD(t *testing.T) {
 		MemoryEnabled: true,
 	}
 
-	result := o.buildMemoryContext(context.Background(), req)
+	result := o.buildMemoryContext(context.Background(), req, 0)
 
 	if !strings.Contains(result, "I am Jarmila") {
 		t.Error("missing AGENT.md content")
@@ -160,7 +160,7 @@ func TestBuildMemoryContext_NoFiles(t *testing.T) {
 		MemoryEnabled: true,
 	}
 
-	result := o.buildMemoryContext(context.Background(), req)
+	result := o.buildMemoryContext(context.Background(), req, 0)
 
 	// Should still return instructions even with no memory files
 	if !strings.Contains(result, "[MEMORY INSTRUCTIONS]") {
@@ -173,7 +173,7 @@ func TestBuildMemoryContext_NoFiles(t *testing.T) {
 }
 
 func TestBuildMemoryContext_Truncation(t *testing.T) {
-	// Create AGENT.md that exceeds maxMemoryContextChars
+	// Create AGENT.md that exceeds defaultMemoryContextChars
 	bigContent := strings.Repeat("This is a long line of memory content. ", 500)
 
 	mc := mockContainerForMemory(map[string]string{
@@ -187,11 +187,11 @@ func TestBuildMemoryContext_Truncation(t *testing.T) {
 		MemoryEnabled: true,
 	}
 
-	result := o.buildMemoryContext(context.Background(), req)
+	result := o.buildMemoryContext(context.Background(), req, 0)
 
 	// Result should be bounded — AGENT.md alone is >15k chars
-	if len(result) > maxMemoryContextChars+2000 { // allow some overhead for headers/instructions
-		t.Errorf("result too large: %d chars (max should be ~%d)", len(result), maxMemoryContextChars)
+	if len(result) > defaultMemoryContextChars+2000 { // allow some overhead for headers/instructions
+		t.Errorf("result too large: %d chars (max should be ~%d)", len(result), defaultMemoryContextChars)
 	}
 	if !strings.Contains(result, "truncated") {
 		t.Error("expected truncation marker")
@@ -211,7 +211,7 @@ func TestBuildMemoryContext_CatErrorFiltered(t *testing.T) {
 		MemoryEnabled: true,
 	}
 
-	result := o.buildMemoryContext(context.Background(), req)
+	result := o.buildMemoryContext(context.Background(), req, 0)
 
 	// "cat:" prefix should be filtered — treated as no file
 	if strings.Contains(result, "No such file") {
