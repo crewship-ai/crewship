@@ -546,7 +546,8 @@ func init() {
 
 	credTestCmd.Flags().String("provider", "", "Provider: ANTHROPIC|OPENAI|GOOGLE|GITHUB|GITLAB|VERCEL|AWS|CUSTOM_CLI (required)")
 	credTestCmd.Flags().String("type", "", "Type: API_KEY|AI_CLI_TOKEN|SECRET|CLI_TOKEN")
-	credTestCmd.Flags().String("value", "", "Credential value to test (required)")
+	credTestCmd.Flags().String("value", "", "Credential value to test")
+	credTestCmd.Flags().Bool("value-stdin", false, "Read value from stdin")
 
 	credentialCmd.AddCommand(credListCmd)
 	credentialCmd.AddCommand(credCreateCmd)
@@ -569,12 +570,19 @@ var credTestCmd = &cobra.Command{
 		provider, _ := cmd.Flags().GetString("provider")
 		credType, _ := cmd.Flags().GetString("type")
 		value, _ := cmd.Flags().GetString("value")
+		valueStdin, _ := cmd.Flags().GetBool("value-stdin")
+		if value == "" && valueStdin {
+			scanner := bufio.NewScanner(os.Stdin)
+			if scanner.Scan() {
+				value = strings.TrimSpace(scanner.Text())
+			}
+		}
 
 		if provider == "" {
 			return fmt.Errorf("--provider is required (e.g. ANTHROPIC, OPENAI, GOOGLE)")
 		}
 		if value == "" {
-			return fmt.Errorf("--value is required")
+			return fmt.Errorf("--value or --value-stdin is required")
 		}
 
 		client := newAPIClient()
@@ -607,7 +615,7 @@ var credTestCmd = &cobra.Command{
 			if msg == "" {
 				msg = "validation failed"
 			}
-			cli.PrintError(fmt.Sprintf("Credential invalid: %s", msg))
+			return fmt.Errorf("credential invalid: %s", msg)
 		}
 		return nil
 	},

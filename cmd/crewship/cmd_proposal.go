@@ -65,7 +65,7 @@ var proposalListCmd = &cobra.Command{
 				title = title[:37] + "..."
 			}
 			rows = append(rows, []string{
-				p.ID[:12],
+				p.ID[:min(12, len(p.ID))],
 				title,
 				p.Status,
 				proposer,

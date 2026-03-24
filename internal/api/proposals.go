@@ -116,6 +116,11 @@ func (h *ProposalHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		result = append(result, p)
 	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate proposals", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 	if result == nil {
 		result = []proposalResponse{}
 	}

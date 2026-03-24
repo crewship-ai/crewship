@@ -170,6 +170,10 @@ var templateDeployCmd = &cobra.Command{
 		name, _ := cmd.Flags().GetString("name")
 		slug, _ := cmd.Flags().GetString("slug")
 
+		if name == "" {
+			return fmt.Errorf("--name is required (crew name for the deployed template)")
+		}
+
 		body := map[string]interface{}{}
 		if name != "" {
 			body["crew_name"] = name

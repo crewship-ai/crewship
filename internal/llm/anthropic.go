@@ -264,6 +264,7 @@ func checkAnthropicStatus(resp *http.Response) error {
 func (a *Anthropic) doWithRetry(ctx context.Context, body []byte) (*http.Response, error) {
 	const maxRetries = 3
 	baseDelay := time.Second
+	var retryAfter time.Duration
 
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
@@ -289,13 +290,18 @@ func (a *Anthropic) doWithRetry(ctx context.Context, body []byte) (*http.Respons
 			// Check Retry-After header
 			if ra := resp.Header.Get("Retry-After"); ra != "" {
 				if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
-					baseDelay = time.Duration(secs) * time.Second
+					retryAfter = time.Duration(secs) * time.Second
 				}
 			}
 		}
 
 		if attempt < maxRetries-1 {
 			delay := baseDelay * (1 << attempt) // 1s, 2s, 4s
+			// Use Retry-After if it exceeds the calculated exponential delay
+			if retryAfter > delay {
+				delay = retryAfter
+			}
+			retryAfter = 0 // reset for next attempt
 			jitter := time.Duration(rand.Int63n(int64(delay / 4)))
 			select {
 			case <-ctx.Done():

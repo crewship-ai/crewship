@@ -203,6 +203,9 @@ func execListCrews(ctx context.Context, h *CaptainHandler, wsID, _, _ string, _ 
 		}
 		result = append(result, r)
 	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterate crews: %w", err)
+	}
 	if len(result) == 0 {
 		return "No crews found.", nil
 	}
@@ -239,6 +242,9 @@ func execListAgents(ctx context.Context, h *CaptainHandler, wsID, _, _ string, i
 		}
 		result = append(result, r)
 	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterate agents: %w", err)
+	}
 	if len(result) == 0 {
 		return "No agents found.", nil
 	}
@@ -267,6 +273,9 @@ func execListCredentials(ctx context.Context, h *CaptainHandler, wsID, _, _ stri
 			return "", fmt.Errorf("scan credential: %w", err)
 		}
 		result = append(result, r)
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterate credentials: %w", err)
 	}
 	if len(result) == 0 {
 		return "No credentials found.", nil
@@ -303,6 +312,9 @@ func execListMissions(ctx context.Context, h *CaptainHandler, wsID, _, _ string,
 		}
 		result = append(result, r)
 	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterate missions: %w", err)
+	}
 	if len(result) == 0 {
 		return "No missions found.", nil
 	}
@@ -333,6 +345,9 @@ func execListEscalations(ctx context.Context, h *CaptainHandler, wsID, _, _ stri
 			return "", fmt.Errorf("scan escalation: %w", err)
 		}
 		result = append(result, r)
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterate escalations: %w", err)
 	}
 	if len(result) == 0 {
 		return "No pending escalations.", nil
@@ -405,6 +420,9 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 		slug = slugify(name)
 	} else {
 		slug = slugify(slug)
+	}
+	if slug == "" {
+		return "", fmt.Errorf("name must contain at least one letter or number to generate a valid slug")
 	}
 	// Ensure workspace uniqueness with a simple suffix if taken.
 	var taken int
@@ -515,18 +533,26 @@ func execCreateMission(ctx context.Context, h *CaptainHandler, wsID, _, _ string
 		}
 	}
 
-	if _, err = tx.ExecContext(ctx,
-		"UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ?", now, missionID); err != nil {
-		return "", fmt.Errorf("update mission status: %w", err)
-	}
-
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("commit: %w", err)
 	}
 
+	// Update status to IN_PROGRESS after successful commit.
+	if _, err := h.db.ExecContext(ctx,
+		"UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ?",
+		time.Now().UTC().Format(time.RFC3339), missionID); err != nil {
+		return "", fmt.Errorf("update mission status: %w", err)
+	}
+
 	if h.missionEngine != nil {
 		if startErr := h.missionEngine.StartMission(ctx, missionID); startErr != nil {
-			b, _ := json.Marshal(map[string]string{"id": missionID, "status": "IN_PROGRESS", "warning": "engine start failed: " + startErr.Error()})
+			// StartMission failed — mark as FAILED so we don't leave a dangling IN_PROGRESS.
+			if _, updErr := h.db.ExecContext(ctx,
+				"UPDATE missions SET status = 'FAILED', updated_at = ? WHERE id = ?",
+				time.Now().UTC().Format(time.RFC3339), missionID); updErr != nil {
+				h.logger.Error("failed to set mission FAILED after engine error", "mission_id", missionID, "error", updErr)
+			}
+			b, _ := json.Marshal(map[string]string{"id": missionID, "status": "FAILED", "warning": "engine start failed: " + startErr.Error()})
 			return string(b), nil
 		}
 	}
@@ -554,26 +580,38 @@ func execApproveProposal(ctx context.Context, h *CaptainHandler, wsID, userID, r
 	if err != nil {
 		return "", fmt.Errorf("approve proposal: %w", err)
 	}
-	if affected, _ := res.RowsAffected(); affected == 0 {
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return "", fmt.Errorf("check rows affected: %w", err)
+	}
+	if affected == 0 {
 		return "", fmt.Errorf("proposal %q not found or not in PENDING state", proposalID)
+	}
+
+	rollbackProposal := func() {
+		if _, rollErr := h.db.ExecContext(ctx,
+			"UPDATE mission_proposals SET status = 'PENDING', reviewed_by = NULL, reviewed_at = NULL, review_notes = NULL, updated_at = ? WHERE id = ?",
+			now, proposalID); rollErr != nil {
+			h.logger.Error("rollback proposal status", "error", rollErr)
+		}
 	}
 
 	var missionsJSON string
 	if err := h.db.QueryRowContext(ctx,
 		"SELECT missions_json FROM mission_proposals WHERE id = ?", proposalID).Scan(&missionsJSON); err != nil {
-		h.db.ExecContext(ctx, "UPDATE mission_proposals SET status = 'PENDING', reviewed_by = NULL, reviewed_at = NULL, review_notes = NULL, updated_at = ? WHERE id = ?", now, proposalID)
+		rollbackProposal()
 		return "", fmt.Errorf("load proposal missions: %w", err)
 	}
 
 	var missions []proposalMission
 	if err := json.Unmarshal([]byte(missionsJSON), &missions); err != nil {
-		h.db.ExecContext(ctx, "UPDATE mission_proposals SET status = 'PENDING', reviewed_by = NULL, reviewed_at = NULL, review_notes = NULL, updated_at = ? WHERE id = ?", now, proposalID)
+		rollbackProposal()
 		return "", fmt.Errorf("parse missions: %w", err)
 	}
 
 	missionIDs, err := createMissionsFromProposal(ctx, h.db, wsID, proposalID, missions)
 	if err != nil {
-		h.db.ExecContext(ctx, "UPDATE mission_proposals SET status = 'PENDING', reviewed_by = NULL, reviewed_at = NULL, review_notes = NULL, updated_at = ? WHERE id = ?", now, proposalID)
+		rollbackProposal()
 		return "", fmt.Errorf("create missions: %w", err)
 	}
 

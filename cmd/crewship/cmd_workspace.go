@@ -7,6 +7,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func truncateID(id string, n int) string {
+	if len(id) < n {
+		return id
+	}
+	return id[:n]
+}
+
 var workspaceCmd = &cobra.Command{
 	Use:     "workspace",
 	Aliases: []string{"ws"},
@@ -300,7 +307,7 @@ var workspaceMemberListCmd = &cobra.Command{
 		headers := []string{"ID", "EMAIL", "NAME", "ROLE", "JOINED"}
 		var rows [][]string
 		for _, m := range members {
-			rows = append(rows, []string{m.UserID[:12], m.Email, m.FullName, m.Role, m.CreatedAt})
+			rows = append(rows, []string{truncateID(m.UserID, 12), m.Email, m.FullName, m.Role, m.CreatedAt})
 		}
 		return f.Auto(members, headers, rows)
 	},
@@ -415,7 +422,7 @@ var workspaceInviteListCmd = &cobra.Command{
 		headers := []string{"ID", "EMAIL", "ROLE", "EXPIRES", "CREATED"}
 		var rows [][]string
 		for _, inv := range invitations {
-			rows = append(rows, []string{inv.ID[:12], inv.Email, inv.Role, inv.ExpiresAt, inv.CreatedAt})
+			rows = append(rows, []string{truncateID(inv.ID, 12), inv.Email, inv.Role, inv.ExpiresAt, inv.CreatedAt})
 		}
 		return f.Auto(invitations, headers, rows)
 	},
