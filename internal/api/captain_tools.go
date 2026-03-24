@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -469,7 +471,10 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 	return string(b), nil
 }
 
-func execCreateMission(ctx context.Context, h *CaptainHandler, wsID, _, _ string, input map[string]any) (string, error) {
+func execCreateMission(ctx context.Context, h *CaptainHandler, wsID, _, role string, input map[string]any) (string, error) {
+	if !canRole(role, "create") {
+		return "", fmt.Errorf("insufficient permissions")
+	}
 	crewID := strInput(input, "crew_id")
 	title := strInput(input, "title")
 	if crewID == "" || title == "" {
@@ -486,9 +491,13 @@ func execCreateMission(ctx context.Context, h *CaptainHandler, wsID, _, _ string
 	}
 
 	var leadID string
-	if err := h.db.QueryRowContext(ctx,
-		"SELECT id FROM agents WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL LIMIT 1", crewID).Scan(&leadID); err != nil {
+	err := h.db.QueryRowContext(ctx,
+		"SELECT id FROM agents WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL LIMIT 1", crewID).Scan(&leadID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("no LEAD agent in crew %q", crewID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup LEAD agent: %w", err)
 	}
 
 	missionID := generateCUID()
