@@ -125,6 +125,9 @@ func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Dependencies           *string `json:"dependencies"`
 		License                *string `json:"license"`
 		AgentCount             int     `json:"agent_count"`
+		SecurityScore          *int    `json:"security_score"`
+		AllowedDomains         *string `json:"allowed_domains"`
+		Changelog              *string `json:"changelog"`
 	}
 
 	var s skillDetailResponse
@@ -135,13 +138,15 @@ func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
 		       s.tags, s.featured, s.pricing_tier, s.tool_count, s.created_at, s.updated_at,
 		       s.content, s.credential_requirements, s.mcp_server_command, s.mcp_server_image,
 		       s.mcp_transport, s.dependencies, s.license,
-		       (SELECT COUNT(*) FROM agent_skills WHERE skill_id = s.id) as agent_count
+		       (SELECT COUNT(*) FROM agent_skills WHERE skill_id = s.id) as agent_count,
+		       s.security_score, s.allowed_domains, s.changelog
 		FROM skills s WHERE s.id = ?`, skillID).Scan(
 		&s.ID, &s.Name, &s.Slug, &s.DisplayName, &s.Description, &s.Version, &s.Author,
 		&s.Category, &s.Source, &s.Icon, &s.Verification, &s.Downloads, &s.RatingAvg, &s.RatingCount,
 		&s.Tags, &featured, &s.PricingTier, &s.ToolCount, &s.CreatedAt, &s.UpdatedAt,
 		&s.Content, &s.CredentialRequirements, &s.McpServerCommand, &s.McpServerImage,
 		&s.McpTransport, &s.Dependencies, &s.License, &s.AgentCount,
+		&s.SecurityScore, &s.AllowedDomains, &s.Changelog,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

@@ -10,7 +10,7 @@ import { SkillDetailView } from "@/components/skills/skill-detail"
 import { InstallSkillDialog } from "@/components/skills/install-skill-dialog"
 import { useWorkspace } from "@/hooks/use-workspace"
 
-interface SkillDetail {
+export interface SkillDetail {
   id: string
   name: string
   slug: string
@@ -25,11 +25,21 @@ interface SkillDetail {
   content: string | null
   credential_requirements: string | null
   mcp_server_command: string | null
+  mcp_server_image: string | null
   mcp_transport: string | null
   license: string | null
   tags: string | null
   tool_count: number | null
   agent_count: number
+  downloads: number
+  rating_avg: number | null
+  rating_count: number
+  featured: boolean
+  pricing_tier: string
+  security_score: number | null
+  allowed_domains: string | null
+  changelog: string | null
+  dependencies: string | null
   created_at: string
   updated_at: string
 }
@@ -80,7 +90,7 @@ export function SkillDetailPageClient() {
 
   if (error) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 max-w-3xl">
+      <div className="p-4 sm:p-6 space-y-4">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/skills">
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -97,22 +107,23 @@ export function SkillDetailPageClient() {
 
   if (isLoading) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 max-w-3xl">
+      <div className="p-4 sm:p-6 space-y-6">
         <Skeleton className="h-8 w-48" />
         <div className="flex items-start gap-4">
           <Skeleton className="h-14 w-14 rounded-xl" />
           <div className="space-y-2 flex-1">
             <Skeleton className="h-6 w-64" />
-            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-full max-w-md" />
             <Skeleton className="h-4 w-48" />
           </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-20 rounded-[var(--radius)]" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-20 rounded-xl" />
           ))}
         </div>
-        <Skeleton className="h-[200px] rounded-[var(--radius)]" />
+        <Skeleton className="h-32 rounded-xl" />
+        <Skeleton className="h-32 rounded-xl" />
       </div>
     )
   }
@@ -120,7 +131,7 @@ export function SkillDetailPageClient() {
   if (!skill || !workspaceId) return null
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 max-w-3xl">
+    <div className="p-4 sm:p-6 space-y-6">
       <div className="flex items-center justify-between">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/skills">
