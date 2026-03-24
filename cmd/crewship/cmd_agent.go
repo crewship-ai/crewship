@@ -522,6 +522,115 @@ var agentDebugCmd = &cobra.Command{
 	},
 }
 
+var agentSkillsCmd = &cobra.Command{
+	Use:   "skills <agent>",
+	Short: "List skills assigned to an agent",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		agentID, err := resolveAgentID(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		resp, err := client.Get(fmt.Sprintf("/api/v1/agents/%s/skills", agentID))
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var skills []struct {
+			ID        string `json:"id"`
+			SkillID   string `json:"skill_id"`
+			SkillName string `json:"skill_name"`
+			Category  string `json:"category"`
+			Enabled   bool   `json:"enabled"`
+		}
+		if err := cli.ReadJSON(resp, &skills); err != nil {
+			return err
+		}
+
+		if len(skills) == 0 {
+			fmt.Println("No skills assigned to this agent.")
+			return nil
+		}
+
+		f := newFormatter()
+		headers := []string{"SKILL ID", "NAME", "CATEGORY", "ENABLED"}
+		var rows [][]string
+		for _, s := range skills {
+			enabled := "yes"
+			if !s.Enabled {
+				enabled = "no"
+			}
+			rows = append(rows, []string{s.SkillID[:min(12, len(s.SkillID))], s.SkillName, s.Category, enabled})
+		}
+		return f.Auto(skills, headers, rows)
+	},
+}
+
+var agentCredentialsCmd = &cobra.Command{
+	Use:   "credentials <agent>",
+	Short: "List credentials assigned to an agent",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		agentID, err := resolveAgentID(client, args[0])
+		if err != nil {
+			return err
+		}
+
+		resp, err := client.Get(fmt.Sprintf("/api/v1/agents/%s/credentials", agentID))
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var creds []struct {
+			ID             string `json:"id"`
+			CredentialID   string `json:"credential_id"`
+			CredentialName string `json:"credential_name"`
+			Provider       string `json:"provider"`
+			Type           string `json:"type"`
+			EnvVarName     string `json:"env_var_name"`
+		}
+		if err := cli.ReadJSON(resp, &creds); err != nil {
+			return err
+		}
+
+		if len(creds) == 0 {
+			fmt.Println("No credentials assigned to this agent.")
+			return nil
+		}
+
+		f := newFormatter()
+		headers := []string{"ID", "NAME", "PROVIDER", "TYPE", "ENV VAR"}
+		var rows [][]string
+		for _, c := range creds {
+			rows = append(rows, []string{c.ID[:min(12, len(c.ID))], c.CredentialName, c.Provider, c.Type, c.EnvVarName})
+		}
+		return f.Auto(creds, headers, rows)
+	},
+}
+
 func init() {
 	agentListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
 
@@ -564,6 +673,8 @@ func init() {
 	agentCmd.AddCommand(agentStopCmd)
 	agentCmd.AddCommand(agentLogsCmd)
 	agentCmd.AddCommand(agentDebugCmd)
+	agentCmd.AddCommand(agentSkillsCmd)
+	agentCmd.AddCommand(agentCredentialsCmd)
 }
 
 // Resolver helpers and shared types

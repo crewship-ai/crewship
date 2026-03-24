@@ -765,8 +765,11 @@ func init() {
 	crewCmd.AddCommand(crewConnectCmd)
 	crewCmd.AddCommand(crewDisconnectCmd)
 	crewCmd.AddCommand(crewConnectionsCmd)
+	crewSuggestCmd.Flags().String("goal", "", "What should this crew accomplish? (required)")
+
 	crewCmd.AddCommand(crewStandupCmd)
 	crewCmd.AddCommand(crewPeerConvsCmd)
+	crewCmd.AddCommand(crewSuggestCmd)
 }
 
 var crewStandupCmd = &cobra.Command{
@@ -878,5 +881,53 @@ var crewPeerConvsCmd = &cobra.Command{
 			rows[i] = []string{item.ID[:8], item.FromName, item.ToName, q, item.Status, esc, item.CreatedAt}
 		}
 		return f.Auto(items, headers, rows)
+	},
+}
+
+var crewSuggestCmd = &cobra.Command{
+	Use:   "suggest",
+	Short: "Get AI-powered crew suggestions based on a goal",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		goal, _ := cmd.Flags().GetString("goal")
+		if goal == "" {
+			return fmt.Errorf("--goal is required")
+		}
+
+		client := newAPIClient()
+		resp, err := client.Post("/api/v1/crew-ai-suggest", map[string]string{"goal": goal})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var result struct {
+			CrewName    string `json:"crew_name"`
+			Description string `json:"description"`
+			Agents      []struct {
+				Name      string `json:"name"`
+				RoleTitle string `json:"role_title"`
+				AgentRole string `json:"agent_role"`
+			} `json:"agents"`
+		}
+		if err := cli.ReadJSON(resp, &result); err != nil {
+			return err
+		}
+
+		fmt.Printf("Suggested crew: %s\n", result.CrewName)
+		fmt.Printf("Description: %s\n\n", result.Description)
+		fmt.Println("Agents:")
+		for _, a := range result.Agents {
+			fmt.Printf("  - %s (%s, %s)\n", a.Name, a.RoleTitle, a.AgentRole)
+		}
+		return nil
 	},
 }
