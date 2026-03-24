@@ -7,9 +7,12 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/llm"
+	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -36,6 +39,7 @@ type Router struct {
 	authMw           *AuthMiddleware
 	socketPath       string
 	internalToken    string
+	internalBaseURL  string
 	hub              *ws.Hub
 	orch             *orchestrator.Orchestrator
 	keeperGK         gatekeeper.Evaluator
@@ -45,7 +49,10 @@ type Router struct {
 	keeperConvReader ConversationReader
 	missionCallback  MissionCallback
 	scheduleUpdater  ScheduleUpdater
-	allowSignup      bool
+	logWriter        *logcollector.Writer
+	captainLLM           llm.Provider
+	captainMissionEngine MissionStarter
+	allowSignup          bool
 	license          *license.License
 	agentHandler     *AgentHandler
 }
@@ -102,6 +109,12 @@ func WithSocketPath(path string) RouterOption {
 func WithInternalToken(token string) RouterOption {
 	return func(r *Router) {
 		r.internalToken = token
+	}
+}
+
+func WithInternalBaseURL(url string) RouterOption {
+	return func(r *Router) {
+		r.internalBaseURL = url
 	}
 }
 
@@ -169,6 +182,24 @@ func WithKeeperConversations(cr ConversationReader) RouterOption {
 func WithMissionCallback(cb MissionCallback) RouterOption {
 	return func(r *Router) {
 		r.missionCallback = cb
+	}
+}
+
+func WithLogWriter(lw *logcollector.Writer) RouterOption {
+	return func(r *Router) {
+		r.logWriter = lw
+	}
+}
+
+func WithCaptainLLM(p llm.Provider) RouterOption {
+	return func(r *Router) {
+		r.captainLLM = p
+	}
+}
+
+func WithCaptainMissionCallback(ms MissionStarter) RouterOption {
+	return func(r *Router) {
+		r.captainMissionEngine = ms
 	}
 }
 
@@ -354,6 +385,19 @@ func (r *Router) registerRoutes() {
 	// Audit logs (require workspace context + manage role)
 	r.mux.Handle("GET /api/v1/audit", authed(wsCtx(http.HandlerFunc(audit.List))))
 
+	// Captain (require auth + workspace context)
+	captain := NewCaptainHandler(r.db, r.logger)
+	if r.captainLLM != nil {
+		captain.SetProvider(r.captainLLM)
+	}
+	if r.captainMissionEngine != nil {
+		captain.SetMissionEngine(r.captainMissionEngine)
+	}
+	r.mux.Handle("POST /api/v1/captain/chat", authed(wsCtx(http.HandlerFunc(captain.Chat))))
+	r.mux.Handle("GET /api/v1/captain/context", authed(wsCtx(http.HandlerFunc(captain.Context))))
+	r.mux.Handle("GET /api/v1/captain/history", authed(wsCtx(http.HandlerFunc(captain.History))))
+	r.mux.Handle("DELETE /api/v1/captain/history", authed(wsCtx(http.HandlerFunc(captain.ClearHistory))))
+
 	// Onboarding (require auth, no workspace context needed)
 	onboarding := NewOnboardingHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/onboarding/status", authed(http.HandlerFunc(onboarding.Status)))
@@ -423,6 +467,8 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("PATCH /api/v1/internal/credentials/{credentialId}", internalAuth(http.HandlerFunc(internal.UpdateCredentialStatus)))
 	r.mux.Handle("POST /api/v1/internal/chats", internalAuth(http.HandlerFunc(internal.CreateChat)))
 	r.mux.Handle("GET /api/v1/internal/chats/{chatId}/resolve", internalAuth(http.HandlerFunc(internal.ResolveChat)))
+	r.mux.Handle("GET /api/v1/internal/agents/{agentId}/resolve", internalAuth(http.HandlerFunc(internal.ResolveAgent)))
+	r.mux.Handle("GET /api/v1/internal/agents/{agentId}/webhook-secret", internalAuth(http.HandlerFunc(internal.GetWebhookSecret)))
 	r.mux.Handle("POST /api/v1/internal/runs", internalAuth(http.HandlerFunc(internal.CreateRun)))
 	r.mux.Handle("PATCH /api/v1/internal/runs/{runId}", internalAuth(http.HandlerFunc(internal.UpdateRun)))
 	r.mux.Handle("PATCH /api/v1/internal/chats/{chatId}/message-count", internalAuth(http.HandlerFunc(internal.IncrementMessageCount)))
@@ -490,4 +536,16 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/internal/keeper/request", internalAuth(http.HandlerFunc(keeperH.HandleRequest)))
 	r.mux.Handle("GET /api/v1/internal/keeper/request/{requestId}", internalAuth(http.HandlerFunc(keeperH.GetRequest)))
 	r.mux.Handle("POST /api/v1/internal/keeper/execute", internalAuth(http.HandlerFunc(keeperH.HandleExecute)))
+
+	// Webhooks (public, HMAC-secret protected)
+	if r.orch != nil && r.keeperContainer != nil && r.logWriter != nil && r.internalToken != "" {
+		// Use IPC resolver to talk to our own internal endpoints
+		baseURL := r.internalBaseURL
+		if baseURL == "" {
+			baseURL = "http://localhost:8080"
+		}
+		resolver := chatbridge.NewIPCResolver(baseURL, r.internalToken, r.logger)
+		wh := NewWebhookHandler(r.logger, resolver, r.orch, r.hub, r.keeperContainer, r.logWriter)
+		r.mux.Handle("POST /api/v1/webhooks/{crewId}/{agentId}/trigger", http.HandlerFunc(wh.ServeHTTP))
+	}
 }

@@ -7,6 +7,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func truncateID(id string, n int) string {
+	if len(id) < n {
+		return id
+	}
+	return id[:n]
+}
+
 var workspaceCmd = &cobra.Command{
 	Use:     "workspace",
 	Aliases: []string{"ws"},
@@ -257,6 +264,214 @@ var workspaceUpdateCmd = &cobra.Command{
 	},
 }
 
+// workspaceMemberCmd groups member management subcommands.
+var workspaceMemberCmd = &cobra.Command{
+	Use:   "member",
+	Short: "Manage workspace members",
+}
+
+var workspaceMemberListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List workspace members",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		wsID := client.GetWorkspaceID()
+		resp, err := client.Get("/api/v1/workspaces/" + wsID + "/members")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var members []struct {
+			ID        string `json:"id"`
+			UserID    string `json:"user_id"`
+			Email     string `json:"email"`
+			FullName  string `json:"full_name"`
+			Role      string `json:"role"`
+			CreatedAt string `json:"created_at"`
+		}
+		if err := cli.ReadJSON(resp, &members); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		headers := []string{"ID", "EMAIL", "NAME", "ROLE", "JOINED"}
+		var rows [][]string
+		for _, m := range members {
+			rows = append(rows, []string{truncateID(m.UserID, 12), m.Email, m.FullName, m.Role, m.CreatedAt})
+		}
+		return f.Auto(members, headers, rows)
+	},
+}
+
+var workspaceMemberAddCmd = &cobra.Command{
+	Use:   "add <user-id>",
+	Short: "Add a member to the workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		role, _ := cmd.Flags().GetString("role")
+		if role == "" {
+			role = "MEMBER"
+		}
+
+		client := newAPIClient()
+		wsID := client.GetWorkspaceID()
+		resp, err := client.Post("/api/v1/workspaces/"+wsID+"/members", map[string]string{
+			"user_id": args[0],
+			"role":    role,
+		})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+
+		cli.PrintSuccess(fmt.Sprintf("Member added with role %s.", role))
+		return nil
+	},
+}
+
+var workspaceMemberRemoveCmd = &cobra.Command{
+	Use:   "remove <user-id>",
+	Short: "Remove a member from the workspace",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		if err := confirmAction(cmd, fmt.Sprintf("Remove member %q from workspace?", args[0])); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		wsID := client.GetWorkspaceID()
+		resp, err := client.Delete("/api/v1/workspaces/" + wsID + "/members/" + args[0])
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+
+		cli.PrintSuccess("Member removed.")
+		return nil
+	},
+}
+
+// workspaceInviteCmd groups invitation subcommands.
+var workspaceInviteCmd = &cobra.Command{
+	Use:   "invite",
+	Short: "Manage workspace invitations",
+}
+
+var workspaceInviteListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List pending workspace invitations",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		wsID := client.GetWorkspaceID()
+		resp, err := client.Get("/api/v1/workspaces/" + wsID + "/invitations")
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var invitations []struct {
+			ID        string `json:"id"`
+			Email     string `json:"email"`
+			Role      string `json:"role"`
+			ExpiresAt string `json:"expires_at"`
+			CreatedAt string `json:"created_at"`
+		}
+		if err := cli.ReadJSON(resp, &invitations); err != nil {
+			return err
+		}
+
+		f := newFormatter()
+		headers := []string{"ID", "EMAIL", "ROLE", "EXPIRES", "CREATED"}
+		var rows [][]string
+		for _, inv := range invitations {
+			rows = append(rows, []string{truncateID(inv.ID, 12), inv.Email, inv.Role, inv.ExpiresAt, inv.CreatedAt})
+		}
+		return f.Auto(invitations, headers, rows)
+	},
+}
+
+var workspaceInviteCreateCmd = &cobra.Command{
+	Use:   "create <email>",
+	Short: "Invite a user to the workspace by email",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		role, _ := cmd.Flags().GetString("role")
+		if role == "" {
+			role = "MEMBER"
+		}
+
+		client := newAPIClient()
+		wsID := client.GetWorkspaceID()
+		resp, err := client.Post("/api/v1/workspaces/"+wsID+"/invitations", map[string]string{
+			"email": args[0],
+			"role":  role,
+		})
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+
+		var inv struct {
+			ID    string `json:"id"`
+			Email string `json:"email"`
+			Role  string `json:"role"`
+		}
+		if err := cli.ReadJSON(resp, &inv); err != nil {
+			return err
+		}
+
+		cli.PrintSuccess(fmt.Sprintf("Invitation sent to %s (%s role).", inv.Email, inv.Role))
+		return nil
+	},
+}
+
 func init() {
 	workspaceCreateCmd.Flags().String("name", "", "Workspace name (required)")
 	workspaceCreateCmd.Flags().String("slug", "", "Workspace slug (auto-generated from name)")
@@ -266,9 +481,23 @@ func init() {
 	workspaceUpdateCmd.Flags().String("slug", "", "Workspace slug")
 	workspaceUpdateCmd.Flags().String("language", "", "Preferred language (e.g. cs, en)")
 
+	workspaceMemberAddCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
+	workspaceMemberRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
+
+	workspaceInviteCreateCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
+
+	workspaceMemberCmd.AddCommand(workspaceMemberListCmd)
+	workspaceMemberCmd.AddCommand(workspaceMemberAddCmd)
+	workspaceMemberCmd.AddCommand(workspaceMemberRemoveCmd)
+
+	workspaceInviteCmd.AddCommand(workspaceInviteListCmd)
+	workspaceInviteCmd.AddCommand(workspaceInviteCreateCmd)
+
 	workspaceCmd.AddCommand(workspaceListCmd)
 	workspaceCmd.AddCommand(workspaceUseCmd)
 	workspaceCmd.AddCommand(workspaceGetCmd)
 	workspaceCmd.AddCommand(workspaceCreateCmd)
 	workspaceCmd.AddCommand(workspaceUpdateCmd)
+	workspaceCmd.AddCommand(workspaceMemberCmd)
+	workspaceCmd.AddCommand(workspaceInviteCmd)
 }
