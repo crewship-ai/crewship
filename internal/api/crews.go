@@ -212,7 +212,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var existingID string
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM crews WHERE workspace_id = ? AND slug = ?", workspaceID, req.Slug).Scan(&existingID)
+		"SELECT id FROM crews WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL", workspaceID, req.Slug).Scan(&existingID)
 	if err == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "Crew slug already taken in this workspace"})
 		return
@@ -221,6 +221,13 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("check crew slug", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
+	}
+
+	// Free slug from soft-deleted crews so the UNIQUE constraint doesn't block re-creation.
+	if _, err := h.db.ExecContext(r.Context(),
+		"UPDATE crews SET slug = slug || '_deleted_' || id WHERE workspace_id = ? AND slug = ? AND deleted_at IS NOT NULL",
+		workspaceID, req.Slug); err != nil {
+		h.logger.Warn("free deleted crew slug", "slug", req.Slug, "error", err)
 	}
 
 	// Validate and prepare network policy fields

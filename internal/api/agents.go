@@ -278,7 +278,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var existingID string
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE workspace_id = ? AND slug = ?", workspaceID, req.Slug).Scan(&existingID)
+		"SELECT id FROM agents WHERE workspace_id = ? AND slug = ? AND deleted_at IS NULL", workspaceID, req.Slug).Scan(&existingID)
 	if err == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "Agent slug already taken in this workspace"})
 		return
@@ -287,6 +287,13 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("check agent slug", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
+	}
+
+	// Free slug from soft-deleted agents so the UNIQUE constraint doesn't block re-creation.
+	if _, err := h.db.ExecContext(r.Context(),
+		"UPDATE agents SET slug = slug || '_deleted_' || id WHERE workspace_id = ? AND slug = ? AND deleted_at IS NOT NULL",
+		workspaceID, req.Slug); err != nil {
+		h.logger.Warn("free deleted agent slug", "slug", req.Slug, "error", err)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
