@@ -213,13 +213,13 @@ assert_ok "Credential list works" \
   "$CLI" credential list -s "$SERVER"
 
 # Check if CLAUDE_CODE_OAUTH_TOKEN exists for assignment
-if "$CLI" credential list -s "$SERVER" -f quiet 2>/dev/null | grep -qi "CLAUDE_CODE_OAUTH_TOKEN"; then
+if "$CLI" credential list -s "$SERVER" 2>/dev/null | grep -qi "CLAUDE_CODE_OAUTH_TOKEN"; then
   HAS_CREDENTIAL="1"
   echo "  → Found CLAUDE_CODE_OAUTH_TOKEN, testing assignment..."
 
   for target in e2e-lead e2e-worker; do
     TOTAL=$((TOTAL + 1))
-    if assign_out=$("$CLI" credential assign CLAUDE_CODE_OAUTH_TOKEN "$target" -s "$SERVER" 2>&1); then
+    if assign_out=$("$CLI" credential assign CLAUDE_CODE_OAUTH_TOKEN "$target" --env-var-name ANTHROPIC_API_KEY -s "$SERVER" 2>&1); then
       PASS=$((PASS + 1)); echo "  ✓ Assign credential to $target"
     elif echo "$assign_out" | grep -qiE "already|409|exists"; then
       PASS=$((PASS + 1)); echo "  ✓ Assign credential to $target (already assigned)"

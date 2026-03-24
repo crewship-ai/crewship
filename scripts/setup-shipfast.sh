@@ -57,7 +57,7 @@ ensure_connection() {
 ensure_credential_assigned() {
   local cred="$1" agent="$2"
   local output
-  if output=$("$CLI" credential assign "$cred" "$agent" -s "$SERVER" 2>&1); then
+  if output=$("$CLI" credential assign "$cred" "$agent" --env-var-name ANTHROPIC_API_KEY -s "$SERVER" 2>&1); then
     echo "  credential '$cred' assigned to '$agent'"
   elif echo "$output" | grep -q "already assigned\|already exists\|409\|Conflict"; then
     echo "  credential '$cred' already assigned to '$agent', skipping"
