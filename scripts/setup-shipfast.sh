@@ -76,7 +76,22 @@ ensure_crew() {
   if output=$("$CLI" crew create "$@" -s "$SERVER" 2>&1); then
     echo "$output"
   elif echo "$output" | grep -q "already taken\|already exists\|409"; then
-    echo "  crew '$slug' already exists, skipping"
+    echo "  crew '$slug' already exists, updating icon/color..."
+    # Extract --icon and --color from args and apply via update
+    local icon="" color=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --icon) icon="$2"; shift 2 ;;
+        --color) color="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    local update_args=()
+    [[ -n "$icon" ]] && update_args+=(--icon "$icon")
+    [[ -n "$color" ]] && update_args+=(--color "$color")
+    if [[ ${#update_args[@]} -gt 0 ]]; then
+      "$CLI" crew update "$slug" "${update_args[@]}" -s "$SERVER" 2>/dev/null || true
+    fi
   else
     echo "$output" >&2
     return 1
@@ -134,19 +149,19 @@ echo ">>> Creating crews..."
 
 ensure_crew product --name "Product" --slug product \
   --description "Product management, UX design, technical writing. Every feature starts here." \
-  --icon "📋" --color "#8B5CF6"
+  --icon "clipboard" --color "violet"
 
 ensure_crew dev --name "Dev" --slug dev \
   --description "Full-stack engineering. Go backend, React/Next.js frontend, architecture decisions." \
-  --icon "⚡" --color "#3B82F6"
+  --icon "code" --color "blue"
 
 ensure_crew qa --name "QA" --slug qa \
   --description "Quality assurance, test engineering, security audits, performance benchmarks." \
-  --icon "🔍" --color "#10B981"
+  --icon "search" --color "emerald"
 
 ensure_crew devops --name "DevOps" --slug devops \
   --description "CI/CD, Docker, infrastructure, monitoring, deployment, reliability." \
-  --icon "🚀" --color "#F59E0B"
+  --icon "rocket" --color "amber"
 
 echo ""
 echo ">>> Crews created."
@@ -562,7 +577,7 @@ echo ">>> Creating Finance crew + agents..."
 
 ensure_crew finance --name "Finance" --slug finance \
   --description "Zpracování faktur: stahování z Gmailu, klasifikace, pojmenování, ukládání na Google Drive. Automatizovaný účetní workflow." \
-  --icon "💰" --color "#EF4444"
+  --icon "receipt" --color "rose"
 
 ensure_agent jana --name "Jana" --slug jana --crew finance --role LEAD \
   --role-title "Finance Manager" \

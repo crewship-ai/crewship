@@ -467,6 +467,10 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 	if err != nil {
 		return "", fmt.Errorf("create agent: %w", err)
 	}
+
+	// Auto-assign workspace AI credentials so the agent can run immediately.
+	autoAssignCredentials(ctx, h.db, wsID, id, now)
+
 	b, _ := json.Marshal(map[string]string{"id": id, "name": name, "slug": slug, "agent_role": agentRole})
 	return string(b), nil
 }

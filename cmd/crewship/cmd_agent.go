@@ -299,6 +299,14 @@ var agentUpdateCmd = &cobra.Command{
 				body["system_prompt"] = v
 			}
 		}
+		if flags.Changed("avatar-seed") {
+			v, _ := flags.GetString("avatar-seed")
+			body["avatar_seed"] = v
+		}
+		if flags.Changed("avatar-style") {
+			v, _ := flags.GetString("avatar-style")
+			body["avatar_style"] = v
+		}
 
 		if len(body) == 0 {
 			return fmt.Errorf("no fields to update")
@@ -659,6 +667,8 @@ func init() {
 	agentUpdateCmd.Flags().Bool("memory", false, "Enable memory")
 	agentUpdateCmd.Flags().String("lead-mode", "", "Lead mode")
 	agentUpdateCmd.Flags().Int("timeout", 0, "Timeout in seconds")
+	agentUpdateCmd.Flags().String("avatar-seed", "", "Avatar seed")
+	agentUpdateCmd.Flags().String("avatar-style", "", "Avatar style")
 
 	agentDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
