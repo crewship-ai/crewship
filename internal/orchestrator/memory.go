@@ -13,15 +13,19 @@ import (
 )
 
 const (
-	maxMemoryContextChars = 15000
-	memoryReadTimeout     = 5 * time.Second
+	defaultMemoryContextChars = 15000
+	memoryReadTimeout         = 5 * time.Second
 )
 
 // buildMemoryContext reads agent memory files from the container and returns
 // a formatted block for system prompt injection. Caller should gate on
-// req.MemoryEnabled. When no memory files exist, returns only the
-// memory instructions block.
-func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunRequest) string {
+// req.MemoryEnabled. charBudget controls the maximum character size; pass 0
+// to use the default (15000 chars). When no memory files exist, returns only
+// the memory instructions block.
+func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunRequest, charBudget int) string {
+	if charBudget <= 0 {
+		charBudget = defaultMemoryContextChars
+	}
 	memoryDir := path.Join("/crew", "agents", req.AgentSlug, ".memory")
 	agentMDPath := path.Join(memoryDir, "AGENT.md")
 
@@ -53,17 +57,17 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 
 	if agentMD != "" {
 		section := fmt.Sprintf("--- AGENT.md (long-term memory) ---\n%s\n", agentMD)
-		if totalChars+len(section) > maxMemoryContextChars {
-			section = section[:maxMemoryContextChars-totalChars] + "\n...(truncated)"
+		if totalChars+len(section) > charBudget {
+			section = section[:charBudget-totalChars] + "\n...(truncated)"
 		}
 		b.WriteString(section)
 		totalChars += len(section)
 	}
 
-	if yesterdayLog != "" && totalChars < maxMemoryContextChars {
+	if yesterdayLog != "" && totalChars < charBudget {
 		section := fmt.Sprintf("\n--- Daily log: %s (yesterday) ---\n%s\n", yesterday, yesterdayLog)
-		if totalChars+len(section) > maxMemoryContextChars {
-			remaining := maxMemoryContextChars - totalChars
+		if totalChars+len(section) > charBudget {
+			remaining := charBudget - totalChars
 			if remaining > 100 {
 				section = section[:remaining] + "\n...(truncated)"
 			} else {
@@ -76,10 +80,10 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 		}
 	}
 
-	if todayLog != "" && totalChars < maxMemoryContextChars {
+	if todayLog != "" && totalChars < charBudget {
 		section := fmt.Sprintf("\n--- Daily log: %s (today) ---\n%s\n", today, todayLog)
-		if totalChars+len(section) > maxMemoryContextChars {
-			remaining := maxMemoryContextChars - totalChars
+		if totalChars+len(section) > charBudget {
+			remaining := charBudget - totalChars
 			if remaining > 100 {
 				section = section[:remaining] + "\n...(truncated)"
 			} else {

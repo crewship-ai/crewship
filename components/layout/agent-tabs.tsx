@@ -52,7 +52,7 @@ export function AgentDesktopRail({ agentId }: { agentId: string }) {
   return (
     <div
       className={cn(
-        "bg-background border-r flex flex-col shrink-0 transition-all duration-200 overflow-hidden",
+        "bg-background border-r flex flex-col shrink-0 h-full transition-all duration-200 overflow-hidden",
         expanded ? "w-44" : "w-12"
       )}
       onMouseEnter={() => setExpanded(true)}

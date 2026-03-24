@@ -2,6 +2,7 @@
 
 import { useParams, useSearchParams } from "next/navigation"
 import { useState, useEffect, useCallback } from "react"
+import { nanoid } from "nanoid"
 import { Plus, Info, Search, User, Bot, LayoutGrid, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
@@ -40,6 +41,16 @@ export function ChatPageClient() {
   const searchParams = useSearchParams()
   const sessionParam = searchParams.get("session") ?? undefined
   const [prefillParam] = useState(() => searchParams.get("prefill") ?? undefined)
+
+  useEffect(() => {
+    if (prefillParam) {
+      // Remove prefill from URL to avoid re-triggering on manual refresh
+      const url = new URL(window.location.href)
+      url.searchParams.delete("prefill")
+      window.history.replaceState(null, "", url.toString())
+    }
+  }, [prefillParam])
+
   const wsParam = searchParams.get("workspace_id") ?? undefined
   const { workspaceId: storeWorkspaceId } = useWorkspace()
   const workspaceId = wsParam ?? storeWorkspaceId
@@ -103,7 +114,7 @@ export function ChatPageClient() {
 
   useEffect(() => {
     if (sessionsLoaded && !activeSessionId) {
-      setActiveSessionId(crypto.randomUUID())
+      setActiveSessionId(nanoid())
     }
   }, [sessionsLoaded, activeSessionId])
 
@@ -114,7 +125,7 @@ export function ChatPageClient() {
   }, [sessionsLoaded, workspaceId, refreshSessions])
 
   const handleNewSession = useCallback(() => {
-    setActiveSessionId(crypto.randomUUID())
+    setActiveSessionId(nanoid())
     setMobileView("chat")
   }, [])
 

@@ -10,6 +10,8 @@ import { RuntimeBanner } from "@/components/layout/runtime-banner"
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar"
 import { RealtimeProvider } from "@/hooks/use-realtime"
 import { RealtimeToasts } from "@/components/layout/realtime-toasts"
+import { CaptainBubble } from "@/components/features/captain/captain-bubble"
+import { CaptainPanel } from "@/components/features/captain/captain-panel"
 
 export default function DashboardLayout({
   children,
@@ -40,12 +42,14 @@ export default function DashboardLayout({
         <SidebarInset>
           <AppToolbar />
           <RuntimeBanner />
-          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-4xl mr-2">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden bg-background rounded-t-2xl">
             {children}
           </div>
         </SidebarInset>
       </SidebarProvider>
       <RealtimeToasts />
+      <CaptainBubble />
+      <CaptainPanel />
     </RealtimeProvider>
   )
 }

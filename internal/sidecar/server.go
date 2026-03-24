@@ -224,8 +224,17 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/agent/create":
 				s.handleCreateAgent(w, r)
 				return
+			case r.Method == http.MethodGet && r.URL.Path == "/credentials":
+				s.handleListCredentials(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/agent-credentials":
+				s.handleAssignAgentCredential(w, r)
+				return
 			case r.Method == http.MethodGet && r.URL.Path == "/crew-connections":
 				s.handleListCrewConnections(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/crew-connections":
+				s.handleCreateCrewConnection(w, r)
 				return
 			case r.Method == http.MethodPost && r.URL.Path == "/proposal":
 				s.handleCreateProposal(w, r)

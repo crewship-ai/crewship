@@ -116,6 +116,11 @@ func (h *ProposalHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		result = append(result, p)
 	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate proposals", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 	if result == nil {
 		result = []proposalResponse{}
 	}
@@ -373,8 +378,9 @@ func (h *ProposalHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // createMissionsFromProposal creates missions and tasks in the DB from proposal JSON.
-func (h *ProposalHandler) createMissionsFromProposal(ctx context.Context, wsID, proposalID string, missions []proposalMission) ([]string, error) {
-	tx, err := h.db.BeginTx(ctx, nil)
+// It is a package-level helper shared by ProposalHandler and captain tool executors.
+func createMissionsFromProposal(ctx context.Context, db *sql.DB, wsID, proposalID string, missions []proposalMission) ([]string, error) {
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
@@ -384,7 +390,6 @@ func (h *ProposalHandler) createMissionsFromProposal(ctx context.Context, wsID, 
 	var missionIDs []string
 
 	for _, pm := range missions {
-		// Find lead agent for this crew (first LEAD agent)
 		var leadAgentID string
 		err := tx.QueryRowContext(ctx,
 			`SELECT id FROM agents WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL LIMIT 1`,
@@ -406,7 +411,6 @@ func (h *ProposalHandler) createMissionsFromProposal(ctx context.Context, wsID, 
 			return nil, fmt.Errorf("insert mission %q: %w", pm.Title, err)
 		}
 
-		// Create synthetic chat for FK
 		chatID := missionID
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO chats (id, workspace_id, agent_id, title, mode, status, started_at, created_at, updated_at)
@@ -416,7 +420,6 @@ func (h *ProposalHandler) createMissionsFromProposal(ctx context.Context, wsID, 
 			return nil, fmt.Errorf("insert chat for mission %q: %w", pm.Title, err)
 		}
 
-		// Create tasks
 		for _, t := range pm.Tasks {
 			taskID := generateCUID()
 			depsJSON := "[]"
@@ -455,6 +458,11 @@ func (h *ProposalHandler) createMissionsFromProposal(ctx context.Context, wsID, 
 	}
 
 	return missionIDs, nil
+}
+
+// createMissionsFromProposal on ProposalHandler delegates to the package-level helper.
+func (h *ProposalHandler) createMissionsFromProposal(ctx context.Context, wsID, proposalID string, missions []proposalMission) ([]string, error) {
+	return createMissionsFromProposal(ctx, h.db, wsID, proposalID, missions)
 }
 
 func (h *ProposalHandler) loadProposal(ctx context.Context, wsID, proposalID string) (*proposalResponse, error) {
