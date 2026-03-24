@@ -1,11 +1,11 @@
 "use client"
 
-import { useParams, useRouter } from "next/navigation"
+import { useParams } from "next/navigation"
 import { useState, useEffect, useCallback, useRef } from "react"
 import dynamic from "next/dynamic"
 import {
   Download, AlertCircle, Inbox, Copy, Check, RefreshCw,
-  ChevronRight, ChevronDown, Search, Home, GitBranch,
+  ChevronRight, ChevronDown, Search, Users, GitBranch,
   FolderOpen, FolderClosed, FileText, FileCode, FileJson, Terminal,
   Box, Settings, Loader2, Pencil, Save, X,
   File as FileIcon,
@@ -14,7 +14,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import type { BundledLanguage } from "shiki"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useRealtimeEvent, useRealtimeChannel } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -225,12 +224,9 @@ function flatCount(nodes: TreeNode[]): { fileCount: number; dirCount: number; to
   return { fileCount, dirCount, totalBytes }
 }
 
-export function FilesPageClient() {
-  const { agentId } = useParams<{ agentId: string }>()
+export function CrewFilesClient() {
+  const { crewId } = useParams<{ crewId: string }>()
   const { workspaceId, loading: wsLoading } = useWorkspace()
-  const router = useRouter()
-  const { agent } = useAgentDetail()
-  const crewId = agent?.crew_id ?? null
   const [tree, setTree] = useState<TreeNode[]>([])
   const [basePrefix, setBasePrefix] = useState("")
   const [loading, setLoading] = useState(true)
@@ -266,7 +262,7 @@ export function FilesPageClient() {
     let isFirstLoad = true
     async function fetchFiles() {
       try {
-        const res = await fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}`)
+        const res = await fetch(`/api/v1/crews/${crewId}/files?workspace_id=${workspaceId}`)
         if (!res.ok) { if (!cancelled) setError("Failed to load files"); return }
         const data: FileEntry[] | null = await res.json()
         if (!cancelled) {
@@ -291,7 +287,7 @@ export function FilesPageClient() {
     fetchFiles()
     const interval = setInterval(fetchFiles, 120000)
     return () => { cancelled = true; clearInterval(interval); fetchFilesRef.current = null }
-  }, [agentId, workspaceId, wsLoading])
+  }, [crewId, workspaceId, wsLoading])
 
   useRealtimeEvent("file.event", useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -300,24 +296,18 @@ export function FilesPageClient() {
     }, 500)
   }, []))
 
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-    }
-  }, [])
-
   const fetchSubdir = useCallback(async (dirPath: string) => {
     if (!workspaceId) return
     setLoadingDirs((prev) => new Set(prev).add(dirPath))
     try {
       const relPath = dirPath.startsWith(basePrefix) ? dirPath.slice(basePrefix.length) : dirPath
-      const res = await fetch(`/api/v1/agents/${agentId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(relPath)}`)
+      const res = await fetch(`/api/v1/crews/${crewId}/files?workspace_id=${workspaceId}&subdir=${encodeURIComponent(relPath)}`)
       if (!res.ok) return
       const data: FileEntry[] | null = await res.json()
       setTree((prev) => insertChildren(prev, dirPath, data ?? []))
-    } catch { /* folder contents unavailable — tree shows empty */ }
+    } catch { /* folder contents unavailable */ }
     finally { setLoadingDirs((prev) => { const next = new Set(prev); next.delete(dirPath); return next }) }
-  }, [agentId, workspaceId, basePrefix])
+  }, [crewId, workspaceId, basePrefix])
 
   const openFile = useCallback((path: string) => {
     const file = findNode(tree, path)
@@ -335,19 +325,19 @@ export function FilesPageClient() {
       return
     }
     setLoadingContent(true)
-    fetch(`/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`, { signal: ac.signal })
+    fetch(`/api/v1/crews/${crewId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(path)}`, { signal: ac.signal })
       .then((r) => { if (!r.ok) throw new Error("Unable to load"); return r.text() })
       .then((text) => { if (!ac.signal.aborted) setFileContent(text) })
       .catch((err) => { if (err.name !== "AbortError") { setFileContent(null); setFileError(err.message ?? "Network error") } })
       .finally(() => { if (!ac.signal.aborted) setLoadingContent(false) })
-  }, [agentId, workspaceId, tree])
+  }, [crewId, workspaceId, tree])
 
   const handleSave = useCallback(async (content: string) => {
     if (!selectedPath || !workspaceId) return
     setSaving(true)
     try {
       const res = await fetch(
-        `/api/v1/agents/${agentId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(selectedPath)}`,
+        `/api/v1/crews/${crewId}/files/save?workspace_id=${workspaceId}&path=${encodeURIComponent(selectedPath)}`,
         { method: "PUT", body: content }
       )
       if (res.ok) {
@@ -363,7 +353,7 @@ export function FilesPageClient() {
     } finally {
       setSaving(false)
     }
-  }, [agentId, workspaceId, selectedPath])
+  }, [crewId, workspaceId, selectedPath])
 
   const handleDiscard = useCallback(() => {
     setEditMode(false)
@@ -388,10 +378,10 @@ export function FilesPageClient() {
     if (!selectedPath) return
     const file = findNode(tree, selectedPath)
     if (!file) return
-    const url = `/api/v1/agents/${agentId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(selectedPath)}`
+    const url = `/api/v1/crews/${crewId}/files/download?workspace_id=${workspaceId}&path=${encodeURIComponent(selectedPath)}`
     const a = document.createElement("a")
     a.href = url; a.download = file.name; a.click()
-  }, [agentId, workspaceId, selectedPath, tree])
+  }, [crewId, workspaceId, selectedPath, tree])
 
   const handleCopy = useCallback(() => {
     if (!selectedPath) return
@@ -432,12 +422,12 @@ export function FilesPageClient() {
 
   return (
     <div className="flex h-full">
-      {/* ── Left: File tree (always visible, fixed width) ── */}
+      {/* Left: File tree */}
       <div className="flex flex-col w-64 shrink-0 border-r overflow-hidden">
         <div className="flex items-center justify-between h-[41px] px-4 border-b shrink-0">
           <div className="flex items-center gap-2">
-            <Home className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-label font-semibold">Agent Files</span>
+            <Users className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-label font-semibold">Crew Files</span>
             <span className="text-micro text-muted-foreground bg-muted rounded-full px-1.5">{fileCount}</span>
           </div>
           <div className="flex items-center gap-2">
@@ -445,22 +435,6 @@ export function FilesPageClient() {
             <span className="text-micro text-emerald-600">Live</span>
             <RefreshCw className="h-3 w-3 text-muted-foreground cursor-pointer hover:text-foreground ml-1" />
           </div>
-        </div>
-
-        <div className="flex items-center gap-1 border-b shrink-0 px-3 py-1.5">
-          <button className="px-2.5 py-1 text-micro font-medium rounded-md bg-accent text-foreground">Agent Home</button>
-          <button className="px-2.5 py-1 text-micro text-muted-foreground/40 rounded-md cursor-not-allowed" title="Coming soon">Container</button>
-          <button
-            className={cn(
-              "px-2.5 py-1 text-micro rounded-md",
-              crewId ? "text-muted-foreground hover:bg-accent cursor-pointer" : "text-muted-foreground/40 cursor-not-allowed",
-            )}
-            title={crewId ? "Browse all crew files" : "No crew assigned"}
-            onClick={() => crewId && router.push(`/crews/${crewId}/files`)}
-          >Crew</button>
-          <button className="px-2.5 py-1 text-micro text-muted-foreground/40 rounded-md cursor-not-allowed flex items-center gap-1" title="Coming soon">
-            <GitBranch className="h-3 w-3" /> Git
-          </button>
         </div>
 
         <div className="px-3 py-2 shrink-0">
@@ -480,7 +454,7 @@ export function FilesPageClient() {
           <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
             <Inbox className="h-10 w-10 text-muted-foreground/40 mb-3" />
             <p className="text-body font-medium text-muted-foreground">No files yet</p>
-            <p className="text-label text-muted-foreground mt-1">Files created by the agent will appear here.</p>
+            <p className="text-label text-muted-foreground mt-1">Files created by crew agents will appear here.</p>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
@@ -495,11 +469,11 @@ export function FilesPageClient() {
 
         <div className="px-3 py-2 border-t text-micro text-muted-foreground flex items-center justify-between shrink-0">
           <span>{fileCount} file{fileCount !== 1 ? "s" : ""}, {dirCount} folder{dirCount !== 1 ? "s" : ""} · {fmtSize(totalBytes)}</span>
-          <span>/output/</span>
+          <span>/crew/</span>
         </div>
       </div>
 
-      {/* ── Right: File preview/editor or empty state ── */}
+      {/* Right: File preview/editor or empty state */}
       {selectedPath && selectedFile ? (
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <div className="flex items-center gap-3 h-[41px] px-4 border-b shrink-0">

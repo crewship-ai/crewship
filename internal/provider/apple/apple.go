@@ -439,6 +439,10 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 	}, nil
 }
 
+func (p *Provider) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
+	return nil, fmt.Errorf("container stats not supported on Apple Containers")
+}
+
 // Exec runs a command inside a container via the Apple Container CLI exec.
 // It returns a reader for stdout/stderr and tracks the exec process for ExecInspect.
 func (p *Provider) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {

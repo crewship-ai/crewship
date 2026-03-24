@@ -9,11 +9,13 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/fileserver"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
@@ -47,8 +49,11 @@ type Server struct {
 	tokenSyncer   *llmproxy.TokenSyncer
 	credMonitor   *llmproxy.CredentialMonitor
 	debugLogs     *logging.RingBuffer
-	db            *sql.DB
-	apiRouter     *goapi.Router
+	db             *sql.DB
+	apiRouter      *goapi.Router
+	fileWatcher    *fileserver.Watcher
+	watchedCrews   sync.Map
+	statsCollector *StatsCollector
 	startedAt     time.Time
 	runCtx        context.Context
 	runCancel     context.CancelFunc
@@ -141,6 +146,22 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 
 	wsHub := ws.NewHub(logger, nil, jwtValidator)
 
+	// File watcher broadcasts real-time file events to WebSocket clients
+	// on the crew:{crewID} channel.
+	fileWatcher := fileserver.NewWatcher(cfg.Storage.BasePath, logger, func(crewID string, event fileserver.FileEvent) {
+		channel := "crew:" + crewID
+		wsHub.Broadcast(channel, ws.ServerMessage{
+			Type:    "file.event",
+			Channel: channel,
+			Payload: event,
+		})
+	})
+
+	var statsCollector *StatsCollector
+	if ctr != nil {
+		statsCollector = NewStatsCollector(ctr, wsHub, logger, 5*time.Second)
+	}
+
 	tokenPool := llmproxy.NewTokenPool(logger)
 
 	var tokenSyncer *llmproxy.TokenSyncer
@@ -193,8 +214,10 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		convStore:     convStore,
 		tokenPool:     tokenPool,
 		tokenSyncer:   tokenSyncer,
-		credMonitor:   credMonitor,
-		debugLogs:     debugLogs,
+		credMonitor:    credMonitor,
+		debugLogs:      debugLogs,
+		fileWatcher:    fileWatcher,
+		statsCollector: statsCollector,
 	}
 	if deps != nil {
 		s.db = deps.DB
@@ -356,6 +379,10 @@ func (s *Server) Start(ctx context.Context) error {
 	go s.wsHub.Run(ctx)
 	go s.orchestrator.Start(ctx)
 
+	if s.statsCollector != nil {
+		go s.statsCollector.Run(ctx)
+	}
+
 	if s.tokenSyncer != nil {
 		go s.tokenSyncer.Run(ctx)
 	}
@@ -401,6 +428,11 @@ func (s *Server) Shutdown() error {
 
 	s.logWriter.Close()
 	s.convStore.Close()
+	// fileWatcher goroutines are closed via context cancellation (runCancel above);
+	// explicit Close() is a no-op but signals intent.
+	if s.fileWatcher != nil {
+		s.fileWatcher.Close()
+	}
 
 	if s.state != nil {
 		if err := s.state.Close(); err != nil {

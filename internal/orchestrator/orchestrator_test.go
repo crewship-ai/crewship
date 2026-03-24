@@ -92,6 +92,9 @@ func (m *mockContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provi
 func (m *mockContainer) ExecInspect(_ context.Context, _ string) (bool, int, error) {
 	return m.inspectResult.running, m.inspectResult.exitCode, m.inspectErr
 }
+func (m *mockContainer) ContainerStats(_ context.Context, _ string) (*provider.ContainerMetrics, error) {
+	return nil, nil
+}
 func (m *mockContainer) CrewContainerName(slug string) string {
 	return "crewship-team-" + slug
 }
