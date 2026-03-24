@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -26,7 +27,7 @@ var proposalListCmd = &cobra.Command{
 		client := newAPIClient()
 		path := "/api/v1/mission-proposals"
 		if status, _ := cmd.Flags().GetString("status"); status != "" {
-			path += "?status=" + status
+			path += "?status=" + url.QueryEscape(status)
 		}
 
 		resp, err := client.Get(path)
@@ -92,7 +93,7 @@ var proposalGetCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/mission-proposals/" + args[0])
+		resp, err := client.Get("/api/v1/mission-proposals/" + url.PathEscape(args[0]))
 		if err != nil {
 			return err
 		}
@@ -182,7 +183,7 @@ var proposalApproveCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		resp, err := client.Post("/api/v1/mission-proposals/"+args[0]+"/approve", body)
+		resp, err := client.Post("/api/v1/mission-proposals/"+url.PathEscape(args[0])+"/approve", body)
 		if err != nil {
 			return err
 		}
@@ -223,7 +224,7 @@ var proposalRejectCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		resp, err := client.Post("/api/v1/mission-proposals/"+args[0]+"/reject", body)
+		resp, err := client.Post("/api/v1/mission-proposals/"+url.PathEscape(args[0])+"/reject", body)
 		if err != nil {
 			return err
 		}
@@ -253,7 +254,7 @@ var proposalDeleteCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		resp, err := client.Delete("/api/v1/mission-proposals/" + args[0])
+		resp, err := client.Delete("/api/v1/mission-proposals/" + url.PathEscape(args[0]))
 		if err != nil {
 			return err
 		}

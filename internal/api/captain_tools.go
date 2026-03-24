@@ -438,9 +438,12 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 		slug = slug + "-" + generateCUID()[:6]
 	}
 
-	agentRole := strInput(input, "agent_role")
+	agentRole := strings.ToUpper(strInput(input, "agent_role"))
 	if agentRole == "" {
 		agentRole = "AGENT"
+	}
+	if agentRole != "AGENT" && agentRole != "LEAD" {
+		return "", fmt.Errorf("agent_role must be AGENT or LEAD, got %q", agentRole)
 	}
 	toolProfile := strInput(input, "tool_profile")
 	if toolProfile == "" {
