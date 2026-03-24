@@ -1,4 +1,4 @@
-.PHONY: up down restart status dev dev\:go dev\:next build test lint e2e e2e\:ui
+.PHONY: up down restart status dev dev\:go dev\:next build test lint e2e e2e\:ui validate
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -63,3 +63,6 @@ e2e:
 
 e2e\:ui:
 	pnpm test:e2e:ui
+
+validate:
+	@./scripts/validate-flow.sh
