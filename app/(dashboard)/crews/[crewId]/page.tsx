@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
-  ArrowLeft, AlertTriangle, Paintbrush, RefreshCw, Loader2, ChevronDown,
+  ArrowLeft, AlertTriangle, Paintbrush, RefreshCw, Loader2, ChevronDown, Settings2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -231,18 +231,6 @@ export default function CrewDetailPage() {
       <CrewStats
         agentCount={crew._count.agents}
         memberCount={crew._count.members}
-        memoryMb={crew.container_memory_mb}
-        cpus={crew.container_cpus}
-        ttlHours={crew.container_ttl_hours}
-      />
-
-      {/* Container Config */}
-      <CrewContainerConfig
-        memoryMb={crew.container_memory_mb}
-        cpus={crew.container_cpus}
-        ttlHours={crew.container_ttl_hours}
-        canEdit={canEdit}
-        onSave={handleContainerSave}
       />
 
       {/* Network Policy */}
@@ -252,6 +240,42 @@ export default function CrewDetailPage() {
         canEdit={canEdit}
         onSave={handleNetworkSave}
       />
+
+      {/* Advanced — Container Config */}
+      {canEdit && (
+        <Collapsible>
+          <Card>
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full items-center justify-between p-4 text-left hover:bg-muted/50 transition-colors rounded-xl"
+              >
+                <div className="flex items-center gap-2">
+                  <Settings2 className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Advanced Container Settings</span>
+                  <span className="text-xs text-muted-foreground">
+                    {crew.container_memory_mb === 4096 && crew.container_cpus === 2 && !crew.container_ttl_hours
+                      ? "(using defaults)"
+                      : `(${crew.container_memory_mb} MB, ${crew.container_cpus} CPU)`}
+                  </span>
+                </div>
+                <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
+              </button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent className="px-4 pb-4 pt-0">
+                <CrewContainerConfig
+                  memoryMb={crew.container_memory_mb}
+                  cpus={crew.container_cpus}
+                  ttlHours={crew.container_ttl_hours}
+                  canEdit={canEdit}
+                  onSave={handleContainerSave}
+                />
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
+      )}
 
       {/* Agents */}
       <CrewAgents

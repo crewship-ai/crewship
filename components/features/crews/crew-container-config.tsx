@@ -1,9 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Settings2, HardDrive, Cpu, Clock } from "lucide-react"
+import { HardDrive, Cpu, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { toast } from "sonner"
@@ -58,18 +57,12 @@ export function CrewContainerConfig({ memoryMb, cpus, ttlHours, canEdit, onSave 
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center gap-2">
-          <Settings2 className="h-4 w-4 text-primary" />
-          <CardTitle className="text-base">Container Configuration</CardTitle>
-        </div>
-        <CardDescription>
-          Resource limits and lifecycle policy for the crew runtime.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Resource limits for the crew container. Leave defaults unless you have specific requirements.
+        Changes take effect on next container start.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="space-y-1.5">
             <Label htmlFor="memory" className="text-xs flex items-center gap-1.5">
               <HardDrive className="h-3 w-3 text-muted-foreground" />
@@ -123,16 +116,11 @@ export function CrewContainerConfig({ memoryMb, cpus, ttlHours, canEdit, onSave 
           </div>
         </div>
 
-        <p className="text-[11px] text-muted-foreground">
-          Container will auto-stop after specified hours of inactivity. Memory and CPU changes take effect upon next container start.
-        </p>
-
         {canEdit && hasChanges && (
           <Button size="sm" onClick={handleSave} disabled={saving}>
             {saving ? "Saving..." : "Save Container Config"}
           </Button>
         )}
-      </CardContent>
-    </Card>
+    </div>
   )
 }
