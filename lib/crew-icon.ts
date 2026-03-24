@@ -413,9 +413,6 @@ export const CREW_ICONS: CrewIconDef[] = [
   { name: "test-tubes", icon: TestTubes, label: "Test Tubes" },
   { name: "square-stack", icon: SquareStack, label: "Stack" },
   { name: "swiss-franc", icon: SwissFranc, label: "Swiss Franc" },
-  { name: "shrub", icon: Shrub, label: "Shrub" },
-  { name: "shovel", icon: Shovel, label: "Shovel" },
-  { name: "shopping-bag", icon: ShoppingBag, label: "Shopping Bag" },
   { name: "utensils-crossed", icon: UtensilsCrossed, label: "Dining" },
 ]
 
