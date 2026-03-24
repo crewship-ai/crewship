@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -215,6 +216,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	var fullResponse string
+	var toolSummaries []string
 
 	req := orchestrator.AgentRunRequest{
 		AgentID:        info.AgentID,
@@ -265,6 +267,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// be stored as part of the assistant response.
 		if event.Type == "text" {
 			fullResponse += event.Content
+		}
+		// Track tool calls for conversation context (compact summary, not full output).
+		if event.Type == "tool_call" {
+			toolSummaries = append(toolSummaries, fmt.Sprintf("[tool: %s]", event.Content))
+		}
+		if event.Type == "tool_result" {
+			truncated := event.Content
+			if len(truncated) > 200 {
+				truncated = truncated[:200] + "..."
+			}
+			toolSummaries = append(toolSummaries, fmt.Sprintf("[result: %s]", truncated))
 		}
 		// Capture result metadata (cost, usage, duration) for the run record.
 		if event.Type == "result" {
@@ -357,11 +370,20 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 	}
 
+	// Build compact tool summary for conversation context (max 5 entries).
+	var toolSummary string
+	if len(toolSummaries) > 10 {
+		toolSummary = strings.Join(toolSummaries[:10], "\n") + fmt.Sprintf("\n...and %d more", len(toolSummaries)-10)
+	} else if len(toolSummaries) > 0 {
+		toolSummary = strings.Join(toolSummaries, "\n")
+	}
+
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
-		ID:        generateMsgID(),
-		Role:      conversation.RoleAssistant,
-		Content:   fullResponse,
-		Timestamp: time.Now().UTC(),
+		ID:          generateMsgID(),
+		Role:        conversation.RoleAssistant,
+		Content:     fullResponse,
+		ToolSummary: toolSummary,
+		Timestamp:   time.Now().UTC(),
 	}); err != nil {
 		b.logger.Error("failed to persist assistant message", "error", err, "chat_id", chatID)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save response"})
