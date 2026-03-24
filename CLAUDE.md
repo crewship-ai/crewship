@@ -1,4 +1,4 @@
-# AGENTS.md
+# CLAUDE.md — Crewship Development Rules
 
 ## Verify after every change
 

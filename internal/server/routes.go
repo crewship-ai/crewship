@@ -694,13 +694,15 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func (s *Server) handleCrewStats(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("id")
-	containerID := r.URL.Query().Get("container_id")
-	if containerID == "" || s.container == nil {
+	if s.container == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "stats": nil})
 		return
 	}
+	// Look up container by crew ID from the stats collector instead of
+	// trusting a client-supplied container_id query parameter.
 	if s.statsCollector != nil {
-		if m := s.statsCollector.Latest(containerID); m != nil {
+		containerID, m := s.statsCollector.LatestByCrewID(crewID)
+		if m != nil {
 			writeJSON(w, http.StatusOK, map[string]interface{}{
 				"crew_id": crewID, "container_id": containerID,
 				"cpu_percent": m.CPUPercent, "memory_used": m.MemoryUsed,
@@ -711,18 +713,7 @@ func (s *Server) handleCrewStats(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	metrics, err := s.container.ContainerStats(r.Context(), containerID)
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "stats": nil, "error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"crew_id": crewID, "container_id": containerID,
-		"cpu_percent": metrics.CPUPercent, "memory_used": metrics.MemoryUsed,
-		"memory_limit": metrics.MemoryLimit, "memory_percent": metrics.MemoryPct,
-		"net_rx_bytes": metrics.NetRx, "net_tx_bytes": metrics.NetTx,
-		"pids": metrics.PIDs, "timestamp": metrics.Timestamp,
-	})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "stats": nil})
 }
 
 func (s *Server) ensureFileWatcher(crewID string) {

@@ -178,16 +178,16 @@ export default function DashboardPage() {
 
   useRealtimeEvent("container.stats", useCallback((event: RealtimeEvent) => {
     const p = event.payload
-    if (!p.container_id) return
+    if (typeof p.container_id !== "string") return
     setContainerStats(prev => {
       const next = new Map(prev)
-      next.set(p.container_id as string, {
-        crew_id: p.crew_id as string,
-        cpu_percent: p.cpu_percent as number,
-        memory_used: p.memory_used as number,
-        memory_limit: p.memory_limit as number,
-        memory_percent: p.memory_percent as number,
-        pids: p.pids as number,
+      next.set(p.container_id, {
+        crew_id: String(p.crew_id ?? ""),
+        cpu_percent: Number(p.cpu_percent) || 0,
+        memory_used: Number(p.memory_used) || 0,
+        memory_limit: Number(p.memory_limit) || 0,
+        memory_percent: Number(p.memory_percent) || 0,
+        pids: Number(p.pids) || 0,
       })
       return next
     })

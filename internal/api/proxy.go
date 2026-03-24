@@ -67,7 +67,9 @@ func (h *ProxyHandler) proxyJSON(w http.ResponseWriter, resp *http.Response) {
 	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		h.logger.Debug("proxy JSON stream error", "error", err)
+	}
 }
 
 func (h *ProxyHandler) CrewshipdHealth(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +243,9 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 	if cl := resp.Header.Get("Content-Length"); cl != "" {
 		w.Header().Set("Content-Length", cl)
 	}
-	io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		h.logger.Debug("agent file download stream error", "error", err, "agent_id", agentID)
+	}
 }
 
 func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
@@ -356,7 +360,9 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 	if cl := resp.Header.Get("Content-Length"); cl != "" {
 		w.Header().Set("Content-Length", cl)
 	}
-	io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		h.logger.Debug("crew file download stream error", "error", err, "crew_id", crewID)
+	}
 }
 
 func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {

@@ -555,17 +555,21 @@ func (p *Provider) ContainerStats(ctx context.Context, containerID string) (*pro
 		return nil, fmt.Errorf("decode stats: %w", err)
 	}
 	var cpuPct float64
-	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
-	sysDelta := float64(stats.CPUStats.SystemUsage - stats.PreCPUStats.SystemUsage)
-	if sysDelta > 0 && cpuDelta >= 0 {
-		numCPUs := float64(stats.CPUStats.OnlineCPUs)
-		if numCPUs == 0 {
-			numCPUs = float64(len(stats.CPUStats.CPUUsage.PercpuUsage))
+	// Guard against uint64 counter wraparound
+	if stats.CPUStats.CPUUsage.TotalUsage >= stats.PreCPUStats.CPUUsage.TotalUsage &&
+		stats.CPUStats.SystemUsage >= stats.PreCPUStats.SystemUsage {
+		cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
+		sysDelta := float64(stats.CPUStats.SystemUsage - stats.PreCPUStats.SystemUsage)
+		if sysDelta > 0 && cpuDelta >= 0 {
+			numCPUs := float64(stats.CPUStats.OnlineCPUs)
+			if numCPUs == 0 {
+				numCPUs = float64(len(stats.CPUStats.CPUUsage.PercpuUsage))
+			}
+			if numCPUs == 0 {
+				numCPUs = 1
+			}
+			cpuPct = (cpuDelta / sysDelta) * numCPUs * 100.0
 		}
-		if numCPUs == 0 {
-			numCPUs = 1
-		}
-		cpuPct = (cpuDelta / sysDelta) * numCPUs * 100.0
 	}
 	memUsed := int64(stats.MemoryStats.Usage - stats.MemoryStats.Stats["cache"])
 	if memUsed < 0 {

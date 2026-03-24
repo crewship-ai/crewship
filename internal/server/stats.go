@@ -59,6 +59,28 @@ func (sc *StatsCollector) Latest(containerID string) *provider.ContainerMetrics 
 	return sc.latest[containerID]
 }
 
+// LatestByCrewID looks up the container registered for the given crewID and
+// returns its latest metrics along with the container ID. This avoids trusting
+// a client-supplied container_id parameter.
+func (sc *StatsCollector) LatestByCrewID(crewID string) (string, *provider.ContainerMetrics) {
+	sc.mu.RLock()
+	var containerID string
+	for _, tc := range sc.tracked {
+		if tc.CrewID == crewID {
+			containerID = tc.ContainerID
+			break
+		}
+	}
+	sc.mu.RUnlock()
+	if containerID == "" {
+		return "", nil
+	}
+	sc.latestMu.RLock()
+	m := sc.latest[containerID]
+	sc.latestMu.RUnlock()
+	return containerID, m
+}
+
 func (sc *StatsCollector) Run(ctx context.Context) {
 	ticker := time.NewTicker(sc.interval)
 	defer ticker.Stop()
@@ -91,9 +113,11 @@ func (sc *StatsCollector) poll(ctx context.Context) {
 		go func(tc trackedContainer) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			metrics, err := sc.container.ContainerStats(ctx, tc.ContainerID)
+			pollCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			metrics, err := sc.container.ContainerStats(pollCtx, tc.ContainerID)
 			if err != nil {
-				sc.Unregister(tc.ContainerID)
+				// Don't unregister on transient errors — just skip this cycle
 				return
 			}
 			sc.latestMu.Lock()

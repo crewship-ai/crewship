@@ -300,6 +300,12 @@ export function FilesPageClient() {
     }, 500)
   }, []))
 
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [])
+
   const fetchSubdir = useCallback(async (dirPath: string) => {
     if (!workspaceId) return
     setLoadingDirs((prev) => new Set(prev).add(dirPath))

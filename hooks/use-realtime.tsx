@@ -61,6 +61,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const [lastEvent, setLastEvent] = useState<RealtimeEvent | null>(null)
   const listenersRef = useRef<Map<string, Set<EventCallback>>>(new Map())
   const activeChannelsRef = useRef<Set<string>>(new Set())
+  const statusRef = useRef<string>("disconnected")
 
   useEffect(() => {
     let cancelled = false
@@ -113,6 +114,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     onMessage: handleMessage,
   })
 
+  useEffect(() => { statusRef.current = status }, [status])
+
   // Subscribe to workspace channel when connected
   useEffect(() => {
     if (status !== "connected" || !workspaceId) return
@@ -134,7 +137,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       }
       return () => {
         activeChannelsRef.current.delete(channel)
-        if (status === "connected") {
+        if (statusRef.current === "connected") {
           send({ type: "unsubscribe", channel })
         }
       }

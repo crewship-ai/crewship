@@ -428,6 +428,11 @@ func (s *Server) Shutdown() error {
 
 	s.logWriter.Close()
 	s.convStore.Close()
+	// fileWatcher goroutines are closed via context cancellation (runCancel above);
+	// explicit Close() is a no-op but signals intent.
+	if s.fileWatcher != nil {
+		s.fileWatcher.Close()
+	}
 
 	if s.state != nil {
 		if err := s.state.Close(); err != nil {
