@@ -57,8 +57,8 @@ export function CaptainPanel() {
     e?.preventDefault()
     const trimmed = input.trim()
     if (!trimmed || isStreaming) return
-    setInput("")
     sendMessage(trimmed)
+    setInput("")
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -163,6 +163,7 @@ export function CaptainPanel() {
         <div className="flex items-end gap-2">
           <textarea
             ref={textareaRef}
+            aria-label="Message Captain"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

@@ -147,17 +147,14 @@ func (h *CaptainHandler) Chat(w http.ResponseWriter, r *http.Request) {
 
 	var body struct {
 		Message string `json:"message"`
-		ChatID  string `json:"chat_id,omitempty"`
 	}
 	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Message) == "" {
 		writeProblem(w, r, http.StatusBadRequest, "message is required")
 		return
 	}
 
-	chatID := body.ChatID
-	if chatID == "" {
-		chatID = captainChatID(wsID, user.ID)
-	}
+	// Always derive chatID server-side to prevent cross-user history access.
+	chatID := captainChatID(wsID, user.ID)
 
 	msgs, err := h.loadHistory(r.Context(), chatID)
 	if err != nil {
@@ -269,6 +266,8 @@ func (h *CaptainHandler) chatViaDirect(
 		}
 	}
 
+	// Re-prune before persisting — tool results appended during the loop may exceed the limit.
+	msgs = pruneConversation(msgs, 640000)
 	if err := h.saveHistory(ctx, chatID, wsID, userID, msgs); err != nil {
 		h.logger.Error("captain: save history", "error", err)
 	}

@@ -481,7 +481,7 @@ func init() {
 	workspaceUpdateCmd.Flags().String("slug", "", "Workspace slug")
 	workspaceUpdateCmd.Flags().String("language", "", "Preferred language (e.g. cs, en)")
 
-	workspaceMemberAddCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN|OWNER")
+	workspaceMemberAddCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
 	workspaceMemberRemoveCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
 	workspaceInviteCreateCmd.Flags().String("role", "MEMBER", "Role: MEMBER|ADMIN")
