@@ -2,17 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { z } from "zod"
-import { Blocks, Search } from "lucide-react"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { Blocks, Search, AlertCircle } from "lucide-react"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
 import { FilterBar } from "@/components/layout/filter-bar"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { ImportSkillDialog } from "@/components/skills/import-dialog"
-import Link from "next/link"
+import { SkillCard } from "@/components/features/skills/skill-card"
 
 const SkillSchema = z.object({
   id: z.string(),
@@ -114,6 +113,7 @@ export default function SkillsPage() {
   }, [workspaceId, wsLoading, activeFilter, debouncedSearch, buildParams])
 
   const isLoading = wsLoading || loading
+  const hasActiveFilter = debouncedSearch || activeFilter !== "All"
 
   function handleImported() {
     if (!workspaceId) return
@@ -130,9 +130,15 @@ export default function SkillsPage() {
       .finally(() => setLoading(false))
   }
 
+  function handleClearFilters() {
+    setActiveFilter("All")
+    setSearchQuery("")
+    setDebouncedSearch("")
+  }
+
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <PageHeader title="Skills" description="Browse and manage agent skills">
+    <div className="p-4 sm:p-6 space-y-5 sm:space-y-8">
+      <PageHeader title="Skills" description="Browse and manage agent capabilities">
         {workspaceId && (
           <ImportSkillDialog workspaceId={workspaceId} onImported={handleImported} />
         )}
@@ -157,68 +163,43 @@ export default function SkillsPage() {
         onFilter={setActiveFilter}
       />
 
-      {error && <p className="text-body text-destructive">{error}</p>}
+      {error && (
+        <div className="flex items-center gap-3">
+          <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+          <p className="text-body text-destructive flex-1">{error}</p>
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-[120px] rounded-xl" />
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-[180px] rounded-[var(--radius)]" />
           ))}
         </div>
       ) : skills.length === 0 ? (
         <EmptyState
           icon={Blocks}
-          title={debouncedSearch || activeFilter !== "All" ? "No matching skills" : "No skills available"}
+          title={hasActiveFilter ? "No matching skills" : "No skills available"}
           description={
-            debouncedSearch || activeFilter !== "All"
+            hasActiveFilter
               ? "No skills match the current filter or search."
-              : "Skills will appear here once they are added to the platform."
+              : "Import your first skill or browse the marketplace to get started."
           }
-        />
+        >
+          {hasActiveFilter ? (
+            <Button className="mt-4" variant="outline" onClick={handleClearFilters}>
+              Clear filters
+            </Button>
+          ) : workspaceId ? (
+            <div className="mt-4">
+              <ImportSkillDialog workspaceId={workspaceId} onImported={handleImported} />
+            </div>
+          ) : null}
+        </EmptyState>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {skills.map((skill) => (
-            <Link key={skill.id} href={`/skills/${skill.id}`}>
-              <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
-                <CardContent className="p-4 sm:p-5">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-lg shrink-0">
-                      {skill.icon ?? "🔧"}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-body font-semibold truncate">
-                          {skill.display_name ?? skill.name}
-                        </h3>
-                        <Badge variant="secondary" className="text-micro shrink-0">
-                          {skill.source}
-                        </Badge>
-                      </div>
-                      {skill.description && (
-                        <p className="mt-1 text-label text-muted-foreground line-clamp-2">
-                          {skill.description}
-                        </p>
-                      )}
-                      <div className="mt-2 flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className="text-micro">
-                          {skill.category}
-                        </Badge>
-                        {skill.version && (
-                          <span className="text-micro text-muted-foreground">
-                            v{skill.version}
-                          </span>
-                        )}
-                        {skill.tool_count != null && skill.tool_count > 0 && (
-                          <span className="text-micro text-muted-foreground">
-                            {skill.tool_count} tools
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
+            <SkillCard key={skill.id} skill={skill} />
           ))}
         </div>
       )}

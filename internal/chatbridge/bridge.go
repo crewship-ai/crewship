@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 type ChatResolver interface {
 	CreateChat(ctx context.Context, req CreateChatRequest) error
 	ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error)
+	ResolveAgent(ctx context.Context, agentID string) (*ChatInfo, error)
+	GetWebhookSecret(ctx context.Context, agentID string) (string, error)
 	CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error
 	UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error
 	IncrementMessageCount(ctx context.Context, chatID string, delta int) error
@@ -45,6 +48,9 @@ type ChatInfo struct {
 	ActiveMissions []orchestrator.MissionSummary
 	NetworkMode    string
 	AllowedDomains []string
+	MemoryMB       int
+	CPUs           float64
+	TTLHours       int
 }
 
 type Bridge struct {
@@ -176,14 +182,23 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 
 	coldStart := containerID == ""
 
+	memoryMB := info.MemoryMB
+	if memoryMB <= 0 {
+		memoryMB = b.cfg.DefaultMemoryMB
+	}
+	cpuVal := info.CPUs
+	if cpuVal <= 0 {
+		cpuVal = b.cfg.DefaultCPUs
+	}
+
 	if containerID == "" && b.container != nil {
 		b.logger.Info("creating container", "crew_slug", info.CrewSlug)
 		streamFn(ws.ChatEvent{Type: "status", Content: "Starting container..."})
 		cID, err := b.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
 			ID:       info.CrewID,
 			Slug:     info.CrewSlug,
-			MemoryMB: b.cfg.DefaultMemoryMB,
-			CPUs:     b.cfg.DefaultCPUs,
+			MemoryMB: memoryMB,
+			CPUs:     cpuVal,
 		})
 		if err != nil {
 			streamFn(ws.ChatEvent{Type: "error", Content: "failed to start agent container"})
@@ -201,6 +216,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 
 	var fullResponse string
+	var toolSummaries []string
 
 	req := orchestrator.AgentRunRequest{
 		AgentID:        info.AgentID,
@@ -224,6 +240,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		ActiveMissions: info.ActiveMissions,
 		NetworkMode:    info.NetworkMode,
 		AllowedDomains: info.AllowedDomains,
+		MemoryMB:       memoryMB,
+		CPUs:           cpuVal,
+		TTLHours:       info.TTLHours,
 	}
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).
@@ -248,6 +267,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		// be stored as part of the assistant response.
 		if event.Type == "text" {
 			fullResponse += event.Content
+		}
+		// Track tool calls for conversation context (compact summary, not full output).
+		if event.Type == "tool_call" {
+			toolSummaries = append(toolSummaries, fmt.Sprintf("[tool: %s]", event.Content))
+		}
+		if event.Type == "tool_result" {
+			truncated := event.Content
+			if len(truncated) > 200 {
+				truncated = truncated[:200] + "..."
+			}
+			toolSummaries = append(toolSummaries, fmt.Sprintf("[result: %s]", truncated))
 		}
 		// Capture result metadata (cost, usage, duration) for the run record.
 		if event.Type == "result" {
@@ -340,11 +370,20 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		b.logger.Warn("failed to update run status", "run_id", runID, "error", err)
 	}
 
+	// Build compact tool summary for conversation context (max 5 entries).
+	var toolSummary string
+	if len(toolSummaries) > 10 {
+		toolSummary = strings.Join(toolSummaries[:10], "\n") + fmt.Sprintf("\n...and %d more", len(toolSummaries)-10)
+	} else if len(toolSummaries) > 0 {
+		toolSummary = strings.Join(toolSummaries, "\n")
+	}
+
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{
-		ID:        generateMsgID(),
-		Role:      conversation.RoleAssistant,
-		Content:   fullResponse,
-		Timestamp: time.Now().UTC(),
+		ID:          generateMsgID(),
+		Role:        conversation.RoleAssistant,
+		Content:     fullResponse,
+		ToolSummary: toolSummary,
+		Timestamp:   time.Now().UTC(),
 	}); err != nil {
 		b.logger.Error("failed to persist assistant message", "error", err, "chat_id", chatID)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save response"})

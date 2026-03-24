@@ -140,6 +140,36 @@ func (s *Server) handleAllMissionsSummary(w http.ResponseWriter, r *http.Request
 	writeJSONResponse(w, http.StatusOK, summary)
 }
 
+// handleListCredentials proxies GET /credentials to the crewshipd internal API.
+// Used by COORDINATOR agents to discover available credentials for assignment.
+func (s *Server) handleListCredentials(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
+	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/credentials?workspace_id="+s.ipc.WorkspaceID)
+}
+
+// handleAssignAgentCredential proxies POST /agent-credentials to the crewshipd internal API.
+// Used by COORDINATOR agents to assign a credential to a newly created agent.
+func (s *Server) handleAssignAgentCredential(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
+	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/agent-credentials?workspace_id="+s.ipc.WorkspaceID)
+}
+
+// handleCreateCrewConnection proxies POST /crew-connections to the crewshipd internal API.
+// Used by COORDINATOR agents to connect a new crew to existing ones.
+func (s *Server) handleCreateCrewConnection(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
+	s.proxyToAPI(w, r, http.MethodPost, "/api/v1/internal/crew-connections?workspace_id="+s.ipc.WorkspaceID)
+}
+
 // handleCreateCrew proxies POST /crew/create to the crewshipd internal API.
 // Allows COORDINATOR agents to create new crews in the workspace.
 func (s *Server) handleCreateCrew(w http.ResponseWriter, r *http.Request) {

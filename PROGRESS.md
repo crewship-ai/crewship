@@ -496,9 +496,10 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 | 1 | Scaffolding | ✅ | ~95% |
 | 2 | Auth a infra | ✅ | ~80% |
 | 3 | Layout a navigace | ✅ | ~90% |
-| 4 | Frontend stranky | ✅ | ~98% |
+| 4 | Frontend stranky | ✅ | ~100% |
 | 5 | REST API | ✅ | ~95% |
 | 6 | Go backend | ✅ | ~85% |
+
 | 7 | Create/Edit forms | ✅ | 100% |
 | 8 | Testy | ✅ | ~92% (311 testu: 128 Go + 183 TS) |
 | 9 | Seed data | ✅ | ~80% |
@@ -517,10 +518,10 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 
 #### P1: SHOULD HAVE (pro rozumne demo)
 
-- [ ] **Container TTL** -- auto-stop po neaktivite
-- [ ] **Container resource limits** -- memory, CPU per crew
-- [ ] **Webhook → orchestrator** -- napojeni trigger handleru na RunAgent
-- [ ] **Real-time log streaming** pres WebSocket
+- [x] **Container TTL** -- auto-stop po neaktivite
+- [x] **Container resource limits** -- memory, CPU per crew
+- [x] **Webhook → orchestrator** -- napojeni trigger handleru na RunAgent
+- [x] **Real-time log streaming** pres WebSocket
 - [ ] **Coolify deployment config** (staging Proxmox)
 
 #### P2: NICE TO HAVE (ne blokuje spusteni)

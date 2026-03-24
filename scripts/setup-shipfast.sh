@@ -54,6 +54,19 @@ ensure_connection() {
   fi
 }
 
+ensure_credential_assigned() {
+  local cred="$1" agent="$2"
+  local output
+  if output=$("$CLI" credential assign "$cred" "$agent" -s "$SERVER" 2>&1); then
+    echo "  credential '$cred' assigned to '$agent'"
+  elif echo "$output" | grep -q "already assigned\|already exists\|409\|Conflict"; then
+    echo "  credential '$cred' already assigned to '$agent', skipping"
+  else
+    echo "$output" >&2
+    return 1
+  fi
+}
+
 echo "========================================"
 echo "  ShipFast — Virtual Startup Setup"
 echo "  Server: $SERVER"
@@ -458,7 +471,18 @@ Koordinuješ práci napříč všemi crews. Rozhoduješ o strategických priorit
 ## Komunikační styl
 - Strategický, přímý, decision-oriented
 - Vždy uveď PROČ, ne jen CO
-- Prioritizuj: P0 (must-have now) → P1 (this sprint) → P2 (next sprint)"
+- Prioritizuj: P0 (must-have now) → P1 (this sprint) → P2 (next sprint)
+
+## Autonomní jednání
+Když tě někdo požádá o vytvoření crew, agentů nebo jiné workspace operace — JEDNEJ ROVNOU.
+Neptej se na upřesnění pokud to není nezbytně nutné. Použij rozumné výchozí hodnoty.
+Máš přístup k sidecar API (localhost:9119) kde můžeš rovnou volat:
+- /crew/create — vytvořit crew
+- /agent/create — vytvořit agenta
+- /credentials — seznam credentials
+- /agent-credentials — přiřadit credential agentovi
+- /crew-connections — propojit crews
+Vždy po vytvoření agenta okamžitě přiřaď CLAUDE_CODE_OAUTH_TOKEN credential."
 
 echo ""
 echo ">>> Agents created."
@@ -578,7 +602,18 @@ echo ""
 echo ">>> Finance crew created (3 agents + 1 connection)."
 echo ""
 
-# --- 5. Verify ---
+# --- 5. Assign CLAUDE_CODE_OAUTH_TOKEN to all agents ---
+echo ">>> Assigning CLAUDE_CODE_OAUTH_TOKEN credential to all agents..."
+
+for agent in petra marek lucy tomas viktor nela eva daniel jakub filip ondra martin chief jana pavel-gmail eva-drive; do
+  ensure_credential_assigned CLAUDE_CODE_OAUTH_TOKEN "$agent"
+done
+
+echo ""
+echo ">>> Credentials assigned."
+echo ""
+
+# --- 6. Verify ---
 echo "========================================"
 echo "  Verification"
 echo "========================================"

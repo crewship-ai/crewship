@@ -22,10 +22,11 @@ export type RealtimeEventType =
   | "mission.updated"
   | "task.updated"
   | "peer_conversation.updated"
+  | "agent.log"
 
 export interface RealtimeEvent {
   type: RealtimeEventType
-  payload: Record<string, string>
+  payload: Record<string, any>
   timestamp: Date
 }
 
@@ -43,8 +44,10 @@ function getWsUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL
   if (typeof window === "undefined") return "ws://localhost:8080/ws"
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  const host = window.location.port === "3001"
-    ? window.location.hostname + ":8080"
+  const goPort = process.env.NEXT_PUBLIC_GO_PORT ?? "8080"
+  const devPorts = ["3001", "3011", "3012", "3013", "3014", "3015"]
+  const host = devPorts.includes(window.location.port)
+    ? window.location.hostname + ":" + goPort
     : window.location.host
   return `${proto}//${host}/ws`
 }
@@ -72,7 +75,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         "run.started", "run.completed", "run.failed",
         "agent.status", "assignment.updated", "escalation.created",
         "escalation.resolved", "mission.updated", "task.updated",
-        "peer_conversation.updated",
+        "peer_conversation.updated", "agent.log",
       ])
       if (!validTypes.has(msg.type)) return
 
@@ -83,7 +86,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           : {}),
         timestamp: new Date(),
       }
-      setLastEvent(event)
+      // Skip updating lastEvent for high-frequency log events to avoid
+      // re-rendering all useRealtime() consumers on every log frame.
+      if (msg.type !== "agent.log") {
+        setLastEvent(event)
+      }
 
       const callbacks = listenersRef.current.get(msg.type)
       if (callbacks) {

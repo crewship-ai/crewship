@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/scrubber"
+	"github.com/crewship-ai/crewship/internal/tokenutil"
 )
 
 var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
@@ -43,6 +44,9 @@ type AgentRunRequest struct {
 	SkipConvHistory bool         // When true, skip injecting conversation history (used by assignment sub-agents)
 	NetworkMode     string       // "free" (default) or "restricted" — crew-level network policy
 	AllowedDomains  []string     // Extra allowed domains for restricted mode
+	MemoryMB        int
+	CPUs            float64
+	TTLHours        int
 }
 
 type Credential struct {
@@ -87,6 +91,9 @@ type Orchestrator struct {
 	ipcToken       string
 	mu             sync.Mutex
 	accepting      bool
+	crewLastActivity map[string]time.Time
+	crewTTL          map[string]time.Duration
+	crewContainers   map[string]string
 }
 
 func New(
@@ -95,12 +102,15 @@ func New(
 	logger *slog.Logger,
 ) *Orchestrator {
 	return &Orchestrator{
-		container: container,
-		state:     state,
-		scrubber:  scrubber.New(),
-		logger:    logger,
-		cooldown:  NewCooldownManager(),
-		accepting: true,
+		container:        container,
+		state:            state,
+		scrubber:         scrubber.New(),
+		logger:           logger,
+		cooldown:         NewCooldownManager(),
+		accepting:        true,
+		crewLastActivity: make(map[string]time.Time),
+		crewTTL:          make(map[string]time.Duration),
+		crewContainers:   make(map[string]string),
 	}
 }
 
@@ -176,6 +186,11 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	}
 	o.mu.Unlock()
 
+	if req.ContainerID != "" {
+		o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
+		defer o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
+	}
+
 	runState := RunState{
 		ID:          req.ChatID,
 		AgentID:     req.AgentID,
@@ -195,9 +210,18 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		o.logger.Error("failed to persist run state", "error", err)
 	}
 
-	// Inject conversation history into system prompt for context continuity
+	// Inject conversation history into system prompt for context continuity.
+	// Uses token-budget allocation: 60% conversation, 40% memory (of remaining budget).
+	baseTokens := tokenutil.EstimateTokens(req.SystemPrompt)
+	remaining := tokenutil.MaxSystemPromptTokens - baseTokens
+	if remaining < 2000 {
+		remaining = 2000 // minimum fallback
+	}
+	convTokenBudget := remaining * tokenutil.ConversationBudgetPct / 100
+	memTokenBudget := remaining * tokenutil.MemoryBudgetPct / 100
+
 	if o.convStore != nil && req.ChatID != "" && !req.SkipConvHistory {
-		history := o.buildConversationContext(ctx, req.ChatID, 10)
+		history := o.buildConversationContext(ctx, req.ChatID, convTokenBudget)
 		if history != "" {
 			req.SystemPrompt = req.SystemPrompt + "\n\n" + history
 		}
@@ -234,11 +258,16 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 
 	// Inject agent memory context into system prompt (after conversation history)
 	if req.MemoryEnabled {
-		memoryCtx := o.buildMemoryContext(ctx, req)
+		memoryCtx := o.buildMemoryContext(ctx, req, tokenutil.CharsForTokens(memTokenBudget))
 		if memoryCtx != "" {
 			req.SystemPrompt = req.SystemPrompt + "\n\n" + memoryCtx
 		}
 	}
+
+	o.logger.Info("system prompt assembled",
+		"agent", req.AgentSlug,
+		"est_tokens", tokenutil.EstimateTokens(req.SystemPrompt),
+	)
 
 	o.mu.Lock()
 	sidecarEnabled := o.sidecarEnabled && !req.SkipSidecar
@@ -262,7 +291,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		// Build IPC config for agents in a crew so the sidecar can forward
 		// assignment requests (LEAD), peer queries, and escalations (all roles)
 		var ipcCfg *SidecarIPCConfig
-		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || len(req.CrewMembers) > 0) {
+		if ipcBaseURL != "" && (req.AgentRole == "LEAD" || req.AgentRole == "COORDINATOR" || len(req.CrewMembers) > 0) {
 			ipcCfg = &SidecarIPCConfig{
 				BaseURL:     ipcBaseURL,
 				Token:       ipcToken,
@@ -593,6 +622,68 @@ func (o *Orchestrator) selectCredential(creds []Credential) *Credential {
 	return &creds[0]
 }
 
+func (o *Orchestrator) Start(ctx context.Context) error {
+	o.logger.Info("starting orchestrator container TTL manager")
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			o.checkTTLs(ctx)
+		}
+	}
+}
+
+func (o *Orchestrator) refreshActivity(crewID, containerID string, ttlHours int) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.crewLastActivity[crewID] = time.Now()
+	o.crewContainers[crewID] = containerID
+	if ttlHours > 0 {
+		o.crewTTL[crewID] = time.Duration(ttlHours) * time.Hour
+	} else {
+		delete(o.crewTTL, crewID)
+	}
+}
+
+func (o *Orchestrator) checkTTLs(ctx context.Context) {
+	o.mu.Lock()
+	var toStop []struct {
+		crewID      string
+		containerID string
+	}
+	now := time.Now()
+	for crewID, last := range o.crewLastActivity {
+		ttl, ok := o.crewTTL[crewID]
+		if !ok || ttl <= 0 {
+			continue
+		}
+		if now.Sub(last) > ttl {
+			toStop = append(toStop, struct {
+				crewID      string
+				containerID string
+			}{crewID: crewID, containerID: o.crewContainers[crewID]})
+			delete(o.crewLastActivity, crewID)
+			delete(o.crewContainers, crewID)
+			delete(o.crewTTL, crewID)
+		}
+	}
+	o.mu.Unlock()
+
+	for _, stop := range toStop {
+		if stop.containerID == "" {
+			continue
+		}
+		o.logger.Info("stopping idle crew container (TTL expired)", "crew_id", stop.crewID, "container_id", stop.containerID)
+		if err := o.container.StopCrewRuntime(ctx, stop.containerID); err != nil {
+			o.logger.Error("failed to stop idle crew container", "crew_id", stop.crewID, "error", err)
+		}
+	}
+}
+
 func (o *Orchestrator) updateRunStatus(ctx context.Context, runID, status string) {
 	data, err := o.state.Get(ctx, "agent_runs", runID)
 	if err != nil {
@@ -620,18 +711,17 @@ func (o *Orchestrator) updateRunStatus(ctx context.Context, runID, status string
 	}
 }
 
-const maxConversationContextChars = 20000
-
-// buildConversationContext reads the last N messages from the session JSONL
-// and formats them as a conversation transcript for the system prompt.
-func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID string, maxMessages int) string {
+// buildConversationContext reads messages from the session JSONL and formats them
+// as a conversation transcript for the system prompt. Uses a token budget to
+// dynamically size the window — short exchanges get more turns, long tool-heavy
+// turns get fewer but always include the most recent messages.
+func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID string, tokenBudget int) string {
 	messages, err := o.convStore.Read(ctx, sessionID, 0, 0)
 	if err != nil || len(messages) == 0 {
 		return ""
 	}
 
-	// Take last N messages (excluding the current user message which was just appended)
-	// The bridge appends the user message before calling RunAgent, so skip the very last one
+	// Skip the current user message (just appended by bridge before RunAgent call).
 	if len(messages) > 0 && messages[len(messages)-1].Role == conversation.RoleUser {
 		messages = messages[:len(messages)-1]
 	}
@@ -639,27 +729,46 @@ func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID s
 		return ""
 	}
 
-	start := 0
-	if len(messages) > maxMessages {
-		start = len(messages) - maxMessages
+	charBudget := tokenutil.CharsForTokens(tokenBudget)
+
+	// Iterate backward from newest, accumulate until budget exhausted.
+	var selected []conversation.Message
+	totalChars := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		msgLen := len(msg.Content) + len(msg.ToolSummary)
+		if totalChars+msgLen > charBudget {
+			// Try to fit a truncated version of this message.
+			remaining := charBudget - totalChars
+			if remaining > 200 {
+				truncated := msg
+				if len(truncated.Content) > remaining {
+					truncated.Content = truncated.Content[:remaining-20] + "...(truncated)"
+					truncated.ToolSummary = ""
+				}
+				selected = append(selected, truncated)
+			}
+			break
+		}
+		selected = append(selected, msg)
+		totalChars += msgLen
 	}
-	recent := messages[start:]
+	if len(selected) == 0 {
+		return ""
+	}
+
+	// Reverse to chronological order.
+	for i, j := 0, len(selected)-1; i < j; i, j = i+1, j-1 {
+		selected[i], selected[j] = selected[j], selected[i]
+	}
 
 	var b strings.Builder
 	b.WriteString("[CONVERSATION HISTORY - previous messages in this session]\n")
-	totalChars := 0
-	for _, msg := range recent {
-		content := msg.Content
-		if totalChars+len(content) > maxConversationContextChars {
-			remaining := maxConversationContextChars - totalChars
-			if remaining > 100 {
-				content = content[:remaining] + "...(truncated)"
-			} else {
-				break
-			}
+	for _, msg := range selected {
+		b.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, msg.Content))
+		if msg.ToolSummary != "" {
+			b.WriteString(fmt.Sprintf("  %s\n", msg.ToolSummary))
 		}
-		b.WriteString(fmt.Sprintf("[%s]: %s\n", msg.Role, content))
-		totalChars += len(content)
 	}
 	b.WriteString("[END CONVERSATION HISTORY]\n")
 	b.WriteString("The user's new message follows. Continue the conversation naturally, referencing previous context when relevant.")

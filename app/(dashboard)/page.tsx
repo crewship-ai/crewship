@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText } from "lucide-react"
+import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText, AlertCircle, Pause } from "lucide-react"
 import { BotIcon as AnimatedBot } from "@/components/ui/bot"
 import { ActivityIcon as AnimatedActivity } from "@/components/ui/activity"
 import { KeyIcon as AnimatedKey } from "@/components/ui/key"
@@ -77,10 +77,11 @@ const runStatusConfig: Record<string, { label: string; variant: "default" | "sec
   TIMEOUT: { label: "Timeout", variant: "destructive", icon: AlertTriangle },
 }
 
-const agentStatusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+const agentStatusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon?: React.ElementType }> = {
   IDLE: { label: "Idle", variant: "outline" },
   RUNNING: { label: "Running", variant: "default" },
-  ERROR: { label: "Error", variant: "destructive" },
+  ERROR: { label: "Error", variant: "destructive", icon: AlertCircle },
+  STOPPED: { label: "Stopped", variant: "outline", icon: Pause },
 }
 
 function formatTimeAgo(ts: string): string {
@@ -358,6 +359,7 @@ export default function DashboardPage() {
                   const statusCfg = agentStatusConfig[agent.status] ?? agentStatusConfig.IDLE
                   const runCfg = lastRun ? (runStatusConfig[lastRun.status] ?? runStatusConfig.PENDING) : null
                   const RunIcon = runCfg?.icon
+                  const StatusIcon = statusCfg.icon
 
                   return (
                     <TableRow key={agent.id} className="transition-colors duration-500">
@@ -390,6 +392,7 @@ export default function DashboardPage() {
                               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                             </span>
                           )}
+                          {StatusIcon && <StatusIcon className="h-3 w-3" />}
                           {statusCfg.label}
                         </Badge>
                       </TableCell>

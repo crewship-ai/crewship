@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation"
 
 import { use, useState, useEffect, useCallback } from "react"
-import { ShieldCheck, AlertCircle, Inbox, Plus, Trash2, Loader2 } from "lucide-react"
+import { ShieldCheck, AlertCircle, Inbox, Plus, Trash2, Loader2, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -64,9 +64,11 @@ export function CredentialsPageClient() {
       })
       if (res.ok) {
         setCredentials((prev) => prev.filter((c) => c.id !== assignmentId))
+      } else {
+        setError("Failed to remove credential. Please try again.")
       }
     } catch {
-      // silently fail
+      setError("Failed to remove credential. Please try again.")
     } finally {
       setRemovingId(null)
     }
@@ -79,9 +81,13 @@ export function CredentialsPageClient() {
   if (error) {
     return (
       <div className="p-4 sm:p-6">
-        <div className="flex items-center gap-2 text-destructive">
-          <AlertCircle className="h-5 w-5" />
-          <p className="text-body">{error}</p>
+        <div className="flex items-center gap-3">
+          <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+          <p className="text-body text-destructive flex-1">{error}</p>
+          <Button variant="outline" size="sm" onClick={() => { setError(null); fetchCredentials() }} className="gap-2 shrink-0">
+            <RotateCcw className="h-3.5 w-3.5" />
+            Try Again
+          </Button>
         </div>
       </div>
     )
@@ -144,6 +150,7 @@ export function CredentialsPageClient() {
                     <Button
                       variant="ghost"
                       size="icon"
+                      aria-label={`Remove ${c.credential_name}`}
                       className="h-8 w-8 text-destructive hover:text-destructive"
                       onClick={() => handleRemove(c.id)}
                       disabled={removingId === c.id}
