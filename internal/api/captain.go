@@ -40,7 +40,7 @@ func captainCheckRateLimit(userID string) bool {
 
 	ts := captainRateLimiter.windows[userID]
 	cutoff := now.Add(-captainRateWindow)
-	valid := ts[:0]
+	valid := make([]time.Time, 0, len(ts))
 	for _, t := range ts {
 		if t.After(cutoff) {
 			valid = append(valid, t)
@@ -201,13 +201,19 @@ func (h *CaptainHandler) chatViaDirect(
 	rc := http.NewResponseController(w)
 	rc.SetWriteDeadline(time.Time{}) // zero = no deadline
 
+	// Overall timeout for the SSE connection to prevent indefinite hangs.
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+	defer cancel()
+
 	role := RoleFromContext(r.Context())
 
+	var streamFailed bool
 	const maxIter = 10
-	for i := 0; i < maxIter; i++ {
+	var i int
+	for i = 0; i < maxIter; i++ {
 		var assistantTextBuf strings.Builder
 
-		finalResp, streamErr := provider.Stream(r.Context(), llm.Request{
+		finalResp, streamErr := provider.Stream(ctx, llm.Request{
 			Model:     "claude-haiku-4-5-20251001",
 			System:    systemPrompt,
 			Messages:  msgs,
@@ -224,6 +230,7 @@ func (h *CaptainHandler) chatViaDirect(
 		if streamErr != nil {
 			h.logger.Error("captain: stream error", "error", streamErr)
 			writeCaptainSSE(w, map[string]any{"type": "error", "content": "LLM error: " + streamErr.Error()})
+			streamFailed = true
 			break
 		}
 
@@ -241,12 +248,12 @@ func (h *CaptainHandler) chatViaDirect(
 		}
 
 		for _, tc := range finalResp.ToolCalls {
-			WriteAuditLog(r.Context(), h.db, "captain_tool_call", "CAPTAIN", tc.Name,
+			WriteAuditLog(ctx, h.db, "captain_tool_call", "CAPTAIN", tc.Name,
 				userID, wsID, map[string]interface{}{"tool_id": tc.ID})
 
 			writeCaptainSSE(w, map[string]any{"type": "tool_call", "id": tc.ID, "name": tc.Name})
 
-			result, toolErr := h.executeTool(r.Context(), wsID, userID, role, tc)
+			result, toolErr := h.executeTool(ctx, wsID, userID, role, tc)
 			if toolErr != nil {
 				result = "Error: " + toolErr.Error()
 			}
@@ -262,11 +269,16 @@ func (h *CaptainHandler) chatViaDirect(
 		}
 	}
 
-	if err := h.saveHistory(r.Context(), chatID, wsID, userID, msgs); err != nil {
+	if err := h.saveHistory(ctx, chatID, wsID, userID, msgs); err != nil {
 		h.logger.Error("captain: save history", "error", err)
 	}
 
-	writeCaptainSSE(w, map[string]any{"type": "done"})
+	if !streamFailed {
+		if i == maxIter {
+			writeCaptainSSE(w, map[string]any{"type": "warning", "content": "Maximum tool iterations reached. Some actions may be incomplete."})
+		}
+		writeCaptainSSE(w, map[string]any{"type": "done"})
+	}
 }
 
 // Context handles GET /api/v1/captain/context
@@ -377,13 +389,21 @@ func (h *CaptainHandler) getProvider(r *http.Request, wsID string) (llm.Provider
 	}
 	defer rows.Close()
 
+	var foundAny bool
+	var decryptFailed bool
 	for rows.Next() {
 		var c credRow
 		if err := rows.Scan(&c.Provider, &c.EncryptedValue); err != nil {
+			h.logger.Warn("captain: credential scan failed", "workspace", wsID, "error", err)
+			foundAny = true
+			decryptFailed = true
 			continue
 		}
+		foundAny = true
 		plain, err := encryption.Decrypt(c.EncryptedValue)
 		if err != nil {
+			h.logger.Warn("captain: credential decrypt failed", "workspace", wsID, "provider", c.Provider, "error", err)
+			decryptFailed = true
 			continue
 		}
 		switch c.Provider {
@@ -393,11 +413,17 @@ func (h *CaptainHandler) getProvider(r *http.Request, wsID string) (llm.Provider
 			return llm.NewOpenAI(plain), nil
 		}
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("captain: credential query iteration: %w", err)
+	}
 
-	// Fallback: try Ollama (no API key needed)
-	return nil, errors.New(
-		"Captain requires an LLM API key. Add one in Settings → Credentials. " +
-			"Supported: Anthropic, OpenAI.")
+	if !foundAny {
+		return nil, errors.New("no API credentials found")
+	}
+	if decryptFailed {
+		return nil, errors.New("credential decryption failed")
+	}
+	return nil, errors.New("no usable API credentials found")
 }
 
 func (h *CaptainHandler) executeTool(ctx context.Context, wsID, userID, role string, tc llm.ToolCall) (string, error) {
@@ -426,8 +452,10 @@ func captainWorkspacePhase(ctx context.Context, db *sql.DB, wsID string, crewCou
 		return 2
 	}
 	var credCount int
-	db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM credentials WHERE workspace_id = ? AND status = 'ACTIVE' AND deleted_at IS NULL", wsID).Scan(&credCount)
+	if err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM credentials WHERE workspace_id = ? AND status = 'ACTIVE' AND deleted_at IS NULL", wsID).Scan(&credCount); err != nil {
+		slog.Warn("captain: count credentials", "workspace", wsID, "error", err)
+	}
 	if credCount == 0 {
 		return 3
 	}
@@ -455,16 +483,24 @@ func detectLanguageFromMessage(msg string) string {
 // firstMessage is the current user message — used to detect language when workspace preference is unset.
 func buildCaptainSystemPrompt(ctx context.Context, db *sql.DB, wsID, firstMessage string) string {
 	var crewCount, agentCount, missionCount int
-	db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&crewCount)
-	db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&agentCount)
-	db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'", wsID).Scan(&missionCount)
+	if err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&crewCount); err != nil {
+		slog.Warn("captain: count crews for prompt", "workspace", wsID, "error", err)
+	}
+	if err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&agentCount); err != nil {
+		slog.Warn("captain: count agents for prompt", "workspace", wsID, "error", err)
+	}
+	if err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'", wsID).Scan(&missionCount); err != nil {
+		slog.Warn("captain: count missions for prompt", "workspace", wsID, "error", err)
+	}
 
 	var lang string
-	db.QueryRowContext(ctx,
-		"SELECT COALESCE(preferred_language, '') FROM workspaces WHERE id = ?", wsID).Scan(&lang)
+	if err := db.QueryRowContext(ctx,
+		"SELECT COALESCE(preferred_language, '') FROM workspaces WHERE id = ?", wsID).Scan(&lang); err != nil {
+		slog.Warn("captain: fetch workspace language", "workspace", wsID, "error", err)
+	}
 	if lang == "" {
 		lang = detectLanguageFromMessage(firstMessage)
 	}
@@ -474,9 +510,11 @@ func buildCaptainSystemPrompt(ctx context.Context, db *sql.DB, wsID, firstMessag
 	// For SETUP phase, fetch first crew name for a more personalized message.
 	var firstCrewName string
 	if phase == 2 {
-		db.QueryRowContext(ctx,
+		if err := db.QueryRowContext(ctx,
 			"SELECT name FROM crews WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at LIMIT 1", wsID,
-		).Scan(&firstCrewName)
+		).Scan(&firstCrewName); err != nil {
+			slog.Warn("captain: fetch first crew name", "workspace", wsID, "error", err)
+		}
 	}
 
 	var phaseName, onboarding string
