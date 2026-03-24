@@ -36,6 +36,11 @@ func NewWatcher(basePath string, logger *slog.Logger, handler EventHandler) *Wat
 	}
 }
 
+// Close is a no-op — individual fsnotify watchers are closed when the context
+// passed to Watch() is cancelled. This method exists so callers can express
+// explicit cleanup intent without needing to know the internal lifecycle.
+func (w *Watcher) Close() {}
+
 func (w *Watcher) Watch(ctx context.Context, crewID string) error {
 	if crewID == "" || filepath.IsAbs(crewID) || strings.Contains(crewID, "..") {
 		return fmt.Errorf("invalid crew ID: %q", crewID)

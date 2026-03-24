@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
-  ArrowLeft, AlertTriangle, Paintbrush, RefreshCw, Loader2, ChevronDown, Settings2,
+  ArrowLeft, AlertTriangle, Paintbrush, RefreshCw, Loader2, ChevronDown, Settings2, FolderOpen,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -232,6 +232,15 @@ export default function CrewDetailPage() {
         agentCount={crew._count.agents}
         memberCount={crew._count.members}
       />
+
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" asChild>
+          <Link href={`/crews/${crew.id}/files`}>
+            <FolderOpen className="mr-2 h-4 w-4" />
+            Crew Files
+          </Link>
+        </Button>
+      </div>
 
       {/* Network Policy */}
       <CrewNetworkPolicy

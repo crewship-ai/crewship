@@ -23,6 +23,8 @@ export type RealtimeEventType =
   | "task.updated"
   | "peer_conversation.updated"
   | "agent.log"
+  | "file.event"
+  | "container.stats"
 
 export interface RealtimeEvent {
   type: RealtimeEventType
@@ -35,6 +37,7 @@ type EventCallback = (event: RealtimeEvent) => void
 interface RealtimeContextValue {
   status: WSStatus
   subscribe: (eventType: RealtimeEventType, callback: EventCallback) => () => void
+  subscribeChannel: (channel: string) => () => void
   lastEvent: RealtimeEvent | null
 }
 
@@ -57,6 +60,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null)
   const [lastEvent, setLastEvent] = useState<RealtimeEvent | null>(null)
   const listenersRef = useRef<Map<string, Set<EventCallback>>>(new Map())
+  const activeChannelsRef = useRef<Set<string>>(new Set())
+  const statusRef = useRef<string>("disconnected")
 
   useEffect(() => {
     let cancelled = false
@@ -76,6 +81,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
         "agent.status", "assignment.updated", "escalation.created",
         "escalation.resolved", "mission.updated", "task.updated",
         "peer_conversation.updated", "agent.log",
+        "file.event", "container.stats",
       ])
       if (!validTypes.has(msg.type)) return
 
@@ -88,7 +94,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       }
       // Skip updating lastEvent for high-frequency log events to avoid
       // re-rendering all useRealtime() consumers on every log frame.
-      if (msg.type !== "agent.log") {
+      if (msg.type !== "agent.log" && msg.type !== "file.event" && msg.type !== "container.stats") {
         setLastEvent(event)
       }
 
@@ -108,14 +114,36 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     onMessage: handleMessage,
   })
 
+  useEffect(() => { statusRef.current = status }, [status])
+
   // Subscribe to workspace channel when connected
   useEffect(() => {
     if (status !== "connected" || !workspaceId) return
     send({ type: "subscribe", channel: `workspace:${workspaceId}` })
+    // Re-subscribe any component-registered channels after reconnect
+    for (const ch of activeChannelsRef.current) {
+      send({ type: "subscribe", channel: ch })
+    }
     return () => {
       send({ type: "unsubscribe", channel: `workspace:${workspaceId}` })
     }
   }, [status, workspaceId, send])
+
+  const subscribeChannel = useCallback(
+    (channel: string): (() => void) => {
+      activeChannelsRef.current.add(channel)
+      if (status === "connected") {
+        send({ type: "subscribe", channel })
+      }
+      return () => {
+        activeChannelsRef.current.delete(channel)
+        if (statusRef.current === "connected") {
+          send({ type: "unsubscribe", channel })
+        }
+      }
+    },
+    [status, send],
+  )
 
   const subscribe = useCallback(
     (eventType: RealtimeEventType, callback: EventCallback): (() => void) => {
@@ -131,7 +159,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   )
 
   return (
-    <RealtimeContext.Provider value={{ status, subscribe, lastEvent }}>
+    <RealtimeContext.Provider value={{ status, subscribe, subscribeChannel, lastEvent }}>
       {children}
     </RealtimeContext.Provider>
   )
@@ -161,4 +189,12 @@ export function useRealtimeEvent(
   useEffect(() => {
     return subscribe(eventType, (event) => callbackRef.current(event))
   }, [eventType, subscribe])
+}
+
+export function useRealtimeChannel(channel: string | null): void {
+  const { subscribeChannel } = useRealtime()
+  useEffect(() => {
+    if (!channel) return
+    return subscribeChannel(channel)
+  }, [channel, subscribeChannel])
 }

@@ -7,13 +7,8 @@ frontend:
           - 'app/**'
           - 'components/**'
           - 'hooks/**'
+          - 'lib/**'
           - '*.css'
-
-backend:
-  - changed-files:
-      - any-glob-to-any-file:
-          - 'app/api/**'
-          - 'lib/services/**'
 
 go:
   - changed-files:
@@ -27,6 +22,7 @@ database:
   - changed-files:
       - any-glob-to-any-file:
           - 'prisma/**'
+          - 'internal/database/**'
 
 docker:
   - changed-files:
@@ -56,9 +52,12 @@ dependencies:
 security:
   - changed-files:
       - any-glob-to-any-file:
+          - 'internal/auth/**'
+          - 'internal/encryption/**'
+          - 'internal/keeper/**'
+          - 'internal/sidecar/**'
           - 'lib/permissions/**'
           - 'lib/encryption.ts'
-          - 'middleware.ts'
 
 tests:
   - changed-files:
@@ -67,6 +66,7 @@ tests:
           - '**/*.test.tsx'
           - '**/*_test.go'
           - 'vitest.config.ts'
+          - 'scripts/validate-flow.sh'
 
 config:
   - changed-files:
@@ -75,4 +75,4 @@ config:
           - 'next.config.ts'
           - 'eslint.config.mjs'
           - '.env.example'
-          - 'config/**'
+          - 'CLAUDE.md'
