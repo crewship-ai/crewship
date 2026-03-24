@@ -87,11 +87,11 @@ func (h *CaptainHandler) loadHistory(ctx context.Context, chatID string) ([]llm.
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load captain history: %w", err)
 	}
 	var msgs []llm.Message
 	if err := json.Unmarshal([]byte(msgsJSON), &msgs); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load captain history: unmarshal: %w", err)
 	}
 	return msgs, nil
 }
@@ -99,7 +99,7 @@ func (h *CaptainHandler) loadHistory(ctx context.Context, chatID string) ([]llm.
 func (h *CaptainHandler) saveHistory(ctx context.Context, chatID, wsID, userID string, msgs []llm.Message) error {
 	data, err := json.Marshal(msgs)
 	if err != nil {
-		return err
+		return fmt.Errorf("save captain history: marshal: %w", err)
 	}
 	_, err = h.db.ExecContext(ctx, `
 		INSERT INTO captain_chats (id, workspace_id, user_id, messages_json)
@@ -108,7 +108,10 @@ func (h *CaptainHandler) saveHistory(ctx context.Context, chatID, wsID, userID s
 			messages_json = excluded.messages_json,
 			updated_at = datetime('now')
 	`, chatID, wsID, userID, string(data))
-	return err
+	if err != nil {
+		return fmt.Errorf("save captain history: %w", err)
+	}
+	return nil
 }
 
 // writeCaptainSSE writes a single SSE data frame and flushes immediately.
@@ -204,6 +207,12 @@ func (h *CaptainHandler) chatViaDirect(
 
 	role := RoleFromContext(r.Context())
 
+	// Select model based on the resolved provider.
+	model := "claude-haiku-4-5-20251001"
+	if provider.Name() == "openai" {
+		model = "gpt-4o-mini"
+	}
+
 	var streamFailed bool
 	const maxIter = 10
 	var i int
@@ -211,7 +220,7 @@ func (h *CaptainHandler) chatViaDirect(
 		var assistantTextBuf strings.Builder
 
 		finalResp, streamErr := provider.Stream(ctx, llm.Request{
-			Model:     "claude-haiku-4-5-20251001",
+			Model:     model,
 			System:    systemPrompt,
 			Messages:  msgs,
 			Tools:     CaptainTools,
