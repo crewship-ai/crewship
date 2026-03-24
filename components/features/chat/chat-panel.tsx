@@ -29,6 +29,7 @@ import {
   Save,
   Maximize2,
   Minimize2,
+  RefreshCw,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -109,7 +110,13 @@ function formatTimestamp(date: Date): string {
 }
 
 /** Render a single turn (user, assistant, or system). */
-function TurnRenderer({ turn, onCopy, onFileClick }: { turn: ChatTurn; onCopy: (s: string) => void; onFileClick: (s: string) => void }) {
+function TurnRenderer({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate }: {
+  turn: ChatTurn
+  onCopy: (s: string) => void
+  onFileClick: (s: string) => void
+  isLastAssistant?: boolean
+  onRegenerate?: () => void
+}) {
   if (turn.role === "user") {
     const textContent = turn.parts.find((p) => p.type === "text")?.content ?? ""
     return (
@@ -168,7 +175,23 @@ function TurnRenderer({ turn, onCopy, onFileClick }: { turn: ChatTurn; onCopy: (
   }
 
   // Assistant turn - use the new grouped component
-  return <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} />
+  return (
+    <div>
+      <AssistantTurn turn={turn} onCopy={onCopy} onFileClick={onFileClick} />
+      {isLastAssistant && onRegenerate && !turn.isStreaming && (
+        <div className="flex pl-4 -mt-1 mb-2">
+          <button
+            onClick={onRegenerate}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            title="Regenerate response"
+          >
+            <RefreshCw className="h-3 w-3" />
+            <span>Regenerate</span>
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 const RIGHT_PANEL_TABS = [
@@ -566,7 +589,7 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
       .catch(() => {})
   }, [])
 
-  const { turns, sendMessage, stopGeneration, loadHistory, isStreaming, connectionStatus } = useChat({
+  const { turns, sendMessage, stopGeneration, regenerateLastTurn, editAndResend, loadHistory, isStreaming, connectionStatus } = useChat({
     wsUrl: getWsUrl(),
     token,
     sessionId,
@@ -742,9 +765,26 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
                     description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
                   />
                 )}
-                {turns.map((turn) => (
-                  <TurnRenderer key={turn.id} turn={turn} onCopy={handleCopy} onFileClick={() => {}} />
+                {turns.map((turn, idx) => (
+                  <TurnRenderer
+                    key={turn.id}
+                    turn={turn}
+                    onCopy={handleCopy}
+                    onFileClick={() => {}}
+                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
+                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
+                  />
                 ))}
+                {isStreaming && turns.length > 0 && turns[turns.length - 1]?.role === "user" && (
+                  <div className="flex items-center gap-2 px-4 py-3 text-muted-foreground text-sm animate-in fade-in">
+                    <span className="inline-flex gap-0.5">
+                      <span className="animate-bounce [animation-delay:0ms]">·</span>
+                      <span className="animate-bounce [animation-delay:150ms]">·</span>
+                      <span className="animate-bounce [animation-delay:300ms]">·</span>
+                    </span>
+                    <span>Agent is thinking</span>
+                  </div>
+                )}
               </ConversationContent>
               <ConversationScrollButton />
             </Conversation>
@@ -831,9 +871,26 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
                     description={agentName ? `Send a message to ${agentName}` : "Send a message or pick a suggestion below"}
                   />
                 )}
-                {turns.map((turn) => (
-                  <TurnRenderer key={turn.id} turn={turn} onCopy={handleCopy} onFileClick={() => {}} />
+                {turns.map((turn, idx) => (
+                  <TurnRenderer
+                    key={turn.id}
+                    turn={turn}
+                    onCopy={handleCopy}
+                    onFileClick={() => {}}
+                    isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
+                    onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
+                  />
                 ))}
+                {isStreaming && turns.length > 0 && turns[turns.length - 1]?.role === "user" && (
+                  <div className="flex items-center gap-2 px-4 py-3 text-muted-foreground text-sm animate-in fade-in">
+                    <span className="inline-flex gap-0.5">
+                      <span className="animate-bounce [animation-delay:0ms]">·</span>
+                      <span className="animate-bounce [animation-delay:150ms]">·</span>
+                      <span className="animate-bounce [animation-delay:300ms]">·</span>
+                    </span>
+                    <span>Agent is thinking</span>
+                  </div>
+                )}
               </ConversationContent>
               <ConversationScrollButton />
             </Conversation>

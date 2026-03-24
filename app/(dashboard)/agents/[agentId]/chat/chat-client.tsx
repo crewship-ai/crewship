@@ -40,6 +40,16 @@ export function ChatPageClient() {
   const searchParams = useSearchParams()
   const sessionParam = searchParams.get("session") ?? undefined
   const [prefillParam] = useState(() => searchParams.get("prefill") ?? undefined)
+
+  useEffect(() => {
+    if (prefillParam) {
+      // Remove prefill from URL to avoid re-triggering on manual refresh
+      const url = new URL(window.location.href)
+      url.searchParams.delete("prefill")
+      window.history.replaceState(null, "", url.toString())
+    }
+  }, [prefillParam])
+
   const wsParam = searchParams.get("workspace_id") ?? undefined
   const { workspaceId: storeWorkspaceId } = useWorkspace()
   const workspaceId = wsParam ?? storeWorkspaceId

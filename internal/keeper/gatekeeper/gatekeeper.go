@@ -4,22 +4,17 @@
 package gatekeeper
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/keeper"
+	"github.com/crewship-ai/crewship/internal/llm"
 )
-
-var ollamaHTTPClient = &http.Client{Timeout: 60 * time.Second}
 
 // Evaluator decides whether a credential request should be allowed.
 type Evaluator interface {
@@ -38,24 +33,24 @@ type EvalRequest struct {
 	Command        string // non-empty for /execute requests: the command to run with the credential
 }
 
-// Gatekeeper is the default implementation that calls an Ollama-compatible LLM.
+// Gatekeeper reviews credential requests using an LLM.
 // Falls back to a strict deny-all policy if the LLM is unavailable.
 type Gatekeeper struct {
-	ollamaURL string // e.g. "http://localhost:11434"
-	model     string // e.g. "phi3:mini"
+	provider llm.Provider
+	model     string // model name to use for requests
 	logger    *slog.Logger
 }
 
-// New creates a Gatekeeper that calls Ollama for decisions.
-// If ollamaURL is empty, falls back to the safe deny-all policy.
-func New(ollamaURL, model string, logger *slog.Logger) *Gatekeeper {
+// New creates a Gatekeeper that uses an LLM provider for decisions.
+// If provider is nil, falls back to the safe deny-all policy.
+func New(provider llm.Provider, model string, logger *slog.Logger) *Gatekeeper {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if model == "" {
 		model = "phi3:mini"
 	}
-	return &Gatekeeper{ollamaURL: ollamaURL, model: model, logger: logger}
+	return &Gatekeeper{provider: provider, model: model, logger: logger}
 }
 
 // minIntentLength is the minimum number of non-whitespace characters required for
@@ -82,8 +77,8 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		}, nil
 	}
 
-	if g.ollamaURL == "" {
-		g.logger.Warn("keeper: no ollama URL configured — denying request",
+	if g.provider == nil {
+		g.logger.Warn("keeper: no LLM provider configured — denying request",
 			"agent", req.AgentName, "credential", req.CredentialName)
 		return keeper.GatekeeperResponse{
 			Decision:  string(keeper.DecisionDeny),
@@ -93,10 +88,17 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 	}
 
 	prompt := g.buildPrompt(req)
-	g.logger.Debug("keeper: ollama prompt", "prompt_len", len(prompt))
-	raw, err := g.callOllama(ctx, prompt)
+	g.logger.Debug("keeper: LLM prompt", "prompt_len", len(prompt))
+
+	respLLM, err := g.provider.Complete(ctx, llm.Request{
+		Model:       g.model,
+		Messages:    []llm.Message{{Role: llm.RoleUser, Content: prompt}},
+		Temperature: ptr(0.1),
+		MaxTokens:   256,
+	})
+
 	if err != nil {
-		g.logger.Error("keeper: ollama call failed, denying",
+		g.logger.Error("keeper: LLM call failed, denying",
 			"error", err, "agent", req.AgentName)
 		return keeper.GatekeeperResponse{
 			Decision:  string(keeper.DecisionDeny),
@@ -105,6 +107,7 @@ func (g *Gatekeeper) Evaluate(ctx context.Context, req EvalRequest) (keeper.Gate
 		}, nil
 	}
 
+	raw := respLLM.Content
 	resp, err := parseResponse(raw)
 	if err != nil {
 		g.logger.Error("keeper: parse LLM response failed, denying",
@@ -196,57 +199,7 @@ func (g *Gatekeeper) buildPrompt(req EvalRequest) string {
 	return sb.String()
 }
 
-type ollamaGenerateRequest struct {
-	Model   string                 `json:"model"`
-	Prompt  string                 `json:"prompt"`
-	Stream  bool                   `json:"stream"`
-	Options map[string]interface{} `json:"options,omitempty"`
-}
-
-type ollamaGenerateResponse struct {
-	Response string `json:"response"`
-}
-
-// callOllama posts a generate request to the Ollama API and returns the raw response text.
-func (g *Gatekeeper) callOllama(ctx context.Context, prompt string) (string, error) {
-	reqBody, err := json.Marshal(ollamaGenerateRequest{
-		Model:  g.model,
-		Prompt: prompt,
-		Stream: false,
-		Options: map[string]interface{}{
-			"temperature": 0.1,
-			"num_predict": 256,
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("marshal ollama request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		g.ollamaURL+"/api/generate", bytes.NewReader(reqBody))
-	if err != nil {
-		return "", fmt.Errorf("create ollama request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := ollamaHTTPClient.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("ollama HTTP: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return "", fmt.Errorf("ollama returned %d: %s", resp.StatusCode, body)
-	}
-
-	var result ollamaGenerateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode ollama response: %w", err)
-	}
-
-	return result.Response, nil
-}
+func ptr[T any](v T) *T { return &v }
 
 // parseResponse extracts the JSON decision from the LLM response.
 // The LLM might wrap the JSON in extra text; we scan for the first '{'.

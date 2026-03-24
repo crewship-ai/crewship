@@ -18,6 +18,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 func (s *Server) registerRoutes() {
@@ -129,6 +130,7 @@ func (s *Server) handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 type agentStartRequest struct {
+	WorkspaceID    string                    `json:"workspace_id"`
 	CrewID         string                    `json:"crew_id"`
 	CrewSlug       string                    `json:"crew_slug"`
 	AgentSlug      string                    `json:"agent_slug"`
@@ -141,6 +143,9 @@ type agentStartRequest struct {
 	Credentials    []orchestrator.Credential `json:"credentials"`
 	NetworkMode    string                    `json:"network_mode"`
 	AllowedDomains []string                  `json:"allowed_domains"`
+	MemoryMB       int                       `json:"memory_mb"`
+	CPUs           float64                   `json:"cpus"`
+	TTLHours       int                       `json:"ttl_hours"`
 }
 
 func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
@@ -158,11 +163,19 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	memoryMB := req.MemoryMB
+	if memoryMB <= 0 {
+		memoryMB = s.cfg.Container.DefaultMemoryMB
+	}
+	cpus := req.CPUs
+	if cpus <= 0 {
+		cpus = s.cfg.Container.DefaultCPUs
+	}
 	containerID, err := s.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
 		ID:       req.CrewID,
 		Slug:     req.CrewSlug,
-		MemoryMB: s.cfg.Container.DefaultMemoryMB,
-		CPUs:     s.cfg.Container.DefaultCPUs,
+		MemoryMB: memoryMB,
+		CPUs:     cpus,
 	})
 	if err != nil {
 		s.logger.Error("failed to ensure team runtime", "crew_id", req.CrewID, "error", err)
@@ -175,6 +188,7 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		AgentSlug:      req.AgentSlug,
 		CrewID:         req.CrewID,
 		CrewSlug:       req.CrewSlug,
+		WorkspaceID:    req.WorkspaceID,
 		ChatID:         req.ChatID,
 		ContainerID:    containerID,
 		CLIAdapter:     req.CLIAdapter,
@@ -185,6 +199,9 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 		TimeoutSecs:    req.TimeoutSecs,
 		NetworkMode:    req.NetworkMode,
 		AllowedDomains: req.AllowedDomains,
+		MemoryMB:       memoryMB,
+		CPUs:           cpus,
+		TTLHours:       req.TTLHours,
 	}
 
 	go func() {
@@ -209,6 +226,30 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 					Agent:     req.AgentSlug,
 					Event:     event.Type,
 					Content:   event.Content,
+					Metadata:  event.Metadata,
+				})
+			}
+
+			// Broadcast real-time log events to the workspace channel
+			if s.wsHub != nil {
+				channel := "workspace:" + req.WorkspaceID
+				s.wsHub.Broadcast(channel, ws.ServerMessage{
+					Type:    "agent.log",
+					Channel: channel,
+					Payload: map[string]interface{}{
+						"ts":       event.Timestamp,
+						"level":    "info",
+						"agent":    req.AgentSlug,
+						"agent_id": agentID,
+						"event":    event.Type,
+						"content":  event.Content,
+						"metadata": sanitizeMetadata(func() map[string]interface{} {
+							if m, ok := event.Metadata.(map[string]interface{}); ok {
+								return m
+							}
+							return nil
+						}()),
+					},
 				})
 			}
 		}
@@ -638,6 +679,28 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		slog.Error("failed to encode JSON response", "error", err)
 	}
+}
+
+// sanitizeMetadata filters agent event metadata to a safe allowlist before
+// broadcasting to workspace WebSocket clients, preventing leakage of tool
+// inputs, error details, or MCP configuration.
+func sanitizeMetadata(raw any) map[string]interface{} {
+	m, ok := raw.(map[string]interface{})
+	if !ok || m == nil {
+		return nil
+	}
+	allowed := map[string]bool{
+		"source": true, "summary": true, "duration": true, "duration_ms": true,
+		"tool_name": true, "num_turns": true, "total_cost_usd": true,
+		"usage": true, "model": true, "session_id": true, "exit_code": true,
+	}
+	safe := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		if allowed[k] {
+			safe[k] = v
+		}
+	}
+	return safe
 }
 
 
