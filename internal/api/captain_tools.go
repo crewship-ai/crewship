@@ -374,8 +374,10 @@ func execCreateCrew(ctx context.Context, h *CaptainHandler, wsID, _, role string
 		return "", fmt.Errorf("slug must contain only lowercase letters, numbers, and hyphens")
 	}
 	var existing int
-	h.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM crews WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL", slug, wsID).Scan(&existing)
+	if err := h.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM crews WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL", slug, wsID).Scan(&existing); err != nil {
+		return "", fmt.Errorf("check crew slug: %w", err)
+	}
 	if existing > 0 {
 		return "", fmt.Errorf("crew with slug '%s' already exists", slug)
 	}
@@ -409,8 +411,10 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 	}
 
 	var exists int
-	h.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", crewID, wsID).Scan(&exists)
+	if err := h.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", crewID, wsID).Scan(&exists); err != nil {
+		return "", fmt.Errorf("check crew existence: %w", err)
+	}
 	if exists == 0 {
 		return "", fmt.Errorf("crew %q not found in workspace", crewID)
 	}
@@ -426,8 +430,10 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 	}
 	// Ensure workspace uniqueness with a simple suffix if taken.
 	var taken int
-	h.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM agents WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL", slug, wsID).Scan(&taken)
+	if err := h.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM agents WHERE slug = ? AND workspace_id = ? AND deleted_at IS NULL", slug, wsID).Scan(&taken); err != nil {
+		return "", fmt.Errorf("check agent slug: %w", err)
+	}
 	if taken > 0 {
 		slug = slug + "-" + generateCUID()[:6]
 	}
@@ -468,8 +474,10 @@ func execCreateMission(ctx context.Context, h *CaptainHandler, wsID, _, _ string
 	}
 
 	var exists int
-	h.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", crewID, wsID).Scan(&exists)
+	if err := h.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", crewID, wsID).Scan(&exists); err != nil {
+		return "", fmt.Errorf("check crew: %w", err)
+	}
 	if exists == 0 {
 		return "", fmt.Errorf("crew %q not found", crewID)
 	}

@@ -57,8 +57,10 @@ var proposalListCmd = &cobra.Command{
 		var rows [][]string
 		for _, p := range proposals {
 			proposer := "-"
-			if p.ProposerSlug != nil {
+			if p.ProposerSlug != nil && *p.ProposerSlug != "" {
 				proposer = *p.ProposerSlug
+			} else if p.ProposerName != nil && *p.ProposerName != "" {
+				proposer = *p.ProposerName
 			}
 			title := p.Title
 			if len(title) > 40 {

@@ -62,6 +62,8 @@ func (m *mockResolver) ResolveChat(_ context.Context, _ string) (*chatbridge.Cha
 }
 
 func (m *mockResolver) ResolveAgent(_ context.Context, _ string) (*chatbridge.ChatInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.resolveInfo, m.resolveErr
 }
 
@@ -308,7 +310,9 @@ func TestLoadSchedules_SkipsDisabled(t *testing.T) {
 func TestLoadSchedules_SkipsDeletedAgents(t *testing.T) {
 	db := testDB(t)
 	seedAgent(t, db, "a1", "bob", "Bob", "", "ws1", "0 8 * * MON", "", true)
-	db.Exec("UPDATE agents SET deleted_at = '2026-01-01T00:00:00Z' WHERE id = 'a1'")
+	if _, err := db.Exec("UPDATE agents SET deleted_at = '2026-01-01T00:00:00Z' WHERE id = 'a1'"); err != nil {
+		t.Fatalf("mark deleted: %v", err)
+	}
 
 	s := newTestScheduler(db, &mockResolver{}, nil, nil)
 	if err := s.loadSchedules(context.Background()); err != nil {
@@ -349,7 +353,9 @@ func TestUpdateSchedule_Enable(t *testing.T) {
 
 	// Check next_run was written to DB
 	var nextRun sql.NullString
-	db.QueryRow("SELECT schedule_next_run FROM agents WHERE id = 'a1'").Scan(&nextRun)
+	if err := db.QueryRow("SELECT schedule_next_run FROM agents WHERE id = 'a1'").Scan(&nextRun); err != nil {
+		t.Fatalf("scan schedule_next_run: %v", err)
+	}
 	if !nextRun.Valid || nextRun.String == "" {
 		t.Error("expected schedule_next_run to be set")
 	}
@@ -508,7 +514,9 @@ func TestTriggerAgent_Success(t *testing.T) {
 
 	// Check schedule_last_run was updated in DB
 	var lastRun sql.NullString
-	db.QueryRow("SELECT schedule_last_run FROM agents WHERE id = 'a1'").Scan(&lastRun)
+	if err := db.QueryRow("SELECT schedule_last_run FROM agents WHERE id = 'a1'").Scan(&lastRun); err != nil {
+		t.Fatalf("scan schedule_last_run: %v", err)
+	}
 	if !lastRun.Valid || lastRun.String == "" {
 		t.Error("expected schedule_last_run to be set after trigger")
 	}
@@ -540,7 +548,9 @@ func TestTriggerAgent_CreateChatFails(t *testing.T) {
 
 	// next_run should still be updated (errorOnly=true path)
 	var nextRun sql.NullString
-	db.QueryRow("SELECT schedule_next_run FROM agents WHERE id = 'a1'").Scan(&nextRun)
+	if err := db.QueryRow("SELECT schedule_next_run FROM agents WHERE id = 'a1'").Scan(&nextRun); err != nil {
+		t.Fatalf("scan schedule_next_run: %v", err)
+	}
 	if !nextRun.Valid {
 		t.Error("expected schedule_next_run to be set even on error")
 	}
@@ -695,7 +705,9 @@ func TestUpdateTimestamps_Success(t *testing.T) {
 	s.updateTimestamps("a1", "0 8 * * MON", false)
 
 	var lastRun, nextRun sql.NullString
-	db.QueryRow("SELECT schedule_last_run, schedule_next_run FROM agents WHERE id = 'a1'").Scan(&lastRun, &nextRun)
+	if err := db.QueryRow("SELECT schedule_last_run, schedule_next_run FROM agents WHERE id = 'a1'").Scan(&lastRun, &nextRun); err != nil {
+		t.Fatalf("scan schedule timestamps: %v", err)
+	}
 
 	if !lastRun.Valid || lastRun.String == "" {
 		t.Error("expected schedule_last_run to be set")
@@ -713,7 +725,9 @@ func TestUpdateTimestamps_ErrorOnly(t *testing.T) {
 	s.updateTimestamps("a1", "0 8 * * MON", true)
 
 	var lastRun, nextRun sql.NullString
-	db.QueryRow("SELECT schedule_last_run, schedule_next_run FROM agents WHERE id = 'a1'").Scan(&lastRun, &nextRun)
+	if err := db.QueryRow("SELECT schedule_last_run, schedule_next_run FROM agents WHERE id = 'a1'").Scan(&lastRun, &nextRun); err != nil {
+		t.Fatalf("scan schedule timestamps: %v", err)
+	}
 
 	// errorOnly=true should only update next_run, not last_run
 	if lastRun.Valid {

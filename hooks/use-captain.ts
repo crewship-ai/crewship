@@ -61,9 +61,7 @@ export function useCaptain() {
         })
         if (!res.ok) return
         const data = await res.json()
-        if (data.messages?.length) {
-          store.setMessages(convertHistory(data.messages))
-        }
+        store.setMessages(data.messages?.length ? convertHistory(data.messages) : [])
       } catch {
         // Silently fail
       } finally {
@@ -167,6 +165,9 @@ export function useCaptain() {
                 case "done":
                   store.setStreaming(false)
                   store.setActiveToolCall(null)
+                  break
+                case "warning":
+                  store.appendToLast(`\n\n_${event.content}_`)
                   break
                 case "error":
                   store.appendToLast(`\n\n_Error: ${event.content}_`)

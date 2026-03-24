@@ -578,7 +578,7 @@ var credTestCmd = &cobra.Command{
 			}
 		}
 
-		if provider == "" {
+		if provider == "" && credType != "SECRET" {
 			return fmt.Errorf("--provider is required (e.g. ANTHROPIC, OPENAI, GOOGLE)")
 		}
 		if value == "" {

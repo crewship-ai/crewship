@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -88,7 +89,7 @@ var templateGetCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/crew-templates/" + args[0])
+		resp, err := client.Get("/api/v1/crew-templates/" + url.PathEscape(args[0]))
 		if err != nil {
 			return err
 		}
