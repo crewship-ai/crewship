@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestQueryCreate_MissingFields(t *testing.T) {
@@ -473,6 +475,390 @@ func TestResolveEscalation_MissingResolution(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestResolveEscalation_WithAction(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Nela', 'nela')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, created_at)
+		 VALUES ('esc1', ?, 'crew1', 'chat1', 'ag1', 'Need approval', 'PENDING', '2025-01-01T15:00:00Z')`, wsID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	body := strings.NewReader(`{"resolution":"Rejected due to security concerns","action":"reject"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
+	req.SetPathValue("escalationId", "esc1")
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.ResolveEscalation(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify action stored in DB
+	var action string
+	err := db.QueryRowContext(context.Background(),
+		`SELECT action FROM escalations WHERE id = 'esc1'`,
+	).Scan(&action)
+	if err != nil {
+		t.Fatalf("DB query error: %v", err)
+	}
+	if action != "reject" {
+		t.Errorf("expected action=reject, got %s", action)
+	}
+}
+
+func TestResolveEscalation_RedirectAction(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Nela', 'nela')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag2', 'crew1', ?, 'Viktor', 'viktor')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, created_at)
+		 VALUES ('esc1', ?, 'crew1', 'chat1', 'ag1', 'Wrong agent', 'PENDING', '2025-01-01T15:00:00Z')`, wsID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	body := strings.NewReader(`{"resolution":"Viktor should handle this","action":"redirect","redirect_to":"viktor"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
+	req.SetPathValue("escalationId", "esc1")
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.ResolveEscalation(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify action and redirect_to stored in DB
+	var action string
+	var redirectTo sql.NullString
+	err := db.QueryRowContext(context.Background(),
+		`SELECT action, redirect_to FROM escalations WHERE id = 'esc1'`,
+	).Scan(&action, &redirectTo)
+	if err != nil {
+		t.Fatalf("DB query error: %v", err)
+	}
+	if action != "redirect" {
+		t.Errorf("expected action=redirect, got %s", action)
+	}
+	if !redirectTo.Valid || redirectTo.String != "viktor" {
+		t.Errorf("expected redirect_to=viktor, got %v", redirectTo)
+	}
+}
+
+func TestResolveEscalation_InvalidAction(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Nela', 'nela')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, created_at)
+		 VALUES ('esc1', ?, 'crew1', 'chat1', 'ag1', 'Need help', 'PENDING', '2025-01-01T15:00:00Z')`, wsID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	body := strings.NewReader(`{"resolution":"test","action":"invalid"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
+	req.SetPathValue("escalationId", "esc1")
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.ResolveEscalation(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestResolveEscalation_RedirectToNonexistentAgent(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Nela', 'nela')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, created_at)
+		 VALUES ('esc1', ?, 'crew1', 'chat1', 'ag1', 'Wrong agent', 'PENDING', '2025-01-01T15:00:00Z')`, wsID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	body := strings.NewReader(`{"resolution":"Send to ghost","action":"redirect","redirect_to":"nonexistent"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
+	req.SetPathValue("escalationId", "esc1")
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.ResolveEscalation(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for nonexistent redirect target, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestResolveEscalation_NotifiesWaiter(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Nela', 'nela')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, created_at)
+		 VALUES ('esc1', ?, 'crew1', 'chat1', 'ag1', 'Need help', 'PENDING', '2025-01-01T15:00:00Z')`, wsID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	// Register a waiter before resolving
+	ch := h.registerEscalationWaiter("esc1")
+
+	// Resolve in a goroutine
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		body := strings.NewReader(`{"resolution":"Approved","action":"approve"}`)
+		req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
+		req.SetPathValue("escalationId", "esc1")
+		ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+		req = req.WithContext(ctx)
+		w := httptest.NewRecorder()
+		h.ResolveEscalation(w, req)
+		if w.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	}()
+
+	// Wait for the notification
+	select {
+	case result := <-ch:
+		if result.Resolution != "Approved" {
+			t.Errorf("expected resolution=Approved, got %s", result.Resolution)
+		}
+		if result.Action != "approve" {
+			t.Errorf("expected action=approve, got %s", result.Action)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for escalation notification")
+	}
+
+	<-done
+}
+
+func TestWaitForEscalationResponse_ResolvesBeforeTimeout(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Nela', 'nela')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, created_at)
+		 VALUES ('esc1', ?, 'crew1', 'chat1', 'ag1', 'Need approval', 'PENDING', '2025-01-01T15:00:00Z')`, wsID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	// Start wait in goroutine
+	var waitCode int
+	var waitBody map[string]interface{}
+	waitDone := make(chan struct{})
+	go func() {
+		defer close(waitDone)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/escalations/esc1/wait", nil)
+		req.SetPathValue("escalationId", "esc1")
+		w := httptest.NewRecorder()
+		h.WaitForEscalationResponse(w, req)
+		waitCode = w.Code
+		json.NewDecoder(w.Body).Decode(&waitBody)
+	}()
+
+	// Give waiter time to register
+	time.Sleep(50 * time.Millisecond)
+
+	// Resolve the escalation
+	body := strings.NewReader(`{"resolution":"Go ahead","action":"approve"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
+	req.SetPathValue("escalationId", "esc1")
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.ResolveEscalation(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("resolve failed: %d: %s", w.Code, w.Body.String())
+	}
+
+	// Wait for the waiter to finish
+	select {
+	case <-waitDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("wait handler didn't return")
+	}
+
+	if waitCode != http.StatusOK {
+		t.Errorf("expected wait 200, got %d", waitCode)
+	}
+	if waitBody["resolution"] != "Go ahead" {
+		t.Errorf("expected resolution='Go ahead', got %v", waitBody["resolution"])
+	}
+	if waitBody["action"] != "approve" {
+		t.Errorf("expected action=approve, got %v", waitBody["action"])
+	}
+}
+
+func TestWaitForEscalationResponse_AlreadyResolved(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Nela', 'nela')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, resolution, action, resolved_at, created_at)
+		 VALUES ('esc1', ?, 'crew1', 'chat1', 'ag1', 'Old issue', 'RESOLVED', 'Already done', 'approve', '2025-01-01T16:00:00Z', '2025-01-01T15:00:00Z')`, wsID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/escalations/esc1/wait", nil)
+	req.SetPathValue("escalationId", "esc1")
+	w := httptest.NewRecorder()
+
+	h.WaitForEscalationResponse(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["resolution"] != "Already done" {
+		t.Errorf("expected resolution='Already done', got %v", result["resolution"])
+	}
+	if result["action"] != "approve" {
+		t.Errorf("expected action=approve, got %v", result["action"])
+	}
+	if result["status"] != "RESOLVED" {
+		t.Errorf("expected status=RESOLVED, got %v", result["status"])
+	}
+}
+
+func TestWaitForEscalationResponse_Timeout(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Nela', 'nela')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, created_at)
+		 VALUES ('esc1', ?, 'crew1', 'chat1', 'ag1', 'Need approval', 'PENDING', '2025-01-01T15:00:00Z')`, wsID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	// Use a short-lived context to simulate timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/internal/escalations/esc1/wait", nil)
+	req = req.WithContext(ctx)
+	req.SetPathValue("escalationId", "esc1")
+	w := httptest.NewRecorder()
+
+	h.WaitForEscalationResponse(w, req)
+
+	if w.Code != http.StatusRequestTimeout {
+		t.Fatalf("expected 408, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestListEscalations_IncludesAction(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+
+	execOrFatal(t, db,
+		`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew1', ?, 'Eng', 'eng')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('ag1', 'crew1', ?, 'Nela', 'nela')`, wsID)
+	execOrFatal(t, db,
+		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, status, resolution, action, redirect_to, resolved_at, created_at)
+		 VALUES ('esc1', ?, 'crew1', 'chat1', 'ag1', 'Wrong agent', 'RESOLVED', 'Viktor handles this', 'redirect', 'viktor', '2025-01-01T16:00:00Z', '2025-01-01T15:00:00Z')`, wsID)
+
+	h := NewQueryHandler(db, nil, nil, "token", logger)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/crews/crew1/escalations", nil)
+	req.SetPathValue("crewId", "crew1")
+	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.ListEscalations(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var result []map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 escalation, got %d", len(result))
+	}
+	if result[0]["action"] != "redirect" {
+		t.Errorf("expected action=redirect, got %v", result[0]["action"])
+	}
+	if result[0]["redirect_to"] != "viktor" {
+		t.Errorf("expected redirect_to=viktor, got %v", result[0]["redirect_to"])
 	}
 }
 

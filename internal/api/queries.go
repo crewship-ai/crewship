@@ -12,12 +12,20 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
+
+// escalationResult is the response delivered to a waiting sidecar when a human resolves an escalation.
+type escalationResult struct {
+	Resolution string `json:"resolution"`
+	Action     string `json:"action"`
+	RedirectTo string `json:"redirect_to,omitempty"`
+}
 
 // QueryHandler handles peer query, standup, and escalation API requests.
 type QueryHandler struct {
@@ -26,16 +34,58 @@ type QueryHandler struct {
 	hub           *ws.Hub
 	logger        *slog.Logger
 	internalToken string
+
+	escalationMu      sync.Mutex
+	escalationWaiters map[string]chan escalationResult
 }
 
 func NewQueryHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, internalToken string, logger *slog.Logger) *QueryHandler {
 	return &QueryHandler{
-		db:            db,
-		orch:          orch,
-		hub:           hub,
-		logger:        logger,
-		internalToken: internalToken,
+		db:                db,
+		orch:              orch,
+		hub:               hub,
+		logger:            logger,
+		internalToken:     internalToken,
+		escalationWaiters: make(map[string]chan escalationResult),
 	}
+}
+
+// registerEscalationWaiter creates a buffered channel for the given escalation ID
+// and stores it in the waiter map. Returns the channel to receive the result on.
+// Only one waiter per escalation is supported; subsequent registrations overwrite.
+func (h *QueryHandler) registerEscalationWaiter(id string) chan escalationResult {
+	h.escalationMu.Lock()
+	defer h.escalationMu.Unlock()
+	ch := make(chan escalationResult, 1)
+	h.escalationWaiters[id] = ch
+	return ch
+}
+
+// notifyEscalationWaiter sends the result to the waiter channel (if one exists)
+// and removes it from the map. Uses non-blocking send to prevent panic if the
+// waiter has already timed out and the channel buffer is full or removed.
+func (h *QueryHandler) notifyEscalationWaiter(id string, result escalationResult) {
+	h.escalationMu.Lock()
+	ch, ok := h.escalationWaiters[id]
+	if ok {
+		delete(h.escalationWaiters, id)
+	}
+	h.escalationMu.Unlock()
+	if ok {
+		select {
+		case ch <- result:
+		default:
+			// Waiter already timed out or channel full — discard safely.
+		}
+	}
+}
+
+// removeEscalationWaiter removes a waiter channel from the map (cleanup on timeout).
+// Idempotent — safe to call even if notifyEscalationWaiter already removed it.
+func (h *QueryHandler) removeEscalationWaiter(id string) {
+	h.escalationMu.Lock()
+	defer h.escalationMu.Unlock()
+	delete(h.escalationWaiters, id)
 }
 
 type createQueryBody struct {
@@ -437,6 +487,8 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 
 	var body struct {
 		Resolution string `json:"resolution"`
+		Action     string `json:"action"`
+		RedirectTo string `json:"redirect_to"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
@@ -447,6 +499,19 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Default action to "approve" for backward compatibility.
+	if body.Action == "" {
+		body.Action = "approve"
+	}
+	if body.Action != "approve" && body.Action != "reject" && body.Action != "redirect" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be approve, reject, or redirect"})
+		return
+	}
+	if body.Action == "redirect" && body.RedirectTo == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "redirect_to required when action is redirect"})
+		return
+	}
+
 	var status, chatID, crewID, fromSlug, escalationType string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT e.status, e.chat_id, e.crew_id, a.slug, e.type
@@ -454,6 +519,20 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		JOIN agents a ON a.id = e.from_agent_id
 		WHERE e.id = ? AND e.workspace_id = ?
 	`, escalationID, workspaceID).Scan(&status, &chatID, &crewID, &fromSlug, &escalationType)
+
+	// Validate redirect_to agent exists in the same crew (after we know crew_id).
+	if err == nil && body.Action == "redirect" && body.RedirectTo != "" {
+		var exists int
+		h.db.QueryRowContext(r.Context(), `
+			SELECT COUNT(*) FROM agents WHERE slug = ? AND crew_id = ? AND deleted_at IS NULL
+		`, body.RedirectTo, crewID).Scan(&exists)
+		if exists == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("redirect_to agent %q not found in crew", body.RedirectTo),
+			})
+			return
+		}
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "escalation not found"})
@@ -482,10 +561,15 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		storedResolution = enc
 	}
 
+	var redirectToVal interface{}
+	if body.RedirectTo != "" {
+		redirectToVal = body.RedirectTo
+	}
+
 	result, err := h.db.ExecContext(r.Context(), `
-		UPDATE escalations SET status = 'RESOLVED', resolution = ?, resolved_at = ?, resolved_by = 'user'
+		UPDATE escalations SET status = 'RESOLVED', resolution = ?, action = ?, redirect_to = ?, resolved_at = ?, resolved_by = 'user'
 		WHERE id = ? AND workspace_id = ? AND status = 'PENDING'
-	`, storedResolution, now, escalationID, workspaceID)
+	`, storedResolution, body.Action, redirectToVal, now, escalationID, workspaceID)
 	if err != nil {
 		h.logger.Error("resolve escalation update", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -495,6 +579,13 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "escalation already resolved"})
 		return
 	}
+
+	// Notify any waiting sidecar that the escalation has been resolved.
+	h.notifyEscalationWaiter(escalationID, escalationResult{
+		Resolution: body.Resolution,
+		Action:     body.Action,
+		RedirectTo: body.RedirectTo,
+	})
 
 	if h.hub != nil {
 		broadcastResolution := body.Resolution
@@ -507,6 +598,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 			Payload: map[string]string{
 				"id":         escalationID,
 				"resolution": broadcastResolution,
+				"action":     body.Action,
 			},
 		})
 		h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
@@ -516,6 +608,7 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 				"id":        escalationID,
 				"crew_id":   crewID,
 				"from_slug": fromSlug,
+				"action":    body.Action,
 			},
 		})
 	}
@@ -523,13 +616,69 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	h.logger.Info("escalation resolved",
 		"escalation_id", escalationID,
 		"crew_id", crewID,
+		"action", body.Action,
 	)
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"id":     escalationID,
 		"status": "RESOLVED",
+		"action": body.Action,
 	})
 }
+
+// WaitForEscalationResponse handles GET /api/v1/internal/escalations/{escalationId}/wait.
+// It blocks until the escalation is resolved or the request context is cancelled (timeout).
+// This is called by the sidecar to deliver the human's response back to the waiting agent.
+func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.Request) {
+	escalationID := r.PathValue("escalationId")
+
+	// Check if escalation is already resolved.
+	var status string
+	var resolution, action, redirectTo sql.NullString
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT status, resolution, action, redirect_to FROM escalations WHERE id = ?
+	`, escalationID).Scan(&status, &resolution, &action, &redirectTo)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "escalation not found"})
+			return
+		}
+		h.logger.Error("wait escalation lookup", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	if status == "RESOLVED" {
+		// Already resolved — return immediately.
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":      "RESOLVED",
+			"resolution":  resolution.String,
+			"action":      action.String,
+			"redirect_to": redirectTo.String,
+		})
+		return
+	}
+
+	// Register a waiter and block until resolved or timeout.
+	ch := h.registerEscalationWaiter(escalationID)
+	defer h.removeEscalationWaiter(escalationID)
+
+	select {
+	case result := <-ch:
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":      "RESOLVED",
+			"resolution":  result.Resolution,
+			"action":      result.Action,
+			"redirect_to": result.RedirectTo,
+		})
+	case <-r.Context().Done():
+		writeJSON(w, http.StatusRequestTimeout, map[string]string{
+			"status": "TIMEOUT",
+			"error":  "escalation not resolved in time",
+		})
+	}
+}
+
 // Standup handles GET /api/v1/internal/standup (internal) and GET /api/v1/crews/{crewId}/standup (public).
 func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	crewID := r.URL.Query().Get("crew_id")
@@ -958,6 +1107,8 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		PeerConversationID *string `json:"peer_conversation_id"`
 		Status             string  `json:"status"`
 		Resolution         *string `json:"resolution"`
+		Action             *string `json:"action"`
+		RedirectTo         *string `json:"redirect_to"`
 		ResolvedBy         *string `json:"resolved_by"`
 		ResolvedAt         *string `json:"resolved_at"`
 		CreatedAt          string  `json:"created_at"`
@@ -965,7 +1116,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT e.id, e.type, e.reason, e.context, e.metadata, e.peer_conversation_id, e.status,
-		       e.resolution, e.resolved_by, e.resolved_at, e.created_at,
+		       e.resolution, e.action, e.redirect_to, e.resolved_by, e.resolved_at, e.created_at,
 		       from_a.name, from_a.slug
 		FROM escalations e
 		JOIN agents from_a ON from_a.id = e.from_agent_id
@@ -985,8 +1136,9 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 		var item escalationItem
 		if err := rows.Scan(
 			&item.ID, &item.Type, &item.Reason, &item.Context, &item.Metadata,
-			&item.PeerConversationID, &item.Status, &item.Resolution, &item.ResolvedBy,
-			&item.ResolvedAt, &item.CreatedAt, &item.FromName, &item.FromSlug,
+			&item.PeerConversationID, &item.Status, &item.Resolution, &item.Action,
+			&item.RedirectTo, &item.ResolvedBy, &item.ResolvedAt, &item.CreatedAt,
+			&item.FromName, &item.FromSlug,
 		); err != nil {
 			h.logger.Error("scan escalation", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})

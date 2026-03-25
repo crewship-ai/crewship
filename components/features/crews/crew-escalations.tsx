@@ -4,10 +4,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import { CheckCircle2, AlertTriangle, Send, ExternalLink, KeyRound } from "lucide-react"
 import { BadgeAlertIcon } from "@/components/ui/badge-alert"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Table,
   TableBody,
@@ -24,6 +21,7 @@ import {
 } from "@/components/ui/tooltip"
 import { escalationSchema, type Escalation } from "@/lib/types/escalation"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { EscalationResponseCard, ActionBadge } from "@/components/features/escalations/escalation-response-card"
 import { z } from "zod"
 
 interface CrewEscalationsProps {
@@ -34,6 +32,7 @@ interface CrewEscalationsProps {
 function PendingIcon({ className }: { className?: string }) {
   return <BadgeAlertIcon size={14} className={className} />
 }
+
 
 const STATUS_CONFIG: Record<Escalation["status"], {
   label: string
@@ -73,122 +72,6 @@ function formatRelativeTime(dateStr: string): string {
   return `${days}d ago`
 }
 
-function parseMetadataUrl(metadata: string | null): string | null {
-  if (!metadata) return null
-  try {
-    const parsed = JSON.parse(metadata)
-    return parsed.url || null
-  } catch {
-    if (metadata.startsWith("https://")) return metadata
-    return null
-  }
-}
-
-function ResolveForm({ escalation, workspaceId, onResolved }: { escalation: Escalation; workspaceId: string; onResolved: () => void }) {
-  const [resolution, setResolution] = useState("")
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const handleResolve = async () => {
-    if (!resolution.trim()) return
-    setSubmitting(true)
-    setError(null)
-    try {
-      const res = await fetch(`/api/v1/escalations/${escalation.id}/resolve`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resolution: resolution.trim(), workspace_id: workspaceId }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Failed to resolve" }))
-        setError(err.error || "Failed to resolve")
-        return
-      }
-      setResolution("")
-      onResolved()
-    } catch {
-      setError("Network error")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  const metadataUrl = parseMetadataUrl(escalation.metadata)
-
-  return (
-    <div className="space-y-3 p-3">
-      {escalation.context && (
-        <div className="text-body">
-          <span className="font-medium text-muted-foreground">Context: </span>
-          <span className="whitespace-pre-wrap">{escalation.context}</span>
-        </div>
-      )}
-
-      {escalation.type === "LINK" && metadataUrl && (
-        <div>
-          <a
-            href={metadataUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            Open link
-          </a>
-        </div>
-      )}
-
-      <div className="flex gap-2">
-        {escalation.type === "CREDENTIAL" ? (
-          <Input
-            type="password"
-            placeholder="Paste credential value..."
-            aria-label="Credential value"
-            value={resolution}
-            onChange={(e) => setResolution(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault()
-                handleResolve()
-              }
-            }}
-            disabled={submitting}
-            className="flex-1 font-mono text-sm"
-          />
-        ) : (
-          <Textarea
-            placeholder={escalation.type === "LINK" ? "Confirm completion..." : "Type your response..."}
-            aria-label="Resolution response"
-            value={resolution}
-            onChange={(e) => setResolution(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault()
-                handleResolve()
-              }
-            }}
-            disabled={submitting}
-            rows={2}
-            className="flex-1 text-sm resize-none"
-          />
-        )}
-        <Button
-          size="sm"
-          onClick={handleResolve}
-          disabled={submitting || !resolution.trim()}
-          className="self-end"
-        >
-          <Send className="h-3.5 w-3.5 mr-1" />
-          {submitting ? "Sending..." : "Resolve"}
-        </Button>
-      </div>
-
-      {error && (
-        <p className="text-sm text-destructive">{error}</p>
-      )}
-    </div>
-  )
-}
 
 export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   const [escalations, setEscalations] = useState<Escalation[]>([])
@@ -353,15 +236,21 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
                           <TableRow id={detailId}>
                             <TableCell colSpan={4} className="bg-muted/30 p-0">
                               {isPending ? (
-                                <ResolveForm
+                                <EscalationResponseCard
                                   escalation={e}
                                   workspaceId={workspaceId}
+                                  crewId={crewId}
                                   onResolved={() => fetchEscalations(false, true)}
                                 />
                               ) : (
-                                <div className="text-body whitespace-pre-wrap max-h-60 overflow-y-auto p-3">
+                                <div className="text-body whitespace-pre-wrap max-h-60 overflow-y-auto p-3 space-y-2">
+                                  {e.action && (
+                                    <div>
+                                      <ActionBadge action={e.action} redirectTo={e.redirect_to} />
+                                    </div>
+                                  )}
                                   {e.context && (
-                                    <div className="mb-2">
+                                    <div>
                                       <span className="font-medium text-muted-foreground">Context: </span>
                                       {e.context}
                                     </div>

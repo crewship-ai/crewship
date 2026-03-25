@@ -11,9 +11,36 @@ export const escalationSchema = z.object({
   peer_conversation_id: z.string().nullable(),
   status: z.enum(["PENDING", "RESOLVED"]),
   resolution: z.string().nullable(),
+  action: z.enum(["approve", "reject", "redirect"]).nullable().default("approve"),
+  redirect_to: z.string().nullable().default(null),
   resolved_by: z.string().nullable(),
   resolved_at: z.string().nullable(),
   created_at: z.string(),
 })
+
+export interface EvidencePack {
+  task_title?: string
+  task_id?: string
+  agent_slug?: string
+  agent_actions?: string[]
+  error?: string
+  relevant_files?: string[]
+  confidence?: number
+  suggested_action?: string
+}
+
+export function parseEvidencePack(metadata: string | null): EvidencePack | null {
+  if (!metadata) return null
+  try {
+    const parsed = JSON.parse(metadata)
+    // Only treat as evidence pack if it has at least one expected field.
+    if (parsed.task_title || parsed.agent_actions || parsed.error || parsed.suggested_action) {
+      return parsed as EvidencePack
+    }
+    return null
+  } catch {
+    return null
+  }
+}
 
 export type Escalation = z.infer<typeof escalationSchema>
