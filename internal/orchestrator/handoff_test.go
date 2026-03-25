@@ -61,14 +61,11 @@ summary: incomplete handoff`,
 			wantArtifacts:  "none",
 		},
 		{
-			name: "handoff with only summary",
+			name: "handoff with only summary (missing confidence)",
 			input: `---HANDOFF---
 summary: Did the thing
 ---END HANDOFF---`,
-			wantParsed:     true,
-			wantSummary:    "Did the thing",
-			wantConfidence: "",
-			wantArtifacts:  "",
+			wantParsed: false,
 		},
 		{
 			name: "multiple handoff blocks takes last one",

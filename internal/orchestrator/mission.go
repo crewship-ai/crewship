@@ -90,7 +90,7 @@ func parseHandoff(resultSummary string) HandoffData {
 	}
 
 	block := resultSummary[startIdx+len(startMarker) : startIdx+endIdx]
-	hd := HandoffData{Parsed: true}
+	hd := HandoffData{}
 
 	for _, line := range strings.Split(block, "\n") {
 		line = strings.TrimSpace(line)
@@ -103,6 +103,9 @@ func parseHandoff(resultSummary string) HandoffData {
 		}
 	}
 
+	// Require summary and confidence for a valid handoff — partial blocks
+	// (e.g. summary-only) are treated as unparsed so callers don't skip review.
+	hd.Parsed = hd.Summary != "" && hd.Confidence != ""
 	return hd
 }
 
@@ -801,13 +804,14 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		e.cbMu.Unlock()
 	}
 
-	// Compress result summary to prevent DB bloat
+	// Parse structured handoff from FULL output before truncation.
+	handoff := parseHandoff(resultSummary)
+
+	// Compress result summary to prevent DB bloat (after handoff parsing).
 	if len(resultSummary) > maxResultSummaryLen {
 		resultSummary = resultSummary[:maxResultSummaryLen] + "\n...(truncated)"
 	}
 
-	// Parse structured handoff from agent output
-	handoff := parseHandoff(resultSummary)
 	if handoff.Parsed {
 		e.logger.Info("structured handoff received",
 			"task_id", taskID,
@@ -816,9 +820,10 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 			"summary_len", len(handoff.Summary),
 			"artifacts", handoff.Artifacts,
 		)
-		// Persist handoff data to DB
+		// Map confidence to numeric value and persist handoff + needs_review in one UPDATE.
 		var confVal *float64
-		switch handoff.Confidence {
+		needsReview := 0
+		switch strings.ToLower(handoff.Confidence) {
 		case "high":
 			v := 0.9
 			confVal = &v
@@ -828,16 +833,16 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		case "low":
 			v := 0.4
 			confVal = &v
+			needsReview = 1
 		}
 		if confVal != nil {
-			e.db.ExecContext(ctx,
-				`UPDATE mission_tasks SET confidence = ?, handoff_context = ? WHERE id = ?`,
-				*confVal, handoff.Summary, taskID)
+			if _, err := e.db.ExecContext(ctx,
+				`UPDATE mission_tasks SET confidence = ?, handoff_context = ?, needs_review = ? WHERE id = ?`,
+				*confVal, handoff.Summary, needsReview, taskID); err != nil {
+				e.logger.Error("persist handoff data", "error", err, "task_id", taskID)
+			}
 		}
-		// Flag low-confidence tasks for human review
-		if handoff.Confidence == "low" {
-			e.db.ExecContext(ctx,
-				`UPDATE mission_tasks SET needs_review = 1 WHERE id = ?`, taskID)
+		if needsReview == 1 {
 			e.logger.Warn("task flagged for human review (low confidence)",
 				"task_id", taskID, "mission_id", missionID)
 		}
