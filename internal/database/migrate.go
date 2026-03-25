@@ -85,6 +85,7 @@ var migrations = []migration{
 	{24, "add_agent_schedule", migrationAddAgentSchedule},
 	{25, "add_captain_chats", migrationAddCaptainChats},
 	{26, "add_crew_templates_workspace_id", migrationAddCrewTemplatesWorkspaceID},
+	{27, "add_escalation_action", migrationAddEscalationAction},
 }
 
 const migrationAddKeeperObservability = `
@@ -832,4 +833,9 @@ ALTER TABLE agents ADD COLUMN schedule_prompt TEXT;
 ALTER TABLE agents ADD COLUMN schedule_enabled INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE agents ADD COLUMN schedule_last_run TEXT;
 ALTER TABLE agents ADD COLUMN schedule_next_run TEXT;
+`
+
+const migrationAddEscalationAction = `
+ALTER TABLE escalations ADD COLUMN action TEXT DEFAULT 'approve';
+ALTER TABLE escalations ADD COLUMN redirect_to TEXT;
 `
