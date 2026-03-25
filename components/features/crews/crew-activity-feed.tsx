@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/tooltip"
 import { activityItemSchema, type ActivityItem } from "@/lib/types/activity"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { useTick } from "@/hooks/use-tick"
 import { z } from "zod"
 
 interface CrewActivityFeedProps {
@@ -67,6 +68,7 @@ export function CrewActivityFeed({ workspaceId }: CrewActivityFeedProps) {
   const [items, setItems] = useState<ActivityItem[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  useTick(60_000) // re-render every 60s to keep relative times fresh
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const fetchActivity = useCallback(async (showRefresh = false, silent = false) => {

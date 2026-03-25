@@ -175,6 +175,10 @@ export default function DashboardPage() {
   useRealtimeEvent("run.completed", useCallback(() => { fetchData(false) }, [fetchData]))
   useRealtimeEvent("run.failed", useCallback(() => { fetchData(false) }, [fetchData]))
   useRealtimeEvent("agent.status", useCallback(() => { fetchData(false) }, [fetchData]))
+  useRealtimeEvent("mission.updated", useCallback(() => { fetchData(false) }, [fetchData]))
+  useRealtimeEvent("escalation.created", useCallback(() => { fetchData(false) }, [fetchData]))
+  useRealtimeEvent("agent.created", useCallback(() => { fetchData(false) }, [fetchData]))
+  useRealtimeEvent("agent.deleted", useCallback(() => { fetchData(false) }, [fetchData]))
 
   useRealtimeEvent("container.stats", useCallback((event: RealtimeEvent) => {
     const p = event.payload

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // normalizeDomain extracts and validates a bare hostname from a domain entry.
@@ -47,6 +48,7 @@ func normalizeDomain(raw string) string {
 
 type CrewHandler struct {
 	db         *sql.DB
+	hub        *ws.Hub
 	logger     *slog.Logger
 	license    *license.License
 	socketPath string
@@ -54,6 +56,19 @@ type CrewHandler struct {
 
 func NewCrewHandler(db *sql.DB, logger *slog.Logger) *CrewHandler {
 	return &CrewHandler{db: db, logger: logger}
+}
+
+func (h *CrewHandler) SetHub(hub *ws.Hub) { h.hub = hub }
+
+func (h *CrewHandler) broadcastCrewEvent(eventType, workspaceID string, payload map[string]string) {
+	if h.hub == nil {
+		return
+	}
+	h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
+		Type:    eventType,
+		Channel: "workspace:" + workspaceID,
+		Payload: payload,
+	})
 }
 
 func (h *CrewHandler) SetLicense(lic *license.License) { h.license = lic }
@@ -295,6 +310,10 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	})
+
+	h.broadcastCrewEvent("crew.created", workspaceID, map[string]string{
+		"id": crewID, "name": req.Name, "slug": req.Slug,
+	})
 }
 
 func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -527,6 +546,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	c.AllowedDomains = parseAllowedDomains(updatedDomainsJSON)
 	writeJSON(w, http.StatusOK, c)
 
+	h.broadcastCrewEvent("crew.updated", workspaceID, map[string]string{
+		"id": crewID, "name": c.Name, "slug": c.Slug,
+	})
+
 	// Restart crew container when network policy changes so the sidecar
 	// picks up the new config on the next agent run. Runs after response
 	// is sent to avoid SQLite lock contention.
@@ -576,6 +599,8 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+
+	h.broadcastCrewEvent("crew.deleted", workspaceID, map[string]string{"id": crewID})
 }
 
 type crewMemberResponse struct {

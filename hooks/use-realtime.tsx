@@ -16,12 +16,18 @@ export type RealtimeEventType =
   | "run.completed"
   | "run.failed"
   | "agent.status"
+  | "agent.created"
+  | "agent.updated"
+  | "agent.deleted"
   | "assignment.updated"
   | "escalation.created"
   | "escalation.resolved"
   | "mission.updated"
   | "task.updated"
   | "peer_conversation.updated"
+  | "crew.created"
+  | "crew.updated"
+  | "crew.deleted"
   | "agent.log"
   | "file.event"
   | "container.stats"
@@ -78,10 +84,11 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     (msg: WSMessage) => {
       const validTypes: Set<string> = new Set([
         "run.started", "run.completed", "run.failed",
-        "agent.status", "assignment.updated", "escalation.created",
+        "agent.status", "agent.created", "agent.updated", "agent.deleted",
+        "assignment.updated", "escalation.created",
         "escalation.resolved", "mission.updated", "task.updated",
-        "peer_conversation.updated", "agent.log",
-        "file.event", "container.stats",
+        "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
+        "agent.log", "file.event", "container.stats",
       ])
       if (!validTypes.has(msg.type)) return
 

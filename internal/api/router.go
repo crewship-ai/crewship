@@ -221,8 +221,14 @@ func (r *Router) registerRoutes() {
 		crewSocket = "/tmp/crewship.sock"
 	}
 	crews.SetSocketPath(crewSocket)
+	if r.hub != nil {
+		crews.SetHub(r.hub)
+	}
 	agents := NewAgentHandler(r.db, r.logger)
 	r.agentHandler = agents
+	if r.hub != nil {
+		agents.SetHub(r.hub)
+	}
 	if r.scheduleUpdater != nil {
 		agents.SetScheduler(r.scheduleUpdater)
 	}

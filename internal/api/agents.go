@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // ScheduleUpdater is implemented by the scheduler to receive live schedule changes.
@@ -20,6 +21,7 @@ type ScheduleUpdater interface {
 
 type AgentHandler struct {
 	db               *sql.DB
+	hub              *ws.Hub
 	logger           *slog.Logger
 	license          *license.License
 	scheduleUpdater  ScheduleUpdater
@@ -27,6 +29,19 @@ type AgentHandler struct {
 
 func NewAgentHandler(db *sql.DB, logger *slog.Logger) *AgentHandler {
 	return &AgentHandler{db: db, logger: logger}
+}
+
+func (h *AgentHandler) SetHub(hub *ws.Hub) { h.hub = hub }
+
+func (h *AgentHandler) broadcastAgentEvent(eventType, workspaceID string, payload map[string]string) {
+	if h.hub == nil {
+		return
+	}
+	h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
+		Type:    eventType,
+		Channel: "workspace:" + workspaceID,
+		Payload: payload,
+	})
 }
 
 func (h *AgentHandler) SetLicense(lic *license.License) { h.license = lic }
@@ -358,6 +373,10 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	})
+
+	h.broadcastAgentEvent("agent.created", workspaceID, map[string]string{
+		"id": agentID, "name": req.Name, "slug": req.Slug, "status": "IDLE",
+	})
 }
 
 func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -599,6 +618,8 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.Get(w, r)
+
+	h.broadcastAgentEvent("agent.updated", workspaceID, map[string]string{"id": agentID})
 }
 
 func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -634,6 +655,8 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	WriteAuditLog(r.Context(), h.db, "delete", "AGENT", agentID, userID, workspaceID, nil)
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+
+	h.broadcastAgentEvent("agent.deleted", workspaceID, map[string]string{"id": agentID})
 }
 
 type agentSkillSkillData struct {

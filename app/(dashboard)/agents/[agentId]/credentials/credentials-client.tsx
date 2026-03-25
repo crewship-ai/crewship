@@ -2,12 +2,13 @@
 
 import { useParams } from "next/navigation"
 
-import { use, useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { ShieldCheck, AlertCircle, Inbox, Plus, Trash2, Loader2, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { PROVIDER_ICONS } from "@/components/icons/provider-icons"
 import { AssignCredentialDialog } from "@/components/features/credentials/assign-credential-dialog"
 
@@ -54,6 +55,9 @@ export function CredentialsPageClient() {
     if (!workspaceId) return
     fetchCredentials()
   }, [workspaceId, fetchCredentials])
+
+  // Real-time: refresh when agent status changes (auto-assign may add credentials)
+  useRealtimeEvent("agent.status", useCallback(() => { fetchCredentials() }, [fetchCredentials]))
 
   const handleRemove = useCallback(async (assignmentId: string) => {
     if (!workspaceId) return

@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 interface AgentCrew {
   name: string
@@ -103,6 +104,11 @@ export function AgentDetailProvider({
     fetchAgent()
     return () => { cancelled = true }
   }, [agentId, workspaceId, refreshKey])
+
+  // Real-time: auto-refresh agent detail when status or runs change
+  useRealtimeEvent("agent.status", useCallback(() => { refresh() }, [refresh]))
+  useRealtimeEvent("run.completed", useCallback(() => { refresh() }, [refresh]))
+  useRealtimeEvent("run.failed", useCallback(() => { refresh() }, [refresh]))
 
   return (
     <AgentDetailContext.Provider value={{ agent, loading, error, refresh, setAgent }}>
