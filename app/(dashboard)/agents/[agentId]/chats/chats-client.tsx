@@ -70,6 +70,7 @@ export function SessionsPageClient() {
       }
       const data = await res.json()
       setSessions(Array.isArray(data) ? data : [])
+      setError(null)
     } catch {
       if (!silent) setError("Network error. Please try again.")
     } finally {
@@ -78,9 +79,12 @@ export function SessionsPageClient() {
   }, [agentId, workspaceId])
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      if (!wsLoading) setLoading(false)
+      return
+    }
     fetchSessions()
-  }, [workspaceId, fetchSessions])
+  }, [workspaceId, wsLoading, fetchSessions])
 
   // Real-time: refetch sessions when agent runs start/complete
   useRealtimeEvent("run.started", useCallback(() => { fetchSessions(true) }, [fetchSessions]))

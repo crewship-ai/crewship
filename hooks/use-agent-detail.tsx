@@ -105,10 +105,16 @@ export function AgentDetailProvider({
     return () => { cancelled = true }
   }, [agentId, workspaceId, refreshKey])
 
-  // Real-time: auto-refresh agent detail when status or runs change
-  useRealtimeEvent("agent.status", useCallback(() => { refresh() }, [refresh]))
-  useRealtimeEvent("run.completed", useCallback(() => { refresh() }, [refresh]))
-  useRealtimeEvent("run.failed", useCallback(() => { refresh() }, [refresh]))
+  // Real-time: auto-refresh agent detail when status or runs change (filtered by agentId)
+  useRealtimeEvent("agent.status", useCallback((event) => {
+    if (event.payload.agent_id === agentId) refresh()
+  }, [refresh, agentId]))
+  useRealtimeEvent("run.completed", useCallback((event) => {
+    if (event.payload.agent_id === agentId) refresh()
+  }, [refresh, agentId]))
+  useRealtimeEvent("run.failed", useCallback((event) => {
+    if (event.payload.agent_id === agentId) refresh()
+  }, [refresh, agentId]))
 
   return (
     <AgentDetailContext.Provider value={{ agent, loading, error, refresh, setAgent }}>

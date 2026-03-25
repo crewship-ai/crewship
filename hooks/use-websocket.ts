@@ -54,6 +54,11 @@ export function useWebSocket({
 
   const connect = useCallback(() => {
     if (!token || !url) return
+    disconnectingRef.current = false
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = undefined
+    }
 
     // Note: token is passed as query parameter because browser WebSocket API
     // does not support custom headers. The token is a short-lived JWE and the

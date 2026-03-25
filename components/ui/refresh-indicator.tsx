@@ -6,5 +6,5 @@
  */
 export function RefreshIndicator({ active }: { active: boolean }) {
   if (!active) return null
-  return <div className="h-0.5 bg-primary/50 animate-pulse rounded-full" />
+  return <div className="h-0.5 bg-primary/50 animate-pulse rounded-full" aria-hidden="true" />
 }

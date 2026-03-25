@@ -117,7 +117,6 @@ export default function CrewDetailPage() {
   useRealtimeEvent("agent.created", useCallback(() => { fetchData(true) }, [fetchData]))
   useRealtimeEvent("agent.deleted", useCallback(() => { fetchData(true) }, [fetchData]))
   useRealtimeEvent("mission.updated", useCallback(() => { fetchData(true) }, [fetchData]))
-  useRealtimeEvent("run.completed", useCallback(() => { fetchData(true) }, [fetchData]))
 
   async function patchCrew(body: Record<string, unknown>) {
     if (!workspaceId || !crew) return

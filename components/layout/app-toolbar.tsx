@@ -285,10 +285,10 @@ export function AppToolbar() {
           }
 
           const colorMap = {
-            emerald: { bg: "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800", dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-400" },
-            amber: { bg: "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800", dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" },
-            red: { bg: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800", dot: "bg-red-500", text: "text-red-700 dark:text-red-400" },
-            muted: { bg: "bg-muted/50 border-border", dot: "bg-muted-foreground/40", text: "text-muted-foreground" },
+            emerald: { bg: "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800", dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-400", icon: "text-emerald-600" },
+            amber: { bg: "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800", dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400", icon: "text-amber-600" },
+            red: { bg: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800", dot: "bg-red-500", text: "text-red-700 dark:text-red-400", icon: "text-red-600" },
+            muted: { bg: "bg-muted/50 border-border", dot: "bg-muted-foreground/40", text: "text-muted-foreground", icon: "text-muted-foreground" },
           }
 
           const sysColors = systemOnline ? colorMap.emerald : systemChecking ? colorMap.amber : colorMap.red
@@ -300,7 +300,7 @@ export function AppToolbar() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
-                    <AnimatedWifi ref={wifiRef} size={12} className={sysColors.text.split(" ")[0]} />
+                    <AnimatedWifi ref={wifiRef} size={12} className={sysColors.icon} />
                     <span className={`text-micro font-medium ${sysColors.text}`}>
                       {systemOnline ? "Online" : systemChecking ? "Connecting" : "Offline"}
                     </span>

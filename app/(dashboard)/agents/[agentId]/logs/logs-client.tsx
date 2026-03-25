@@ -127,9 +127,13 @@ export function LogsPageClient() {
     }
   }, [autoRefresh, agentId]))
 
-  // Real-time: refetch full log when runs start/complete (always active)
-  useRealtimeEvent("run.started", useCallback(() => { fetchLogs() }, [fetchLogs]))
-  useRealtimeEvent("run.completed", useCallback(() => { fetchLogs() }, [fetchLogs]))
+  // Real-time: refetch full log when this agent's runs start/complete
+  useRealtimeEvent("run.started", useCallback((event: RealtimeEvent) => {
+    if (event.payload.agent_id === agentId) fetchLogs()
+  }, [fetchLogs, agentId]))
+  useRealtimeEvent("run.completed", useCallback((event: RealtimeEvent) => {
+    if (event.payload.agent_id === agentId) fetchLogs()
+  }, [fetchLogs, agentId]))
 
   useEffect(() => {
     if (autoScroll && logContainerRef.current) {

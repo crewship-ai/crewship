@@ -62,6 +62,7 @@ export default function CrewsPage() {
       }
       const data = (await res.json()) as Crew[]
       setCrews(data)
+      setError(null)
     } catch {
       if (!silent) { const msg = "Failed to load crews"; setError(msg); toast.error(msg) }
     } finally {
