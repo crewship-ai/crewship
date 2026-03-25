@@ -18,8 +18,14 @@ interface UseWebSocketOptions {
   token: string | null
   onMessage?: (msg: WSMessage) => void
   onStatusChange?: (status: WSStatus) => void
-  reconnectInterval?: number
-  maxReconnectAttempts?: number
+}
+
+/** Exponential backoff with jitter: min(base * 2^attempt, max) + random(0, jitter) */
+function backoffDelay(attempt: number): number {
+  const base = 1000
+  const max = 30000
+  const jitter = 1000
+  return Math.min(base * Math.pow(2, attempt), max) + Math.random() * jitter
 }
 
 export function useWebSocket({
@@ -27,13 +33,12 @@ export function useWebSocket({
   token,
   onMessage,
   onStatusChange,
-  reconnectInterval = 3000,
-  maxReconnectAttempts = 10,
 }: UseWebSocketOptions) {
   const [status, setStatus] = useState<WSStatus>("disconnected")
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectAttemptsRef = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const disconnectingRef = useRef(false)
 
   // Use refs for callbacks to prevent reconnection loops when consumers
   // pass non-memoized functions.
@@ -49,6 +54,11 @@ export function useWebSocket({
 
   const connect = useCallback(() => {
     if (!token || !url) return
+    disconnectingRef.current = false
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = undefined
+    }
 
     // Note: token is passed as query parameter because browser WebSocket API
     // does not support custom headers. The token is a short-lived JWE and the
@@ -83,21 +93,23 @@ export function useWebSocket({
       wsRef.current = null
       updateStatus("disconnected")
 
-      if (reconnectAttemptsRef.current < maxReconnectAttempts) {
+      // Reconnect with exponential backoff unless intentionally disconnected
+      if (!disconnectingRef.current) {
+        const delay = backoffDelay(reconnectAttemptsRef.current)
         reconnectAttemptsRef.current++
-        reconnectTimerRef.current = setTimeout(connect, reconnectInterval)
+        reconnectTimerRef.current = setTimeout(connect, delay)
       }
     }
-  }, [url, token, updateStatus, reconnectInterval, maxReconnectAttempts])
+  }, [url, token, updateStatus])
 
   const disconnect = useCallback(() => {
+    disconnectingRef.current = true
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current)
     }
-    reconnectAttemptsRef.current = maxReconnectAttempts
     wsRef.current?.close()
     wsRef.current = null
-  }, [maxReconnectAttempts])
+  }, [])
 
   const send = useCallback(
     (msg: WSMessage) => {

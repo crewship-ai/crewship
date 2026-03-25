@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { Users, Plus, Search, RotateCcw, ArrowUpDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,6 +12,7 @@ import { CrewActivityFeed } from "@/components/features/crews/crew-activity-feed
 import { Separator } from "@/components/ui/separator"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,29 +50,25 @@ export default function CrewsPage() {
   const [search, setSearch] = useState("")
   const [sortBy, setSortBy] = useState<SortOption>("name")
 
-  async function fetchCrews() {
+  const fetchCrews = useCallback(async (silent = false) => {
     if (!workspaceId) return
 
-    setLoading(true)
-    setError(null)
+    if (!silent) { setLoading(true); setError(null) }
     try {
       const res = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
       if (!res.ok) {
-        const msg = "Failed to load crews"
-        setError(msg)
-        toast.error(msg)
+        if (!silent) { const msg = "Failed to load crews"; setError(msg); toast.error(msg) }
         return
       }
       const data = (await res.json()) as Crew[]
       setCrews(data)
+      setError(null)
     } catch {
-      const msg = "Failed to load crews"
-      setError(msg)
-      toast.error(msg)
+      if (!silent) { const msg = "Failed to load crews"; setError(msg); toast.error(msg) }
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
-  }
+  }, [workspaceId])
 
   useEffect(() => {
     if (!workspaceId) {
@@ -80,8 +77,13 @@ export default function CrewsPage() {
     }
 
     fetchCrews()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, wsLoading])
+  }, [workspaceId, wsLoading, fetchCrews])
+
+  // Real-time: refetch crews when agent/crew changes occur
+  useRealtimeEvent("agent.status", useCallback(() => { fetchCrews(true) }, [fetchCrews]))
+  useRealtimeEvent("crew.created", useCallback(() => { fetchCrews(true) }, [fetchCrews]))
+  useRealtimeEvent("crew.updated", useCallback(() => { fetchCrews(true) }, [fetchCrews]))
+  useRealtimeEvent("crew.deleted", useCallback(() => { fetchCrews(true) }, [fetchCrews]))
 
   const filteredAndSorted = useMemo(() => {
     let result = crews
@@ -128,7 +130,7 @@ export default function CrewsPage() {
       {error && (
         <div className="flex items-center gap-3">
           <p className="text-body text-destructive flex-1">{error}</p>
-          <Button variant="outline" size="sm" onClick={fetchCrews} className="gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={() => fetchCrews()} className="gap-2 shrink-0">
             <RotateCcw className="h-3.5 w-3.5" />
             Try Again
           </Button>

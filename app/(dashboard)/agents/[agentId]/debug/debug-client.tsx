@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation"
 
-import { use, useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback } from "react"
 import {
   RefreshCw, AlertCircle, CheckCircle2, XCircle, Loader2,
   Server, Cpu, ScrollText, Database, Wifi, Settings2,
@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 interface ServiceLogEntry {
   time: string
@@ -129,6 +130,12 @@ export function DebugPageClient() {
     const interval = setInterval(fetchDebug, 3000)
     return () => clearInterval(interval)
   }, [autoRefresh, workspaceId, fetchDebug])
+
+  // Real-time: refresh debug info when agent status or runs change
+  useRealtimeEvent("agent.status", useCallback(() => { fetchDebug() }, [fetchDebug]))
+  useRealtimeEvent("run.started", useCallback(() => { fetchDebug() }, [fetchDebug]))
+  useRealtimeEvent("run.completed", useCallback(() => { fetchDebug() }, [fetchDebug]))
+  useRealtimeEvent("run.failed", useCallback(() => { fetchDebug() }, [fetchDebug]))
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true)

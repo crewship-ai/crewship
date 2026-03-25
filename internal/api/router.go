@@ -221,8 +221,14 @@ func (r *Router) registerRoutes() {
 		crewSocket = "/tmp/crewship.sock"
 	}
 	crews.SetSocketPath(crewSocket)
+	if r.hub != nil {
+		crews.SetHub(r.hub)
+	}
 	agents := NewAgentHandler(r.db, r.logger)
 	r.agentHandler = agents
+	if r.hub != nil {
+		agents.SetHub(r.hub)
+	}
 	if r.scheduleUpdater != nil {
 		agents.SetScheduler(r.scheduleUpdater)
 	}
@@ -343,6 +349,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("DELETE /api/v1/mission-proposals/{proposalId}", authed(wsCtx(http.HandlerFunc(proposals.Delete))))
 
 	// Agents (require workspace context)
+	r.mux.Handle("GET /api/v1/agents/fleet-status", authed(wsCtx(http.HandlerFunc(agents.FleetStatus))))
 	r.mux.Handle("GET /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.List))))
 	r.mux.Handle("POST /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.Create))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Get))))
@@ -525,6 +532,9 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/standup", authed(wsCtx(http.HandlerFunc(queries.Standup))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/escalations", authed(wsCtx(http.HandlerFunc(queries.ListEscalations))))
 	r.mux.Handle("PATCH /api/v1/escalations/{escalationId}/resolve", authed(wsCtx(http.HandlerFunc(queries.ResolveEscalation))))
+
+	// Workspace-wide escalation count (public, authenticated)
+	r.mux.Handle("GET /api/v1/escalations/pending-count", authed(wsCtx(http.HandlerFunc(queries.PendingEscalationCount))))
 
 	// Cross-crew activity feed (public, authenticated)
 	r.mux.Handle("GET /api/v1/activity", authed(wsCtx(http.HandlerFunc(queries.ListAllActivity))))

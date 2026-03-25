@@ -112,8 +112,11 @@ export default function CrewDetailPage() {
     fetchData()
   }, [workspaceId, wsLoading, fetchData])
 
-  // Real-time: refetch agents when agent status changes
+  // Real-time: refetch crew data when agent/mission/crew changes occur
   useRealtimeEvent("agent.status", useCallback(() => { fetchData(true) }, [fetchData]))
+  useRealtimeEvent("agent.created", useCallback(() => { fetchData(true) }, [fetchData]))
+  useRealtimeEvent("agent.deleted", useCallback(() => { fetchData(true) }, [fetchData]))
+  useRealtimeEvent("mission.updated", useCallback(() => { fetchData(true) }, [fetchData]))
 
   async function patchCrew(body: Record<string, unknown>) {
     if (!workspaceId || !crew) return

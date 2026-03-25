@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { Download, AlertCircle, Inbox, Search, Pause, Play } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 
 const SECRET_RE = /(?:sk-[a-zA-Z0-9_-]{10,}|ghp_[a-zA-Z0-9]{36,}|gho_[a-zA-Z0-9]{36,}|xoxb-[a-zA-Z0-9-]+|AIza[a-zA-Z0-9_-]{35}|eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]+)/g
 function redactSecrets(s: string): string { return s.replace(SECRET_RE, "***") }
@@ -111,7 +111,8 @@ export function LogsPageClient() {
     return () => clearInterval(interval)
   }, [autoRefresh, workspaceId, fetchLogs])
 
-  useRealtimeEvent("agent.log", (event) => {
+  // Real-time: stream individual log entries when autoRefresh is on
+  useRealtimeEvent("agent.log", useCallback((event: RealtimeEvent) => {
     if (!autoRefresh) return
     const payload = event.payload
     if (payload.agent_id === agentId) {
@@ -124,7 +125,15 @@ export function LogsPageClient() {
         metadata: payload.metadata,
       }])
     }
-  })
+  }, [autoRefresh, agentId]))
+
+  // Real-time: refetch full log when this agent's runs start/complete
+  useRealtimeEvent("run.started", useCallback((event: RealtimeEvent) => {
+    if (event.payload.agent_id === agentId) fetchLogs()
+  }, [fetchLogs, agentId]))
+  useRealtimeEvent("run.completed", useCallback((event: RealtimeEvent) => {
+    if (event.payload.agent_id === agentId) fetchLogs()
+  }, [fetchLogs, agentId]))
 
   useEffect(() => {
     if (autoScroll && logContainerRef.current) {

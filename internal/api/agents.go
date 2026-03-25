@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // ScheduleUpdater is implemented by the scheduler to receive live schedule changes.
@@ -20,6 +21,7 @@ type ScheduleUpdater interface {
 
 type AgentHandler struct {
 	db               *sql.DB
+	hub              *ws.Hub
 	logger           *slog.Logger
 	license          *license.License
 	scheduleUpdater  ScheduleUpdater
@@ -29,8 +31,58 @@ func NewAgentHandler(db *sql.DB, logger *slog.Logger) *AgentHandler {
 	return &AgentHandler{db: db, logger: logger}
 }
 
+func (h *AgentHandler) SetHub(hub *ws.Hub) { h.hub = hub }
+
+func (h *AgentHandler) broadcastAgentEvent(eventType, workspaceID string, payload map[string]string) {
+	if h.hub == nil {
+		return
+	}
+	h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
+		Type:    eventType,
+		Channel: "workspace:" + workspaceID,
+		Payload: payload,
+	})
+}
+
 func (h *AgentHandler) SetLicense(lic *license.License) { h.license = lic }
 func (h *AgentHandler) SetScheduler(su ScheduleUpdater) { h.scheduleUpdater = su }
+
+// FleetStatus returns lightweight agent counts by status for the toolbar.
+func (h *AgentHandler) FleetStatus(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT status, COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL GROUP BY status`,
+		workspaceID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	result := struct {
+		Total   int `json:"total"`
+		Running int `json:"running"`
+		Error   int `json:"error"`
+		Idle    int `json:"idle"`
+	}{}
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			continue
+		}
+		result.Total += count
+		switch status {
+		case "RUNNING":
+			result.Running += count
+		case "ERROR":
+			result.Error += count
+		default:
+			result.Idle += count
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
 
 var validAgentRoles = map[string]bool{
 	"AGENT":       true,
@@ -358,6 +410,10 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	})
+
+	h.broadcastAgentEvent("agent.created", workspaceID, map[string]string{
+		"id": agentID, "name": req.Name, "slug": req.Slug, "status": "IDLE",
+	})
 }
 
 func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -599,6 +655,8 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.Get(w, r)
+
+	h.broadcastAgentEvent("agent.updated", workspaceID, map[string]string{"id": agentID})
 }
 
 func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -634,6 +692,8 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	WriteAuditLog(r.Context(), h.db, "delete", "AGENT", agentID, userID, workspaceID, nil)
 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+
+	h.broadcastAgentEvent("agent.deleted", workspaceID, map[string]string{"id": agentID})
 }
 
 type agentSkillSkillData struct {

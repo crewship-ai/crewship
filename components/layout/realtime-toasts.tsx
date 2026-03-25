@@ -40,7 +40,12 @@ export function RealtimeToasts() {
   useRealtimeEvent(
     "mission.updated",
     useCallback((event) => {
-      if (event.payload.status === "COMPLETED") {
+      if (event.payload.status === "STARTED") {
+        toast.info("Mission started", {
+          description: event.payload.title ?? "A new mission is being orchestrated.",
+          duration: 4000,
+        })
+      } else if (event.payload.status === "COMPLETED") {
         toast.success("Mission completed", {
           description: event.payload.title ?? "A mission has been completed successfully.",
           duration: 6000,
@@ -51,6 +56,29 @@ export function RealtimeToasts() {
           duration: 8000,
         })
       }
+    }, []),
+  )
+
+  useRealtimeEvent(
+    "escalation.resolved",
+    useCallback(() => {
+      toast.success("Escalation resolved", { duration: 4000 })
+    }, []),
+  )
+
+  useRealtimeEvent(
+    "agent.created",
+    useCallback((event) => {
+      const name = event.payload.name ?? "Agent"
+      toast.info(`New agent: @${name}`, { duration: 4000 })
+    }, []),
+  )
+
+  useRealtimeEvent(
+    "crew.created",
+    useCallback((event) => {
+      const name = event.payload.name ?? "Crew"
+      toast.info(`New crew: ${name}`, { duration: 4000 })
     }, []),
   )
 
