@@ -18,7 +18,11 @@ var queryClient = &http.Client{Timeout: 130 * time.Second}
 
 // escalateWaitClient uses a 310s timeout (10s buffer over the 300s context timeout in handleEscalate wait).
 // The agent blocks while waiting for human response to the escalation.
-var escalateWaitClient = &http.Client{Timeout: 310 * time.Second}
+// Shares transport with ipcClient for consistency (both talk to crewshipd over HTTP).
+var escalateWaitClient = &http.Client{
+	Transport: ipcClient.Transport,
+	Timeout:   310 * time.Second,
+}
 
 type queryRequest struct {
 	Target   string `json:"target"`

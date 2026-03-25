@@ -29,15 +29,19 @@ export interface EvidencePack {
   suggested_action?: string
 }
 
+const EVIDENCE_PACK_KEYS = [
+  "task_title", "task_id", "agent_slug", "agent_actions",
+  "error", "relevant_files", "confidence", "suggested_action",
+] as const
+
 export function parseEvidencePack(metadata: string | null): EvidencePack | null {
   if (!metadata) return null
   try {
     const parsed = JSON.parse(metadata)
-    // Only treat as evidence pack if it has at least one expected field.
-    if (parsed.task_title || parsed.agent_actions || parsed.error || parsed.suggested_action) {
-      return parsed as EvidencePack
-    }
-    return null
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+    // Detect evidence pack by key presence (not truthiness — confidence: 0 is valid).
+    const hasKey = EVIDENCE_PACK_KEYS.some((key) => key in (parsed as Record<string, unknown>))
+    return hasKey ? (parsed as EvidencePack) : null
   } catch {
     return null
   }

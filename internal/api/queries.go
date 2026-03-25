@@ -80,12 +80,15 @@ func (h *QueryHandler) notifyEscalationWaiter(id string, result escalationResult
 	}
 }
 
-// removeEscalationWaiter removes a waiter channel from the map (cleanup on timeout).
-// Idempotent — safe to call even if notifyEscalationWaiter already removed it.
-func (h *QueryHandler) removeEscalationWaiter(id string) {
+// removeEscalationWaiter removes a waiter channel from the map only if the
+// stored channel matches the given instance. This prevents a timed-out waiter
+// from accidentally removing a newer waiter registered for the same escalation.
+func (h *QueryHandler) removeEscalationWaiter(id string, ch chan escalationResult) {
 	h.escalationMu.Lock()
 	defer h.escalationMu.Unlock()
-	delete(h.escalationWaiters, id)
+	if h.escalationWaiters[id] == ch {
+		delete(h.escalationWaiters, id)
+	}
 }
 
 type createQueryBody struct {
@@ -523,9 +526,13 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 	// Validate redirect_to agent exists in the same crew (after we know crew_id).
 	if err == nil && body.Action == "redirect" && body.RedirectTo != "" {
 		var exists int
-		h.db.QueryRowContext(r.Context(), `
+		if scanErr := h.db.QueryRowContext(r.Context(), `
 			SELECT COUNT(*) FROM agents WHERE slug = ? AND crew_id = ? AND deleted_at IS NULL
-		`, body.RedirectTo, crewID).Scan(&exists)
+		`, body.RedirectTo, crewID).Scan(&exists); scanErr != nil {
+			h.logger.Error("resolve escalation redirect lookup", "error", scanErr)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 		if exists == 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error": fmt.Sprintf("redirect_to agent %q not found in crew", body.RedirectTo),
@@ -632,12 +639,18 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.Request) {
 	escalationID := r.PathValue("escalationId")
 
-	// Check if escalation is already resolved.
-	var status string
+	// Register waiter FIRST to avoid lost-wakeup race: if ResolveEscalation
+	// runs between the DB check and the registration, the notification would
+	// be lost. By registering first, the channel is in place before we check.
+	ch := h.registerEscalationWaiter(escalationID)
+	defer h.removeEscalationWaiter(escalationID, ch)
+
+	// Now re-check if the escalation is already resolved.
+	var status, escalationType string
 	var resolution, action, redirectTo sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT status, resolution, action, redirect_to FROM escalations WHERE id = ?
-	`, escalationID).Scan(&status, &resolution, &action, &redirectTo)
+		SELECT status, type, resolution, action, redirect_to FROM escalations WHERE id = ?
+	`, escalationID).Scan(&status, &escalationType, &resolution, &action, &redirectTo)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "escalation not found"})
@@ -649,20 +662,27 @@ func (h *QueryHandler) WaitForEscalationResponse(w http.ResponseWriter, r *http.
 	}
 
 	if status == "RESOLVED" {
-		// Already resolved — return immediately.
+		// Already resolved — decrypt CREDENTIAL resolutions and return immediately.
+		resolved := resolution.String
+		if escalationType == "CREDENTIAL" && resolved != "" {
+			dec, decErr := encryption.Decrypt(resolved)
+			if decErr != nil {
+				h.logger.Error("decrypt credential resolution", "error", decErr)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
+			resolved = dec
+		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status":      "RESOLVED",
-			"resolution":  resolution.String,
+			"resolution":  resolved,
 			"action":      action.String,
 			"redirect_to": redirectTo.String,
 		})
 		return
 	}
 
-	// Register a waiter and block until resolved or timeout.
-	ch := h.registerEscalationWaiter(escalationID)
-	defer h.removeEscalationWaiter(escalationID)
-
+	// Block until resolved or timeout.
 	select {
 	case result := <-ch:
 		writeJSON(w, http.StatusOK, map[string]interface{}{

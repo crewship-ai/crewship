@@ -35,6 +35,20 @@ function parseMetadataUrl(metadata: string | null): string | null {
   }
 }
 
+// Map confidence 0-1 to nearest Tailwind width class (w-0 through w-full).
+function confidenceWidthClass(confidence: number): string {
+  const pct = Math.round(confidence * 100)
+  if (pct <= 0) return "w-0"
+  if (pct <= 15) return "w-1/6"
+  if (pct <= 25) return "w-1/4"
+  if (pct <= 35) return "w-1/3"
+  if (pct <= 50) return "w-1/2"
+  if (pct <= 65) return "w-2/3"
+  if (pct <= 75) return "w-3/4"
+  if (pct <= 85) return "w-5/6"
+  return "w-full"
+}
+
 function ConfidenceIndicator({ confidence }: { confidence: number }) {
   const level = confidence <= 0.3 ? "low" : confidence <= 0.6 ? "medium" : "high"
   const colors = {
@@ -49,10 +63,7 @@ function ConfidenceIndicator({ confidence }: { confidence: number }) {
       <span className="text-label text-muted-foreground">Confidence:</span>
       <div className="flex items-center gap-1.5">
         <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
-          <div
-            className={`h-full rounded-full ${colors[level]}`}
-            style={{ width: `${Math.round(confidence * 100)}%` }}
-          />
+          <div className={`h-full rounded-full ${colors[level]} ${confidenceWidthClass(confidence)}`} />
         </div>
         <span className={`text-label font-medium ${
           level === "low" ? "text-red-600 dark:text-red-400" :
@@ -117,18 +128,17 @@ export function EscalationResponseCard({
   const loadAgents = async () => {
     if (agentsLoaded) return
     try {
-      const res = await fetch(`/api/v1/crews/${crewId}?workspace_id=${workspaceId}`)
-      if (res.ok) {
-        const data = await res.json()
-        const crewAgents = (data.agents || [])
-          .filter((a: { slug: string }) => a.slug !== escalation.from_slug)
-          .map((a: { slug: string; name: string }) => ({ slug: a.slug, name: a.name }))
-        setAgents(crewAgents)
-      }
+      const res = await fetch(`/api/v1/agents?crew_id=${crewId}&workspace_id=${workspaceId}`)
+      if (!res.ok) return // Don't mark as loaded so user can retry
+      const data = await res.json()
+      const crewAgents = (Array.isArray(data) ? data : [])
+        .filter((a: { slug: string }) => a.slug !== escalation.from_slug)
+        .map((a: { slug: string; name: string }) => ({ slug: a.slug, name: a.name }))
+      setAgents(crewAgents)
+      setAgentsLoaded(true)
     } catch {
-      // Silently fail
+      // Don't mark as loaded on network error — user can retry by toggling redirect
     }
-    setAgentsLoaded(true)
   }
 
   const handleRedirectClick = () => {
