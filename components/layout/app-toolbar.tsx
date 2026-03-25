@@ -267,7 +267,10 @@ export function AppToolbar() {
           // Fleet display logic (scales to 1000+ agents)
           let fleetLabel = ""
           let fleetColor: "emerald" | "amber" | "red" | "muted" = "muted"
-          if (!fleetStatus || fleetStatus.total === 0) {
+          if (!fleetStatus) {
+            fleetLabel = "Loading..."
+            fleetColor = "muted"
+          } else if (fleetStatus.total === 0) {
             fleetLabel = "No agents"
             fleetColor = "muted"
           } else if (fleetStatus.error > 0 && fleetStatus.running > 0) {
@@ -299,7 +302,7 @@ export function AppToolbar() {
               {/* System: combined engine + WS */}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
+                  <div tabIndex={0} role="status" aria-label={`System ${systemOnline ? "online" : systemChecking ? "connecting" : "offline"}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
                     <AnimatedWifi ref={wifiRef} size={12} className={sysColors.icon} />
                     <span className={`text-micro font-medium ${sysColors.text}`}>
                       {systemOnline ? "Online" : systemChecking ? "Connecting" : "Offline"}
@@ -314,7 +317,7 @@ export function AppToolbar() {
               {/* Fleet status */}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${fleetColors.bg}`}>
+                  <div tabIndex={0} role="status" aria-label={`Fleet: ${fleetLabel}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${fleetColors.bg}`}>
                     <span className={`h-1.5 w-1.5 rounded-full ${fleetColors.dot} ${fleetStatus?.running ? "animate-pulse" : ""}`} />
                     <span className={`text-micro font-medium ${fleetColors.text}`}>{fleetLabel}</span>
                   </div>
@@ -365,7 +368,7 @@ export function AppToolbar() {
         {/* Desktop: notifications */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 relative hidden md:inline-flex" aria-label="Notifications">
+            <Button variant="ghost" size="icon" className="h-8 w-8 relative hidden md:inline-flex" aria-label={pendingEscalations > 0 ? `Notifications, ${pendingEscalations} pending escalation${pendingEscalations !== 1 ? "s" : ""}` : "Notifications"}>
               <AnimatedBell size={16} />
               {pendingEscalations > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-micro font-bold text-destructive-foreground ring-2 ring-background" aria-hidden="true">
