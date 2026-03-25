@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/tooltip"
 import { escalationSchema, type Escalation } from "@/lib/types/escalation"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { useTick } from "@/hooks/use-tick"
 import { EscalationResponseCard, ActionBadge } from "@/components/features/escalations/escalation-response-card"
 import { z } from "zod"
 
@@ -79,6 +80,7 @@ export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const requestIdRef = useRef(0)
+  useTick(60_000) // re-render every 60s to keep relative times fresh
   const loadingOwnerRef = useRef<number | null>(null)
   const refreshingOwnerRef = useRef<number | null>(null)
 

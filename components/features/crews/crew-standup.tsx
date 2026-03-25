@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { RefreshCw, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { z } from "zod"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 const standupResponseSchema = z.object({
   standup: z.string(),
@@ -22,7 +23,7 @@ export function CrewStandup({ crewId, workspaceId }: CrewStandupProps) {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
-  async function fetchStandup(showRefresh = false) {
+  const fetchStandup = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true)
     else setLoading(true)
     try {
@@ -44,12 +45,18 @@ export function CrewStandup({ crewId, workspaceId }: CrewStandupProps) {
       setLoading(false)
       setRefreshing(false)
     }
-  }
+  }, [crewId, workspaceId])
 
   useEffect(() => {
     fetchStandup()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crewId, workspaceId])
+  }, [fetchStandup])
+
+  // Real-time: auto-refresh standup when crew activity changes
+  const silentRefresh = useCallback(() => { fetchStandup(true) }, [fetchStandup])
+  useRealtimeEvent("mission.updated", silentRefresh)
+  useRealtimeEvent("escalation.created", silentRefresh)
+  useRealtimeEvent("escalation.resolved", silentRefresh)
+  useRealtimeEvent("peer_conversation.updated", silentRefresh)
 
   if (loading) {
     return (

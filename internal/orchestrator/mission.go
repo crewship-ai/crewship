@@ -73,6 +73,7 @@ func (e *MissionEngine) SetDispatcher(d TaskDispatcher) {
 
 type missionState struct {
 	ID                 string
+	Title              string
 	CrewID             string
 	CrewSlug           string
 	LeadAgentID        string
@@ -146,11 +147,11 @@ func (e *MissionEngine) StartMission(ctx context.Context, missionID string) erro
 	var ms missionState
 	var crewSlug string
 	err := e.db.QueryRowContext(ctx, `
-		SELECT m.id, m.crew_id, m.lead_agent_id, m.trace_id, m.workspace_id, c.slug
+		SELECT m.id, m.title, m.crew_id, m.lead_agent_id, m.trace_id, m.workspace_id, c.slug
 		FROM missions m
 		JOIN crews c ON c.id = m.crew_id
 		WHERE m.id = ?`, missionID).Scan(
-		&ms.ID, &ms.CrewID, &ms.LeadAgentID, &ms.TraceID, &ms.WorkspaceID, &crewSlug,
+		&ms.ID, &ms.Title, &ms.CrewID, &ms.LeadAgentID, &ms.TraceID, &ms.WorkspaceID, &crewSlug,
 	)
 	if err != nil {
 		e.mu.Lock()
@@ -175,6 +176,7 @@ func (e *MissionEngine) StartMission(ctx context.Context, missionID string) erro
 		Type:      "mission_started",
 		MissionID: missionID,
 	})
+	e.broadcastMissionStatus(&ms, "STARTED")
 
 	go e.runMissionLoop(mCtx, &ms)
 	return nil
@@ -1031,13 +1033,13 @@ func (e *MissionEngine) broadcastMissionStatus(ms *missionState, status string) 
 	e.hub.Broadcast("mission:"+ms.ID, ws.ServerMessage{
 		Type:    "mission.status",
 		Channel: "mission:" + ms.ID,
-		Payload: map[string]string{"id": ms.ID, "status": status},
+		Payload: map[string]string{"id": ms.ID, "title": ms.Title, "status": status},
 	})
 	wsChannel := "workspace:" + ms.WorkspaceID
 	e.hub.Broadcast(wsChannel, ws.ServerMessage{
 		Type:    "mission.updated",
 		Channel: wsChannel,
-		Payload: map[string]string{"id": ms.ID, "crew_id": ms.CrewID, "status": status},
+		Payload: map[string]string{"id": ms.ID, "crew_id": ms.CrewID, "title": ms.Title, "status": status},
 	})
 }
 

@@ -7,6 +7,7 @@ import { Plus, Info, Search, User, Bot, LayoutGrid, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { agentTabsList } from "@/components/layout/agent-tabs"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
@@ -118,11 +119,10 @@ export function ChatPageClient() {
     }
   }, [sessionsLoaded, activeSessionId])
 
-  useEffect(() => {
-    if (!sessionsLoaded || !workspaceId) return
-    const interval = setInterval(refreshSessions, 5000)
-    return () => clearInterval(interval)
-  }, [sessionsLoaded, workspaceId, refreshSessions])
+  // Real-time: refresh sessions when agent runs change (replaces 5s polling)
+  useRealtimeEvent("run.started", useCallback(() => { refreshSessions() }, [refreshSessions]))
+  useRealtimeEvent("run.completed", useCallback(() => { refreshSessions() }, [refreshSessions]))
+  useRealtimeEvent("run.failed", useCallback(() => { refreshSessions() }, [refreshSessions]))
 
   const handleNewSession = useCallback(() => {
     setActiveSessionId(nanoid())

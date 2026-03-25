@@ -71,8 +71,11 @@ export default function AgentsPage() {
     fetchAgents()
   }, [workspaceId, wsLoading, fetchAgents])
 
-  // Real-time: refetch agents when status changes
+  // Real-time: refetch agents when status changes or CRUD operations occur
   useRealtimeEvent("agent.status", useCallback(() => { fetchAgents(true) }, [fetchAgents]))
+  useRealtimeEvent("agent.created", useCallback(() => { fetchAgents(true) }, [fetchAgents]))
+  useRealtimeEvent("agent.updated", useCallback(() => { fetchAgents(true) }, [fetchAgents]))
+  useRealtimeEvent("agent.deleted", useCallback(() => { fetchAgents(true) }, [fetchAgents]))
 
   const isLoading = wsLoading || loading
 

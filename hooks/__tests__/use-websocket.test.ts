@@ -154,41 +154,30 @@ describe("useWebSocket", () => {
     expect(result.current.status).toBe("error")
   })
 
-  it("reconnects on close up to maxReconnectAttempts", () => {
+  it("reconnects on close with exponential backoff", () => {
     renderHook(() =>
       useWebSocket({
         url: "ws://localhost:8080/ws",
         token: "test-token",
-        reconnectInterval: 1000,
-        maxReconnectAttempts: 2,
       }),
     )
     expect(mockInstances).toHaveLength(1)
 
-    // First close -> reconnect
+    // First close -> reconnect after ~1s backoff (base * 2^0 + jitter)
     act(() => {
       mockInstances[0].close()
     })
     act(() => {
-      vi.advanceTimersByTime(1000)
+      vi.advanceTimersByTime(2500) // covers base 1s + up to 1s jitter
     })
     expect(mockInstances).toHaveLength(2)
 
-    // Second close -> reconnect
+    // Second close -> reconnect after ~2s backoff (base * 2^1 + jitter)
     act(() => {
       mockInstances[1].close()
     })
     act(() => {
-      vi.advanceTimersByTime(1000)
-    })
-    expect(mockInstances).toHaveLength(3)
-
-    // Third close -> no more reconnects (max 2 attempts reached)
-    act(() => {
-      mockInstances[2].close()
-    })
-    act(() => {
-      vi.advanceTimersByTime(1000)
+      vi.advanceTimersByTime(4000) // covers base 2s + up to 1s jitter
     })
     expect(mockInstances).toHaveLength(3)
   })
@@ -246,8 +235,6 @@ describe("useWebSocket", () => {
       useWebSocket({
         url: "ws://localhost:8080/ws",
         token: "test-token",
-        reconnectInterval: 1000,
-        maxReconnectAttempts: 5,
       }),
     )
 
@@ -256,7 +243,7 @@ describe("useWebSocket", () => {
     })
 
     act(() => {
-      vi.advanceTimersByTime(5000)
+      vi.advanceTimersByTime(35000) // well past max backoff
     })
 
     // Only the initial connection, no reconnects after disconnect
@@ -268,22 +255,20 @@ describe("useWebSocket", () => {
       useWebSocket({
         url: "ws://localhost:8080/ws",
         token: "test-token",
-        reconnectInterval: 100,
-        maxReconnectAttempts: 2,
       }),
     )
 
-    // Open and close
+    // Open and close — first reconnect uses base backoff (~1s + jitter)
     act(() => { mockInstances[0].simulateOpen() })
     act(() => { mockInstances[0].close() })
-    act(() => { vi.advanceTimersByTime(100) })
+    act(() => { vi.advanceTimersByTime(2500) })
     expect(mockInstances).toHaveLength(2)
 
-    // Open again (resets counter) and close
+    // Open again (resets counter) and close — backoff resets to base
     act(() => { mockInstances[1].simulateOpen() })
     act(() => { mockInstances[1].close() })
-    act(() => { vi.advanceTimersByTime(100) })
-    // Should still reconnect because counter was reset
+    act(() => { vi.advanceTimersByTime(2500) })
+    // Should still reconnect because counter was reset on open
     expect(mockInstances).toHaveLength(3)
   })
 })

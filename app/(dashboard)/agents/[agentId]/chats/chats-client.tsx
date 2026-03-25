@@ -2,13 +2,14 @@
 
 import { useParams } from "next/navigation"
 
-import { use, useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { Plus, MessageSquare, AlertCircle, Inbox } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 interface Session {
   id: string
@@ -58,30 +59,36 @@ export function SessionsPageClient() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const fetchSessions = useCallback(async (silent = false) => {
     if (!workspaceId) return
-
-    let cancelled = false
-
-    async function fetchSessions() {
-      try {
-        const res = await fetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
-        if (!res.ok) {
-          if (!cancelled) setError("Failed to load chats")
-          return
-        }
-        const data = await res.json()
-        if (!cancelled) setSessions(Array.isArray(data) ? data : [])
-      } catch {
-        if (!cancelled) setError("Network error. Please try again.")
-      } finally {
-        if (!cancelled) setLoading(false)
+    if (!silent) { setLoading(true); setError(null) }
+    try {
+      const res = await fetch(`/api/v1/agents/${agentId}/chats?workspace_id=${workspaceId}`)
+      if (!res.ok) {
+        if (!silent) setError("Failed to load chats")
+        return
       }
+      const data = await res.json()
+      setSessions(Array.isArray(data) ? data : [])
+      setError(null)
+    } catch {
+      if (!silent) setError("Network error. Please try again.")
+    } finally {
+      if (!silent) setLoading(false)
     }
-
-    fetchSessions()
-    return () => { cancelled = true }
   }, [agentId, workspaceId])
+
+  useEffect(() => {
+    if (!workspaceId) {
+      if (!wsLoading) setLoading(false)
+      return
+    }
+    fetchSessions()
+  }, [workspaceId, wsLoading, fetchSessions])
+
+  // Real-time: refetch sessions when agent runs start/complete
+  useRealtimeEvent("run.started", useCallback(() => { fetchSessions(true) }, [fetchSessions]))
+  useRealtimeEvent("run.completed", useCallback(() => { fetchSessions(true) }, [fetchSessions]))
 
   if (wsLoading || loading) {
     return <SessionsSkeleton />
