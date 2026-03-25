@@ -66,6 +66,49 @@ const (
 	missionTimeoutDefault   = 2 * time.Hour
 )
 
+// HandoffData represents parsed structured handoff from an agent's output.
+type HandoffData struct {
+	Summary    string `json:"summary"`
+	Confidence string `json:"confidence"` // low, medium, high
+	Artifacts  string `json:"artifacts"`
+	Parsed     bool   `json:"parsed"` // true if handoff block was found
+}
+
+// parseHandoff extracts structured handoff data from an agent's result summary.
+// Looks for ---HANDOFF--- ... ---END HANDOFF--- block at the end of the output.
+func parseHandoff(resultSummary string) HandoffData {
+	const startMarker = "---HANDOFF---"
+	const endMarker = "---END HANDOFF---"
+
+	startIdx := strings.LastIndex(resultSummary, startMarker)
+	if startIdx < 0 {
+		return HandoffData{Parsed: false}
+	}
+	endIdx := strings.Index(resultSummary[startIdx:], endMarker)
+	if endIdx < 0 {
+		return HandoffData{Parsed: false}
+	}
+
+	block := resultSummary[startIdx+len(startMarker) : startIdx+endIdx]
+	hd := HandoffData{}
+
+	for _, line := range strings.Split(block, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "summary:") {
+			hd.Summary = strings.TrimSpace(strings.TrimPrefix(line, "summary:"))
+		} else if strings.HasPrefix(line, "confidence:") {
+			hd.Confidence = strings.TrimSpace(strings.TrimPrefix(line, "confidence:"))
+		} else if strings.HasPrefix(line, "artifacts:") {
+			hd.Artifacts = strings.TrimSpace(strings.TrimPrefix(line, "artifacts:"))
+		}
+	}
+
+	// Require summary and confidence for a valid handoff — partial blocks
+	// (e.g. summary-only) are treated as unparsed so callers don't skip review.
+	hd.Parsed = hd.Summary != "" && hd.Confidence != ""
+	return hd
+}
+
 // SetDispatcher registers the assignment dispatcher.
 func (e *MissionEngine) SetDispatcher(d TaskDispatcher) {
 	e.dispatcher = d
@@ -429,7 +472,8 @@ func (e *MissionEngine) autoAssignTask(ctx context.Context, missionID, taskID st
 func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState, task TaskInfo, allTasks []TaskInfo) string {
 	var b strings.Builder
 
-	// Collect dependency outputs first — we need to know if they exist for the preamble
+	// Collect dependency outputs first — we need to know if they exist for the preamble.
+	// Prefer structured handoff summary when available (concise, designed for next agent).
 	deps, _ := parseDependsOn(task.DependsOn)
 	depOutputs := make([]string, 0)
 	for _, depID := range deps {
@@ -439,10 +483,25 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 				if t.AgentSlug != nil {
 					agentLabel = "@" + *t.AgentSlug
 				}
-				summary := *t.ResultSummary
-				if len(summary) > maxDepOutputLen {
-					summary = summary[:maxDepOutputLen] + "\n...(truncated)"
+
+				// Try to extract structured handoff — more concise and targeted
+				handoff := parseHandoff(*t.ResultSummary)
+				var summary string
+				if handoff.Parsed && handoff.Summary != "" {
+					summary = handoff.Summary
+					if handoff.Artifacts != "" && handoff.Artifacts != "none" {
+						summary += "\nArtifacts: " + handoff.Artifacts
+					}
+					if handoff.Confidence != "" {
+						summary += "\nConfidence: " + handoff.Confidence
+					}
+				} else {
+					summary = *t.ResultSummary
+					if len(summary) > maxDepOutputLen {
+						summary = summary[:maxDepOutputLen] + "\n...(truncated)"
+					}
 				}
+
 				depOutputs = append(depOutputs,
 					fmt.Sprintf("--- Output from Task #%d \"%s\" (by %s) ---\n%s", t.TaskOrder, t.Title, agentLabel, summary))
 			}
@@ -509,6 +568,16 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 	if task.Iteration > 1 {
 		b.WriteString(fmt.Sprintf("Iteration: %d — this is a retry. Fix the issues from the previous attempt.\n", task.Iteration))
 	}
+
+	// Structured handoff instructions — agent MUST format output this way
+	b.WriteString("\n[OUTPUT FORMAT]\n")
+	b.WriteString("When you complete this task, end your response with a structured summary block:\n")
+	b.WriteString("---HANDOFF---\n")
+	b.WriteString("summary: <1-3 sentences describing what you did and the result>\n")
+	b.WriteString("confidence: <low|medium|high>\n")
+	b.WriteString("artifacts: <comma-separated list of files created/modified, or \"none\">\n")
+	b.WriteString("---END HANDOFF---\n")
+	b.WriteString("This block is REQUIRED. It helps the next agent in the pipeline understand your output.\n")
 
 	// Closing directive
 	if len(depOutputs) > 0 {
@@ -737,9 +806,53 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		e.cbMu.Unlock()
 	}
 
-	// Compress result summary to prevent DB bloat
+	// Parse structured handoff from FULL output before truncation.
+	handoff := parseHandoff(resultSummary)
+
+	// Compress result summary to prevent DB bloat (after handoff parsing).
 	if len(resultSummary) > maxResultSummaryLen {
 		resultSummary = resultSummary[:maxResultSummaryLen] + "\n...(truncated)"
+	}
+
+	if handoff.Parsed {
+		e.logger.Info("structured handoff received",
+			"task_id", taskID,
+			"mission_id", missionID,
+			"confidence", handoff.Confidence,
+			"summary_len", len(handoff.Summary),
+			"artifacts", handoff.Artifacts,
+		)
+		// Map confidence to numeric value and persist handoff + needs_review in one UPDATE.
+		var confVal *float64
+		needsReview := 0
+		switch strings.ToLower(handoff.Confidence) {
+		case "high":
+			v := 0.9
+			confVal = &v
+		case "medium":
+			v := 0.7
+			confVal = &v
+		case "low":
+			v := 0.4
+			confVal = &v
+			needsReview = 1
+		}
+		if confVal != nil {
+			if _, err := e.db.ExecContext(ctx,
+				`UPDATE mission_tasks SET confidence = ?, handoff_context = ?, needs_review = ? WHERE id = ?`,
+				*confVal, handoff.Summary, needsReview, taskID); err != nil {
+				e.logger.Error("persist handoff data", "error", err, "task_id", taskID)
+			}
+		}
+		if needsReview == 1 {
+			e.logger.Warn("task flagged for human review (low confidence)",
+				"task_id", taskID, "mission_id", missionID)
+		}
+	} else if taskStatus == "COMPLETED" {
+		e.logger.Warn("task completed without structured handoff",
+			"task_id", taskID,
+			"mission_id", missionID,
+		)
 	}
 
 	// Calculate task duration
@@ -1083,12 +1196,19 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 		b.WriteString(fmt.Sprintf("Description: %s\n", desc.String))
 	}
 	b.WriteString(fmt.Sprintf("Mission ID: %s\n\n", ms.ID))
+	b.WriteString("SCALING RULES — classify before planning:\n")
+	b.WriteString("  SIMPLE  (fact-finding, single op):    1 agent, 3-10 tool calls, ~5 min\n")
+	b.WriteString("  MEDIUM  (multi-step, 1-2 files):      1-2 agents, 10-15 tool calls, ~15 min\n")
+	b.WriteString("  COMPLEX (research, multi-file):        2-4 agents, 15+ tool calls, ~30 min\n")
+	b.WriteString("Match effort to complexity. Do NOT create missions for SIMPLE tasks — use /assign directly.\n\n")
+
 	b.WriteString("INSTRUCTIONS:\n")
-	b.WriteString("1. Review the mission objective and your crew members' capabilities\n")
-	b.WriteString("2. Break the work into specific, actionable tasks\n")
-	b.WriteString("3. Assign each task to the most suitable crew member (or yourself if solo)\n")
-	b.WriteString("4. Define task dependencies (which tasks must complete before others start)\n")
-	b.WriteString("5. Create the tasks using the mission API:\n\n")
+	b.WriteString("1. Assess mission complexity (SIMPLE/MEDIUM/COMPLEX) first\n")
+	b.WriteString("2. Review the mission objective and your crew members' capabilities\n")
+	b.WriteString("3. Break the work into specific, actionable tasks\n")
+	b.WriteString("4. Assign each task to the most suitable crew member (or yourself if solo)\n")
+	b.WriteString("5. Define task dependencies (which tasks must complete before others start)\n")
+	b.WriteString("6. Create the tasks using the mission API:\n\n")
 	b.WriteString("Option A — Add tasks to this existing mission:\n")
 	b.WriteString(fmt.Sprintf("  For each task, run:\n"))
 	b.WriteString(fmt.Sprintf("  curl -s -X POST http://localhost:9119/assign \\\n"))
