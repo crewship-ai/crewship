@@ -24,6 +24,8 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useEngineStatus } from "@/hooks/use-engine-status"
+import { useFleetStatus } from "@/hooks/use-fleet-status"
+import { usePendingEscalations } from "@/hooks/use-pending-escalations"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -140,6 +142,8 @@ export function AppToolbar() {
   const config = pageConfig[pathname] ?? null
   const { workspaceId } = useWorkspace()
   const { status: engineStatus } = useEngineStatus(workspaceId)
+  const fleetStatus = useFleetStatus(workspaceId)
+  const pendingEscalations = usePendingEscalations(workspaceId)
   const { session, signOut } = useAuth()
   const agentBreadcrumb = useAgentBreadcrumb(pathname, workspaceId)
   const { status: wsStatus } = useRealtime()
@@ -255,63 +259,90 @@ export function AppToolbar() {
 
       {/* Right: Status indicators + search + help + notifications + user */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        <div className="hidden lg:flex items-center gap-1.5 mr-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${
-                engineStatus === "connected"
-                  ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800"
-                  : engineStatus === "checking"
-                    ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800"
-                    : "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800"
-              }`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${
-                  engineStatus === "connected" ? "bg-emerald-500 animate-pulse"
-                    : engineStatus === "checking" ? "bg-amber-500 animate-pulse"
-                      : "bg-red-500"
-                }`} />
-                <span className={`text-micro font-medium ${
-                  engineStatus === "connected" ? "text-emerald-700 dark:text-emerald-400"
-                    : engineStatus === "checking" ? "text-amber-700 dark:text-amber-400"
-                      : "text-red-700 dark:text-red-400"
-                }`}>Engine</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              Backend engine: {engineStatus === "connected" ? "Online" : engineStatus === "checking" ? "Connecting..." : "Offline"}
-            </TooltipContent>
-          </Tooltip>
+        {/* Status indicators: System + Fleet + Escalations */}
+        {(() => {
+          const systemOnline = engineStatus === "connected" && wsStatus === "connected"
+          const systemChecking = engineStatus === "checking" || wsStatus === "connecting"
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div tabIndex={0} role="status" aria-label={`WebSocket ${wsStatus}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${
-                wsStatus === "connected"
-                  ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800"
-                  : wsStatus === "connecting"
-                    ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800"
-                    : "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800"
-              }`}>
-                <AnimatedWifi ref={wifiRef} size={12} className={
-                  wsStatus === "connected"
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : wsStatus === "connecting"
-                      ? "text-amber-600 dark:text-amber-400"
-                      : "text-red-600 dark:text-red-400"
-                } />
-                <span className={`text-micro font-medium ${
-                  wsStatus === "connected"
-                    ? "text-emerald-700 dark:text-emerald-400"
-                    : wsStatus === "connecting"
-                      ? "text-amber-700 dark:text-amber-400"
-                      : "text-red-700 dark:text-red-400"
-                }`}>Live</span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              Real-time updates: {wsStatus === "connected" ? "Connected" : wsStatus === "connecting" ? "Connecting..." : "Disconnected"}
-            </TooltipContent>
-          </Tooltip>
-        </div>
+          // Fleet display logic (scales to 1000+ agents)
+          let fleetLabel = ""
+          let fleetColor: "emerald" | "amber" | "red" | "muted" = "muted"
+          if (!fleetStatus || fleetStatus.total === 0) {
+            fleetLabel = "No agents"
+            fleetColor = "muted"
+          } else if (fleetStatus.error > 0 && fleetStatus.running > 0) {
+            fleetLabel = `${fleetStatus.running > 99 ? "99+" : fleetStatus.running} active \u00b7 ${fleetStatus.error} error${fleetStatus.error > 1 ? "s" : ""}`
+            fleetColor = "amber"
+          } else if (fleetStatus.error > 0) {
+            fleetLabel = `${fleetStatus.error} error${fleetStatus.error > 1 ? "s" : ""}`
+            fleetColor = "red"
+          } else if (fleetStatus.running > 0) {
+            fleetLabel = `${fleetStatus.running > 99 ? "99+" : fleetStatus.running} active`
+            fleetColor = "emerald"
+          } else {
+            fleetLabel = "Fleet idle"
+            fleetColor = "muted"
+          }
+
+          const colorMap = {
+            emerald: { bg: "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800", dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-400" },
+            amber: { bg: "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800", dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" },
+            red: { bg: "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800", dot: "bg-red-500", text: "text-red-700 dark:text-red-400" },
+            muted: { bg: "bg-muted/50 border-border", dot: "bg-muted-foreground/40", text: "text-muted-foreground" },
+          }
+
+          const sysColors = systemOnline ? colorMap.emerald : systemChecking ? colorMap.amber : colorMap.red
+          const fleetColors = colorMap[fleetColor]
+
+          return (
+            <div className="hidden lg:flex items-center gap-1.5 mr-1">
+              {/* System: combined engine + WS */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
+                    <AnimatedWifi ref={wifiRef} size={12} className={sysColors.text.split(" ")[0]} />
+                    <span className={`text-micro font-medium ${sysColors.text}`}>
+                      {systemOnline ? "Online" : systemChecking ? "Connecting" : "Offline"}
+                    </span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Engine: {engineStatus === "connected" ? "Online" : engineStatus === "checking" ? "Connecting..." : "Offline"} / Real-time: {wsStatus === "connected" ? "Connected" : wsStatus === "connecting" ? "Connecting..." : "Disconnected"}
+                </TooltipContent>
+              </Tooltip>
+
+              {/* Fleet status */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${fleetColors.bg}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${fleetColors.dot} ${fleetStatus?.running ? "animate-pulse" : ""}`} />
+                    <span className={`text-micro font-medium ${fleetColors.text}`}>{fleetLabel}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {fleetStatus ? `${fleetStatus.total} agents: ${fleetStatus.running} running, ${fleetStatus.idle} idle, ${fleetStatus.error} errors` : "Loading fleet status..."}
+                </TooltipContent>
+              </Tooltip>
+
+              {/* Pending escalations */}
+              {pendingEscalations > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Link href="/crews" className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${colorMap.amber.bg} hover:brightness-95 transition-all`}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      <span className={`text-micro font-medium ${colorMap.amber.text}`}>
+                        {pendingEscalations > 99 ? "99+" : pendingEscalations} escalation{pendingEscalations !== 1 ? "s" : ""}
+                      </span>
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {pendingEscalations} pending escalation{pendingEscalations !== 1 ? "s" : ""} need your attention
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Desktop: search button */}
         <Button variant="outline" size="sm" className="hidden md:flex h-8 gap-2 rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground px-3" aria-label="Search" onClick={() => setCmdkOpen(true)}>
@@ -336,20 +367,30 @@ export function AppToolbar() {
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="h-8 w-8 relative hidden md:inline-flex" aria-label="Notifications">
               <AnimatedBell size={16} />
-              <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-micro font-bold text-destructive-foreground ring-2 ring-background" aria-hidden="true">
-                3
-              </span>
+              {pendingEscalations > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-micro font-bold text-destructive-foreground ring-2 ring-background" aria-hidden="true">
+                  {pendingEscalations > 9 ? "9+" : pendingEscalations}
+                </span>
+              )}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-80">
             <DropdownMenuLabel className="flex items-center justify-between">
               <span>Notifications</span>
-              <button className="text-micro text-primary font-medium">Mark all read</button>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="flex-col items-start gap-1 py-3">
-              <div className="text-xs font-medium">No new notifications</div>
-              <div className="text-micro text-muted-foreground">You&apos;re all caught up.</div>
+              {pendingEscalations > 0 ? (
+                <>
+                  <div className="text-xs font-medium">{pendingEscalations} pending escalation{pendingEscalations !== 1 ? "s" : ""}</div>
+                  <div className="text-micro text-muted-foreground">Agents need your input to proceed.</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-xs font-medium">No new notifications</div>
+                  <div className="text-micro text-muted-foreground">You&apos;re all caught up.</div>
+                </>
+              )}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

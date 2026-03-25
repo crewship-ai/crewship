@@ -47,6 +47,43 @@ func (h *AgentHandler) broadcastAgentEvent(eventType, workspaceID string, payloa
 func (h *AgentHandler) SetLicense(lic *license.License) { h.license = lic }
 func (h *AgentHandler) SetScheduler(su ScheduleUpdater) { h.scheduleUpdater = su }
 
+// FleetStatus returns lightweight agent counts by status for the toolbar.
+func (h *AgentHandler) FleetStatus(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT status, COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL GROUP BY status`,
+		workspaceID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	result := struct {
+		Total   int `json:"total"`
+		Running int `json:"running"`
+		Error   int `json:"error"`
+		Idle    int `json:"idle"`
+	}{}
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			continue
+		}
+		result.Total += count
+		switch status {
+		case "RUNNING":
+			result.Running += count
+		case "ERROR":
+			result.Error += count
+		default:
+			result.Idle += count
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 var validAgentRoles = map[string]bool{
 	"AGENT":       true,
 	"LEAD":        true,

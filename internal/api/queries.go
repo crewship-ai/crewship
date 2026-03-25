@@ -38,6 +38,22 @@ func NewQueryHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, i
 	}
 }
 
+// PendingEscalationCount returns the number of unresolved escalations workspace-wide.
+func (h *QueryHandler) PendingEscalationCount(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	var count int
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM escalations e
+		 JOIN crews c ON c.id = e.crew_id
+		 WHERE c.workspace_id = ? AND e.status = 'PENDING' AND c.deleted_at IS NULL`,
+		workspaceID).Scan(&count)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": count})
+}
+
 type createQueryBody struct {
 	TargetSlug  string `json:"target_slug"`
 	Question    string `json:"question"`
