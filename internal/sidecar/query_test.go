@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // newQueryServer creates a Server configured for query/escalation testing.
@@ -257,19 +258,26 @@ func TestHandleEscalate_ForwardsToCrewshipd(t *testing.T) {
 	var receivedToken string
 	var receivedBody map[string]string
 	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/internal/escalations" {
-			http.Error(w, "not found", http.StatusNotFound)
+		if r.URL.Path == "/api/v1/internal/escalations" && r.Method == http.MethodPost {
+			receivedToken = r.Header.Get("X-Internal-Token")
+			bodyBytes, _ := io.ReadAll(r.Body)
+			if err := json.Unmarshal(bodyBytes, &receivedBody); err != nil {
+				http.Error(w, "bad json", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"escalation_id":"esc-1","status":"PENDING"}`))
 			return
 		}
-		receivedToken = r.Header.Get("X-Internal-Token")
-		bodyBytes, _ := io.ReadAll(r.Body)
-		if err := json.Unmarshal(bodyBytes, &receivedBody); err != nil {
-			http.Error(w, "bad json", http.StatusBadRequest)
+		if strings.HasPrefix(r.URL.Path, "/api/v1/internal/escalations/") && strings.HasSuffix(r.URL.Path, "/wait") {
+			// Immediately return resolved for test speed.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"RESOLVED","resolution":"Approved","action":"approve"}`))
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"escalation_id":"esc-1","status":"PENDING"}`))
+		http.Error(w, "not found", http.StatusNotFound)
 	}))
 	defer mockCrewshipd.Close()
 
@@ -288,8 +296,8 @@ func TestHandleEscalate_ForwardsToCrewshipd(t *testing.T) {
 
 	srv.handleEscalate(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Errorf("expected 201, got %d; body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d; body: %s", w.Code, w.Body.String())
 	}
 	if receivedToken != "secret-token" {
 		t.Errorf("expected X-Internal-Token=secret-token, got %q", receivedToken)
@@ -302,5 +310,175 @@ func TestHandleEscalate_ForwardsToCrewshipd(t *testing.T) {
 	}
 	if receivedBody["crew_id"] != "crew-1" {
 		t.Errorf("expected crew_id=crew-1, got %q", receivedBody["crew_id"])
+	}
+
+	// Verify the response contains resolution from the wait endpoint.
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["status"] != "RESOLVED" {
+		t.Errorf("expected status=RESOLVED, got %v", result["status"])
+	}
+	if result["resolution"] != "Approved" {
+		t.Errorf("expected resolution=Approved, got %v", result["resolution"])
+	}
+	if result["escalation_id"] != "esc-1" {
+		t.Errorf("expected escalation_id=esc-1, got %v", result["escalation_id"])
+	}
+}
+
+func TestHandleEscalate_BlocksUntilResolution(t *testing.T) {
+	waitCalled := make(chan struct{})
+	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/internal/escalations" && r.Method == http.MethodPost {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"escalation_id":"esc-2","status":"PENDING"}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/wait") {
+			close(waitCalled)
+			// Simulate delay then resolve.
+			time.Sleep(100 * time.Millisecond)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"RESOLVED","resolution":"Go ahead","action":"approve"}`))
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer mockCrewshipd.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mockCrewshipd.URL,
+		Token:       "tok",
+		CrewID:      "c1",
+		WorkspaceID: "ws1",
+		ChatID:      "ch1",
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/escalate",
+		strings.NewReader(`{"from":"nela","reason":"need help"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleEscalate(w, req)
+
+	// Ensure wait was called.
+	select {
+	case <-waitCalled:
+	default:
+		t.Error("wait endpoint was not called")
+	}
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["resolution"] != "Go ahead" {
+		t.Errorf("expected resolution='Go ahead', got %v", result["resolution"])
+	}
+	if result["escalation_id"] != "esc-2" {
+		t.Errorf("expected escalation_id=esc-2, got %v", result["escalation_id"])
+	}
+}
+
+func TestHandleEscalate_TimeoutReturnsStatus(t *testing.T) {
+	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/internal/escalations" && r.Method == http.MethodPost {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"escalation_id":"esc-3","status":"PENDING"}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/wait") {
+			// Simulate timeout by returning 408.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestTimeout)
+			w.Write([]byte(`{"status":"TIMEOUT","error":"escalation not resolved in time"}`))
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer mockCrewshipd.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mockCrewshipd.URL,
+		Token:       "tok",
+		CrewID:      "c1",
+		WorkspaceID: "ws1",
+		ChatID:      "ch1",
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/escalate",
+		strings.NewReader(`{"from":"nela","reason":"need help"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleEscalate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	var result map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&result)
+	if result["status"] != "TIMEOUT" {
+		t.Errorf("expected status=TIMEOUT, got %v", result["status"])
+	}
+}
+
+func TestHandleEscalate_ForwardsEvidencePack(t *testing.T) {
+	var receivedBody map[string]string
+	mockCrewshipd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/internal/escalations" && r.Method == http.MethodPost {
+			bodyBytes, _ := io.ReadAll(r.Body)
+			json.Unmarshal(bodyBytes, &receivedBody)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"escalation_id":"esc-4","status":"PENDING"}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/wait") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"RESOLVED","resolution":"OK","action":"approve"}`))
+			return
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer mockCrewshipd.Close()
+
+	srv := newQueryServer(t, &IPCConfig{
+		BaseURL:     mockCrewshipd.URL,
+		Token:       "tok",
+		CrewID:      "c1",
+		WorkspaceID: "ws1",
+		ChatID:      "ch1",
+	}, nil)
+
+	evidencePack := `{"task_title":"Process invoices","agent_slug":"nela","error":"403 forbidden"}`
+	reqBody := `{"from":"nela","reason":"Permission denied","evidence_pack":` + "`" + evidencePack + "`" + `}`
+	// Use proper JSON escaping.
+	reqBody = `{"from":"nela","reason":"Permission denied","evidence_pack":"{\"task_title\":\"Process invoices\",\"agent_slug\":\"nela\",\"error\":\"403 forbidden\"}"}`
+
+	req := httptest.NewRequest(http.MethodPost, "/escalate",
+		strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.handleEscalate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	// The evidence_pack should have been forwarded as metadata.
+	if receivedBody["metadata"] == "" {
+		t.Error("expected evidence_pack to be forwarded as metadata")
+	}
+	if !strings.Contains(receivedBody["metadata"], "Process invoices") {
+		t.Errorf("expected metadata to contain evidence pack, got %q", receivedBody["metadata"])
 	}
 }

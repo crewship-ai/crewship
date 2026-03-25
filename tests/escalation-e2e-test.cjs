@@ -187,11 +187,59 @@ async function run() {
     ok('resolved_at not null', t && t.resolved_at != null);
   }
 
-  // -- 14. Escalation type validation --
-  console.log('\n14. Escalation type validation (internal endpoint)');
-  // The internal create endpoint should reject invalid types.
-  // We can't easily call internal endpoints without the internal token,
-  // so verify via DB constraint directly.
+  // -- 14. Resolve with action field --
+  console.log('\n14. Resolve with action field (CRE-21)');
+  sql(`INSERT INTO escalations (id,workspace_id,crew_id,chat_id,from_agent_id,reason,type,status,created_at) VALUES ('esc-act1','${workspaceId}','${crewId}','chat1','${agentId}','Need approval for deploy','TEXT','PENDING','${now}')`);
+  sql(`INSERT INTO escalations (id,workspace_id,crew_id,chat_id,from_agent_id,reason,type,status,created_at) VALUES ('esc-act2','${workspaceId}','${crewId}','chat1','${agentId}','Wrong agent for this task','TEXT','PENDING','${now}')`);
+  sql(`INSERT INTO escalations (id,workspace_id,crew_id,chat_id,from_agent_id,reason,type,status,created_at) VALUES ('esc-act3','${workspaceId}','${crewId}','chat1','${agentId}','Bad approach','TEXT','PENDING','${now}')`);
+
+  const rApprove = await req('PATCH', `/api/v1/escalations/esc-act1/resolve?workspace_id=${workspaceId}`, {
+    resolution: 'Go ahead with deploy', action: 'approve',
+  }, auth);
+  ok('Resolve with approve → 200', rApprove.status === 200);
+  ok('Response has action=approve', rApprove.body && rApprove.body.action === 'approve');
+
+  const rReject = await req('PATCH', `/api/v1/escalations/esc-act3/resolve?workspace_id=${workspaceId}`, {
+    resolution: 'Try different approach', action: 'reject',
+  }, auth);
+  ok('Resolve with reject → 200', rReject.status === 200);
+
+  const rRedirect = await req('PATCH', `/api/v1/escalations/esc-act2/resolve?workspace_id=${workspaceId}`, {
+    resolution: 'Nela should handle this', action: 'redirect', redirect_to: 'nela',
+  }, auth);
+  ok('Resolve with redirect → 200', rRedirect.status === 200);
+
+  // -- 15. Verify action in list --
+  console.log('\n15. List includes action field');
+  const listAct = await req('GET', `/api/v1/crews/${crewId}/escalations?workspace_id=${workspaceId}`, null, auth);
+  ok('List → 200', listAct.status === 200);
+  if (listAct.body) {
+    const act1 = listAct.body.find(e => e.id === 'esc-act1');
+    const act2 = listAct.body.find(e => e.id === 'esc-act2');
+    const act3 = listAct.body.find(e => e.id === 'esc-act3');
+    ok('act1 action=approve', act1 && act1.action === 'approve');
+    ok('act2 action=redirect', act2 && act2.action === 'redirect');
+    ok('act2 redirect_to=nela', act2 && act2.redirect_to === 'nela');
+    ok('act3 action=reject', act3 && act3.action === 'reject');
+  }
+
+  // -- 16. Invalid action → 400 --
+  console.log('\n16. Invalid action → 400');
+  sql(`INSERT INTO escalations (id,workspace_id,crew_id,chat_id,from_agent_id,reason,type,status,created_at) VALUES ('esc-inv','${workspaceId}','${crewId}','chat1','${agentId}','test','TEXT','PENDING','${now}')`);
+  const rInvalid = await req('PATCH', `/api/v1/escalations/esc-inv/resolve?workspace_id=${workspaceId}`, {
+    resolution: 'test', action: 'invalid_action',
+  }, auth);
+  ok('Invalid action → 400', rInvalid.status === 400, `status=${rInvalid.status}`);
+
+  // -- 17. Redirect without redirect_to → 400 --
+  console.log('\n17. Redirect without redirect_to → 400');
+  const rNoTarget = await req('PATCH', `/api/v1/escalations/esc-inv/resolve?workspace_id=${workspaceId}`, {
+    resolution: 'redirect please', action: 'redirect',
+  }, auth);
+  ok('Redirect no target → 400', rNoTarget.status === 400, `status=${rNoTarget.status}`);
+
+  // -- 18. Escalation type validation --
+  console.log('\n18. Escalation type validation (DB constraint)');
   try {
     sql(`INSERT INTO escalations (id,workspace_id,crew_id,chat_id,from_agent_id,reason,type,status,created_at) VALUES ('esc-bad','${workspaceId}','${crewId}','chat1','${agentId}','test','INVALID','PENDING','${now}')`);
     ok('Invalid type rejected by CHECK constraint', false, 'insert succeeded');
