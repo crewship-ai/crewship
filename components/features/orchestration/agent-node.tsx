@@ -15,6 +15,7 @@ interface AgentNodeData {
   tokenCount: number | null
   estimatedCost: number | null
   durationMs: number | null
+  activitySnippet?: string | null
   [key: string]: unknown
 }
 
@@ -187,6 +188,15 @@ function AgentNodeComponent({ data }: NodeProps) {
             {duration && (
               <span className="text-[10px] text-white/30 font-mono">{duration}</span>
             )}
+          </div>
+        )}
+
+        {/* Live activity snippet */}
+        {d.status === "IN_PROGRESS" && d.activitySnippet && (
+          <div className="mt-2 pt-1.5 border-t border-white/[0.04]">
+            <p className="text-[10px] text-blue-300/50 italic truncate leading-relaxed">
+              {d.activitySnippet}
+            </p>
           </div>
         )}
       </div>

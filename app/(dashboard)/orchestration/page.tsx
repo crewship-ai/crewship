@@ -28,23 +28,33 @@ import { CreateMissionWizard } from "@/components/features/orchestration/create-
 import { CrewConnections } from "@/components/features/orchestration/crew-connections"
 import { ProposalReview } from "@/components/features/orchestration/proposal-review"
 import type { Mission, MissionTask } from "@/lib/types/mission"
+import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 
 export default function OrchestrationPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const [missions, setMissions] = useState<Mission[]>([])
+  const [crews, setCrews] = useState<CrewSummary[]>([])
+  const [agents, setAgents] = useState<AgentSummary[]>([])
+  const [connections, setConnections] = useState<CrewConnection[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedMissionId, setSelectedMissionId] = useState<string>("all")
   const [selectedTask, setSelectedTask] = useState<MissionTask | null>(null)
   const [activeTab, setActiveTab] = useState("graph")
   const graphRef = useRef<WorkflowGraphRef>(null)
 
-  const fetchMissions = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`)
-      if (res.ok) {
-        setMissions(await res.json())
-      }
+      const [missionsRes, crewsRes, agentsRes, connsRes] = await Promise.all([
+        fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`),
+        fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
+        fetch(`/api/v1/agents?workspace_id=${workspaceId}`),
+        fetch(`/api/v1/crew-connections?workspace_id=${workspaceId}`),
+      ])
+      if (missionsRes.ok) setMissions(await missionsRes.json())
+      if (crewsRes.ok) setCrews(await crewsRes.json())
+      if (agentsRes.ok) setAgents(await agentsRes.json())
+      if (connsRes.ok) setConnections(await connsRes.json())
     } catch {
       // ignore
     } finally {
@@ -52,17 +62,26 @@ export default function OrchestrationPage() {
     }
   }, [workspaceId])
 
-  useEffect(() => { fetchMissions() }, [fetchMissions])
+  useEffect(() => { fetchData() }, [fetchData])
 
   const hasActive = useMemo(
     () => missions.some((m) => m.status === "IN_PROGRESS" || m.status === "REVIEW"),
     [missions]
   )
+  // Only poll missions during active execution (crews/agents/connections are stable)
+  const fetchMissionsOnly = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`)
+      if (res.ok) setMissions(await res.json())
+    } catch { /* ignore */ }
+  }, [workspaceId])
+
   useEffect(() => {
     if (!hasActive) return
-    const interval = setInterval(fetchMissions, 3000)
+    const interval = setInterval(fetchMissionsOnly, 3000)
     return () => clearInterval(interval)
-  }, [hasActive, fetchMissions])
+  }, [hasActive, fetchMissionsOnly])
 
   const handleTaskUpdate = useCallback((event: RealtimeEvent) => {
     const { id, status, mission_id } = event.payload
@@ -80,7 +99,7 @@ export default function OrchestrationPage() {
   }, [])
 
   useRealtimeEvent("task.updated", handleTaskUpdate)
-  useRealtimeEvent("mission.updated", useCallback(() => fetchMissions(), [fetchMissions]))
+  useRealtimeEvent("mission.updated", useCallback(() => fetchData(), [fetchData]))
 
   const filteredMissions = useMemo(() => {
     if (selectedMissionId === "all") return missions
@@ -163,11 +182,11 @@ export default function OrchestrationPage() {
           <Button variant="ghost" size="sm" className="h-7 px-2 text-white/40 hover:text-white/70" onClick={() => graphRef.current?.focusActive()}>
             <Focus className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 px-2 text-white/40 hover:text-white/70" onClick={fetchMissions}>
+          <Button variant="ghost" size="sm" className="h-7 px-2 text-white/40 hover:text-white/70" onClick={fetchData}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           {workspaceId && (
-            <CreateMissionWizard workspaceId={workspaceId} onCreated={fetchMissions} />
+            <CreateMissionWizard workspaceId={workspaceId} onCreated={fetchData} />
           )}
         </div>
       </div>
@@ -175,7 +194,7 @@ export default function OrchestrationPage() {
       {/* Mission control bar when selected */}
       {selectedMission && (
         <div className="shrink-0">
-          <MissionControlBar mission={selectedMission} workspaceId={workspaceId!} onMissionChanged={fetchMissions} />
+          <MissionControlBar mission={selectedMission} workspaceId={workspaceId!} onMissionChanged={fetchData} />
         </div>
       )}
 
@@ -184,7 +203,14 @@ export default function OrchestrationPage() {
         {activeTab === "graph" && (
           <>
             {/* Graph — fills entire area */}
-            <WorkflowGraph ref={graphRef} missions={filteredMissions} onTaskClick={handleNodeClick} />
+            <WorkflowGraph
+              ref={graphRef}
+              missions={filteredMissions}
+              crews={crews}
+              agents={agents}
+              connections={connections}
+              onTaskClick={handleNodeClick}
+            />
 
             {/* Floating stats overlay — top-left of graph */}
             <div className="absolute top-3 left-3 flex items-center gap-1.5 z-10">
@@ -259,7 +285,7 @@ export default function OrchestrationPage() {
         allTasks={taskMission?.tasks || []}
         workspaceId={workspaceId!}
         onClose={() => setSelectedTask(null)}
-        onTaskChanged={fetchMissions}
+        onTaskChanged={fetchData}
       />
     </div>
   )
