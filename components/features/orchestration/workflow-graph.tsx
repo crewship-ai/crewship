@@ -325,6 +325,9 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
   }
 
   // Cross-crew dependency edges (tasks in different crews)
+  // Collect all visible node IDs to skip edges to/from collapsed crews
+  const visibleNodeIds = new Set(nodes.map((n) => n.id))
+
   for (const mission of activeMissions) {
     const tasks = mission.tasks || []
     for (const task of tasks) {
@@ -336,12 +339,13 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
       }
       const taskCrewId = (task.agent_slug && agentCrewMap.get(task.agent_slug)) || mission.crew_id
       for (const depId of taskDeps) {
-        // Find the dep task's crew
         const depTask = tasks.find((t) => t.id === depId)
         if (!depTask) continue
         const depCrewId = (depTask.agent_slug && agentCrewMap.get(depTask.agent_slug)) || mission.crew_id
         if (depCrewId !== taskCrewId) {
-          // Cross-crew edge
+          // Skip if either endpoint is hidden (crew collapsed)
+          if (!visibleNodeIds.has(task.id) || !visibleNodeIds.has(depId)) continue
+
           const edgeColor = "#a855f7" // purple for cross-crew
           edges.push({
             id: `e-cross-${depId}-${task.id}`,
@@ -614,6 +618,13 @@ function WorkflowGraphInner(
       })
     )
   }, [activities, setNodes])
+
+  // Clear highlight if the highlighted node no longer exists (collapsed crew, graph rebuild)
+  useEffect(() => {
+    if (highlightedNodeId && !nodes.some((n) => n.id === highlightedNodeId)) {
+      setHighlightedNodeId(null)
+    }
+  }, [nodes, highlightedNodeId])
 
   // Compute dimmed nodes/edges for Shift+Click highlighting
   const { dimmedNodeIds, dimmedEdgeIds } = useMemo(() => {
