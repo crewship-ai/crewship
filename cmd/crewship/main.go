@@ -64,6 +64,7 @@ func init() {
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(credentialCmd)
+	rootCmd.AddCommand(integrationCmd)
 	rootCmd.AddCommand(missionCmd)
 	rootCmd.AddCommand(activityCmd)
 	rootCmd.AddCommand(auditCmd)
