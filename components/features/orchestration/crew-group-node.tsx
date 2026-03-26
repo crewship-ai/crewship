@@ -3,6 +3,7 @@
 import { memo, type CSSProperties } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { ChevronDown, ChevronRight, Users } from "lucide-react"
+import { CrewIcon } from "@/components/ui/crew-icon"
 
 // Palette matching crew colors from the system
 export const crewColorMap: Record<string, string> = {
@@ -73,10 +74,14 @@ function CrewGroupNodeInner({ data, id }: NodeProps) {
           )}
         </button>
 
-        <div
-          className="w-2.5 h-2.5 rounded-full shrink-0"
-          style={{ backgroundColor: accent }}
-        />
+        {d.icon ? (
+          <CrewIcon icon={d.icon} color={d.color} size="sm" className="!h-5 !w-5 !rounded-md" />
+        ) : (
+          <div
+            className="w-2.5 h-2.5 rounded-full shrink-0"
+            style={{ backgroundColor: accent }}
+          />
+        )}
 
         <span className="text-xs font-semibold text-white/80 truncate flex-1">
           {d.label}
