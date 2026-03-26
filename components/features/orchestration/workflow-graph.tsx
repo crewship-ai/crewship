@@ -219,8 +219,11 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
     }
 
     const levels = new Map<string, number>()
+    const visiting = new Set<string>()
     function getLevel(taskId: string): number {
       if (levels.has(taskId)) return levels.get(taskId)!
+      if (visiting.has(taskId)) return 0 // cycle detected — break recursion
+      visiting.add(taskId)
       const taskDeps = deps.get(taskId) || []
       if (taskDeps.length === 0) {
         levels.set(taskId, 0)
@@ -455,8 +458,11 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
     }
 
     const levels = new Map<string, number>()
+    const visiting = new Set<string>()
     function getLevel(taskId: string): number {
       if (levels.has(taskId)) return levels.get(taskId)!
+      if (visiting.has(taskId)) return 0 // cycle detected
+      visiting.add(taskId)
       const taskDeps = deps.get(taskId) || []
       if (taskDeps.length === 0) {
         levels.set(taskId, 0)
@@ -566,7 +572,7 @@ function WorkflowGraphInner(
     })
   }, [])
 
-  const hasCrewData = crews && crews.length > 0
+  const hasCrewData = !!(crews && crews.length > 0 && agents)
 
   const graphData = useMemo(() => {
     if (hasCrewData) {
