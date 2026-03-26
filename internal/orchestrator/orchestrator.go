@@ -47,6 +47,27 @@ type AgentRunRequest struct {
 	MemoryMB        int
 	CPUs            float64
 	TTLHours        int
+	MCPServers      []MCPServerConfig // Resolved MCP server configs for this agent
+}
+
+// MCPServerConfig is a resolved MCP server ready for sidecar injection.
+type MCPServerConfig struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	DisplayName string            `json:"display_name"`
+	Transport   string            `json:"transport"`
+	Endpoint    string            `json:"endpoint,omitempty"`
+	Command     string            `json:"command,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	Credential  *MCPCredential    `json:"credential,omitempty"`
+}
+
+// MCPCredential holds a decrypted credential for MCP server authentication.
+type MCPCredential struct {
+	PlainValue string `json:"token"`
+	Type       string `json:"type"`   // "bearer", "api_key", "basic"
+	Header     string `json:"header,omitempty"`
 }
 
 type Credential struct {
@@ -355,7 +376,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			}
 		}
 		if needStart {
-			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, networkPolicy, o.logger); err != nil {
+			if err := startSidecar(ctx, o.container, req.ContainerID, req.Credentials, memoryCfg, ipcCfg, sidecarMembers, networkPolicy, req.MCPServers, o.logger); err != nil {
 				o.logger.Error("failed to start sidecar", "error", err, "agent_id", req.AgentID)
 				o.updateRunStatus(ctx, runState.ID, "error")
 				return fmt.Errorf("start sidecar: %w", err)

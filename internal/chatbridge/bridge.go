@@ -51,6 +51,7 @@ type ChatInfo struct {
 	MemoryMB       int
 	CPUs           float64
 	TTLHours       int
+	MCPServers     []orchestrator.MCPServerConfig
 }
 
 type Bridge struct {
@@ -243,6 +244,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		MemoryMB:       memoryMB,
 		CPUs:           cpuVal,
 		TTLHours:       info.TTLHours,
+		MCPServers:     info.MCPServers,
 	}
 
 	// Only show "Starting agent..." on cold start (first message, container freshly created).

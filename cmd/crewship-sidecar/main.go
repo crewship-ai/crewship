@@ -21,6 +21,7 @@ type sidecarInput struct {
 	IPC           *sidecar.IPCConfig           `json:"ipc,omitempty"`
 	CrewMembers   []sidecar.CrewMember         `json:"crew_members,omitempty"`
 	NetworkPolicy *sidecar.NetworkPolicyConfig `json:"network_policy,omitempty"`
+	MCPServers    []sidecar.MCPServerInput     `json:"mcp_servers,omitempty"`
 }
 
 func main() {
@@ -74,6 +75,7 @@ func main() {
 		"ipc_enabled", input.IPC != nil,
 		"crew_members", len(input.CrewMembers),
 		"network_mode", networkMode,
+		"mcp_servers", len(input.MCPServers),
 	)
 
 	srv := sidecar.NewServer(sidecar.ServerConfig{
@@ -83,6 +85,7 @@ func main() {
 		IPC:           input.IPC,
 		CrewMembers:   input.CrewMembers,
 		NetworkPolicy: input.NetworkPolicy,
+		MCPServers:    input.MCPServers,
 		Logger:        logger,
 	})
 

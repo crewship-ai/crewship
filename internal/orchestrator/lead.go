@@ -5,15 +5,23 @@ import (
 	"strings"
 )
 
+// MemberIntegration represents an MCP integration available to a crew member.
+type MemberIntegration struct {
+	Name        string   // display name, e.g. "Gmail"
+	ServerName  string   // machine name, e.g. "gmail"
+	Tools       []string // tool names discovered from MCP server, e.g. ["gmail_send", "gmail_search"]
+}
+
 // CrewMember represents a fellow crew member visible to a lead agent.
 type CrewMember struct {
-	ID          string
-	Name        string
-	Slug        string
-	RoleTitle   string
-	Description string
-	Status      string
-	ChatID      string
+	ID           string
+	Name         string
+	Slug         string
+	RoleTitle    string
+	Description  string
+	Status       string
+	ChatID       string
+	Integrations []MemberIntegration
 }
 
 // BuildLeadContext formats a [CREW CONTEXT] block for the lead agent's system prompt.
@@ -37,6 +45,17 @@ func BuildLeadContext(members []CrewMember) string {
 			b.WriteString(fmt.Sprintf(": %s", m.Description))
 		}
 		b.WriteString("\n")
+		if len(m.Integrations) > 0 {
+			var parts []string
+			for _, ig := range m.Integrations {
+				if len(ig.Tools) > 0 {
+					parts = append(parts, fmt.Sprintf("%s (%s)", ig.Name, strings.Join(ig.Tools, ", ")))
+				} else {
+					parts = append(parts, ig.Name)
+				}
+			}
+			b.WriteString(fmt.Sprintf("  Integrations: %s\n", strings.Join(parts, ", ")))
+		}
 	}
 
 	b.WriteString("\n")

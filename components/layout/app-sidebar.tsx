@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Bot,
   Key,
+  Plug,
   Zap,
   Settings,
   Network,
@@ -63,6 +64,7 @@ const navSections = [
       { title: "Skills", href: "/skills", icon: Zap },
       { title: "Marketplace", href: "/marketplace", icon: Store, badge: "FUTURE" as const },
       { title: "Credentials", href: "/credentials", icon: Key },
+      { title: "Integrations", href: "/integrations", icon: Plug },
     ],
   },
   {
