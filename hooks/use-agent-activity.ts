@@ -25,13 +25,15 @@ export function useAgentActivity(): Map<string, string> {
       const STALE_MS = 30_000 // Clear snippets older than 30s
 
       const next = new Map<string, string>()
+      const staleKeys: string[] = []
       for (const [slug, entry] of rawRef.current) {
         if (now - entry.updatedAt < STALE_MS) {
           next.set(slug, entry.text)
         } else {
-          rawRef.current.delete(slug)
+          staleKeys.push(slug)
         }
       }
+      for (const key of staleKeys) rawRef.current.delete(key)
       setActivities(next)
     }, 500)
 

@@ -68,11 +68,20 @@ export default function OrchestrationPage() {
     () => missions.some((m) => m.status === "IN_PROGRESS" || m.status === "REVIEW"),
     [missions]
   )
+  // Only poll missions during active execution (crews/agents/connections are stable)
+  const fetchMissionsOnly = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`)
+      if (res.ok) setMissions(await res.json())
+    } catch { /* ignore */ }
+  }, [workspaceId])
+
   useEffect(() => {
     if (!hasActive) return
-    const interval = setInterval(fetchData, 3000)
+    const interval = setInterval(fetchMissionsOnly, 3000)
     return () => clearInterval(interval)
-  }, [hasActive, fetchData])
+  }, [hasActive, fetchMissionsOnly])
 
   const handleTaskUpdate = useCallback((event: RealtimeEvent) => {
     const { id, status, mission_id } = event.payload

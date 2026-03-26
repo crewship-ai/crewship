@@ -26,7 +26,7 @@ import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orch
 import { useAgentActivity } from "@/hooks/use-agent-activity"
 import { AgentNode } from "./agent-node"
 import { AnimatedEdge } from "./animated-edge"
-import { CrewGroupNode } from "./crew-group-node"
+import { CrewGroupNode, crewColorMap } from "./crew-group-node"
 import { PermissionEdge, getPermissionMarkers } from "./permission-edge"
 
 export interface WorkflowGraphRef {
@@ -148,9 +148,9 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
   let crewX = 0
   const CREW_GAP = 80
   const TASK_WIDTH = 260
-  const TASK_HEIGHT = 120
+  const TASK_HEIGHT = 150
   const TASK_H_GAP = 60
-  const TASK_V_GAP = 10
+  const TASK_V_GAP = 15
   const CREW_PADDING_TOP = 60
   const CREW_PADDING_SIDE = 40
   const CREW_PADDING_BOTTOM = 40
@@ -561,7 +561,7 @@ function WorkflowGraphInner(
     })
   }, [])
 
-  const hasCrewData = crews && crews.length > 0 && agents && agents.length > 0
+  const hasCrewData = crews && crews.length > 0
 
   const graphData = useMemo(() => {
     if (hasCrewData) {
@@ -623,16 +623,15 @@ function WorkflowGraphInner(
     const hlNode = nodes.find((n) => n.id === highlightedNodeId)
     if (hlNode?.parentId) connectedNodeIds.add(hlNode.parentId)
 
-    // Include children of connected crew nodes
-    for (const n of nodes) {
-      if (n.parentId && connectedNodeIds.has(n.parentId)) {
-        // Don't dim children of connected crew groups
-      }
-    }
-
     return {
-      dimmedNodeIds: new Set(nodes.filter((n) => !connectedNodeIds.has(n.id) && !(n.parentId && connectedNodeIds.has(n.parentId))).map((n) => n.id)),
-      dimmedEdgeIds: new Set(edgesState.filter((e) => !connectedEdgeIds.has(e.id)).map((e) => e.id)),
+      dimmedNodeIds: new Set(
+        nodes
+          .filter((n) => !connectedNodeIds.has(n.id) && !(n.parentId && connectedNodeIds.has(n.parentId)))
+          .map((n) => n.id)
+      ),
+      dimmedEdgeIds: new Set(
+        edgesState.filter((e) => !connectedEdgeIds.has(e.id)).map((e) => e.id)
+      ),
     }
   }, [highlightedNodeId, nodes, edgesState])
 
@@ -751,8 +750,8 @@ function WorkflowGraphInner(
           <MiniMap
             nodeColor={(n) => {
               if (n.id.startsWith("crew-")) {
-                const color = (n.data as Record<string, unknown>)?.color as string | null
-                if (color) return color
+                const paletteName = (n.data as Record<string, unknown>)?.color as string | null
+                if (paletteName) return crewColorMap[paletteName] || paletteName
                 return "#1e2332"
               }
               if (n.id.startsWith("mission-")) return "#1e2332"

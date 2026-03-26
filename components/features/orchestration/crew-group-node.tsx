@@ -5,7 +5,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { ChevronDown, ChevronRight, Users } from "lucide-react"
 
 // Palette matching crew colors from the system
-const colorMap: Record<string, string> = {
+export const crewColorMap: Record<string, string> = {
   blue: "#3b82f6",
   emerald: "#10b981",
   violet: "#8b5cf6",
@@ -18,7 +18,7 @@ const colorMap: Record<string, string> = {
 
 function resolveColor(color: string | null): string {
   if (!color) return "#64748b"
-  return colorMap[color] || color
+  return crewColorMap[color] || color
 }
 
 export interface CrewGroupData {
@@ -54,7 +54,6 @@ function CrewGroupNodeInner({ data, id }: NodeProps) {
         background: "rgba(13, 15, 20, 0.60)",
         boxShadow: `0 0 30px ${accent}08`,
         minWidth: collapsed ? 260 : undefined,
-        minHeight: collapsed ? undefined : undefined,
       }}
     >
       {/* Header — interactive, receives pointer events */}
