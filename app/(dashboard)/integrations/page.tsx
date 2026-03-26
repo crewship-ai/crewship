@@ -124,7 +124,7 @@ export default function IntegrationsPage() {
   }
 
   function formatDate(dateStr: string): string {
-    return new Intl.DateTimeFormat("en-US", {
+    return new Intl.DateTimeFormat(undefined, {
       month: "short",
       day: "numeric",
       year: "numeric",

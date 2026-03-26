@@ -23,6 +23,7 @@ type MCPGateway struct {
 	logger     *slog.Logger
 	auditCh    chan auditEntry // bounded audit log channel
 	auditHTTP  *http.Client   // dedicated client for audit calls
+	auditDone  chan struct{}   // closed when audit worker exits
 }
 
 type auditEntry struct {
@@ -148,6 +149,7 @@ func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger
 		logger:    logger,
 		auditCh:   make(chan auditEntry, 64),
 		auditHTTP: &http.Client{Timeout: 5 * time.Second},
+		auditDone: make(chan struct{}),
 	}
 	// Start single audit worker goroutine (bounded)
 	go g.auditWorker()
@@ -311,10 +313,11 @@ func (g *MCPGateway) Status() []MCPServerStatus {
 	return statuses
 }
 
-// Close terminates all MCP server sessions and stops the audit worker.
+// Close terminates all MCP server sessions and waits for audit worker to drain.
 func (g *MCPGateway) Close() {
-	// Close audit channel to stop worker goroutine
+	// Close audit channel and wait for worker to finish processing
 	close(g.auditCh)
+	<-g.auditDone
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -535,6 +538,7 @@ func (c *mcpClient) terminateSession() {
 
 // auditWorker processes audit entries from the bounded channel.
 func (g *MCPGateway) auditWorker() {
+	defer close(g.auditDone)
 	for entry := range g.auditCh {
 		g.sendAuditEntry(entry)
 	}

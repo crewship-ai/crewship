@@ -162,7 +162,7 @@ func (h *IntegrationHandler) ListWorkspaceIntegrations(w http.ResponseWriter, r 
 			(SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = ws.id AND mcp_server_scope = 'workspace') AS bind_count,
 			(SELECT COUNT(*) FROM crew_mcp_servers WHERE workspace_mcp_server_id = ws.id) AS crew_count
 		FROM workspace_mcp_servers ws
-		WHERE ws.workspace_id = ?
+		WHERE ws.workspace_id = ? AND ws.deleted_at IS NULL
 		ORDER BY ws.created_at DESC`, workspaceID)
 	if err != nil {
 		h.logger.Error("list workspace integrations", "error", err)
@@ -456,7 +456,7 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 			cs.icon, cs.enabled, cs.created_at, cs.updated_at,
 			(SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = cs.id AND mcp_server_scope = 'crew') AS bind_count
 		FROM crew_mcp_servers cs
-		WHERE cs.crew_id = ?
+		WHERE cs.crew_id = ? AND cs.deleted_at IS NULL
 		ORDER BY cs.created_at DESC`, crewID)
 	if err != nil {
 		h.logger.Error("list crew integrations", "error", err)

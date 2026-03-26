@@ -82,6 +82,9 @@ func (h *MCPAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		results = append(results, e)
 	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate mcp tool calls", "error", err)
+	}
 	if results == nil {
 		results = []mcpToolCallEntry{}
 	}
