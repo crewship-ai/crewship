@@ -5,6 +5,7 @@ import { type EdgeProps, getBezierPath } from "@xyflow/react"
 interface AnimatedEdgeData {
   color?: string
   active?: boolean
+  dimmed?: boolean
   [key: string]: unknown
 }
 
@@ -22,11 +23,25 @@ export function AnimatedEdge({
   const edgeData = data as AnimatedEdgeData | undefined
   const color = edgeData?.color || "#3b82f6"
   const active = edgeData?.active ?? false
+  const dimmed = edgeData?.dimmed ?? false
 
   const [edgePath] = getBezierPath({
     sourceX, sourceY, sourcePosition,
     targetX, targetY, targetPosition,
   })
+
+  // Dimmed mode: simple faded line, no animation
+  if (dimmed) {
+    return (
+      <path
+        d={edgePath}
+        fill="none"
+        stroke="#334155"
+        strokeWidth={1}
+        strokeOpacity={0.1}
+      />
+    )
+  }
 
   const glowId = `glow-${id}`
   const gradId = `grad-${id}`
