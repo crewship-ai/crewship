@@ -58,7 +58,8 @@ type MCPServerInput struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
 	DisplayName string            `json:"display_name"`
-	Transport   string            `json:"transport"`   // "streamable-http" or "stdio"
+	Scope       string            `json:"scope,omitempty"` // "workspace" or "crew"
+	Transport   string            `json:"transport"`       // "streamable-http" or "stdio"
 	Endpoint    string            `json:"endpoint,omitempty"`
 	Command     string            `json:"command,omitempty"`
 	Args        []string          `json:"args,omitempty"`

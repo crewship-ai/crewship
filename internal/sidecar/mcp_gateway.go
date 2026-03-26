@@ -22,11 +22,12 @@ type MCPGateway struct {
 	tools      map[string][]MCPTool  // cached tool catalog per server
 	ipc        *IPCConfig
 	logger     *slog.Logger
-	auditCh    chan auditEntry // bounded audit log channel
-	auditHTTP  *http.Client   // dedicated client for audit calls
-	auditDone  chan struct{}   // closed when audit worker exits
-	shutdownCh chan struct{}   // closed on shutdown to prevent send-to-closed-channel panic
-	closeOnce  sync.Once
+	auditCh      chan auditEntry // bounded audit log channel
+	auditHTTP    *http.Client   // dedicated client for audit calls
+	auditBaseURL string         // base URL for audit HTTP calls
+	auditDone    chan struct{}   // closed when audit worker exits
+	shutdownCh   chan struct{}   // closed on shutdown to prevent send-to-closed-channel panic
+	closeOnce    sync.Once
 }
 
 type auditEntry struct {
@@ -52,6 +53,7 @@ type mcpClient struct {
 	mu          sync.Mutex
 	serverID    string
 	serverName  string
+	serverScope string
 	displayName string
 	transport   string
 	endpoint    string
@@ -145,17 +147,22 @@ type toolContent struct {
 
 // NewMCPGateway creates a new MCP gateway with the given server configurations.
 func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger) *MCPGateway {
-	// Audit HTTP client uses TCP to crewshipd (IPC base URL is typically http://host:port)
-	// If IPC uses Unix socket, override transport.
+	// Audit HTTP client uses TCP to crewshipd by default.
+	// If IPC BaseURL is a Unix socket path, use UDS transport.
 	auditHTTP := &http.Client{Timeout: 5 * time.Second}
+	auditBaseURL := ""
 	if ipc != nil && ipc.BaseURL != "" {
-		// Check if BaseURL points to a Unix socket path
-		if len(ipc.BaseURL) > 0 && ipc.BaseURL[0] == '/' {
+		if ipc.BaseURL[0] == '/' {
+			// Unix socket: use placeholder HTTP host, dial the socket
+			socketPath := ipc.BaseURL
+			auditBaseURL = "http://localhost"
 			auditHTTP.Transport = &http.Transport{
 				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-					return (&net.Dialer{}).DialContext(ctx, "unix", ipc.BaseURL)
+					return (&net.Dialer{}).DialContext(ctx, "unix", socketPath)
 				},
 			}
+		} else {
+			auditBaseURL = ipc.BaseURL
 		}
 	}
 
@@ -164,10 +171,11 @@ func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger
 		tools:      make(map[string][]MCPTool),
 		ipc:        ipc,
 		logger:     logger,
-		auditCh:    make(chan auditEntry, 64),
-		auditHTTP:  auditHTTP,
-		auditDone:  make(chan struct{}),
-		shutdownCh: make(chan struct{}),
+		auditCh:      make(chan auditEntry, 64),
+		auditHTTP:    auditHTTP,
+		auditBaseURL: auditBaseURL,
+		auditDone:    make(chan struct{}),
+		shutdownCh:   make(chan struct{}),
 	}
 	// Start single audit worker goroutine (bounded)
 	go g.auditWorker()
@@ -181,9 +189,14 @@ func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger
 			logger.Warn("MCP server has no endpoint, skipping", "name", s.Name)
 			continue
 		}
+		scope := s.Scope
+		if scope == "" {
+			scope = "workspace"
+		}
 		g.clients[s.Name] = &mcpClient{
 			serverID:    s.ID,
 			serverName:  s.Name,
+			serverScope: scope,
 			displayName: s.DisplayName,
 			transport:   s.Transport,
 			endpoint:    s.Endpoint,
@@ -300,7 +313,7 @@ func (g *MCPGateway) CallTool(ctx context.Context, serverName, toolName string, 
 		default:
 			select {
 			case g.auditCh <- auditEntry{
-				serverID: client.serverID, serverScope: "workspace", serverName: serverName,
+				serverID: client.serverID, serverScope: client.serverScope, serverName: serverName,
 				toolName: toolName, durationMS: duration.Milliseconds(), status: status, errMsg: errMsg,
 			}:
 			default:
@@ -399,8 +412,11 @@ func (c *mcpClient) initialize(ctx context.Context) error {
 	httpReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "application/json, text/event-stream")
-	if c.sessionID != "" {
-		httpReq.Header.Set("Mcp-Session-Id", c.sessionID)
+	c.mu.Lock()
+	sid := c.sessionID
+	c.mu.Unlock()
+	if sid != "" {
+		httpReq.Header.Set("Mcp-Session-Id", sid)
 	}
 	c.injectCredential(httpReq)
 	notifResp, err := c.httpClient.Do(httpReq)
@@ -576,7 +592,7 @@ func (g *MCPGateway) auditWorker() {
 }
 
 func (g *MCPGateway) sendAuditEntry(entry auditEntry) {
-	if g.ipc == nil || g.ipc.BaseURL == "" {
+	if g.ipc == nil || g.auditBaseURL == "" {
 		return
 	}
 
@@ -596,7 +612,7 @@ func (g *MCPGateway) sendAuditEntry(entry auditEntry) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	url := g.ipc.BaseURL + "/api/v1/internal/mcp-tool-calls"
+	url := g.auditBaseURL + "/api/v1/internal/mcp-tool-calls"
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if req != nil {
 		req.Header.Set("Content-Type", "application/json")

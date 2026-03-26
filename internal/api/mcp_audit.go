@@ -34,11 +34,15 @@ type mcpToolCallEntry struct {
 // List returns MCP tool call audit records filtered by workspace and optional agent/date.
 func (h *MCPAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	if workspaceID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id is required"})
+		return
+	}
 
 	query := `SELECT id, workspace_id, crew_id, agent_id, mcp_server_id, mcp_server_scope,
 		tool_name, input_hash, status, duration_ms, error_message, created_at
 		FROM mcp_tool_calls WHERE workspace_id = ?`
-	args := []interface{}{workspaceID}
+	args := []any{workspaceID}
 
 	if agentID := r.URL.Query().Get("agent_id"); agentID != "" {
 		query += " AND agent_id = ?"
