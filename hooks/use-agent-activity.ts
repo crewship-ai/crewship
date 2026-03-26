@@ -41,7 +41,8 @@ export function useAgentActivity(): Map<string, string> {
   }, [])
 
   const handleLog = useCallback((event: { payload: Record<string, unknown> }) => {
-    const agentSlug = event.payload.agent_slug as string | undefined
+    // Backend sends "agent" field (not "agent_slug") containing the slug
+    const agentSlug = (event.payload.agent ?? event.payload.agent_slug) as string | undefined
     const content = event.payload.content as string | undefined
     if (!agentSlug || !content) return
 

@@ -92,16 +92,21 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = []
   const edges: Edge[] = []
 
-  // Build agent slug → crew id map
+  // Build agent slug → crew id map (crew response has no id, so resolve via slug)
   const agentCrewMap = new Map<string, string>()
   const crewById = new Map<string, CrewSummary>()
-  for (const agent of agents) {
-    if (agent.slug && agent.crew?.id) {
-      agentCrewMap.set(agent.slug, agent.crew.id)
-    }
-  }
+  const crewBySlug = new Map<string, CrewSummary>()
   for (const crew of crews) {
     crewById.set(crew.id, crew)
+    crewBySlug.set(crew.slug, crew)
+  }
+  for (const agent of agents) {
+    if (agent.slug && agent.crew?.slug) {
+      const crew = crewBySlug.get(agent.crew.slug)
+      if (crew) agentCrewMap.set(agent.slug, crew.id)
+    } else if (agent.slug && agent.crew_id) {
+      agentCrewMap.set(agent.slug, agent.crew_id)
+    }
   }
 
   // Select active or recent missions

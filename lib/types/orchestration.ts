@@ -12,7 +12,8 @@ export interface AgentSummary {
   name: string
   slug: string
   crew_id: string | null
-  crew: { id: string; name: string; slug: string; color: string | null } | null
+  // Backend returns crew without id — only name, slug, color, avatar_style
+  crew: { name: string; slug: string; color: string | null } | null
 }
 
 export interface CrewConnection {
