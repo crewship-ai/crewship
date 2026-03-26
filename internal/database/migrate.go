@@ -90,6 +90,7 @@ var migrations = []migration{
 	{29, "add_mcp_gateway", migrationAddMCPGateway},
 	{30, "fix_mcp_gateway_constraints", migrationFixMCPGatewayConstraints},
 	{31, "add_mcp_binding_env_var", migrationAddMCPBindingEnvVar},
+	{32, "add_oauth_credentials", migrationAddOAuthCredentials},
 }
 
 const migrationAddKeeperObservability = `
@@ -1034,4 +1035,24 @@ END;
 const migrationAddMCPBindingEnvVar = `
 -- Env var name for stdio MCP credential injection (e.g. GITHUB_TOKEN, SLACK_TOKEN)
 ALTER TABLE agent_mcp_bindings ADD COLUMN env_var_name TEXT;
+`
+
+const migrationAddOAuthCredentials = `
+-- OAuth 2.0 credential fields (extends existing credentials table)
+ALTER TABLE credentials ADD COLUMN oauth_client_id TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_client_secret_enc TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_auth_url TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_token_url TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_scopes TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_refresh_token_enc TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_token_expires_at TEXT;
+
+-- OAuth state tokens for CSRF protection during auth flow
+CREATE TABLE IF NOT EXISTS oauth_states (
+	state TEXT PRIMARY KEY,
+	credential_id TEXT NOT NULL,
+	workspace_id TEXT NOT NULL,
+	redirect_uri TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `

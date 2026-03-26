@@ -420,6 +420,15 @@ func (r *Router) registerRoutes() {
 	mcpAudit := NewMCPAuditHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/mcp-tool-calls", authed(wsCtx(http.HandlerFunc(mcpAudit.List))))
 
+	// OAuth flow (auth required for initiate, callback is unauthenticated — uses state token)
+	oauth := NewOAuthHandler(r.db, r.logger)
+	if r.hub != nil {
+		oauth.SetHub(r.hub)
+	}
+	r.mux.Handle("GET /api/v1/oauth/providers", authed(http.HandlerFunc(oauth.ListProviders)))
+	r.mux.Handle("POST /api/v1/oauth/initiate", authed(wsCtx(http.HandlerFunc(oauth.Initiate))))
+	r.mux.HandleFunc("GET /api/v1/oauth/callback", oauth.Callback) // No auth — uses state token
+
 	// Captain (require auth + workspace context)
 	captain := NewCaptainHandler(r.db, r.logger)
 	if r.captainLLM != nil {

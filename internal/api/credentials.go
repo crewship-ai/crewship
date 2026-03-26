@@ -179,7 +179,13 @@ type createCredentialRequest struct {
 	AccountEmail  *string  `json:"account_email"`
 	RefreshToken  *string  `json:"refresh_token"`
 	TokenExpires  *string  `json:"token_expires_at"`
-	SecurityLevel *int    `json:"security_level"`
+	SecurityLevel *int     `json:"security_level"`
+	// OAuth 2.0 fields (used when type = OAUTH2)
+	OAuthClientID     *string `json:"oauth_client_id"`
+	OAuthClientSecret *string `json:"oauth_client_secret"`
+	OAuthAuthURL      *string `json:"oauth_auth_url"`
+	OAuthTokenURL     *string `json:"oauth_token_url"`
+	OAuthScopes       *string `json:"oauth_scopes"`
 }
 
 func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -202,9 +208,12 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
-	if req.Value == "" {
+	if req.Value == "" && req.Type != "OAUTH2" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "value is required"})
 		return
+	}
+	if req.Value == "" {
+		req.Value = "pending_oauth" // placeholder until OAuth flow completes
 	}
 
 	if req.Type == "" {
@@ -295,6 +304,26 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("insert credential", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
+	}
+
+	// Store OAuth fields if type is OAUTH2
+	if req.Type == "OAUTH2" && req.OAuthClientID != nil {
+		var encClientSecret string
+		if req.OAuthClientSecret != nil && *req.OAuthClientSecret != "" {
+			encClientSecret, _ = encryption.Encrypt(*req.OAuthClientSecret)
+		}
+		if _, err := tx.ExecContext(r.Context(), `
+			UPDATE credentials SET oauth_client_id = ?, oauth_client_secret_enc = ?,
+				oauth_auth_url = ?, oauth_token_url = ?, oauth_scopes = ?
+			WHERE id = ?`,
+			req.OAuthClientID, encClientSecret,
+			req.OAuthAuthURL, req.OAuthTokenURL, req.OAuthScopes,
+			credID); err != nil {
+			tx.Rollback()
+			h.logger.Error("store OAuth fields", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
 	}
 
 	if err := h.setCrewIDs(r.Context(), tx, credID, crewIDs); err != nil {
