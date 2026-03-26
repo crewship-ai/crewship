@@ -53,9 +53,9 @@ func BuildCLICommand(req AgentRunRequest) []string {
 		if req.ToolProfile == "MINIMAL" {
 			cmd = append(cmd, "--tools", "Read,Search,Grep")
 		}
-		// Inject MCP server configuration so Claude Code discovers external tools
-		if mcpJSON, err := buildMCPConfig(req.MCPServers); err == nil && mcpJSON != "" {
-			cmd = append(cmd, "--mcp-config", mcpJSON)
+		// Inject MCP server configuration via file (Claude Code reads --mcp-config from files)
+		if len(req.MCPServers) > 0 {
+			cmd = append(cmd, "--mcp-config", fmt.Sprintf("/crew/agents/%s/.mcp.json", req.AgentSlug))
 		}
 		// Use -- separator to prevent variadic flags (--tools) from consuming the user message
 		cmd = append(cmd, "--", req.UserMessage)
@@ -102,8 +102,8 @@ func buildMCPConfig(servers []MCPServerConfig) (string, error) {
 				continue
 			}
 			entry := map[string]interface{}{
-				"transport": "http",
-				"url":       s.Endpoint,
+				"type": "http",
+				"url":  s.Endpoint,
 			}
 			if s.Credential != nil && s.Credential.PlainValue != "" {
 				headers := map[string]string{}
@@ -127,6 +127,7 @@ func buildMCPConfig(servers []MCPServerConfig) (string, error) {
 				continue
 			}
 			entry := map[string]interface{}{
+				"type":    "stdio",
 				"command": s.Command,
 			}
 			if len(s.Args) > 0 {
@@ -153,7 +154,9 @@ func buildMCPConfig(servers []MCPServerConfig) (string, error) {
 	if len(mcpConfig) == 0 {
 		return "", nil
 	}
-	b, err := json.Marshal(mcpConfig)
+	// Claude Code expects {"mcpServers": {...}} wrapper
+	wrapper := map[string]interface{}{"mcpServers": mcpConfig}
+	b, err := json.Marshal(wrapper)
 	if err != nil {
 		return "", fmt.Errorf("marshal MCP config: %w", err)
 	}
@@ -710,6 +713,50 @@ chmod 600 %s/.claude.json`, homeDir, homeDir, homeDir)
 	result.Reader.Close()
 
 	logger.Debug("claude config injected (no credentials on disk)", "container_id", containerID[:min(12, len(containerID))])
+	return nil
+}
+
+// setupMCPConfig writes the MCP server configuration file into the container
+// so Claude Code can discover external tools via --mcp-config flag.
+func setupMCPConfig(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	agentSlug string,
+	servers []MCPServerConfig,
+	logger *slog.Logger,
+) error {
+	if len(servers) == 0 {
+		return nil
+	}
+	mcpJSON, err := buildMCPConfig(servers)
+	if err != nil {
+		return fmt.Errorf("build MCP config: %w", err)
+	}
+	if mcpJSON == "" {
+		return nil
+	}
+
+	homeDir := fmt.Sprintf("/crew/agents/%s", agentSlug)
+	// Write config file (SECURITY: may contain decrypted tokens, file is 600 and owned by agent)
+	script := fmt.Sprintf(`cat > %s/.mcp.json << 'MCPEOF'
+%s
+MCPEOF
+chmod 600 %s/.mcp.json`, homeDir, mcpJSON, homeDir)
+
+	cfg := provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", script},
+		User:        "1001:1001",
+	}
+	result, err := container.Exec(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("write MCP config: %w", err)
+	}
+	io.Copy(io.Discard, result.Reader)
+	result.Reader.Close()
+
+	logger.Debug("MCP config injected", "container_id", containerID[:min(12, len(containerID))], "servers", len(servers))
 	return nil
 }
 

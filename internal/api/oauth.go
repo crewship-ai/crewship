@@ -184,11 +184,13 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decrypt client secret
+	// Decrypt client secret (fallback to raw value if not encrypted)
 	clientSecret := ""
 	if clientSecretEnc != "" {
 		if decrypted, err := encryption.Decrypt(clientSecretEnc); err == nil {
 			clientSecret = decrypted
+		} else {
+			clientSecret = clientSecretEnc // fallback for unencrypted values
 		}
 	}
 
@@ -334,6 +336,8 @@ func refreshExpiringTokens(db *sql.DB, hub *ws.Hub, logger *slog.Logger) {
 		if clientSecretEnc != "" {
 			if d, err := encryption.Decrypt(clientSecretEnc); err == nil {
 				clientSecret = d
+			} else {
+				clientSecret = clientSecretEnc
 			}
 		}
 		refreshToken := ""

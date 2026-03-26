@@ -498,6 +498,11 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
 	}
 
+	// Write MCP server configuration file (if integrations are assigned)
+	if err := setupMCPConfig(ctx, o.container, req.ContainerID, req.AgentSlug, req.MCPServers, o.logger); err != nil {
+		o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID)
+	}
+
 	// Write CLI-specific system prompt files (e.g. AGENTS.md for OpenCode)
 	if err := setupSystemPromptFiles(ctx, o.container, req.ContainerID, req, workDir, o.logger); err != nil {
 		o.logger.Warn("failed to write system prompt files", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)

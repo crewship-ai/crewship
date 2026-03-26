@@ -648,11 +648,14 @@ func TestBuildMCPConfig_HTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.Contains(result, `"mcpServers"`) {
+		t.Error("missing mcpServers wrapper")
+	}
 	if !strings.Contains(result, `"sentry"`) {
 		t.Error("missing sentry key")
 	}
-	if !strings.Contains(result, `"transport":"http"`) {
-		t.Error("missing transport")
+	if !strings.Contains(result, `"type":"http"`) {
+		t.Error("missing type")
 	}
 	if !strings.Contains(result, `"Bearer token123"`) {
 		t.Error("missing bearer credential in headers")
@@ -714,6 +717,7 @@ func TestBuildMCPConfig_APIKey(t *testing.T) {
 func TestBuildCLICommand_WithMCP(t *testing.T) {
 	req := AgentRunRequest{
 		CLIAdapter:  "CLAUDE_CODE",
+		AgentSlug:   "test-agent",
 		UserMessage: "hello",
 		MCPServers: []MCPServerConfig{
 			{Name: "test", Transport: "http", Endpoint: "https://example.com/mcp"},
@@ -724,8 +728,8 @@ func TestBuildCLICommand_WithMCP(t *testing.T) {
 	for i, arg := range cmd {
 		if arg == "--mcp-config" && i+1 < len(cmd) {
 			found = true
-			if !strings.Contains(cmd[i+1], `"test"`) {
-				t.Errorf("mcp config missing server name: %s", cmd[i+1])
+			if !strings.Contains(cmd[i+1], ".mcp.json") {
+				t.Errorf("expected .mcp.json file path, got: %s", cmd[i+1])
 			}
 		}
 	}

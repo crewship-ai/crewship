@@ -729,6 +729,8 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		Transport   string `json:"transport"`
 		Endpoint    *string `json:"endpoint,omitempty"`
 		Command     *string `json:"command,omitempty"`
+		Args        []string `json:"args,omitempty"`
+		Env         map[string]string `json:"env,omitempty"`
 		CredToken    string `json:"cred_token,omitempty"`
 		CredType     string `json:"cred_type,omitempty"`
 		CredHeader   string `json:"cred_header,omitempty"`
@@ -736,18 +738,18 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 	}
 	type mcpServerRow struct {
 		id, name, displayName, transport string
-		endpoint, command                *string
+		endpoint, command, argsJSON, envJSON *string
 	}
 	var mcpServers []mcpServerEntry
 	{
 		// Step 1: Workspace MCP servers (keyed by name)
 		merged := make(map[string]*mcpServerRow)
 		if wsRows, err := h.db.QueryContext(r.Context(), `
-			SELECT id, name, display_name, transport, endpoint, command
+			SELECT id, name, display_name, transport, endpoint, command, args_json, env_json
 			FROM workspace_mcp_servers WHERE workspace_id = ? AND enabled = 1 AND deleted_at IS NULL`, wsID); err == nil {
 			for wsRows.Next() {
 				var s mcpServerRow
-				if err := wsRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command); err != nil {
+				if err := wsRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command, &s.argsJSON, &s.envJSON); err != nil {
 					continue
 				}
 				merged[s.name] = &s
@@ -758,13 +760,13 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		// Step 2: Crew MCP servers override workspace by name
 		if crewID.Valid {
 			if crewRows, err := h.db.QueryContext(r.Context(), `
-				SELECT cs.id, cs.name, cs.display_name, cs.transport, cs.endpoint, cs.command
+				SELECT cs.id, cs.name, cs.display_name, cs.transport, cs.endpoint, cs.command, cs.args_json, cs.env_json
 				FROM crew_mcp_servers cs
 				JOIN crews c ON c.id = cs.crew_id AND c.deleted_at IS NULL
 				WHERE cs.crew_id = ? AND cs.enabled = 1 AND cs.deleted_at IS NULL`, crewID.String); err == nil {
 				for crewRows.Next() {
 					var s mcpServerRow
-					if err := crewRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command); err != nil {
+					if err := crewRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command, &s.argsJSON, &s.envJSON); err != nil {
 						continue
 					}
 					merged[s.name] = &s
@@ -832,6 +834,14 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 			entry := mcpServerEntry{
 				ID: srv.id, Name: srv.name, DisplayName: srv.displayName,
 				Transport: srv.transport, Endpoint: srv.endpoint, Command: srv.command,
+			}
+			// Parse args_json
+			if srv.argsJSON != nil && *srv.argsJSON != "" {
+				json.Unmarshal([]byte(*srv.argsJSON), &entry.Args)
+			}
+			// Parse env_json
+			if srv.envJSON != nil && *srv.envJSON != "" {
+				json.Unmarshal([]byte(*srv.envJSON), &entry.Env)
 			}
 			if b, ok := agentBindings[srv.id]; ok {
 				if !b.enabled {
