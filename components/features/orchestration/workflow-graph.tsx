@@ -74,6 +74,17 @@ function pickEdgeColor(sourceId: string, targetId: string): string {
   return edgeColorPalette[Math.abs(h) % edgeColorPalette.length]
 }
 
+// Safe parser for depends_on — handles null, non-array, malformed JSON
+function parseDependsOn(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 // -------------------------------------------------------------------
 // Build graph with crew group nodes (sub-flows)
 // -------------------------------------------------------------------
@@ -205,11 +216,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
     const sortedTasks = [...tasks].sort((a, b) => a.task.task_order - b.task.task_order)
     const deps = new Map<string, string[]>()
     for (const { task } of sortedTasks) {
-      try {
-        deps.set(task.id, JSON.parse(task.depends_on || "[]"))
-      } catch {
-        deps.set(task.id, [])
-      }
+      deps.set(task.id, parseDependsOn(task.depends_on))
     }
 
     // Only keep deps that are within this crew's tasks
@@ -331,12 +338,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
   for (const mission of activeMissions) {
     const tasks = mission.tasks || []
     for (const task of tasks) {
-      let taskDeps: string[] = []
-      try {
-        taskDeps = JSON.parse(task.depends_on || "[]")
-      } catch {
-        continue
-      }
+      const taskDeps = parseDependsOn(task.depends_on)
       const taskCrewId = (task.agent_slug && agentCrewMap.get(task.agent_slug)) || mission.crew_id
       for (const depId of taskDeps) {
         const depTask = tasks.find((t) => t.id === depId)
@@ -454,11 +456,7 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
     const tasksByOrder = [...tasks].sort((a, b) => a.task_order - b.task_order)
     const deps = new Map<string, string[]>()
     for (const task of tasksByOrder) {
-      try {
-        deps.set(task.id, JSON.parse(task.depends_on || "[]"))
-      } catch {
-        deps.set(task.id, [])
-      }
+      deps.set(task.id, parseDependsOn(task.depends_on))
     }
 
     const levels = new Map<string, number>()
