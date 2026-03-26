@@ -74,6 +74,39 @@ func TestBuildLeadContext(t *testing.T) {
 			wantContains:    []string{"Bob", "bob"},
 			wantMemberLines: 1,
 		},
+		{
+			name: "members with integrations",
+			members: []CrewMember{
+				{
+					Name: "Pepa", Slug: "pepa", RoleTitle: "Backend Dev",
+					Integrations: []MemberIntegration{
+						{Name: "Gmail", ServerName: "gmail", Tools: []string{"gmail_send", "gmail_search"}},
+						{Name: "GDrive", ServerName: "gdrive"},
+					},
+				},
+				{
+					Name: "Franta", Slug: "franta", RoleTitle: "Frontend Dev",
+					Integrations: []MemberIntegration{
+						{Name: "Gmail", ServerName: "gmail", Tools: []string{"gmail_send"}},
+					},
+				},
+			},
+			wantContains: []string{
+				"Integrations: Gmail (gmail_send, gmail_search), GDrive",
+				"Integrations: Gmail (gmail_send)",
+				"Pepa", "Franta",
+			},
+			wantMemberLines: 2,
+		},
+		{
+			name: "member without integrations shows no Integrations line",
+			members: []CrewMember{
+				{Name: "Solo", Slug: "solo", RoleTitle: "Dev"},
+			},
+			wantContains:    []string{"Solo"},
+			wantNotContain:  []string{"Integrations:"},
+			wantMemberLines: 1,
+		},
 	}
 
 	for _, tt := range tests {

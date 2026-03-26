@@ -59,6 +59,21 @@ type chatResolveResponse struct {
 	MemoryMB       int                     `json:"memory_mb"`
 	CPUs           float64                 `json:"cpus"`
 	TTLHours       int                     `json:"ttl_hours"`
+	MCPServers     []mcpServerResponse     `json:"mcp_servers,omitempty"`
+}
+
+type mcpServerResponse struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	DisplayName string            `json:"display_name"`
+	Transport   string            `json:"transport"`
+	Endpoint    string            `json:"endpoint,omitempty"`
+	Command     string            `json:"command,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	CredToken   string            `json:"cred_token,omitempty"`
+	CredType    string            `json:"cred_type,omitempty"`
+	CredHeader  string            `json:"cred_header,omitempty"`
 }
 
 type crewInfoResponse struct {
@@ -75,14 +90,21 @@ type missionSummaryResponse struct {
 	Status   string `json:"status"`
 }
 
+type memberIntegrationResponse struct {
+	Name       string   `json:"name"`
+	ServerName string   `json:"server_name"`
+	Tools      []string `json:"tools"`
+}
+
 type crewMemberResponse struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Slug        string `json:"slug"`
-	RoleTitle   string `json:"role_title"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
-	ChatID      string `json:"chat_id,omitempty"`
+	ID           string                       `json:"id"`
+	Name         string                       `json:"name"`
+	Slug         string                       `json:"slug"`
+	RoleTitle    string                       `json:"role_title"`
+	Description  string                       `json:"description"`
+	Status       string                       `json:"status"`
+	ChatID       string                       `json:"chat_id,omitempty"`
+	Integrations []memberIntegrationResponse  `json:"integrations,omitempty"`
 }
 
 type credentialResponse struct {
@@ -310,7 +332,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 
 	var crewMembers []orchestrator.CrewMember
 	for _, m := range data.CrewMembers {
-		crewMembers = append(crewMembers, orchestrator.CrewMember{
+		cm := orchestrator.CrewMember{
 			ID:          m.ID,
 			Name:        m.Name,
 			Slug:        m.Slug,
@@ -318,7 +340,15 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 			Description: m.Description,
 			Status:      m.Status,
 			ChatID:      m.ChatID,
-		})
+		}
+		for _, ig := range m.Integrations {
+			cm.Integrations = append(cm.Integrations, orchestrator.MemberIntegration{
+				Name:       ig.Name,
+				ServerName: ig.ServerName,
+				Tools:      ig.Tools,
+			})
+		}
+		crewMembers = append(crewMembers, cm)
 	}
 
 	networkMode := data.NetworkMode
@@ -339,7 +369,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 			Slug: c.Slug,
 		}
 		for _, m := range c.Members {
-			ci.Members = append(ci.Members, orchestrator.CrewMember{
+			cm := orchestrator.CrewMember{
 				ID:          m.ID,
 				Name:        m.Name,
 				Slug:        m.Slug,
@@ -347,7 +377,15 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 				Description: m.Description,
 				Status:      m.Status,
 				ChatID:      m.ChatID,
-			})
+			}
+			for _, ig := range m.Integrations {
+				cm.Integrations = append(cm.Integrations, orchestrator.MemberIntegration{
+					Name:       ig.Name,
+					ServerName: ig.ServerName,
+					Tools:      ig.Tools,
+				})
+			}
+			ci.Members = append(ci.Members, cm)
 		}
 		allCrews = append(allCrews, ci)
 	}
@@ -360,6 +398,23 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 			Title:    m.Title,
 			Status:   m.Status,
 		})
+	}
+
+	var mcpServers []orchestrator.MCPServerConfig
+	for _, s := range data.MCPServers {
+		cfg := orchestrator.MCPServerConfig{
+			ID: s.ID, Name: s.Name, DisplayName: s.DisplayName,
+			Transport: s.Transport, Endpoint: s.Endpoint,
+			Command: s.Command, Args: s.Args, Env: s.Env,
+		}
+		if s.CredToken != "" {
+			cfg.Credential = &orchestrator.MCPCredential{
+				PlainValue: s.CredToken,
+				Type:       s.CredType,
+				Header:     s.CredHeader,
+			}
+		}
+		mcpServers = append(mcpServers, cfg)
 	}
 
 	return &ChatInfo{
@@ -385,5 +440,6 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		MemoryMB:       data.MemoryMB,
 		CPUs:           data.CPUs,
 		TTLHours:       data.TTLHours,
+		MCPServers:     mcpServers,
 	}, nil
 }

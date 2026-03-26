@@ -526,14 +526,20 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Query crew members for all agents in a crew (enables peer communication)
+	type memberIntegrationEntry struct {
+		Name       string   `json:"name"`
+		ServerName string   `json:"server_name"`
+		Tools      []string `json:"tools"`
+	}
 	type crewMemberEntry struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Slug        string `json:"slug"`
-		RoleTitle   string `json:"role_title"`
-		Description string `json:"description"`
-		Status      string `json:"status"`
-		ChatID      string `json:"chat_id,omitempty"`
+		ID           string                    `json:"id"`
+		Name         string                    `json:"name"`
+		Slug         string                    `json:"slug"`
+		RoleTitle    string                    `json:"role_title"`
+		Description  string                    `json:"description"`
+		Status       string                    `json:"status"`
+		ChatID       string                    `json:"chat_id,omitempty"`
+		Integrations []memberIntegrationEntry  `json:"integrations,omitempty"`
 	}
 	crewMembers := []crewMemberEntry{}
 	if crewID.Valid {
@@ -558,6 +564,43 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 			}
 			if err := memberRows.Err(); err != nil {
 				h.logger.Error("rows iteration (crew members)", "error", err)
+			}
+		}
+		// Enrich crew members with MCP integration info (single batch query)
+		if (roleStr == "LEAD" || roleStr == "COORDINATOR") && len(crewMembers) > 0 {
+			memberIDs := make([]string, len(crewMembers))
+			memberIdx := make(map[string]int, len(crewMembers))
+			placeholders := make([]string, len(crewMembers))
+			args := make([]interface{}, len(crewMembers))
+			for i, m := range crewMembers {
+				memberIDs[i] = m.ID
+				memberIdx[m.ID] = i
+				placeholders[i] = "?"
+				args[i] = m.ID
+			}
+			if igRows, err := h.db.QueryContext(r.Context(), `
+				SELECT b.agent_id,
+					COALESCE(CASE b.mcp_server_scope
+						WHEN 'workspace' THEN ws.display_name
+						WHEN 'crew' THEN cs.display_name END, ''),
+					COALESCE(CASE b.mcp_server_scope
+						WHEN 'workspace' THEN ws.name
+						WHEN 'crew' THEN cs.name END, '')
+				FROM agent_mcp_bindings b
+				LEFT JOIN workspace_mcp_servers ws ON b.mcp_server_id = ws.id AND b.mcp_server_scope = 'workspace'
+				LEFT JOIN crew_mcp_servers cs ON b.mcp_server_id = cs.id AND b.mcp_server_scope = 'crew'
+				WHERE b.agent_id IN (`+strings.Join(placeholders, ",")+`) AND b.enabled = 1`,
+				args...); err == nil {
+				for igRows.Next() {
+					var aid, displayName, serverName string
+					if igRows.Scan(&aid, &displayName, &serverName) == nil && serverName != "" {
+						if idx, ok := memberIdx[aid]; ok {
+							crewMembers[idx].Integrations = append(crewMembers[idx].Integrations,
+								memberIntegrationEntry{Name: displayName, ServerName: serverName})
+						}
+					}
+				}
+				igRows.Close()
 			}
 		}
 	}
@@ -680,6 +723,135 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		ttlHours = int(crewTTLHours.Int64)
 	}
 
+	// Resolve MCP integrations for this agent (workspace → crew → agent cascade)
+	type mcpServerEntry struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		DisplayName string `json:"display_name"`
+		Transport   string `json:"transport"`
+		Endpoint    *string `json:"endpoint,omitempty"`
+		Command     *string `json:"command,omitempty"`
+		CredToken   string `json:"cred_token,omitempty"`
+		CredType    string `json:"cred_type,omitempty"`
+		CredHeader  string `json:"cred_header,omitempty"`
+	}
+	type mcpServerRow struct {
+		id, name, displayName, transport string
+		endpoint, command                *string
+	}
+	var mcpServers []mcpServerEntry
+	{
+		// Step 1: Workspace MCP servers (keyed by name)
+		merged := make(map[string]*mcpServerRow)
+		if wsRows, err := h.db.QueryContext(r.Context(), `
+			SELECT id, name, display_name, transport, endpoint, command
+			FROM workspace_mcp_servers WHERE workspace_id = ? AND enabled = 1 AND deleted_at IS NULL`, wsID); err == nil {
+			for wsRows.Next() {
+				var s mcpServerRow
+				if err := wsRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command); err != nil {
+					continue
+				}
+				merged[s.name] = &s
+			}
+			wsRows.Close()
+		}
+
+		// Step 2: Crew MCP servers override workspace by name
+		if crewID.Valid {
+			if crewRows, err := h.db.QueryContext(r.Context(), `
+				SELECT cs.id, cs.name, cs.display_name, cs.transport, cs.endpoint, cs.command
+				FROM crew_mcp_servers cs
+				JOIN crews c ON c.id = cs.crew_id AND c.deleted_at IS NULL
+				WHERE cs.crew_id = ? AND cs.enabled = 1 AND cs.deleted_at IS NULL`, crewID.String); err == nil {
+				for crewRows.Next() {
+					var s mcpServerRow
+					if err := crewRows.Scan(&s.id, &s.name, &s.displayName, &s.transport, &s.endpoint, &s.command); err != nil {
+						continue
+					}
+					merged[s.name] = &s
+				}
+				crewRows.Close()
+			}
+		}
+
+		// Step 3: Agent bindings (opt-out + credential assignment)
+		type bindInfo struct {
+			credID     *string
+			credType   string
+			credHeader string
+			enabled    bool
+		}
+		agentBindings := make(map[string]*bindInfo)
+		if bindRows, err := h.db.QueryContext(r.Context(), `
+			SELECT mcp_server_id, credential_id, enabled, COALESCE(cred_type, ''), COALESCE(cred_header, '')
+			FROM agent_mcp_bindings WHERE agent_id = ?`, agentID); err == nil {
+			for bindRows.Next() {
+				var sid, ct, ch string
+				var credID *string
+				var enabled int
+				if err := bindRows.Scan(&sid, &credID, &enabled, &ct, &ch); err != nil {
+					continue
+				}
+				agentBindings[sid] = &bindInfo{credID: credID, enabled: enabled == 1, credType: ct, credHeader: ch}
+			}
+			bindRows.Close()
+		}
+
+		// Step 4: Batch credential lookup (avoid N+1)
+		credIDs := make([]string, 0)
+		for _, srv := range merged {
+			if b, ok := agentBindings[srv.id]; ok && b.enabled && b.credID != nil && *b.credID != "" {
+				credIDs = append(credIDs, *b.credID)
+			}
+		}
+		credTokens := make(map[string]string) // credID → plaintext
+		if len(credIDs) > 0 {
+			placeholders := make([]string, len(credIDs))
+			args := make([]interface{}, len(credIDs))
+			for i, id := range credIDs {
+				placeholders[i] = "?"
+				args[i] = id
+			}
+			if credRows, err := h.db.QueryContext(r.Context(),
+				"SELECT id, encrypted_value FROM credentials WHERE id IN ("+strings.Join(placeholders, ",")+") AND deleted_at IS NULL",
+				args...); err == nil {
+				for credRows.Next() {
+					var cid, encVal string
+					if credRows.Scan(&cid, &encVal) == nil {
+						if plain, err := encryption.Decrypt(encVal); err == nil {
+							credTokens[cid] = plain
+						}
+					}
+				}
+				credRows.Close()
+			}
+		}
+
+		// Step 5: Build result entries
+		for _, srv := range merged {
+			entry := mcpServerEntry{
+				ID: srv.id, Name: srv.name, DisplayName: srv.displayName,
+				Transport: srv.transport, Endpoint: srv.endpoint, Command: srv.command,
+			}
+			if b, ok := agentBindings[srv.id]; ok {
+				if !b.enabled {
+					continue // agent opted out
+				}
+				if b.credID != nil && *b.credID != "" {
+					if token, ok := credTokens[*b.credID]; ok {
+						entry.CredToken = token
+						entry.CredType = b.credType
+						entry.CredHeader = b.credHeader
+						if entry.CredType == "" {
+							entry.CredType = "bearer"
+						}
+					}
+				}
+			}
+			mcpServers = append(mcpServers, entry)
+		}
+	}
+
 	resp := map[string]interface{}{
 		"agent_id":        agentID,
 		"agent_slug":      agentSlug,
@@ -701,6 +873,7 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		"memory_mb":       memoryMB,
 		"cpus":            cpus,
 		"ttl_hours":       ttlHours,
+		"mcp_servers":     mcpServers,
 	}
 	if len(allCrews) > 0 {
 		resp["all_crews"] = allCrews
@@ -1272,4 +1445,41 @@ func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Req
 		result = append(result, c)
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// RecordMCPToolCall records an MCP tool call audit entry from the sidecar gateway.
+func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		WorkspaceID   string `json:"workspace_id"`
+		AgentID       string `json:"agent_id"`
+		CrewID        string `json:"crew_id"`
+		MCPServerName string `json:"mcp_server_name"`
+		ToolName      string `json:"tool_name"`
+		Status        string `json:"status"`
+		DurationMS    int64  `json:"duration_ms"`
+		ErrorMessage  string `json:"error_message"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
+		return
+	}
+	if body.WorkspaceID == "" || body.AgentID == "" || body.ToolName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id, agent_id, and tool_name are required"})
+		return
+	}
+
+	id := generateCUID()
+	_, err := h.db.ExecContext(r.Context(), `
+		INSERT INTO mcp_tool_calls (id, workspace_id, crew_id, agent_id, mcp_server_id,
+			mcp_server_scope, tool_name, status, duration_ms, error_message, created_at)
+		VALUES (?, ?, ?, ?, ?, 'workspace', ?, ?, ?, ?, datetime('now'))`,
+		id, body.WorkspaceID, body.CrewID, body.AgentID, body.MCPServerName,
+		body.ToolName, body.Status, body.DurationMS, body.ErrorMessage)
+	if err != nil {
+		h.logger.Error("record mcp tool call", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to record"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
