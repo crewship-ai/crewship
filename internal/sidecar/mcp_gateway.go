@@ -554,6 +554,8 @@ func (c *mcpClient) injectCredential(req *http.Request) {
 		}
 		req.Header.Set(header, c.credential.Token)
 	case "basic":
+		// Token is used as the password with an empty username.
+		// Future: add Username field to MCPCredInput for user:pass servers.
 		req.SetBasicAuth("", c.credential.Token)
 	}
 }
