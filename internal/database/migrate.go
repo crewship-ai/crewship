@@ -89,6 +89,7 @@ var migrations = []migration{
 	{28, "add_task_scaling_and_handoff", migrationAddTaskScalingAndHandoff},
 	{29, "add_mcp_gateway", migrationAddMCPGateway},
 	{30, "fix_mcp_gateway_constraints", migrationFixMCPGatewayConstraints},
+	{31, "add_mcp_binding_env_var", migrationAddMCPBindingEnvVar},
 }
 
 const migrationAddKeeperObservability = `
@@ -1028,4 +1029,9 @@ BEGIN
 	   OR (NEW.mcp_server_scope = 'crew'
 		AND NOT EXISTS (SELECT 1 FROM crew_mcp_servers WHERE id = NEW.mcp_server_id AND deleted_at IS NULL));
 END;
+`
+
+const migrationAddMCPBindingEnvVar = `
+-- Env var name for stdio MCP credential injection (e.g. GITHUB_TOKEN, SLACK_TOKEN)
+ALTER TABLE agent_mcp_bindings ADD COLUMN env_var_name TEXT;
 `

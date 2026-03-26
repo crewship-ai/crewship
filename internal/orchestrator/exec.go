@@ -53,6 +53,10 @@ func BuildCLICommand(req AgentRunRequest) []string {
 		if req.ToolProfile == "MINIMAL" {
 			cmd = append(cmd, "--tools", "Read,Search,Grep")
 		}
+		// Inject MCP server configuration so Claude Code discovers external tools
+		if mcpJSON, err := buildMCPConfig(req.MCPServers); err == nil && mcpJSON != "" {
+			cmd = append(cmd, "--mcp-config", mcpJSON)
+		}
 		// Use -- separator to prevent variadic flags (--tools) from consuming the user message
 		cmd = append(cmd, "--", req.UserMessage)
 		return cmd
@@ -82,6 +86,78 @@ func BuildCLICommand(req AgentRunRequest) []string {
 	default:
 		return []string{"claude", "--print", req.UserMessage}
 	}
+}
+
+// buildMCPConfig converts resolved MCP server configs into Claude Code's --mcp-config JSON format.
+// Supports both HTTP (remote) and stdio (local npm/pip) MCP servers.
+func buildMCPConfig(servers []MCPServerConfig) (string, error) {
+	if len(servers) == 0 {
+		return "", nil
+	}
+	mcpConfig := make(map[string]map[string]interface{})
+	for _, s := range servers {
+		switch s.Transport {
+		case "streamable-http", "http":
+			if s.Endpoint == "" {
+				continue
+			}
+			entry := map[string]interface{}{
+				"transport": "http",
+				"url":       s.Endpoint,
+			}
+			if s.Credential != nil && s.Credential.PlainValue != "" {
+				headers := map[string]string{}
+				switch s.Credential.Type {
+				case "bearer":
+					headers["Authorization"] = "Bearer " + s.Credential.PlainValue
+				case "api_key":
+					header := s.Credential.Header
+					if header == "" {
+						header = "X-API-Key"
+					}
+					headers[header] = s.Credential.PlainValue
+				}
+				if len(headers) > 0 {
+					entry["headers"] = headers
+				}
+			}
+			mcpConfig[s.Name] = entry
+		case "stdio":
+			if s.Command == "" {
+				continue
+			}
+			entry := map[string]interface{}{
+				"command": s.Command,
+			}
+			if len(s.Args) > 0 {
+				entry["args"] = s.Args
+			}
+			env := make(map[string]string)
+			for k, v := range s.Env {
+				env[k] = v
+			}
+			// Inject credential as env var for stdio servers
+			if s.Credential != nil && s.Credential.PlainValue != "" {
+				envVar := s.Credential.Header // reuse Header field as env var name for stdio
+				if envVar == "" {
+					envVar = "MCP_TOKEN"
+				}
+				env[envVar] = s.Credential.PlainValue
+			}
+			if len(env) > 0 {
+				entry["env"] = env
+			}
+			mcpConfig[s.Name] = entry
+		}
+	}
+	if len(mcpConfig) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(mcpConfig)
+	if err != nil {
+		return "", fmt.Errorf("marshal MCP config: %w", err)
+	}
+	return string(b), nil
 }
 
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {

@@ -729,9 +729,10 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		Transport   string `json:"transport"`
 		Endpoint    *string `json:"endpoint,omitempty"`
 		Command     *string `json:"command,omitempty"`
-		CredToken   string `json:"cred_token,omitempty"`
-		CredType    string `json:"cred_type,omitempty"`
-		CredHeader  string `json:"cred_header,omitempty"`
+		CredToken    string `json:"cred_token,omitempty"`
+		CredType     string `json:"cred_type,omitempty"`
+		CredHeader   string `json:"cred_header,omitempty"`
+		EnvVarName   string `json:"env_var_name,omitempty"`
 	}
 	type mcpServerRow struct {
 		id, name, displayName, transport string
@@ -777,20 +778,21 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 			credID     *string
 			credType   string
 			credHeader string
+			envVarName string
 			enabled    bool
 		}
 		agentBindings := make(map[string]*bindInfo)
 		if bindRows, err := h.db.QueryContext(r.Context(), `
-			SELECT mcp_server_id, credential_id, enabled, COALESCE(cred_type, ''), COALESCE(cred_header, '')
+			SELECT mcp_server_id, credential_id, enabled, COALESCE(cred_type, ''), COALESCE(cred_header, ''), COALESCE(env_var_name, '')
 			FROM agent_mcp_bindings WHERE agent_id = ?`, agentID); err == nil {
 			for bindRows.Next() {
-				var sid, ct, ch string
+				var sid, ct, ch, evn string
 				var credID *string
 				var enabled int
-				if err := bindRows.Scan(&sid, &credID, &enabled, &ct, &ch); err != nil {
+				if err := bindRows.Scan(&sid, &credID, &enabled, &ct, &ch, &evn); err != nil {
 					continue
 				}
-				agentBindings[sid] = &bindInfo{credID: credID, enabled: enabled == 1, credType: ct, credHeader: ch}
+				agentBindings[sid] = &bindInfo{credID: credID, enabled: enabled == 1, credType: ct, credHeader: ch, envVarName: evn}
 			}
 			bindRows.Close()
 		}
@@ -835,6 +837,7 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 				if !b.enabled {
 					continue // agent opted out
 				}
+				entry.EnvVarName = b.envVarName
 				if b.credID != nil && *b.credID != "" {
 					if token, ok := credTokens[*b.credID]; ok {
 						entry.CredToken = token
