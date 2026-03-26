@@ -1,6 +1,6 @@
 "use client"
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react"
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import {
   ReactFlow,
   Background,
@@ -22,8 +22,11 @@ import "@xyflow/react/dist/style.css"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Workflow } from "lucide-react"
 import type { Mission, MissionTask } from "@/lib/types/mission"
+import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { AgentNode } from "./agent-node"
 import { AnimatedEdge } from "./animated-edge"
+import { CrewGroupNode } from "./crew-group-node"
+import { PermissionEdge, getPermissionMarkers } from "./permission-edge"
 
 export interface WorkflowGraphRef {
   focusActive: () => void
@@ -31,11 +34,20 @@ export interface WorkflowGraphRef {
 
 interface WorkflowGraphProps {
   missions: Mission[]
+  crews?: CrewSummary[]
+  agents?: AgentSummary[]
+  connections?: CrewConnection[]
   onTaskClick?: (task: MissionTask) => void
 }
 
-const nodeTypes: NodeTypes = { agent: AgentNode }
-const edgeTypes: EdgeTypes = { animated: AnimatedEdge }
+const nodeTypes: NodeTypes = {
+  agent: AgentNode,
+  crew: CrewGroupNode,
+}
+const edgeTypes: EdgeTypes = {
+  animated: AnimatedEdge,
+  permission: PermissionEdge,
+}
 
 const statusColors: Record<string, string> = {
   COMPLETED: "#22c55e",
@@ -49,16 +61,9 @@ const statusColors: Record<string, string> = {
   SKIPPED: "#6b7280",
 }
 
-// Distinct edge colors for visual variety (like Bleu)
 const edgeColorPalette = [
-  "#06b6d4", // cyan
-  "#3b82f6", // blue
-  "#8b5cf6", // violet
-  "#22c55e", // green
-  "#f59e0b", // amber
-  "#ec4899", // pink
-  "#14b8a6", // teal
-  "#6366f1", // indigo
+  "#06b6d4", "#3b82f6", "#8b5cf6", "#22c55e",
+  "#f59e0b", "#ec4899", "#14b8a6", "#6366f1",
 ]
 
 function pickEdgeColor(sourceId: string, targetId: string): string {
@@ -68,7 +73,320 @@ function pickEdgeColor(sourceId: string, targetId: string): string {
   return edgeColorPalette[Math.abs(h) % edgeColorPalette.length]
 }
 
-function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
+// -------------------------------------------------------------------
+// Build graph with crew group nodes (sub-flows)
+// -------------------------------------------------------------------
+
+interface BuildInput {
+  missions: Mission[]
+  crews: CrewSummary[]
+  agents: AgentSummary[]
+  connections: CrewConnection[]
+  collapsedCrews: Set<string>
+  onToggleCollapse: (crewId: string) => void
+}
+
+function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
+  const { missions, crews, agents, connections, collapsedCrews, onToggleCollapse } = input
+  const nodes: Node[] = []
+  const edges: Edge[] = []
+
+  // Build agent slug → crew id map
+  const agentCrewMap = new Map<string, string>()
+  const crewById = new Map<string, CrewSummary>()
+  for (const agent of agents) {
+    if (agent.slug && agent.crew?.id) {
+      agentCrewMap.set(agent.slug, agent.crew.id)
+    }
+  }
+  for (const crew of crews) {
+    crewById.set(crew.id, crew)
+  }
+
+  // Select active or recent missions
+  const activeMissions = missions.filter(
+    (m) => m.status === "IN_PROGRESS" || m.status === "PLANNING" || m.status === "REVIEW"
+  )
+  if (activeMissions.length === 0) {
+    const recent = [...missions]
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, 3)
+    activeMissions.push(...recent)
+  }
+
+  // Collect all tasks grouped by crew
+  const crewTasks = new Map<string, { mission: Mission; task: MissionTask }[]>()
+  const usedCrewIds = new Set<string>()
+
+  for (const mission of activeMissions) {
+    const tasks = mission.tasks || []
+    for (const task of tasks) {
+      const crewId = (task.agent_slug && agentCrewMap.get(task.agent_slug)) || mission.crew_id
+      if (!crewId) continue
+      usedCrewIds.add(crewId)
+      if (!crewTasks.has(crewId)) crewTasks.set(crewId, [])
+      crewTasks.get(crewId)!.push({ mission, task })
+    }
+    // Ensure mission's crew is always shown
+    if (mission.crew_id) usedCrewIds.add(mission.crew_id)
+  }
+
+  // Also include crews with connections even if no tasks
+  for (const conn of connections) {
+    if (crewById.has(conn.from_crew_id)) usedCrewIds.add(conn.from_crew_id)
+    if (crewById.has(conn.to_crew_id)) usedCrewIds.add(conn.to_crew_id)
+  }
+
+  // Layout crew groups horizontally
+  const sortedCrewIds = [...usedCrewIds].sort((a, b) => {
+    const aName = crewById.get(a)?.name || ""
+    const bName = crewById.get(b)?.name || ""
+    return aName.localeCompare(bName)
+  })
+
+  let crewX = 0
+  const CREW_GAP = 80
+  const TASK_WIDTH = 260
+  const TASK_HEIGHT = 120
+  const TASK_H_GAP = 60
+  const TASK_V_GAP = 10
+  const CREW_PADDING_TOP = 60
+  const CREW_PADDING_SIDE = 40
+  const CREW_PADDING_BOTTOM = 40
+  const COLLAPSED_WIDTH = 300
+  const COLLAPSED_HEIGHT = 50
+
+  for (const crewId of sortedCrewIds) {
+    const crew = crewById.get(crewId)
+    if (!crew) continue
+
+    const tasks = crewTasks.get(crewId) || []
+    const collapsed = collapsedCrews.has(crewId)
+
+    // Compute task stats for header
+    const taskCount = tasks.length
+    const activeCount = tasks.filter((t) => t.task.status === "IN_PROGRESS").length
+    const completedCount = tasks.filter((t) => t.task.status === "COMPLETED").length
+    const failedCount = tasks.filter((t) => t.task.status === "FAILED").length
+
+    if (collapsed || tasks.length === 0) {
+      // Collapsed crew node
+      nodes.push({
+        id: `crew-${crewId}`,
+        type: "crew",
+        position: { x: crewX, y: 0 },
+        data: {
+          label: crew.name,
+          slug: crew.slug,
+          color: crew.color,
+          icon: crew.icon,
+          agentCount: crew._count?.agents || 0,
+          collapsed: true,
+          taskCount,
+          activeCount,
+          completedCount,
+          failedCount,
+          onToggleCollapse,
+          crewId,
+        },
+        style: { width: COLLAPSED_WIDTH, height: COLLAPSED_HEIGHT },
+      })
+      crewX += COLLAPSED_WIDTH + CREW_GAP
+      continue
+    }
+
+    // Topological layout of tasks inside this crew
+    const sortedTasks = [...tasks].sort((a, b) => a.task.task_order - b.task.task_order)
+    const deps = new Map<string, string[]>()
+    for (const { task } of sortedTasks) {
+      try {
+        deps.set(task.id, JSON.parse(task.depends_on || "[]"))
+      } catch {
+        deps.set(task.id, [])
+      }
+    }
+
+    // Only keep deps that are within this crew's tasks
+    const taskIds = new Set(sortedTasks.map((t) => t.task.id))
+    for (const [taskId, taskDeps] of deps) {
+      deps.set(taskId, taskDeps.filter((d) => taskIds.has(d)))
+    }
+
+    const levels = new Map<string, number>()
+    function getLevel(taskId: string): number {
+      if (levels.has(taskId)) return levels.get(taskId)!
+      const taskDeps = deps.get(taskId) || []
+      if (taskDeps.length === 0) {
+        levels.set(taskId, 0)
+        return 0
+      }
+      const level = Math.max(...taskDeps.map(getLevel)) + 1
+      levels.set(taskId, level)
+      return level
+    }
+    for (const { task } of sortedTasks) getLevel(task.id)
+
+    const levelGroups = new Map<number, MissionTask[]>()
+    for (const { task } of sortedTasks) {
+      const level = levels.get(task.id) || 0
+      if (!levelGroups.has(level)) levelGroups.set(level, [])
+      levelGroups.get(level)!.push(task)
+    }
+
+    const maxLevel = Math.max(...[...levelGroups.keys()], 0)
+    const maxLevelSize = Math.max(...[...levelGroups.values()].map((g) => g.length), 1)
+
+    const crewWidth = (maxLevel + 1) * (TASK_WIDTH + TASK_H_GAP) + CREW_PADDING_SIDE * 2
+    const crewHeight = maxLevelSize * (TASK_HEIGHT + TASK_V_GAP) + CREW_PADDING_TOP + CREW_PADDING_BOTTOM
+
+    // Create crew group node
+    nodes.push({
+      id: `crew-${crewId}`,
+      type: "crew",
+      position: { x: crewX, y: 0 },
+      data: {
+        label: crew.name,
+        slug: crew.slug,
+        color: crew.color,
+        icon: crew.icon,
+        agentCount: crew._count?.agents || 0,
+        collapsed: false,
+        taskCount,
+        activeCount,
+        completedCount,
+        failedCount,
+        onToggleCollapse,
+        crewId,
+      },
+      style: { width: crewWidth, height: crewHeight },
+    })
+
+    // Create child task nodes (positions relative to crew group)
+    for (const [level, levelTasks] of levelGroups) {
+      levelTasks.forEach((task, idx) => {
+        const x = CREW_PADDING_SIDE + level * (TASK_WIDTH + TASK_H_GAP)
+        const y = CREW_PADDING_TOP + idx * (TASK_HEIGHT + TASK_V_GAP)
+
+        nodes.push({
+          id: task.id,
+          type: "agent",
+          parentId: `crew-${crewId}`,
+          extent: "parent" as const,
+          position: { x, y },
+          data: {
+            label: task.title,
+            status: task.status,
+            agentName: task.agent_name || "Unassigned",
+            agentSlug: task.agent_slug,
+            iteration: task.iteration,
+            maxIterations: task.max_iterations,
+            tokenCount: task.token_count,
+            estimatedCost: task.estimated_cost,
+            durationMs: task.duration_ms,
+            missionId: task.mission_id,
+          },
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
+        })
+
+        // Dependency edges (within crew)
+        const taskDeps = deps.get(task.id) || []
+        for (const depId of taskDeps) {
+          const isActive = task.status === "IN_PROGRESS"
+          const edgeColor = isActive ? statusColors.IN_PROGRESS : pickEdgeColor(depId, task.id)
+          edges.push({
+            id: `e-${depId}-${task.id}`,
+            source: depId,
+            target: task.id,
+            type: "animated",
+            data: { color: edgeColor, active: isActive },
+            style: { strokeWidth: 2 },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: edgeColor,
+              width: 14,
+              height: 14,
+            },
+          })
+        }
+      })
+    }
+
+    crewX += crewWidth + CREW_GAP
+  }
+
+  // Cross-crew dependency edges (tasks in different crews)
+  for (const mission of activeMissions) {
+    const tasks = mission.tasks || []
+    for (const task of tasks) {
+      let taskDeps: string[] = []
+      try {
+        taskDeps = JSON.parse(task.depends_on || "[]")
+      } catch {
+        continue
+      }
+      const taskCrewId = (task.agent_slug && agentCrewMap.get(task.agent_slug)) || mission.crew_id
+      for (const depId of taskDeps) {
+        // Find the dep task's crew
+        const depTask = tasks.find((t) => t.id === depId)
+        if (!depTask) continue
+        const depCrewId = (depTask.agent_slug && agentCrewMap.get(depTask.agent_slug)) || mission.crew_id
+        if (depCrewId !== taskCrewId) {
+          // Cross-crew edge
+          const edgeColor = "#a855f7" // purple for cross-crew
+          edges.push({
+            id: `e-cross-${depId}-${task.id}`,
+            source: depId,
+            target: task.id,
+            type: "animated",
+            data: { color: edgeColor, active: task.status === "IN_PROGRESS" },
+            style: { strokeWidth: 2 },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: edgeColor,
+              width: 14,
+              height: 14,
+            },
+          })
+        }
+      }
+    }
+  }
+
+  // Permission edges between crews
+  for (const conn of connections) {
+    if (!usedCrewIds.has(conn.from_crew_id) || !usedCrewIds.has(conn.to_crew_id)) continue
+    const markers = getPermissionMarkers(conn.direction)
+    edges.push({
+      id: `perm-${conn.id}`,
+      source: `crew-${conn.from_crew_id}`,
+      target: `crew-${conn.to_crew_id}`,
+      sourceHandle: `crew-${conn.from_crew_id}-perm-source`,
+      targetHandle: `crew-${conn.to_crew_id}-perm-target`,
+      type: "permission",
+      data: {
+        direction: conn.direction,
+        status: conn.status,
+      },
+      ...markers,
+    })
+  }
+
+  // Sort: crew group nodes must come before their children
+  nodes.sort((a, b) => {
+    const aIsCrew = a.type === "crew" ? 0 : 1
+    const bIsCrew = b.type === "crew" ? 0 : 1
+    return aIsCrew - bIsCrew
+  })
+
+  return { nodes, edges }
+}
+
+// -------------------------------------------------------------------
+// Fallback: flat graph when no crew data available
+// -------------------------------------------------------------------
+
+function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = []
   const edges: Edge[] = []
 
@@ -87,15 +405,14 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
   for (const mission of activeMissions) {
     const tasks = mission.tasks || []
     const accent = statusColors[mission.status] || "#64748b"
-
     const totalTokens = tasks.reduce((sum, t) => sum + (t.token_count || 0), 0)
-    const statusLabel = tasks.length === 0 && (mission.status === "PLANNING" || mission.status === "IN_PROGRESS")
-      ? " — Lead is planning tasks..."
-      : totalTokens > 0
-        ? ` · ${(totalTokens / 1000).toFixed(1)}k tok`
-        : ""
+    const statusLabel =
+      tasks.length === 0 && (mission.status === "PLANNING" || mission.status === "IN_PROGRESS")
+        ? " — Lead is planning tasks..."
+        : totalTokens > 0
+          ? ` · ${(totalTokens / 1000).toFixed(1)}k tok`
+          : ""
 
-    // Mission node — styled as a header card
     nodes.push({
       id: `mission-${mission.id}`,
       type: "default",
@@ -124,16 +441,21 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
     const tasksByOrder = [...tasks].sort((a, b) => a.task_order - b.task_order)
     const deps = new Map<string, string[]>()
     for (const task of tasksByOrder) {
-      try { deps.set(task.id, JSON.parse(task.depends_on || "[]")) }
-      catch { deps.set(task.id, []) }
+      try {
+        deps.set(task.id, JSON.parse(task.depends_on || "[]"))
+      } catch {
+        deps.set(task.id, [])
+      }
     }
 
-    // Topological level assignment
     const levels = new Map<string, number>()
     function getLevel(taskId: string): number {
       if (levels.has(taskId)) return levels.get(taskId)!
       const taskDeps = deps.get(taskId) || []
-      if (taskDeps.length === 0) { levels.set(taskId, 0); return 0 }
+      if (taskDeps.length === 0) {
+        levels.set(taskId, 0)
+        return 0
+      }
       const level = Math.max(...taskDeps.map(getLevel)) + 1
       levels.set(taskId, level)
       return level
@@ -173,7 +495,6 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
           targetPosition: Position.Left,
         })
 
-        // Edge from mission to first-level tasks
         if (level === 0) {
           const edgeColor = pickEdgeColor(`mission-${mission.id}`, task.id)
           edges.push({
@@ -186,14 +507,10 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
           })
         }
 
-        // Dependency edges
         const taskDeps = deps.get(task.id) || []
         for (const depId of taskDeps) {
           const isActive = task.status === "IN_PROGRESS"
-          const edgeColor = isActive
-            ? statusColors.IN_PROGRESS
-            : pickEdgeColor(depId, task.id)
-
+          const edgeColor = isActive ? statusColors.IN_PROGRESS : pickEdgeColor(depId, task.id)
           edges.push({
             id: `e-${depId}-${task.id}`,
             source: depId,
@@ -219,10 +536,46 @@ function buildGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[] } {
   return { nodes, edges }
 }
 
-function WorkflowGraphInner({ missions, onTaskClick }: WorkflowGraphProps, ref: React.ForwardedRef<WorkflowGraphRef>) {
-  const graphData = useMemo(() => buildGraphData(missions), [missions])
+// -------------------------------------------------------------------
+// React Flow component
+// -------------------------------------------------------------------
+
+function WorkflowGraphInner(
+  { missions, crews, agents, connections, onTaskClick }: WorkflowGraphProps,
+  ref: React.ForwardedRef<WorkflowGraphRef>
+) {
+  const [collapsedCrews, setCollapsedCrews] = useState<Set<string>>(new Set())
+
+  const toggleCollapse = useCallback((crewId: string) => {
+    setCollapsedCrews((prev) => {
+      const next = new Set(prev)
+      if (next.has(crewId)) {
+        next.delete(crewId)
+      } else {
+        next.add(crewId)
+      }
+      return next
+    })
+  }, [])
+
+  const hasCrewData = crews && crews.length > 0 && agents && agents.length > 0
+
+  const graphData = useMemo(() => {
+    if (hasCrewData) {
+      return buildGraphData({
+        missions,
+        crews: crews!,
+        agents: agents!,
+        connections: connections || [],
+        collapsedCrews,
+        onToggleCollapse: toggleCollapse,
+      })
+    }
+    return buildFlatGraphData(missions)
+  }, [missions, crews, agents, connections, collapsedCrews, toggleCollapse, hasCrewData])
+
   const [nodes, setNodes, onNodesChange] = useNodesState(graphData.nodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(graphData.edges)
+  const [edgesState, setEdges, onEdgesChange] = useEdgesState(graphData.edges)
   const { fitView, setCenter } = useReactFlow()
   const prevDataRef = useRef(graphData)
 
@@ -233,26 +586,41 @@ function WorkflowGraphInner({ missions, onTaskClick }: WorkflowGraphProps, ref: 
     setEdges(graphData.edges)
   }, [graphData, setNodes, setEdges])
 
-  useImperativeHandle(ref, () => ({
-    focusActive() {
-      const activeNode = nodes.find(
-        (n) => !n.id.startsWith("mission-") && (n.data as Record<string, unknown>)?.status === "IN_PROGRESS"
-      )
-      if (activeNode) {
-        setCenter(activeNode.position.x + 130, activeNode.position.y + 60, { zoom: 1.2, duration: 600 })
-      } else {
-        fitView({ duration: 600, padding: 0.2 })
-      }
-    },
-  }), [nodes, setCenter, fitView])
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusActive() {
+        const activeNode = nodes.find(
+          (n) =>
+            n.type === "agent" &&
+            (n.data as Record<string, unknown>)?.status === "IN_PROGRESS"
+        )
+        if (activeNode) {
+          // For child nodes, compute absolute position
+          const parent = activeNode.parentId
+            ? nodes.find((n) => n.id === activeNode.parentId)
+            : null
+          const absX = (parent?.position.x || 0) + activeNode.position.x + 130
+          const absY = (parent?.position.y || 0) + activeNode.position.y + 60
+          setCenter(absX, absY, { zoom: 1.2, duration: 600 })
+        } else {
+          fitView({ duration: 600, padding: 0.2 })
+        }
+      },
+    }),
+    [nodes, setCenter, fitView]
+  )
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
-      if (node.id.startsWith("mission-")) return
+      if (node.id.startsWith("mission-") || node.id.startsWith("crew-")) return
       if (!onTaskClick) return
       for (const m of missions) {
         const task = m.tasks?.find((t) => t.id === node.id)
-        if (task) { onTaskClick(task); return }
+        if (task) {
+          onTaskClick(task)
+          return
+        }
       }
     },
     [missions, onTaskClick]
@@ -275,7 +643,7 @@ function WorkflowGraphInner({ missions, onTaskClick }: WorkflowGraphProps, ref: 
       <div className="h-full w-full">
         <ReactFlow
           nodes={nodes}
-          edges={edges}
+          edges={edgesState}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
@@ -283,7 +651,7 @@ function WorkflowGraphInner({ missions, onTaskClick }: WorkflowGraphProps, ref: 
           onNodeClick={onNodeClick}
           fitView
           fitViewOptions={{ padding: 0.3 }}
-          minZoom={0.2}
+          minZoom={0.1}
           maxZoom={2.5}
           proOptions={{ hideAttribution: true }}
           className="!bg-transparent"
@@ -301,6 +669,11 @@ function WorkflowGraphInner({ missions, onTaskClick }: WorkflowGraphProps, ref: 
           />
           <MiniMap
             nodeColor={(n) => {
+              if (n.id.startsWith("crew-")) {
+                const color = (n.data as Record<string, unknown>)?.color as string | null
+                if (color) return color
+                return "#1e2332"
+              }
               if (n.id.startsWith("mission-")) return "#1e2332"
               return statusColors[(n.data?.status as string) || "PENDING"] || "#64748b"
             }}
