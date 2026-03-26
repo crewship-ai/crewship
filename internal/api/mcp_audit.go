@@ -78,12 +78,15 @@ func (h *MCPAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 			&e.MCPServerID, &e.MCPServerScope, &e.ToolName, &e.InputHash,
 			&e.Status, &e.DurationMS, &e.ErrorMessage, &e.CreatedAt); err != nil {
 			h.logger.Error("scan mcp tool call", "error", err)
-			continue
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
 		}
 		results = append(results, e)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("iterate mcp tool calls", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if results == nil {
 		results = []mcpToolCallEntry{}

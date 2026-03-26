@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -24,6 +25,8 @@ type MCPGateway struct {
 	auditCh    chan auditEntry // bounded audit log channel
 	auditHTTP  *http.Client   // dedicated client for audit calls
 	auditDone  chan struct{}   // closed when audit worker exits
+	shutdownCh chan struct{}   // closed on shutdown to prevent send-to-closed-channel panic
+	closeOnce  sync.Once
 }
 
 type auditEntry struct {
@@ -142,14 +145,29 @@ type toolContent struct {
 
 // NewMCPGateway creates a new MCP gateway with the given server configurations.
 func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger) *MCPGateway {
+	// Audit HTTP client uses TCP to crewshipd (IPC base URL is typically http://host:port)
+	// If IPC uses Unix socket, override transport.
+	auditHTTP := &http.Client{Timeout: 5 * time.Second}
+	if ipc != nil && ipc.BaseURL != "" {
+		// Check if BaseURL points to a Unix socket path
+		if len(ipc.BaseURL) > 0 && ipc.BaseURL[0] == '/' {
+			auditHTTP.Transport = &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return (&net.Dialer{}).DialContext(ctx, "unix", ipc.BaseURL)
+				},
+			}
+		}
+	}
+
 	g := &MCPGateway{
-		clients:   make(map[string]*mcpClient, len(servers)),
-		tools:     make(map[string][]MCPTool),
-		ipc:       ipc,
-		logger:    logger,
-		auditCh:   make(chan auditEntry, 64),
-		auditHTTP: &http.Client{Timeout: 5 * time.Second},
-		auditDone: make(chan struct{}),
+		clients:    make(map[string]*mcpClient, len(servers)),
+		tools:      make(map[string][]MCPTool),
+		ipc:        ipc,
+		logger:     logger,
+		auditCh:    make(chan auditEntry, 64),
+		auditHTTP:  auditHTTP,
+		auditDone:  make(chan struct{}),
+		shutdownCh: make(chan struct{}),
 	}
 	// Start single audit worker goroutine (bounded)
 	go g.auditWorker()
@@ -204,8 +222,11 @@ func (g *MCPGateway) DiscoverTools(ctx context.Context) ([]MCPTool, error) {
 
 	var allTools []MCPTool
 	for name, client := range g.clients {
-		if client.sessionID == "" {
-			continue // not connected
+		client.mu.Lock()
+		connected := client.sessionID != ""
+		client.mu.Unlock()
+		if !connected {
+			continue
 		}
 		tools, err := client.listTools(ctx)
 		if err != nil {
@@ -262,21 +283,29 @@ func (g *MCPGateway) CallTool(ctx context.Context, serverName, toolName string, 
 	result, err := client.callTool(ctx, toolName, input)
 	duration := time.Since(start)
 
-	// Audit logging via bounded channel (non-blocking)
+	// Audit logging via bounded channel (non-blocking, shutdown-safe)
 	if g.ipc != nil {
 		status := "success"
 		errMsg := ""
 		if err != nil {
 			status = "error"
 			errMsg = err.Error()
+		} else if result != nil && result.IsError {
+			status = "error"
+			errMsg = result.Error
 		}
 		select {
-		case g.auditCh <- auditEntry{
-			serverID: client.serverID, serverScope: "workspace", serverName: serverName,
-			toolName: toolName, durationMS: duration.Milliseconds(), status: status, errMsg: errMsg,
-		}:
+		case <-g.shutdownCh:
+			// shutting down, skip audit
 		default:
-			g.logger.Warn("MCP audit channel full, dropping entry", "tool", toolName)
+			select {
+			case g.auditCh <- auditEntry{
+				serverID: client.serverID, serverScope: "workspace", serverName: serverName,
+				toolName: toolName, durationMS: duration.Milliseconds(), status: status, errMsg: errMsg,
+			}:
+			default:
+				g.logger.Warn("MCP audit channel full, dropping entry", "tool", toolName)
+			}
 		}
 	}
 
@@ -315,8 +344,10 @@ func (g *MCPGateway) Status() []MCPServerStatus {
 
 // Close terminates all MCP server sessions and waits for audit worker to drain.
 func (g *MCPGateway) Close() {
-	// Close audit channel and wait for worker to finish processing
-	close(g.auditCh)
+	g.closeOnce.Do(func() {
+		close(g.shutdownCh) // signal CallTool to stop enqueueing
+		close(g.auditCh)    // signal worker to drain and exit
+	})
 	<-g.auditDone
 
 	g.mu.Lock()
@@ -571,9 +602,14 @@ func (g *MCPGateway) sendAuditEntry(entry auditEntry) {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Internal-Token", g.ipc.Token)
 		resp, err := g.auditHTTP.Do(req)
-		if err == nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+		if err != nil {
+			g.logger.Warn("MCP audit delivery failed", "error", err)
+			return
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			g.logger.Warn("MCP audit delivery rejected", "status", resp.StatusCode)
 		}
 	}
 }
