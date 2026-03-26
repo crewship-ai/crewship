@@ -26,11 +26,13 @@ type MCPGateway struct {
 }
 
 type auditEntry struct {
-	serverName string
-	toolName   string
-	durationMS int64
-	status     string
-	errMsg     string
+	serverID    string
+	serverScope string
+	serverName  string
+	toolName    string
+	durationMS  int64
+	status      string
+	errMsg      string
 }
 
 // MCPTool represents a tool discovered from an MCP server.
@@ -44,6 +46,7 @@ type MCPTool struct {
 // mcpClient manages a connection to a single MCP server.
 type mcpClient struct {
 	mu          sync.Mutex
+	serverID    string
 	serverName  string
 	displayName string
 	transport   string
@@ -159,6 +162,7 @@ func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger
 			continue
 		}
 		g.clients[s.Name] = &mcpClient{
+			serverID:    s.ID,
 			serverName:  s.Name,
 			displayName: s.DisplayName,
 			transport:   s.Transport,
@@ -266,8 +270,8 @@ func (g *MCPGateway) CallTool(ctx context.Context, serverName, toolName string, 
 		}
 		select {
 		case g.auditCh <- auditEntry{
-			serverName: serverName, toolName: toolName,
-			durationMS: duration.Milliseconds(), status: status, errMsg: errMsg,
+			serverID: client.serverID, serverScope: "workspace", serverName: serverName,
+			toolName: toolName, durationMS: duration.Milliseconds(), status: status, errMsg: errMsg,
 		}:
 		default:
 			g.logger.Warn("MCP audit channel full, dropping entry", "tool", toolName)
@@ -542,14 +546,15 @@ func (g *MCPGateway) sendAuditEntry(entry auditEntry) {
 	}
 
 	payload := map[string]interface{}{
-		"workspace_id":    g.ipc.WorkspaceID,
-		"agent_id":        g.ipc.AgentID,
-		"crew_id":         g.ipc.CrewID,
-		"mcp_server_name": entry.serverName,
-		"tool_name":       entry.toolName,
-		"status":          entry.status,
-		"duration_ms":     entry.durationMS,
-		"error_message":   entry.errMsg,
+		"workspace_id":     g.ipc.WorkspaceID,
+		"agent_id":         g.ipc.AgentID,
+		"crew_id":          g.ipc.CrewID,
+		"mcp_server_id":    entry.serverID,
+		"mcp_server_scope": entry.serverScope,
+		"tool_name":        entry.toolName,
+		"status":           entry.status,
+		"duration_ms":      entry.durationMS,
+		"error_message":    entry.errMsg,
 	}
 	body, _ := json.Marshal(payload)
 

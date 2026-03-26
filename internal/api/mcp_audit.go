@@ -28,7 +28,6 @@ type mcpToolCallEntry struct {
 	Status         string  `json:"status"`
 	DurationMS     *int64  `json:"duration_ms"`
 	ErrorMessage   *string `json:"error_message"`
-	SessionID      *string `json:"session_id"`
 	CreatedAt      string  `json:"created_at"`
 }
 
@@ -37,11 +36,10 @@ func (h *MCPAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
 	query := `SELECT id, workspace_id, crew_id, agent_id, mcp_server_id, mcp_server_scope,
-		tool_name, input_hash, status, duration_ms, error_message, session_id, created_at
+		tool_name, input_hash, status, duration_ms, error_message, created_at
 		FROM mcp_tool_calls WHERE workspace_id = ?`
 	args := []interface{}{workspaceID}
 
-	// Optional filters
 	if agentID := r.URL.Query().Get("agent_id"); agentID != "" {
 		query += " AND agent_id = ?"
 		args = append(args, agentID)
@@ -55,11 +53,11 @@ func (h *MCPAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		args = append(args, status)
 	}
 	if since := r.URL.Query().Get("since"); since != "" {
-		query += " AND created_at >= ?"
+		query += " AND datetime(created_at) >= datetime(?)"
 		args = append(args, since)
 	}
 	if until := r.URL.Query().Get("until"); until != "" {
-		query += " AND created_at <= ?"
+		query += " AND datetime(created_at) <= datetime(?)"
 		args = append(args, until)
 	}
 
@@ -78,7 +76,7 @@ func (h *MCPAuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		var e mcpToolCallEntry
 		if err := rows.Scan(&e.ID, &e.WorkspaceID, &e.CrewID, &e.AgentID,
 			&e.MCPServerID, &e.MCPServerScope, &e.ToolName, &e.InputHash,
-			&e.Status, &e.DurationMS, &e.ErrorMessage, &e.SessionID, &e.CreatedAt); err != nil {
+			&e.Status, &e.DurationMS, &e.ErrorMessage, &e.CreatedAt); err != nil {
 			h.logger.Error("scan mcp tool call", "error", err)
 			continue
 		}

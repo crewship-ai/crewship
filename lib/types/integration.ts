@@ -42,6 +42,8 @@ export interface AgentMCPBinding {
   mcp_server_id: string
   mcp_server_scope: "workspace" | "crew"
   credential_id?: string | null
+  cred_type?: string | null
+  cred_header?: string | null
   enabled: boolean
   config_override_json?: string | null
   created_at: string
@@ -58,6 +60,9 @@ export interface ResolvedIntegration {
   transport: string
   endpoint?: string | null
   command?: string | null
+  args_json?: string | null
+  env_json?: string | null
+  config_json?: string | null
   icon?: string | null
   enabled: boolean
   credential_id?: string | null

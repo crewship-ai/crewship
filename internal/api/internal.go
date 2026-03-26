@@ -568,12 +568,10 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		}
 		// Enrich crew members with MCP integration info (single batch query)
 		if (roleStr == "LEAD" || roleStr == "COORDINATOR") && len(crewMembers) > 0 {
-			memberIDs := make([]string, len(crewMembers))
 			memberIdx := make(map[string]int, len(crewMembers))
 			placeholders := make([]string, len(crewMembers))
 			args := make([]interface{}, len(crewMembers))
 			for i, m := range crewMembers {
-				memberIDs[i] = m.ID
 				memberIdx[m.ID] = i
 				placeholders[i] = "?"
 				args[i] = m.ID
@@ -587,8 +585,8 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 						WHEN 'workspace' THEN ws.name
 						WHEN 'crew' THEN cs.name END, '')
 				FROM agent_mcp_bindings b
-				LEFT JOIN workspace_mcp_servers ws ON b.mcp_server_id = ws.id AND b.mcp_server_scope = 'workspace'
-				LEFT JOIN crew_mcp_servers cs ON b.mcp_server_id = cs.id AND b.mcp_server_scope = 'crew'
+				LEFT JOIN workspace_mcp_servers ws ON b.mcp_server_id = ws.id AND b.mcp_server_scope = 'workspace' AND ws.deleted_at IS NULL
+				LEFT JOIN crew_mcp_servers cs ON b.mcp_server_id = cs.id AND b.mcp_server_scope = 'crew' AND cs.deleted_at IS NULL
 				WHERE b.agent_id IN (`+strings.Join(placeholders, ",")+`) AND b.enabled = 1`,
 				args...); err == nil {
 				for igRows.Next() {
@@ -1450,30 +1448,34 @@ func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Req
 // RecordMCPToolCall records an MCP tool call audit entry from the sidecar gateway.
 func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		WorkspaceID   string `json:"workspace_id"`
-		AgentID       string `json:"agent_id"`
-		CrewID        string `json:"crew_id"`
-		MCPServerName string `json:"mcp_server_name"`
-		ToolName      string `json:"tool_name"`
-		Status        string `json:"status"`
-		DurationMS    int64  `json:"duration_ms"`
-		ErrorMessage  string `json:"error_message"`
+		WorkspaceID    string `json:"workspace_id"`
+		AgentID        string `json:"agent_id"`
+		CrewID         string `json:"crew_id"`
+		MCPServerID    string `json:"mcp_server_id"`
+		MCPServerScope string `json:"mcp_server_scope"`
+		ToolName       string `json:"tool_name"`
+		Status         string `json:"status"`
+		DurationMS     int64  `json:"duration_ms"`
+		ErrorMessage   string `json:"error_message"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON"})
 		return
 	}
-	if body.WorkspaceID == "" || body.AgentID == "" || body.ToolName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id, agent_id, and tool_name are required"})
+	if body.WorkspaceID == "" || body.AgentID == "" || body.MCPServerID == "" || body.ToolName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id, agent_id, mcp_server_id, and tool_name are required"})
 		return
+	}
+	if body.MCPServerScope == "" {
+		body.MCPServerScope = "workspace"
 	}
 
 	id := generateCUID()
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO mcp_tool_calls (id, workspace_id, crew_id, agent_id, mcp_server_id,
 			mcp_server_scope, tool_name, status, duration_ms, error_message, created_at)
-		VALUES (?, ?, ?, ?, ?, 'workspace', ?, ?, ?, ?, datetime('now'))`,
-		id, body.WorkspaceID, body.CrewID, body.AgentID, body.MCPServerName,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+		id, body.WorkspaceID, body.CrewID, body.AgentID, body.MCPServerID, body.MCPServerScope,
 		body.ToolName, body.Status, body.DurationMS, body.ErrorMessage)
 	if err != nil {
 		h.logger.Error("record mcp tool call", "error", err)

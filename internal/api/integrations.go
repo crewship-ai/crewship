@@ -380,17 +380,32 @@ func (h *IntegrationHandler) DeleteWorkspaceIntegration(w http.ResponseWriter, r
 	}
 
 	// Delete agent bindings for this workspace server
-	tx.ExecContext(r.Context(),
-		"DELETE FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'workspace'", id)
+	if _, err := tx.ExecContext(r.Context(),
+		"DELETE FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'workspace'", id); err != nil {
+		tx.Rollback()
+		h.logger.Error("delete agent bindings for workspace server", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	// Delete agent bindings for crew servers that override this workspace server
-	tx.ExecContext(r.Context(), `
+	if _, err := tx.ExecContext(r.Context(), `
 		DELETE FROM agent_mcp_bindings WHERE mcp_server_scope = 'crew' AND mcp_server_id IN
-		(SELECT id FROM crew_mcp_servers WHERE workspace_mcp_server_id = ?)`, id)
+		(SELECT id FROM crew_mcp_servers WHERE workspace_mcp_server_id = ?)`, id); err != nil {
+		tx.Rollback()
+		h.logger.Error("delete crew agent bindings", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	// Delete crew server overrides
-	tx.ExecContext(r.Context(),
-		"DELETE FROM crew_mcp_servers WHERE workspace_mcp_server_id = ?", id)
+	if _, err := tx.ExecContext(r.Context(),
+		"DELETE FROM crew_mcp_servers WHERE workspace_mcp_server_id = ?", id); err != nil {
+		tx.Rollback()
+		h.logger.Error("delete crew server overrides", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	// Delete the workspace server itself
 	result, err := tx.ExecContext(r.Context(),
@@ -671,8 +686,13 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 	}
 
 	// Delete agent bindings for this crew server
-	tx.ExecContext(r.Context(),
-		"DELETE FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'crew'", id)
+	if _, err := tx.ExecContext(r.Context(),
+		"DELETE FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'crew'", id); err != nil {
+		tx.Rollback()
+		h.logger.Error("delete agent bindings for crew server", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 
 	result, err := tx.ExecContext(r.Context(), `
 		DELETE FROM crew_mcp_servers WHERE id = ? AND crew_id = ? AND crew_id IN
@@ -719,7 +739,7 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT b.id, b.agent_id, b.mcp_server_id, b.mcp_server_scope,
-			b.credential_id, b.enabled, b.config_override_json, b.created_at,
+			b.credential_id, b.cred_type, b.cred_header, b.enabled, b.config_override_json, b.created_at,
 			CASE
 				WHEN b.mcp_server_scope = 'workspace' THEN COALESCE(ws.name, '')
 				WHEN b.mcp_server_scope = 'crew' THEN COALESCE(cs.name, '')
@@ -747,7 +767,7 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 		var b agentMCPBindingResponse
 		var enabled int
 		if err := rows.Scan(&b.ID, &b.AgentID, &b.MCPServerID, &b.MCPServerScope,
-			&b.CredentialID, &enabled, &b.ConfigOverride, &b.CreatedAt,
+			&b.CredentialID, &b.CredType, &b.CredHeader, &enabled, &b.ConfigOverride, &b.CreatedAt,
 			&b.ServerName, &b.ServerDisplay, &b.CredentialName); err != nil {
 			h.logger.Error("scan agent binding", "error", err)
 			continue
@@ -1016,24 +1036,28 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 	}
 
 	// Step 1: Workspace MCP servers
-	wsServers := make(map[string]*ResolvedIntegration) // keyed by name
-	rows, err := h.db.QueryContext(r.Context(), `
+	wsServers := make(map[string]*ResolvedIntegration)
+	if wsRows, err := h.db.QueryContext(r.Context(), `
 		SELECT id, name, display_name, transport, endpoint, command,
 			args_json, env_json, config_json, icon, enabled
 		FROM workspace_mcp_servers
-		WHERE workspace_id = ? AND enabled = 1`, workspaceID)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
+		WHERE workspace_id = ? AND enabled = 1 AND deleted_at IS NULL`, workspaceID); err == nil {
+		for wsRows.Next() {
 			var s ResolvedIntegration
 			var enabled int
-			rows.Scan(&s.ServerID, &s.Name, &s.DisplayName, &s.Transport,
+			if err := wsRows.Scan(&s.ServerID, &s.Name, &s.DisplayName, &s.Transport,
 				&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
-				&s.Icon, &enabled)
+				&s.Icon, &enabled); err != nil {
+				continue
+			}
 			s.Scope = "workspace"
 			s.Enabled = enabled == 1
 			wsServers[s.Name] = &s
 		}
+		if err := wsRows.Err(); err != nil {
+			h.logger.Error("iterate workspace MCP servers", "error", err)
+		}
+		wsRows.Close()
 	}
 
 	// Step 2: Crew MCP servers (override workspace by name)
@@ -1043,55 +1067,63 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 	}
 
 	if crewID.Valid {
-		crewRows, err := h.db.QueryContext(r.Context(), `
+		if crewRows, err := h.db.QueryContext(r.Context(), `
 			SELECT id, workspace_mcp_server_id, name, display_name, transport,
 				endpoint, command, args_json, env_json, config_json, icon, enabled
 			FROM crew_mcp_servers
-			WHERE crew_id = ? AND enabled = 1`, crewID.String)
-		if err == nil {
-			defer crewRows.Close()
+			WHERE crew_id = ? AND enabled = 1 AND deleted_at IS NULL`, crewID.String); err == nil {
 			for crewRows.Next() {
 				var s ResolvedIntegration
 				var wsServerID sql.NullString
 				var enabled int
-				crewRows.Scan(&s.ServerID, &wsServerID, &s.Name, &s.DisplayName, &s.Transport,
+				if err := crewRows.Scan(&s.ServerID, &wsServerID, &s.Name, &s.DisplayName, &s.Transport,
 					&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
-					&s.Icon, &enabled)
+					&s.Icon, &enabled); err != nil {
+					continue
+				}
 				s.Scope = "crew"
 				s.Enabled = enabled == 1
-				// Crew server overrides workspace server with same name
 				merged[s.Name] = &s
 			}
+			if err := crewRows.Err(); err != nil {
+				h.logger.Error("iterate crew MCP servers", "error", err)
+			}
+			crewRows.Close()
 		}
 	}
 
 	// Step 3: Apply agent bindings (opt-out and credential assignment)
-	bindingRows, err := h.db.QueryContext(r.Context(), `
+	type bindingInfo struct {
+		credentialID *string
+		credName     *string
+		enabled      bool
+		configJSON   *string
+	}
+	bindings := make(map[string]*bindingInfo)
+	if bindingRows, err := h.db.QueryContext(r.Context(), `
 		SELECT b.mcp_server_id, b.mcp_server_scope, b.credential_id, b.enabled, b.config_override_json,
 			c.name AS cred_name
 		FROM agent_mcp_bindings b
 		LEFT JOIN credentials c ON b.credential_id = c.id
-		WHERE b.agent_id = ?`, agentID)
-	if err == nil {
-		defer bindingRows.Close()
-		// Build lookup: server_id → binding
-		type bindingInfo struct {
-			credentialID *string
-			credName     *string
-			enabled      bool
-			configJSON   *string
-		}
-		bindings := make(map[string]*bindingInfo)
+		WHERE b.agent_id = ?`, agentID); err == nil {
 		for bindingRows.Next() {
 			var serverID, scope string
 			var credID, credName, configJSON *string
 			var enabled int
-			bindingRows.Scan(&serverID, &scope, &credID, &enabled, &configJSON, &credName)
+			if err := bindingRows.Scan(&serverID, &scope, &credID, &enabled, &configJSON, &credName); err != nil {
+				continue
+			}
 			bindings[serverID] = &bindingInfo{
 				credentialID: credID, credName: credName,
 				enabled: enabled == 1, configJSON: configJSON,
 			}
 		}
+		if err := bindingRows.Err(); err != nil {
+			h.logger.Error("iterate agent MCP bindings", "error", err)
+		}
+		bindingRows.Close()
+	}
+	{
 
 		// Apply bindings to merged servers
 		for _, s := range merged {

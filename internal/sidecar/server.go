@@ -336,16 +336,6 @@ func (s *Server) Start(ctx context.Context) error {
 		"openai_creds", s.credStore.Count(ProviderOpenAI),
 	)
 
-	// Connect to MCP servers and discover tools (non-blocking, best-effort)
-	if s.mcpGateway != nil {
-		if err := s.mcpGateway.Connect(ctx); err != nil {
-			s.logger.Warn("MCP gateway partial connect failure", "error", err)
-		}
-		if _, err := s.mcpGateway.DiscoverTools(ctx); err != nil {
-			s.logger.Warn("MCP gateway tool discovery failed", "error", err)
-		}
-	}
-
 	errCh := make(chan error, 1)
 	go func() {
 		if err := s.httpServer.Serve(ln); err != http.ErrServerClosed {
@@ -353,6 +343,20 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		close(errCh)
 	}()
+
+	// Connect to MCP servers in the background (don't block startup)
+	if s.mcpGateway != nil {
+		go func() {
+			startupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			if err := s.mcpGateway.Connect(startupCtx); err != nil {
+				s.logger.Warn("MCP gateway partial connect failure", "error", err)
+			}
+			if _, err := s.mcpGateway.DiscoverTools(startupCtx); err != nil {
+				s.logger.Warn("MCP gateway tool discovery failed", "error", err)
+			}
+		}()
+	}
 
 	select {
 	case <-ctx.Done():

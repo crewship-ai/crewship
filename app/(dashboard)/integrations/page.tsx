@@ -41,17 +41,21 @@ export default function IntegrationsPage() {
   const fetchServers = React.useCallback(async (wid: string) => {
     try {
       const res = await fetch(`/api/v1/integrations?workspace_id=${wid}`)
-      if (!res.ok) return
+      if (!res.ok) {
+        setServers([])
+        return
+      }
       const data = await res.json()
       setServers(Array.isArray(data) ? data : [])
     } catch {
-      // silently fail
+      setServers([])
     }
   }, [])
 
   React.useEffect(() => {
     if (wsLoading) return
     if (!workspaceId) {
+      setServers([])
       setLoading(false)
       return
     }
