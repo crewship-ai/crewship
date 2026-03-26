@@ -61,8 +61,8 @@ func TestNewReturnsDefaults(t *testing.T) {
 
 func TestLoadValidLicense(t *testing.T) {
 	pub, priv := generateTestKeypair(t)
-	SetPublicKey(base64.StdEncoding.EncodeToString(pub))
-	defer SetPublicKey("")
+	setPublicKey(base64.StdEncoding.EncodeToString(pub))
+	defer setPublicKey("")
 
 	claims := Claims{
 		LicenseID:    "test-001",
@@ -109,8 +109,8 @@ func TestLoadValidLicense(t *testing.T) {
 
 func TestLoadExpiredLicense(t *testing.T) {
 	pub, priv := generateTestKeypair(t)
-	SetPublicKey(base64.StdEncoding.EncodeToString(pub))
-	defer SetPublicKey("")
+	setPublicKey(base64.StdEncoding.EncodeToString(pub))
+	defer setPublicKey("")
 
 	claims := Claims{
 		LicenseID:    "expired-001",
@@ -140,8 +140,8 @@ func TestLoadExpiredLicense(t *testing.T) {
 func TestLoadInvalidSignature(t *testing.T) {
 	pub, _ := generateTestKeypair(t)
 	_, otherPriv := generateTestKeypair(t) // different key
-	SetPublicKey(base64.StdEncoding.EncodeToString(pub))
-	defer SetPublicKey("")
+	setPublicKey(base64.StdEncoding.EncodeToString(pub))
+	defer setPublicKey("")
 
 	claims := Claims{
 		LicenseID: "tampered",
@@ -162,8 +162,8 @@ func TestLoadInvalidSignature(t *testing.T) {
 
 func TestLoadFromFile(t *testing.T) {
 	pub, priv := generateTestKeypair(t)
-	SetPublicKey(base64.StdEncoding.EncodeToString(pub))
-	defer SetPublicKey("")
+	setPublicKey(base64.StdEncoding.EncodeToString(pub))
+	defer setPublicKey("")
 
 	claims := Claims{
 		LicenseID:    "file-001",
@@ -213,8 +213,8 @@ func TestLoadFromFileEmpty(t *testing.T) {
 }
 
 func TestNoPublicKey(t *testing.T) {
-	SetPublicKey("")
-	defer SetPublicKey("")
+	setPublicKey("")
+	defer setPublicKey("")
 
 	data := []byte(`{"payload":"{}","signature":"AAAA"}`)
 

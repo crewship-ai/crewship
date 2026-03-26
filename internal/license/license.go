@@ -184,7 +184,8 @@ func CommunityDefaults() Claims {
 	return communityDefaults
 }
 
-// SetPublicKey allows overriding the embedded public key (for testing).
-func SetPublicKey(key string) {
+// setPublicKey allows overriding the embedded public key (for testing only).
+// Unexported to prevent external code from bypassing license verification.
+func setPublicKey(key string) {
 	publicKey = key
 }
