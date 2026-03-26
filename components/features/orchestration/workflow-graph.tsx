@@ -23,6 +23,7 @@ import { EmptyState } from "@/components/layout/empty-state"
 import { Workflow } from "lucide-react"
 import type { Mission, MissionTask } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
+import { useAgentActivity } from "@/hooks/use-agent-activity"
 import { AgentNode } from "./agent-node"
 import { AnimatedEdge } from "./animated-edge"
 import { CrewGroupNode } from "./crew-group-node"
@@ -545,6 +546,8 @@ function WorkflowGraphInner(
   ref: React.ForwardedRef<WorkflowGraphRef>
 ) {
   const [collapsedCrews, setCollapsedCrews] = useState<Set<string>>(new Set())
+  const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null)
+  const activities = useAgentActivity()
 
   const toggleCollapse = useCallback((crewId: string) => {
     setCollapsedCrews((prev) => {
@@ -586,6 +589,74 @@ function WorkflowGraphInner(
     setEdges(graphData.edges)
   }, [graphData, setNodes, setEdges])
 
+  // Inject activity snippets into agent nodes
+  useEffect(() => {
+    if (activities.size === 0) return
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (node.type !== "agent") return node
+        const slug = (node.data as Record<string, unknown>)?.agentSlug as string | undefined
+        const snippet = slug ? activities.get(slug) ?? null : null
+        const current = (node.data as Record<string, unknown>)?.activitySnippet
+        if (current === snippet) return node
+        return { ...node, data: { ...node.data, activitySnippet: snippet } }
+      })
+    )
+  }, [activities, setNodes])
+
+  // Compute dimmed nodes/edges for Shift+Click highlighting
+  const { dimmedNodeIds, dimmedEdgeIds } = useMemo(() => {
+    if (!highlightedNodeId) return { dimmedNodeIds: new Set<string>(), dimmedEdgeIds: new Set<string>() }
+
+    const connectedNodeIds = new Set<string>([highlightedNodeId])
+    const connectedEdgeIds = new Set<string>()
+
+    for (const e of edgesState) {
+      if (e.source === highlightedNodeId || e.target === highlightedNodeId) {
+        connectedEdgeIds.add(e.id)
+        connectedNodeIds.add(e.source)
+        connectedNodeIds.add(e.target)
+      }
+    }
+
+    // Also include parent crew of highlighted node
+    const hlNode = nodes.find((n) => n.id === highlightedNodeId)
+    if (hlNode?.parentId) connectedNodeIds.add(hlNode.parentId)
+
+    // Include children of connected crew nodes
+    for (const n of nodes) {
+      if (n.parentId && connectedNodeIds.has(n.parentId)) {
+        // Don't dim children of connected crew groups
+      }
+    }
+
+    return {
+      dimmedNodeIds: new Set(nodes.filter((n) => !connectedNodeIds.has(n.id) && !(n.parentId && connectedNodeIds.has(n.parentId))).map((n) => n.id)),
+      dimmedEdgeIds: new Set(edgesState.filter((e) => !connectedEdgeIds.has(e.id)).map((e) => e.id)),
+    }
+  }, [highlightedNodeId, nodes, edgesState])
+
+  // Apply dimming styles to nodes and edges
+  const displayNodes = useMemo(() => {
+    if (!highlightedNodeId) return nodes
+    return nodes.map((n) => ({
+      ...n,
+      style: {
+        ...n.style,
+        opacity: dimmedNodeIds.has(n.id) ? 0.15 : 1,
+        transition: "opacity 0.3s ease",
+      },
+    }))
+  }, [nodes, highlightedNodeId, dimmedNodeIds])
+
+  const displayEdges = useMemo(() => {
+    if (!highlightedNodeId) return edgesState
+    return edgesState.map((e) => ({
+      ...e,
+      data: { ...e.data, dimmed: dimmedEdgeIds.has(e.id) },
+    }))
+  }, [edgesState, highlightedNodeId, dimmedEdgeIds])
+
   useImperativeHandle(
     ref,
     () => ({
@@ -612,7 +683,12 @@ function WorkflowGraphInner(
   )
 
   const onNodeClick = useCallback(
-    (_: React.MouseEvent, node: Node) => {
+    (event: React.MouseEvent, node: Node) => {
+      // Shift+Click: toggle highlight mode
+      if (event.shiftKey && !node.id.startsWith("mission-")) {
+        setHighlightedNodeId((prev) => (prev === node.id ? null : node.id))
+        return
+      }
       if (node.id.startsWith("mission-") || node.id.startsWith("crew-")) return
       if (!onTaskClick) return
       for (const m of missions) {
@@ -625,6 +701,10 @@ function WorkflowGraphInner(
     },
     [missions, onTaskClick]
   )
+
+  const onPaneClick = useCallback(() => {
+    setHighlightedNodeId(null)
+  }, [])
 
   if (missions.length === 0) {
     return (
@@ -642,13 +722,14 @@ function WorkflowGraphInner(
     <div className="h-full w-full overflow-hidden bg-[#0a0c10]">
       <div className="h-full w-full">
         <ReactFlow
-          nodes={nodes}
-          edges={edgesState}
+          nodes={displayNodes}
+          edges={displayEdges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeClick={onNodeClick}
+          onPaneClick={onPaneClick}
           fitView
           fitViewOptions={{ padding: 0.3 }}
           minZoom={0.1}
