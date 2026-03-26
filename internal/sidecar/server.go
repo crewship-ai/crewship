@@ -53,6 +53,27 @@ type NetworkPolicyConfig struct {
 	AllowedDomains []string `json:"allowed_domains"` // extra allowed domains for restricted mode
 }
 
+// MCPServerInput describes an MCP server to connect to via the gateway.
+type MCPServerInput struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	DisplayName string            `json:"display_name"`
+	Scope       string            `json:"scope,omitempty"` // "workspace" or "crew"
+	Transport   string            `json:"transport"`       // "streamable-http" or "stdio"
+	Endpoint    string            `json:"endpoint,omitempty"`
+	Command     string            `json:"command,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	Credential  *MCPCredInput     `json:"credential,omitempty"`
+}
+
+// MCPCredInput carries decrypted credential for MCP server authentication.
+type MCPCredInput struct {
+	Token  string `json:"token"`
+	Type   string `json:"type"`   // "bearer", "api_key", "basic"
+	Header string `json:"header,omitempty"` // custom header name (for api_key type)
+}
+
 // ServerConfig configures the sidecar server.
 type ServerConfig struct {
 	Addr           string   // listen address (default: 127.0.0.1:9119)
@@ -62,6 +83,7 @@ type ServerConfig struct {
 	IPC            *IPCConfig
 	CrewMembers    []CrewMember
 	NetworkPolicy  *NetworkPolicyConfig
+	MCPServers     []MCPServerInput
 	Logger         *slog.Logger
 }
 
@@ -76,6 +98,7 @@ type Server struct {
 	memoryEngine *memory.Engine
 	ipc          *IPCConfig
 	crewMembers  []CrewMember
+	mcpGateway   *MCPGateway
 	logger       *slog.Logger
 	readyCh      chan struct{} // closed when the TCP listener is bound
 }
@@ -149,10 +172,12 @@ func NewServer(cfg ServerConfig) *Server {
 		}
 	}
 
-	// Use ServeMux to route local API requests while keeping the
-	// forward proxy as the default handler for external traffic.
-	// The proxy's handleLocal already handles /health, but we register
-	// explicit routes here for the memory API.
+	// Initialize MCP Gateway if servers are configured
+	if len(cfg.MCPServers) > 0 {
+		s.mcpGateway = NewMCPGateway(cfg.MCPServers, cfg.IPC, cfg.Logger)
+		cfg.Logger.Info("MCP gateway initialized", "servers", len(cfg.MCPServers))
+	}
+
 	s.httpServer = &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           s.buildHandler(proxy),
@@ -254,6 +279,16 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPatch && r.URL.Path == "/manifest":
 				s.handleUpdateManifest(w, r)
 				return
+			// MCP Gateway routes
+			case r.Method == http.MethodGet && r.URL.Path == "/mcp/tools":
+				s.handleMCPListTools(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/mcp/call":
+				s.handleMCPCallTool(w, r)
+				return
+			case r.Method == http.MethodGet && r.URL.Path == "/mcp/status":
+				s.handleMCPStatus(w, r)
+				return
 			}
 		}
 		proxy.ServeHTTP(w, r)
@@ -310,20 +345,39 @@ func (s *Server) Start(ctx context.Context) error {
 		close(errCh)
 	}()
 
+	// Connect to MCP servers in the background (don't block startup)
+	if s.mcpGateway != nil {
+		go func() {
+			startupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			if err := s.mcpGateway.Connect(startupCtx); err != nil {
+				s.logger.Warn("MCP gateway partial connect failure", "error", err)
+			}
+			if _, err := s.mcpGateway.DiscoverTools(startupCtx); err != nil {
+				s.logger.Warn("MCP gateway tool discovery failed", "error", err)
+			}
+		}()
+	}
+
 	select {
 	case <-ctx.Done():
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		if s.mcpGateway != nil {
+			s.mcpGateway.Close()
+		}
 		if s.memoryEngine != nil {
 			s.memoryEngine.Close()
 		}
 		if err := s.httpServer.Shutdown(shutCtx); err != nil {
-			// Shutdown failed; force close to release the listener
 			s.httpServer.Close()
 			return fmt.Errorf("sidecar shutdown: %w", err)
 		}
 		return nil
 	case err := <-errCh:
+		if s.mcpGateway != nil {
+			s.mcpGateway.Close()
+		}
 		if s.memoryEngine != nil {
 			s.memoryEngine.Close()
 		}

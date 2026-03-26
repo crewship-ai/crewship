@@ -456,6 +456,7 @@ func startSidecar(
 	ipcCfg *SidecarIPCConfig,
 	crewMembers []SidecarCrewMember,
 	networkPolicy *SidecarNetworkPolicy,
+	mcpServers []MCPServerConfig,
 	logger *slog.Logger,
 ) error {
 	type sidecarCred struct {
@@ -483,19 +484,43 @@ func startSidecar(
 	}
 
 	// Build the input payload (new object format that includes memory config and IPC config)
+	type sidecarMCPServer struct {
+		ID          string            `json:"id"`
+		Name        string            `json:"name"`
+		DisplayName string            `json:"display_name"`
+		Transport   string            `json:"transport"`
+		Endpoint    string            `json:"endpoint,omitempty"`
+		Command     string            `json:"command,omitempty"`
+		Args        []string          `json:"args,omitempty"`
+		Env         map[string]string `json:"env,omitempty"`
+		Credential  *MCPCredential    `json:"credential,omitempty"`
+	}
 	type sidecarInput struct {
 		Credentials   []sidecarCred          `json:"credentials"`
 		Memory        *SidecarMemoryConfig   `json:"memory,omitempty"`
 		IPC           *SidecarIPCConfig      `json:"ipc,omitempty"`
 		CrewMembers   []SidecarCrewMember    `json:"crew_members,omitempty"`
 		NetworkPolicy *SidecarNetworkPolicy  `json:"network_policy,omitempty"`
+		MCPServers    []sidecarMCPServer     `json:"mcp_servers,omitempty"`
 	}
+
+	var mcpInput []sidecarMCPServer
+	for _, s := range mcpServers {
+		mcpInput = append(mcpInput, sidecarMCPServer{
+			ID: s.ID, Name: s.Name, DisplayName: s.DisplayName,
+			Transport: s.Transport, Endpoint: s.Endpoint,
+			Command: s.Command, Args: s.Args, Env: s.Env,
+			Credential: s.Credential,
+		})
+	}
+
 	input := sidecarInput{
 		Credentials:   sc,
 		Memory:        memoryCfg,
 		IPC:           ipcCfg,
 		CrewMembers:   crewMembers,
 		NetworkPolicy: networkPolicy,
+		MCPServers:    mcpInput,
 	}
 
 	credsJSON, err := json.Marshal(input)
