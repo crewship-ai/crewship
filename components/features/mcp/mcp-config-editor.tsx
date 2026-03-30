@@ -930,7 +930,7 @@ function OAuthForm({
         body: JSON.stringify({
           name: credName,
           type: "OAUTH2",
-          value: "pending_oauth",
+          value: "",
           scope: "WORKSPACE",
           oauth_client_id: clientId.trim(),
           oauth_client_secret: clientSecret.trim(),
@@ -977,6 +977,11 @@ function OAuthForm({
         }
         const result = await res.json()
         oauthRedirectUrl = result.auth_url
+        // Extract redirect_uri from auth_url for manual exchange fallback
+        try {
+          const authParams = new URL(oauthRedirectUrl)
+          setPendingRedirectUri(authParams.searchParams.get("redirect_uri") ?? "")
+        } catch { /* ignore */ }
       } else if (hasPublicDomain) {
         // PUBLIC DOMAIN: use standard redirect callback
         const redirectUri = `${window.location.origin}/api/v1/oauth/callback`
@@ -1010,6 +1015,11 @@ function OAuthForm({
         }
         const result = await res.json()
         oauthRedirectUrl = result.auth_url
+        // Extract redirect_uri from auth_url for manual exchange
+        try {
+          const authParams = new URL(oauthRedirectUrl)
+          setPendingRedirectUri(authParams.searchParams.get("redirect_uri") ?? "")
+        } catch { /* ignore */ }
         // Show paste input immediately for private IP
         setShowCodeInput(true)
         toast.info(
