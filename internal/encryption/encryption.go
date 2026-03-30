@@ -95,9 +95,13 @@ func Decrypt(ciphertextStr string) (string, error) {
 		return "", err
 	}
 
+	// Try standard base64 first, fall back to raw (no padding) for TS compat
 	data, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return "", fmt.Errorf("decode base64: %w", err)
+		data, err = base64.RawStdEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", fmt.Errorf("decode base64: %w", err)
+		}
 	}
 
 	if len(data) < 32 {
