@@ -113,7 +113,7 @@ export function CrewMCPConfig({ crewId, workspaceId }: CrewMCPConfigProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <MCPConfigEditor value={configJson} onChange={setConfigJson} />
+        <MCPConfigEditor value={configJson} onChange={setConfigJson} workspaceId={workspaceId} />
 
         {hasChanges && (
           <Button size="sm" onClick={handleSave} disabled={saving} className="gap-1.5">

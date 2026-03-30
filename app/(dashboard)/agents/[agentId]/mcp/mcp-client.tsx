@@ -201,7 +201,7 @@ export function MCPPageClient() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <MCPConfigEditor value={configJson} onChange={setConfigJson} />
+          <MCPConfigEditor value={configJson} onChange={setConfigJson} workspaceId={workspaceId ?? undefined} />
 
           {hasChanges && (
             <Button size="sm" onClick={handleSave} disabled={saving} className="gap-1.5">
