@@ -945,10 +945,14 @@ function OAuthForm({
       onAddCredential(created)
 
       // Step 2: Initiate OAuth flow
+      // Build redirect URI from current window location (works for self-hosted + cloud)
+      const backendOrigin = window.location.origin.replace(":3001", ":8080") // dev: proxy 3001→8080
+      const redirectUri = `${backendOrigin}/api/v1/oauth/callback`
+
       const initiateRes = await fetch(`/api/v1/oauth/initiate?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential_id: created.id }),
+        body: JSON.stringify({ credential_id: created.id, redirect_uri: redirectUri }),
       })
 
       if (!initiateRes.ok) {
