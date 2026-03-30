@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -105,7 +106,11 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 
 	// Generate state token
 	stateBytes := make([]byte, 16)
-	rand.Read(stateBytes)
+	if _, err := rand.Read(stateBytes); err != nil {
+		h.logger.Error("generate OAuth state", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate state token"})
+		return
+	}
 	state := hex.EncodeToString(stateBytes)
 
 	// Default redirect URI = Crewship backend callback
@@ -211,7 +216,12 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 
 	var encRefreshToken string
 	if tokenResp.RefreshToken != "" {
-		encRefreshToken, _ = encryption.Encrypt(tokenResp.RefreshToken)
+		encRefreshToken, err = encryption.Encrypt(tokenResp.RefreshToken)
+		if err != nil {
+			h.logger.Error("encrypt refresh token", "error", err)
+			http.Error(w, "Failed to encrypt refresh token", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	expiresAt := ""
@@ -300,21 +310,28 @@ func StartOAuthRefreshWorker(db *sql.DB, hub *ws.Hub, logger *slog.Logger, stop 
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 
+		// Derive a context that cancels when stop is closed
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			<-stop
+			cancel()
+		}()
+
 		for {
 			select {
 			case <-stop:
 				return
 			case <-ticker.C:
-				refreshExpiringTokens(db, hub, logger)
+				refreshExpiringTokens(ctx, db, hub, logger)
 			}
 		}
 	}()
 }
 
-func refreshExpiringTokens(db *sql.DB, hub *ws.Hub, logger *slog.Logger) {
+func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger *slog.Logger) {
 	// Find tokens expiring within 10 minutes
 	threshold := time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)
-	rows, err := db.Query(`
+	rows, err := db.QueryContext(ctx, `
 		SELECT id, workspace_id, oauth_client_id, oauth_client_secret_enc, oauth_token_url, oauth_refresh_token_enc
 		FROM credentials
 		WHERE type = 'OAUTH2' AND status = 'ACTIVE'
@@ -352,7 +369,9 @@ func refreshExpiringTokens(db *sql.DB, hub *ws.Hub, logger *slog.Logger) {
 		newToken, err := refreshOAuthToken(tokenURL, clientID, clientSecret, refreshToken)
 		if err != nil {
 			logger.Error("OAuth token refresh failed", "credential_id", id, "error", err)
-			db.Exec("UPDATE credentials SET status = 'EXPIRED', updated_at = datetime('now') WHERE id = ?", id)
+			if _, dbErr := db.ExecContext(ctx, "UPDATE credentials SET status = 'EXPIRED', updated_at = datetime('now') WHERE id = ?", id); dbErr != nil {
+				logger.Error("mark credential expired", "credential_id", id, "error", dbErr)
+			}
 			if hub != nil {
 				hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
 					Type: "credential.expired", Channel: "workspace:" + wsID,
@@ -362,7 +381,11 @@ func refreshExpiringTokens(db *sql.DB, hub *ws.Hub, logger *slog.Logger) {
 			continue
 		}
 
-		encAccess, _ := encryption.Encrypt(newToken.AccessToken)
+		encAccess, err := encryption.Encrypt(newToken.AccessToken)
+		if err != nil {
+			logger.Error("encrypt refreshed access token", "credential_id", id, "error", err)
+			continue
+		}
 		expiresAt := ""
 		if newToken.ExpiresIn > 0 {
 			expiresAt = time.Now().Add(time.Duration(newToken.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
@@ -370,12 +393,22 @@ func refreshExpiringTokens(db *sql.DB, hub *ws.Hub, logger *slog.Logger) {
 
 		// Update refresh token only if a new one was issued
 		if newToken.RefreshToken != "" {
-			encRefresh, _ := encryption.Encrypt(newToken.RefreshToken)
-			db.Exec("UPDATE credentials SET encrypted_value = ?, oauth_refresh_token_enc = ?, oauth_token_expires_at = ?, updated_at = datetime('now') WHERE id = ?",
-				encAccess, encRefresh, expiresAt, id)
+			encRefresh, err := encryption.Encrypt(newToken.RefreshToken)
+			if err != nil {
+				logger.Error("encrypt refreshed refresh token", "credential_id", id, "error", err)
+				continue
+			}
+			if _, err := db.ExecContext(ctx, "UPDATE credentials SET encrypted_value = ?, oauth_refresh_token_enc = ?, oauth_token_expires_at = ?, updated_at = datetime('now') WHERE id = ?",
+				encAccess, encRefresh, expiresAt, id); err != nil {
+				logger.Error("update refreshed tokens", "credential_id", id, "error", err)
+				continue
+			}
 		} else {
-			db.Exec("UPDATE credentials SET encrypted_value = ?, oauth_token_expires_at = ?, updated_at = datetime('now') WHERE id = ?",
-				encAccess, expiresAt, id)
+			if _, err := db.ExecContext(ctx, "UPDATE credentials SET encrypted_value = ?, oauth_token_expires_at = ?, updated_at = datetime('now') WHERE id = ?",
+				encAccess, expiresAt, id); err != nil {
+				logger.Error("update refreshed token", "credential_id", id, "error", err)
+				continue
+			}
 		}
 
 		logger.Info("OAuth token refreshed", "credential_id", id)

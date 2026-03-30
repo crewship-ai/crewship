@@ -837,17 +837,23 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 			}
 			// Parse args_json
 			if srv.argsJSON != nil && *srv.argsJSON != "" {
-				json.Unmarshal([]byte(*srv.argsJSON), &entry.Args)
+				if err := json.Unmarshal([]byte(*srv.argsJSON), &entry.Args); err != nil {
+					h.logger.Warn("malformed args_json for MCP server", "server_id", srv.id, "error", err)
+				}
 			}
 			// Parse env_json
 			if srv.envJSON != nil && *srv.envJSON != "" {
-				json.Unmarshal([]byte(*srv.envJSON), &entry.Env)
+				if err := json.Unmarshal([]byte(*srv.envJSON), &entry.Env); err != nil {
+					h.logger.Warn("malformed env_json for MCP server", "server_id", srv.id, "error", err)
+				}
 			}
 			if b, ok := agentBindings[srv.id]; ok {
 				if !b.enabled {
 					continue // agent opted out
 				}
-				entry.EnvVarName = b.envVarName
+				if srv.transport == "stdio" {
+					entry.EnvVarName = b.envVarName
+				}
 				if b.credID != nil && *b.credID != "" {
 					if token, ok := credTokens[*b.credID]; ok {
 						entry.CredToken = token

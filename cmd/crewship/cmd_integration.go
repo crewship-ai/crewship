@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -77,7 +79,7 @@ var intgAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Add a workspace integration",
 	Example: `  crewship integration add --name gmail --display "Google Gmail" --transport streamable-http --endpoint https://mcp.example.com/gmail
-  crewship integration add --name local-tools --transport stdio --command "npx @modelcontextprotocol/server-github"`,
+  crewship integration add --name github --transport stdio --command npx --arg @modelcontextprotocol/server-github --env GITHUB_TOKEN=ghp_xxx`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -92,6 +94,8 @@ var intgAddCmd = &cobra.Command{
 		endpoint, _ := flags.GetString("endpoint")
 		command, _ := flags.GetString("command")
 		icon, _ := flags.GetString("icon")
+		argSlice, _ := flags.GetStringArray("arg")
+		envSlice, _ := flags.GetStringArray("env")
 
 		if name == "" {
 			return fmt.Errorf("--name is required")
@@ -117,6 +121,28 @@ var intgAddCmd = &cobra.Command{
 		if icon != "" {
 			body["icon"] = icon
 		}
+		if len(argSlice) > 0 {
+			argsJSON, err := json.Marshal(argSlice)
+			if err != nil {
+				return fmt.Errorf("marshal args: %w", err)
+			}
+			body["args_json"] = string(argsJSON)
+		}
+		if len(envSlice) > 0 {
+			envMap := make(map[string]string, len(envSlice))
+			for _, kv := range envSlice {
+				parts := strings.SplitN(kv, "=", 2)
+				if len(parts) != 2 {
+					return fmt.Errorf("invalid --env format %q, expected KEY=VALUE", kv)
+				}
+				envMap[parts[0]] = parts[1]
+			}
+			envJSON, err := json.Marshal(envMap)
+			if err != nil {
+				return fmt.Errorf("marshal env: %w", err)
+			}
+			body["env_json"] = string(envJSON)
+		}
 
 		client := newAPIClient()
 		resp, err := client.Post("/api/v1/integrations", body)
@@ -130,7 +156,9 @@ var intgAddCmd = &cobra.Command{
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		}
-		cli.ReadJSON(resp, &created)
+		if err := cli.ReadJSON(resp, &created); err != nil {
+			return err
+		}
 		fmt.Printf("Integration created: %s (%s)\n", created.Name, created.ID)
 		return nil
 	},
@@ -231,12 +259,13 @@ var intgBindCmd = &cobra.Command{
 				return err
 			}
 			body["credential_id"] = credID
-		}
-		if credType != "" {
-			body["cred_type"] = credType
-		}
-		if credHeader != "" {
-			body["cred_header"] = credHeader
+			// Only send cred_type/cred_header when a credential is bound
+			if credType != "" {
+				body["cred_type"] = credType
+			}
+			if credHeader != "" {
+				body["cred_header"] = credHeader
+			}
 		}
 		if envVar != "" {
 			body["env_var_name"] = envVar
@@ -474,6 +503,8 @@ func init() {
 	intgAddCmd.Flags().String("transport", "streamable-http", "Transport: streamable-http or stdio")
 	intgAddCmd.Flags().String("endpoint", "", "MCP server endpoint URL")
 	intgAddCmd.Flags().String("command", "", "MCP server command (for stdio)")
+	intgAddCmd.Flags().StringArray("arg", nil, "Command argument (repeatable, for stdio)")
+	intgAddCmd.Flags().StringArray("env", nil, "Environment variable KEY=VALUE (repeatable, for stdio)")
 	intgAddCmd.Flags().String("icon", "", "Lucide icon name")
 
 	intgBindCmd.Flags().String("agent", "", "Agent slug (required)")

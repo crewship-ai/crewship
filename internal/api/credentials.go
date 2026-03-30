@@ -310,7 +310,13 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "OAUTH2" && req.OAuthClientID != nil {
 		var encClientSecret string
 		if req.OAuthClientSecret != nil && *req.OAuthClientSecret != "" {
-			encClientSecret, _ = encryption.Encrypt(*req.OAuthClientSecret)
+			encClientSecret, err = encryption.Encrypt(*req.OAuthClientSecret)
+			if err != nil {
+				tx.Rollback()
+				h.logger.Error("encrypt OAuth client secret", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
 		}
 		if _, err := tx.ExecContext(r.Context(), `
 			UPDATE credentials SET oauth_client_id = ?, oauth_client_secret_enc = ?,

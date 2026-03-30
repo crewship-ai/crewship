@@ -116,6 +116,8 @@ func buildMCPConfig(servers []MCPServerConfig) (string, error) {
 						header = "X-API-Key"
 					}
 					headers[header] = s.Credential.PlainValue
+				case "basic":
+					headers["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(s.Credential.PlainValue))
 				}
 				if len(headers) > 0 {
 					entry["headers"] = headers

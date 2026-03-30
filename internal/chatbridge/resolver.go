@@ -411,7 +411,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		if s.CredToken != "" {
 			header := s.CredHeader
 			// For stdio servers, env_var_name takes precedence over header
-			if s.EnvVarName != "" {
+			if s.Transport == "stdio" && s.EnvVarName != "" {
 				header = s.EnvVarName
 			}
 			cfg.Credential = &orchestrator.MCPCredential{
