@@ -391,6 +391,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			}
 		}
 		o.logger.Info("sidecar ready", "agent_id", req.AgentID, "credentials", credCount)
+
+		// MCP servers configured via .mcp.json use ${ENV_VAR} references that
+		// Claude Code expands from the process environment. With sidecar enabled
+		// credentials normally skip env vars (they go via stdin instead), but
+		// MCP env references still need the actual values in the exec env.
+		env = injectMCPCredentialEnvVars(req, env)
 	} else {
 		env = BuildEnvVars(req, cred)
 	}

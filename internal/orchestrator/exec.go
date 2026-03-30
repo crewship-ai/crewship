@@ -202,6 +202,71 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	return env
 }
 
+// injectMCPCredentialEnvVars ensures that credentials referenced as ${ENV_VAR}
+// in MCP .mcp.json configs are available as env vars in the agent exec.
+// This is needed because sidecar mode skips BuildEnvVars (credentials go via
+// stdin), but MCP servers need actual env vars for ${VAR} expansion.
+func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
+	// Collect env var names referenced in crew/agent MCP configs
+	mcpEnvRefs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
+	if len(mcpEnvRefs) == 0 {
+		return env
+	}
+
+	// Build set of already-set env var names
+	existing := make(map[string]bool)
+	for _, e := range env {
+		if idx := strings.IndexByte(e, '='); idx > 0 {
+			existing[e[:idx]] = true
+		}
+	}
+
+	// Match credentials to MCP env var references
+	for _, cred := range req.Credentials {
+		if cred.EnvVarName == "" || cred.PlainValue == "" {
+			continue
+		}
+		if _, needed := mcpEnvRefs[cred.EnvVarName]; !needed {
+			continue
+		}
+		if existing[cred.EnvVarName] {
+			continue
+		}
+		env = append(env, cred.EnvVarName+"="+cred.PlainValue)
+		existing[cred.EnvVarName] = true
+	}
+
+	return env
+}
+
+// collectMCPEnvRefs parses MCP config JSONs and returns env var names
+// referenced as ${VAR} in the "env" blocks of server definitions.
+func collectMCPEnvRefs(configs ...string) map[string]bool {
+	refs := make(map[string]bool)
+	for _, cfg := range configs {
+		if cfg == "" {
+			continue
+		}
+		var wrapper struct {
+			MCPServers map[string]struct {
+				Env map[string]string `json:"env"`
+			} `json:"mcpServers"`
+		}
+		if err := json.Unmarshal([]byte(cfg), &wrapper); err != nil {
+			continue
+		}
+		for _, srv := range wrapper.MCPServers {
+			for _, val := range srv.Env {
+				// Match ${VAR_NAME} pattern
+				if len(val) > 3 && val[0] == '$' && val[1] == '{' && val[len(val)-1] == '}' {
+					refs[val[2:len(val)-1]] = true
+				}
+			}
+		}
+	}
+	return refs
+}
+
 // BuildEnvVarsSidecar builds env vars for the agent when sidecar mode is active.
 // API key credentials are NOT included -- the sidecar proxy injects them into HTTP requests.
 // OAuth tokens (AI_CLI_TOKEN) are injected directly as CLAUDE_CODE_OAUTH_TOKEN because
