@@ -913,10 +913,11 @@ function OAuthForm({
     setAuthorizing(true)
 
     try {
-      // Step 1: Create OAUTH2 credential
-      const credName = envKey
+      // Step 1: Create OAUTH2 credential (add timestamp suffix to avoid name collisions)
+      const baseName = envKey
         ? deriveCredentialName(envKey) + "-oauth"
         : (selectedProvider ?? "custom") + "-oauth"
+      const credName = baseName + "-" + Date.now().toString(36)
 
       const createRes = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
         method: "POST",
