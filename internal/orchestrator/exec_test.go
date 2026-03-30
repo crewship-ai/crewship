@@ -750,3 +750,70 @@ func TestBuildCLICommand_WithoutMCP(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCLICommand_WithRawMCPConfig(t *testing.T) {
+	req := AgentRunRequest{
+		CLIAdapter:        "CLAUDE_CODE",
+		AgentSlug:         "test-agent",
+		UserMessage:       "hello",
+		CrewMCPConfigJSON: `{"mcpServers":{"github":{"command":"npx"}}}`,
+	}
+	cmd := BuildCLICommand(req)
+	found := false
+	for _, arg := range cmd {
+		if arg == "--mcp-config" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("--mcp-config should be present when CrewMCPConfigJSON is set")
+	}
+}
+
+func TestMergeMCPConfigs_CrewOnly(t *testing.T) {
+	crew := `{"mcpServers":{"github":{"command":"npx","args":["-y","@mcp/server-github"]}}}`
+	result, err := mergeMCPConfigs(crew, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "github") {
+		t.Error("expected github in merged config")
+	}
+}
+
+func TestMergeMCPConfigs_AgentOverridesCrew(t *testing.T) {
+	crew := `{"mcpServers":{"github":{"command":"npx","args":["old"]}}}`
+	agent := `{"mcpServers":{"github":{"command":"npx","args":["new"]},"jira":{"type":"http","url":"https://jira.example.com"}}}`
+	result, err := mergeMCPConfigs(crew, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Agent's github should override crew's
+	if !strings.Contains(result, `"new"`) {
+		t.Error("expected agent override for github")
+	}
+	if strings.Contains(result, `"old"`) {
+		t.Error("crew github args should be overridden")
+	}
+	// Jira should be added
+	if !strings.Contains(result, "jira") {
+		t.Error("expected jira from agent config")
+	}
+}
+
+func TestMergeMCPConfigs_BothEmpty(t *testing.T) {
+	result, err := mergeMCPConfigs("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "" {
+		t.Errorf("expected empty, got %s", result)
+	}
+}
+
+func TestMergeMCPConfigs_InvalidJSON(t *testing.T) {
+	_, err := mergeMCPConfigs("{invalid", "")
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
