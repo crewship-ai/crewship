@@ -212,8 +212,10 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "value is required"})
 		return
 	}
-	if req.Value == "" {
+	oauthPending := false
+	if req.Value == "" && req.Type == "OAUTH2" {
 		req.Value = "pending_oauth" // placeholder until OAuth flow completes
+		oauthPending = true
 	}
 
 	if req.Type == "" {
@@ -291,14 +293,19 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	credStatus := "ACTIVE"
+	if oauthPending {
+		credStatus = "PENDING"
+	}
+
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, crew_id, account_label, account_email,
-			token_expires_at, security_level, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			token_expires_at, security_level, status, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		credID, workspaceID, req.Name, req.Description, encryptedValue,
 		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail,
-		req.TokenExpires, secLevel, user.ID, now, now)
+		req.TokenExpires, secLevel, credStatus, user.ID, now, now)
 	if err != nil {
 		tx.Rollback()
 		h.logger.Error("insert credential", "error", err)

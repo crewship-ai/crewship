@@ -79,7 +79,8 @@ var intgAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Add a workspace integration",
 	Example: `  crewship integration add --name gmail --display "Google Gmail" --transport streamable-http --endpoint https://mcp.example.com/gmail
-  crewship integration add --name github --transport stdio --command npx --arg @modelcontextprotocol/server-github --env GITHUB_TOKEN=ghp_xxx`,
+  crewship integration add --name github --transport stdio --command npx --arg @modelcontextprotocol/server-github --env NODE_ENV=production
+  # For credentials, use: crewship integration bind --agent <slug> --server github --credential gh-token --env-var GITHUB_TOKEN`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err

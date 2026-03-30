@@ -54,7 +54,7 @@ func BuildCLICommand(req AgentRunRequest) []string {
 			cmd = append(cmd, "--tools", "Read,Search,Grep")
 		}
 		// Inject MCP server configuration via file (Claude Code reads --mcp-config from files)
-		if len(req.MCPServers) > 0 {
+		if len(req.MCPServers) > 0 || req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" {
 			cmd = append(cmd, "--mcp-config", fmt.Sprintf("/crew/agents/%s/.mcp.json", req.AgentSlug))
 		}
 		// Use -- separator to prevent variadic flags (--tools) from consuming the user message

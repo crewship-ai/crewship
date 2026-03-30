@@ -561,6 +561,23 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate mcp_config_json if being updated
+	if mcpVal, ok := body["mcp_config_json"]; ok {
+		if mcpStr, ok := mcpVal.(string); ok && mcpStr != "" {
+			var mcpCheck struct {
+				MCPServers map[string]json.RawMessage `json:"mcpServers"`
+			}
+			if err := json.Unmarshal([]byte(mcpStr), &mcpCheck); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_config_json is not valid JSON: " + err.Error()})
+				return
+			}
+			if mcpCheck.MCPServers == nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_config_json must contain a \"mcpServers\" object"})
+				return
+			}
+		}
+	}
+
 	var setClauses []string
 	var args []interface{}
 	for jsonKey, col := range allowed {

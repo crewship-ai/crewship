@@ -506,6 +506,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	if err := setupMCPConfig(ctx, o.container, req.ContainerID, req.AgentSlug, req.CrewMCPConfigJSON, req.AgentMCPConfigJSON, req.MCPServers, o.logger); err != nil {
 		hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
 		if hasMCP {
+			o.updateRunStatus(ctx, runState.ID, "error")
 			return fmt.Errorf("inject MCP config: %w", err)
 		}
 		o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID)

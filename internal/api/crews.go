@@ -472,6 +472,19 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		args = append(args, *req.ContainerCPUs)
 	}
 	if req.MCPConfigJSON != nil {
+		if *req.MCPConfigJSON != "" {
+			var mcpCheck struct {
+				MCPServers map[string]json.RawMessage `json:"mcpServers"`
+			}
+			if err := json.Unmarshal([]byte(*req.MCPConfigJSON), &mcpCheck); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_config_json is not valid JSON: " + err.Error()})
+				return
+			}
+			if mcpCheck.MCPServers == nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_config_json must contain a \"mcpServers\" object"})
+				return
+			}
+		}
 		query += ", mcp_config_json = ?"
 		args = append(args, *req.MCPConfigJSON)
 	}
