@@ -251,6 +251,94 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `<html><body><script>window.close(); window.opener && window.opener.location.reload();</script><p>Authorization successful! You can close this window.</p></body></html>`)
 }
 
+// Exchange handles manual code exchange — for when the automatic callback
+// doesn't work (private IP, firewall, etc.). The frontend collects the
+// authorization code and POSTs it here.
+func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	var req struct {
+		CredentialID string `json:"credential_id"`
+		Code         string `json:"code"`
+		RedirectURI  string `json:"redirect_uri"`
+	}
+	if err := readJSON(r, &req); err != nil || req.CredentialID == "" || req.Code == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "credential_id and code are required"})
+		return
+	}
+
+	// Load credential OAuth config
+	var clientID, clientSecretEnc, tokenURL string
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT oauth_client_id, COALESCE(oauth_client_secret_enc, ''), oauth_token_url
+		FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		req.CredentialID, workspaceID).Scan(&clientID, &clientSecretEnc, &tokenURL)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		return
+	}
+
+	clientSecret := ""
+	if clientSecretEnc != "" {
+		if decrypted, err := encryption.Decrypt(clientSecretEnc); err == nil {
+			clientSecret = decrypted
+		} else {
+			clientSecret = clientSecretEnc
+		}
+	}
+
+	// Exchange code for tokens
+	tokenResp, err := exchangeOAuthCode(tokenURL, clientID, clientSecret, req.Code, req.RedirectURI)
+	if err != nil {
+		h.logger.Error("OAuth manual code exchange failed", "error", err, "credential_id", req.CredentialID)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Token exchange failed: " + err.Error()})
+		return
+	}
+
+	// Encrypt and store tokens
+	encAccessToken, err := encryption.Encrypt(tokenResp.AccessToken)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt token"})
+		return
+	}
+
+	var encRefreshToken string
+	if tokenResp.RefreshToken != "" {
+		encRefreshToken, err = encryption.Encrypt(tokenResp.RefreshToken)
+		if err != nil {
+			h.logger.Error("encrypt refresh token", "error", err)
+		}
+	}
+
+	expiresAt := ""
+	if tokenResp.ExpiresIn > 0 {
+		expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
+	}
+
+	_, err = h.db.ExecContext(r.Context(), `
+		UPDATE credentials SET
+			encrypted_value = ?,
+			oauth_refresh_token_enc = CASE WHEN ? != '' THEN ? ELSE oauth_refresh_token_enc END,
+			oauth_token_expires_at = ?,
+			status = 'ACTIVE',
+			updated_at = datetime('now')
+		WHERE id = ?`,
+		encAccessToken, encRefreshToken, encRefreshToken, expiresAt, req.CredentialID)
+	if err != nil {
+		h.logger.Error("store OAuth tokens from exchange", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store tokens"})
+		return
+	}
+
+	h.logger.Info("OAuth tokens stored via manual exchange", "credential_id", req.CredentialID)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "credential_id": req.CredentialID})
+}
+
 // tokenResponse holds the OAuth token exchange response.
 type tokenResponse struct {
 	AccessToken  string `json:"access_token"`

@@ -860,6 +860,11 @@ function OAuthForm({
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
   const [authorizing, setAuthorizing] = useState(false)
   const [polling, setPolling] = useState(false)
+  const [showCodeInput, setShowCodeInput] = useState(false)
+  const [manualCode, setManualCode] = useState("")
+  const [pendingCredId, setPendingCredId] = useState<string | null>(null)
+  const [pendingCredName, setPendingCredName] = useState("")
+  const [pendingRedirectUri, setPendingRedirectUri] = useState("")
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Fetch available providers on mount
@@ -944,15 +949,17 @@ function OAuthForm({
 
       const created: Credential = await createRes.json()
       onAddCredential(created)
+      setPendingCredId(created.id)
+      setPendingCredName(credName)
 
       // Step 2: Initiate OAuth flow
-      // Build redirect URI: in production (single binary), origin IS the backend.
-      // In dev mode (Next.js :3001 proxying Go :8080), swap port.
+      // Build redirect URI: production = same origin, dev = swap :3001→:8080
       const origin = window.location.origin
       const backendOrigin = origin.includes(":3001")
         ? origin.replace(":3001", ":8080")
         : origin
       const redirectUri = `${backendOrigin}/api/v1/oauth/callback`
+      setPendingRedirectUri(redirectUri)
 
       const initiateRes = await fetch(`/api/v1/oauth/initiate?workspace_id=${workspaceId}`, {
         method: "POST",
@@ -969,14 +976,17 @@ function OAuthForm({
 
       const { auth_url: oauthRedirectUrl } = await initiateRes.json()
 
-      // Step 3: Open popup
+      // Step 3: Open popup + poll for automatic callback completion
       const popup = window.open(oauthRedirectUrl, "oauth_popup", "width=600,height=700,popup=yes")
-
-      // Step 4: Poll for completion
       setPolling(true)
+
+      // Also show manual code input after 5s as fallback
+      // (in case callback doesn't work — private IP, firewall, etc.)
+      setTimeout(() => setShowCodeInput(true), 5000)
+
       let elapsed = 0
       const POLL_INTERVAL = 2000
-      const MAX_WAIT = 60000
+      const MAX_WAIT = 120000
 
       pollRef.current = setInterval(async () => {
         elapsed += POLL_INTERVAL
@@ -1000,6 +1010,7 @@ function OAuthForm({
               pollRef.current = null
               setPolling(false)
               setAuthorizing(false)
+              setShowCodeInput(false)
               if (popup && !popup.closed) popup.close()
               toast.success("OAuth authorization successful")
               onSelectCredential(credName)
@@ -1011,6 +1022,51 @@ function OAuthForm({
       }, POLL_INTERVAL)
     } catch {
       toast.error("Network error during OAuth setup")
+      setAuthorizing(false)
+    }
+  }
+
+  // Manual code exchange — for when automatic callback doesn't work
+  async function handleManualCodeExchange() {
+    if (!manualCode.trim() || !pendingCredId) return
+    setAuthorizing(true)
+
+    // Extract code from URL or raw code
+    let code = manualCode.trim()
+    try {
+      const url = new URL(code)
+      code = url.searchParams.get("code") ?? code
+    } catch {
+      // Not a URL, use as-is (raw code)
+    }
+
+    try {
+      // Exchange code for tokens via backend
+      const res = await fetch(`/api/v1/oauth/exchange?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          credential_id: pendingCredId,
+          code,
+          redirect_uri: pendingRedirectUri,
+        }),
+      })
+
+      if (res.ok) {
+        if (pollRef.current) clearInterval(pollRef.current)
+        pollRef.current = null
+        setPolling(false)
+        setAuthorizing(false)
+        setShowCodeInput(false)
+        toast.success("OAuth authorization successful")
+        onSelectCredential(pendingCredName)
+      } else {
+        const data = await res.json().catch(() => ({ error: "Code exchange failed" }))
+        toast.error(typeof data.error === "string" ? data.error : "Failed to exchange code")
+        setAuthorizing(false)
+      }
+    } catch {
+      toast.error("Network error during code exchange")
       setAuthorizing(false)
     }
   }
@@ -1126,6 +1182,32 @@ function OAuthForm({
               Cancel
             </Button>
           </div>
+
+          {/* Manual code fallback — appears after 5s or when user needs it */}
+          {(showCodeInput || polling) && (
+            <div className="border-t pt-3 mt-3 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                If the redirect didn't complete automatically, paste the URL or authorization code from your browser:
+              </p>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={manualCode}
+                  onChange={(e) => setManualCode(e.target.value)}
+                  placeholder="Paste redirect URL or authorization code"
+                  className="h-7 text-xs font-mono flex-1"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 text-xs"
+                  disabled={!manualCode.trim() || !pendingCredId}
+                  onClick={handleManualCodeExchange}
+                >
+                  Submit
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
