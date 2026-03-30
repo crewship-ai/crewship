@@ -305,13 +305,15 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 	var crewNetworkMode, crewAllowedDomains sql.NullString
 	var crewMemoryMB, crewTTLHours sql.NullInt64
 	var crewCPUs sql.NullFloat64
+	var crewMCPConfigJSON, agentMCPConfigJSON sql.NullString
 
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT a.slug, a.name, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt,
 			a.tool_profile, a.timeout_seconds, a.memory_enabled,
 			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model,
 			c2.network_mode, c2.allowed_domains,
-			c2.container_memory_mb, c2.container_cpus, c2.container_ttl_hours
+			c2.container_memory_mb, c2.container_cpus, c2.container_ttl_hours,
+			c2.mcp_config_json, a.mcp_config_json
 		FROM agents a
 		LEFT JOIN crews c2 ON c2.id = a.crew_id
 		WHERE a.id = ?
@@ -319,7 +321,8 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		&toolProfile, &timeoutSecs, &memoryEnabled,
 		&crewID, &crewSlug, &crewName, &wsID, &llmModel,
 		&crewNetworkMode, &crewAllowedDomains,
-		&crewMemoryMB, &crewCPUs, &crewTTLHours)
+		&crewMemoryMB, &crewCPUs, &crewTTLHours,
+		&crewMCPConfigJSON, &agentMCPConfigJSON)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
@@ -890,7 +893,9 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		"memory_mb":       memoryMB,
 		"cpus":            cpus,
 		"ttl_hours":       ttlHours,
-		"mcp_servers":     mcpServers,
+		"mcp_servers":          mcpServers,
+		"crew_mcp_config_json":  crewMCPConfigJSON.String,
+		"agent_mcp_config_json": agentMCPConfigJSON.String,
 	}
 	if len(allCrews) > 0 {
 		resp["all_crews"] = allCrews

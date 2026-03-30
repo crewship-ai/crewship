@@ -91,6 +91,7 @@ var migrations = []migration{
 	{30, "fix_mcp_gateway_constraints", migrationFixMCPGatewayConstraints},
 	{31, "add_mcp_binding_env_var", migrationAddMCPBindingEnvVar},
 	{32, "add_oauth_credentials", migrationAddOAuthCredentials},
+	{33, "add_mcp_config_json", migrationAddMCPConfigJSON},
 }
 
 const migrationAddKeeperObservability = `
@@ -1035,6 +1036,14 @@ END;
 const migrationAddMCPBindingEnvVar = `
 -- Env var name for stdio MCP credential injection (e.g. GITHUB_TOKEN, SLACK_TOKEN)
 ALTER TABLE agent_mcp_bindings ADD COLUMN env_var_name TEXT;
+`
+
+const migrationAddMCPConfigJSON = `
+-- Raw .mcp.json config stored per crew (base) and per agent (additions).
+-- Orchestrator merges crew + agent configs at runtime; Claude Code
+-- natively expands ${VAR} references from container env vars.
+ALTER TABLE crews ADD COLUMN mcp_config_json TEXT;
+ALTER TABLE agents ADD COLUMN mcp_config_json TEXT;
 `
 
 const migrationAddOAuthCredentials = `

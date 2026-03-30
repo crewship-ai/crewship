@@ -720,27 +720,48 @@ chmod 600 %s/.claude.json`, homeDir, homeDir, homeDir)
 
 // setupMCPConfig writes the MCP server configuration file into the container
 // so Claude Code can discover external tools via --mcp-config flag.
+//
+// Primary path: merge crew + agent raw .mcp.json configs. Credentials stay as
+// ${VAR} references — Claude Code expands them from the container env vars.
+//
+// Fallback path: build from resolved MCPServerConfig entries (legacy per-binding model
+// where credentials are decrypted and injected into the JSON).
 func setupMCPConfig(
 	ctx context.Context,
 	container provider.ContainerProvider,
 	containerID string,
 	agentSlug string,
+	crewMCPJSON string,
+	agentMCPJSON string,
 	servers []MCPServerConfig,
 	logger *slog.Logger,
 ) error {
-	if len(servers) == 0 {
-		return nil
+	var mcpJSON string
+
+	// Primary path: raw JSON configs from crew/agent DB fields
+	if crewMCPJSON != "" || agentMCPJSON != "" {
+		merged, err := mergeMCPConfigs(crewMCPJSON, agentMCPJSON)
+		if err != nil {
+			return fmt.Errorf("merge MCP configs: %w", err)
+		}
+		mcpJSON = merged
 	}
-	mcpJSON, err := buildMCPConfig(servers)
-	if err != nil {
-		return fmt.Errorf("build MCP config: %w", err)
+
+	// Fallback: legacy per-binding model
+	if mcpJSON == "" && len(servers) > 0 {
+		var err error
+		mcpJSON, err = buildMCPConfig(servers)
+		if err != nil {
+			return fmt.Errorf("build MCP config: %w", err)
+		}
 	}
+
 	if mcpJSON == "" {
 		return nil
 	}
 
 	homeDir := fmt.Sprintf("/crew/agents/%s", agentSlug)
-	// Write config file (SECURITY: may contain decrypted tokens, file is 600 and owned by agent)
+	// Write config file (600 perms, owned by agent user)
 	script := fmt.Sprintf(`cat > %s/.mcp.json << 'MCPEOF'
 %s
 MCPEOF
@@ -758,8 +779,51 @@ chmod 600 %s/.mcp.json`, homeDir, mcpJSON, homeDir)
 	io.Copy(io.Discard, result.Reader)
 	result.Reader.Close()
 
-	logger.Debug("MCP config injected", "container_id", containerID[:min(12, len(containerID))], "servers", len(servers))
+	logger.Debug("MCP config injected", "container_id", containerID[:min(12, len(containerID))])
 	return nil
+}
+
+// mergeMCPConfigs merges crew-level and agent-level .mcp.json configs.
+// Agent servers with the same name override crew servers; different names are combined.
+func mergeMCPConfigs(crewJSON, agentJSON string) (string, error) {
+	type mcpConfigWrapper struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+
+	merged := make(map[string]json.RawMessage)
+
+	// Parse crew config (base layer)
+	if crewJSON != "" {
+		var crew mcpConfigWrapper
+		if err := json.Unmarshal([]byte(crewJSON), &crew); err != nil {
+			return "", fmt.Errorf("parse crew MCP config: %w", err)
+		}
+		for k, v := range crew.MCPServers {
+			merged[k] = v
+		}
+	}
+
+	// Parse agent config (override layer — same-name servers win)
+	if agentJSON != "" {
+		var agent mcpConfigWrapper
+		if err := json.Unmarshal([]byte(agentJSON), &agent); err != nil {
+			return "", fmt.Errorf("parse agent MCP config: %w", err)
+		}
+		for k, v := range agent.MCPServers {
+			merged[k] = v
+		}
+	}
+
+	if len(merged) == 0 {
+		return "", nil
+	}
+
+	wrapper := map[string]interface{}{"mcpServers": merged}
+	b, err := json.Marshal(wrapper)
+	if err != nil {
+		return "", fmt.Errorf("marshal merged MCP config: %w", err)
+	}
+	return string(b), nil
 }
 
 // setupSystemPromptFiles writes CLI-specific system prompt files into the container.

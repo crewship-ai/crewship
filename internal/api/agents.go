@@ -134,6 +134,7 @@ type agentResponse struct {
 	ScheduleEnabled bool           `json:"schedule_enabled"`
 	ScheduleLastRun *string        `json:"schedule_last_run"`
 	ScheduleNextRun *string        `json:"schedule_next_run"`
+	MCPConfigJSON   *string        `json:"mcp_config_json,omitempty"`
 	CreatedAt       string         `json:"created_at"`
 	UpdatedAt       string         `json:"updated_at"`
 	Crew            *agentCrewInfo `json:"crew"`
@@ -155,6 +156,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.cli_tools,
 			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
+			a.mcp_config_json,
 			a.created_at, a.updated_at,
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
@@ -191,6 +193,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
 			&a.TimeoutSeconds, &a.ToolProfile, &memEnabled, &a.CLITools,
 			&a.ScheduleCron, &a.SchedulePrompt, &schedEnabled, &a.ScheduleLastRun, &a.ScheduleNextRun,
+			&a.MCPConfigJSON,
 			&a.CreatedAt, &a.UpdatedAt,
 			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 			&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats); err != nil {
@@ -434,6 +437,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 			a.system_prompt, a.avatar_seed, a.avatar_style, a.timeout_seconds,
 			a.tool_profile, a.memory_enabled, a.cli_tools,
 			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
+			a.mcp_config_json,
 			a.created_at, a.updated_at,
 			c.name, c.slug, c.color, c.avatar_style,
 			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
@@ -447,6 +451,7 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&a.LLMProvider, &a.LLMModel, &a.SystemPrompt, &a.AvatarSeed, &a.AvatarStyle,
 		&a.TimeoutSeconds, &a.ToolProfile, &memEnabled, &a.CLITools,
 		&a.ScheduleCron, &a.SchedulePrompt, &schedEnabled, &a.ScheduleLastRun, &a.ScheduleNextRun,
+		&a.MCPConfigJSON,
 		&a.CreatedAt, &a.UpdatedAt,
 		&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
 		&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats)
@@ -508,6 +513,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"memory_enabled": "memory_enabled", "cli_tools": "cli_tools", "crew_id": "crew_id",
 		"schedule_cron": "schedule_cron", "schedule_prompt": "schedule_prompt",
 		"schedule_enabled": "schedule_enabled",
+		"mcp_config_json": "mcp_config_json",
 	}
 
 	// Validate agent_role if being updated

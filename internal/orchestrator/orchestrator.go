@@ -47,7 +47,9 @@ type AgentRunRequest struct {
 	MemoryMB        int
 	CPUs            float64
 	TTLHours        int
-	MCPServers      []MCPServerConfig // Resolved MCP server configs for this agent
+	MCPServers         []MCPServerConfig // Resolved MCP server configs for this agent
+	CrewMCPConfigJSON  string            // Raw crew .mcp.json (merged with agent's at runtime)
+	AgentMCPConfigJSON string            // Raw agent .mcp.json additions
 }
 
 // MCPServerConfig is a resolved MCP server ready for sidecar injection.
@@ -498,9 +500,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
 	}
 
-	// Write MCP server configuration file (if integrations are assigned)
-	if err := setupMCPConfig(ctx, o.container, req.ContainerID, req.AgentSlug, req.MCPServers, o.logger); err != nil {
-		if len(req.MCPServers) > 0 {
+	// Write MCP server configuration file.
+	// Primary path: merge crew + agent raw .mcp.json configs (new simplified model).
+	// Fallback: build from resolved MCPServerConfig entries (legacy per-binding model).
+	if err := setupMCPConfig(ctx, o.container, req.ContainerID, req.AgentSlug, req.CrewMCPConfigJSON, req.AgentMCPConfigJSON, req.MCPServers, o.logger); err != nil {
+		hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
+		if hasMCP {
 			return fmt.Errorf("inject MCP config: %w", err)
 		}
 		o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID)

@@ -122,6 +122,7 @@ type crewResponse struct {
 	ContainerCPUs     float64          `json:"container_cpus"`
 	NetworkMode       string           `json:"network_mode"`
 	AllowedDomains    []string         `json:"allowed_domains"`
+	MCPConfigJSON     *string          `json:"mcp_config_json,omitempty"`
 	CreatedAt         string           `json:"created_at"`
 	UpdatedAt         string           `json:"updated_at"`
 	Count             crewCountResponse `json:"_count"`
@@ -137,6 +138,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.mcp_config_json,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -158,6 +160,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 			&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 			&c.NetworkMode, &allowedDomainsJSON,
+			&c.MCPConfigJSON,
 			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
 			h.logger.Error("scan crew", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -330,6 +333,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.mcp_config_json,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -338,6 +342,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 		&c.NetworkMode, &allowedDomainsJSON,
+		&c.MCPConfigJSON,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -364,6 +369,7 @@ type updateCrewRequest struct {
 	ContainerCPUs     *float64  `json:"container_cpus"`
 	NetworkMode       *string   `json:"network_mode"`
 	AllowedDomains    *[]string `json:"allowed_domains"`
+	MCPConfigJSON     *string   `json:"mcp_config_json"`
 }
 
 func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -465,6 +471,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		query += ", container_cpus = ?"
 		args = append(args, *req.ContainerCPUs)
 	}
+	if req.MCPConfigJSON != nil {
+		query += ", mcp_config_json = ?"
+		args = append(args, *req.MCPConfigJSON)
+	}
 	// Track whether the resolved mode is free — if so, always clear allowed_domains.
 	updatedModeFree := false
 	if req.NetworkMode != nil {
@@ -528,6 +538,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.mcp_config_json,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -536,6 +547,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	`, crewID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 		&c.NetworkMode, &updatedDomainsJSON,
+		&c.MCPConfigJSON,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		h.logger.Error("get crew after update", "error", err)
