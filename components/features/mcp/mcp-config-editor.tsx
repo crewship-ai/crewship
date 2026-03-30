@@ -952,31 +952,80 @@ function OAuthForm({
       setPendingCredId(created.id)
       setPendingCredName(credName)
 
-      // Step 2: Start loopback OAuth flow
-      // Backend spins up a temporary server on 127.0.0.1:random-port
-      // Same approach as gh auth login, gcloud auth login — works everywhere
-      const loopbackRes = await fetch(`/api/v1/oauth/loopback?workspace_id=${workspaceId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential_id: created.id }),
-      })
+      // Step 2: Pick the right OAuth mechanism based on how the user accesses Crewship
+      const hostname = window.location.hostname
+      const hasPublicDomain = hostname !== "localhost"
+        && hostname !== "127.0.0.1"
+        && !/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(hostname)
+      const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1"
 
-      if (!loopbackRes.ok) {
-        const data = await loopbackRes.json().catch(() => ({ error: "Failed to start OAuth" }))
-        toast.error(typeof data.error === "string" ? data.error : "Failed to start OAuth flow")
-        setAuthorizing(false)
-        return
+      let oauthRedirectUrl: string
+
+      if (isLocalhost) {
+        // LOCALHOST: use loopback server (127.0.0.1:random-port)
+        // Same approach as gh auth login, gcloud auth login
+        const res = await fetch(`/api/v1/oauth/loopback?workspace_id=${workspaceId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ credential_id: created.id }),
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: "Failed to start OAuth" }))
+          toast.error(typeof data.error === "string" ? data.error : "Failed to start OAuth flow")
+          setAuthorizing(false)
+          return
+        }
+        const result = await res.json()
+        oauthRedirectUrl = result.auth_url
+      } else if (hasPublicDomain) {
+        // PUBLIC DOMAIN: use standard redirect callback
+        const redirectUri = `${window.location.origin}/api/v1/oauth/callback`
+        setPendingRedirectUri(redirectUri)
+        const res = await fetch(`/api/v1/oauth/initiate?workspace_id=${workspaceId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ credential_id: created.id, redirect_uri: redirectUri }),
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: "Failed to initiate OAuth" }))
+          toast.error(typeof data.error === "string" ? data.error : "Failed to initiate OAuth flow")
+          setAuthorizing(false)
+          return
+        }
+        const result = await res.json()
+        oauthRedirectUrl = result.auth_url
+      } else {
+        // PRIVATE IP: use loopback but show manual paste immediately
+        // (loopback callback won't reach user's browser from remote server)
+        const res = await fetch(`/api/v1/oauth/loopback?workspace_id=${workspaceId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ credential_id: created.id }),
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: "Failed to start OAuth" }))
+          toast.error(typeof data.error === "string" ? data.error : "Failed to start OAuth flow")
+          setAuthorizing(false)
+          return
+        }
+        const result = await res.json()
+        oauthRedirectUrl = result.auth_url
+        // Show paste input immediately for private IP
+        setShowCodeInput(true)
+        toast.info(
+          "After authorizing, copy the URL from your browser and paste it below.",
+          { duration: 8000 },
+        )
       }
 
-      const { auth_url: oauthRedirectUrl } = await loopbackRes.json()
-
-      // Step 3: Open auth URL — callback goes to 127.0.0.1:PORT (loopback server)
+      // Step 3: Open auth URL in popup
       const popup = window.open(oauthRedirectUrl, "oauth_popup", "width=600,height=700,popup=yes")
       setPolling(true)
 
-      // Also show manual code input after 5s as fallback
-      // (in case callback doesn't work — private IP, firewall, etc.)
-      setTimeout(() => setShowCodeInput(true), 5000)
+      // Show manual code input after 5s as fallback (for localhost/domain paths)
+      if (!showCodeInput) {
+        setTimeout(() => setShowCodeInput(true), 5000)
+      }
 
       let elapsed = 0
       const POLL_INTERVAL = 2000
