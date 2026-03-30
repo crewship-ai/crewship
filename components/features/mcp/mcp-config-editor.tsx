@@ -946,8 +946,24 @@ function OAuthForm({
       onAddCredential(created)
 
       // Step 2: Initiate OAuth flow
-      // Build redirect URI from current window location (works for self-hosted + cloud)
-      const backendOrigin = window.location.origin.replace(":3001", ":8080") // dev: proxy 3001→8080
+      // Validate: OAuth providers reject private IPs as redirect URIs.
+      const hostname = window.location.hostname
+      const isPrivateIP = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(hostname)
+
+      if (isPrivateIP) {
+        toast.error(
+          "OAuth requires a public domain or localhost. You are accessing Crewship via a private IP. " +
+          "Either access via a domain name, or use 'Create new credential' with a manually obtained token.",
+          { duration: 10000 },
+        )
+        setAuthorizing(false)
+        return
+      }
+
+      // Build redirect URI from browser origin
+      const backendOrigin = hostname === "localhost"
+        ? window.location.origin.replace(":3001", ":8080")
+        : window.location.origin
       const redirectUri = `${backendOrigin}/api/v1/oauth/callback`
 
       const initiateRes = await fetch(`/api/v1/oauth/initiate?workspace_id=${workspaceId}`, {
