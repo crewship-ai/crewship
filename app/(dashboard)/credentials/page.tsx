@@ -3,7 +3,7 @@
 import * as React from "react"
 import {
   Key, Plus, Pencil, Trash2,
-  Bot, Lock, Terminal, CheckCircle, AlertTriangle, Clock, XCircle,
+  Bot, Lock, Terminal, CheckCircle, AlertTriangle, Clock, XCircle, ExternalLink,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
@@ -27,9 +27,9 @@ interface Credential {
   id: string
   name: string
   description: string | null
-  type: "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET"
+  type: "AI_CLI_TOKEN" | "API_KEY" | "CLI_TOKEN" | "SECRET" | "OAUTH2"
   provider: "ANTHROPIC" | "OPENAI" | "GOOGLE" | "GITHUB" | "GITLAB" | "VERCEL" | "AWS" | "CUSTOM_CLI" | "NONE"
-  status: "ACTIVE" | "EXPIRED" | "RATE_LIMITED" | "REVOKED" | "ERROR"
+  status: "ACTIVE" | "EXPIRED" | "RATE_LIMITED" | "REVOKED" | "ERROR" | "PENDING"
   scope: "WORKSPACE" | "CREW"
   crew_id: string | null
   crew_ids: string[]
@@ -53,6 +53,7 @@ const TYPE_CONFIG = {
   API_KEY: { icon: Key, label: "API Key", color: "text-amber-600" },
   CLI_TOKEN: { icon: Terminal, label: "CLI Token", color: "text-blue-600" },
   SECRET: { icon: Lock, label: "Secret", color: "text-muted-foreground" },
+  OAUTH2: { icon: ExternalLink, label: "OAuth 2.0", color: "text-emerald-600" },
 } as const
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -73,6 +74,7 @@ const STATUS_CONFIG = {
   EXPIRED: { icon: AlertTriangle, label: "Expired", variant: "destructive" as const, color: "text-orange-600" },
   REVOKED: { icon: XCircle, label: "Revoked", variant: "destructive" as const, color: "text-red-600" },
   ERROR: { icon: AlertTriangle, label: "Error", variant: "destructive" as const, color: "text-red-600" },
+  PENDING: { icon: Clock, label: "Pending", variant: "secondary" as const, color: "text-blue-600" },
 }
 
 export default function CredentialsPage() {
