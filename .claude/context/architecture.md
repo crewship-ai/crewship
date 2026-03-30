@@ -112,7 +112,7 @@ Uzivatel chatuje primarne s Crew Leadem (90 % interakci).
 Pro cross-crew otazky chatuje s Virtual Coordinatorem.
 Muze take chatovat primo s agentem (bypass leada).
 
-> Plna specifikace: `.factory/context/prd/ORCHESTRATION.md`
+> Plna specifikace: `.claude/context/prd/ORCHESTRATION.md`
 
 ## Provider Pattern (K8s Readiness)
 
@@ -149,7 +149,7 @@ CREWSHIP_STORAGE_PROVIDER=localfs     # localfs | s3
 CREWSHIP_STATE_PROVIDER=bbolt         # bbolt | postgres
 ```
 
-Full details: `.factory/context/K8S-READINESS.md`
+Full details: `.claude/context/K8S-READINESS.md`
 
 ## Process Responsibilities
 

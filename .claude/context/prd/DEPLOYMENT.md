@@ -122,7 +122,7 @@ Viz sekce 3 (Staging), 4 (Docker Images) a 5 (Docker Networking) nize.
 Helm chart pro nasazeni na GKE, EKS, AKS. K8s provider nahrazuje Docker provider
 pro kontejnerovou orchestraci.
 
-Detaily viz `.factory/context/K8S-READINESS.md`.
+Detaily viz `.claude/context/K8S-READINESS.md`.
 
 - gRPC komunikace mezi instancemi crewshipd
 - PostgreSQL cluster (Patroni)
