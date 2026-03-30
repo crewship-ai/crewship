@@ -3,7 +3,8 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import {
   Plug, Plus, Trash2, Globe, Terminal, ChevronDown,
-  Check, KeyRound, Loader2, Type,
+  Check, KeyRound, Loader2, Type, ExternalLink,
+  Github, Hash, Folder, Database, Bug, Mail,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -71,6 +72,95 @@ interface Credential {
   type: string
   provider?: string
   status?: string
+}
+
+interface OAuthProvider {
+  auth_url: string
+  token_url: string
+  default_scopes: string
+}
+
+// ---------------------------------------------------------------------------
+// MCP Templates (Feature 3)
+// ---------------------------------------------------------------------------
+
+interface MCPTemplate {
+  name: string
+  label: string
+  icon: string
+  transport: "stdio" | "http"
+  command?: string
+  args?: string
+  url?: string
+  headerHint?: string
+  envHint?: string
+  oauthProvider?: string
+}
+
+const MCP_TEMPLATES: MCPTemplate[] = [
+  {
+    name: "github",
+    label: "GitHub",
+    icon: "github",
+    transport: "stdio",
+    command: "npx",
+    args: "-y @modelcontextprotocol/server-github",
+    envHint: "GITHUB_TOKEN",
+  },
+  {
+    name: "google-workspace",
+    label: "Google Workspace",
+    icon: "mail",
+    transport: "stdio",
+    command: "npx",
+    args: "-y mcp-google-workspace",
+    envHint: "GOOGLE_ACCESS_TOKEN",
+    oauthProvider: "google",
+  },
+  {
+    name: "slack",
+    label: "Slack",
+    icon: "hash",
+    transport: "stdio",
+    command: "npx",
+    args: "-y @anthropic-ai/slack-mcp",
+    envHint: "SLACK_TOKEN",
+    oauthProvider: "slack",
+  },
+  {
+    name: "filesystem",
+    label: "Filesystem",
+    icon: "folder",
+    transport: "stdio",
+    command: "npx",
+    args: "-y @modelcontextprotocol/server-filesystem /tmp",
+  },
+  {
+    name: "postgres",
+    label: "PostgreSQL",
+    icon: "database",
+    transport: "stdio",
+    command: "npx",
+    args: "-y @modelcontextprotocol/server-postgres",
+    envHint: "DATABASE_URL",
+  },
+  {
+    name: "sentry",
+    label: "Sentry",
+    icon: "bug",
+    transport: "http",
+    url: "https://mcp.sentry.dev/sse",
+    headerHint: "Authorization: Bearer ${SENTRY_AUTH_TOKEN}",
+  },
+]
+
+const TEMPLATE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  github: Github,
+  mail: Mail,
+  hash: Hash,
+  folder: Folder,
+  database: Database,
+  bug: Bug,
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +257,35 @@ function emptyEntry(): ServerEntry {
   }
 }
 
+function entryFromTemplate(template: MCPTemplate): ServerEntry {
+  const entry: ServerEntry = {
+    _key: nextKey++,
+    name: template.name,
+    transport: template.transport,
+    command: template.command ?? "",
+    args: template.args ?? "",
+    url: template.url ?? "",
+    headers: [],
+    env: [],
+  }
+
+  if (template.envHint) {
+    entry.env.push({ key: template.envHint, value: "" })
+  }
+
+  if (template.headerHint) {
+    const colonIdx = template.headerHint.indexOf(":")
+    if (colonIdx > 0) {
+      entry.headers.push({
+        key: template.headerHint.slice(0, colonIdx).trim(),
+        value: template.headerHint.slice(colonIdx + 1).trim(),
+      })
+    }
+  }
+
+  return entry
+}
+
 /** Check whether a value looks like a credential reference: ${SOME_VAR} */
 function isCredentialRef(value: string): boolean {
   return /^\$\{[A-Z_][A-Z0-9_]*\}$/.test(value)
@@ -228,6 +347,7 @@ export function MCPConfigEditor({
   workspaceId,
 }: MCPConfigEditorProps) {
   const [entries, setEntries] = useState<ServerEntry[]>(() => parseConfig(value))
+  const [templatePopoverOpen, setTemplatePopoverOpen] = useState(false)
   const { credentials, loading: credLoading, addCredential } = useCredentials(
     readOnly ? undefined : workspaceId,
   )
@@ -261,6 +381,11 @@ export function MCPConfigEditor({
 
   function addEntry() {
     emit([...entries, emptyEntry()])
+  }
+
+  function addFromTemplate(template: MCPTemplate) {
+    emit([...entries, entryFromTemplate(template)])
+    setTemplatePopoverOpen(false)
   }
 
   // -- Key-value pair helpers -----------------------------------------------
@@ -351,16 +476,60 @@ export function MCPConfigEditor({
       ))}
 
       {!readOnly && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={addEntry}
-          className="gap-1.5"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Add MCP Server
-        </Button>
+        <Popover open={templatePopoverOpen} onOpenChange={setTemplatePopoverOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add MCP Server
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-80 p-3">
+            <div className="space-y-3">
+              <div className="text-xs font-medium text-muted-foreground">Popular servers</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {MCP_TEMPLATES.map((tpl) => {
+                  const Icon = TEMPLATE_ICONS[tpl.icon] ?? Terminal
+                  return (
+                    <button
+                      key={tpl.name}
+                      type="button"
+                      className={cn(
+                        "flex items-center gap-2 px-2.5 py-2 text-xs rounded-md",
+                        "border border-transparent hover:border-border hover:bg-accent/50",
+                        "transition-colors text-left",
+                      )}
+                      onClick={() => addFromTemplate(tpl)}
+                    >
+                      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{tpl.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="border-t pt-2">
+                <button
+                  type="button"
+                  className={cn(
+                    "flex items-center gap-2 w-full px-2.5 py-2 text-xs rounded-md",
+                    "hover:bg-accent/50 transition-colors text-left",
+                  )}
+                  onClick={() => {
+                    addEntry()
+                    setTemplatePopoverOpen(false)
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span>Custom server</span>
+                </button>
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
       )}
     </div>
   )
@@ -656,6 +825,311 @@ function ServerCard({
 }
 
 // ---------------------------------------------------------------------------
+// OAuth Form
+// ---------------------------------------------------------------------------
+
+interface OAuthFormProps {
+  envKey: string
+  workspaceId: string
+  onAddCredential: (cred: Credential) => void
+  onSelectCredential: (credName: string) => void
+  onCancel: () => void
+}
+
+const OAUTH_PROVIDER_SHORTCUTS: { key: string; label: string }[] = [
+  { key: "google", label: "Google" },
+  { key: "github", label: "GitHub" },
+  { key: "slack", label: "Slack" },
+  { key: "microsoft", label: "Microsoft" },
+]
+
+function OAuthForm({
+  envKey,
+  workspaceId,
+  onAddCredential,
+  onSelectCredential,
+  onCancel,
+}: OAuthFormProps) {
+  const [providers, setProviders] = useState<Record<string, OAuthProvider>>({})
+  const [providersFetched, setProvidersFetched] = useState(false)
+  const [clientId, setClientId] = useState("")
+  const [clientSecret, setClientSecret] = useState("")
+  const [authUrl, setAuthUrl] = useState("")
+  const [tokenUrl, setTokenUrl] = useState("")
+  const [scopes, setScopes] = useState("")
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
+  const [authorizing, setAuthorizing] = useState(false)
+  const [polling, setPolling] = useState(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Fetch available providers on mount
+  useEffect(() => {
+    let cancelled = false
+
+    async function fetchProviders() {
+      try {
+        const res = await fetch(`/api/v1/oauth/providers?workspace_id=${workspaceId}`)
+        if (res.ok) {
+          const data = await res.json()
+          if (!cancelled) setProviders(data)
+        }
+      } catch {
+        // Non-critical — user can still use Custom
+      } finally {
+        if (!cancelled) setProvidersFetched(true)
+      }
+    }
+
+    fetchProviders()
+    return () => {
+      cancelled = true
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [workspaceId])
+
+  function handleProviderSelect(key: string) {
+    setSelectedProvider(key)
+    const provider = providers[key]
+    if (provider) {
+      setAuthUrl(provider.auth_url)
+      setTokenUrl(provider.token_url)
+      setScopes(provider.default_scopes)
+    }
+  }
+
+  function handleCustom() {
+    setSelectedProvider("custom")
+    setAuthUrl("")
+    setTokenUrl("")
+    setScopes("")
+  }
+
+  async function handleAuthorize() {
+    if (!clientId.trim() || !clientSecret.trim() || !authUrl.trim() || !tokenUrl.trim()) {
+      toast.error("Client ID, Client Secret, Auth URL, and Token URL are required")
+      return
+    }
+
+    setAuthorizing(true)
+
+    try {
+      // Step 1: Create OAUTH2 credential
+      const credName = envKey
+        ? deriveCredentialName(envKey) + "-oauth"
+        : (selectedProvider ?? "custom") + "-oauth"
+
+      const createRes = await fetch(`/api/v1/credentials?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: credName,
+          type: "OAUTH2",
+          value: "pending_oauth",
+          scope: "WORKSPACE",
+          oauth_client_id: clientId.trim(),
+          oauth_client_secret: clientSecret.trim(),
+          oauth_auth_url: authUrl.trim(),
+          oauth_token_url: tokenUrl.trim(),
+          oauth_scopes: scopes.trim(),
+        }),
+      })
+
+      if (!createRes.ok) {
+        const data = await createRes.json().catch(() => ({ error: "Failed to create OAuth credential" }))
+        toast.error(typeof data.error === "string" ? data.error : "Failed to create OAuth credential")
+        setAuthorizing(false)
+        return
+      }
+
+      const created: Credential = await createRes.json()
+      onAddCredential(created)
+
+      // Step 2: Initiate OAuth flow
+      const initiateRes = await fetch(`/api/v1/oauth/initiate?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential_id: created.id }),
+      })
+
+      if (!initiateRes.ok) {
+        const data = await initiateRes.json().catch(() => ({ error: "Failed to initiate OAuth" }))
+        toast.error(typeof data.error === "string" ? data.error : "Failed to initiate OAuth flow")
+        setAuthorizing(false)
+        return
+      }
+
+      const { auth_url: oauthRedirectUrl } = await initiateRes.json()
+
+      // Step 3: Open popup
+      const popup = window.open(oauthRedirectUrl, "oauth_popup", "width=600,height=700,popup=yes")
+
+      // Step 4: Poll for completion
+      setPolling(true)
+      let elapsed = 0
+      const POLL_INTERVAL = 2000
+      const MAX_WAIT = 60000
+
+      pollRef.current = setInterval(async () => {
+        elapsed += POLL_INTERVAL
+        if (elapsed > MAX_WAIT) {
+          if (pollRef.current) clearInterval(pollRef.current)
+          pollRef.current = null
+          setPolling(false)
+          setAuthorizing(false)
+          toast.error("OAuth authorization timed out")
+          return
+        }
+
+        try {
+          const statusRes = await fetch(
+            `/api/v1/credentials/${created.id}?workspace_id=${workspaceId}`,
+          )
+          if (statusRes.ok) {
+            const statusData = await statusRes.json()
+            if (statusData.status === "ACTIVE") {
+              if (pollRef.current) clearInterval(pollRef.current)
+              pollRef.current = null
+              setPolling(false)
+              setAuthorizing(false)
+              if (popup && !popup.closed) popup.close()
+              toast.success("OAuth authorization successful")
+              onSelectCredential(credName)
+            }
+          }
+        } catch {
+          // Continue polling
+        }
+      }, POLL_INTERVAL)
+    } catch {
+      toast.error("Network error during OAuth setup")
+      setAuthorizing(false)
+    }
+  }
+
+  return (
+    <div className="p-3 space-y-3">
+      <div className="text-xs font-medium">Connect with OAuth</div>
+
+      {/* Provider shortcuts */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {OAUTH_PROVIDER_SHORTCUTS.map((p) => (
+          <Button
+            key={p.key}
+            type="button"
+            variant={selectedProvider === p.key ? "default" : "outline"}
+            size="sm"
+            className="h-6 text-[10px] px-2"
+            onClick={() => handleProviderSelect(p.key)}
+            disabled={!providersFetched || authorizing}
+          >
+            {p.label}
+          </Button>
+        ))}
+        <Button
+          type="button"
+          variant={selectedProvider === "custom" ? "default" : "outline"}
+          size="sm"
+          className="h-6 text-[10px] px-2"
+          onClick={handleCustom}
+          disabled={authorizing}
+        >
+          Custom
+        </Button>
+      </div>
+
+      {selectedProvider && (
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Client ID</Label>
+            <Input
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              placeholder="your-client-id"
+              className="h-7 text-xs"
+              disabled={authorizing}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Client Secret</Label>
+            <Input
+              type="password"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              placeholder="your-client-secret"
+              className="h-7 text-xs font-mono"
+              disabled={authorizing}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Auth URL</Label>
+            <Input
+              value={authUrl}
+              onChange={(e) => setAuthUrl(e.target.value)}
+              placeholder="https://accounts.google.com/o/oauth2/v2/auth"
+              className="h-7 text-xs font-mono"
+              disabled={authorizing}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Token URL</Label>
+            <Input
+              value={tokenUrl}
+              onChange={(e) => setTokenUrl(e.target.value)}
+              placeholder="https://oauth2.googleapis.com/token"
+              className="h-7 text-xs font-mono"
+              disabled={authorizing}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Scopes</Label>
+            <Input
+              value={scopes}
+              onChange={(e) => setScopes(e.target.value)}
+              placeholder="openid email profile"
+              className="h-7 text-xs font-mono"
+              disabled={authorizing}
+            />
+          </div>
+
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 text-xs gap-1.5 flex-1"
+              disabled={authorizing || !clientId.trim() || !clientSecret.trim() || !authUrl.trim() || !tokenUrl.trim()}
+              onClick={handleAuthorize}
+            >
+              {polling ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <ExternalLink className="h-3 w-3" />
+              )}
+              {polling ? "Waiting for authorization..." : "Authorize"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={onCancel}
+              disabled={authorizing}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {!selectedProvider && (
+        <p className="text-xs text-muted-foreground">
+          Select a provider above or choose Custom for any OAuth2 endpoint.
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Credential Picker
 // ---------------------------------------------------------------------------
 
@@ -669,7 +1143,7 @@ interface CredentialPickerProps {
   onChangeValue: (value: string) => void
 }
 
-type PickerMode = "credential" | "manual" | "create"
+type PickerMode = "credential" | "manual" | "create" | "oauth"
 
 function CredentialPicker({
   envKey,
@@ -727,6 +1201,10 @@ function CredentialPicker({
     setMode("create")
     setCreateName(envKey ? deriveCredentialName(envKey) : "")
     setCreateValue("")
+  }
+
+  function handleSwitchToOAuth() {
+    setMode("oauth")
   }
 
   async function handleCreate() {
@@ -889,6 +1367,17 @@ function CredentialPicker({
               </Button>
             </div>
           </div>
+        ) : mode === "oauth" ? (
+          /* ---- Inline OAuth form ---- */
+          <OAuthForm
+            envKey={envKey}
+            workspaceId={workspaceId}
+            onAddCredential={onAddCredential}
+            onSelectCredential={(credName) => {
+              handleSelectCredential(credName)
+            }}
+            onCancel={() => setMode("credential")}
+          />
         ) : (
           /* ---- Credential list ---- */
           <div>
@@ -940,6 +1429,14 @@ function CredentialPicker({
               >
                 <Plus className="h-3 w-3 shrink-0" />
                 <span>Create new credential</span>
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-2 w-full px-2 py-1.5 text-xs rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors text-left"
+                onClick={handleSwitchToOAuth}
+              >
+                <ExternalLink className="h-3 w-3 shrink-0" />
+                <span>Connect with OAuth</span>
               </button>
               <button
                 type="button"
