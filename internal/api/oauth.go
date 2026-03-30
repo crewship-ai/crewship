@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -337,6 +338,200 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("OAuth tokens stored via manual exchange", "credential_id", req.CredentialID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "credential_id": req.CredentialID})
+}
+
+// Loopback starts an OAuth flow using a temporary loopback HTTP server.
+// This is the same approach as `gh auth login`, `gcloud auth login`, etc.
+// Works on localhost without any domain or public IP — the browser and
+// server are on the same machine.
+func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	var req struct {
+		CredentialID string `json:"credential_id"`
+	}
+	if err := readJSON(r, &req); err != nil || req.CredentialID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "credential_id is required"})
+		return
+	}
+
+	// Load credential OAuth config
+	var clientID, clientSecretEnc, authURL, tokenURL, scopes string
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT oauth_client_id, COALESCE(oauth_client_secret_enc, ''),
+			oauth_auth_url, oauth_token_url, COALESCE(oauth_scopes, '')
+		FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		req.CredentialID, workspaceID).Scan(&clientID, &clientSecretEnc, &authURL, &tokenURL, &scopes)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "OAuth credential not found"})
+		return
+	}
+	if clientID == "" || authURL == "" || tokenURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Credential missing OAuth configuration"})
+		return
+	}
+
+	// Decrypt client secret
+	clientSecret := ""
+	if clientSecretEnc != "" {
+		if dec, err := encryption.Decrypt(clientSecretEnc); err == nil {
+			clientSecret = dec
+		} else {
+			clientSecret = clientSecretEnc
+		}
+	}
+
+	// Find a free port for the loopback server
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		h.logger.Error("find free port for OAuth loopback", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to start loopback server"})
+		return
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+
+	// Generate state token
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		listener.Close()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate state"})
+		return
+	}
+	state := hex.EncodeToString(stateBytes)
+
+	// Build auth URL
+	params := url.Values{
+		"client_id":     {clientID},
+		"redirect_uri":  {redirectURI},
+		"response_type": {"code"},
+		"state":         {state},
+		"access_type":   {"offline"},
+		"prompt":        {"consent"},
+	}
+	if scopes != "" {
+		params.Set("scope", scopes)
+	}
+	fullAuthURL := authURL + "?" + params.Encode()
+
+	// Start loopback callback server in background
+	credID := req.CredentialID
+	go h.runLoopbackServer(listener, state, credID, workspaceID, clientID, clientSecret, tokenURL, redirectURI)
+
+	h.logger.Info("OAuth loopback started", "port", port, "credential_id", credID)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"auth_url":      fullAuthURL,
+		"loopback_port": port,
+		"state":         state,
+	})
+}
+
+// runLoopbackServer handles the OAuth callback on a temporary loopback server.
+func (h *OAuthHandler) runLoopbackServer(
+	listener net.Listener,
+	expectedState string,
+	credentialID string,
+	workspaceID string,
+	clientID string,
+	clientSecret string,
+	tokenURL string,
+	redirectURI string,
+) {
+	defer listener.Close()
+
+	done := make(chan struct{})
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
+		defer close(done)
+
+		code := r.URL.Query().Get("code")
+		state := r.URL.Query().Get("state")
+		errParam := r.URL.Query().Get("error")
+
+		if errParam != "" {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<html><body><h2>Authorization failed</h2><p>%s</p><p>You can close this window.</p></body></html>`, errParam)
+			return
+		}
+
+		if code == "" || state != expectedState {
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, `<html><body><h2>Invalid callback</h2><p>Missing code or invalid state. You can close this window.</p></body></html>`)
+			return
+		}
+
+		// Exchange code for tokens
+		tokenResp, err := exchangeOAuthCode(tokenURL, clientID, clientSecret, code, redirectURI)
+		if err != nil {
+			h.logger.Error("OAuth loopback token exchange", "error", err, "credential_id", credentialID)
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<html><body><h2>Token exchange failed</h2><p>%s</p><p>You can close this window.</p></body></html>`, err.Error())
+			return
+		}
+
+		// Encrypt and store
+		encAccess, err := encryption.Encrypt(tokenResp.AccessToken)
+		if err != nil {
+			h.logger.Error("encrypt loopback token", "error", err)
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, `<html><body><h2>Failed to store token</h2><p>You can close this window.</p></body></html>`)
+			return
+		}
+
+		var encRefresh string
+		if tokenResp.RefreshToken != "" {
+			encRefresh, _ = encryption.Encrypt(tokenResp.RefreshToken)
+		}
+
+		expiresAt := ""
+		if tokenResp.ExpiresIn > 0 {
+			expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err = h.db.ExecContext(ctx, `
+			UPDATE credentials SET
+				encrypted_value = ?,
+				oauth_refresh_token_enc = CASE WHEN ? != '' THEN ? ELSE oauth_refresh_token_enc END,
+				oauth_token_expires_at = ?,
+				status = 'ACTIVE',
+				updated_at = datetime('now')
+			WHERE id = ?`,
+			encAccess, encRefresh, encRefresh, expiresAt, credentialID)
+		if err != nil {
+			h.logger.Error("store loopback tokens", "error", err)
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, `<html><body><h2>Failed to store token</h2><p>You can close this window.</p></body></html>`)
+			return
+		}
+
+		h.logger.Info("OAuth loopback completed", "credential_id", credentialID)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, `<html><body><script>window.close()</script><h2>Authorization successful!</h2><p>You can close this window.</p></body></html>`)
+	})
+
+	server := &http.Server{Handler: mux}
+	go func() {
+		select {
+		case <-done:
+			// Give browser time to receive the response
+			time.Sleep(500 * time.Millisecond)
+		case <-time.After(120 * time.Second):
+			h.logger.Warn("OAuth loopback timed out", "credential_id", credentialID)
+		}
+		server.Close()
+	}()
+
+	server.Serve(listener)
 }
 
 // tokenResponse holds the OAuth token exchange response.

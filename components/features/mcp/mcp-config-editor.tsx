@@ -952,31 +952,25 @@ function OAuthForm({
       setPendingCredId(created.id)
       setPendingCredName(credName)
 
-      // Step 2: Initiate OAuth flow
-      // Build redirect URI: production = same origin, dev = swap :3001→:8080
-      const origin = window.location.origin
-      const backendOrigin = origin.includes(":3001")
-        ? origin.replace(":3001", ":8080")
-        : origin
-      const redirectUri = `${backendOrigin}/api/v1/oauth/callback`
-      setPendingRedirectUri(redirectUri)
-
-      const initiateRes = await fetch(`/api/v1/oauth/initiate?workspace_id=${workspaceId}`, {
+      // Step 2: Start loopback OAuth flow
+      // Backend spins up a temporary server on 127.0.0.1:random-port
+      // Same approach as gh auth login, gcloud auth login — works everywhere
+      const loopbackRes = await fetch(`/api/v1/oauth/loopback?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credential_id: created.id, redirect_uri: redirectUri }),
+        body: JSON.stringify({ credential_id: created.id }),
       })
 
-      if (!initiateRes.ok) {
-        const data = await initiateRes.json().catch(() => ({ error: "Failed to initiate OAuth" }))
-        toast.error(typeof data.error === "string" ? data.error : "Failed to initiate OAuth flow")
+      if (!loopbackRes.ok) {
+        const data = await loopbackRes.json().catch(() => ({ error: "Failed to start OAuth" }))
+        toast.error(typeof data.error === "string" ? data.error : "Failed to start OAuth flow")
         setAuthorizing(false)
         return
       }
 
-      const { auth_url: oauthRedirectUrl } = await initiateRes.json()
+      const { auth_url: oauthRedirectUrl } = await loopbackRes.json()
 
-      // Step 3: Open popup + poll for automatic callback completion
+      // Step 3: Open auth URL — callback goes to 127.0.0.1:PORT (loopback server)
       const popup = window.open(oauthRedirectUrl, "oauth_popup", "width=600,height=700,popup=yes")
       setPolling(true)
 
