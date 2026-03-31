@@ -210,6 +210,19 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
 	// Collect env var names referenced in crew/agent MCP configs
 	mcpEnvRefs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
+
+	// Also collect from table-based MCPServers (after JSON blob migration)
+	for _, srv := range req.MCPServers {
+		for k, v := range srv.Env {
+			if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
+				mcpEnvRefs[v[2:len(v)-1]] = true
+			} else if k != "" {
+				// Env key itself might be the var name needed
+				mcpEnvRefs[k] = true
+			}
+		}
+	}
+
 	if len(mcpEnvRefs) == 0 {
 		return env
 	}
