@@ -129,7 +129,7 @@ function serializeEnv(entries: { key: string; value: string }[]): string {
 }
 
 function subtitleFor(server: CrewIntegration): string {
-  if (server.transport === "http") return server.endpoint ?? ""
+  if (server.transport === "streamable-http") return server.endpoint ?? ""
   const cmd = server.command ?? ""
   const args = parseArgs(server.args_json)
   return `${cmd} ${args}`.trim()
@@ -612,12 +612,12 @@ export default function IntegrationsPage() {
 
                   {/* Transport */}
                   <span className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-                    {server.transport === "http" ? (
+                    {server.transport === "streamable-http" ? (
                       <Globe className="h-3 w-3" />
                     ) : (
                       <Terminal className="h-3 w-3" />
                     )}
-                    {server.transport === "http" ? "HTTP" : "Stdio"}
+                    {server.transport === "streamable-http" ? "HTTP" : "Stdio"}
                   </span>
 
                   {/* Agent count */}
@@ -894,7 +894,7 @@ function ExpandedPanel({
                   <Terminal className="h-3 w-3" /> Stdio
                 </span>
               </SelectItem>
-              <SelectItem value="http">
+              <SelectItem value="streamable-http">
                 <span className="flex items-center gap-1.5">
                   <Globe className="h-3 w-3" /> HTTP
                 </span>
