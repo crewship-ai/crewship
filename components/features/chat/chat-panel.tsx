@@ -63,15 +63,9 @@ const FileEditor = dynamic(
 )
 
 function getWsUrl(): string {
-  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL
-  if (typeof window === "undefined") return "ws://localhost:8080/ws"
+  if (typeof window === "undefined") return ""
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  const goPort = process.env.NEXT_PUBLIC_GO_PORT ?? "8080"
-  const devPorts = ["3001", "3011", "3012", "3013", "3014", "3015"]
-  const host = devPorts.includes(window.location.port)
-    ? window.location.hostname + ":" + goPort
-    : window.location.host
-  return `${proto}//${host}/ws`
+  return `${proto}//${window.location.host}/ws`
 }
 
 interface ChatPanelProps {

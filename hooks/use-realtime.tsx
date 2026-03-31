@@ -50,17 +50,15 @@ interface RealtimeContextValue {
 const RealtimeContext = createContext<RealtimeContextValue | null>(null)
 
 function getWsUrl(): string {
-  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL
   // During SSR window is undefined — return empty string so useWebSocket
   // skips connecting. The client-side re-render will compute the real URL.
   if (typeof window === "undefined") return ""
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  const goPort = process.env.NEXT_PUBLIC_GO_PORT ?? "8080"
-  const devPorts = ["3001", "3011", "3012", "3013", "3014", "3015"]
-  const host = devPorts.includes(window.location.port)
-    ? window.location.hostname + ":" + goPort
-    : window.location.host
-  return `${proto}//${host}/ws`
+  // Always use the same host:port as the page.  In dev mode the custom dev
+  // server (dev-server.mjs) proxies /ws to the Go backend, so there is no
+  // need to redirect to a different port.  In production the Go binary
+  // serves both the static frontend and the WebSocket on the same port.
+  return `${proto}//${window.location.host}/ws`
 }
 
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
