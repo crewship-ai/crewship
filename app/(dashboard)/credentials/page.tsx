@@ -41,6 +41,8 @@ interface Credential {
   created_at: string
   updated_at: string
   _count_agent_credentials: number
+  agent_names: string[]
+  mcp_used: boolean
 }
 
 interface Org {
@@ -267,9 +269,23 @@ export default function CredentialsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <span className="text-muted-foreground">
-                        {cred._count_agent_credentials ?? 0} {(cred._count_agent_credentials ?? 0) === 1 ? "agent" : "agents"}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {cred.agent_names?.length > 0 ? (
+                          <span className="text-sm text-muted-foreground" title={cred.agent_names.join(", ")}>
+                            {cred.agent_names.slice(0, 3).join(", ")}
+                            {cred.agent_names.length > 3 && ` +${cred.agent_names.length - 3}`}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            {cred._count_agent_credentials ?? 0} {(cred._count_agent_credentials ?? 0) === 1 ? "agent" : "agents"}
+                          </span>
+                        )}
+                        {cred.mcp_used && (
+                          <Badge variant="outline" className="text-label font-normal text-emerald-600 border-emerald-200">
+                            MCP
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <span className="text-muted-foreground">{formatDate(cred.created_at)}</span>

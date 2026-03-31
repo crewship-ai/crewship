@@ -1,5 +1,5 @@
 import {
-  Github, Mail, Hash, Folder, Database, Bug,
+  GitBranch, Mail, Hash, Folder, Database, Bug,
 } from "lucide-react"
 import type { MCPTemplate } from "../types"
 
@@ -29,7 +29,7 @@ export const MCP_TEMPLATES: MCPTemplate[] = [
 // ---------------------------------------------------------------------------
 
 export const TEMPLATE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  github: Github,
+  github: GitBranch,
   mail: Mail,
   hash: Hash,
   folder: Folder,

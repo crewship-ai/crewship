@@ -1,7 +1,10 @@
 package api
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -436,6 +439,73 @@ func (h *IntegrationHandler) DeleteWorkspaceIntegration(w http.ResponseWriter, r
 }
 
 // ==========================================
+// All crew integrations (cross-crew view for Integrations page)
+// ==========================================
+
+type crewIntegrationOverview struct {
+	crewMCPServerResponse
+	CrewName string `json:"crew_name"`
+	CrewSlug string `json:"crew_slug"`
+}
+
+func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	// Auto-migrate any crews that still have JSON blob config.
+	blobRows, err := h.db.QueryContext(r.Context(), `
+		SELECT id, mcp_config_json FROM crews
+		WHERE workspace_id = ? AND mcp_config_json IS NOT NULL AND mcp_config_json != '' AND deleted_at IS NULL`,
+		workspaceID)
+	if err == nil {
+		defer blobRows.Close()
+		for blobRows.Next() {
+			var cid, blob string
+			if blobRows.Scan(&cid, &blob) == nil {
+				if err := MigrateJSONBlobToCrewServers(r.Context(), h.db, h.logger, cid, workspaceID, blob); err != nil {
+					h.logger.Warn("auto-migrate crew MCP config", "crew_id", cid, "error", err)
+				}
+			}
+		}
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT cs.id, cs.crew_id, cs.workspace_mcp_server_id, cs.name, cs.display_name,
+			cs.transport, cs.endpoint, cs.command, cs.args_json, cs.env_json, cs.config_json,
+			cs.icon, cs.enabled, cs.created_at, cs.updated_at,
+			c.name AS crew_name, c.slug AS crew_slug,
+			(SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = cs.id AND mcp_server_scope = 'crew') AS bind_count
+		FROM crew_mcp_servers cs
+		JOIN crews c ON c.id = cs.crew_id AND c.deleted_at IS NULL
+		WHERE c.workspace_id = ? AND cs.deleted_at IS NULL
+		ORDER BY c.name, cs.name`, workspaceID)
+	if err != nil {
+		h.logger.Error("list all crew integrations", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	var results []crewIntegrationOverview
+	for rows.Next() {
+		var s crewIntegrationOverview
+		var enabled int
+		if err := rows.Scan(&s.ID, &s.CrewID, &s.WorkspaceMCPServerID, &s.Name, &s.DisplayName,
+			&s.Transport, &s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
+			&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt,
+			&s.CrewName, &s.CrewSlug, &s.AgentBindCount); err != nil {
+			h.logger.Error("scan crew integration overview", "error", err)
+			continue
+		}
+		s.Enabled = enabled == 1
+		results = append(results, s)
+	}
+	if results == nil {
+		results = []crewIntegrationOverview{}
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
+// ==========================================
 // Crew MCP Servers
 // ==========================================
 
@@ -450,6 +520,16 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 		crewID, workspaceID).Scan(&crewExists); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
+	}
+
+	// Auto-migrate JSON blob if present.
+	var mcpBlob sql.NullString
+	_ = h.db.QueryRowContext(r.Context(),
+		"SELECT mcp_config_json FROM crews WHERE id = ?", crewID).Scan(&mcpBlob)
+	if mcpBlob.Valid && mcpBlob.String != "" {
+		if err := MigrateJSONBlobToCrewServers(r.Context(), h.db, h.logger, crewID, workspaceID, mcpBlob.String); err != nil {
+			h.logger.Warn("auto-migrate crew MCP config", "crew_id", crewID, "error", err)
+		}
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
@@ -1142,16 +1222,131 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 		}
 	}
 
-	// Build result (only enabled)
+	// Check which servers have ANY bindings (for opt-in filtering).
+	serversWithBindings := make(map[string]bool)
+	if bcRows, err := h.db.QueryContext(r.Context(), `
+		SELECT mcp_server_id FROM agent_mcp_bindings
+		GROUP BY mcp_server_id HAVING COUNT(*) > 0`); err == nil {
+		for bcRows.Next() {
+			var sid string
+			if bcRows.Scan(&sid) == nil {
+				serversWithBindings[sid] = true
+			}
+		}
+		bcRows.Close()
+	}
+
+	// Build result (only enabled, respecting opt-in bindings)
 	var result []ResolvedIntegration
 	for _, s := range merged {
-		if s.Enabled {
-			result = append(result, *s)
+		if !s.Enabled {
+			continue
 		}
+		_, hasBind := bindings[s.ServerID]
+		if !hasBind && serversWithBindings[s.ServerID] {
+			// Server has bindings for other agents but not this one → skip
+			continue
+		}
+		result = append(result, *s)
 	}
 	if result == nil {
 		result = []ResolvedIntegration{}
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// ---------------------------------------------------------------------------
+// JSON blob → integration table migration
+// ---------------------------------------------------------------------------
+
+// MigrateJSONBlobToCrewServers converts a crew's mcp_config_json blob into
+// individual crew_mcp_servers rows.  It is idempotent (INSERT OR IGNORE) and
+// clears the blob after successful migration.
+func MigrateJSONBlobToCrewServers(ctx context.Context, db *sql.DB, logger *slog.Logger, crewID, workspaceID, mcpJSON string) error {
+	if mcpJSON == "" {
+		return nil
+	}
+
+	var config struct {
+		MCPServers map[string]struct {
+			Command   string            `json:"command"`
+			Args      []string          `json:"args"`
+			Env       map[string]string `json:"env"`
+			URL       string            `json:"url"`
+			Type      string            `json:"type"`
+			Transport string            `json:"transport"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal([]byte(mcpJSON), &config); err != nil {
+		return fmt.Errorf("parse mcp_config_json: %w", err)
+	}
+	if len(config.MCPServers) == 0 {
+		return nil
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	for name, srv := range config.MCPServers {
+		transport := "stdio"
+		if srv.Transport == "streamable-http" || srv.Type == "http" || (srv.Command == "" && srv.URL != "") {
+			transport = "streamable-http"
+		}
+
+		var argsJSON *string
+		if len(srv.Args) > 0 {
+			b, _ := json.Marshal(srv.Args)
+			s := string(b)
+			argsJSON = &s
+		}
+
+		var envJSON *string
+		if len(srv.Env) > 0 {
+			b, _ := json.Marshal(srv.Env)
+			s := string(b)
+			envJSON = &s
+		}
+
+		var endpoint *string
+		if srv.URL != "" {
+			endpoint = &srv.URL
+		}
+
+		var command *string
+		if srv.Command != "" {
+			command = &srv.Command
+		}
+
+		displayName := strings.ReplaceAll(name, "-", " ")
+		displayName = strings.Title(displayName) //nolint:staticcheck
+
+		id := generateCUID()
+
+		_, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO crew_mcp_servers
+				(id, crew_id, name, display_name, transport, endpoint, command, args_json, env_json, enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+			id, crewID, name, displayName, transport, endpoint, command, argsJSON, envJSON, now, now)
+		if err != nil {
+			return fmt.Errorf("insert crew server %q: %w", name, err)
+		}
+	}
+
+	// Clear the JSON blob now that data lives in the table.
+	if _, err := tx.ExecContext(ctx, `UPDATE crews SET mcp_config_json = NULL WHERE id = ?`, crewID); err != nil {
+		return fmt.Errorf("clear mcp_config_json: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration: %w", err)
+	}
+
+	logger.Info("migrated crew MCP config from JSON blob to tables", "crew_id", crewID, "servers", len(config.MCPServers))
+	return nil
 }
 

@@ -27,6 +27,8 @@ export interface MCPConfig {
 export interface ServerEntry {
   /** Unique key for React list rendering; NOT the server name. */
   _key: number
+  /** Database ID from crew_mcp_servers table (undefined for new entries). */
+  id?: string
   name: string
   transport: "stdio" | "http"
   command: string
