@@ -20,10 +20,11 @@ const goPort = parseInt(process.env.NEXT_PUBLIC_GO_PORT || "8080", 10)
 const hostname = "0.0.0.0"
 
 const app = next({ dev: true, hostname, port })
-const handle = app.getRequestHandler()
-const handleUpgrade = app.getUpgradeHandler()
 
 await app.prepare()
+
+const handle = app.getRequestHandler()
+const handleUpgrade = app.getUpgradeHandler()
 
 const server = createServer((req, res) => handle(req, res))
 
