@@ -109,7 +109,9 @@ export function entryFromTemplate(template: MCPTemplate): ServerEntry {
   }
 
   if (template.envHint) {
-    entry.env.push({ key: template.envHint, value: "" })
+    for (const key of template.envHint.split(",").map((s) => s.trim()).filter(Boolean)) {
+      entry.env.push({ key, value: "" })
+    }
   }
 
   if (template.headerHint) {

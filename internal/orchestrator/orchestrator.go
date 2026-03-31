@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -852,7 +853,8 @@ func mcpStdioDomains(servers []MCPServerConfig) []string {
 			continue
 		}
 		for _, arg := range s.Args {
-			if domains, ok := mcpPackageDomains[arg]; ok {
+			pkg := normalizeNPMPackage(arg)
+			if domains, ok := mcpPackageDomains[pkg]; ok {
 				for _, d := range domains {
 					seen[d] = true
 				}
@@ -863,5 +865,18 @@ func mcpStdioDomains(servers []MCPServerConfig) []string {
 	for d := range seen {
 		out = append(out, d)
 	}
+	sort.Strings(out)
 	return out
+}
+
+// npmSpecRe strips @version suffix from scoped and unscoped npm packages.
+// "@scope/pkg@1.0.0" → "@scope/pkg", "pkg@latest" → "pkg", "-y" → "-y"
+var npmSpecRe = regexp.MustCompile(`^(@[^/]+/[^@]+|[^@]+)(?:@.+)?$`)
+
+func normalizeNPMPackage(arg string) string {
+	m := npmSpecRe.FindStringSubmatch(arg)
+	if len(m) > 1 {
+		return m[1]
+	}
+	return arg
 }

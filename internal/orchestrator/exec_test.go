@@ -758,8 +758,10 @@ func TestMcpStdioDomains(t *testing.T) {
 	servers := []MCPServerConfig{
 		{Transport: "stdio", Args: []string{"-y", "@modelcontextprotocol/server-github"}},
 		{Transport: "stdio", Args: []string{"-y", "@anthropic-ai/brave-search-mcp"}},
-		{Transport: "streamable-http", Endpoint: "https://mcp.sentry.dev/mcp"}, // should be ignored
-		{Transport: "stdio", Args: []string{"-y", "unknown-package"}},           // no match
+		{Transport: "stdio", Args: []string{"-y", "@anthropic-ai/brave-search-mcp@latest"}}, // versioned
+		{Transport: "stdio", Args: []string{"-y", "linear-mcp@^2.0.0"}},                     // unscoped versioned
+		{Transport: "streamable-http", Endpoint: "https://mcp.sentry.dev/mcp"},                // should be ignored
+		{Transport: "stdio", Args: []string{"-y", "unknown-package"}},                         // no match
 	}
 	domains := mcpStdioDomains(servers)
 	found := make(map[string]bool)
@@ -772,8 +774,35 @@ func TestMcpStdioDomains(t *testing.T) {
 	if !found["api.search.brave.com"] {
 		t.Error("missing api.search.brave.com")
 	}
+	if !found["api.linear.app"] {
+		t.Error("missing api.linear.app from versioned unscoped package")
+	}
 	if found["sentry.io"] {
 		t.Error("HTTP server domains should not be included")
+	}
+	// Verify output is sorted
+	for i := 1; i < len(domains); i++ {
+		if domains[i] < domains[i-1] {
+			t.Errorf("output not sorted: %v", domains)
+			break
+		}
+	}
+}
+
+func TestNormalizeNPMPackage(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"@anthropic-ai/brave-search-mcp", "@anthropic-ai/brave-search-mcp"},
+		{"@anthropic-ai/brave-search-mcp@latest", "@anthropic-ai/brave-search-mcp"},
+		{"@modelcontextprotocol/server-github@^2.0.0", "@modelcontextprotocol/server-github"},
+		{"linear-mcp@1.2.3", "linear-mcp"},
+		{"linear-mcp", "linear-mcp"},
+		{"-y", "-y"},
+	}
+	for _, tc := range cases {
+		got := normalizeNPMPackage(tc.in)
+		if got != tc.want {
+			t.Errorf("normalizeNPMPackage(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 
