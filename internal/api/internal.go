@@ -851,6 +851,21 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 			}
 		}
 
+		// Step 4b: Check which servers have ANY bindings (for opt-in filtering).
+		// If a server has at least one binding, only agents WITH a binding see it.
+		serversWithBindings := make(map[string]bool)
+		if bindCountRows, err := h.db.QueryContext(r.Context(), `
+			SELECT mcp_server_id FROM agent_mcp_bindings
+			GROUP BY mcp_server_id HAVING COUNT(*) > 0`); err == nil {
+			for bindCountRows.Next() {
+				var sid string
+				if bindCountRows.Scan(&sid) == nil {
+					serversWithBindings[sid] = true
+				}
+			}
+			bindCountRows.Close()
+		}
+
 		// Step 5: Build result entries
 		for _, srv := range merged {
 			entry := mcpServerEntry{
@@ -869,7 +884,8 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 					h.logger.Warn("malformed env_json for MCP server", "server_id", srv.id, "error", err)
 				}
 			}
-			if b, ok := agentBindings[srv.id]; ok {
+			b, hasBind := agentBindings[srv.id]
+			if hasBind {
 				if !b.enabled {
 					continue // agent opted out
 				}
@@ -886,6 +902,9 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 						}
 					}
 				}
+			} else if serversWithBindings[srv.id] {
+				// Server has bindings for other agents but NOT this one → skip
+				continue
 			}
 			mcpServers = append(mcpServers, entry)
 		}

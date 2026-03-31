@@ -1222,12 +1222,32 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 		}
 	}
 
-	// Build result (only enabled)
+	// Check which servers have ANY bindings (for opt-in filtering).
+	serversWithBindings := make(map[string]bool)
+	if bcRows, err := h.db.QueryContext(r.Context(), `
+		SELECT mcp_server_id FROM agent_mcp_bindings
+		GROUP BY mcp_server_id HAVING COUNT(*) > 0`); err == nil {
+		for bcRows.Next() {
+			var sid string
+			if bcRows.Scan(&sid) == nil {
+				serversWithBindings[sid] = true
+			}
+		}
+		bcRows.Close()
+	}
+
+	// Build result (only enabled, respecting opt-in bindings)
 	var result []ResolvedIntegration
 	for _, s := range merged {
-		if s.Enabled {
-			result = append(result, *s)
+		if !s.Enabled {
+			continue
 		}
+		_, hasBind := bindings[s.ServerID]
+		if !hasBind && serversWithBindings[s.ServerID] {
+			// Server has bindings for other agents but not this one → skip
+			continue
+		}
+		result = append(result, *s)
 	}
 	if result == nil {
 		result = []ResolvedIntegration{}
