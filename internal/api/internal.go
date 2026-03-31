@@ -1607,15 +1607,38 @@ func autoResolveMCPCredentials(
 	// For each missing env var, derive the credential name prefix and query.
 	for _, envVar := range missing {
 		prefix := strings.ToLower(strings.ReplaceAll(envVar, "_", "-"))
-		row := db.QueryRowContext(ctx, `
-			SELECT id, encrypted_value, type,
-				oauth_client_id, oauth_client_secret_enc, oauth_token_url,
-				oauth_refresh_token_enc, oauth_token_expires_at
-			FROM credentials
-			WHERE workspace_id = ? AND name LIKE ? AND deleted_at IS NULL
-			  AND status != 'REVOKED'
-			ORDER BY created_at DESC LIMIT 1
-		`, workspaceID, prefix+"%")
+
+		// For CLIENT_ID/CLIENT_SECRET env vars, also search OAUTH2 credentials
+		// that have the matching oauth_client_id field (not just by name prefix).
+		isClientID := strings.HasSuffix(envVar, "_CLIENT_ID")
+		isClientSecret := strings.HasSuffix(envVar, "_CLIENT_SECRET")
+
+		var query string
+		var queryArgs []interface{}
+		if isClientID || isClientSecret {
+			// Search by name prefix OR by any OAUTH2 credential with non-empty client fields
+			query = `
+				SELECT id, encrypted_value, type,
+					oauth_client_id, oauth_client_secret_enc, oauth_token_url,
+					oauth_refresh_token_enc, oauth_token_expires_at
+				FROM credentials
+				WHERE workspace_id = ? AND deleted_at IS NULL AND status != 'REVOKED'
+				  AND (name LIKE ? OR (type = 'OAUTH2' AND oauth_client_id != '' AND oauth_client_id IS NOT NULL))
+				ORDER BY created_at DESC LIMIT 1`
+			queryArgs = []interface{}{workspaceID, prefix + "%"}
+		} else {
+			query = `
+				SELECT id, encrypted_value, type,
+					oauth_client_id, oauth_client_secret_enc, oauth_token_url,
+					oauth_refresh_token_enc, oauth_token_expires_at
+				FROM credentials
+				WHERE workspace_id = ? AND name LIKE ? AND deleted_at IS NULL
+				  AND status != 'REVOKED'
+				ORDER BY created_at DESC LIMIT 1`
+			queryArgs = []interface{}{workspaceID, prefix + "%"}
+		}
+
+		row := db.QueryRowContext(ctx, query, queryArgs...)
 
 		var id, encValue, credType string
 		var oaClientID, oaSecretEnc, oaTokenURL, oaRefreshEnc, oaExpiresAt sql.NullString
