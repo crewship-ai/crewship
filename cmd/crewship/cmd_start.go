@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
+	api "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/database"
@@ -187,6 +189,17 @@ var startCmd = &cobra.Command{
 					apiRouter.SetScheduler(sched)
 				}
 			}
+		}
+
+		// Start OAuth token refresh worker (refreshes tokens expiring soon)
+		if deps.DB != nil {
+			oauthStop := make(chan struct{})
+			var oauthWg sync.WaitGroup
+			api.StartOAuthRefreshWorker(deps.DB, nil, logger, oauthStop, &oauthWg)
+			defer func() {
+				close(oauthStop)
+				oauthWg.Wait()
+			}()
 		}
 
 		if err := srv.Start(ctx); err != nil {

@@ -636,3 +636,184 @@ func TestWriteCredentialFiles_SkipsEmptyValues(t *testing.T) {
 		t.Errorf("expected nil for creds with empty name/value, got %v", err)
 	}
 }
+
+func TestBuildMCPConfig_HTTP(t *testing.T) {
+	servers := []MCPServerConfig{
+		{
+			Name: "sentry", Transport: "http", Endpoint: "https://mcp.sentry.dev/mcp",
+			Credential: &MCPCredential{PlainValue: "token123", Type: "bearer"},
+		},
+	}
+	result, err := buildMCPConfig(servers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, `"mcpServers"`) {
+		t.Error("missing mcpServers wrapper")
+	}
+	if !strings.Contains(result, `"sentry"`) {
+		t.Error("missing sentry key")
+	}
+	if !strings.Contains(result, `"type":"http"`) {
+		t.Error("missing type")
+	}
+	if !strings.Contains(result, `"Bearer token123"`) {
+		t.Error("missing bearer credential in headers")
+	}
+}
+
+func TestBuildMCPConfig_Stdio(t *testing.T) {
+	servers := []MCPServerConfig{
+		{
+			Name: "github", Transport: "stdio", Command: "npx",
+			Args: []string{"@modelcontextprotocol/server-github"},
+			Credential: &MCPCredential{PlainValue: "ghp_xxx", Type: "bearer", Header: "GITHUB_TOKEN"},
+		},
+	}
+	result, err := buildMCPConfig(servers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, `"command":"npx"`) {
+		t.Error("missing command")
+	}
+	if !strings.Contains(result, `"GITHUB_TOKEN"`) {
+		t.Error("missing env var name")
+	}
+	if !strings.Contains(result, `"ghp_xxx"`) {
+		t.Error("missing credential value in env")
+	}
+}
+
+func TestBuildMCPConfig_Empty(t *testing.T) {
+	result, err := buildMCPConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "" {
+		t.Errorf("expected empty string, got %q", result)
+	}
+}
+
+func TestBuildMCPConfig_APIKey(t *testing.T) {
+	servers := []MCPServerConfig{
+		{
+			Name: "custom", Transport: "streamable-http", Endpoint: "https://api.example.com/mcp",
+			Credential: &MCPCredential{PlainValue: "key123", Type: "api_key", Header: "X-Custom-Key"},
+		},
+	}
+	result, err := buildMCPConfig(servers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, `"X-Custom-Key"`) {
+		t.Error("missing custom header")
+	}
+	if !strings.Contains(result, `"key123"`) {
+		t.Error("missing api key value")
+	}
+}
+
+func TestBuildCLICommand_WithMCP(t *testing.T) {
+	req := AgentRunRequest{
+		CLIAdapter:  "CLAUDE_CODE",
+		AgentSlug:   "test-agent",
+		UserMessage: "hello",
+		MCPServers: []MCPServerConfig{
+			{Name: "test", Transport: "http", Endpoint: "https://example.com/mcp"},
+		},
+	}
+	cmd := BuildCLICommand(req)
+	found := false
+	for i, arg := range cmd {
+		if arg == "--mcp-config" && i+1 < len(cmd) {
+			found = true
+			if !strings.Contains(cmd[i+1], ".mcp.json") {
+				t.Errorf("expected .mcp.json file path, got: %s", cmd[i+1])
+			}
+		}
+	}
+	if !found {
+		t.Error("--mcp-config flag not found in command")
+	}
+}
+
+func TestBuildCLICommand_WithoutMCP(t *testing.T) {
+	req := AgentRunRequest{
+		CLIAdapter:  "CLAUDE_CODE",
+		UserMessage: "hello",
+	}
+	cmd := BuildCLICommand(req)
+	for _, arg := range cmd {
+		if arg == "--mcp-config" {
+			t.Error("--mcp-config should not be present when no MCP servers")
+		}
+	}
+}
+
+func TestBuildCLICommand_WithRawMCPConfig(t *testing.T) {
+	req := AgentRunRequest{
+		CLIAdapter:        "CLAUDE_CODE",
+		AgentSlug:         "test-agent",
+		UserMessage:       "hello",
+		CrewMCPConfigJSON: `{"mcpServers":{"github":{"command":"npx"}}}`,
+	}
+	cmd := BuildCLICommand(req)
+	found := false
+	for _, arg := range cmd {
+		if arg == "--mcp-config" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("--mcp-config should be present when CrewMCPConfigJSON is set")
+	}
+}
+
+func TestMergeMCPConfigs_CrewOnly(t *testing.T) {
+	crew := `{"mcpServers":{"github":{"command":"npx","args":["-y","@mcp/server-github"]}}}`
+	result, err := mergeMCPConfigs(crew, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "github") {
+		t.Error("expected github in merged config")
+	}
+}
+
+func TestMergeMCPConfigs_AgentOverridesCrew(t *testing.T) {
+	crew := `{"mcpServers":{"github":{"command":"npx","args":["old"]}}}`
+	agent := `{"mcpServers":{"github":{"command":"npx","args":["new"]},"jira":{"type":"http","url":"https://jira.example.com"}}}`
+	result, err := mergeMCPConfigs(crew, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Agent's github should override crew's
+	if !strings.Contains(result, `"new"`) {
+		t.Error("expected agent override for github")
+	}
+	if strings.Contains(result, `"old"`) {
+		t.Error("crew github args should be overridden")
+	}
+	// Jira should be added
+	if !strings.Contains(result, "jira") {
+		t.Error("expected jira from agent config")
+	}
+}
+
+func TestMergeMCPConfigs_BothEmpty(t *testing.T) {
+	result, err := mergeMCPConfigs("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "" {
+		t.Errorf("expected empty, got %s", result)
+	}
+}
+
+func TestMergeMCPConfigs_InvalidJSON(t *testing.T) {
+	_, err := mergeMCPConfigs("{invalid", "")
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}

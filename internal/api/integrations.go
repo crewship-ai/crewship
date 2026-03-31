@@ -134,8 +134,9 @@ type createAgentBindingRequest struct {
 	MCPServerID    string  `json:"mcp_server_id"`
 	MCPServerScope string  `json:"mcp_server_scope"`
 	CredentialID   *string `json:"credential_id"`
-	CredType       *string `json:"cred_type"`   // "bearer", "api_key", "basic"
-	CredHeader     *string `json:"cred_header"` // custom header for api_key type
+	CredType       *string `json:"cred_type"`      // "bearer", "api_key", "basic"
+	CredHeader     *string `json:"cred_header"`     // custom header for api_key type
+	EnvVarName     *string `json:"env_var_name"`    // env var name for stdio credential injection
 	Enabled        *bool   `json:"enabled"`
 	ConfigOverride *string `json:"config_override_json"`
 }
@@ -144,6 +145,7 @@ type updateAgentBindingRequest struct {
 	CredentialID   *string `json:"credential_id"`
 	CredType       *string `json:"cred_type"`
 	CredHeader     *string `json:"cred_header"`
+	EnvVarName     *string `json:"env_var_name"`
 	Enabled        *bool   `json:"enabled"`
 	ConfigOverride *string `json:"config_override_json"`
 }
@@ -870,10 +872,10 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope,
-			credential_id, cred_type, cred_header, enabled, config_override_json, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			credential_id, cred_type, cred_header, env_var_name, enabled, config_override_json, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, agentID, req.MCPServerID, req.MCPServerScope,
-		req.CredentialID, credType, req.CredHeader, enabled, req.ConfigOverride, now)
+		req.CredentialID, credType, req.CredHeader, req.EnvVarName, enabled, req.ConfigOverride, now)
 	if err != nil {
 		h.logger.Error("create agent binding", "error", err)
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "Agent already has a binding for this integration"})

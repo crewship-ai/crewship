@@ -89,6 +89,9 @@ var migrations = []migration{
 	{28, "add_task_scaling_and_handoff", migrationAddTaskScalingAndHandoff},
 	{29, "add_mcp_gateway", migrationAddMCPGateway},
 	{30, "fix_mcp_gateway_constraints", migrationFixMCPGatewayConstraints},
+	{31, "add_mcp_binding_env_var", migrationAddMCPBindingEnvVar},
+	{32, "add_oauth_credentials", migrationAddOAuthCredentials},
+	{33, "add_mcp_config_json", migrationAddMCPConfigJSON},
 }
 
 const migrationAddKeeperObservability = `
@@ -1028,4 +1031,37 @@ BEGIN
 	   OR (NEW.mcp_server_scope = 'crew'
 		AND NOT EXISTS (SELECT 1 FROM crew_mcp_servers WHERE id = NEW.mcp_server_id AND deleted_at IS NULL));
 END;
+`
+
+const migrationAddMCPBindingEnvVar = `
+-- Env var name for stdio MCP credential injection (e.g. GITHUB_TOKEN, SLACK_TOKEN)
+ALTER TABLE agent_mcp_bindings ADD COLUMN env_var_name TEXT;
+`
+
+const migrationAddMCPConfigJSON = `
+-- Raw .mcp.json config stored per crew (base) and per agent (additions).
+-- Orchestrator merges crew + agent configs at runtime; Claude Code
+-- natively expands ${VAR} references from container env vars.
+ALTER TABLE crews ADD COLUMN mcp_config_json TEXT;
+ALTER TABLE agents ADD COLUMN mcp_config_json TEXT;
+`
+
+const migrationAddOAuthCredentials = `
+-- OAuth 2.0 credential fields (extends existing credentials table)
+ALTER TABLE credentials ADD COLUMN oauth_client_id TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_client_secret_enc TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_auth_url TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_token_url TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_scopes TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_refresh_token_enc TEXT;
+ALTER TABLE credentials ADD COLUMN oauth_token_expires_at TEXT;
+
+-- OAuth state tokens for CSRF protection during auth flow
+CREATE TABLE IF NOT EXISTS oauth_states (
+	state TEXT PRIMARY KEY,
+	credential_id TEXT NOT NULL,
+	workspace_id TEXT NOT NULL,
+	redirect_uri TEXT NOT NULL,
+	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `

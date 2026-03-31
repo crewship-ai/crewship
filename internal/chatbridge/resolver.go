@@ -59,7 +59,9 @@ type chatResolveResponse struct {
 	MemoryMB       int                     `json:"memory_mb"`
 	CPUs           float64                 `json:"cpus"`
 	TTLHours       int                     `json:"ttl_hours"`
-	MCPServers     []mcpServerResponse     `json:"mcp_servers,omitempty"`
+	MCPServers         []mcpServerResponse `json:"mcp_servers,omitempty"`
+	CrewMCPConfigJSON  string              `json:"crew_mcp_config_json"`
+	AgentMCPConfigJSON string              `json:"agent_mcp_config_json"`
 }
 
 type mcpServerResponse struct {
@@ -71,9 +73,10 @@ type mcpServerResponse struct {
 	Command     string            `json:"command,omitempty"`
 	Args        []string          `json:"args,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
-	CredToken   string            `json:"cred_token,omitempty"`
-	CredType    string            `json:"cred_type,omitempty"`
-	CredHeader  string            `json:"cred_header,omitempty"`
+	CredToken    string            `json:"cred_token,omitempty"`
+	CredType     string            `json:"cred_type,omitempty"`
+	CredHeader   string            `json:"cred_header,omitempty"`
+	EnvVarName   string            `json:"env_var_name,omitempty"`
 }
 
 type crewInfoResponse struct {
@@ -408,10 +411,15 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 			Command: s.Command, Args: s.Args, Env: s.Env,
 		}
 		if s.CredToken != "" {
+			header := s.CredHeader
+			// For stdio servers, env_var_name takes precedence over header
+			if s.Transport == "stdio" && s.EnvVarName != "" {
+				header = s.EnvVarName
+			}
 			cfg.Credential = &orchestrator.MCPCredential{
 				PlainValue: s.CredToken,
 				Type:       s.CredType,
-				Header:     s.CredHeader,
+				Header:     header,
 			}
 		}
 		mcpServers = append(mcpServers, cfg)
@@ -440,6 +448,8 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		MemoryMB:       data.MemoryMB,
 		CPUs:           data.CPUs,
 		TTLHours:       data.TTLHours,
-		MCPServers:     mcpServers,
+		MCPServers:         mcpServers,
+		CrewMCPConfigJSON:  data.CrewMCPConfigJSON,
+		AgentMCPConfigJSON: data.AgentMCPConfigJSON,
 	}, nil
 }
