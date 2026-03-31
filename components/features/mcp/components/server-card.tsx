@@ -87,6 +87,8 @@ export function ServerCard({
               </CardTitle>
             ) : (
               <Input
+                id={`server-name-${entry._key}`}
+                aria-label="Server name"
                 value={entry.name}
                 onChange={(e) => onUpdate(index, { name: e.target.value })}
                 placeholder="server-name"
@@ -126,7 +128,7 @@ export function ServerCard({
         {/* Transport selector */}
         {!readOnly && (
           <div className="space-y-1.5">
-            <Label className="text-xs">Transport</Label>
+            <Label htmlFor={`transport-${entry._key}`} className="text-xs">Transport</Label>
             <Select
               value={entry.transport}
               onValueChange={(val: "stdio" | "http") =>
@@ -148,8 +150,9 @@ export function ServerCard({
         {entry.transport === "stdio" ? (
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label className="text-xs">Command</Label>
+              <Label htmlFor={`command-${entry._key}`} className="text-xs">Command</Label>
               <Input
+                id={`command-${entry._key}`}
                 value={entry.command}
                 onChange={(e) => onUpdate(index, { command: e.target.value })}
                 placeholder="npx"
@@ -158,8 +161,9 @@ export function ServerCard({
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Arguments</Label>
+              <Label htmlFor={`args-${entry._key}`} className="text-xs">Arguments</Label>
               <Input
+                id={`args-${entry._key}`}
                 value={entry.args}
                 onChange={(e) => onUpdate(index, { args: e.target.value })}
                 placeholder="-y @modelcontextprotocol/server-github"
@@ -173,8 +177,9 @@ export function ServerCard({
           </div>
         ) : (
           <div className="space-y-1.5">
-            <Label className="text-xs">URL</Label>
+            <Label htmlFor={`url-${entry._key}`} className="text-xs">URL</Label>
             <Input
+              id={`url-${entry._key}`}
               value={entry.url}
               onChange={(e) => onUpdate(index, { url: e.target.value })}
               placeholder="https://mcp.example.com/sse"
@@ -209,6 +214,7 @@ export function ServerCard({
                 {entry.headers.map((h, hIdx) => (
                   <div key={hIdx} className="flex items-center gap-2">
                     <Input
+                      aria-label={`Header ${hIdx + 1} name`}
                       value={h.key}
                       onChange={(e) => onUpdateHeader(index, hIdx, "key", e.target.value)}
                       placeholder="Header-Name"
@@ -216,6 +222,7 @@ export function ServerCard({
                       className="h-7 text-xs font-mono flex-1"
                     />
                     <Input
+                      aria-label={`Header ${hIdx + 1} value`}
                       value={h.value}
                       onChange={(e) => onUpdateHeader(index, hIdx, "value", e.target.value)}
                       placeholder="Bearer ${TOKEN}"
@@ -257,6 +264,7 @@ export function ServerCard({
               {entry.env.map((e, eIdx) => (
                 <div key={eIdx} className="flex items-center gap-2">
                   <Input
+                    aria-label={`Environment variable ${eIdx + 1} name`}
                     value={e.key}
                     onChange={(ev) => onUpdateEnvVar(index, eIdx, "key", ev.target.value)}
                     placeholder="VAR_NAME"
@@ -278,6 +286,7 @@ export function ServerCard({
                     </div>
                   ) : (
                     <Input
+                      aria-label={`Environment variable ${eIdx + 1} value`}
                       value={e.value}
                       onChange={(ev) => onUpdateEnvVar(index, eIdx, "value", ev.target.value)}
                       placeholder="${CREDENTIAL_REF}"

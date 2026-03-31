@@ -259,7 +259,7 @@ var agentMCPCmd = &cobra.Command{
 				if err := cli.ReadJSON(crewResp, &crew); err != nil {
 					return fmt.Errorf("read crew response: %w", err)
 				}
-				if crew.MCPConfigJSON != nil {
+				if crew.MCPConfigJSON != nil && *crew.MCPConfigJSON != "" {
 					var parsed struct {
 						MCPServers map[string]json.RawMessage `json:"mcpServers"`
 					}
