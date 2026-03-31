@@ -7,7 +7,7 @@
 
 ## Strategicke priority (2026-02-17)
 
-> Detailni analyza: `.factory/context/STRATEGY-2026.md`
+> Detailni analyza: `.claude/context/STRATEGY-2026.md`
 
 Na zaklade hloubkove analyzy OpenClaw ekosystemu (bezpecnostni incidenty, community feedback,
 konkurencni krajina) jsme definovali strategicke priority pro Crewship:
@@ -540,7 +540,7 @@ konkurencni krajina) jsme definovali strategicke priority pro Crewship:
 ### Dalsi kroky
 
 #### Faze 1: Open Source Wow (aktualni priorita)
-> Detail: `.factory/context/STRATEGY-2026.md` sekce 8
+> Detail: `.claude/context/STRATEGY-2026.md` sekce 8
 
 - [ ] Single binary distribuce (GoReleaser, brew tap, curl installer)
 - [ ] SQLite jako default DB (Prisma migrace, zero deps)

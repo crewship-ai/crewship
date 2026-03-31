@@ -64,7 +64,7 @@ brews:
     name: crewship
     homepage: "https://crewship.ai"
     description: "AI Agent Orchestration Platform -- manage AI virtual employees in crews"
-    license: "MIT"
+    license: "Apache-2.0"
     install: |
       bin.install "crewship"
     test: |

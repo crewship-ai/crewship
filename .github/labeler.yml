@@ -39,7 +39,7 @@ documentation:
   - changed-files:
       - any-glob-to-any-file:
           - '**/*.md'
-          - '.factory/context/**'
+          - '.claude/context/**'
 
 dependencies:
   - changed-files:
