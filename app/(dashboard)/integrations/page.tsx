@@ -1,8 +1,22 @@
 "use client"
 
 import * as React from "react"
-import { Plug, Plus, Globe, Terminal, Users, ChevronRight, ChevronDown, Bot, Check } from "lucide-react"
+import {
+  Plug,
+  Plus,
+  Globe,
+  Terminal,
+  Users,
+  ChevronRight,
+  ChevronDown,
+  Bot,
+  Check,
+  Trash2,
+  Settings2,
+  KeyRound,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { PageHeader } from "@/components/layout/page-header"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Badge } from "@/components/ui/badge"
@@ -20,23 +34,33 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { MCPConfigEditor } from "@/components/features/mcp/mcp-config-editor"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import { toast } from "sonner"
-import {
-  crewServerToEntry,
-  entryToPayload,
-  diffEntries,
-  type CrewMCPServer,
-} from "@/components/features/mcp/lib/integration-adapter"
-import { parseConfig, serializeConfig, entryFromTemplate } from "@/components/features/mcp/lib/config-parser"
 import { MCP_TEMPLATES, TEMPLATE_ICONS } from "@/components/features/mcp/templates"
-import type { ServerEntry, MCPTemplate } from "@/components/features/mcp/types"
+import type { MCPTemplate } from "@/components/features/mcp/types"
 
-interface CrewIntegrationRow extends CrewMCPServer {
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+interface CrewIntegration {
+  id: string
+  crew_id: string
   crew_name: string
   crew_slug: string
+  name: string
+  display_name: string
+  transport: string
+  endpoint: string | null
+  command: string | null
+  args_json: string | null
+  env_json: string | null
+  icon: string | null
+  enabled: boolean
+  created_at: string
+  updated_at: string
+  agent_binding_count: number
 }
 
 interface AgentInfo {
@@ -51,30 +75,130 @@ interface CrewInfo {
   slug: string
 }
 
+interface AgentBinding {
+  id: string
+  mcp_server_id: string
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function parseArgs(argsJson: string | null): string {
+  if (!argsJson) return ""
+  try {
+    const arr = JSON.parse(argsJson) as string[]
+    return Array.isArray(arr) ? arr.join(" ") : ""
+  } catch {
+    return ""
+  }
+}
+
+function serializeArgs(argsStr: string): string {
+  const parts = argsStr.trim().split(/\s+/).filter(Boolean)
+  return JSON.stringify(parts)
+}
+
+function parseEnv(envJson: string | null): { key: string; value: string }[] {
+  if (!envJson) return []
+  try {
+    const obj = JSON.parse(envJson) as Record<string, string>
+    return Object.entries(obj).map(([key, value]) => ({ key, value }))
+  } catch {
+    return []
+  }
+}
+
+function serializeEnv(entries: { key: string; value: string }[]): string {
+  return JSON.stringify(
+    Object.fromEntries(entries.filter((e) => e.key.trim()).map((e) => [e.key, e.value])),
+  )
+}
+
+function subtitleFor(server: CrewIntegration): string {
+  if (server.transport === "http") return server.endpoint ?? ""
+  const cmd = server.command ?? ""
+  const args = parseArgs(server.args_json)
+  return `${cmd} ${args}`.trim()
+}
+
+// ---------------------------------------------------------------------------
+// Template popover (shared between header and empty state)
+// ---------------------------------------------------------------------------
+
+function TemplatePopover({
+  open,
+  onOpenChange,
+  onSelect,
+  trigger,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onSelect: (t: MCPTemplate | null) => void
+  trigger: React.ReactNode
+}) {
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+      <PopoverContent className="w-80 p-3" align="end">
+        <div className="space-y-2">
+          <p className="text-sm font-medium">Add from template</p>
+          <div className="grid grid-cols-2 gap-2">
+            {MCP_TEMPLATES.map((t) => {
+              const Icon = TEMPLATE_ICONS[t.icon] ?? Plug
+              return (
+                <button
+                  key={t.name}
+                  type="button"
+                  className="flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/60 transition-colors"
+                  onClick={() => onSelect(t)}
+                >
+                  <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  {t.label}
+                </button>
+              )
+            })}
+          </div>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
+            onClick={() => onSelect(null)}
+          >
+            <Terminal className="h-4 w-4" />
+            Custom server
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
+
 export default function IntegrationsPage() {
   const { workspaceId, loading: wsLoading } = useWorkspace()
   const { abilities } = useAbilities()
   const canManage = abilities.can("create", "Credential")
 
-  const [crewServers, setCrewServers] = React.useState<CrewIntegrationRow[]>([])
+  // Data
+  const [servers, setServers] = React.useState<CrewIntegration[]>([])
   const [crews, setCrews] = React.useState<CrewInfo[]>([])
   const [crewAgents, setCrewAgents] = React.useState<Record<string, AgentInfo[]>>({})
-  // Agent bindings: serverId → Set of bound agentIds
   const [agentBindings, setAgentBindings] = React.useState<Record<string, Set<string>>>({})
+  const [bindingIds, setBindingIds] = React.useState<Record<string, Record<string, string>>>({})
+
+  // UI state
   const [loading, setLoading] = React.useState(true)
-  const [saving, setSaving] = React.useState(false)
+  const [expandedId, setExpandedId] = React.useState<string | null>(null)
   const [templatePopoverOpen, setTemplatePopoverOpen] = React.useState(false)
+  const [emptyPopoverOpen, setEmptyPopoverOpen] = React.useState(false)
+  const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null)
 
-  // Editor state
-  const snapshotRef = React.useRef<ServerEntry[]>([])
-  const [editorJson, setEditorJson] = React.useState("")
-
-  // Accordion
-  const [expandedIdx, setExpandedIdx] = React.useState<number | null>(null)
-
-  // -----------------------------------------------------------------------
-  // Fetch
-  // -----------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Fetch all data
+  // -------------------------------------------------------------------------
 
   const fetchAll = React.useCallback(async (wid: string) => {
     try {
@@ -82,8 +206,9 @@ export default function IntegrationsPage() {
         fetch(`/api/v1/integrations/crews?workspace_id=${wid}`),
         fetch(`/api/v1/crews?workspace_id=${wid}`),
       ])
-      const data: CrewIntegrationRow[] = crewRes.ok ? (await crewRes.json()) ?? [] : []
-      setCrewServers(data)
+
+      const data: CrewIntegration[] = crewRes.ok ? (await crewRes.json()) ?? [] : []
+      setServers(data)
 
       const crewsList: CrewInfo[] = crewsListRes.ok ? (await crewsListRes.json()) ?? [] : []
       setCrews(crewsList)
@@ -96,38 +221,38 @@ export default function IntegrationsPage() {
           const r = await fetch(`/api/v1/agents?workspace_id=${wid}&crew_id=${cid}`)
           if (r.ok) {
             const agents = await r.json()
-            agentMap[cid] = Array.isArray(agents) ? agents.map((a: AgentInfo) => ({ id: a.id, name: a.name, slug: a.slug })) : []
+            agentMap[cid] = Array.isArray(agents)
+              ? agents.map((a: AgentInfo) => ({ id: a.id, name: a.name, slug: a.slug }))
+              : []
           }
         }),
       )
       setCrewAgents(agentMap)
 
-      // Fetch agent bindings for each agent in each crew
+      // Fetch agent bindings
       const allAgents = Object.values(agentMap).flat()
-      const bindingsMap: Record<string, Set<string>> = {}
+      const bMap: Record<string, Set<string>> = {}
+      const idMap: Record<string, Record<string, string>> = {}
       await Promise.all(
         allAgents.map(async (agent) => {
           const r = await fetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${wid}`)
           if (r.ok) {
-            const bindings = await r.json()
+            const bindings: AgentBinding[] = (await r.json()) ?? []
             if (Array.isArray(bindings)) {
               for (const b of bindings) {
-                if (!bindingsMap[b.mcp_server_id]) bindingsMap[b.mcp_server_id] = new Set()
-                bindingsMap[b.mcp_server_id].add(agent.id)
+                if (!bMap[b.mcp_server_id]) bMap[b.mcp_server_id] = new Set()
+                bMap[b.mcp_server_id].add(agent.id)
+                if (!idMap[b.mcp_server_id]) idMap[b.mcp_server_id] = {}
+                idMap[b.mcp_server_id][agent.id] = b.id
               }
             }
           }
         }),
       )
-      setAgentBindings(bindingsMap)
-
-      // Build editor JSON
-      const entries = data.map((s, i) => crewServerToEntry(s, i))
-      snapshotRef.current = entries
-      setEditorJson(serializeConfig(entries))
+      setAgentBindings(bMap)
+      setBindingIds(idMap)
     } catch {
-      setCrewServers([])
-      setEditorJson("")
+      setServers([])
     }
   }, [])
 
@@ -142,112 +267,243 @@ export default function IntegrationsPage() {
       await fetchAll(workspaceId)
       if (!cancelled) setLoading(false)
     })()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [workspaceId, wsLoading, fetchAll])
 
-  // -----------------------------------------------------------------------
-  // Add from template
-  // -----------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Add from template / custom
+  // -------------------------------------------------------------------------
 
-  function handleAddFromTemplate(template: MCPTemplate) {
-    const currentEntries = parseConfig(editorJson)
-    const newEntry = entryFromTemplate(template)
-    const updated = [...currentEntries, newEntry]
-    setEditorJson(serializeConfig(updated))
-    setExpandedIdx(updated.length - 1)
+  async function handleAddServer(template: MCPTemplate | null) {
+    if (!workspaceId) return
     setTemplatePopoverOpen(false)
-  }
+    setEmptyPopoverOpen(false)
 
-  function handleAddCustom() {
-    const currentEntries = parseConfig(editorJson)
-    const newEntry: ServerEntry = {
-      _key: Date.now(),
-      name: "",
-      transport: "stdio",
-      command: "",
-      args: "",
-      url: "",
-      headers: [],
-      env: [],
-    }
-    const updated = [...currentEntries, newEntry]
-    setEditorJson(serializeConfig(updated))
-    setExpandedIdx(updated.length - 1)
-    setTemplatePopoverOpen(false)
-  }
-
-  // -----------------------------------------------------------------------
-  // Save
-  // -----------------------------------------------------------------------
-
-  async function handleSave() {
-    if (!workspaceId || saving) return
-
-    const currentEntries = parseConfig(editorJson)
-    const withIds = reconcileIds(snapshotRef.current, currentEntries)
-    const diff = diffEntries(snapshotRef.current, withIds)
-
-    if (diff.create.length === 0 && diff.update.length === 0 && diff.remove.length === 0) {
-      toast.info("No changes to save")
+    const defaultCrewId = servers[0]?.crew_id ?? crews[0]?.id
+    if (!defaultCrewId) {
+      toast.error("Create a crew first before adding integrations")
       return
     }
 
-    setSaving(true)
+    const payload: Record<string, unknown> = template
+      ? {
+          name: template.name,
+          display_name: template.label,
+          transport: template.transport,
+          command: template.command ?? null,
+          args_json: template.args ? JSON.stringify(template.args.split(/\s+/)) : null,
+          endpoint: template.url ?? null,
+          env_json: template.envHint
+            ? JSON.stringify(
+                Object.fromEntries(template.envHint.split(",").map((h) => [h.trim(), ""])),
+              )
+            : null,
+          enabled: true,
+        }
+      : {
+          name: "custom-server",
+          display_name: "Custom Server",
+          transport: "stdio",
+          command: "",
+          args_json: "[]",
+          endpoint: null,
+          env_json: null,
+          enabled: true,
+        }
+
     try {
-      const errors: string[] = []
-      let defaultCrewId = crewServers[0]?.crew_id || crews[0]?.id
-
-      for (const entry of diff.create) {
-        if (!entry.name.trim() || !defaultCrewId) continue
-        const payload = entryToPayload(entry)
-        const res = await fetch(
-          `/api/v1/crews/${defaultCrewId}/integrations?workspace_id=${workspaceId}`,
-          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
-        )
-        if (!res.ok) {
-          const d = await res.json().catch(() => null)
-          errors.push(d?.error ?? `Failed to create "${entry.name}"`)
-        }
+      const res = await fetch(
+        `/api/v1/crews/${defaultCrewId}/integrations?workspace_id=${workspaceId}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      )
+      if (!res.ok) {
+        const d = await res.json().catch(() => null)
+        toast.error(d?.error ?? "Failed to create server")
+        return
       }
-
-      for (const entry of diff.update) {
-        if (!entry.id) continue
-        const original = crewServers.find((s) => s.id === entry.id)
-        const crewId = original?.crew_id ?? defaultCrewId
-        if (!crewId) continue
-        const payload = entryToPayload(entry)
-        const res = await fetch(
-          `/api/v1/crews/${crewId}/integrations/${entry.id}?workspace_id=${workspaceId}`,
-          { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
-        )
-        if (!res.ok) {
-          const d = await res.json().catch(() => null)
-          errors.push(d?.error ?? `Failed to update "${entry.name}"`)
-        }
-      }
-
-      for (const id of diff.remove) {
-        const original = crewServers.find((s) => s.id === id)
-        const crewId = original?.crew_id ?? defaultCrewId
-        if (!crewId) continue
-        await fetch(`/api/v1/crews/${crewId}/integrations/${id}?workspace_id=${workspaceId}`, { method: "DELETE" })
-      }
-
-      if (errors.length > 0) toast.error(errors[0])
-      else toast.success("Integrations saved")
-
-      setExpandedIdx(null)
+      const created = await res.json().catch(() => null)
+      toast.success(`"${payload.display_name ?? payload.name}" added`)
       await fetchAll(workspaceId)
+      // Auto-expand the new row
+      if (created?.id) {
+        setExpandedId(created.id)
+      } else {
+        // Fallback: expand by name match
+        setExpandedId(null)
+      }
     } catch {
       toast.error("Network error")
-    } finally {
-      setSaving(false)
     }
   }
 
-  // -----------------------------------------------------------------------
-  // Render
-  // -----------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Inline field update (PATCH)
+  // -------------------------------------------------------------------------
+
+  async function patchServer(
+    server: CrewIntegration,
+    fields: Record<string, unknown>,
+  ) {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(
+        `/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fields),
+        },
+      )
+      if (!res.ok) {
+        const d = await res.json().catch(() => null)
+        toast.error(d?.error ?? "Failed to update")
+        return
+      }
+      await fetchAll(workspaceId)
+    } catch {
+      toast.error("Network error")
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Crew move
+  // -------------------------------------------------------------------------
+
+  async function handleCrewMove(server: CrewIntegration, newCrewId: string) {
+    if (!workspaceId || newCrewId === server.crew_id) return
+    const serverName = server.name
+
+    try {
+      // Delete from old crew
+      const delRes = await fetch(
+        `/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`,
+        { method: "DELETE" },
+      )
+      if (!delRes.ok) {
+        toast.error("Failed to move integration")
+        return
+      }
+
+      // Create on new crew
+      const payload = {
+        name: server.name,
+        display_name: server.display_name,
+        transport: server.transport,
+        command: server.command,
+        args_json: server.args_json,
+        endpoint: server.endpoint,
+        env_json: server.env_json,
+        icon: server.icon,
+        enabled: server.enabled,
+      }
+      const createRes = await fetch(
+        `/api/v1/crews/${newCrewId}/integrations?workspace_id=${workspaceId}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      )
+      if (!createRes.ok) {
+        toast.error("Failed to create on new crew")
+        return
+      }
+
+      toast.success("Integration moved")
+      await fetchAll(workspaceId)
+
+      // Find the new server by name to keep panel open
+      setExpandedId((prev) => {
+        // Will be resolved after fetchAll; use a workaround via effect
+        return prev
+      })
+      // Re-fetch to find new ID
+      const refetchRes = await fetch(
+        `/api/v1/integrations/crews?workspace_id=${workspaceId}`,
+      )
+      if (refetchRes.ok) {
+        const all: CrewIntegration[] = (await refetchRes.json()) ?? []
+        const moved = all.find((s) => s.name === serverName && s.crew_id === newCrewId)
+        if (moved) setExpandedId(moved.id)
+      }
+    } catch {
+      toast.error("Network error")
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Agent binding toggle
+  // -------------------------------------------------------------------------
+
+  async function handleAgentToggle(
+    server: CrewIntegration,
+    agent: AgentInfo,
+    hasAccess: boolean,
+    hasAnyBindings: boolean,
+  ) {
+    if (!workspaceId || !canManage) return
+
+    try {
+      if (hasAccess && hasAnyBindings) {
+        // Remove binding
+        const bId = bindingIds[server.id]?.[agent.id]
+        if (bId) {
+          await fetch(
+            `/api/v1/agents/${agent.id}/integrations/${bId}?workspace_id=${workspaceId}`,
+            { method: "DELETE" },
+          )
+        }
+      } else {
+        // Create binding
+        await fetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${workspaceId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mcp_server_id: server.id,
+            mcp_server_scope: "crew",
+            enabled: true,
+          }),
+        })
+      }
+      await fetchAll(workspaceId)
+    } catch {
+      toast.error("Network error")
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Delete server
+  // -------------------------------------------------------------------------
+
+  async function handleDelete(server: CrewIntegration) {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(
+        `/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`,
+        { method: "DELETE" },
+      )
+      if (res.ok) {
+        toast.success(`"${server.display_name || server.name}" deleted`)
+        setExpandedId(null)
+        setConfirmDeleteId(null)
+        await fetchAll(workspaceId)
+      } else {
+        toast.error("Failed to delete integration")
+      }
+    } catch {
+      toast.error("Network error")
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Render: loading
+  // -------------------------------------------------------------------------
 
   if (wsLoading || loading) {
     return (
@@ -261,351 +517,521 @@ export default function IntegrationsPage() {
     )
   }
 
-  const entries = parseConfig(editorJson)
-  const hasChanges = editorJson !== serializeConfig(snapshotRef.current)
+  // -------------------------------------------------------------------------
+  // Render: main
+  // -------------------------------------------------------------------------
 
   return (
     <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
       <PageHeader title="Integrations" description="Manage MCP server connections for your workspace">
-        <div className="flex items-center gap-2">
-          {canManage && hasChanges && (
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : "Save Changes"}
-            </Button>
-          )}
-          {canManage && (
-            <Popover open={templatePopoverOpen} onOpenChange={setTemplatePopoverOpen}>
-              <PopoverTrigger asChild>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add MCP Server
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80 p-3" align="end">
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Add from template</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {MCP_TEMPLATES.map((t) => {
-                      const Icon = TEMPLATE_ICONS[t.icon] ?? Plug
-                      return (
-                        <button
-                          key={t.name}
-                          type="button"
-                          className="flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/60 transition-colors"
-                          onClick={() => handleAddFromTemplate(t)}
-                        >
-                          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          {t.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
-                    onClick={handleAddCustom}
-                  >
-                    <Terminal className="h-4 w-4" />
-                    Custom server
-                  </button>
-                </div>
-              </PopoverContent>
-            </Popover>
-          )}
-        </div>
+        {canManage && (
+          <TemplatePopover
+            open={templatePopoverOpen}
+            onOpenChange={setTemplatePopoverOpen}
+            onSelect={handleAddServer}
+            trigger={
+              <Button>
+                <Plus className="mr-2 h-4 w-4" />
+                Add MCP Server
+              </Button>
+            }
+          />
+        )}
       </PageHeader>
 
-      {entries.length === 0 ? (
+      {servers.length === 0 ? (
         <EmptyState
           icon={Plug}
           title="No integrations yet"
           description="Connect MCP servers to give your agents access to external tools and services."
         >
           {canManage && (
-            <Popover>
-              <PopoverTrigger asChild>
+            <TemplatePopover
+              open={emptyPopoverOpen}
+              onOpenChange={setEmptyPopoverOpen}
+              onSelect={handleAddServer}
+              trigger={
                 <Button className="mt-4">
                   <Plus className="mr-2 h-4 w-4" />
                   Add First MCP Server
                 </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80 p-3">
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Choose a template</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {MCP_TEMPLATES.map((t) => {
-                      const Icon = TEMPLATE_ICONS[t.icon] ?? Plug
-                      return (
-                        <button
-                          key={t.name}
-                          type="button"
-                          className="flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/60 transition-colors"
-                          onClick={() => handleAddFromTemplate(t)}
-                        >
-                          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          {t.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
-                    onClick={handleAddCustom}
-                  >
-                    <Terminal className="h-4 w-4" />
-                    Custom server
-                  </button>
-                </div>
-              </PopoverContent>
-            </Popover>
+              }
+            />
           )}
         </EmptyState>
       ) : (
-        <div className="space-y-3">
-          {/* Accordion list — each entry is a collapsible row */}
-          <div className="rounded-md border divide-y">
-            {entries.map((entry, idx) => {
-              const isExpanded = expandedIdx === idx
-              const server = crewServers.find((s) => s.name === entry.name)
-              const crewName = server?.crew_name
-              const agents = server ? (crewAgents[server.crew_id] ?? []) : []
-              const isNew = !entry.id && !server
+        <div className="rounded-md border divide-y">
+          {servers.map((server) => {
+            const isExpanded = expandedId === server.id
+            const agents = crewAgents[server.crew_id] ?? []
 
-              return (
-                <div key={entry._key}>
-                  {/* Collapsed header row */}
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
-                    onClick={() => setExpandedIdx(isExpanded ? null : idx)}
-                  >
-                    <span className="shrink-0 text-muted-foreground">
-                      {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                    </span>
+            return (
+              <div key={server.id}>
+                {/* Collapsed header row */}
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+                  onClick={() => setExpandedId(isExpanded ? null : server.id)}
+                  aria-expanded={isExpanded}
+                  aria-label={`${server.display_name || server.name} integration`}
+                >
+                  <span className="shrink-0 text-muted-foreground">
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                  </span>
 
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <Plug className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0">
-                        <p className="font-medium text-sm truncate">{entry.name || "(new server)"}</p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {entry.transport === "http" ? entry.url : `${entry.command} ${entry.args}`.trim()}
-                        </p>
-                      </div>
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <Plug className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">
+                        {server.display_name || server.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {subtitleFor(server)}
+                      </p>
                     </div>
+                  </div>
 
-                    {/* Crew badge */}
-                    {crewName && (
-                      <Badge variant="outline" className="text-xs font-normal shrink-0">
-                        <Users className="mr-1 h-3 w-3" />
-                        {crewName}
-                      </Badge>
-                    )}
-                    {isNew && (
-                      <Badge variant="default" className="text-xs font-normal shrink-0">
-                        New
-                      </Badge>
-                    )}
+                  {/* Crew badge */}
+                  <Badge variant="outline" className="text-xs font-normal shrink-0">
+                    <Users className="mr-1 h-3 w-3" />
+                    {server.crew_name}
+                  </Badge>
 
-                    {/* Transport */}
-                    <span className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-                      {entry.transport === "http" ? <Globe className="h-3 w-3" /> : <Terminal className="h-3 w-3" />}
-                      {entry.transport === "http" ? "HTTP" : "Stdio"}
+                  {/* Transport */}
+                  <span className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+                    {server.transport === "http" ? (
+                      <Globe className="h-3 w-3" />
+                    ) : (
+                      <Terminal className="h-3 w-3" />
+                    )}
+                    {server.transport === "http" ? "HTTP" : "Stdio"}
+                  </span>
+
+                  {/* Agent count */}
+                  {server.agent_binding_count > 0 && (
+                    <span className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+                      <Bot className="h-3 w-3" />
+                      {server.agent_binding_count}
                     </span>
-
-                    {/* Agent count */}
-                    {agents.length > 0 && (
-                      <span className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground shrink-0">
-                        <Bot className="h-3 w-3" />
-                        {agents.length}
-                      </span>
-                    )}
-                  </button>
-
-                  {/* Expanded panel */}
-                  {isExpanded && (
-                    <div className="bg-muted/20 border-t px-6 py-5 space-y-4">
-                      {/* Scope & Assignment */}
-                      <div className="rounded-md border bg-background p-4 space-y-4">
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                          <Users className="h-4 w-4 text-muted-foreground" />
-                          Scope & Assignment
-                        </div>
-
-                        {/* Crew selector */}
-                        {server && (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-1.5">
-                              <Label className="text-xs">Assigned to crew</Label>
-                              <Select
-                                value={server.crew_id}
-                                onValueChange={async (newCrewId) => {
-                                  if (!workspaceId || !server || newCrewId === server.crew_id) return
-                                  // Move: delete from old crew, create on new crew
-                                  const payload = entryToPayload(entry)
-                                  const delRes = await fetch(`/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
-                                  if (!delRes.ok) { toast.error("Failed to move integration"); return }
-                                  const createRes = await fetch(`/api/v1/crews/${newCrewId}/integrations?workspace_id=${workspaceId}`, {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify(payload),
-                                  })
-                                  if (createRes.ok) {
-                                    toast.success("Integration moved")
-                                    setExpandedIdx(null)
-                                    fetchAll(workspaceId)
-                                  } else {
-                                    toast.error("Failed to create on new crew")
-                                  }
-                                }}
-                              >
-                                <SelectTrigger className="h-8 text-xs">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {crews.map((c) => (
-                                    <SelectItem key={c.id} value={c.id}>
-                                      {c.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Agent assignment */}
-                        {agents.length > 0 && server && (
-                          <div className="space-y-2">
-                            <Label className="text-xs">Agent access</Label>
-                            <div className="flex flex-wrap gap-1.5">
-                              {agents.map((a) => {
-                                const bound = agentBindings[server.id]?.has(a.id) ?? false
-                                const hasAnyBindings = (agentBindings[server.id]?.size ?? 0) > 0
-                                // If no explicit bindings exist, all agents have access (crew-level default)
-                                const hasAccess = hasAnyBindings ? bound : true
-                                return (
-                                  <button
-                                    key={a.id}
-                                    type="button"
-                                    className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
-                                      hasAccess
-                                        ? "bg-primary/10 border-primary/30 text-primary"
-                                        : "bg-muted/30 border-border text-muted-foreground"
-                                    }`}
-                                    onClick={async () => {
-                                      if (!workspaceId || !canManage) return
-                                      if (hasAccess && hasAnyBindings) {
-                                        // Remove binding — find binding id first
-                                        const r = await fetch(`/api/v1/agents/${a.id}/integrations?workspace_id=${workspaceId}`)
-                                        if (r.ok) {
-                                          const bindings = await r.json()
-                                          const binding = bindings?.find((b: { mcp_server_id: string }) => b.mcp_server_id === server.id)
-                                          if (binding) {
-                                            await fetch(`/api/v1/agents/${a.id}/integrations/${binding.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
-                                          }
-                                        }
-                                      } else {
-                                        // Create binding
-                                        await fetch(`/api/v1/agents/${a.id}/integrations?workspace_id=${workspaceId}`, {
-                                          method: "POST",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({
-                                            mcp_server_id: server.id,
-                                            mcp_server_scope: "crew",
-                                            enabled: true,
-                                          }),
-                                        })
-                                      }
-                                      fetchAll(workspaceId)
-                                    }}
-                                    disabled={!canManage}
-                                    title={hasAccess ? `Remove ${a.name} access` : `Grant ${a.name} access`}
-                                  >
-                                    {hasAccess && <Check className="h-3 w-3" />}
-                                    <Bot className="h-3 w-3" />
-                                    {a.name}
-                                  </button>
-                                )
-                              })}
-                            </div>
-                            <p className="text-xs text-muted-foreground">
-                              {(agentBindings[server.id]?.size ?? 0) > 0
-                                ? "Only selected agents have access. Click to toggle."
-                                : "All agents in the crew have access. Click an agent to restrict."}
-                            </p>
-                          </div>
-                        )}
-
-                        {isNew && crews.length > 0 && (
-                          <p className="text-xs text-muted-foreground">
-                            Save the integration first, then assign it to a crew.
-                          </p>
-                        )}
-                      </div>
-
-                      {/* MCPConfigEditor for just this one entry */}
-                      <MCPConfigEditor
-                        value={serializeConfig([entry])}
-                        onChange={(json) => {
-                          const parsed = parseConfig(json)
-                          if (parsed.length === 0) {
-                            // Entry was deleted — if it has a DB id, call DELETE API immediately
-                            if (entry.id && server && workspaceId) {
-                              fetch(`/api/v1/crews/${server.crew_id}/integrations/${entry.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
-                                .then((res) => {
-                                  if (res.ok) {
-                                    toast.success(`"${entry.name}" deleted`)
-                                    fetchAll(workspaceId)
-                                  } else {
-                                    toast.error("Failed to delete integration")
-                                  }
-                                })
-                                .catch(() => toast.error("Network error"))
-                            }
-                            const updated = entries.filter((_, i) => i !== idx)
-                            setEditorJson(serializeConfig(updated))
-                            setExpandedIdx(null)
-                          } else {
-                            // Entry was updated
-                            const updated = entries.map((e, i) =>
-                              i === idx ? { ...parsed[0], _key: entry._key, id: entry.id } : e,
-                            )
-                            setEditorJson(serializeConfig(updated))
-                          }
-                        }}
-                        readOnly={!canManage}
-                        workspaceId={workspaceId ?? undefined}
-                      />
-                    </div>
                   )}
-                </div>
-              )
-            })}
-          </div>
+                </button>
 
-          {/* Save button at bottom too if there are changes */}
-          {canManage && hasChanges && (
-            <div className="flex justify-end">
-              <Button onClick={handleSave} disabled={saving}>
-                {saving ? "Saving..." : "Save Changes"}
-              </Button>
-            </div>
-          )}
+                {/* Expanded panel */}
+                {isExpanded && (
+                  <ExpandedPanel
+                    server={server}
+                    crews={crews}
+                    agents={agents}
+                    agentBindings={agentBindings}
+                    confirmDeleteId={confirmDeleteId}
+                    canManage={canManage}
+                    onPatch={(fields) => patchServer(server, fields)}
+                    onCrewMove={(newCrewId) => handleCrewMove(server, newCrewId)}
+                    onAgentToggle={(agent, hasAccess, hasAny) =>
+                      handleAgentToggle(server, agent, hasAccess, hasAny)
+                    }
+                    onDelete={() => handleDelete(server)}
+                    onConfirmDeleteChange={(v) => setConfirmDeleteId(v ? server.id : null)}
+                  />
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
   )
 }
 
-function reconcileIds(snapshot: ServerEntry[], current: ServerEntry[]): ServerEntry[] {
-  const idByName = new Map<string, string>()
-  for (const e of snapshot) {
-    if (e.id && e.name) idByName.set(e.name, e.id)
+// ---------------------------------------------------------------------------
+// Expanded panel component
+// ---------------------------------------------------------------------------
+
+function ExpandedPanel({
+  server,
+  crews,
+  agents,
+  agentBindings,
+  confirmDeleteId,
+  canManage,
+  onPatch,
+  onCrewMove,
+  onAgentToggle,
+  onDelete,
+  onConfirmDeleteChange,
+}: {
+  server: CrewIntegration
+  crews: CrewInfo[]
+  agents: AgentInfo[]
+  agentBindings: Record<string, Set<string>>
+  confirmDeleteId: string | null
+  canManage: boolean
+  onPatch: (fields: Record<string, unknown>) => Promise<void>
+  onCrewMove: (newCrewId: string) => Promise<void>
+  onAgentToggle: (agent: AgentInfo, hasAccess: boolean, hasAny: boolean) => Promise<void>
+  onDelete: () => Promise<void>
+  onConfirmDeleteChange: (v: boolean) => void
+}) {
+  // Local state for inputs (save on blur)
+  const [name, setName] = React.useState(server.name)
+  const [displayName, setDisplayName] = React.useState(server.display_name || "")
+  const [command, setCommand] = React.useState(server.command ?? "")
+  const [args, setArgs] = React.useState(parseArgs(server.args_json))
+  const [url, setUrl] = React.useState(server.endpoint ?? "")
+  const [transport, setTransport] = React.useState(server.transport)
+  const [envVars, setEnvVars] = React.useState(parseEnv(server.env_json))
+
+  // Sync local state if server data changes (after refetch)
+  React.useEffect(() => {
+    setName(server.name)
+    setDisplayName(server.display_name || "")
+    setCommand(server.command ?? "")
+    setArgs(parseArgs(server.args_json))
+    setUrl(server.endpoint ?? "")
+    setTransport(server.transport)
+    setEnvVars(parseEnv(server.env_json))
+  }, [server])
+
+  const hasAnyBindings = (agentBindings[server.id]?.size ?? 0) > 0
+
+  function handleBlur(field: string, value: string) {
+    switch (field) {
+      case "name":
+        if (value !== server.name) onPatch({ name: value })
+        break
+      case "display_name":
+        if (value !== (server.display_name || "")) onPatch({ display_name: value })
+        break
+      case "command":
+        if (value !== (server.command ?? "")) onPatch({ command: value })
+        break
+      case "args":
+        if (value !== parseArgs(server.args_json)) onPatch({ args_json: serializeArgs(value) })
+        break
+      case "url":
+        if (value !== (server.endpoint ?? "")) onPatch({ endpoint: value })
+        break
+    }
   }
-  return current.map((e) => {
-    if (e.id) return e
-    const matchedId = idByName.get(e.name)
-    return matchedId ? { ...e, id: matchedId } : e
-  })
+
+  function handleTransportChange(newTransport: string) {
+    setTransport(newTransport)
+    if (newTransport !== server.transport) {
+      onPatch({ transport: newTransport })
+    }
+  }
+
+  function handleEnvBlur() {
+    const newJson = serializeEnv(envVars)
+    const oldJson = server.env_json ?? "{}"
+    if (newJson !== oldJson) {
+      onPatch({ env_json: newJson })
+    }
+  }
+
+  function addEnvVar() {
+    setEnvVars((prev) => [...prev, { key: "", value: "" }])
+  }
+
+  function removeEnvVar(idx: number) {
+    const updated = envVars.filter((_, i) => i !== idx)
+    setEnvVars(updated)
+    // Save immediately on remove
+    const newJson = serializeEnv(updated)
+    const oldJson = server.env_json ?? "{}"
+    if (newJson !== oldJson) {
+      onPatch({ env_json: newJson })
+    }
+  }
+
+  function updateEnvVar(idx: number, field: "key" | "value", val: string) {
+    setEnvVars((prev) => prev.map((e, i) => (i === idx ? { ...e, [field]: val } : e)))
+  }
+
+  const isConfirming = confirmDeleteId === server.id
+
+  return (
+    <div className="bg-muted/20 border-t px-6 py-5 space-y-4">
+      {/* Section 1: Scope & Assignment */}
+      <div className="rounded-md border bg-background p-4 space-y-4">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Users className="h-4 w-4 text-muted-foreground" />
+          Scope & Assignment
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label htmlFor={`crew-${server.id}`} className="text-xs">
+              Assigned to crew
+            </Label>
+            <Select
+              value={server.crew_id}
+              onValueChange={(v) => onCrewMove(v)}
+              disabled={!canManage}
+            >
+              <SelectTrigger id={`crew-${server.id}`} className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {crews.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Agent assignment */}
+        {agents.length > 0 && (
+          <div className="space-y-2">
+            <Label className="text-xs">Agent access</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {agents.map((a) => {
+                const bound = agentBindings[server.id]?.has(a.id) ?? false
+                const hasAccess = hasAnyBindings ? bound : true
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                      hasAccess
+                        ? "bg-primary/10 border-primary/30 text-primary"
+                        : "bg-muted/30 border-border text-muted-foreground"
+                    }`}
+                    onClick={() => onAgentToggle(a, hasAccess, hasAnyBindings)}
+                    disabled={!canManage}
+                    title={hasAccess ? `Remove ${a.name} access` : `Grant ${a.name} access`}
+                  >
+                    {hasAccess && <Check className="h-3 w-3" />}
+                    <Bot className="h-3 w-3" />
+                    {a.name}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {hasAnyBindings
+                ? "Only selected agents have access. Click to toggle."
+                : "All agents in the crew have access. Click an agent to restrict."}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Section 2: Server Configuration */}
+      <div className="rounded-md border bg-background p-4 space-y-4">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Settings2 className="h-4 w-4 text-muted-foreground" />
+          Server Configuration
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label htmlFor={`name-${server.id}`} className="text-xs">
+              Server name
+            </Label>
+            <Input
+              id={`name-${server.id}`}
+              className="h-8 text-xs"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={() => handleBlur("name", name)}
+              readOnly={!canManage}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`display-${server.id}`} className="text-xs">
+              Display name
+            </Label>
+            <Input
+              id={`display-${server.id}`}
+              className="h-8 text-xs"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              onBlur={() => handleBlur("display_name", displayName)}
+              readOnly={!canManage}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor={`transport-${server.id}`} className="text-xs">
+            Transport
+          </Label>
+          <Select
+            value={transport}
+            onValueChange={handleTransportChange}
+            disabled={!canManage}
+          >
+            <SelectTrigger id={`transport-${server.id}`} className="h-8 text-xs w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="stdio">
+                <span className="flex items-center gap-1.5">
+                  <Terminal className="h-3 w-3" /> Stdio
+                </span>
+              </SelectItem>
+              <SelectItem value="http">
+                <span className="flex items-center gap-1.5">
+                  <Globe className="h-3 w-3" /> HTTP
+                </span>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {transport === "stdio" ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor={`cmd-${server.id}`} className="text-xs">
+                Command
+              </Label>
+              <Input
+                id={`cmd-${server.id}`}
+                className="h-8 text-xs font-mono"
+                placeholder="npx"
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+                onBlur={() => handleBlur("command", command)}
+                readOnly={!canManage}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`args-${server.id}`} className="text-xs">
+                Arguments
+              </Label>
+              <Input
+                id={`args-${server.id}`}
+                className="h-8 text-xs font-mono"
+                placeholder="-y @modelcontextprotocol/server-github"
+                value={args}
+                onChange={(e) => setArgs(e.target.value)}
+                onBlur={() => handleBlur("args", args)}
+                readOnly={!canManage}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <Label htmlFor={`url-${server.id}`} className="text-xs">
+              URL
+            </Label>
+            <Input
+              id={`url-${server.id}`}
+              className="h-8 text-xs font-mono"
+              placeholder="https://example.com/mcp"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onBlur={() => handleBlur("url", url)}
+              readOnly={!canManage}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Section 3: Environment Variables */}
+      <div className="rounded-md border bg-background p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <KeyRound className="h-4 w-4 text-muted-foreground" />
+            Environment Variables
+          </div>
+          {canManage && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={addEnvVar}
+            >
+              <Plus className="mr-1 h-3 w-3" />
+              Add Variable
+            </Button>
+          )}
+        </div>
+
+        {envVars.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No environment variables configured.</p>
+        ) : (
+          <div className="space-y-2">
+            {envVars.map((env, idx) => (
+              <div key={idx} className="flex items-center gap-2">
+                <Input
+                  className="h-8 text-xs font-mono flex-1"
+                  placeholder="KEY"
+                  value={env.key}
+                  onChange={(e) => updateEnvVar(idx, "key", e.target.value)}
+                  onBlur={handleEnvBlur}
+                  readOnly={!canManage}
+                  aria-label={`Environment variable key ${idx + 1}`}
+                />
+                <span className="text-xs text-muted-foreground">=</span>
+                <Input
+                  className="h-8 text-xs font-mono flex-1"
+                  placeholder="value"
+                  value={env.value}
+                  onChange={(e) => updateEnvVar(idx, "value", e.target.value)}
+                  onBlur={handleEnvBlur}
+                  readOnly={!canManage}
+                  aria-label={`Environment variable value ${idx + 1}`}
+                />
+                {canManage && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => removeEnvVar(idx)}
+                    aria-label={`Remove environment variable ${env.key || idx + 1}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Section 4: Actions */}
+      {canManage && (
+        <div className="flex justify-end">
+          {isConfirming ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Delete this integration?</span>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={onDelete}
+              >
+                Confirm Delete
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onConfirmDeleteChange(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => onConfirmDeleteChange(true)}
+            >
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+              Delete Integration
+            </Button>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
