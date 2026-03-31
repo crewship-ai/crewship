@@ -189,9 +189,9 @@ export default function IntegrationsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
+                <TableHead>Scope</TableHead>
                 <TableHead>Transport</TableHead>
                 <TableHead>Enabled</TableHead>
-                <TableHead>Agent Bindings</TableHead>
                 <TableHead>Created</TableHead>
                 {canManage && <TableHead className="text-right">Actions</TableHead>}
               </TableRow>
@@ -200,7 +200,6 @@ export default function IntegrationsPage() {
               {servers.map((server) => {
                 const transportConfig = TRANSPORT_CONFIG[server.transport]
                 const TransportIcon = transportConfig.icon
-
                 return (
                   <TableRow key={server.id}>
                     <TableCell>
@@ -211,6 +210,12 @@ export default function IntegrationsPage() {
                           <p className="text-label text-muted-foreground font-mono">{server.name}</p>
                         </div>
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="text-label font-normal">
+                        <Globe className="mr-1 h-3 w-3" />
+                        Workspace
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant={transportConfig.variant} className="text-label font-normal">
@@ -227,33 +232,16 @@ export default function IntegrationsPage() {
                       />
                     </TableCell>
                     <TableCell>
-                      <span className="text-muted-foreground">
-                        {server.agent_binding_count} {server.agent_binding_count === 1 ? "agent" : "agents"}
-                      </span>
-                    </TableCell>
-                    <TableCell>
                       <span className="text-muted-foreground">{formatDate(server.created_at)}</span>
                     </TableCell>
                     {canManage && (
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            onClick={() => handleEdit(server)}
-                            title="Edit integration"
-                          >
+                          <Button variant="ghost" size="icon-xs" onClick={() => handleEdit(server)} title="Edit">
                             <Pencil className="h-3.5 w-3.5" />
-                            <span className="sr-only">Edit</span>
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            onClick={() => handleDelete(server)}
-                            title="Delete integration"
-                          >
+                          <Button variant="ghost" size="icon-xs" onClick={() => handleDelete(server)} title="Delete">
                             <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                            <span className="sr-only">Delete</span>
                           </Button>
                         </div>
                       </TableCell>
@@ -261,67 +249,45 @@ export default function IntegrationsPage() {
                   </TableRow>
                 )
               })}
+              {crewServers.map((cs) => {
+                const tc = TRANSPORT_CONFIG[cs.transport as keyof typeof TRANSPORT_CONFIG] ?? TRANSPORT_CONFIG.stdio
+                const TIcon = tc.icon
+                return (
+                  <TableRow key={cs.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Plug className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm">{cs.display_name}</p>
+                          <p className="text-label text-muted-foreground font-mono">{cs.name}</p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-label font-normal">
+                        <Users className="mr-1 h-3 w-3" />
+                        {cs.crew_name}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={tc.variant} className="text-label font-normal">
+                        <TIcon className="mr-1 h-3 w-3" />
+                        {tc.label}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Switch checked={cs.enabled} disabled aria-label={`${cs.display_name} status`} />
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-muted-foreground">{formatDate(cs.created_at)}</span>
+                    </TableCell>
+                    {canManage && <TableCell />}
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         </div>
-      )}
-
-      {crewServers.length > 0 && (
-        <>
-          <h3 className="text-sm font-medium text-muted-foreground mt-6">Crew Integrations</h3>
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Crew</TableHead>
-                  <TableHead>Transport</TableHead>
-                  <TableHead>Enabled</TableHead>
-                  <TableHead>Created</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {crewServers.map((cs) => {
-                  const tc = TRANSPORT_CONFIG[cs.transport as keyof typeof TRANSPORT_CONFIG] ?? TRANSPORT_CONFIG.stdio
-                  const TIcon = tc.icon
-                  return (
-                    <TableRow key={cs.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Plug className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          <div className="min-w-0">
-                            <p className="font-medium text-sm">{cs.display_name}</p>
-                            <p className="text-label text-muted-foreground font-mono">{cs.name}</p>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-label font-normal">
-                          <Users className="mr-1 h-3 w-3" />
-                          {cs.crew_name}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={tc.variant} className="text-label font-normal">
-                          <TIcon className="mr-1 h-3 w-3" />
-                          {tc.label}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={cs.enabled ? "default" : "secondary"} className="text-label">
-                          {cs.enabled ? "Active" : "Disabled"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-muted-foreground">{formatDate(cs.created_at)}</span>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        </>
       )}
 
       {workspaceId && (
