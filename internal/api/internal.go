@@ -910,6 +910,24 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Auto-resolve credentials from table-based MCP servers' env_json.
+	// This covers the case where MCP config was migrated from JSON blob
+	// to crew_mcp_servers table — the env_json contains ${VAR} references
+	// that need credential resolution.
+	if len(mcpServers) > 0 {
+		var envJsons []string
+		for _, srv := range mcpServers {
+			if len(srv.Env) > 0 {
+				if b, err := json.Marshal(map[string]interface{}{"mcpServers": map[string]interface{}{srv.Name: map[string]interface{}{"env": srv.Env}}}); err == nil {
+					envJsons = append(envJsons, string(b))
+				}
+			}
+		}
+		if len(envJsons) > 0 {
+			creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, wsID, creds, envJsons...)
+		}
+	}
+
 	resp := map[string]interface{}{
 		"agent_id":        agentID,
 		"agent_slug":      agentSlug,
