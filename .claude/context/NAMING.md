@@ -311,13 +311,13 @@ Při aplikování změn proveď v tomto pořadí (závislosti):
    - Sidecar API endpointy
    - Agent příkazy (stdout parsing)
 
-5. **Dokumentace** (.factory/context/)
+5. **Dokumentace** (.claude/context/)
    - AGENTS.md, architecture.md, business.md
    - prd/PRD.md, prd/ORCHESTRATION.md, prd/DATABASE.md, prd/AGENT-RUNTIME.md, prd/API.md
    - prd/CREW-EXECUTION.md, prd/ADR.md
    - TODO.md, MVP.md, STRATEGY-2026.md
 
-6. **Wireframes** (.factory/context/wireframes/)
+6. **Wireframes** (.claude/context/wireframes/)
    - HTML wireframy s UI texty
 
 7. **Config soubory**
