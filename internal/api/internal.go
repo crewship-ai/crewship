@@ -1627,11 +1627,32 @@ func autoResolveMCPCredentials(
 			continue
 		}
 
-		// For OAUTH2 credentials, check token freshness and refresh if needed.
-		if credType == "OAUTH2" && oaRefreshEnc.Valid && oaRefreshEnc.String != "" && oaTokenURL.Valid {
-			encValue = ensureFreshOAuthToken(ctx, db, logger, id, encValue,
-				oaClientID.String, oaSecretEnc.String, oaTokenURL.String,
-				oaRefreshEnc.String, oaExpiresAt.String)
+		// For OAUTH2 credentials, map env var names to the correct fields:
+		// GOOGLE_CLIENT_ID → oauth_client_id (plaintext)
+		// GOOGLE_CLIENT_SECRET → oauth_client_secret_enc (decrypt)
+		// *_ACCESS_TOKEN → encrypted_value (access token, with refresh)
+		if credType == "OAUTH2" {
+			if strings.HasSuffix(envVar, "_CLIENT_ID") && oaClientID.Valid && oaClientID.String != "" {
+				existing = append(existing, mcpCredEntry{ID: id, EnvVar: envVar, Value: oaClientID.String, Type: credType})
+				logger.Debug("auto-resolved MCP credential (oauth_client_id)", "env_var", envVar, "credential_id", id)
+				continue
+			}
+			if strings.HasSuffix(envVar, "_CLIENT_SECRET") && oaSecretEnc.Valid && oaSecretEnc.String != "" {
+				dec, err := encryption.Decrypt(oaSecretEnc.String)
+				if err != nil {
+					logger.Warn("decrypt oauth_client_secret", "id", id, "error", err)
+					continue
+				}
+				existing = append(existing, mcpCredEntry{ID: id, EnvVar: envVar, Value: dec, Type: credType})
+				logger.Debug("auto-resolved MCP credential (oauth_client_secret)", "env_var", envVar, "credential_id", id)
+				continue
+			}
+			// For access token env vars, refresh if needed
+			if oaRefreshEnc.Valid && oaRefreshEnc.String != "" && oaTokenURL.Valid {
+				encValue = ensureFreshOAuthToken(ctx, db, logger, id, encValue,
+					oaClientID.String, oaSecretEnc.String, oaTokenURL.String,
+					oaRefreshEnc.String, oaExpiresAt.String)
+			}
 		}
 
 		dec, err := encryption.Decrypt(encValue)
