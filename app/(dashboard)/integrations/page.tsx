@@ -1092,8 +1092,8 @@ function ExpandedPanel({
         />
       )}
 
-      {/* Section 4: Environment Variables */}
-      <div className="rounded-md border bg-background p-4 space-y-4">
+      {/* Section 4: Environment Variables (hidden for HTTP servers that use OAuth) */}
+      {!(server.transport === "streamable-http" && server.endpoint) && <div className="rounded-md border bg-background p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-medium">
             <KeyRound className="h-4 w-4 text-muted-foreground" />
@@ -1171,9 +1171,9 @@ function ExpandedPanel({
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
-      {/* Section 4: Actions */}
+      {/* Section 5: Actions */}
       {canManage && (
         <div className="flex justify-end">
           {isConfirming ? (
