@@ -3,6 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useWebSocket, type WSStatus } from "@/hooks/use-websocket"
 
+/** uuid() is unavailable in non-secure (HTTP) contexts.
+ *  Fall back to a simple Math.random-based UUID when needed. */
+function uuid(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return uuid()
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
+
 // --- Turn-based model types ---
 
 export type TurnPartType = "text" | "thinking" | "tool_call" | "tool_result" | "status" | "error" | "result" | "system_init" | "image"
@@ -145,9 +157,9 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
         setTurns((prev) => [
           ...prev,
           {
-            id: crypto.randomUUID(),
+            id: uuid(),
             role: "system",
-            parts: [{ id: crypto.randomUUID(), type: "text", content, timestamp: new Date() }],
+            parts: [{ id: uuid(), type: "text", content, timestamp: new Date() }],
             isStreaming: false,
             timestamp: new Date(),
           },
@@ -181,7 +193,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
                   ...last,
                   parts: [
                     ...last.parts,
-                    { id: crypto.randomUUID(), type: "status" as TurnPartType, content, timestamp: new Date() },
+                    { id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() },
                   ],
                 },
               ]
@@ -190,9 +202,9 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             return [
               ...prev,
               {
-                id: crypto.randomUUID(),
+                id: uuid(),
                 role: "assistant",
-                parts: [{ id: crypto.randomUUID(), type: "status" as TurnPartType, content, timestamp: new Date() }],
+                parts: [{ id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() }],
                 isStreaming: true,
                 timestamp: new Date(),
               },
@@ -232,7 +244,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
                     ...last,
                     parts: [
                       ...cleanedParts,
-                      { id: crypto.randomUUID(), type: "thinking" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
+                      { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
                     ],
                   },
                 ]
@@ -245,7 +257,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
                   ...last,
                   parts: [
                     ...cleanedParts,
-                    { id: crypto.randomUUID(), type: "thinking" as TurnPartType, content, isStreaming: false, timestamp: new Date() },
+                    { id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: false, timestamp: new Date() },
                   ],
                 },
               ]
@@ -263,9 +275,9 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             return [
               ...cleaned,
               {
-                id: crypto.randomUUID(),
+                id: uuid(),
                 role: "assistant",
-                parts: [{ id: crypto.randomUUID(), type: "thinking" as TurnPartType, content, isStreaming: !isStreamingDelta ? false : true, timestamp: new Date() }],
+                parts: [{ id: uuid(), type: "thinking" as TurnPartType, content, isStreaming: !isStreamingDelta ? false : true, timestamp: new Date() }],
                 isStreaming: true,
                 timestamp: new Date(),
               },
@@ -305,7 +317,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
                   ...last,
                   parts: [
                     ...cleanedParts,
-                    { id: crypto.randomUUID(), type: "text" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
+                    { id: uuid(), type: "text" as TurnPartType, content, isStreaming: true, timestamp: new Date() },
                   ],
                 },
               ]
@@ -321,9 +333,9 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             return [
               ...cleaned,
               {
-                id: crypto.randomUUID(),
+                id: uuid(),
                 role: "assistant",
-                parts: [{ id: crypto.randomUUID(), type: "text" as TurnPartType, content, isStreaming: true, timestamp: new Date() }],
+                parts: [{ id: uuid(), type: "text" as TurnPartType, content, isStreaming: true, timestamp: new Date() }],
                 isStreaming: true,
                 timestamp: new Date(),
               },
@@ -335,7 +347,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
           setTurns((prev) => {
             const last = prev[prev.length - 1]
             const part: TurnPart = {
-              id: crypto.randomUUID(),
+              id: uuid(),
               type: "tool_call",
               content,
               metadata,
@@ -350,7 +362,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             return [
               ...prev,
               {
-                id: crypto.randomUUID(),
+                id: uuid(),
                 role: "assistant",
                 parts: [part],
                 isStreaming: true,
@@ -364,7 +376,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
           setTurns((prev) => {
             const last = prev[prev.length - 1]
             const part: TurnPart = {
-              id: crypto.randomUUID(),
+              id: uuid(),
               type: "tool_result",
               content,
               metadata,
@@ -389,7 +401,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             return [
               ...prev,
               {
-                id: crypto.randomUUID(),
+                id: uuid(),
                 role: "assistant",
                 parts: [part],
                 isStreaming: true,
@@ -403,7 +415,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
           setTurns((prev) => {
             const last = prev[prev.length - 1]
             const part: TurnPart = {
-              id: crypto.randomUUID(),
+              id: uuid(),
               type: "image",
               content,
               metadata,
@@ -418,7 +430,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             return [
               ...prev,
               {
-                id: crypto.randomUUID(),
+                id: uuid(),
                 role: "assistant",
                 parts: [part],
                 isStreaming: true,
@@ -433,7 +445,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
           setTurns((prev) => {
             const last = prev[prev.length - 1]
             const part: TurnPart = {
-              id: crypto.randomUUID(),
+              id: uuid(),
               type: "result",
               content: content || "",
               metadata,
@@ -448,7 +460,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             return [
               ...prev,
               {
-                id: crypto.randomUUID(),
+                id: uuid(),
                 role: "assistant",
                 parts: [part],
                 isStreaming: true,
@@ -479,10 +491,10 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
               return [
                 ...cleaned,
                 {
-                  id: crypto.randomUUID(),
+                  id: uuid(),
                   role: "system",
                   parts: [{
-                    id: crypto.randomUUID(),
+                    id: uuid(),
                     type: "system_init" as TurnPartType,
                     content: content || "init",
                     metadata,
@@ -504,7 +516,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
                     ...last,
                     parts: [
                       ...last.parts,
-                      { id: crypto.randomUUID(), type: "status" as TurnPartType, content, timestamp: new Date() },
+                      { id: uuid(), type: "status" as TurnPartType, content, timestamp: new Date() },
                     ],
                   },
                 ]
@@ -546,7 +558,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
           setTurns((prev) => {
             const last = prev[prev.length - 1]
             const errorPart: TurnPart = {
-              id: crypto.randomUUID(),
+              id: uuid(),
               type: "error",
               content: content || "An error occurred",
               timestamp: new Date(),
@@ -560,7 +572,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
             return [
               ...prev,
               {
-                id: crypto.randomUUID(),
+                id: uuid(),
                 role: "system",
                 parts: [errorPart],
                 isStreaming: false,
@@ -588,9 +600,9 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
       if (!content.trim() || isStreaming) return
 
       const userTurn: ChatTurn = {
-        id: crypto.randomUUID(),
+        id: uuid(),
         role: "user",
-        parts: [{ id: crypto.randomUUID(), type: "text", content: content.trim(), timestamp: new Date() }],
+        parts: [{ id: uuid(), type: "text", content: content.trim(), timestamp: new Date() }],
         isStreaming: false,
         timestamp: new Date(),
       }
@@ -652,7 +664,7 @@ export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
       // Replace the user turn content and remove everything after
       const editedTurn: ChatTurn = {
         ...turns[turnIdx],
-        parts: [{ id: crypto.randomUUID(), type: "text", content: newContent.trim(), timestamp: new Date() }],
+        parts: [{ id: uuid(), type: "text", content: newContent.trim(), timestamp: new Date() }],
       }
       setTurns(turns.slice(0, turnIdx).concat(editedTurn))
       setIsStreaming(true)
