@@ -68,6 +68,10 @@ var crewMCPCmd = &cobra.Command{
 		setJSON, _ := cmd.Flags().GetString("set")
 		setFile, _ := cmd.Flags().GetString("set-file")
 
+		if cmd.Flags().Changed("set") && setFile != "" {
+			return fmt.Errorf("--set and --set-file are mutually exclusive")
+		}
+
 		// SET mode
 		if cmd.Flags().Changed("set") || setFile != "" {
 			value := setJSON
@@ -176,8 +180,17 @@ var agentMCPCmd = &cobra.Command{
 		setJSON, _ := cmd.Flags().GetString("set")
 		setFile, _ := cmd.Flags().GetString("set-file")
 
+		// Flag conflict validation
+		setMode := cmd.Flags().Changed("set") || setFile != ""
+		if resolved && setMode {
+			return fmt.Errorf("--resolved cannot be combined with --set or --set-file")
+		}
+		if cmd.Flags().Changed("set") && setFile != "" {
+			return fmt.Errorf("--set and --set-file are mutually exclusive")
+		}
+
 		// SET mode
-		if cmd.Flags().Changed("set") || setFile != "" {
+		if setMode {
 			value := setJSON
 			if setFile != "" {
 				data, err := os.ReadFile(setFile)
@@ -234,18 +247,26 @@ var agentMCPCmd = &cobra.Command{
 			crewServers := map[string]json.RawMessage{}
 			if agent.CrewID != nil && *agent.CrewID != "" {
 				crewResp, err := client.Get("/api/v1/crews/" + *agent.CrewID)
-				if err == nil {
-					var crew struct {
-						MCPConfigJSON *string `json:"mcp_config_json"`
+				if err != nil {
+					return fmt.Errorf("fetch crew: %w", err)
+				}
+				if err := cli.CheckError(crewResp); err != nil {
+					return err
+				}
+				var crew struct {
+					MCPConfigJSON *string `json:"mcp_config_json"`
+				}
+				if err := cli.ReadJSON(crewResp, &crew); err != nil {
+					return fmt.Errorf("read crew response: %w", err)
+				}
+				if crew.MCPConfigJSON != nil {
+					var parsed struct {
+						MCPServers map[string]json.RawMessage `json:"mcpServers"`
 					}
-					if cli.ReadJSON(crewResp, &crew) == nil && crew.MCPConfigJSON != nil {
-						var parsed struct {
-							MCPServers map[string]json.RawMessage `json:"mcpServers"`
-						}
-						if json.Unmarshal([]byte(*crew.MCPConfigJSON), &parsed) == nil {
-							crewServers = parsed.MCPServers
-						}
+					if err := json.Unmarshal([]byte(*crew.MCPConfigJSON), &parsed); err != nil {
+						return fmt.Errorf("parse crew MCP config: %w", err)
 					}
+					crewServers = parsed.MCPServers
 				}
 			}
 

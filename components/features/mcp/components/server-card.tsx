@@ -112,6 +112,7 @@ export function ServerCard({
               type="button"
               variant="ghost"
               size="sm"
+              aria-label={`Remove server ${entry.name || "(unnamed)"}`}
               onClick={() => onRemove(index)}
               className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
             >
@@ -226,6 +227,7 @@ export function ServerCard({
                         type="button"
                         variant="ghost"
                         size="sm"
+                        aria-label={`Delete header ${h.key || "(unnamed)"}`}
                         onClick={() => onRemoveHeader(index, hIdx)}
                         className="h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-destructive"
                       >
@@ -261,6 +263,8 @@ export function ServerCard({
                     disabled={readOnly}
                     className="h-7 text-xs font-mono flex-1"
                   />
+                  {/* hasCredentialSupport is computed as `Boolean(workspaceId) && !readOnly`
+                     in MCPConfigEditor, so CredentialPicker is never rendered when readOnly=true. */}
                   {hasCredentialSupport && workspaceId ? (
                     <div className="flex-1">
                       <CredentialPicker
@@ -288,6 +292,7 @@ export function ServerCard({
                       type="button"
                       variant="ghost"
                       size="sm"
+                      aria-label={`Delete env var ${e.key || "(unnamed)"}`}
                       onClick={() => onRemoveEnvVar(index, eIdx)}
                       className="h-7 w-7 p-0 shrink-0 text-muted-foreground hover:text-destructive"
                     >

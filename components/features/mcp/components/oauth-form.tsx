@@ -358,8 +358,9 @@ export function OAuthForm({
       {selectedProvider && (
         <div className="space-y-2">
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Client ID</Label>
+            <Label htmlFor="oauth-client-id" className="text-xs text-muted-foreground">Client ID</Label>
             <Input
+              id="oauth-client-id"
               value={clientId}
               onChange={(e) => setClientId(e.target.value)}
               placeholder="your-client-id"
@@ -368,8 +369,9 @@ export function OAuthForm({
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Client Secret</Label>
+            <Label htmlFor="oauth-client-secret" className="text-xs text-muted-foreground">Client Secret</Label>
             <Input
+              id="oauth-client-secret"
               type="password"
               value={clientSecret}
               onChange={(e) => setClientSecret(e.target.value)}
@@ -381,8 +383,9 @@ export function OAuthForm({
           {selectedProvider === "custom" && (
             <>
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Auth URL</Label>
+                <Label htmlFor="oauth-auth-url" className="text-xs text-muted-foreground">Auth URL</Label>
                 <Input
+                  id="oauth-auth-url"
                   value={authUrl}
                   onChange={(e) => setAuthUrl(e.target.value)}
                   placeholder="https://accounts.google.com/o/oauth2/v2/auth"
@@ -391,8 +394,9 @@ export function OAuthForm({
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Token URL</Label>
+                <Label htmlFor="oauth-token-url" className="text-xs text-muted-foreground">Token URL</Label>
                 <Input
+                  id="oauth-token-url"
                   value={tokenUrl}
                   onChange={(e) => setTokenUrl(e.target.value)}
                   placeholder="https://oauth2.googleapis.com/token"
@@ -403,8 +407,9 @@ export function OAuthForm({
             </>
           )}
           <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Scopes</Label>
+            <Label htmlFor="oauth-scopes" className="text-xs text-muted-foreground">Scopes</Label>
             <Input
+              id="oauth-scopes"
               value={scopes}
               onChange={(e) => setScopes(e.target.value)}
               placeholder="space-separated scopes"

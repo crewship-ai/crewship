@@ -67,7 +67,9 @@ export function useWebSocket({
     // Note: token is passed as query parameter because browser WebSocket API
     // does not support custom headers. The token is a short-lived JWE and the
     // connection uses WSS in production, mitigating URL-based leakage risks.
-    const wsUrl = `${effectiveUrl}?token=${encodeURIComponent(token)}`
+    const wsUrlObj = new URL(effectiveUrl, window.location.origin)
+    wsUrlObj.searchParams.set("token", token)
+    const wsUrl = wsUrlObj.toString()
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 
@@ -137,7 +139,7 @@ export function useWebSocket({
 function resolveWsUrl(): string {
   if (typeof window === "undefined") return ""
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  const goPort = "8080"
+  const goPort = process.env.NEXT_PUBLIC_GO_PORT || "8080"
   const devPorts = ["3001", "3011", "3012", "3013", "3014", "3015"]
   const host = devPorts.includes(window.location.port)
     ? window.location.hostname + ":" + goPort
