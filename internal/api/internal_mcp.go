@@ -79,18 +79,30 @@ func resolveOneEnvVar(
 	isClientID := strings.HasSuffix(envVar, "_CLIENT_ID")
 	isClientSecret := strings.HasSuffix(envVar, "_CLIENT_SECRET")
 
+	// Derive the provider prefix from the env var name.
+	// E.g. "GOOGLE_CLIENT_ID" → "google", "SLACK_CLIENT_SECRET" → "slack"
+	oauthNamePrefix := ""
+	if isClientID {
+		oauthNamePrefix = strings.ToLower(strings.TrimSuffix(envVar, "_CLIENT_ID"))
+	} else if isClientSecret {
+		oauthNamePrefix = strings.ToLower(strings.TrimSuffix(envVar, "_CLIENT_SECRET"))
+	}
+	oauthNamePrefix = strings.ReplaceAll(oauthNamePrefix, "_", "-")
+
 	var query string
 	var queryArgs []interface{}
 	if isClientID || isClientSecret {
+		// Scope the OAUTH2 fallback to credentials whose name matches the provider prefix,
+		// not any arbitrary OAUTH2 credential in the workspace.
 		query = `
 			SELECT id, encrypted_value, type,
 				oauth_client_id, oauth_client_secret_enc, oauth_token_url,
 				oauth_refresh_token_enc, oauth_token_expires_at
 			FROM credentials
 			WHERE workspace_id = ? AND deleted_at IS NULL AND status != 'REVOKED'
-			  AND (name LIKE ? OR (type = 'OAUTH2' AND oauth_client_id != '' AND oauth_client_id IS NOT NULL))
+			  AND (name LIKE ? OR (type = 'OAUTH2' AND name LIKE ? AND oauth_client_id != '' AND oauth_client_id IS NOT NULL))
 			ORDER BY created_at DESC LIMIT 1`
-		queryArgs = []interface{}{workspaceID, prefix + "%"}
+		queryArgs = []interface{}{workspaceID, prefix + "%", oauthNamePrefix + "%"}
 	} else {
 		query = `
 			SELECT id, encrypted_value, type,
@@ -197,11 +209,15 @@ func ensureFreshOAuthToken(
 		}
 	}
 
-	// Decrypt client secret and refresh token.
-	clientSecret, err := encryption.Decrypt(clientSecretEnc)
-	if err != nil {
-		logger.Warn("decrypt client secret for token refresh", "credential_id", credID, "error", err)
-		return currentEncValue
+	// Decrypt client secret (may be empty for public/PKCE OAuth clients).
+	clientSecret := ""
+	if clientSecretEnc != "" {
+		var err error
+		clientSecret, err = encryption.Decrypt(clientSecretEnc)
+		if err != nil {
+			logger.Warn("decrypt client secret for token refresh", "credential_id", credID, "error", err)
+			return currentEncValue
+		}
 	}
 	refreshToken, err := encryption.Decrypt(refreshTokenEnc)
 	if err != nil {
@@ -228,19 +244,27 @@ func ensureFreshOAuthToken(
 	// Update refresh token only if a new one was issued.
 	if tokenResp.RefreshToken != "" && tokenResp.RefreshToken != refreshToken {
 		newRefreshEnc, err := encryption.Encrypt(tokenResp.RefreshToken)
-		if err == nil {
-			_, _ = db.ExecContext(ctx, `
-				UPDATE credentials SET
-					encrypted_value = ?, oauth_token_expires_at = ?,
-					oauth_refresh_token_enc = ?, status = 'ACTIVE', updated_at = datetime('now')
-				WHERE id = ?`, newEnc, newExpiry, newRefreshEnc, credID)
+		if err != nil {
+			logger.Warn("encrypt refreshed refresh token", "credential_id", credID, "error", err)
+			return currentEncValue
+		}
+		if _, err := db.ExecContext(ctx, `
+			UPDATE credentials SET
+				encrypted_value = ?, oauth_token_expires_at = ?,
+				oauth_refresh_token_enc = ?, status = 'ACTIVE', updated_at = datetime('now')
+			WHERE id = ?`, newEnc, newExpiry, newRefreshEnc, credID); err != nil {
+			logger.Error("persist refreshed OAuth tokens", "credential_id", credID, "error", err)
+			return currentEncValue
 		}
 	} else {
-		_, _ = db.ExecContext(ctx, `
+		if _, err := db.ExecContext(ctx, `
 			UPDATE credentials SET
 				encrypted_value = ?, oauth_token_expires_at = ?,
 				status = 'ACTIVE', updated_at = datetime('now')
-			WHERE id = ?`, newEnc, newExpiry, credID)
+			WHERE id = ?`, newEnc, newExpiry, credID); err != nil {
+			logger.Error("persist refreshed OAuth token", "credential_id", credID, "error", err)
+			return currentEncValue
+		}
 	}
 
 	logger.Info("refreshed OAuth token before agent exec", "credential_id", credID, "new_expiry", newExpiry)

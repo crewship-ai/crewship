@@ -90,14 +90,25 @@ function parseArgs(argsJson: string | null): string {
   if (!argsJson) return ""
   try {
     const arr = JSON.parse(argsJson) as string[]
-    return Array.isArray(arr) ? arr.join(" ") : ""
+    if (!Array.isArray(arr)) return ""
+    // Round-trip safe: JSON-encode each arg and join, so spaces inside args are preserved
+    return JSON.stringify(arr)
   } catch {
     return ""
   }
 }
 
 function serializeArgs(argsStr: string): string {
-  const parts = argsStr.trim().split(/\s+/).filter(Boolean)
+  const trimmed = argsStr.trim()
+  if (!trimmed) return "[]"
+  // If it's already valid JSON array, use as-is
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (Array.isArray(parsed)) return JSON.stringify(parsed)
+  } catch {
+    // Not JSON — fall back to space-splitting (user typed plain text)
+  }
+  const parts = trimmed.split(/\s+/).filter(Boolean)
   return JSON.stringify(parts)
 }
 
@@ -258,19 +269,21 @@ export default function IntegrationsPage() {
     }
   }, [])
 
+  const activeWsRef = React.useRef<string | null>(null)
   React.useEffect(() => {
     if (wsLoading || !workspaceId) {
       if (!wsLoading) setLoading(false)
       return
     }
-    let cancelled = false
+    activeWsRef.current = workspaceId
     ;(async () => {
       setLoading(true)
       await fetchAll(workspaceId)
-      if (!cancelled) setLoading(false)
+      // Only commit loading state if this is still the active workspace
+      if (activeWsRef.current === workspaceId) setLoading(false)
     })()
     return () => {
-      cancelled = true
+      activeWsRef.current = null
     }
   }, [workspaceId, wsLoading, fetchAll])
 
@@ -295,7 +308,7 @@ export default function IntegrationsPage() {
           display_name: template.label,
           transport: template.transport,
           command: template.command ?? null,
-          args_json: template.args ? JSON.stringify(template.args.split(/\s+/)) : null,
+          args_json: template.args ? serializeArgs(template.args) : null,
           endpoint: template.url ?? null,
           env_json: template.envHint
             ? JSON.stringify(
@@ -797,7 +810,7 @@ function ExpandedPanel({
             <div className="flex flex-wrap gap-1.5">
               {agents.map((a) => {
                 const bound = agentBindings[server.id]?.has(a.id) ?? false
-                const hasAccess = hasAnyBindings ? bound : true
+                const hasAccess = hasAnyBindings ? bound : false
                 return (
                   <button
                     key={a.id}
@@ -821,7 +834,7 @@ function ExpandedPanel({
             <p className="text-xs text-muted-foreground">
               {hasAnyBindings
                 ? "Only selected agents have access. Click to toggle."
-                : "All agents in the crew have access. Click an agent to restrict."}
+                : "No agents have access yet. Click an agent to grant access."}
             </p>
           </div>
         )}
@@ -997,11 +1010,10 @@ function ExpandedPanel({
                   <Input
                     className="h-8 text-xs font-mono flex-1"
                     placeholder="value"
-                    value={env.value}
-                    onChange={(e) => updateEnvVar(idx, "value", e.target.value)}
-                    onBlur={handleEnvBlur}
+                    value={env.value ? "••••••••" : ""}
                     readOnly
-                    aria-label={`Environment variable value ${idx + 1}`}
+                    tabIndex={-1}
+                    aria-label={`Environment variable value ${idx + 1} (redacted)`}
                   />
                 )}
                 {canManage && (
