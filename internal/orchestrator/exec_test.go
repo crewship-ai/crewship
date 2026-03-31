@@ -714,6 +714,69 @@ func TestBuildMCPConfig_APIKey(t *testing.T) {
 	}
 }
 
+func TestBuildMCPConfig_Mixed(t *testing.T) {
+	servers := []MCPServerConfig{
+		{
+			Name: "github", Transport: "stdio", Command: "npx",
+			Args: []string{"-y", "@modelcontextprotocol/server-github"},
+			Env:  map[string]string{"GITHUB_TOKEN": "ghp_test"},
+		},
+		{
+			Name: "sentry", Transport: "streamable-http", Endpoint: "https://mcp.sentry.dev/mcp",
+			Credential: &MCPCredential{PlainValue: "sntrys_xxx", Type: "bearer"},
+		},
+		{
+			Name: "no-command", Transport: "stdio", Command: "",
+		},
+	}
+	result, err := buildMCPConfig(servers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should include both stdio and HTTP servers
+	if !strings.Contains(result, `"github"`) {
+		t.Error("missing stdio server 'github'")
+	}
+	if !strings.Contains(result, `"sentry"`) {
+		t.Error("missing http server 'sentry'")
+	}
+	// Stdio server without command should be skipped
+	if strings.Contains(result, `"no-command"`) {
+		t.Error("server with empty command should be skipped")
+	}
+	// Verify stdio has env vars
+	if !strings.Contains(result, `"GITHUB_TOKEN":"ghp_test"`) {
+		t.Error("missing env var in stdio server")
+	}
+	// Verify HTTP has auth header
+	if !strings.Contains(result, `"Bearer sntrys_xxx"`) {
+		t.Error("missing bearer token in http server")
+	}
+}
+
+func TestMcpStdioDomains(t *testing.T) {
+	servers := []MCPServerConfig{
+		{Transport: "stdio", Args: []string{"-y", "@modelcontextprotocol/server-github"}},
+		{Transport: "stdio", Args: []string{"-y", "@anthropic-ai/brave-search-mcp"}},
+		{Transport: "streamable-http", Endpoint: "https://mcp.sentry.dev/mcp"}, // should be ignored
+		{Transport: "stdio", Args: []string{"-y", "unknown-package"}},           // no match
+	}
+	domains := mcpStdioDomains(servers)
+	found := make(map[string]bool)
+	for _, d := range domains {
+		found[d] = true
+	}
+	if !found["api.github.com"] {
+		t.Error("missing api.github.com")
+	}
+	if !found["api.search.brave.com"] {
+		t.Error("missing api.search.brave.com")
+	}
+	if found["sentry.io"] {
+		t.Error("HTTP server domains should not be included")
+	}
+}
+
 func TestBuildCLICommand_WithMCP(t *testing.T) {
 	req := AgentRunRequest{
 		CLIAdapter:  "CLAUDE_CODE",

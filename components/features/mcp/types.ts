@@ -23,7 +23,9 @@ export interface MCPConfig {
   mcpServers: Record<string, MCPServer>
 }
 
-/** Internal form-state representation of a single MCP server. */
+/** Internal form-state representation of a single MCP server.
+ *  Uses "http" internally (matching Claude Code's .mcp.json format).
+ *  The integration-adapter translates to "streamable-http" for the backend API. */
 export interface ServerEntry {
   /** Unique key for React list rendering; NOT the server name. */
   _key: number
@@ -57,7 +59,7 @@ export interface MCPTemplate {
   name: string
   label: string
   icon: string
-  transport: "stdio" | "http"
+  transport: "stdio" | "streamable-http"
   command?: string
   args?: string
   url?: string

@@ -100,7 +100,7 @@ export function entryFromTemplate(template: MCPTemplate): ServerEntry {
   const entry: ServerEntry = {
     _key: nextKey++,
     name: template.name,
-    transport: template.transport,
+    transport: template.transport === "streamable-http" ? "http" : template.transport,
     command: template.command ?? "",
     args: template.args ?? "",
     url: template.url ?? "",

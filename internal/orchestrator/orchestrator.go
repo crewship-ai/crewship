@@ -348,9 +348,13 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		case "free":
 			networkPolicy = &SidecarNetworkPolicy{Mode: "free"}
 		case "restricted":
+			// Auto-add API domains for stdio MCP servers so their HTTP
+			// calls can pass through the sidecar proxy.
+			domains := append([]string{}, req.AllowedDomains...)
+			domains = append(domains, mcpStdioDomains(req.MCPServers)...)
 			networkPolicy = &SidecarNetworkPolicy{
 				Mode:           "restricted",
-				AllowedDomains: req.AllowedDomains,
+				AllowedDomains: domains,
 			}
 		default:
 			o.logger.Error("unknown network mode, refusing to start sidecar", "mode", req.NetworkMode)
@@ -821,4 +825,43 @@ func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID s
 	b.WriteString("[END CONVERSATION HISTORY]\n")
 	b.WriteString("The user's new message follows. Continue the conversation naturally, referencing previous context when relevant.")
 	return b.String()
+}
+
+// mcpPackageDomains maps well-known MCP npm packages to the API domains
+// they need to reach. Used to auto-populate the sidecar allowlist in
+// restricted network mode so stdio MCP servers can make outbound API calls.
+var mcpPackageDomains = map[string][]string{
+	"@modelcontextprotocol/server-github": {"api.github.com"},
+	"@anthropic-ai/brave-search-mcp":     {"api.search.brave.com"},
+	"@supabase/mcp-server-supabase":      {"api.supabase.com"},
+	"@notionhq/notion-mcp-server":        {"api.notion.com"},
+	"@stripe/mcp":                        {"api.stripe.com"},
+	"@datadog/mcp-server":                {"api.datadoghq.com"},
+	"linear-mcp":                         {"api.linear.app"},
+	"@anthropic-ai/slack-mcp":            {"slack.com"},
+	"@dguido/google-workspace-mcp":       {"www.googleapis.com", "accounts.google.com", "oauth2.googleapis.com"},
+	"mcp-server-sentry":                  {"sentry.io"},
+}
+
+// mcpStdioDomains extracts API domains for stdio MCP servers by matching
+// their args against known packages.
+func mcpStdioDomains(servers []MCPServerConfig) []string {
+	seen := make(map[string]bool)
+	for _, s := range servers {
+		if s.Transport != "stdio" {
+			continue
+		}
+		for _, arg := range s.Args {
+			if domains, ok := mcpPackageDomains[arg]; ok {
+				for _, d := range domains {
+					seen[d] = true
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for d := range seen {
+		out = append(out, d)
+	}
+	return out
 }

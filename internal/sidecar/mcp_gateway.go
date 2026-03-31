@@ -182,7 +182,7 @@ func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger
 
 	for _, s := range servers {
 		if s.Transport != "streamable-http" {
-			logger.Warn("MCP server transport not supported yet, skipping", "name", s.Name, "transport", s.Transport)
+			logger.Debug("MCP server transport not supported by gateway, skipping", "name", s.Name, "transport", s.Transport)
 			continue
 		}
 		if s.Endpoint == "" {
