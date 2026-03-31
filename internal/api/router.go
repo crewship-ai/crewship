@@ -432,6 +432,8 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("GET /api/v1/oauth/callback", oauth.Callback) // No auth — uses state token
 	r.mux.Handle("POST /api/v1/oauth/exchange", authed(wsCtx(http.HandlerFunc(oauth.Exchange))))
 	r.mux.Handle("POST /api/v1/oauth/loopback", authed(wsCtx(http.HandlerFunc(oauth.Loopback))))
+	r.mux.Handle("POST /api/v1/oauth/discover", authed(http.HandlerFunc(oauth.Discover)))
+	r.mux.Handle("POST /api/v1/oauth/auto-connect", authed(wsCtx(http.HandlerFunc(oauth.AutoConnect))))
 
 	// Captain (require auth + workspace context)
 	captain := NewCaptainHandler(r.db, r.logger)

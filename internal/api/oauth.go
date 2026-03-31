@@ -787,3 +787,222 @@ func refreshOAuthToken(ctx context.Context, tokenURL, clientID, clientSecret, re
 	}
 	return &tokenResp, nil
 }
+
+// Discover handles OAuth metadata discovery for an MCP server URL.
+// Returns auth_url, token_url, registration_endpoint, and capabilities.
+func (h *OAuthHandler) Discover(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MCPURL string `json:"mcp_url"`
+	}
+	if err := readJSON(r, &req); err != nil || req.MCPURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_url is required"})
+		return
+	}
+
+	discovered, err := discoverOAuthFromMCPURL(r.Context(), req.MCPURL)
+	if err != nil {
+		h.logger.Debug("OAuth discovery failed, trying known providers", "url", req.MCPURL, "error", err)
+		// Fallback: check if URL matches a known provider
+		if provider := matchKnownProvider(req.MCPURL); provider != nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"auth_url":    provider.AuthURL,
+				"token_url":   provider.TokenURL,
+				"scopes":      provider.DefaultScopes,
+				"supports_dcr": false,
+				"supports_pkce": true,
+				"source":       "known_provider",
+			})
+			return
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Could not discover OAuth endpoints: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"auth_url":              discovered.AuthURL,
+		"token_url":             discovered.TokenURL,
+		"registration_endpoint": discovered.RegistrationEndpoint,
+		"scopes":                discovered.Scopes,
+		"supports_dcr":          discovered.SupportsDCR,
+		"supports_pkce":         discovered.SupportsPKCE,
+		"source":                "discovery",
+	})
+}
+
+// AutoConnect performs the full OAuth auto-connect flow for an MCP server:
+// 1. Discover OAuth endpoints
+// 2. Dynamic Client Registration (if supported)
+// 3. Create OAUTH2 credential
+// 4. Start loopback OAuth flow
+func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	var req struct {
+		MCPURL       string `json:"mcp_url"`
+		ServerName   string `json:"server_name"`
+		ProviderHint string `json:"provider_hint"` // e.g. "linear" — skip discovery, use known provider
+	}
+	if err := readJSON(r, &req); err != nil || req.MCPURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_url is required"})
+		return
+	}
+	if req.ServerName == "" {
+		req.ServerName = "mcp-server"
+	}
+
+	// Step 1: Resolve OAuth endpoints
+	var authURL, tokenURL, scopes string
+	var registrationEndpoint string
+
+	if req.ProviderHint != "" {
+		if p, ok := OAuthProviders[req.ProviderHint]; ok {
+			authURL = p.AuthURL
+			tokenURL = p.TokenURL
+			scopes = p.DefaultScopes
+		}
+	}
+	if authURL == "" {
+		discovered, err := discoverOAuthFromMCPURL(r.Context(), req.MCPURL)
+		if err != nil {
+			if provider := matchKnownProvider(req.MCPURL); provider != nil {
+				authURL = provider.AuthURL
+				tokenURL = provider.TokenURL
+				scopes = provider.DefaultScopes
+			} else {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Cannot discover OAuth for this URL: " + err.Error()})
+				return
+			}
+		} else {
+			authURL = discovered.AuthURL
+			tokenURL = discovered.TokenURL
+			scopes = discovered.Scopes
+			registrationEndpoint = discovered.RegistrationEndpoint
+		}
+	}
+
+	// Step 2: Find free port for loopback
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to start loopback server"})
+		return
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+
+	// Step 3: Dynamic Client Registration (if available)
+	var clientID, clientSecret string
+	if registrationEndpoint != "" {
+		dcr, err := dynamicClientRegister(r.Context(), registrationEndpoint, redirectURI)
+		if err != nil {
+			h.logger.Warn("DCR failed, will need manual client_id", "error", err)
+			listener.Close()
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"status":     "needs_client_id",
+				"auth_url":   authURL,
+				"token_url":  tokenURL,
+				"scopes":     scopes,
+				"message":    "Dynamic Client Registration failed. Please provide Client ID manually.",
+			})
+			return
+		}
+		clientID = dcr.ClientID
+		clientSecret = dcr.ClientSecret
+		h.logger.Info("DCR succeeded", "client_id", clientID, "server", req.ServerName)
+	} else {
+		listener.Close()
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":    "needs_client_id",
+			"auth_url":  authURL,
+			"token_url": tokenURL,
+			"scopes":    scopes,
+			"message":   "This provider does not support automatic registration. Please provide Client ID.",
+		})
+		return
+	}
+
+	// Step 4: Create OAUTH2 credential
+	credID := generateCUID()
+	credName := req.ServerName + "-oauth"
+
+	var encSecret string
+	if clientSecret != "" {
+		encSecret, err = encryption.Encrypt(clientSecret)
+		if err != nil {
+			listener.Close()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt client secret"})
+			return
+		}
+	}
+
+	_, err = h.db.ExecContext(r.Context(), `
+		INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, status,
+			oauth_client_id, oauth_client_secret_enc, oauth_auth_url, oauth_token_url, oauth_scopes,
+			created_at, updated_at)
+		VALUES (?, ?, ?, 'OAUTH2', '', 'PENDING', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		credID, workspaceID, credName, clientID, encSecret, authURL, tokenURL, scopes)
+	if err != nil {
+		listener.Close()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create credential"})
+		return
+	}
+
+	// Step 5: Generate state and build auth URL
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		listener.Close()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate state"})
+		return
+	}
+	state := hex.EncodeToString(stateBytes)
+
+	params := url.Values{
+		"client_id":     {clientID},
+		"redirect_uri":  {redirectURI},
+		"response_type": {"code"},
+		"state":         {state},
+		"access_type":   {"offline"},
+	}
+	if scopes != "" {
+		params.Set("scope", scopes)
+	}
+	fullAuthURL := authURL + "?" + params.Encode()
+
+	// Step 6: Start loopback server
+	go h.runLoopbackServer(listener, state, credID, workspaceID, clientID, clientSecret, tokenURL, redirectURI)
+
+	h.logger.Info("OAuth auto-connect started", "server", req.ServerName, "credential_id", credID, "port", port)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":        "authorize",
+		"auth_url":      fullAuthURL,
+		"credential_id": credID,
+		"loopback_port": port,
+	})
+}
+
+// matchKnownProvider checks if an MCP server URL matches a known OAuth provider.
+func matchKnownProvider(mcpURL string) *OAuthProvider {
+	urlPatterns := map[string]string{
+		"linear.app":    "linear",
+		"gitlab.com":    "gitlab",
+		"cloudflare.com": "cloudflare",
+		"stripe.com":    "stripe",
+		"notion.com":    "notion",
+		"github.com":    "github",
+		"googleapis.com": "google",
+	}
+	lower := strings.ToLower(mcpURL)
+	for domain, providerKey := range urlPatterns {
+		if strings.Contains(lower, domain) {
+			if p, ok := OAuthProviders[providerKey]; ok {
+				return &p
+			}
+		}
+	}
+	return nil
+}

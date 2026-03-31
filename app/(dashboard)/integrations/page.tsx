@@ -14,6 +14,8 @@ import {
   Trash2,
   Settings2,
   KeyRound,
+  ExternalLink,
+  Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -41,6 +43,127 @@ import { MCP_TEMPLATES, TEMPLATE_ICONS } from "@/components/features/mcp/templat
 import type { MCPTemplate } from "@/components/features/mcp/types"
 import { CredentialPicker } from "@/components/features/mcp/components/credential-picker"
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
+
+// ---------------------------------------------------------------------------
+// OAuth Auto-Connect component
+// ---------------------------------------------------------------------------
+
+function OAuthAutoConnect({
+  serverName,
+  mcpURL,
+  workspaceId,
+  onCredentialCreated,
+}: {
+  serverName: string
+  mcpURL: string
+  workspaceId: string | null
+  onCredentialCreated: (credId: string) => Promise<void>
+}) {
+  const [status, setStatus] = React.useState<"idle" | "discovering" | "authorizing" | "polling" | "done" | "error">("idle")
+  const [error, setError] = React.useState("")
+  const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+
+  React.useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [])
+
+  async function handleConnect() {
+    if (!workspaceId) return
+    setStatus("discovering")
+    setError("")
+
+    try {
+      const res = await fetch(`/api/v1/oauth/auto-connect?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mcp_url: mcpURL, server_name: serverName }),
+      })
+      const data = await res.json()
+
+      if (data.status === "authorize") {
+        setStatus("authorizing")
+        // Open browser for OAuth consent
+        window.open(data.auth_url, "_blank", "width=600,height=700")
+
+        // Poll credential status until ACTIVE
+        const credId = data.credential_id
+        pollRef.current = setInterval(async () => {
+          try {
+            const credRes = await fetch(`/api/v1/credentials/${credId}?workspace_id=${workspaceId}`)
+            if (credRes.ok) {
+              const cred = await credRes.json()
+              if (cred.status === "ACTIVE") {
+                if (pollRef.current) clearInterval(pollRef.current)
+                setStatus("done")
+                await onCredentialCreated(credId)
+              }
+            }
+          } catch { /* keep polling */ }
+        }, 2000)
+
+        // Stop polling after 2 minutes
+        setTimeout(() => {
+          if (pollRef.current) {
+            clearInterval(pollRef.current)
+            if (status === "authorizing") {
+              setStatus("error")
+              setError("Authorization timed out. Please try again.")
+            }
+          }
+        }, 120000)
+      } else if (data.status === "needs_client_id") {
+        setStatus("error")
+        setError(data.message || "Please provide Client ID manually via OAuth form in credential picker.")
+      } else {
+        setStatus("error")
+        setError(data.error || "Unknown error")
+      }
+    } catch {
+      setStatus("error")
+      setError("Network error")
+    }
+  }
+
+  if (status === "done") {
+    return (
+      <div className="rounded-md border border-green-500/30 bg-green-500/5 p-4">
+        <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+          <Check className="h-4 w-4" />
+          OAuth connected successfully
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-md border bg-background p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <ExternalLink className="h-4 w-4 text-muted-foreground" />
+          Authentication
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Connect with OAuth to automatically authenticate with this service.
+      </p>
+      {error && (
+        <p className="text-xs text-destructive">{error}</p>
+      )}
+      <Button
+        size="sm"
+        onClick={handleConnect}
+        disabled={status === "discovering" || status === "authorizing" || status === "polling"}
+      >
+        {(status === "discovering" || status === "authorizing") && (
+          <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+        )}
+        {status === "authorizing" ? "Waiting for authorization..." : "Connect with OAuth"}
+      </Button>
+    </div>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -952,7 +1075,24 @@ function ExpandedPanel({
         )}
       </div>
 
-      {/* Section 3: Environment Variables */}
+      {/* Section 3: OAuth Auto-Connect (HTTP servers only) */}
+      {canManage && server.transport === "streamable-http" && server.endpoint && (
+        <OAuthAutoConnect
+          serverName={server.name}
+          mcpURL={server.endpoint}
+          workspaceId={workspaceId}
+          onCredentialCreated={async (credId: string) => {
+            // Set the credential as env var value
+            const key = envVars[0]?.key || server.name.toUpperCase().replace(/-/g, "_") + "_TOKEN"
+            const updated = [{ key, value: `\${${credId}}` }]
+            setEnvVars(updated)
+            await onPatch({ env_json: serializeEnv(updated) })
+            toast.success("OAuth connected! Credential bound.")
+          }}
+        />
+      )}
+
+      {/* Section 4: Environment Variables */}
       <div className="rounded-md border bg-background p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-medium">
