@@ -192,6 +192,13 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	userID := claims.ID
 
 	wsServer := websocket.Server{
+		Handshake: func(config *websocket.Config, req *http.Request) error {
+			// Skip default origin check — token-based auth on the query
+			// parameter is the sole gate.  The default Handshake rejects
+			// connections where Origin port != Host port, which breaks
+			// dev proxies and SSH tunnels.
+			return nil
+		},
 		Handler: func(conn *websocket.Conn) {
 			ctx, cancel := context.WithCancel(context.Background())
 			client := &Client{

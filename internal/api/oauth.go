@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"html"
+
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -117,12 +119,17 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 	// Default redirect URI = Crewship backend callback
 	redirectURI := req.RedirectURI
 	if redirectURI == "" {
-		// Auto-detect from request Host
 		scheme := "http"
-		if r.TLS != nil {
+		if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+			scheme = proto
+		} else if r.TLS != nil {
 			scheme = "https"
 		}
-		redirectURI = fmt.Sprintf("%s://%s/api/v1/oauth/callback", scheme, r.Host)
+		host := r.Host
+		if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+			host = fwdHost
+		}
+		redirectURI = fmt.Sprintf("%s://%s/api/v1/oauth/callback", scheme, host)
 	}
 
 	// Store state for CSRF validation
@@ -162,7 +169,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	errParam := r.URL.Query().Get("error")
 
 	if errParam != "" {
-		http.Error(w, fmt.Sprintf("OAuth error: %s", errParam), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("OAuth error: %s", html.EscapeString(errParam)), http.StatusBadRequest)
 		return
 	}
 	if code == "" || state == "" {
@@ -194,18 +201,20 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decrypt client secret (fallback to raw value if not encrypted)
+	// Decrypt client secret — fail closed if decryption fails
 	clientSecret := ""
 	if clientSecretEnc != "" {
-		if decrypted, err := encryption.Decrypt(clientSecretEnc); err == nil {
-			clientSecret = decrypted
-		} else {
-			clientSecret = clientSecretEnc // fallback for unencrypted values
+		decrypted, decErr := encryption.Decrypt(clientSecretEnc)
+		if decErr != nil {
+			h.logger.Error("decrypt OAuth client secret", "error", decErr, "credential_id", credentialID)
+			http.Error(w, "Failed to decrypt client secret", http.StatusInternalServerError)
+			return
 		}
+		clientSecret = decrypted
 	}
 
 	// Exchange code for tokens
-	tokenResp, err := exchangeOAuthCode(tokenURL, clientID, clientSecret, code, redirectURI)
+	tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, code, redirectURI)
 	if err != nil {
 		h.logger.Error("OAuth token exchange failed", "error", err, "credential_id", credentialID)
 		http.Error(w, fmt.Sprintf("Token exchange failed: %v", err), http.StatusBadGateway)
@@ -290,15 +299,17 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 
 	clientSecret := ""
 	if clientSecretEnc != "" {
-		if decrypted, err := encryption.Decrypt(clientSecretEnc); err == nil {
-			clientSecret = decrypted
-		} else {
-			clientSecret = clientSecretEnc
+		decrypted, decErr := encryption.Decrypt(clientSecretEnc)
+		if decErr != nil {
+			h.logger.Error("decrypt OAuth client secret", "error", decErr, "credential_id", req.CredentialID)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to decrypt client secret"})
+			return
 		}
+		clientSecret = decrypted
 	}
 
 	// Exchange code for tokens
-	tokenResp, err := exchangeOAuthCode(tokenURL, clientID, clientSecret, req.Code, req.RedirectURI)
+	tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, req.Code, req.RedirectURI)
 	if err != nil {
 		h.logger.Error("OAuth manual code exchange failed", "error", err, "credential_id", req.CredentialID)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Token exchange failed: " + err.Error()})
@@ -382,14 +393,16 @@ func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decrypt client secret
+	// Decrypt client secret — fail closed
 	clientSecret := ""
 	if clientSecretEnc != "" {
-		if dec, err := encryption.Decrypt(clientSecretEnc); err == nil {
-			clientSecret = dec
-		} else {
-			clientSecret = clientSecretEnc
+		dec, decErr := encryption.Decrypt(clientSecretEnc)
+		if decErr != nil {
+			h.logger.Error("decrypt OAuth client secret for loopback", "error", decErr, "credential_id", req.CredentialID)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to decrypt client secret"})
+			return
 		}
+		clientSecret = dec
 	}
 
 	// Find a free port for the loopback server
@@ -463,7 +476,7 @@ func (h *OAuthHandler) runLoopbackServer(
 
 		if errParam != "" {
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, `<html><body><h2>Authorization failed</h2><p>%s</p><p>You can close this window.</p></body></html>`, errParam)
+			fmt.Fprintf(w, `<html><body><h2>Authorization failed</h2><p>%s</p><p>You can close this window.</p></body></html>`, html.EscapeString(errParam))
 			return
 		}
 
@@ -474,11 +487,11 @@ func (h *OAuthHandler) runLoopbackServer(
 		}
 
 		// Exchange code for tokens
-		tokenResp, err := exchangeOAuthCode(tokenURL, clientID, clientSecret, code, redirectURI)
+		tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, code, redirectURI)
 		if err != nil {
 			h.logger.Error("OAuth loopback token exchange", "error", err, "credential_id", credentialID)
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, `<html><body><h2>Token exchange failed</h2><p>%s</p><p>You can close this window.</p></body></html>`, err.Error())
+			fmt.Fprintf(w, `<html><body><h2>Token exchange failed</h2><p>%s</p><p>You can close this window.</p></body></html>`, html.EscapeString(err.Error()))
 			return
 		}
 
@@ -555,7 +568,7 @@ type tokenResponse struct {
 	Scope        string `json:"scope"`
 }
 
-func exchangeOAuthCode(tokenURL, clientID, clientSecret, code, redirectURI string) (*tokenResponse, error) {
+func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI string) (*tokenResponse, error) {
 	data := url.Values{
 		"grant_type":   {"authorization_code"},
 		"code":         {code},
@@ -566,7 +579,7 @@ func exchangeOAuthCode(tokenURL, clientID, clientSecret, code, redirectURI strin
 		data.Set("client_secret", clientSecret)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -646,11 +659,12 @@ func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger 
 
 		clientSecret := ""
 		if clientSecretEnc != "" {
-			if d, err := encryption.Decrypt(clientSecretEnc); err == nil {
-				clientSecret = d
-			} else {
-				clientSecret = clientSecretEnc
+			d, decErr := encryption.Decrypt(clientSecretEnc)
+			if decErr != nil {
+				logger.Error("decrypt OAuth client secret during refresh", "credential_id", id, "error", decErr)
+				continue
 			}
+			clientSecret = d
 		}
 		refreshToken := ""
 		if d, err := encryption.Decrypt(refreshTokenEnc); err == nil {
@@ -661,7 +675,7 @@ func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger 
 		}
 
 		// Refresh the token
-		newToken, err := refreshOAuthToken(tokenURL, clientID, clientSecret, refreshToken)
+		newToken, err := refreshOAuthToken(ctx, tokenURL, clientID, clientSecret, refreshToken)
 		if err != nil {
 			logger.Error("OAuth token refresh failed", "credential_id", id, "error", err)
 			if _, dbErr := db.ExecContext(ctx, "UPDATE credentials SET status = 'EXPIRED', updated_at = datetime('now') WHERE id = ?", id); dbErr != nil {
@@ -710,7 +724,7 @@ func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger 
 	}
 }
 
-func refreshOAuthToken(tokenURL, clientID, clientSecret, refreshToken string) (*tokenResponse, error) {
+func refreshOAuthToken(ctx context.Context, tokenURL, clientID, clientSecret, refreshToken string) (*tokenResponse, error) {
 	data := url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
@@ -720,7 +734,7 @@ func refreshOAuthToken(tokenURL, clientID, clientSecret, refreshToken string) (*
 		data.Set("client_secret", clientSecret)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}

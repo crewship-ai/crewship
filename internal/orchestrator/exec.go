@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path"
 	"regexp"
 	"strings"
 	"sync"
@@ -209,6 +210,19 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
 	// Collect env var names referenced in crew/agent MCP configs
 	mcpEnvRefs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
+
+	// Also collect from table-based MCPServers (after JSON blob migration)
+	for _, srv := range req.MCPServers {
+		for k, v := range srv.Env {
+			if strings.HasPrefix(v, "${") && strings.HasSuffix(v, "}") {
+				mcpEnvRefs[v[2:len(v)-1]] = true
+			} else if k != "" {
+				// Env key itself might be the var name needed
+				mcpEnvRefs[k] = true
+			}
+		}
+	}
+
 	if len(mcpEnvRefs) == 0 {
 		return env
 	}
@@ -847,6 +861,144 @@ func setupMCPConfig(
 
 	logger.Debug("MCP config injected", "container_id", containerID[:min(12, len(containerID))])
 	return nil
+}
+
+// injectMCPOAuthTokens writes tokens.json files into the container for MCP
+// servers that use OAUTH2 credentials.  This allows MCP servers (which expect
+// local token files) to use tokens obtained through Crewship's OAuth flow
+// without requiring the user to re-authenticate inside the container.
+//
+// Supports multiple OAuth MCP servers — each gets its own token from the
+// matching _OAUTH_ACCESS_TOKEN:<credID> credential.
+func injectMCPOAuthTokens(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID, agentSlug string,
+	mcpServers []MCPServerConfig,
+	credentials []Credential,
+	logger *slog.Logger,
+) error {
+	// Group OAuth access tokens by credential ID.
+	oauthTokens := make(map[string]string) // credID → plaintext access token
+	for _, c := range credentials {
+		if strings.HasPrefix(c.EnvVarName, "_OAUTH_ACCESS_TOKEN:") && c.PlainValue != "" {
+			credID := strings.TrimPrefix(c.EnvVarName, "_OAUTH_ACCESS_TOKEN:")
+			oauthTokens[credID] = c.PlainValue
+		}
+	}
+	if len(oauthTokens) == 0 {
+		return nil
+	}
+
+	// Build a map: credential ID → which servers use it (via OAUTH2 credential refs).
+	credForServer := make(map[string]string) // serverName → credID
+	for _, c := range credentials {
+		if c.Type == "OAUTH2" && !strings.HasPrefix(c.EnvVarName, "_OAUTH_ACCESS_TOKEN:") {
+			// This is a CLIENT_ID or CLIENT_SECRET ref — find which server uses it.
+			// Match only exact env var references: "${ENV_VAR_NAME}" or literal "ENV_VAR_NAME".
+			for _, srv := range mcpServers {
+				for _, v := range srv.Env {
+					if v == c.EnvVarName || v == "${"+c.EnvVarName+"}" {
+						credForServer[srv.Name] = c.ID
+					}
+				}
+			}
+		}
+	}
+
+	homeDir := path.Join("/crew/agents", agentSlug)
+
+	for _, srv := range mcpServers {
+		if srv.Name == "" {
+			continue
+		}
+
+		// Find the access token for this server.
+		var accessToken string
+		if credID, ok := credForServer[srv.Name]; ok {
+			accessToken = oauthTokens[credID]
+		}
+		// Fallback: only use an unambiguous token when exactly one OAuth credential exists.
+		if accessToken == "" && len(oauthTokens) == 1 {
+			for _, tok := range oauthTokens {
+				accessToken = tok
+			}
+		}
+		if accessToken == "" {
+			continue
+		}
+
+		// Derive config dir name from npm package args.
+		configDirName := sanitizeMCPName(srv.Name)
+		for _, arg := range srv.Args {
+			if strings.Contains(arg, "/") || strings.HasPrefix(arg, "@") {
+				parts := strings.Split(arg, "/")
+				configDirName = sanitizeMCPName(parts[len(parts)-1])
+			}
+		}
+
+		// Write tokens to BOTH the package-name dir and the server-name dir,
+		// since different MCP servers look in different locations.
+		srvNameSafe := sanitizeMCPName(srv.Name)
+		tokenPaths := []string{
+			path.Join(homeDir, ".config", configDirName, "tokens.json"),
+		}
+		if configDirName != srvNameSafe {
+			tokenPaths = append(tokenPaths, path.Join(homeDir, ".config", srvNameSafe, "tokens.json"))
+		}
+
+		// Standard OAuth token file format — compatible with most MCP servers.
+		tokensJSON, _ := json.Marshal(map[string]interface{}{
+			"access_token": accessToken,
+			"token_type":   "Bearer",
+			"expiry_date":  9999999999999,
+		})
+
+		tokB64 := base64.StdEncoding.EncodeToString(tokensJSON)
+
+		for _, tp := range tokenPaths {
+			dir := path.Dir(tp)
+			// Use shell-safe quoting to prevent injection via crafted server names.
+			script := fmt.Sprintf(
+				"mkdir -p '%s' && printf '%%s' '%s' | base64 -d > '%s' && chmod 600 '%s'",
+				shellEscape(dir), tokB64, shellEscape(tp), shellEscape(tp),
+			)
+			cfg := provider.ExecConfig{
+				ContainerID: containerID,
+				Cmd:         []string{"sh", "-c", script},
+				User:        "1001:1001",
+			}
+			result, err := container.Exec(ctx, cfg)
+			if err != nil {
+				logger.Warn("write MCP OAuth tokens", "server", srv.Name, "path", tp, "error", err)
+				continue
+			}
+			io.Copy(io.Discard, result.Reader)
+			result.Reader.Close()
+			logger.Debug("MCP OAuth tokens injected", "server", srv.Name, "path", tp)
+		}
+	}
+
+	return nil
+}
+
+// sanitizeMCPName restricts a server or package name to a safe basename,
+// preventing path traversal and shell metacharacter injection.
+func sanitizeMCPName(name string) string {
+	// Take only the last path component.
+	name = path.Base(name)
+	// Remove any characters that aren't alphanumeric, dash, underscore, dot, or @.
+	safe := regexp.MustCompile(`[^a-zA-Z0-9._@-]`).ReplaceAllString(name, "")
+	if safe == "" || safe == "." || safe == ".." {
+		safe = "mcp-server"
+	}
+	return safe
+}
+
+// shellEscape replaces single quotes in a string so it can be safely used
+// inside single-quoted shell arguments.
+func shellEscape(s string) string {
+	return strings.ReplaceAll(s, "'", "'\"'\"'")
 }
 
 // mergeMCPConfigs merges crew-level and agent-level .mcp.json configs.

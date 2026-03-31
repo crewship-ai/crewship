@@ -135,14 +135,10 @@ export function useWebSocket({
 }
 
 /** Compute WS URL from window.location at runtime. Always correct regardless
- *  of SSR, env var caching, or deployment topology. */
+ *  of SSR, env var caching, or deployment topology.  Uses the same host:port
+ *  as the page — in dev mode, dev-server.mjs proxies /ws to the Go backend. */
 function resolveWsUrl(): string {
   if (typeof window === "undefined") return ""
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  const goPort = process.env.NEXT_PUBLIC_GO_PORT || "8080"
-  const devPorts = ["3001", "3011", "3012", "3013", "3014", "3015"]
-  const host = devPorts.includes(window.location.port)
-    ? window.location.hostname + ":" + goPort
-    : window.location.host
-  return `${proto}//${host}/ws`
+  return `${proto}//${window.location.host}/ws`
 }

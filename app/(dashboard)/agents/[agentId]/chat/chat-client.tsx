@@ -3,7 +3,7 @@
 import { useParams, useSearchParams } from "next/navigation"
 import { useState, useEffect, useCallback } from "react"
 import { nanoid } from "nanoid"
-import { Plus, Info, Search, User, Bot, LayoutGrid, X } from "lucide-react"
+import { Plus, Search, User, Bot, LayoutGrid, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ChatPanel } from "@/components/features/chat/chat-panel"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -318,14 +318,6 @@ export function ChatPageClient() {
       {/* Mobile: Chat (default) */}
       {mobileView === "chat" && (
         <div className="flex-1 flex flex-col md:hidden overflow-hidden min-w-0">
-          {typeof window !== "undefined" && !process.env.NEXT_PUBLIC_WS_URL && (
-            <div className="mx-3 mt-2 flex items-center gap-2 rounded-md bg-muted/10 border border-border px-3 py-2 shrink-0">
-              <Info className="h-4 w-4 text-muted-foreground shrink-0" />
-              <p className="text-label text-muted-foreground">
-                Set <code>CREWSHIPD_URL</code> and start the <strong>engine</strong> for live chat.
-              </p>
-            </div>
-          )}
           <div className="flex-1 overflow-hidden">
             {activeSessionId ? (
               <ChatPanel
@@ -424,14 +416,6 @@ export function ChatPageClient() {
 
       {/* Desktop: Chat area */}
       <div className="hidden md:flex flex-1 flex-col overflow-hidden min-w-0">
-        {typeof window !== "undefined" && !process.env.NEXT_PUBLIC_WS_URL && (
-          <div className="mx-4 md:mx-6 mt-2 flex items-center gap-2 rounded-md bg-muted/10 border border-border px-3 py-2 shrink-0">
-            <Info className="h-4 w-4 text-muted-foreground shrink-0" />
-            <p className="text-label text-muted-foreground">
-              Set <code>CREWSHIPD_URL</code> and start the <strong>engine</strong> for live chat.
-            </p>
-          </div>
-        )}
         <div className="flex-1 overflow-hidden">
           {activeSessionId ? (
             <ChatPanel

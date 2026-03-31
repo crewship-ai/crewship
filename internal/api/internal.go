@@ -17,6 +17,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+type mcpCredEntry struct {
+	ID       string `json:"id"`
+	EnvVar   string `json:"env_var"`
+	Value    string `json:"value"`
+	Priority int    `json:"priority"`
+	Type     string `json:"type"`
+}
+
 type InternalHandler struct {
 	db             *sql.DB
 	logger         *slog.Logger
@@ -333,6 +341,16 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Auto-migrate crew JSON blob to integration tables if present.
+	if crewMCPConfigJSON.Valid && crewMCPConfigJSON.String != "" && crewID.Valid {
+		if err := MigrateJSONBlobToCrewServers(r.Context(), h.db, h.logger, crewID.String, wsID, crewMCPConfigJSON.String); err != nil {
+			h.logger.Warn("auto-migrate crew MCP config in resolveAgentConfig", "crew_id", crewID.String, "error", err)
+		} else {
+			crewMCPConfigJSON.String = ""
+			crewMCPConfigJSON.Valid = false
+		}
+	}
+
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type
 		FROM agent_credentials ac
@@ -347,17 +365,9 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 	}
 	defer rows.Close()
 
-	type credEntry struct {
-		ID       string `json:"id"`
-		EnvVar   string `json:"env_var"`
-		Value    string `json:"value"`
-		Priority int    `json:"priority"`
-		Type     string `json:"type"`
-	}
-
-	var creds []credEntry
+	var creds []mcpCredEntry
 	for rows.Next() {
-		var ce credEntry
+		var ce mcpCredEntry
 		var encValue string
 		if err := rows.Scan(&ce.ID, &ce.EnvVar, &ce.Priority, &encValue, &ce.Type); err != nil {
 			h.logger.Error("scan credential for resolve", "error", err)
@@ -378,8 +388,17 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if creds == nil {
-		creds = []credEntry{}
+		creds = []mcpCredEntry{}
 	}
+
+	// Auto-resolve credentials referenced in crew/agent MCP configs.
+	// The MCP editor stores env vars as ${GOOGLE_ACCESS_TOKEN} and creates
+	// credentials named "google-access-token-oauth-<suffix>".  Match by
+	// converting the env var name to the derived prefix (lowercase, hyphens)
+	// and finding the most-recently created workspace credential whose name
+	// starts with that prefix.
+	creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, wsID, creds,
+		crewMCPConfigJSON.String, agentMCPConfigJSON.String)
 
 	crewIDStr := ""
 	crewSlugStr := ""
@@ -832,6 +851,21 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 			}
 		}
 
+		// Step 4b: Check which servers have ANY bindings (for opt-in filtering).
+		// If a server has at least one binding, only agents WITH a binding see it.
+		serversWithBindings := make(map[string]bool)
+		if bindCountRows, err := h.db.QueryContext(r.Context(), `
+			SELECT mcp_server_id FROM agent_mcp_bindings
+			GROUP BY mcp_server_id HAVING COUNT(*) > 0`); err == nil {
+			for bindCountRows.Next() {
+				var sid string
+				if bindCountRows.Scan(&sid) == nil {
+					serversWithBindings[sid] = true
+				}
+			}
+			bindCountRows.Close()
+		}
+
 		// Step 5: Build result entries
 		for _, srv := range merged {
 			entry := mcpServerEntry{
@@ -850,7 +884,8 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 					h.logger.Warn("malformed env_json for MCP server", "server_id", srv.id, "error", err)
 				}
 			}
-			if b, ok := agentBindings[srv.id]; ok {
+			b, hasBind := agentBindings[srv.id]
+			if hasBind {
 				if !b.enabled {
 					continue // agent opted out
 				}
@@ -867,8 +902,68 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 						}
 					}
 				}
+			} else if serversWithBindings[srv.id] {
+				// Server has bindings for other agents but NOT this one → skip
+				continue
 			}
 			mcpServers = append(mcpServers, entry)
+		}
+	}
+
+	// Auto-resolve credentials from table-based MCP servers' env_json.
+	// This covers the case where MCP config was migrated from JSON blob
+	// to crew_mcp_servers table — the env_json contains ${VAR} references
+	// that need credential resolution.
+	if len(mcpServers) > 0 {
+		var envJsons []string
+		for _, srv := range mcpServers {
+			if len(srv.Env) > 0 {
+				if b, err := json.Marshal(map[string]interface{}{"mcpServers": map[string]interface{}{srv.Name: map[string]interface{}{"env": srv.Env}}}); err == nil {
+					envJsons = append(envJsons, string(b))
+				}
+			}
+		}
+		if len(envJsons) > 0 {
+			creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, wsID, creds, envJsons...)
+		}
+	}
+
+	// For OAUTH2 credentials that were auto-resolved (client_id/secret),
+	// also include the access token so the orchestrator can write tokens.json.
+	// Use a synthetic env var "_OAUTH_ACCESS_TOKEN:<credID>" so the orchestrator
+	// can find it without an actual env var reference.
+	{
+		resolvedOAuthIDs := make(map[string]bool)
+		for _, c := range creds {
+			if c.Type == "OAUTH2" {
+				resolvedOAuthIDs[c.ID] = true
+			}
+		}
+		for credID := range resolvedOAuthIDs {
+			// Check if access token is already in creds
+			hasAccessToken := false
+			for _, c := range creds {
+				if c.ID == credID && !strings.HasSuffix(c.EnvVar, "_CLIENT_ID") && !strings.HasSuffix(c.EnvVar, "_CLIENT_SECRET") {
+					hasAccessToken = true
+					break
+				}
+			}
+			if hasAccessToken {
+				continue
+			}
+			// Fetch and decrypt the access token
+			var encVal string
+			if err := h.db.QueryRowContext(r.Context(),
+				"SELECT encrypted_value FROM credentials WHERE id = ? AND deleted_at IS NULL", credID).Scan(&encVal); err == nil {
+				if dec, err := encryption.Decrypt(encVal); err == nil && dec != "" {
+					creds = append(creds, mcpCredEntry{
+						ID:     credID,
+						EnvVar: "_OAUTH_ACCESS_TOKEN:" + credID,
+						Value:  dec,
+						Type:   "OAUTH2",
+					})
+				}
+			}
 		}
 	}
 
@@ -1509,3 +1604,5 @@ func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Reque
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
+
+// MCP credential auto-resolution functions are in internal_mcp.go
