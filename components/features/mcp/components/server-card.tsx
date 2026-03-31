@@ -261,14 +261,14 @@ export function ServerCard({
                     disabled={readOnly}
                     className="h-7 text-xs font-mono flex-1"
                   />
-                  {hasCredentialSupport ? (
+                  {hasCredentialSupport && workspaceId ? (
                     <div className="flex-1">
                       <CredentialPicker
                         envKey={e.key}
                         envValue={e.value}
                         credentials={credentials}
                         credLoading={credLoading}
-                        workspaceId={workspaceId!}
+                        workspaceId={workspaceId}
                         onFetchCredentials={onFetchCredentials}
                         onAddCredential={onAddCredential}
                         onChangeValue={(val) => onUpdateEnvVar(index, eIdx, "value", val)}

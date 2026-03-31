@@ -81,9 +81,15 @@ export function OAuthForm({
     fetchProviders()
     return () => {
       cancelled = true
-      if (pollRef.current) clearInterval(pollRef.current)
     }
   }, [workspaceId])
+
+  // Always clear pollRef on unmount (handleAuthorize also sets pollRef)
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [])
 
   function handleProviderSelect(key: string) {
     setSelectedProvider(key)
@@ -218,6 +224,11 @@ export function OAuthForm({
 
       // Step 3: Open auth URL in popup and start polling
       const popup = window.open(oauthRedirectUrl, "oauth_popup", "width=600,height=700,popup=yes")
+      if (!popup) {
+        toast.error("Popup blocked — please allow popups for this site and try again")
+        setAuthorizing(false)
+        return
+      }
       setPolling(true)
 
       if (!showCodeInput) {

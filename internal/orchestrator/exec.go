@@ -826,11 +826,12 @@ func setupMCPConfig(
 	}
 
 	homeDir := fmt.Sprintf("/crew/agents/%s", agentSlug)
-	// Write config file (600 perms, owned by agent user)
-	script := fmt.Sprintf(`cat > %s/.mcp.json << 'MCPEOF'
-%s
-MCPEOF
-chmod 600 %s/.mcp.json`, homeDir, mcpJSON, homeDir)
+	// Write config file (600 perms, owned by agent user).
+	// Use base64 encoding to prevent shell injection if mcpJSON contains
+	// the heredoc delimiter or other special characters.
+	mcpB64 := base64.StdEncoding.EncodeToString([]byte(mcpJSON))
+	script := fmt.Sprintf("echo '%s' | base64 -d > %s/.mcp.json && chmod 600 %s/.mcp.json",
+		mcpB64, homeDir, homeDir)
 
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,

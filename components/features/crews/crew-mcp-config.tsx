@@ -47,12 +47,17 @@ export function CrewMCPConfig({ crewId, workspaceId }: CrewMCPConfigProps) {
     let cancelled = false
 
     async function fetchCrew() {
+      setLoading(true)
+      setConfigJson("")
+      setSavedJson("")
+
       try {
         const res = await fetch(
           `/api/v1/crews/${crewId}?workspace_id=${workspaceId}`,
         )
         if (!res.ok) {
           toast.error("Failed to load crew MCP configuration")
+          // Keep loading=true so editor stays blocked
           return
         }
         const data: CrewData = await res.json()
@@ -60,6 +65,7 @@ export function CrewMCPConfig({ crewId, workspaceId }: CrewMCPConfigProps) {
           const json = data.mcp_config_json ?? ""
           setConfigJson(json)
           setSavedJson(json)
+          setLoading(false)
           // Auto-expand if there are servers configured
           if (countServers(json) > 0) {
             setOpen(true)
@@ -67,8 +73,7 @@ export function CrewMCPConfig({ crewId, workspaceId }: CrewMCPConfigProps) {
         }
       } catch {
         if (!cancelled) toast.error("Network error loading MCP configuration")
-      } finally {
-        if (!cancelled) setLoading(false)
+        // Keep loading=true so editor stays blocked
       }
     }
 

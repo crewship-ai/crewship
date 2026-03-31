@@ -126,9 +126,13 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store state for CSRF validation
-	h.db.ExecContext(r.Context(),
+	if _, err := h.db.ExecContext(r.Context(),
 		"INSERT INTO oauth_states (state, credential_id, workspace_id, redirect_uri) VALUES (?, ?, ?, ?)",
-		state, req.CredentialID, workspaceID, redirectURI)
+		state, req.CredentialID, workspaceID, redirectURI); err != nil {
+		h.logger.Error("store OAuth state", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store OAuth state"})
+		return
+	}
 
 	// Build auth URL
 	params := url.Values{
@@ -313,6 +317,8 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 		encRefreshToken, err = encryption.Encrypt(tokenResp.RefreshToken)
 		if err != nil {
 			h.logger.Error("encrypt refresh token", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt refresh token"})
+			return
 		}
 	}
 
@@ -487,7 +493,13 @@ func (h *OAuthHandler) runLoopbackServer(
 
 		var encRefresh string
 		if tokenResp.RefreshToken != "" {
-			encRefresh, _ = encryption.Encrypt(tokenResp.RefreshToken)
+			encRefresh, err = encryption.Encrypt(tokenResp.RefreshToken)
+			if err != nil {
+				h.logger.Error("encrypt loopback refresh token", "error", err)
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprint(w, `<html><body><h2>Failed to store refresh token</h2><p>You can close this window.</p></body></html>`)
+				return
+			}
 		}
 
 		expiresAt := ""

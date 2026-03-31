@@ -9,6 +9,29 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// mcpConfig is the validated structure of an MCP JSON config.
+type mcpConfig struct {
+	MCPServers map[string]json.RawMessage `json:"mcpServers"`
+}
+
+// validateAndNormalizeMCPJSON validates that value is valid MCP JSON with a
+// "mcpServers" key, and returns a compact-printed version. If value is empty
+// it returns ("", 0, nil).
+func validateAndNormalizeMCPJSON(value string) (string, int, error) {
+	if value == "" {
+		return "", 0, nil
+	}
+	var check mcpConfig
+	if err := json.Unmarshal([]byte(value), &check); err != nil {
+		return "", 0, fmt.Errorf("invalid MCP JSON: %w", err)
+	}
+	if check.MCPServers == nil {
+		return "", 0, fmt.Errorf("JSON must contain a \"mcpServers\" object")
+	}
+	pretty, _ := json.Marshal(check)
+	return string(pretty), len(check.MCPServers), nil
+}
+
 // ==========================================
 // crewship crew mcp <slug> [--set|--set-file]
 // ==========================================
@@ -57,22 +80,11 @@ var crewMCPCmd = &cobra.Command{
 			}
 
 			// Validate JSON if non-empty
-			if value != "" {
-				var check struct {
-					MCPServers map[string]json.RawMessage `json:"mcpServers"`
-				}
-				if err := json.Unmarshal([]byte(value), &check); err != nil {
-					return fmt.Errorf("invalid MCP JSON: %w", err)
-				}
-				if check.MCPServers == nil {
-					return fmt.Errorf("JSON must contain a \"mcpServers\" object")
-				}
-				// Pretty-print for storage
-				var raw interface{}
-				json.Unmarshal([]byte(value), &raw)
-				pretty, _ := json.Marshal(raw)
-				value = string(pretty)
+			normalized, serverCount, err := validateAndNormalizeMCPJSON(value)
+			if err != nil {
+				return err
 			}
+			value = normalized
 
 			body := map[string]interface{}{"mcp_config_json": value}
 			if value == "" {
@@ -90,11 +102,7 @@ var crewMCPCmd = &cobra.Command{
 			if value == "" {
 				fmt.Printf("Crew %s: MCP config cleared.\n", args[0])
 			} else {
-				var check struct {
-					MCPServers map[string]json.RawMessage `json:"mcpServers"`
-				}
-				json.Unmarshal([]byte(value), &check)
-				fmt.Printf("Crew %s: MCP config set (%d servers).\n", args[0], len(check.MCPServers))
+				fmt.Printf("Crew %s: MCP config set (%d servers).\n", args[0], serverCount)
 			}
 			return nil
 		}
@@ -179,21 +187,11 @@ var agentMCPCmd = &cobra.Command{
 				value = string(data)
 			}
 
-			if value != "" {
-				var check struct {
-					MCPServers map[string]json.RawMessage `json:"mcpServers"`
-				}
-				if err := json.Unmarshal([]byte(value), &check); err != nil {
-					return fmt.Errorf("invalid MCP JSON: %w", err)
-				}
-				if check.MCPServers == nil {
-					return fmt.Errorf("JSON must contain a \"mcpServers\" object")
-				}
-				var raw interface{}
-				json.Unmarshal([]byte(value), &raw)
-				pretty, _ := json.Marshal(raw)
-				value = string(pretty)
+			normalized, serverCount, err := validateAndNormalizeMCPJSON(value)
+			if err != nil {
+				return err
 			}
+			value = normalized
 
 			body := map[string]interface{}{"mcp_config_json": value}
 			if value == "" {
@@ -211,11 +209,7 @@ var agentMCPCmd = &cobra.Command{
 			if value == "" {
 				fmt.Printf("Agent %s: MCP config cleared.\n", args[0])
 			} else {
-				var check struct {
-					MCPServers map[string]json.RawMessage `json:"mcpServers"`
-				}
-				json.Unmarshal([]byte(value), &check)
-				fmt.Printf("Agent %s: MCP config set (%d servers).\n", args[0], len(check.MCPServers))
+				fmt.Printf("Agent %s: MCP config set (%d servers).\n", args[0], serverCount)
 			}
 			return nil
 		}
