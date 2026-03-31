@@ -426,7 +426,19 @@ export default function IntegrationsPage() {
                         onChange={(json) => {
                           const parsed = parseConfig(json)
                           if (parsed.length === 0) {
-                            // Entry was deleted
+                            // Entry was deleted — if it has a DB id, call DELETE API immediately
+                            if (entry.id && server && workspaceId) {
+                              fetch(`/api/v1/crews/${server.crew_id}/integrations/${entry.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+                                .then((res) => {
+                                  if (res.ok) {
+                                    toast.success(`"${entry.name}" deleted`)
+                                    fetchAll(workspaceId)
+                                  } else {
+                                    toast.error("Failed to delete integration")
+                                  }
+                                })
+                                .catch(() => toast.error("Network error"))
+                            }
                             const updated = entries.filter((_, i) => i !== idx)
                             setEditorJson(serializeConfig(updated))
                             setExpandedIdx(null)
