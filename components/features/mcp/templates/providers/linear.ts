@@ -4,8 +4,6 @@ export const linear: MCPTemplate = {
   name: "linear",
   label: "Linear",
   icon: "list-checks",
-  transport: "stdio",
-  command: "npx",
-  args: "-y linear-mcp",
-  envHint: "LINEAR_API_KEY",
+  transport: "streamable-http",
+  url: "https://mcp.linear.app/mcp",
 }
