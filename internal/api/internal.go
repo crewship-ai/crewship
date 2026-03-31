@@ -17,6 +17,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+type mcpCredEntry struct {
+	ID       string `json:"id"`
+	EnvVar   string `json:"env_var"`
+	Value    string `json:"value"`
+	Priority int    `json:"priority"`
+	Type     string `json:"type"`
+}
+
 type InternalHandler struct {
 	db             *sql.DB
 	logger         *slog.Logger
@@ -347,17 +355,9 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 	}
 	defer rows.Close()
 
-	type credEntry struct {
-		ID       string `json:"id"`
-		EnvVar   string `json:"env_var"`
-		Value    string `json:"value"`
-		Priority int    `json:"priority"`
-		Type     string `json:"type"`
-	}
-
-	var creds []credEntry
+	var creds []mcpCredEntry
 	for rows.Next() {
-		var ce credEntry
+		var ce mcpCredEntry
 		var encValue string
 		if err := rows.Scan(&ce.ID, &ce.EnvVar, &ce.Priority, &encValue, &ce.Type); err != nil {
 			h.logger.Error("scan credential for resolve", "error", err)
@@ -378,8 +378,17 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if creds == nil {
-		creds = []credEntry{}
+		creds = []mcpCredEntry{}
 	}
+
+	// Auto-resolve credentials referenced in crew/agent MCP configs.
+	// The MCP editor stores env vars as ${GOOGLE_ACCESS_TOKEN} and creates
+	// credentials named "google-access-token-oauth-<suffix>".  Match by
+	// converting the env var name to the derived prefix (lowercase, hyphens)
+	// and finding the most-recently created workspace credential whose name
+	// starts with that prefix.
+	creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, wsID, creds,
+		crewMCPConfigJSON.String, agentMCPConfigJSON.String)
 
 	crewIDStr := ""
 	crewSlugStr := ""
@@ -1508,4 +1517,109 @@ func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+}
+
+// ---------------------------------------------------------------------------
+// MCP credential auto-resolution
+// ---------------------------------------------------------------------------
+
+// autoResolveMCPCredentials parses MCP config JSONs for ${VAR} env references
+// and finds workspace credentials whose name matches the derived prefix.
+// This bridges the gap between the MCP config editor (which stores env var
+// references like ${GOOGLE_ACCESS_TOKEN}) and the credential system (which
+// stores credentials with names like "google-access-token-oauth-abc123").
+func autoResolveMCPCredentials(
+	ctx context.Context,
+	db *sql.DB,
+	logger *slog.Logger,
+	workspaceID string,
+	existing []mcpCredEntry,
+	configs ...string,
+) []mcpCredEntry {
+	// Collect ${VAR} references from MCP configs.
+	refs := collectMCPEnvVarRefs(configs...)
+	if len(refs) == 0 {
+		return existing
+	}
+
+	// Remove refs already covered by explicit agent_credentials.
+	coveredVars := make(map[string]bool)
+	for _, c := range existing {
+		coveredVars[c.EnvVar] = true
+	}
+	var missing []string
+	for envVar := range refs {
+		if !coveredVars[envVar] {
+			missing = append(missing, envVar)
+		}
+	}
+	if len(missing) == 0 {
+		return existing
+	}
+
+	// For each missing env var, derive the credential name prefix and query.
+	for _, envVar := range missing {
+		prefix := strings.ToLower(strings.ReplaceAll(envVar, "_", "-"))
+		row := db.QueryRowContext(ctx, `
+			SELECT id, encrypted_value, type
+			FROM credentials
+			WHERE workspace_id = ? AND name LIKE ? AND deleted_at IS NULL
+			  AND status != 'REVOKED'
+			ORDER BY created_at DESC LIMIT 1
+		`, workspaceID, prefix+"%")
+
+		var id, encValue, credType string
+		if err := row.Scan(&id, &encValue, &credType); err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				logger.Warn("auto-resolve MCP credential", "env_var", envVar, "error", err)
+			}
+			continue
+		}
+
+		dec, err := encryption.Decrypt(encValue)
+		if err != nil {
+			logger.Warn("decrypt auto-resolved MCP credential", "id", id, "error", err)
+			continue
+		}
+
+		existing = append(existing, mcpCredEntry{
+			ID:     id,
+			EnvVar: envVar,
+			Value:  dec,
+			Type:   credType,
+		})
+		logger.Debug("auto-resolved MCP credential", "env_var", envVar, "credential_id", id)
+	}
+
+	return existing
+}
+
+// collectMCPEnvVarRefs extracts ${VAR} references from the "env" blocks of
+// MCP config JSON strings.
+func collectMCPEnvVarRefs(configs ...string) map[string]bool {
+	refs := make(map[string]bool)
+	for _, cfg := range configs {
+		if cfg == "" {
+			continue
+		}
+		var wrapper struct {
+			MCPServers map[string]struct {
+				Env map[string]string `json:"env"`
+			} `json:"mcpServers"`
+		}
+		if err := json.Unmarshal([]byte(cfg), &wrapper); err != nil {
+			continue
+		}
+		for _, srv := range wrapper.MCPServers {
+			for _, val := range srv.Env {
+				if strings.HasPrefix(val, "${") && strings.HasSuffix(val, "}") {
+					varName := val[2 : len(val)-1]
+					if varName != "" {
+						refs[varName] = true
+					}
+				}
+			}
+		}
+	}
+	return refs
 }
