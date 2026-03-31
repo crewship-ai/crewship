@@ -341,6 +341,16 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Auto-migrate crew JSON blob to integration tables if present.
+	if crewMCPConfigJSON.Valid && crewMCPConfigJSON.String != "" && crewID.Valid {
+		if err := MigrateJSONBlobToCrewServers(r.Context(), h.db, h.logger, crewID.String, wsID, crewMCPConfigJSON.String); err != nil {
+			h.logger.Warn("auto-migrate crew MCP config in resolveAgentConfig", "crew_id", crewID.String, "error", err)
+		} else {
+			crewMCPConfigJSON.String = ""
+			crewMCPConfigJSON.Valid = false
+		}
+	}
+
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type
 		FROM agent_credentials ac

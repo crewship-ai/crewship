@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { Plug, Loader2, ChevronDown } from "lucide-react"
 import {
   Card, CardContent, CardHeader,
@@ -15,104 +15,153 @@ import {
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { MCPConfigEditor } from "@/components/features/mcp/mcp-config-editor"
+import { parseConfig, serializeConfig } from "@/components/features/mcp/lib/config-parser"
+import type { ServerEntry } from "@/components/features/mcp/types"
+import {
+  crewServerToEntry,
+  entryToPayload,
+  diffEntries,
+} from "@/components/features/mcp/lib/integration-adapter"
+import type { CrewMCPServer } from "@/components/features/mcp/lib/integration-adapter"
 
 interface CrewMCPConfigProps {
   crewId: string
   workspaceId: string
 }
 
-interface CrewData {
-  id: string
-  mcp_config_json: string | null
-}
-
-function countServers(json: string): number {
-  if (!json || json.trim() === "") return 0
-  try {
-    const parsed = JSON.parse(json)
-    return Object.keys(parsed.mcpServers ?? {}).length
-  } catch {
-    return 0
-  }
-}
-
 export function CrewMCPConfig({ crewId, workspaceId }: CrewMCPConfigProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [configJson, setConfigJson] = useState("")
-  const [savedJson, setSavedJson] = useState("")
   const [open, setOpen] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
+  // The serialized JSON string that MCPConfigEditor uses as its value.
+  // We keep this as the "current" editing state.
+  const [configJson, setConfigJson] = useState("")
 
-    async function fetchCrew() {
-      setLoading(true)
-      setConfigJson("")
-      setSavedJson("")
+  // Snapshot of entries as they were loaded from the API — used for diffing.
+  const originalEntriesRef = useRef<ServerEntry[]>([])
 
-      try {
-        const res = await fetch(
-          `/api/v1/crews/${crewId}?workspace_id=${workspaceId}`,
-        )
-        if (!res.ok) {
-          if (!cancelled) {
-            toast.error("Failed to load crew MCP configuration")
-            setOpen(false)
-          }
-          return
-        }
-        const data: CrewData = await res.json()
-        if (!cancelled) {
-          const json = data.mcp_config_json ?? ""
-          setConfigJson(json)
-          setSavedJson(json)
-          setLoading(false)
-          setOpen(countServers(json) > 0)
-        }
-      } catch {
-        if (!cancelled) {
-          toast.error("Network error loading MCP configuration")
-          setOpen(false)
-        }
+  // The serialized JSON of the last-saved state (for dirty detection).
+  const [savedJson, setSavedJson] = useState("")
+
+  const fetchIntegrations = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(
+        `/api/v1/crews/${crewId}/integrations?workspace_id=${workspaceId}`,
+        { credentials: "include" },
+      )
+      if (!res.ok) {
+        toast.error("Failed to load crew MCP configuration")
+        setOpen(false)
+        return
       }
-    }
+      const servers: CrewMCPServer[] = await res.json()
+      const entries = servers.map((s, i) => crewServerToEntry(s, i + 1))
+      originalEntriesRef.current = entries
 
-    fetchCrew()
-    return () => {
-      cancelled = true
+      const json = serializeConfig(entries)
+      setConfigJson(json)
+      setSavedJson(json)
+      setOpen(entries.length > 0)
+    } catch {
+      toast.error("Network error loading MCP configuration")
+      setOpen(false)
+    } finally {
+      setLoading(false)
     }
   }, [crewId, workspaceId])
+
+  useEffect(() => {
+    fetchIntegrations()
+  }, [fetchIntegrations])
 
   const handleSave = useCallback(async () => {
     setSaving(true)
     try {
-      const res = await fetch(
-        `/api/v1/crews/${crewId}?workspace_id=${workspaceId}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mcp_config_json: configJson || null }),
-        },
+      // Parse current editor state into entries, preserving ids from originals.
+      const currentEntries = reconcileIds(
+        originalEntriesRef.current,
+        parseConfig(configJson),
       )
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Failed to save" }))
-        toast.error(
-          typeof data.error === "string" ? data.error : "Failed to save MCP configuration",
+      const { create, update, remove } = diffEntries(
+        originalEntriesRef.current,
+        currentEntries,
+      )
+
+      const baseUrl = `/api/v1/crews/${crewId}/integrations`
+      const wsParam = `workspace_id=${workspaceId}`
+      const errors: string[] = []
+
+      // Run all mutations in parallel
+      const promises: Promise<void>[] = []
+
+      for (const entry of create) {
+        const payload = entryToPayload(entry)
+        promises.push(
+          fetch(`${baseUrl}?${wsParam}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(payload),
+          }).then(async (res) => {
+            if (!res.ok) {
+              const data = await res.json().catch(() => ({ error: "Failed" }))
+              errors.push(`Create "${entry.name}": ${data.error ?? "Failed"}`)
+            }
+          }),
         )
-        return
       }
-      setSavedJson(configJson)
-      toast.success("MCP configuration saved")
+
+      for (const entry of update) {
+        const payload = entryToPayload(entry)
+        promises.push(
+          fetch(`${baseUrl}/${entry.id}?${wsParam}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(payload),
+          }).then(async (res) => {
+            if (!res.ok) {
+              const data = await res.json().catch(() => ({ error: "Failed" }))
+              errors.push(`Update "${entry.name}": ${data.error ?? "Failed"}`)
+            }
+          }),
+        )
+      }
+
+      for (const id of remove) {
+        promises.push(
+          fetch(`${baseUrl}/${id}?${wsParam}`, {
+            method: "DELETE",
+            credentials: "include",
+          }).then(async (res) => {
+            if (!res.ok) {
+              const data = await res.json().catch(() => ({ error: "Failed" }))
+              errors.push(`Delete: ${data.error ?? "Failed"}`)
+            }
+          }),
+        )
+      }
+
+      await Promise.all(promises)
+
+      if (errors.length > 0) {
+        toast.error(errors.join("; "))
+      } else {
+        toast.success("MCP configuration saved")
+      }
+
+      // Refetch to get authoritative state with IDs
+      await fetchIntegrations()
     } catch {
       toast.error("Network error saving MCP configuration")
     } finally {
       setSaving(false)
     }
-  }, [crewId, workspaceId, configJson])
+  }, [crewId, workspaceId, configJson, fetchIntegrations])
 
   const hasChanges = configJson !== savedJson
-  const serverCount = countServers(configJson)
 
   if (loading) {
     return (
@@ -140,9 +189,9 @@ export function CrewMCPConfig({ crewId, workspaceId }: CrewMCPConfigProps) {
               <div className="flex items-center gap-2">
                 <Plug className="h-4 w-4 text-muted-foreground" />
                 <span className="text-sm font-semibold">MCP Servers</span>
-                {serverCount > 0 && (
+                {originalEntriesRef.current.length > 0 && (
                   <span className="text-xs text-muted-foreground">
-                    ({serverCount} active)
+                    ({originalEntriesRef.current.length} active)
                   </span>
                 )}
               </div>
@@ -176,4 +225,35 @@ export function CrewMCPConfig({ crewId, workspaceId }: CrewMCPConfigProps) {
       </Collapsible>
     </Card>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * After the MCPConfigEditor round-trips through serialize/parse, entries lose
+ * their `id` field. This function re-attaches ids by matching entries from the
+ * original list by name (since names are unique per crew).
+ */
+function reconcileIds(
+  originals: ServerEntry[],
+  current: ServerEntry[],
+): ServerEntry[] {
+  const idByName = new Map<string, string>()
+  for (const entry of originals) {
+    if (entry.id) {
+      idByName.set(entry.name, entry.id)
+    }
+  }
+
+  return current.map((entry) => {
+    const existingId = idByName.get(entry.name)
+    if (existingId) {
+      // Remove from map so duplicate names don't reuse the same id
+      idByName.delete(entry.name)
+      return { ...entry, id: existingId }
+    }
+    return entry
+  })
 }

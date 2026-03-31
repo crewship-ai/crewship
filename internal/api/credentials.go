@@ -40,6 +40,64 @@ type credentialResponse struct {
 	CreatedAt      string   `json:"created_at"`
 	UpdatedAt      string   `json:"updated_at"`
 	AgentCount     int      `json:"_count_agent_credentials"`
+	AgentNames     []string `json:"agent_names"`
+	MCPUsed        bool     `json:"mcp_used"`
+}
+
+// loadAgentNamesBatch fetches agent names for multiple credentials in one query.
+func (h *CredentialHandler) loadAgentNamesBatch(ctx context.Context, credentialIDs []string) map[string][]string {
+	result := make(map[string][]string, len(credentialIDs))
+	if len(credentialIDs) == 0 {
+		return result
+	}
+	placeholders := make([]string, len(credentialIDs))
+	args := make([]interface{}, len(credentialIDs))
+	for i, id := range credentialIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	rows, err := h.db.QueryContext(ctx,
+		"SELECT ac.credential_id, a.name FROM agent_credentials ac JOIN agents a ON a.id = ac.agent_id AND a.deleted_at IS NULL WHERE ac.credential_id IN ("+strings.Join(placeholders, ",")+") ORDER BY a.name",
+		args...)
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var credID, agentName string
+		if rows.Scan(&credID, &agentName) == nil {
+			result[credID] = append(result[credID], agentName)
+		}
+	}
+	return result
+}
+
+// loadMCPUsedBatch returns the set of credential IDs that are referenced by MCP bindings.
+func (h *CredentialHandler) loadMCPUsedBatch(ctx context.Context, credentialIDs []string) map[string]bool {
+	result := make(map[string]bool, len(credentialIDs))
+	if len(credentialIDs) == 0 {
+		return result
+	}
+	placeholders := make([]string, len(credentialIDs))
+	args := make([]interface{}, len(credentialIDs))
+	for i, id := range credentialIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	rows, err := h.db.QueryContext(ctx,
+		"SELECT DISTINCT credential_id FROM agent_mcp_bindings WHERE credential_id IN ("+strings.Join(placeholders, ",")+") AND credential_id IS NOT NULL",
+		args...)
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var credID string
+		if rows.Scan(&credID) == nil {
+			result[credID] = true
+		}
+	}
+	return result
 }
 
 // loadCrewIDs fetches crew_ids from the junction table for a single credential.
@@ -155,12 +213,20 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 		credIDs[i] = c.ID
 	}
 	crewIDsMap := h.loadCrewIDsBatch(r.Context(), credIDs)
+	agentNamesMap := h.loadAgentNamesBatch(r.Context(), credIDs)
+	mcpUsedSet := h.loadMCPUsedBatch(r.Context(), credIDs)
 	for i := range result {
 		if ids, ok := crewIDsMap[result[i].ID]; ok {
 			result[i].CrewIDs = ids
 		} else {
 			result[i].CrewIDs = []string{}
 		}
+		if names, ok := agentNamesMap[result[i].ID]; ok {
+			result[i].AgentNames = names
+		} else {
+			result[i].AgentNames = []string{}
+		}
+		result[i].MCPUsed = mcpUsedSet[result[i].ID]
 	}
 
 	writeJSON(w, http.StatusOK, result)
@@ -371,6 +437,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		AccountEmail: req.AccountEmail,
 		CreatedAt:    now,
 		UpdatedAt:    now,
+		AgentNames:   []string{},
 	})
 }
 
@@ -402,6 +469,12 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.CrewIDs = h.loadCrewIDs(r.Context(), c.ID)
+	if names, ok := h.loadAgentNamesBatch(r.Context(), []string{c.ID})[c.ID]; ok {
+		c.AgentNames = names
+	} else {
+		c.AgentNames = []string{}
+	}
+	c.MCPUsed = h.loadMCPUsedBatch(r.Context(), []string{c.ID})[c.ID]
 	writeJSON(w, http.StatusOK, c)
 }
 

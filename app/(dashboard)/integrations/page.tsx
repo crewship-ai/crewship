@@ -21,7 +21,21 @@ import { EditIntegrationDialog } from "@/components/features/integrations/edit-i
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import { toast } from "sonner"
+import { Users } from "lucide-react"
 import type { WorkspaceMCPServer } from "@/lib/types/integration"
+
+interface CrewIntegration {
+  id: string
+  crew_id: string
+  crew_name: string
+  crew_slug: string
+  name: string
+  display_name: string
+  transport: string
+  enabled: boolean
+  agent_binding_count: number
+  created_at: string
+}
 
 const TRANSPORT_CONFIG = {
   "streamable-http": { icon: Globe, label: "HTTP", variant: "default" as const },
@@ -33,6 +47,7 @@ export default function IntegrationsPage() {
   const { abilities } = useAbilities()
   const canManage = abilities.can("create", "Credential")
   const [servers, setServers] = React.useState<WorkspaceMCPServer[]>([])
+  const [crewServers, setCrewServers] = React.useState<CrewIntegration[]>([])
   const [loading, setLoading] = React.useState(true)
   const [addOpen, setAddOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
@@ -40,15 +55,15 @@ export default function IntegrationsPage() {
 
   const fetchServers = React.useCallback(async (wid: string) => {
     try {
-      const res = await fetch(`/api/v1/integrations?workspace_id=${wid}`)
-      if (!res.ok) {
-        setServers([])
-        return
-      }
-      const data = await res.json()
-      setServers(Array.isArray(data) ? data : [])
+      const [wsRes, crewRes] = await Promise.all([
+        fetch(`/api/v1/integrations?workspace_id=${wid}`),
+        fetch(`/api/v1/integrations/crews?workspace_id=${wid}`),
+      ])
+      setServers(wsRes.ok ? (await wsRes.json()) ?? [] : [])
+      setCrewServers(crewRes.ok ? (await crewRes.json()) ?? [] : [])
     } catch {
       setServers([])
+      setCrewServers([])
     }
   }, [])
 
@@ -155,7 +170,7 @@ export default function IntegrationsPage() {
         )}
       </PageHeader>
 
-      {servers.length === 0 ? (
+      {servers.length === 0 && crewServers.length === 0 ? (
         <EmptyState
           icon={Plug}
           title="No integrations yet"
@@ -249,6 +264,64 @@ export default function IntegrationsPage() {
             </TableBody>
           </Table>
         </div>
+      )}
+
+      {crewServers.length > 0 && (
+        <>
+          <h3 className="text-sm font-medium text-muted-foreground mt-6">Crew Integrations</h3>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Crew</TableHead>
+                  <TableHead>Transport</TableHead>
+                  <TableHead>Enabled</TableHead>
+                  <TableHead>Created</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {crewServers.map((cs) => {
+                  const tc = TRANSPORT_CONFIG[cs.transport as keyof typeof TRANSPORT_CONFIG] ?? TRANSPORT_CONFIG.stdio
+                  const TIcon = tc.icon
+                  return (
+                    <TableRow key={cs.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Plug className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0">
+                            <p className="font-medium text-sm">{cs.display_name}</p>
+                            <p className="text-label text-muted-foreground font-mono">{cs.name}</p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-label font-normal">
+                          <Users className="mr-1 h-3 w-3" />
+                          {cs.crew_name}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={tc.variant} className="text-label font-normal">
+                          <TIcon className="mr-1 h-3 w-3" />
+                          {tc.label}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={cs.enabled ? "default" : "secondary"} className="text-label">
+                          {cs.enabled ? "Active" : "Disabled"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-muted-foreground">{formatDate(cs.created_at)}</span>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
 
       {workspaceId && (
