@@ -338,7 +338,7 @@ export function OAuthForm({
             size="sm"
             className="h-6 text-[10px] px-2"
             onClick={() => handleProviderSelect(p.key)}
-            disabled={!providersFetched || authorizing}
+            disabled={!providersFetched || authorizing || (providersFetched && !providers[p.key])}
           >
             {p.label}
           </Button>
@@ -458,6 +458,8 @@ export function OAuthForm({
               </p>
               <div className="flex items-center gap-2">
                 <Input
+                  id="oauth-manual-code"
+                  aria-label="Manual authorization code or redirect URL"
                   value={manualCode}
                   onChange={(e) => setManualCode(e.target.value)}
                   placeholder="Paste redirect URL or authorization code"

@@ -275,9 +275,10 @@ var agentMCPCmd = &cobra.Command{
 				var parsed struct {
 					MCPServers map[string]json.RawMessage `json:"mcpServers"`
 				}
-				if json.Unmarshal([]byte(*agent.MCPConfigJSON), &parsed) == nil {
-					agentServers = parsed.MCPServers
+				if err := json.Unmarshal([]byte(*agent.MCPConfigJSON), &parsed); err != nil {
+					return fmt.Errorf("malformed agent MCP config: %w", err)
 				}
+				agentServers = parsed.MCPServers
 			}
 
 			// Merge: agent overrides crew

@@ -263,9 +263,7 @@ export function ServerCard({
                     disabled={readOnly}
                     className="h-7 text-xs font-mono flex-1"
                   />
-                  {/* hasCredentialSupport is computed as `Boolean(workspaceId) && !readOnly`
-                     in MCPConfigEditor, so CredentialPicker is never rendered when readOnly=true. */}
-                  {hasCredentialSupport && workspaceId ? (
+                  {!readOnly && hasCredentialSupport && workspaceId ? (
                     <div className="flex-1">
                       <CredentialPicker
                         envKey={e.key}
