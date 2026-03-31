@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import {
-  Search, BookOpen, ChevronDown, User, HelpCircle, Github, LogOut, Menu, X,
+  Search, BookOpen, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
   LayoutDashboard, Bot, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck,
 } from "lucide-react"
 import { BellIcon as AnimatedBell } from "@/components/ui/bell"
@@ -435,7 +435,7 @@ export function AppToolbar() {
               Documentation
             </DropdownMenuItem>
             <DropdownMenuItem className="gap-3 text-xs">
-              <Github className="h-4 w-4 text-muted-foreground" />
+              <GitBranch className="h-4 w-4 text-muted-foreground" />
               GitHub
             </DropdownMenuItem>
             <DropdownMenuSeparator />

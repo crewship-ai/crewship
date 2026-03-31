@@ -1,6 +1,6 @@
 // Crewship -- Prisma Schema (source of truth)
-// Full spec: .factory/context/prd/DATABASE.md
-// Naming: .factory/context/NAMING.md
+// Full spec: .claude/context/prd/DATABASE.md
+// Naming: .claude/context/NAMING.md
 //
 // Provider: SQLite (single binary mode)
 // The Go server uses its own SQLite migration system (internal/database/).

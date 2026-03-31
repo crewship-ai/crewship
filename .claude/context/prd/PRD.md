@@ -17,7 +17,7 @@
 > a neprepisitelne -- projevuji se v `[CREWSHIP ETHOS]` bloku system promptu kazdeho agenta.
 
 ### Co stavime
-Open-source (FSL licence) platforma pro orchestraci AI agentu prezentovanych jako **"virtualni zamestnanci"**. Cil: umoznit firmam i jednotlivcum vytvorit virtualni oddeleni (obchod, vyvoj, zakaznicka podpora) kde AI agenti plni ulohy autonomne nebo v konverzaci s lidskymi kolegy.
+Open-source (Apache-2.0 licence) platforma pro orchestraci AI agentu prezentovanych jako **"virtualni zamestnanci"**. Cil: umoznit firmam i jednotlivcum vytvorit virtualni oddeleni (obchod, vyvoj, zakaznicka podpora) kde AI agenti plni ulohy autonomne nebo v konverzaci s lidskymi kolegy.
 
 ### Pracovni nazev
 **Crewship** (Crew + Ship + "-ship" suffix -- trojity vyznam).
@@ -39,7 +39,7 @@ Domena: crewship.ai | GitHub: github.com/crewship-ai
 6. **Curated Skills marketplace** -- sandbox enforcement, permissions model, Official/Verified/Community badges.
 7. **3-tier orchestrace** -- Coordinator → Lead → Agent hierarchie (inspirace realnymi firmami).
 8. **Zero-deps Free tier** -- single binary, SQLite, Docker. Zadny cloud, zadna registrace.
-9. **Open-source + self-hosted** -- FSL licence (→ Apache 2.0 po 2 letech).
+9. **Open-source + self-hosted** -- Apache-2.0 licence (core) + proprietary /ee (enterprise features).
 10. **Crewship AI (meta-agent)** -- AI ktery pomaha vytvoret AI crew.
 
 ### Architekturni vzor: inspirace OpenClaw

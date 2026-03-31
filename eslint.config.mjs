@@ -55,7 +55,7 @@ export default [
       "*.config.{js,ts}",
       "public/**",
       "lib/generated/**",
-      ".factory/**",
+      ".claude/**",
       "e2e/**",
     ],
   },
