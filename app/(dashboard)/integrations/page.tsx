@@ -38,8 +38,8 @@ interface CrewIntegration {
 }
 
 const TRANSPORT_CONFIG = {
-  "streamable-http": { icon: Globe, label: "HTTP", variant: "default" as const },
-  stdio: { icon: Terminal, label: "Stdio", variant: "secondary" as const },
+  "streamable-http": { icon: Globe, label: "HTTP" },
+  stdio: { icon: Terminal, label: "Stdio" },
 } as const
 
 export default function IntegrationsPage() {
@@ -218,10 +218,10 @@ export default function IntegrationsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={transportConfig.variant} className="text-label font-normal">
-                        <TransportIcon className="mr-1 h-3 w-3" />
+                      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <TransportIcon className="h-3.5 w-3.5" />
                         {transportConfig.label}
-                      </Badge>
+                      </span>
                     </TableCell>
                     <TableCell>
                       <Switch
@@ -270,10 +270,10 @@ export default function IntegrationsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={tc.variant} className="text-label font-normal">
-                        <TIcon className="mr-1 h-3 w-3" />
+                      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <TIcon className="h-3.5 w-3.5" />
                         {tc.label}
-                      </Badge>
+                      </span>
                     </TableCell>
                     <TableCell>
                       <Switch checked={cs.enabled} disabled aria-label={`${cs.display_name} status`} />
