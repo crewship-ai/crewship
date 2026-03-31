@@ -756,12 +756,13 @@ func TestBuildMCPConfig_Mixed(t *testing.T) {
 
 func TestMcpStdioDomains(t *testing.T) {
 	servers := []MCPServerConfig{
-		{Transport: "stdio", Args: []string{"-y", "@modelcontextprotocol/server-github"}},
-		{Transport: "stdio", Args: []string{"-y", "@anthropic-ai/brave-search-mcp"}},
-		{Transport: "stdio", Args: []string{"-y", "@anthropic-ai/brave-search-mcp@latest"}}, // versioned
-		{Transport: "stdio", Args: []string{"-y", "linear-mcp@^2.0.0"}},                     // unscoped versioned
-		{Transport: "streamable-http", Endpoint: "https://mcp.sentry.dev/mcp"},                // should be ignored
-		{Transport: "stdio", Args: []string{"-y", "unknown-package"}},                         // no match
+		{Transport: "stdio", Command: "npx", Args: []string{"-y", "@modelcontextprotocol/server-github"}},
+		{Transport: "stdio", Command: "npx", Args: []string{"-y", "@anthropic-ai/brave-search-mcp"}},
+		{Transport: "stdio", Command: "npx", Args: []string{"-y", "@anthropic-ai/brave-search-mcp@latest"}}, // versioned
+		{Transport: "stdio", Command: "npx", Args: []string{"-y", "linear-mcp@^2.0.0"}},                     // unscoped versioned
+		{Transport: "streamable-http", Endpoint: "https://mcp.sentry.dev/mcp"},                                // should be ignored
+		{Transport: "stdio", Command: "npx", Args: []string{"-y", "unknown-package"}},                        // no match
+		{Transport: "stdio", Command: "python3", Args: []string{"@stripe/mcp"}},                               // non-launcher, should be ignored
 	}
 	domains := mcpStdioDomains(servers)
 	found := make(map[string]bool)

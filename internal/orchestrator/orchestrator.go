@@ -368,7 +368,10 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		// if it differs (e.g. after a policy change), we must restart the sidecar.
 		needStart := true
 		if health := checkSidecar(ctx, o.container, req.ContainerID); health != nil {
-			if health.NetworkMode == desiredMode {
+			if health.NetworkMode == desiredMode && desiredMode != "restricted" {
+				// In "free" mode we can safely reuse. In "restricted" mode the
+				// domain allowlist may differ between agents (different MCP servers),
+				// so we always restart to pick up the latest set.
 				o.logger.Info("sidecar already running, reusing", "agent_id", req.AgentID, "container_id", req.ContainerID[:min(12, len(req.ContainerID))])
 				needStart = false
 			} else {
@@ -846,19 +849,31 @@ var mcpPackageDomains = map[string][]string{
 
 // mcpStdioDomains extracts API domains for stdio MCP servers by matching
 // their args against known packages.
+// knownPackageLaunchers are commands that take a package name as the next
+// non-flag argument. We only extract domains from these positions to prevent
+// arbitrary args from widening the restricted-mode allowlist.
+var knownPackageLaunchers = map[string]bool{
+	"npx": true, "pnpm": true, "yarn": true, "bunx": true,
+}
+
 func mcpStdioDomains(servers []MCPServerConfig) []string {
 	seen := make(map[string]bool)
 	for _, s := range servers {
-		if s.Transport != "stdio" {
+		if s.Transport != "stdio" || !knownPackageLaunchers[s.Command] {
 			continue
 		}
+		// Find the first non-flag arg — that's the package name.
 		for _, arg := range s.Args {
+			if strings.HasPrefix(arg, "-") {
+				continue // skip flags like -y, --quiet, dlx
+			}
 			pkg := normalizeNPMPackage(arg)
 			if domains, ok := mcpPackageDomains[pkg]; ok {
 				for _, d := range domains {
 					seen[d] = true
 				}
 			}
+			break // only the first non-flag arg is the package
 		}
 	}
 	out := make([]string, 0, len(seen))
