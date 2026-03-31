@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path"
 	"regexp"
 	"strings"
 	"sync"
@@ -846,6 +847,73 @@ func setupMCPConfig(
 	result.Reader.Close()
 
 	logger.Debug("MCP config injected", "container_id", containerID[:min(12, len(containerID))])
+	return nil
+}
+
+// injectMCPOAuthTokens writes tokens.json files into the container for MCP
+// servers that use OAUTH2 credentials.  This allows MCP servers (which expect
+// local token files) to use tokens obtained through Crewship's OAuth flow
+// without requiring the user to re-authenticate inside the container.
+func injectMCPOAuthTokens(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID, agentSlug string,
+	mcpServers []MCPServerConfig,
+	credentials []Credential,
+	logger *slog.Logger,
+) error {
+	// Find OAuth access tokens from synthetic _OAUTH_ACCESS_TOKEN credentials.
+	var accessToken string
+	for _, c := range credentials {
+		if strings.HasPrefix(c.EnvVarName, "_OAUTH_ACCESS_TOKEN:") && c.PlainValue != "" {
+			accessToken = c.PlainValue
+			break
+		}
+	}
+	if accessToken == "" {
+		return nil
+	}
+
+	homeDir := path.Join("/crew/agents", agentSlug)
+
+	// Write tokens.json to each MCP server's config directory.
+	for _, srv := range mcpServers {
+		if srv.Name == "" {
+			continue
+		}
+		// Standard MCP server config dir: ~/.config/<server-name>/tokens.json
+		tokenDir := path.Join(homeDir, ".config", srv.Name)
+		tokenPath := path.Join(tokenDir, "tokens.json")
+
+		// Build tokens.json in the format MCP servers expect.
+		tokensJSON, _ := json.Marshal(map[string]interface{}{
+			"access_token": accessToken,
+			"token_type":   "Bearer",
+			"expiry_date":  9999999999999,
+		})
+
+		tokB64 := base64.StdEncoding.EncodeToString(tokensJSON)
+		script := fmt.Sprintf(
+			"mkdir -p %s && echo '%s' | base64 -d > %s && chmod 600 %s",
+			tokenDir, tokB64, tokenPath, tokenPath,
+		)
+
+		cfg := provider.ExecConfig{
+			ContainerID: containerID,
+			Cmd:         []string{"sh", "-c", script},
+			User:        "1001:1001",
+		}
+		result, err := container.Exec(ctx, cfg)
+		if err != nil {
+			logger.Warn("write MCP OAuth tokens", "server", srv.Name, "error", err)
+			continue
+		}
+		io.Copy(io.Discard, result.Reader)
+		result.Reader.Close()
+
+		logger.Debug("MCP OAuth tokens injected", "server", srv.Name, "token_path", tokenPath)
+	}
+
 	return nil
 }
 

@@ -518,6 +518,13 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID)
 	}
 
+	// Inject OAuth token files for MCP servers that need them.
+	// When Crewship holds access+refresh tokens from OAuth flow, write them
+	// to the location MCP servers expect (e.g. ~/.config/<server>/tokens.json).
+	if err := injectMCPOAuthTokens(ctx, o.container, req.ContainerID, req.AgentSlug, req.MCPServers, req.Credentials, o.logger); err != nil {
+		o.logger.Warn("failed to inject MCP OAuth tokens", "error", err, "agent_id", req.AgentID)
+	}
+
 	// Write CLI-specific system prompt files (e.g. AGENTS.md for OpenCode)
 	if err := setupSystemPromptFiles(ctx, o.container, req.ContainerID, req, workDir, o.logger); err != nil {
 		o.logger.Warn("failed to write system prompt files", "error", err, "agent_id", req.AgentID, "cli_adapter", req.CLIAdapter)

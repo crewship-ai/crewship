@@ -928,6 +928,45 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// For OAUTH2 credentials that were auto-resolved (client_id/secret),
+	// also include the access token so the orchestrator can write tokens.json.
+	// Use a synthetic env var "_OAUTH_ACCESS_TOKEN:<credID>" so the orchestrator
+	// can find it without an actual env var reference.
+	{
+		resolvedOAuthIDs := make(map[string]bool)
+		for _, c := range creds {
+			if c.Type == "OAUTH2" {
+				resolvedOAuthIDs[c.ID] = true
+			}
+		}
+		for credID := range resolvedOAuthIDs {
+			// Check if access token is already in creds
+			hasAccessToken := false
+			for _, c := range creds {
+				if c.ID == credID && !strings.HasSuffix(c.EnvVar, "_CLIENT_ID") && !strings.HasSuffix(c.EnvVar, "_CLIENT_SECRET") {
+					hasAccessToken = true
+					break
+				}
+			}
+			if hasAccessToken {
+				continue
+			}
+			// Fetch and decrypt the access token
+			var encVal string
+			if err := h.db.QueryRowContext(r.Context(),
+				"SELECT encrypted_value FROM credentials WHERE id = ? AND deleted_at IS NULL", credID).Scan(&encVal); err == nil {
+				if dec, err := encryption.Decrypt(encVal); err == nil && dec != "" {
+					creds = append(creds, mcpCredEntry{
+						ID:     credID,
+						EnvVar: "_OAUTH_ACCESS_TOKEN:" + credID,
+						Value:  dec,
+						Type:   "OAUTH2",
+					})
+				}
+			}
+		}
+	}
+
 	resp := map[string]interface{}{
 		"agent_id":        agentID,
 		"agent_slug":      agentSlug,
