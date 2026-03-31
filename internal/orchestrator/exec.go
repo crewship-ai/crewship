@@ -877,12 +877,22 @@ func injectMCPOAuthTokens(
 	homeDir := path.Join("/crew/agents", agentSlug)
 
 	// Write tokens.json to each MCP server's config directory.
+	// MCP servers typically store tokens in ~/.config/<package-name>/tokens.json
+	// where <package-name> is derived from the npm package (last segment of args).
 	for _, srv := range mcpServers {
 		if srv.Name == "" {
 			continue
 		}
-		// Standard MCP server config dir: ~/.config/<server-name>/tokens.json
-		tokenDir := path.Join(homeDir, ".config", srv.Name)
+		// Derive config dir name from npm package args (e.g. "@dguido/google-workspace-mcp" → "google-workspace-mcp")
+		configDirName := srv.Name // fallback to server name
+		for _, arg := range srv.Args {
+			if strings.Contains(arg, "/") || strings.HasPrefix(arg, "@") {
+				// Extract last segment: "@dguido/google-workspace-mcp" → "google-workspace-mcp"
+				parts := strings.Split(arg, "/")
+				configDirName = parts[len(parts)-1]
+			}
+		}
+		tokenDir := path.Join(homeDir, ".config", configDirName)
 		tokenPath := path.Join(tokenDir, "tokens.json")
 
 		// Build tokens.json in the format MCP servers expect.
