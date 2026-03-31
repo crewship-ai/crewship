@@ -59,6 +59,8 @@ export default function IntegrationsPage() {
   const [crewServers, setCrewServers] = React.useState<CrewIntegrationRow[]>([])
   const [crews, setCrews] = React.useState<CrewInfo[]>([])
   const [crewAgents, setCrewAgents] = React.useState<Record<string, AgentInfo[]>>({})
+  // Agent bindings: serverId → Set of bound agentIds
+  const [agentBindings, setAgentBindings] = React.useState<Record<string, Set<string>>>({})
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
   const [templatePopoverOpen, setTemplatePopoverOpen] = React.useState(false)
@@ -99,6 +101,25 @@ export default function IntegrationsPage() {
         }),
       )
       setCrewAgents(agentMap)
+
+      // Fetch agent bindings for each agent in each crew
+      const allAgents = Object.values(agentMap).flat()
+      const bindingsMap: Record<string, Set<string>> = {}
+      await Promise.all(
+        allAgents.map(async (agent) => {
+          const r = await fetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${wid}`)
+          if (r.ok) {
+            const bindings = await r.json()
+            if (Array.isArray(bindings)) {
+              for (const b of bindings) {
+                if (!bindingsMap[b.mcp_server_id]) bindingsMap[b.mcp_server_id] = new Set()
+                bindingsMap[b.mcp_server_id].add(agent.id)
+              }
+            }
+          }
+        }),
+      )
+      setAgentBindings(bindingsMap)
 
       // Build editor JSON
       const entries = data.map((s, i) => crewServerToEntry(s, i))
@@ -453,20 +474,65 @@ export default function IntegrationsPage() {
                           </div>
                         )}
 
-                        {/* Agent list */}
-                        {agents.length > 0 && (
+                        {/* Agent assignment */}
+                        {agents.length > 0 && server && (
                           <div className="space-y-2">
-                            <Label className="text-xs">Agents in this crew</Label>
+                            <Label className="text-xs">Agent access</Label>
                             <div className="flex flex-wrap gap-1.5">
-                              {agents.map((a) => (
-                                <Badge key={a.id} variant="secondary" className="text-xs font-normal gap-1">
-                                  <Bot className="h-3 w-3" />
-                                  {a.name}
-                                </Badge>
-                              ))}
+                              {agents.map((a) => {
+                                const bound = agentBindings[server.id]?.has(a.id) ?? false
+                                const hasAnyBindings = (agentBindings[server.id]?.size ?? 0) > 0
+                                // If no explicit bindings exist, all agents have access (crew-level default)
+                                const hasAccess = hasAnyBindings ? bound : true
+                                return (
+                                  <button
+                                    key={a.id}
+                                    type="button"
+                                    className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                                      hasAccess
+                                        ? "bg-primary/10 border-primary/30 text-primary"
+                                        : "bg-muted/30 border-border text-muted-foreground"
+                                    }`}
+                                    onClick={async () => {
+                                      if (!workspaceId || !canManage) return
+                                      if (hasAccess && hasAnyBindings) {
+                                        // Remove binding — find binding id first
+                                        const r = await fetch(`/api/v1/agents/${a.id}/integrations?workspace_id=${workspaceId}`)
+                                        if (r.ok) {
+                                          const bindings = await r.json()
+                                          const binding = bindings?.find((b: { mcp_server_id: string }) => b.mcp_server_id === server.id)
+                                          if (binding) {
+                                            await fetch(`/api/v1/agents/${a.id}/integrations/${binding.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+                                          }
+                                        }
+                                      } else {
+                                        // Create binding
+                                        await fetch(`/api/v1/agents/${a.id}/integrations?workspace_id=${workspaceId}`, {
+                                          method: "POST",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({
+                                            mcp_server_id: server.id,
+                                            mcp_server_scope: "crew",
+                                            enabled: true,
+                                          }),
+                                        })
+                                      }
+                                      fetchAll(workspaceId)
+                                    }}
+                                    disabled={!canManage}
+                                    title={hasAccess ? `Remove ${a.name} access` : `Grant ${a.name} access`}
+                                  >
+                                    {hasAccess && <Check className="h-3 w-3" />}
+                                    <Bot className="h-3 w-3" />
+                                    {a.name}
+                                  </button>
+                                )
+                              })}
                             </div>
                             <p className="text-xs text-muted-foreground">
-                              All agents in the crew have access to this integration.
+                              {(agentBindings[server.id]?.size ?? 0) > 0
+                                ? "Only selected agents have access. Click to toggle."
+                                : "All agents in the crew have access. Click an agent to restrict."}
                             </p>
                           </div>
                         )}
