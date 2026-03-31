@@ -1,12 +1,20 @@
 "use client"
 
 import * as React from "react"
-import { Plug, Plus, Globe, Terminal, Users, ChevronRight, ChevronDown, Bot } from "lucide-react"
+import { Plug, Plus, Globe, Terminal, Users, ChevronRight, ChevronDown, Bot, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Badge } from "@/components/ui/badge"
+import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Popover,
   PopoverContent,
@@ -396,29 +404,79 @@ export default function IntegrationsPage() {
                   {/* Expanded panel */}
                   {isExpanded && (
                     <div className="bg-muted/20 border-t px-6 py-5 space-y-4">
-                      {/* Agent & crew info */}
-                      {(agents.length > 0 || crewName) && (
-                        <div className="flex flex-wrap gap-4 text-sm">
-                          {crewName && (
-                            <div>
-                              <span className="text-xs text-muted-foreground">Crew:</span>{" "}
-                              <span className="font-medium">{crewName}</span>
-                            </div>
-                          )}
-                          {agents.length > 0 && (
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs text-muted-foreground">Agents:</span>
-                              <div className="flex flex-wrap gap-1">
-                                {agents.map((a) => (
-                                  <Badge key={a.id} variant="secondary" className="text-xs font-normal">
-                                    {a.name}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                      {/* Scope & Assignment */}
+                      <div className="rounded-md border bg-background p-4 space-y-4">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <Users className="h-4 w-4 text-muted-foreground" />
+                          Scope & Assignment
                         </div>
-                      )}
+
+                        {/* Crew selector */}
+                        {server && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">Assigned to crew</Label>
+                              <Select
+                                value={server.crew_id}
+                                onValueChange={async (newCrewId) => {
+                                  if (!workspaceId || !server || newCrewId === server.crew_id) return
+                                  // Move: delete from old crew, create on new crew
+                                  const payload = entryToPayload(entry)
+                                  const delRes = await fetch(`/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+                                  if (!delRes.ok) { toast.error("Failed to move integration"); return }
+                                  const createRes = await fetch(`/api/v1/crews/${newCrewId}/integrations?workspace_id=${workspaceId}`, {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify(payload),
+                                  })
+                                  if (createRes.ok) {
+                                    toast.success("Integration moved")
+                                    setExpandedIdx(null)
+                                    fetchAll(workspaceId)
+                                  } else {
+                                    toast.error("Failed to create on new crew")
+                                  }
+                                }}
+                              >
+                                <SelectTrigger className="h-8 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {crews.map((c) => (
+                                    <SelectItem key={c.id} value={c.id}>
+                                      {c.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Agent list */}
+                        {agents.length > 0 && (
+                          <div className="space-y-2">
+                            <Label className="text-xs">Agents in this crew</Label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {agents.map((a) => (
+                                <Badge key={a.id} variant="secondary" className="text-xs font-normal gap-1">
+                                  <Bot className="h-3 w-3" />
+                                  {a.name}
+                                </Badge>
+                              ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              All agents in the crew have access to this integration.
+                            </p>
+                          </div>
+                        )}
+
+                        {isNew && crews.length > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            Save the integration first, then assign it to a crew.
+                          </p>
+                        )}
+                      </div>
 
                       {/* MCPConfigEditor for just this one entry */}
                       <MCPConfigEditor
