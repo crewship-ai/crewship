@@ -1571,7 +1571,9 @@ func autoResolveMCPCredentials(
 	for _, envVar := range missing {
 		prefix := strings.ToLower(strings.ReplaceAll(envVar, "_", "-"))
 		row := db.QueryRowContext(ctx, `
-			SELECT id, encrypted_value, type
+			SELECT id, encrypted_value, type,
+				oauth_client_id, oauth_client_secret_enc, oauth_token_url,
+				oauth_refresh_token_enc, oauth_token_expires_at
 			FROM credentials
 			WHERE workspace_id = ? AND name LIKE ? AND deleted_at IS NULL
 			  AND status != 'REVOKED'
@@ -1579,11 +1581,20 @@ func autoResolveMCPCredentials(
 		`, workspaceID, prefix+"%")
 
 		var id, encValue, credType string
-		if err := row.Scan(&id, &encValue, &credType); err != nil {
+		var oaClientID, oaSecretEnc, oaTokenURL, oaRefreshEnc, oaExpiresAt sql.NullString
+		if err := row.Scan(&id, &encValue, &credType,
+			&oaClientID, &oaSecretEnc, &oaTokenURL, &oaRefreshEnc, &oaExpiresAt); err != nil {
 			if !errors.Is(err, sql.ErrNoRows) {
 				logger.Warn("auto-resolve MCP credential", "env_var", envVar, "error", err)
 			}
 			continue
+		}
+
+		// For OAUTH2 credentials, check token freshness and refresh if needed.
+		if credType == "OAUTH2" && oaRefreshEnc.Valid && oaRefreshEnc.String != "" && oaTokenURL.Valid {
+			encValue = ensureFreshOAuthToken(ctx, db, logger, id, encValue,
+				oaClientID.String, oaSecretEnc.String, oaTokenURL.String,
+				oaRefreshEnc.String, oaExpiresAt.String)
 		}
 
 		dec, err := encryption.Decrypt(encValue)
@@ -1632,4 +1643,73 @@ func collectMCPEnvVarRefs(configs ...string) map[string]bool {
 		}
 	}
 	return refs
+}
+
+// ensureFreshOAuthToken checks whether an OAUTH2 credential's access token is
+// about to expire and refreshes it if needed.  Returns the (possibly updated)
+// encrypted access token value.
+func ensureFreshOAuthToken(
+	ctx context.Context,
+	db *sql.DB,
+	logger *slog.Logger,
+	credID string,
+	currentEncValue string,
+	clientID, clientSecretEnc, tokenURL, refreshTokenEnc, expiresAt string,
+) string {
+	// Check if token expires within the next 5 minutes.
+	if expiresAt != "" {
+		expiry, err := time.Parse(time.RFC3339, expiresAt)
+		if err == nil && time.Until(expiry) > 5*time.Minute {
+			return currentEncValue // Still fresh.
+		}
+	}
+
+	// Decrypt client secret and refresh token.
+	clientSecret, err := encryption.Decrypt(clientSecretEnc)
+	if err != nil {
+		logger.Warn("decrypt client secret for token refresh", "credential_id", credID, "error", err)
+		return currentEncValue
+	}
+	refreshToken, err := encryption.Decrypt(refreshTokenEnc)
+	if err != nil {
+		logger.Warn("decrypt refresh token", "credential_id", credID, "error", err)
+		return currentEncValue
+	}
+
+	// Call the token endpoint.
+	tokenResp, err := refreshOAuthToken(tokenURL, clientID, clientSecret, refreshToken)
+	if err != nil {
+		logger.Warn("refresh OAuth token before exec", "credential_id", credID, "error", err)
+		return currentEncValue
+	}
+
+	// Encrypt and persist the new access token.
+	newEnc, err := encryption.Encrypt(tokenResp.AccessToken)
+	if err != nil {
+		logger.Warn("encrypt refreshed token", "credential_id", credID, "error", err)
+		return currentEncValue
+	}
+
+	newExpiry := time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
+
+	// Update refresh token only if a new one was issued.
+	if tokenResp.RefreshToken != "" && tokenResp.RefreshToken != refreshToken {
+		newRefreshEnc, err := encryption.Encrypt(tokenResp.RefreshToken)
+		if err == nil {
+			_, _ = db.ExecContext(ctx, `
+				UPDATE credentials SET
+					encrypted_value = ?, oauth_token_expires_at = ?,
+					oauth_refresh_token_enc = ?, status = 'ACTIVE', updated_at = datetime('now')
+				WHERE id = ?`, newEnc, newExpiry, newRefreshEnc, credID)
+		}
+	} else {
+		_, _ = db.ExecContext(ctx, `
+			UPDATE credentials SET
+				encrypted_value = ?, oauth_token_expires_at = ?,
+				status = 'ACTIVE', updated_at = datetime('now')
+			WHERE id = ?`, newEnc, newExpiry, credID)
+	}
+
+	logger.Info("refreshed OAuth token before agent exec", "credential_id", credID, "new_expiry", newExpiry)
+	return newEnc
 }
