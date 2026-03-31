@@ -39,6 +39,8 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { toast } from "sonner"
 import { MCP_TEMPLATES, TEMPLATE_ICONS } from "@/components/features/mcp/templates"
 import type { MCPTemplate } from "@/components/features/mcp/types"
+import { CredentialPicker } from "@/components/features/mcp/components/credential-picker"
+import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -629,6 +631,7 @@ export default function IntegrationsPage() {
                     agentBindings={agentBindings}
                     confirmDeleteId={confirmDeleteId}
                     canManage={canManage}
+                    workspaceId={workspaceId}
                     onPatch={(fields) => patchServer(server, fields)}
                     onCrewMove={(newCrewId) => handleCrewMove(server, newCrewId)}
                     onAgentToggle={(agent, hasAccess, hasAny) =>
@@ -658,6 +661,7 @@ function ExpandedPanel({
   agentBindings,
   confirmDeleteId,
   canManage,
+  workspaceId,
   onPatch,
   onCrewMove,
   onAgentToggle,
@@ -670,12 +674,17 @@ function ExpandedPanel({
   agentBindings: Record<string, Set<string>>
   confirmDeleteId: string | null
   canManage: boolean
+  workspaceId: string | null
   onPatch: (fields: Record<string, unknown>) => Promise<void>
   onCrewMove: (newCrewId: string) => Promise<void>
   onAgentToggle: (agent: AgentInfo, hasAccess: boolean, hasAny: boolean) => Promise<void>
   onDelete: () => Promise<void>
   onConfirmDeleteChange: (v: boolean) => void
 }) {
+  const { credentials, loading: credLoading, fetchCredentials, addCredential } = useCredentials(
+    canManage ? (workspaceId ?? undefined) : undefined,
+  )
+
   // Local state for inputs (save on blur)
   const [name, setName] = React.useState(server.name)
   const [displayName, setDisplayName] = React.useState(server.display_name || "")
@@ -972,15 +981,35 @@ function ExpandedPanel({
                   aria-label={`Environment variable key ${idx + 1}`}
                 />
                 <span className="text-xs text-muted-foreground">=</span>
-                <Input
-                  className="h-8 text-xs font-mono flex-1"
-                  placeholder="value"
-                  value={env.value}
-                  onChange={(e) => updateEnvVar(idx, "value", e.target.value)}
-                  onBlur={handleEnvBlur}
-                  readOnly={!canManage}
-                  aria-label={`Environment variable value ${idx + 1}`}
-                />
+                {canManage && workspaceId ? (
+                  <div className="flex-1">
+                    <CredentialPicker
+                      envKey={env.key}
+                      envValue={env.value}
+                      credentials={credentials}
+                      credLoading={credLoading}
+                      workspaceId={workspaceId}
+                      onFetchCredentials={fetchCredentials}
+                      onAddCredential={addCredential}
+                      onChangeValue={(val) => {
+                        updateEnvVar(idx, "value", val)
+                        // Save immediately after credential selection
+                        const updated = envVars.map((e, i) => (i === idx ? { ...e, value: val } : e))
+                        onPatch({ env_json: serializeEnv(updated) })
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <Input
+                    className="h-8 text-xs font-mono flex-1"
+                    placeholder="value"
+                    value={env.value}
+                    onChange={(e) => updateEnvVar(idx, "value", e.target.value)}
+                    onBlur={handleEnvBlur}
+                    readOnly
+                    aria-label={`Environment variable value ${idx + 1}`}
+                  />
+                )}
                 {canManage && (
                   <Button
                     variant="ghost"
