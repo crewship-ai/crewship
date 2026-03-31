@@ -210,7 +210,7 @@ func ensureFreshOAuthToken(
 	}
 
 	// Call the token endpoint.
-	tokenResp, err := refreshOAuthToken(tokenURL, clientID, clientSecret, refreshToken)
+	tokenResp, err := refreshOAuthToken(ctx, tokenURL, clientID, clientSecret, refreshToken)
 	if err != nil {
 		logger.Warn("refresh OAuth token before exec", "credential_id", credID, "error", err)
 		return currentEncValue

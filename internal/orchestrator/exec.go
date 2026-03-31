@@ -894,10 +894,11 @@ func injectMCPOAuthTokens(
 	credForServer := make(map[string]string) // serverName → credID
 	for _, c := range credentials {
 		if c.Type == "OAUTH2" && !strings.HasPrefix(c.EnvVarName, "_OAUTH_ACCESS_TOKEN:") {
-			// This is a CLIENT_ID or CLIENT_SECRET ref — find which server uses it
+			// This is a CLIENT_ID or CLIENT_SECRET ref — find which server uses it.
+			// Match only exact env var references: "${ENV_VAR_NAME}" or literal "ENV_VAR_NAME".
 			for _, srv := range mcpServers {
 				for _, v := range srv.Env {
-					if strings.Contains(v, c.EnvVarName) || strings.HasPrefix(v, "${") {
+					if v == c.EnvVarName || v == "${"+c.EnvVarName+"}" {
 						credForServer[srv.Name] = c.ID
 					}
 				}
@@ -917,11 +918,10 @@ func injectMCPOAuthTokens(
 		if credID, ok := credForServer[srv.Name]; ok {
 			accessToken = oauthTokens[credID]
 		}
-		// Fallback: if no server-specific mapping, use any available token.
-		if accessToken == "" {
+		// Fallback: only use an unambiguous token when exactly one OAuth credential exists.
+		if accessToken == "" && len(oauthTokens) == 1 {
 			for _, tok := range oauthTokens {
 				accessToken = tok
-				break
 			}
 		}
 		if accessToken == "" {
@@ -929,21 +929,22 @@ func injectMCPOAuthTokens(
 		}
 
 		// Derive config dir name from npm package args.
-		configDirName := srv.Name
+		configDirName := sanitizeMCPName(srv.Name)
 		for _, arg := range srv.Args {
 			if strings.Contains(arg, "/") || strings.HasPrefix(arg, "@") {
 				parts := strings.Split(arg, "/")
-				configDirName = parts[len(parts)-1]
+				configDirName = sanitizeMCPName(parts[len(parts)-1])
 			}
 		}
 
 		// Write tokens to BOTH the package-name dir and the server-name dir,
 		// since different MCP servers look in different locations.
+		srvNameSafe := sanitizeMCPName(srv.Name)
 		tokenPaths := []string{
 			path.Join(homeDir, ".config", configDirName, "tokens.json"),
 		}
-		if configDirName != srv.Name {
-			tokenPaths = append(tokenPaths, path.Join(homeDir, ".config", srv.Name, "tokens.json"))
+		if configDirName != srvNameSafe {
+			tokenPaths = append(tokenPaths, path.Join(homeDir, ".config", srvNameSafe, "tokens.json"))
 		}
 
 		// Standard OAuth token file format — compatible with most MCP servers.
@@ -957,9 +958,10 @@ func injectMCPOAuthTokens(
 
 		for _, tp := range tokenPaths {
 			dir := path.Dir(tp)
+			// Use shell-safe quoting to prevent injection via crafted server names.
 			script := fmt.Sprintf(
-				"mkdir -p %s && echo '%s' | base64 -d > %s && chmod 600 %s",
-				dir, tokB64, tp, tp,
+				"mkdir -p '%s' && printf '%%s' '%s' | base64 -d > '%s' && chmod 600 '%s'",
+				shellEscape(dir), tokB64, shellEscape(tp), shellEscape(tp),
 			)
 			cfg := provider.ExecConfig{
 				ContainerID: containerID,
@@ -978,6 +980,25 @@ func injectMCPOAuthTokens(
 	}
 
 	return nil
+}
+
+// sanitizeMCPName restricts a server or package name to a safe basename,
+// preventing path traversal and shell metacharacter injection.
+func sanitizeMCPName(name string) string {
+	// Take only the last path component.
+	name = path.Base(name)
+	// Remove any characters that aren't alphanumeric, dash, underscore, dot, or @.
+	safe := regexp.MustCompile(`[^a-zA-Z0-9._@-]`).ReplaceAllString(name, "")
+	if safe == "" || safe == "." || safe == ".." {
+		safe = "mcp-server"
+	}
+	return safe
+}
+
+// shellEscape replaces single quotes in a string so it can be safely used
+// inside single-quoted shell arguments.
+func shellEscape(s string) string {
+	return strings.ReplaceAll(s, "'", "'\"'\"'")
 }
 
 // mergeMCPConfigs merges crew-level and agent-level .mcp.json configs.

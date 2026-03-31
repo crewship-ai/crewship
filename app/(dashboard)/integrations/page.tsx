@@ -382,17 +382,7 @@ export default function IntegrationsPage() {
     const serverName = server.name
 
     try {
-      // Delete from old crew
-      const delRes = await fetch(
-        `/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`,
-        { method: "DELETE" },
-      )
-      if (!delRes.ok) {
-        toast.error("Failed to move integration")
-        return
-      }
-
-      // Create on new crew
+      // Create on new crew FIRST (safe: if this fails, nothing was deleted)
       const payload = {
         name: server.name,
         display_name: server.display_name,
@@ -417,15 +407,19 @@ export default function IntegrationsPage() {
         return
       }
 
+      // Delete from old crew only after successful create
+      const delRes = await fetch(
+        `/api/v1/crews/${server.crew_id}/integrations/${server.id}?workspace_id=${workspaceId}`,
+        { method: "DELETE" },
+      )
+      if (!delRes.ok) {
+        toast.error("Moved but failed to remove from old crew")
+      }
+
       toast.success("Integration moved")
       await fetchAll(workspaceId)
 
       // Find the new server by name to keep panel open
-      setExpandedId((prev) => {
-        // Will be resolved after fetchAll; use a workaround via effect
-        return prev
-      })
-      // Re-fetch to find new ID
       const refetchRes = await fetch(
         `/api/v1/integrations/crews?workspace_id=${workspaceId}`,
       )

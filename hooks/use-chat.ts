@@ -7,7 +7,7 @@ import { useWebSocket, type WSStatus } from "@/hooks/use-websocket"
  *  Fall back to a simple Math.random-based UUID when needed. */
 function uuid(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return uuid()
+    return crypto.randomUUID()
   }
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0
