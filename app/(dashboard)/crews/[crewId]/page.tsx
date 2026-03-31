@@ -21,6 +21,7 @@ import { CrewStandup } from "@/components/features/crews/crew-standup"
 import { CrewDangerZone } from "@/components/features/crews/crew-danger-zone"
 import { CrewNetworkPolicy } from "@/components/features/crews/crew-network-policy"
 import { CrewContainerConfig } from "@/components/features/crews/crew-container-config"
+import { CrewMCPConfig } from "@/components/features/crews/crew-mcp-config"
 import { AvatarPicker } from "@/components/avatar-picker"
 import { AVATAR_STYLES } from "@/lib/agent-avatar"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -252,6 +253,11 @@ export default function CrewDetailPage() {
         canEdit={canEdit}
         onSave={handleNetworkSave}
       />
+
+      {/* MCP Server Configuration */}
+      {canEdit && workspaceId && (
+        <CrewMCPConfig crewId={crew.id} workspaceId={workspaceId} />
+      )}
 
       {/* Advanced — Container Config */}
       {canEdit && (

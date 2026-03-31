@@ -47,7 +47,9 @@ type AgentRunRequest struct {
 	MemoryMB        int
 	CPUs            float64
 	TTLHours        int
-	MCPServers      []MCPServerConfig // Resolved MCP server configs for this agent
+	MCPServers         []MCPServerConfig // Resolved MCP server configs for this agent
+	CrewMCPConfigJSON  string            // Raw crew .mcp.json (merged with agent's at runtime)
+	AgentMCPConfigJSON string            // Raw agent .mcp.json additions
 }
 
 // MCPServerConfig is a resolved MCP server ready for sidecar injection.
@@ -389,6 +391,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			}
 		}
 		o.logger.Info("sidecar ready", "agent_id", req.AgentID, "credentials", credCount)
+
+		// MCP servers configured via .mcp.json use ${ENV_VAR} references that
+		// Claude Code expands from the process environment. With sidecar enabled
+		// credentials normally skip env vars (they go via stdin instead), but
+		// MCP env references still need the actual values in the exec env.
+		env = injectMCPCredentialEnvVars(req, env)
 	} else {
 		env = BuildEnvVars(req, cred)
 	}
@@ -496,6 +504,18 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// also available as files in /secrets/{agent-slug}/ for CLI tools.
 	if err := setupClaudeConfig(ctx, o.container, req.ContainerID, req.AgentSlug, o.logger); err != nil {
 		o.logger.Warn("failed to inject claude config", "error", err, "agent_id", req.AgentID)
+	}
+
+	// Write MCP server configuration file.
+	// Primary path: merge crew + agent raw .mcp.json configs (new simplified model).
+	// Fallback: build from resolved MCPServerConfig entries (legacy per-binding model).
+	if err := setupMCPConfig(ctx, o.container, req.ContainerID, req.AgentSlug, req.CrewMCPConfigJSON, req.AgentMCPConfigJSON, req.MCPServers, o.logger); err != nil {
+		hasMCP := req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" || len(req.MCPServers) > 0
+		if hasMCP {
+			o.updateRunStatus(ctx, runState.ID, "error")
+			return fmt.Errorf("inject MCP config: %w", err)
+		}
+		o.logger.Warn("failed to inject MCP config", "error", err, "agent_id", req.AgentID)
 	}
 
 	// Write CLI-specific system prompt files (e.g. AGENTS.md for OpenCode)

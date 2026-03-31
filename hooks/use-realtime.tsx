@@ -51,7 +51,9 @@ const RealtimeContext = createContext<RealtimeContextValue | null>(null)
 
 function getWsUrl(): string {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL
-  if (typeof window === "undefined") return "ws://localhost:8080/ws"
+  // During SSR window is undefined — return empty string so useWebSocket
+  // skips connecting. The client-side re-render will compute the real URL.
+  if (typeof window === "undefined") return ""
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
   const goPort = process.env.NEXT_PUBLIC_GO_PORT ?? "8080"
   const devPorts = ["3001", "3011", "3012", "3013", "3014", "3015"]

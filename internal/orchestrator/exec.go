@@ -53,6 +53,10 @@ func BuildCLICommand(req AgentRunRequest) []string {
 		if req.ToolProfile == "MINIMAL" {
 			cmd = append(cmd, "--tools", "Read,Search,Grep")
 		}
+		// Inject MCP server configuration via file (Claude Code reads --mcp-config from files)
+		if len(req.MCPServers) > 0 || req.CrewMCPConfigJSON != "" || req.AgentMCPConfigJSON != "" {
+			cmd = append(cmd, "--mcp-config", fmt.Sprintf("/crew/agents/%s/.mcp.json", req.AgentSlug))
+		}
 		// Use -- separator to prevent variadic flags (--tools) from consuming the user message
 		cmd = append(cmd, "--", req.UserMessage)
 		return cmd
@@ -82,6 +86,83 @@ func BuildCLICommand(req AgentRunRequest) []string {
 	default:
 		return []string{"claude", "--print", req.UserMessage}
 	}
+}
+
+// buildMCPConfig converts resolved MCP server configs into Claude Code's --mcp-config JSON format.
+// Supports both HTTP (remote) and stdio (local npm/pip) MCP servers.
+func buildMCPConfig(servers []MCPServerConfig) (string, error) {
+	if len(servers) == 0 {
+		return "", nil
+	}
+	mcpConfig := make(map[string]map[string]interface{})
+	for _, s := range servers {
+		switch s.Transport {
+		case "streamable-http", "http":
+			if s.Endpoint == "" {
+				continue
+			}
+			entry := map[string]interface{}{
+				"type": "http",
+				"url":  s.Endpoint,
+			}
+			if s.Credential != nil && s.Credential.PlainValue != "" {
+				headers := map[string]string{}
+				switch s.Credential.Type {
+				case "bearer":
+					headers["Authorization"] = "Bearer " + s.Credential.PlainValue
+				case "api_key":
+					header := s.Credential.Header
+					if header == "" {
+						header = "X-API-Key"
+					}
+					headers[header] = s.Credential.PlainValue
+				case "basic":
+					headers["Authorization"] = "Basic " + base64.StdEncoding.EncodeToString([]byte(s.Credential.PlainValue))
+				}
+				if len(headers) > 0 {
+					entry["headers"] = headers
+				}
+			}
+			mcpConfig[s.Name] = entry
+		case "stdio":
+			if s.Command == "" {
+				continue
+			}
+			entry := map[string]interface{}{
+				"type":    "stdio",
+				"command": s.Command,
+			}
+			if len(s.Args) > 0 {
+				entry["args"] = s.Args
+			}
+			env := make(map[string]string)
+			for k, v := range s.Env {
+				env[k] = v
+			}
+			// Inject credential as env var for stdio servers
+			if s.Credential != nil && s.Credential.PlainValue != "" {
+				envVar := s.Credential.Header // reuse Header field as env var name for stdio
+				if envVar == "" {
+					envVar = "MCP_TOKEN"
+				}
+				env[envVar] = s.Credential.PlainValue
+			}
+			if len(env) > 0 {
+				entry["env"] = env
+			}
+			mcpConfig[s.Name] = entry
+		}
+	}
+	if len(mcpConfig) == 0 {
+		return "", nil
+	}
+	// Claude Code expects {"mcpServers": {...}} wrapper
+	wrapper := map[string]interface{}{"mcpServers": mcpConfig}
+	b, err := json.Marshal(wrapper)
+	if err != nil {
+		return "", fmt.Errorf("marshal MCP config: %w", err)
+	}
+	return string(b), nil
 }
 
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
@@ -119,6 +200,71 @@ func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	}
 
 	return env
+}
+
+// injectMCPCredentialEnvVars ensures that credentials referenced as ${ENV_VAR}
+// in MCP .mcp.json configs are available as env vars in the agent exec.
+// This is needed because sidecar mode skips BuildEnvVars (credentials go via
+// stdin), but MCP servers need actual env vars for ${VAR} expansion.
+func injectMCPCredentialEnvVars(req AgentRunRequest, env []string) []string {
+	// Collect env var names referenced in crew/agent MCP configs
+	mcpEnvRefs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
+	if len(mcpEnvRefs) == 0 {
+		return env
+	}
+
+	// Build set of already-set env var names
+	existing := make(map[string]bool)
+	for _, e := range env {
+		if idx := strings.IndexByte(e, '='); idx > 0 {
+			existing[e[:idx]] = true
+		}
+	}
+
+	// Match credentials to MCP env var references
+	for _, cred := range req.Credentials {
+		if cred.EnvVarName == "" || cred.PlainValue == "" {
+			continue
+		}
+		if _, needed := mcpEnvRefs[cred.EnvVarName]; !needed {
+			continue
+		}
+		if existing[cred.EnvVarName] {
+			continue
+		}
+		env = append(env, cred.EnvVarName+"="+cred.PlainValue)
+		existing[cred.EnvVarName] = true
+	}
+
+	return env
+}
+
+// collectMCPEnvRefs parses MCP config JSONs and returns env var names
+// referenced as ${VAR} in the "env" blocks of server definitions.
+func collectMCPEnvRefs(configs ...string) map[string]bool {
+	refs := make(map[string]bool)
+	for _, cfg := range configs {
+		if cfg == "" {
+			continue
+		}
+		var wrapper struct {
+			MCPServers map[string]struct {
+				Env map[string]string `json:"env"`
+			} `json:"mcpServers"`
+		}
+		if err := json.Unmarshal([]byte(cfg), &wrapper); err != nil {
+			continue
+		}
+		for _, srv := range wrapper.MCPServers {
+			for _, val := range srv.Env {
+				// Match ${VAR_NAME} pattern
+				if len(val) > 3 && val[0] == '$' && val[1] == '{' && val[len(val)-1] == '}' {
+					refs[val[2:len(val)-1]] = true
+				}
+			}
+		}
+	}
+	return refs
 }
 
 // BuildEnvVarsSidecar builds env vars for the agent when sidecar mode is active.
@@ -635,6 +781,115 @@ chmod 600 %s/.claude.json`, homeDir, homeDir, homeDir)
 
 	logger.Debug("claude config injected (no credentials on disk)", "container_id", containerID[:min(12, len(containerID))])
 	return nil
+}
+
+// setupMCPConfig writes the MCP server configuration file into the container
+// so Claude Code can discover external tools via --mcp-config flag.
+//
+// Primary path: merge crew + agent raw .mcp.json configs. Credentials stay as
+// ${VAR} references — Claude Code expands them from the container env vars.
+//
+// Fallback path: build from resolved MCPServerConfig entries (legacy per-binding model
+// where credentials are decrypted and injected into the JSON).
+func setupMCPConfig(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	agentSlug string,
+	crewMCPJSON string,
+	agentMCPJSON string,
+	servers []MCPServerConfig,
+	logger *slog.Logger,
+) error {
+	var mcpJSON string
+
+	// Primary path: raw JSON configs from crew/agent DB fields
+	if crewMCPJSON != "" || agentMCPJSON != "" {
+		merged, err := mergeMCPConfigs(crewMCPJSON, agentMCPJSON)
+		if err != nil {
+			return fmt.Errorf("merge MCP configs: %w", err)
+		}
+		mcpJSON = merged
+	}
+
+	// Fallback: legacy per-binding model
+	if mcpJSON == "" && len(servers) > 0 {
+		var err error
+		mcpJSON, err = buildMCPConfig(servers)
+		if err != nil {
+			return fmt.Errorf("build MCP config: %w", err)
+		}
+	}
+
+	if mcpJSON == "" {
+		return nil
+	}
+
+	homeDir := fmt.Sprintf("/crew/agents/%s", agentSlug)
+	// Write config file (600 perms, owned by agent user).
+	// Use base64 encoding to prevent shell injection if mcpJSON contains
+	// the heredoc delimiter or other special characters.
+	mcpB64 := base64.StdEncoding.EncodeToString([]byte(mcpJSON))
+	script := fmt.Sprintf("echo '%s' | base64 -d > %s/.mcp.json && chmod 600 %s/.mcp.json",
+		mcpB64, homeDir, homeDir)
+
+	cfg := provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", script},
+		User:        "1001:1001",
+	}
+	result, err := container.Exec(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("write MCP config: %w", err)
+	}
+	io.Copy(io.Discard, result.Reader)
+	result.Reader.Close()
+
+	logger.Debug("MCP config injected", "container_id", containerID[:min(12, len(containerID))])
+	return nil
+}
+
+// mergeMCPConfigs merges crew-level and agent-level .mcp.json configs.
+// Agent servers with the same name override crew servers; different names are combined.
+func mergeMCPConfigs(crewJSON, agentJSON string) (string, error) {
+	type mcpConfigWrapper struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+
+	merged := make(map[string]json.RawMessage)
+
+	// Parse crew config (base layer)
+	if crewJSON != "" {
+		var crew mcpConfigWrapper
+		if err := json.Unmarshal([]byte(crewJSON), &crew); err != nil {
+			return "", fmt.Errorf("parse crew MCP config: %w", err)
+		}
+		for k, v := range crew.MCPServers {
+			merged[k] = v
+		}
+	}
+
+	// Parse agent config (override layer — same-name servers win)
+	if agentJSON != "" {
+		var agent mcpConfigWrapper
+		if err := json.Unmarshal([]byte(agentJSON), &agent); err != nil {
+			return "", fmt.Errorf("parse agent MCP config: %w", err)
+		}
+		for k, v := range agent.MCPServers {
+			merged[k] = v
+		}
+	}
+
+	if len(merged) == 0 {
+		return "", nil
+	}
+
+	wrapper := map[string]interface{}{"mcpServers": merged}
+	b, err := json.Marshal(wrapper)
+	if err != nil {
+		return "", fmt.Errorf("marshal merged MCP config: %w", err)
+	}
+	return string(b), nil
 }
 
 // setupSystemPromptFiles writes CLI-specific system prompt files into the container.
