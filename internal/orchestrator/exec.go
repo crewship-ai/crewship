@@ -867,6 +867,9 @@ func setupMCPConfig(
 // servers that use OAUTH2 credentials.  This allows MCP servers (which expect
 // local token files) to use tokens obtained through Crewship's OAuth flow
 // without requiring the user to re-authenticate inside the container.
+//
+// Supports multiple OAuth MCP servers — each gets its own token from the
+// matching _OAUTH_ACCESS_TOKEN:<credID> credential.
 func injectMCPOAuthTokens(
 	ctx context.Context,
 	container provider.ContainerProvider,
@@ -875,40 +878,75 @@ func injectMCPOAuthTokens(
 	credentials []Credential,
 	logger *slog.Logger,
 ) error {
-	// Find OAuth access tokens from synthetic _OAUTH_ACCESS_TOKEN credentials.
-	var accessToken string
+	// Group OAuth access tokens by credential ID.
+	oauthTokens := make(map[string]string) // credID → plaintext access token
 	for _, c := range credentials {
 		if strings.HasPrefix(c.EnvVarName, "_OAUTH_ACCESS_TOKEN:") && c.PlainValue != "" {
-			accessToken = c.PlainValue
-			break
+			credID := strings.TrimPrefix(c.EnvVarName, "_OAUTH_ACCESS_TOKEN:")
+			oauthTokens[credID] = c.PlainValue
 		}
 	}
-	if accessToken == "" {
+	if len(oauthTokens) == 0 {
 		return nil
+	}
+
+	// Build a map: credential ID → which servers use it (via OAUTH2 credential refs).
+	credForServer := make(map[string]string) // serverName → credID
+	for _, c := range credentials {
+		if c.Type == "OAUTH2" && !strings.HasPrefix(c.EnvVarName, "_OAUTH_ACCESS_TOKEN:") {
+			// This is a CLIENT_ID or CLIENT_SECRET ref — find which server uses it
+			for _, srv := range mcpServers {
+				for _, v := range srv.Env {
+					if strings.Contains(v, c.EnvVarName) || strings.HasPrefix(v, "${") {
+						credForServer[srv.Name] = c.ID
+					}
+				}
+			}
+		}
 	}
 
 	homeDir := path.Join("/crew/agents", agentSlug)
 
-	// Write tokens.json to each MCP server's config directory.
-	// MCP servers typically store tokens in ~/.config/<package-name>/tokens.json
-	// where <package-name> is derived from the npm package (last segment of args).
 	for _, srv := range mcpServers {
 		if srv.Name == "" {
 			continue
 		}
-		// Derive config dir name from npm package args (e.g. "@dguido/google-workspace-mcp" → "google-workspace-mcp")
-		configDirName := srv.Name // fallback to server name
+
+		// Find the access token for this server.
+		var accessToken string
+		if credID, ok := credForServer[srv.Name]; ok {
+			accessToken = oauthTokens[credID]
+		}
+		// Fallback: if no server-specific mapping, use any available token.
+		if accessToken == "" {
+			for _, tok := range oauthTokens {
+				accessToken = tok
+				break
+			}
+		}
+		if accessToken == "" {
+			continue
+		}
+
+		// Derive config dir name from npm package args.
+		configDirName := srv.Name
 		for _, arg := range srv.Args {
 			if strings.Contains(arg, "/") || strings.HasPrefix(arg, "@") {
-				// Extract last segment: "@dguido/google-workspace-mcp" → "google-workspace-mcp"
 				parts := strings.Split(arg, "/")
 				configDirName = parts[len(parts)-1]
 			}
 		}
-		tokenDir := path.Join(homeDir, ".config", configDirName)
-		tokenPath := path.Join(tokenDir, "tokens.json")
 
-		// Build tokens.json in the format MCP servers expect.
+		// Write tokens to BOTH the package-name dir and the server-name dir,
+		// since different MCP servers look in different locations.
+		tokenPaths := []string{
+			path.Join(homeDir, ".config", configDirName, "tokens.json"),
+		}
+		if configDirName != srv.Name {
+			tokenPaths = append(tokenPaths, path.Join(homeDir, ".config", srv.Name, "tokens.json"))
+		}
+
+		// Standard OAuth token file format — compatible with most MCP servers.
 		tokensJSON, _ := json.Marshal(map[string]interface{}{
 			"access_token": accessToken,
 			"token_type":   "Bearer",
@@ -916,25 +954,27 @@ func injectMCPOAuthTokens(
 		})
 
 		tokB64 := base64.StdEncoding.EncodeToString(tokensJSON)
-		script := fmt.Sprintf(
-			"mkdir -p %s && echo '%s' | base64 -d > %s && chmod 600 %s",
-			tokenDir, tokB64, tokenPath, tokenPath,
-		)
 
-		cfg := provider.ExecConfig{
-			ContainerID: containerID,
-			Cmd:         []string{"sh", "-c", script},
-			User:        "1001:1001",
+		for _, tp := range tokenPaths {
+			dir := path.Dir(tp)
+			script := fmt.Sprintf(
+				"mkdir -p %s && echo '%s' | base64 -d > %s && chmod 600 %s",
+				dir, tokB64, tp, tp,
+			)
+			cfg := provider.ExecConfig{
+				ContainerID: containerID,
+				Cmd:         []string{"sh", "-c", script},
+				User:        "1001:1001",
+			}
+			result, err := container.Exec(ctx, cfg)
+			if err != nil {
+				logger.Warn("write MCP OAuth tokens", "server", srv.Name, "path", tp, "error", err)
+				continue
+			}
+			io.Copy(io.Discard, result.Reader)
+			result.Reader.Close()
+			logger.Debug("MCP OAuth tokens injected", "server", srv.Name, "path", tp)
 		}
-		result, err := container.Exec(ctx, cfg)
-		if err != nil {
-			logger.Warn("write MCP OAuth tokens", "server", srv.Name, "error", err)
-			continue
-		}
-		io.Copy(io.Discard, result.Reader)
-		result.Reader.Close()
-
-		logger.Debug("MCP OAuth tokens injected", "server", srv.Name, "token_path", tokenPath)
 	}
 
 	return nil
