@@ -7,5 +7,6 @@ export const notion: MCPTemplate = {
   transport: "stdio",
   command: "npx",
   args: "-y @notionhq/notion-mcp-server",
-  envHint: "NOTION_API_KEY",
+  envHint: "OPENAPI_MCP_HEADERS",
+  oauthProvider: "notion",
 }

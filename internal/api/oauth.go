@@ -51,6 +51,31 @@ var OAuthProviders = map[string]OAuthProvider{
 		TokenURL:      "https://login.microsoftonline.com/common/oauth2/v2.0/token",
 		DefaultScopes: "Mail.Read Mail.Send Calendars.ReadWrite",
 	},
+	"linear": {
+		AuthURL:       "https://linear.app/oauth/authorize",
+		TokenURL:      "https://api.linear.app/oauth/token",
+		DefaultScopes: "read write",
+	},
+	"gitlab": {
+		AuthURL:       "https://gitlab.com/oauth/authorize",
+		TokenURL:      "https://gitlab.com/oauth/token",
+		DefaultScopes: "api read_user",
+	},
+	"cloudflare": {
+		AuthURL:       "https://dash.cloudflare.com/oauth2/authorize",
+		TokenURL:      "https://dash.cloudflare.com/oauth2/token",
+		DefaultScopes: "",
+	},
+	"stripe": {
+		AuthURL:       "https://connect.stripe.com/oauth/authorize",
+		TokenURL:      "https://connect.stripe.com/oauth/token",
+		DefaultScopes: "read_write",
+	},
+	"notion": {
+		AuthURL:       "https://api.notion.com/v1/oauth/authorize",
+		TokenURL:      "https://api.notion.com/v1/oauth/token",
+		DefaultScopes: "",
+	},
 }
 
 type OAuthHandler struct {
