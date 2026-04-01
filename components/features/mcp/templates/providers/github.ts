@@ -4,8 +4,8 @@ export const github: MCPTemplate = {
   name: "github",
   label: "GitHub",
   icon: "github",
-  transport: "stdio",
-  command: "npx",
-  args: "-y @modelcontextprotocol/server-github",
-  envHint: "GITHUB_TOKEN",
+  transport: "streamable-http",
+  url: "https://api.githubcopilot.com/mcp/",
+  envHint: "GITHUB_PERSONAL_ACCESS_TOKEN",
+  headerHint: "Authorization: Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}",
 }
