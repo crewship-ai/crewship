@@ -829,11 +829,11 @@ func (h *OAuthHandler) Discover(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// AutoConnect performs the full OAuth auto-connect flow for an MCP server:
-// 1. Discover OAuth endpoints
+// AutoConnect performs the OAuth auto-connect flow for an MCP server:
+// 1. Discover OAuth endpoints (or use known provider)
 // 2. Dynamic Client Registration (if supported)
-// 3. Create OAUTH2 credential
-// 4. Start loopback OAuth flow
+// 3. Create OAUTH2 credential in PENDING state
+// 4. Return auth URL for browser redirect (uses backend /api/v1/oauth/callback)
 func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -845,7 +845,7 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		MCPURL       string `json:"mcp_url"`
 		ServerName   string `json:"server_name"`
-		ProviderHint string `json:"provider_hint"` // e.g. "linear" — skip discovery, use known provider
+		ProviderHint string `json:"provider_hint"`
 	}
 	if err := readJSON(r, &req); err != nil || req.MCPURL == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_url is required"})
@@ -874,7 +874,9 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 				tokenURL = provider.TokenURL
 				scopes = provider.DefaultScopes
 			} else {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Cannot discover OAuth for this URL: " + err.Error()})
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": "Cannot discover OAuth for this URL. This provider may require a Personal API Key instead.",
+				})
 				return
 			}
 		} else {
@@ -885,28 +887,31 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Step 2: Find free port for loopback
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to start loopback server"})
-		return
+	// Step 2: Build redirect URI from request host (backend callback)
+	scheme := "http"
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	} else if r.TLS != nil {
+		scheme = "https"
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
+	host := r.Host
+	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+		host = fwdHost
+	}
+	redirectURI := fmt.Sprintf("%s://%s/api/v1/oauth/callback", scheme, host)
 
 	// Step 3: Dynamic Client Registration (if available)
 	var clientID, clientSecret string
 	if registrationEndpoint != "" {
 		dcr, err := dynamicClientRegister(r.Context(), registrationEndpoint, redirectURI)
 		if err != nil {
-			h.logger.Warn("DCR failed, will need manual client_id", "error", err)
-			listener.Close()
+			h.logger.Warn("DCR failed, returning needs_client_id", "error", err)
 			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"status":     "needs_client_id",
-				"auth_url":   authURL,
-				"token_url":  tokenURL,
-				"scopes":     scopes,
-				"message":    "Dynamic Client Registration failed. Please provide Client ID manually.",
+				"status":   "needs_client_id",
+				"auth_url": authURL,
+				"token_url": tokenURL,
+				"scopes":   scopes,
+				"message":  "Automatic registration not available. Please create an OAuth app and provide Client ID.",
 			})
 			return
 		}
@@ -914,74 +919,78 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 		clientSecret = dcr.ClientSecret
 		h.logger.Info("DCR succeeded", "client_id", clientID, "server", req.ServerName)
 	} else {
-		listener.Close()
+		// No DCR — return info so frontend can ask for Client ID
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status":    "needs_client_id",
-			"auth_url":  authURL,
+			"status":   "needs_client_id",
+			"auth_url": authURL,
 			"token_url": tokenURL,
-			"scopes":    scopes,
-			"message":   "This provider does not support automatic registration. Please provide Client ID.",
+			"scopes":   scopes,
+			"message":  "This provider requires a Client ID. Create an OAuth app in the provider's settings.",
 		})
 		return
 	}
 
-	// Step 4: Create OAUTH2 credential
+	// Step 4: Create OAUTH2 credential in PENDING state
 	credID := generateCUID()
 	credName := req.ServerName + "-oauth"
 
 	var encSecret string
 	if clientSecret != "" {
+		var err error
 		encSecret, err = encryption.Encrypt(clientSecret)
 		if err != nil {
-			listener.Close()
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt client secret"})
 			return
 		}
 	}
 
-	_, err = h.db.ExecContext(r.Context(), `
+	if _, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, status,
 			oauth_client_id, oauth_client_secret_enc, oauth_auth_url, oauth_token_url, oauth_scopes,
 			created_at, updated_at)
 		VALUES (?, ?, ?, 'OAUTH2', '', 'PENDING', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		credID, workspaceID, credName, clientID, encSecret, authURL, tokenURL, scopes)
-	if err != nil {
-		listener.Close()
+		credID, workspaceID, credName, clientID, encSecret, authURL, tokenURL, scopes); err != nil {
+		h.logger.Error("create auto-connect credential", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create credential"})
 		return
 	}
 
-	// Step 5: Generate state and build auth URL
+	// Step 5: Store CSRF state
 	stateBytes := make([]byte, 16)
 	if _, err := rand.Read(stateBytes); err != nil {
-		listener.Close()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate state"})
 		return
 	}
 	state := hex.EncodeToString(stateBytes)
 
+	if _, err := h.db.ExecContext(r.Context(),
+		"INSERT INTO oauth_states (state, credential_id, workspace_id, redirect_uri) VALUES (?, ?, ?, ?)",
+		state, credID, workspaceID, redirectURI); err != nil {
+		h.logger.Error("store OAuth state", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store state"})
+		return
+	}
+
+	// Step 6: Build auth URL
 	params := url.Values{
 		"client_id":     {clientID},
 		"redirect_uri":  {redirectURI},
 		"response_type": {"code"},
 		"state":         {state},
 		"access_type":   {"offline"},
+		"prompt":        {"consent"},
 	}
 	if scopes != "" {
 		params.Set("scope", scopes)
 	}
 	fullAuthURL := authURL + "?" + params.Encode()
 
-	// Step 6: Start loopback server
-	go h.runLoopbackServer(listener, state, credID, workspaceID, clientID, clientSecret, tokenURL, redirectURI)
-
-	h.logger.Info("OAuth auto-connect started", "server", req.ServerName, "credential_id", credID, "port", port)
+	h.logger.Info("OAuth auto-connect ready", "server", req.ServerName, "credential_id", credID)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":        "authorize",
 		"auth_url":      fullAuthURL,
 		"credential_id": credID,
-		"loopback_port": port,
 	})
 }
 
