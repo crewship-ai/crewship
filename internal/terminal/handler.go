@@ -134,12 +134,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve container.
+	// Ensure container is running (start if needed).
 	containerName := h.container.CrewContainerName(init.CrewSlug)
 	status, err := h.container.ContainerStatus(r.Context(), containerName)
 	if err != nil || status.State != "running" {
-		h.writeError(ws, "container not running")
-		return
+		h.logger.Info("terminal: starting container", "crew_slug", init.CrewSlug)
+		h.writeInfo(ws, "Starting container...")
+		_, err := h.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
+			ID:   init.CrewID,
+			Slug: init.CrewSlug,
+		})
+		if err != nil {
+			h.logger.Error("terminal: failed to start container", "error", err)
+			h.writeError(ws, "failed to start container: "+err.Error())
+			return
+		}
+		// Give the container a moment to fully initialize.
+		time.Sleep(time.Second)
 	}
 
 	// Build exec config based on mode.
@@ -278,5 +289,11 @@ func (h *Handler) verifyAccess(ctx context.Context, userID, crewID string) error
 // writeError sends a JSON error message to the WebSocket client.
 func (h *Handler) writeError(ws *websocket.Conn, msg string) {
 	data, _ := json.Marshal(map[string]string{"type": "error", "message": msg})
+	_ = ws.WriteMessage(websocket.TextMessage, data)
+}
+
+// writeInfo sends a JSON info message to the WebSocket client.
+func (h *Handler) writeInfo(ws *websocket.Conn, msg string) {
+	data, _ := json.Marshal(map[string]string{"type": "info", "message": msg})
 	_ = ws.WriteMessage(websocket.TextMessage, data)
 }

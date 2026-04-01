@@ -125,6 +125,8 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
               if (msg.type === "error") {
                 terminal.writeln(`\r\n\x1b[31mError: ${msg.message}\x1b[0m`)
                 setStatus("error")
+              } else if (msg.type === "info") {
+                terminal.writeln(`\r\n\x1b[33m${msg.message}\x1b[0m`)
               }
             } catch {
               // Not JSON, write as text.
