@@ -50,7 +50,7 @@ export function WebTerminal({
   const containerRef = useRef<HTMLDivElement>(null)
   const [agentSlug, setAgentSlug] = useState(defaultAgentSlug || "__crew_shared__")
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [isConnected, setIsConnected] = useState(true)
+  const [reconnectKey, setReconnectKey] = useState(0)
 
   const { status, disconnect } = useTerminal({
     containerRef,
@@ -58,19 +58,18 @@ export function WebTerminal({
     crewSlug,
     mode: "shell",
     agentSlug: agentSlug === "__crew_shared__" ? undefined : agentSlug,
-    enabled: isConnected,
+    enabled: true,
+    key: reconnectKey,
   })
 
   const handleClose = () => {
     disconnect()
-    setIsConnected(false)
     onClose?.()
   }
 
   const handleReconnect = () => {
-    setIsConnected(false)
-    // Force re-mount by toggling enabled.
-    setTimeout(() => setIsConnected(true), 100)
+    disconnect()
+    setReconnectKey((k) => k + 1)
   }
 
   const effectiveSlug = agentSlug === "__crew_shared__" ? "" : agentSlug

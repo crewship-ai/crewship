@@ -570,6 +570,7 @@ func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.Interactive
 
 	go func() {
 		defer stdoutW.Close()
+		defer stdinR.Close()
 		err := cmd.Wait()
 		if err != nil {
 			if exitErr, ok := err.(*exec.ExitError); ok {

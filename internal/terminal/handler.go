@@ -170,8 +170,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeError(ws, "failed to start container: "+err.Error())
 			return
 		}
-		// Give the container a moment to fully initialize.
-		time.Sleep(time.Second)
+		// Poll for container readiness.
+		for i := 0; i < 10; i++ {
+			time.Sleep(200 * time.Millisecond)
+			if st, stErr := h.container.ContainerStatus(r.Context(), containerName); stErr == nil && st.State == "running" {
+				break
+			}
+		}
 	}
 
 	// Build exec config based on mode.

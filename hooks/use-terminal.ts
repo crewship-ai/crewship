@@ -14,6 +14,7 @@ interface UseTerminalOptions {
   mode?: "shell" | "attach"
   agentSlug?: string
   enabled?: boolean
+  key?: number
 }
 
 interface UseTerminalResult {
@@ -22,11 +23,12 @@ interface UseTerminalResult {
 }
 
 export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
-  const { containerRef, crewId, crewSlug, mode = "shell", agentSlug, enabled = true } = options
+  const { containerRef, crewId, crewSlug, mode = "shell", agentSlug, enabled = true, key = 0 } = options
   const [status, setStatus] = useState<TerminalStatus>("disconnected")
   const terminalRef = useRef<Terminal | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const observerRef = useRef<ResizeObserver | null>(null)
 
   const disconnect = useCallback(() => {
     if (wsRef.current) {
@@ -169,24 +171,21 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
           }
         })
         observer.observe(el)
-
-        // Cleanup on unmount.
-        return () => {
-          observer.disconnect()
-        }
+        observerRef.current = observer
       } catch {
         if (!cancelled) setStatus("error")
       }
     }
 
-    const cleanup = connect()
+    connect()
 
     return () => {
       cancelled = true
-      cleanup?.then((fn) => fn?.())
+      observerRef.current?.disconnect()
+      observerRef.current = null
       disconnect()
     }
-  }, [enabled, crewId, crewSlug, mode, agentSlug, containerRef, disconnect])
+  }, [enabled, crewId, crewSlug, mode, agentSlug, key, containerRef, disconnect])
 
   return { status, disconnect }
 }
