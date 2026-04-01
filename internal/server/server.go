@@ -303,11 +303,15 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	}
 
 	s.httpServer = &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      mainHandler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:        fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler:     mainHandler,
+		ReadTimeout: 15 * time.Second,
+		// WriteTimeout is deliberately unset (0 = no timeout) because
+		// x/net/websocket does not hijack the connection, so Go's HTTP
+		// server applies WriteTimeout to the entire WebSocket lifetime,
+		// killing long-lived connections after the deadline. The WS hub
+		// handles keep-alive via its own ping/pong mechanism.
+		IdleTimeout: 120 * time.Second,
 	}
 
 	s.ipcServer = &http.Server{
