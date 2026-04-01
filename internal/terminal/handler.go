@@ -8,14 +8,19 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/gorilla/websocket"
 )
+
+// validSlugRe matches safe slug values (alphanumeric, hyphens, underscores).
+var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
 // Handler manages WebSocket-based terminal sessions into crew containers.
 type Handler struct {
@@ -64,32 +69,26 @@ func New(container provider.ContainerProvider, validator *auth.JWTValidator, db 
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
-			CheckOrigin:     func(r *http.Request) bool { return true },
+			CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true // non-browser clients
+			}
+			host := r.Host
+			return origin == "http://"+host || origin == "https://"+host
+		},
 		},
 	}
 }
 
 // ServeHTTP handles the WebSocket upgrade and terminal session lifecycle.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Authenticate via JWT token in query param.
-	token := r.URL.Query().Get("token")
-	if token == "" {
-		http.Error(w, "missing token", http.StatusUnauthorized)
-		return
-	}
 	if h.validator == nil {
 		http.Error(w, "auth not configured", http.StatusServiceUnavailable)
 		return
 	}
-	claims, err := h.validator.Validate(token)
-	if err != nil {
-		h.logger.Warn("terminal auth failed", "error", err)
-		http.Error(w, "invalid token", http.StatusUnauthorized)
-		return
-	}
-	userID := claims.ID
 
-	// Upgrade to WebSocket.
+	// Upgrade to WebSocket first (auth happens post-open to avoid token in URL).
 	ws, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Error("terminal ws upgrade failed", "error", err)
@@ -97,8 +96,36 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
-	// Read init message (first text message from client).
+	// Limit read size to 1 MB to prevent unbounded memory allocation.
+	ws.SetReadLimit(1 << 20)
+
+	// Read auth message (first text message from client).
 	ws.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_, authMsg, err := ws.ReadMessage()
+	if err != nil {
+		h.logger.Warn("terminal auth read failed", "error", err)
+		h.writeError(ws, "failed to read auth message")
+		return
+	}
+
+	var authPayload struct {
+		Type  string `json:"type"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(authMsg, &authPayload); err != nil || authPayload.Type != "auth" || authPayload.Token == "" {
+		h.writeError(ws, "invalid auth message")
+		return
+	}
+
+	claims, err := h.validator.Validate(authPayload.Token)
+	if err != nil {
+		h.logger.Warn("terminal auth failed", "error", err)
+		h.writeError(ws, "invalid token")
+		return
+	}
+	userID := claims.ID
+
+	// Read init message (second text message from client).
 	_, msg, err := ws.ReadMessage()
 	if err != nil {
 		h.logger.Warn("terminal init read failed", "error", err)
@@ -162,12 +189,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Give the container a moment to fully initialize.
+		h.logger.Debug("waiting 1s for container init", "crew_slug", actualSlug)
 		time.Sleep(time.Second)
 	}
 
 	interactive, ok := h.container.(provider.InteractiveExecProvider)
 	if !ok {
 		h.writeError(ws, "terminal not supported by container provider")
+		return
+	}
+
+	// Validate agent slug to prevent path traversal.
+	if init.AgentSlug != "" && !validSlugRe.MatchString(init.AgentSlug) {
+		h.writeError(ws, "invalid agent_slug")
 		return
 	}
 
@@ -179,11 +213,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch init.Mode {
 	case "attach":
 		// Attach to a running agent's tmux session.
-		tmuxSession := "agent-" + init.AgentSlug
 		if init.AgentSlug == "" {
 			h.writeError(ws, "agent_slug is required for attach mode")
 			return
 		}
+		tmuxSession := orchestrator.TmuxSessionName(init.AgentSlug)
 		// Check if tmux session exists (agent is running).
 		checkResult, err := h.container.Exec(r.Context(), provider.ExecConfig{
 			ContainerID: containerName,
@@ -200,7 +234,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			checkResult.Reader.Close()
 		}
 		running, exitCode, _ := h.container.ExecInspect(r.Context(), checkResult.ExecID)
-		if running || exitCode != 0 {
+		if !running && exitCode != 0 {
 			h.writeError(ws, "agent is not running (no active tmux session)")
 			return
 		}
