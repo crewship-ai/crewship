@@ -947,6 +947,18 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	for _, e := range env {
 		if idx := strings.IndexByte(e, '='); idx > 0 {
 			key := e[:idx]
+			// Only allow safe env var names ([A-Za-z_][A-Za-z0-9_]*) to prevent
+			// shell injection via crafted key names in the sourced export script.
+			safe := true
+			for i, c := range key {
+				if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || (i > 0 && c >= '0' && c <= '9')) {
+					safe = false
+					break
+				}
+			}
+			if !safe || len(key) == 0 {
+				continue
+			}
 			val := e[idx+1:]
 			escaped := strings.ReplaceAll(val, "'", "'\\''")
 			envScript.WriteString(fmt.Sprintf("export %s='%s'\n", key, escaped))
