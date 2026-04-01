@@ -759,6 +759,7 @@ export default function IntegrationsPage() {
                     crews={crews}
                     agents={agents}
                     agentBindings={agentBindings}
+                    bindingIds={bindingIds}
                     confirmDeleteId={confirmDeleteId}
                     canManage={canManage}
                     workspaceId={workspaceId}
@@ -789,6 +790,7 @@ function ExpandedPanel({
   crews,
   agents,
   agentBindings,
+  bindingIds,
   confirmDeleteId,
   canManage,
   workspaceId,
@@ -802,6 +804,7 @@ function ExpandedPanel({
   crews: CrewInfo[]
   agents: AgentInfo[]
   agentBindings: Record<string, Set<string>>
+  bindingIds: Record<string, Record<string, string>>
   confirmDeleteId: string | null
   canManage: boolean
   workspaceId: string | null
@@ -1082,12 +1085,21 @@ function ExpandedPanel({
           mcpURL={server.endpoint}
           workspaceId={workspaceId}
           onCredentialCreated={async (credId: string) => {
-            // Set the credential as env var value
-            const key = envVars[0]?.key || server.name.toUpperCase().replace(/-/g, "_") + "_TOKEN"
-            const updated = [{ key, value: `\${${credId}}` }]
-            setEnvVars(updated)
-            await onPatch({ env_json: serializeEnv(updated) })
-            toast.success("OAuth connected! Credential bound.")
+            // Update all existing agent bindings with the new credential
+            const bindingsForServer = agentBindings[server.id]
+            if (bindingsForServer && bindingsForServer.size > 0) {
+              for (const agentId of Array.from(bindingsForServer)) {
+                const bId = bindingIds[server.id]?.[agentId]
+                if (bId && workspaceId) {
+                  await fetch(`/api/v1/agents/${agentId}/integrations/${bId}?workspace_id=${workspaceId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ credential_id: credId, cred_type: "bearer" }),
+                  })
+                }
+              }
+            }
+            toast.success("OAuth connected! Credential bound to agents.")
           }}
         />
       )}
