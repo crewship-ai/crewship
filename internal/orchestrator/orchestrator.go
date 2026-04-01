@@ -980,18 +980,22 @@ func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cm
 	io.Copy(io.Discard, writeScriptResult.Reader)
 	writeScriptResult.Reader.Close()
 
-	// Step 4: Return outer wrapper.
+	// Step 4: Return outer wrapper. Uses session-scoped kill (not kill-server)
+	// to avoid disrupting other agent sessions in the same crew container.
+	// If tmux new-session fails, falls back to direct exec via sh.
 	wrapper := fmt.Sprintf(
-		"tmux kill-server 2>/dev/null; rm -f '%s' '%s'; mkfifo '%s'; "+
-			"tmux new-session -d -s '%s' -x 200 -y 50 'sh %s'; "+
+		"tmux kill-session -t '%s' 2>/dev/null; rm -f '%s' '%s'; mkfifo '%s'; "+
+			"if tmux new-session -d -s '%s' -x 200 -y 50 'sh %s'; then "+
 			"cat '%s' 2>/dev/null; "+
 			"tmux wait-for '%s' 2>/dev/null || true; "+
+			"else sh '%s'; fi; "+
 			"EC=0; [ -f '%s' ] && EC=$(cat '%s') && rm -f '%s'; "+
 			"rm -f '%s' '%s' '%s'; exit $EC",
-		fifo, exitFile, fifo,
+		session, fifo, exitFile, fifo,
 		session, scriptFile,
 		fifo,
 		doneSignal,
+		scriptFile,
 		exitFile, exitFile, exitFile,
 		scriptFile, argsFile, envFile,
 	)
