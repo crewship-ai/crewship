@@ -452,7 +452,7 @@ export default function IntegrationsPage() {
         }
 
     try {
-      const res = await fetch(
+      let res = await fetch(
         `/api/v1/crews/${defaultCrewId}/integrations?workspace_id=${workspaceId}`,
         {
           method: "POST",
@@ -460,6 +460,18 @@ export default function IntegrationsPage() {
           body: JSON.stringify(payload),
         },
       )
+      // If name conflict, retry with a numbered suffix
+      if (res.status === 409 && payload.name) {
+        const suffixed = { ...payload, name: `${payload.name}-${Date.now().toString(36).slice(-4)}` }
+        res = await fetch(
+          `/api/v1/crews/${defaultCrewId}/integrations?workspace_id=${workspaceId}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(suffixed),
+          },
+        )
+      }
       if (!res.ok) {
         const d = await res.json().catch(() => null)
         toast.error(d?.error ?? "Failed to create server")
@@ -770,6 +782,7 @@ export default function IntegrationsPage() {
                     }
                     onDelete={() => handleDelete(server)}
                     onConfirmDeleteChange={(v) => setConfirmDeleteId(v ? server.id : null)}
+                    onRefresh={() => { if (workspaceId) fetchAll(workspaceId) }}
                   />
                 )}
               </div>
@@ -792,6 +805,7 @@ function ExpandedPanel({
   agentBindings,
   bindingIds,
   confirmDeleteId,
+  onRefresh,
   canManage,
   workspaceId,
   onPatch,
@@ -813,6 +827,7 @@ function ExpandedPanel({
   onAgentToggle: (agent: AgentInfo, hasAccess: boolean, hasAny: boolean) => Promise<void>
   onDelete: () => Promise<void>
   onConfirmDeleteChange: (v: boolean) => void
+  onRefresh: () => void
 }) {
   const { credentials, loading: credLoading, fetchCredentials, addCredential } = useCredentials(
     canManage ? (workspaceId ?? undefined) : undefined,
@@ -1085,12 +1100,13 @@ function ExpandedPanel({
           mcpURL={server.endpoint}
           workspaceId={workspaceId}
           onCredentialCreated={async (credId: string) => {
-            // Update all existing agent bindings with the new credential
+            if (!workspaceId) return
+            // Update existing bindings with credential
             const bindingsForServer = agentBindings[server.id]
             if (bindingsForServer && bindingsForServer.size > 0) {
               for (const agentId of Array.from(bindingsForServer)) {
                 const bId = bindingIds[server.id]?.[agentId]
-                if (bId && workspaceId) {
+                if (bId) {
                   await fetch(`/api/v1/agents/${agentId}/integrations/${bId}?workspace_id=${workspaceId}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
@@ -1098,8 +1114,24 @@ function ExpandedPanel({
                   })
                 }
               }
+            } else {
+              // No bindings yet — auto-grant access to ALL agents in the crew with credential
+              for (const agent of agents) {
+                await fetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${workspaceId}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    mcp_server_id: server.id,
+                    mcp_server_scope: "crew",
+                    credential_id: credId,
+                    cred_type: "bearer",
+                    enabled: true,
+                  }),
+                })
+              }
             }
-            toast.success("OAuth connected! Credential bound to agents.")
+            onRefresh()
+            toast.success("OAuth connected! All agents have access.")
           }}
         />
       )}
