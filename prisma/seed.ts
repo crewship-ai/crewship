@@ -752,16 +752,16 @@ NEVER ACCEPTABLE:
     linearServerId, engineering.id,
   )
 
-  // GitHub MCP — remote HTTP with PAT (token from SEED_GITHUB_TOKEN)
-  const githubServerId = `seed-github-${engineering.id.slice(-8)}`
+  // Google Workspace MCP — stdio with OAuth (token from SEED_GOOGLE_OAUTH_ACCESS_TOKEN)
+  const googleServerId = `seed-google-ws-${engineering.id.slice(-8)}`
   await prisma.$executeRawUnsafe(
-    `INSERT OR IGNORE INTO crew_mcp_servers (id, crew_id, name, display_name, transport, endpoint, enabled, created_at, updated_at)
-     VALUES (?, ?, 'github', 'GitHub', 'streamable-http', 'https://api.githubcopilot.com/mcp/', 1, datetime('now'), datetime('now'))`,
-    githubServerId, engineering.id,
+    `INSERT OR IGNORE INTO crew_mcp_servers (id, crew_id, name, display_name, transport, command, args_json, env_json, enabled, created_at, updated_at)
+     VALUES (?, ?, 'google-workspace', 'Google Workspace', 'stdio', 'npx', '${JSON.stringify(["-y", "@anthropic-ai/google-workspace-mcp"])}', '${JSON.stringify({ GOOGLE_ACCESS_TOKEN: "" })}', 1, datetime('now'), datetime('now'))`,
+    googleServerId, engineering.id,
   )
 
   console.log(`  ✓ MCP: Linear (Engineering crew)`)
-  console.log(`  ✓ MCP: GitHub (Engineering crew)`)
+  console.log(`  ✓ MCP: Google Workspace (Engineering crew)`)
 
   // Seed OAuth/token credentials + agent bindings for MCP servers
   const mcpConfigs = [
@@ -776,14 +776,14 @@ NEVER ACCEPTABLE:
       oauthScopes: "read write",
     },
     {
-      envVar: "SEED_GITHUB_TOKEN",
-      serverId: githubServerId,
-      credName: "github-pat",
-      credType: "API_KEY",
-      oauthClientId: "",
-      oauthAuthUrl: "",
-      oauthTokenUrl: "",
-      oauthScopes: "",
+      envVar: "SEED_GOOGLE_OAUTH_ACCESS_TOKEN",
+      serverId: googleServerId,
+      credName: "google-workspace-oauth",
+      credType: "OAUTH2",
+      oauthClientId: process.env.SEED_GOOGLE_OAUTH_CLIENT_ID || "",
+      oauthAuthUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      oauthTokenUrl: "https://oauth2.googleapis.com/token",
+      oauthScopes: "https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive",
     },
   ]
 
