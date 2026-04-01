@@ -38,6 +38,8 @@ async function main() {
     await prisma.$executeRawUnsafe("DELETE FROM skill_reviews").catch(() => {})
     await prisma.$executeRawUnsafe("DELETE FROM credential_crews").catch(() => {})
     await prisma.$executeRawUnsafe("DELETE FROM agent_mcp_bindings").catch(() => {})
+    await prisma.$executeRawUnsafe("DELETE FROM crew_mcp_servers").catch(() => {})
+    await prisma.$executeRawUnsafe("DELETE FROM workspace_mcp_servers").catch(() => {})
     await prisma.$executeRawUnsafe("DELETE FROM agent_config_history").catch(() => {})
     await prisma.$executeRawUnsafe("DELETE FROM keeper_requests").catch(() => {})
     await prisma.$executeRawUnsafe("DELETE FROM mission_tasks").catch(() => {})
