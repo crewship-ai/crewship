@@ -795,7 +795,7 @@ NEVER ACCEPTABLE:
       console.log(`  ⚠ Skipping ${cfg.credName} credential (set ${cfg.envVar} in .env.local)`)
       // Still create agent bindings without credential (so UI shows "No credential")
       for (const agent of engineeringAgents) {
-        const bindingId = `seed-bind-${agent.id.slice(-6)}-${cfg.serverId.slice(-6)}`
+        const bindingId = `seed-${cfg.credName}-${agent.id.slice(-6)}`
         await prisma.$executeRawUnsafe(
           `INSERT OR IGNORE INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, cred_type, enabled, created_at)
            VALUES (?, ?, ?, 'crew', 'bearer', 1, datetime('now'))`,
@@ -832,7 +832,7 @@ NEVER ACCEPTABLE:
 
     // Create agent bindings with credential for all engineering agents
     for (const agent of engineeringAgents) {
-      const bindingId = `seed-bind-${agent.id.slice(-6)}-${cfg.serverId.slice(-6)}`
+      const bindingId = `seed-${cfg.credName}-${agent.id.slice(-6)}`
       await prisma.$executeRawUnsafe(
         `INSERT OR IGNORE INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, credential_id, cred_type, enabled, created_at)
          VALUES (?, ?, ?, 'crew', ?, 'bearer', 1, datetime('now'))`,
