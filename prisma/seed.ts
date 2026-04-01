@@ -771,6 +771,7 @@ NEVER ACCEPTABLE:
       credName: "linear-oauth",
       credType: "OAUTH2",
       oauthClientId: process.env.SEED_LINEAR_OAUTH_CLIENT_ID || "",
+      oauthClientSecretEnv: "SEED_LINEAR_OAUTH_CLIENT_SECRET",
       oauthAuthUrl: "https://linear.app/oauth/authorize",
       oauthTokenUrl: "https://api.linear.app/oauth/token",
       oauthScopes: "read write",
@@ -781,6 +782,7 @@ NEVER ACCEPTABLE:
       credName: "google-workspace-oauth",
       credType: "OAUTH2",
       oauthClientId: process.env.SEED_GOOGLE_OAUTH_CLIENT_ID || "",
+      oauthClientSecretEnv: "SEED_GOOGLE_OAUTH_CLIENT_SECRET",
       oauthAuthUrl: "https://accounts.google.com/o/oauth2/v2/auth",
       oauthTokenUrl: "https://oauth2.googleapis.com/token",
       oauthScopes: "https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive",
@@ -791,9 +793,38 @@ NEVER ACCEPTABLE:
 
   for (const cfg of mcpConfigs) {
     const tokenValue = process.env[cfg.envVar]
-    if (!tokenValue) {
+    const clientSecretRaw = cfg.oauthClientSecretEnv ? process.env[cfg.oauthClientSecretEnv] : undefined
+    const hasClientId = cfg.oauthClientId !== ""
+    const credId = `seed-cred-${cfg.credName}-${org.id.slice(-6)}`
+
+    if (cfg.credType === "OAUTH2" && (tokenValue || hasClientId)) {
+      // Create OAUTH2 credential — ACTIVE if we have a token, PENDING if only client_id
+      const encToken = tokenValue ? encrypt(tokenValue) : ""
+      const status = tokenValue ? "ACTIVE" : "PENDING"
+      const encSecret = clientSecretRaw ? encrypt(clientSecretRaw) : ""
+      await prisma.$executeRawUnsafe(
+        `INSERT OR IGNORE INTO credentials (id, workspace_id, name, type, encrypted_value, status,
+          oauth_client_id, oauth_client_secret_enc, oauth_auth_url, oauth_token_url, oauth_scopes,
+          created_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'OAUTH2', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+        credId, org.id, cfg.credName, encToken, status,
+        cfg.oauthClientId, encSecret, cfg.oauthAuthUrl, cfg.oauthTokenUrl, cfg.oauthScopes,
+        user.id,
+      )
+
+      // Create agent bindings with credential
+      for (const agent of engineeringAgents) {
+        const bindingId = `seed-${cfg.credName}-${agent.id.slice(-6)}`
+        await prisma.$executeRawUnsafe(
+          `INSERT OR IGNORE INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, credential_id, cred_type, enabled, created_at)
+           VALUES (?, ?, ?, 'crew', ?, 'bearer', 1, datetime('now'))`,
+          bindingId, agent.id, cfg.serverId, credId,
+        )
+      }
+      console.log(`  ✓ Credential: ${cfg.credName} (${status}) + bindings for ${engineeringAgents.length} agents`)
+    } else if (!tokenValue) {
       console.log(`  ⚠ Skipping ${cfg.credName} credential (set ${cfg.envVar} in .env.local)`)
-      // Still create agent bindings without credential (so UI shows "No credential")
+      // Create agent bindings without credential (UI shows "No credential")
       for (const agent of engineeringAgents) {
         const bindingId = `seed-${cfg.credName}-${agent.id.slice(-6)}`
         await prisma.$executeRawUnsafe(
@@ -802,44 +833,7 @@ NEVER ACCEPTABLE:
           bindingId, agent.id, cfg.serverId,
         )
       }
-      continue
     }
-
-    const credId = `seed-cred-${cfg.credName}-${org.id.slice(-6)}`
-    const encToken = encrypt(tokenValue)
-
-    if (cfg.credType === "OAUTH2") {
-      const encSecret = cfg.oauthClientId
-        ? (process.env.SEED_LINEAR_OAUTH_CLIENT_SECRET ? encrypt(process.env.SEED_LINEAR_OAUTH_CLIENT_SECRET) : "")
-        : ""
-      await prisma.$executeRawUnsafe(
-        `INSERT OR IGNORE INTO credentials (id, workspace_id, name, type, encrypted_value, status,
-          oauth_client_id, oauth_client_secret_enc, oauth_auth_url, oauth_token_url, oauth_scopes,
-          created_by, created_at, updated_at)
-         VALUES (?, ?, ?, 'OAUTH2', ?, 'ACTIVE', ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-        credId, org.id, cfg.credName, encToken,
-        cfg.oauthClientId, encSecret, cfg.oauthAuthUrl, cfg.oauthTokenUrl, cfg.oauthScopes,
-        user.id,
-      )
-    } else {
-      await prisma.$executeRawUnsafe(
-        `INSERT OR IGNORE INTO credentials (id, workspace_id, name, type, encrypted_value, status,
-          provider, scope, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'ACTIVE', 'GITHUB', 'WORKSPACE', ?, datetime('now'), datetime('now'))`,
-        credId, org.id, cfg.credName, cfg.credType, encToken, user.id,
-      )
-    }
-
-    // Create agent bindings with credential for all engineering agents
-    for (const agent of engineeringAgents) {
-      const bindingId = `seed-${cfg.credName}-${agent.id.slice(-6)}`
-      await prisma.$executeRawUnsafe(
-        `INSERT OR IGNORE INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, credential_id, cred_type, enabled, created_at)
-         VALUES (?, ?, ?, 'crew', ?, 'bearer', 1, datetime('now'))`,
-        bindingId, agent.id, cfg.serverId, credId,
-      )
-    }
-    console.log(`  ✓ Credential: ${cfg.credName} + bindings for ${engineeringAgents.length} agents`)
   }
 
   // Step 12: Plan (max_agents bumped to 10 for 8-agent team)
