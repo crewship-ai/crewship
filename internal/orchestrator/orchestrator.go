@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -542,7 +543,16 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// Apple's container runtime buffers exec output which causes choppy
 	// streaming in chat. stdbuf -oL flushes on every newline so JSON
 	// stream events arrive immediately.
-	execCmd := append([]string{"stdbuf", "-oL"}, cmd...)
+	//
+	// When tmux is available, wrap the command inside a named tmux session
+	// so users can attach via the web terminal to observe the running agent.
+	// The tmux session is named "agent-{slug}" and stdout still flows through
+	// the exec pipe for chat streaming.
+	execCmd, tmuxErr := o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, env)
+	if tmuxErr != nil {
+		o.logger.Warn("tmux setup failed, falling back to direct exec", "error", tmuxErr)
+		execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
+	}
 
 	execCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,
@@ -894,4 +904,112 @@ func normalizeNPMPackage(arg string) string {
 		return m[1]
 	}
 	return arg
+}
+
+// TmuxSessionName returns the tmux session name for a given agent slug.
+func TmuxSessionName(agentSlug string) string {
+	return "agent-" + agentSlug
+}
+
+// setupTmuxExec prepares a tmux-wrapped execution environment for an agent.
+// It writes command args, env vars, and a script to files in the container
+// (avoiding shell quoting issues), then returns a wrapper command that starts
+// tmux and streams output via FIFO. Falls back gracefully if setup fails.
+func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cmd []string, agentSlug string, env []string) ([]string, error) {
+	session := TmuxSessionName(agentSlug)
+	argsFile := fmt.Sprintf("/tmp/%s.args", session)
+	scriptFile := fmt.Sprintf("/tmp/%s.sh", session)
+	fifo := fmt.Sprintf("/tmp/%s.fifo", session)
+	exitFile := fmt.Sprintf("/tmp/%s.exit", session)
+	doneSignal := session + "-done"
+	envFile := fmt.Sprintf("/tmp/%s.env", session)
+
+	// Step 1: Write null-separated command args to file via base64.
+	var argsBuf []byte
+	for _, arg := range cmd {
+		argsBuf = append(argsBuf, []byte(arg)...)
+		argsBuf = append(argsBuf, 0)
+	}
+	argsEncoded := base64.StdEncoding.EncodeToString(argsBuf)
+	writeArgsResult, err := o.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", fmt.Sprintf("printf '%%s' '%s' | base64 -d > '%s'", argsEncoded, argsFile)},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("write args file: %w", err)
+	}
+	io.Copy(io.Discard, writeArgsResult.Reader)
+	writeArgsResult.Reader.Close()
+
+	// Step 2: Write env vars as sourceable shell script.
+	var envScript strings.Builder
+	for _, e := range env {
+		if idx := strings.IndexByte(e, '='); idx > 0 {
+			key := e[:idx]
+			// Only allow safe env var names ([A-Za-z_][A-Za-z0-9_]*) to prevent
+			// shell injection via crafted key names in the sourced export script.
+			safe := true
+			for i, c := range key {
+				if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || (i > 0 && c >= '0' && c <= '9')) {
+					safe = false
+					break
+				}
+			}
+			if !safe || len(key) == 0 {
+				continue
+			}
+			val := e[idx+1:]
+			escaped := strings.ReplaceAll(val, "'", "'\\''")
+			envScript.WriteString(fmt.Sprintf("export %s='%s'\n", key, escaped))
+		}
+	}
+	envEncoded := base64.StdEncoding.EncodeToString([]byte(envScript.String()))
+	envWriteResult, err := o.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", fmt.Sprintf("printf '%%s' '%s' | base64 -d > '%s'", envEncoded, envFile)},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("write env file: %w", err)
+	}
+	io.Copy(io.Discard, envWriteResult.Reader)
+	envWriteResult.Reader.Close()
+
+	// Step 3: Write inner script (sources env, runs command via xargs).
+	scriptContent := fmt.Sprintf("#!/bin/sh\n. '%s'\n"+
+		"EX=0\nxargs -0 stdbuf -oL < '%s' > '%s' 2>&1 || EX=$?\necho $EX > '%s'\nrm -f '%s'\ntmux wait-for -S '%s'\n",
+		envFile, argsFile, fifo, exitFile, fifo, doneSignal)
+	scriptEncoded := base64.StdEncoding.EncodeToString([]byte(scriptContent))
+	writeScriptResult, err := o.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", fmt.Sprintf("printf '%%s' '%s' | base64 -d > '%s' && chmod +x '%s'", scriptEncoded, scriptFile, scriptFile)},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("write script file: %w", err)
+	}
+	io.Copy(io.Discard, writeScriptResult.Reader)
+	writeScriptResult.Reader.Close()
+
+	// Step 4: Return outer wrapper. Uses session-scoped kill (not kill-server)
+	// to avoid disrupting other agent sessions in the same crew container.
+	// If tmux new-session fails, falls back to direct exec via sh.
+	wrapper := fmt.Sprintf(
+		"tmux kill-session -t '%s' 2>/dev/null; rm -f '%s' '%s'; mkfifo '%s'; "+
+			"if tmux new-session -d -s '%s' -x 200 -y 50 'sh %s'; then "+
+			"cat '%s' 2>/dev/null; "+
+			"tmux wait-for '%s' 2>/dev/null || true; "+
+			"else sh '%s'; fi; "+
+			"EC=0; [ -f '%s' ] && EC=$(cat '%s') && rm -f '%s'; "+
+			"rm -f '%s' '%s' '%s'; exit $EC",
+		session, fifo, exitFile, fifo,
+		session, scriptFile,
+		fifo,
+		doneSignal,
+		scriptFile,
+		exitFile, exitFile, exitFile,
+		scriptFile, argsFile, envFile,
+	)
+	return []string{"sh", "-c", wrapper}, nil
 }

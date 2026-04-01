@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -65,27 +64,32 @@ func New(container provider.ContainerProvider, validator *auth.JWTValidator, db 
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
-			CheckOrigin: func(r *http.Request) bool {
-				origin := r.Header.Get("Origin")
-				if origin == "" {
-					return true // non-browser clients (curl, etc.)
-				}
-				// Allow same-origin requests by comparing against the Host header.
-				host := r.Host
-				return origin == "http://"+host || origin == "https://"+host
-			},
+			CheckOrigin:     func(r *http.Request) bool { return true },
 		},
 	}
 }
 
 // ServeHTTP handles the WebSocket upgrade and terminal session lifecycle.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Authenticate via JWT token in query param.
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		http.Error(w, "missing token", http.StatusUnauthorized)
+		return
+	}
 	if h.validator == nil {
 		http.Error(w, "auth not configured", http.StatusServiceUnavailable)
 		return
 	}
+	claims, err := h.validator.Validate(token)
+	if err != nil {
+		h.logger.Warn("terminal auth failed", "error", err)
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+	userID := claims.ID
 
-	// Upgrade to WebSocket first (auth happens post-open to avoid token in URL).
+	// Upgrade to WebSocket.
 	ws, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Error("terminal ws upgrade failed", "error", err)
@@ -93,36 +97,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
-	// Limit read size to 1 MB to prevent unbounded memory allocation.
-	ws.SetReadLimit(1 << 20)
-
-	// Read auth message (first text message from client).
+	// Read init message (first text message from client).
 	ws.SetReadDeadline(time.Now().Add(10 * time.Second))
-	_, authMsg, err := ws.ReadMessage()
-	if err != nil {
-		h.logger.Warn("terminal auth read failed", "error", err)
-		h.writeError(ws, "failed to read auth message")
-		return
-	}
-
-	var authPayload struct {
-		Type  string `json:"type"`
-		Token string `json:"token"`
-	}
-	if err := json.Unmarshal(authMsg, &authPayload); err != nil || authPayload.Type != "auth" || authPayload.Token == "" {
-		h.writeError(ws, "invalid auth message")
-		return
-	}
-
-	claims, err := h.validator.Validate(authPayload.Token)
-	if err != nil {
-		h.logger.Warn("terminal auth failed", "error", err)
-		h.writeError(ws, "invalid token")
-		return
-	}
-	userID := claims.ID
-
-	// Read init message (second text message from client).
 	_, msg, err := ws.ReadMessage()
 	if err != nil {
 		h.logger.Warn("terminal init read failed", "error", err)
@@ -151,62 +127,42 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		init.Cols = 80
 	}
 
-	// Verify user has access to this crew's workspace and resolve canonical slug.
-	crewSlug, accessErr := h.verifyAccessAndResolveSlug(r.Context(), userID, init.CrewID)
-	if accessErr != nil {
-		if errors.Is(accessErr, sql.ErrNoRows) {
-			h.logger.Warn("terminal access denied", "user_id", userID, "crew_id", init.CrewID)
-			h.writeError(ws, "access denied")
-		} else {
-			h.logger.Error("terminal access check failed", "user_id", userID, "crew_id", init.CrewID, "error", accessErr)
-			h.writeError(ws, "terminal unavailable")
-		}
+	// Verify user has access to this crew's workspace.
+	if err := h.verifyAccess(r.Context(), userID, init.CrewID); err != nil {
+		h.logger.Warn("terminal access denied", "user_id", userID, "crew_id", init.CrewID, "error", err)
+		h.writeError(ws, "access denied")
 		return
 	}
 
+	// Resolve actual crew slug from DB to prevent slug spoofing.
+	// The client supplies crew_slug for convenience, but we must use the slug
+	// that corresponds to the verified crew_id.
+	actualSlug := init.CrewSlug
+	if h.db != nil {
+		var dbSlug string
+		err := h.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", init.CrewID).Scan(&dbSlug)
+		if err == nil && dbSlug != "" {
+			actualSlug = dbSlug
+		}
+	}
+
 	// Ensure container is running (start if needed).
-	containerName := h.container.CrewContainerName(crewSlug)
+	containerName := h.container.CrewContainerName(actualSlug)
 	status, err := h.container.ContainerStatus(r.Context(), containerName)
 	if err != nil || status.State != "running" {
-		h.logger.Info("terminal: starting container", "crew_slug", crewSlug)
+		h.logger.Info("terminal: starting container", "crew_slug", actualSlug)
 		h.writeInfo(ws, "Starting container...")
 		_, err := h.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
 			ID:   init.CrewID,
-			Slug: crewSlug,
+			Slug: actualSlug,
 		})
 		if err != nil {
 			h.logger.Error("terminal: failed to start container", "error", err)
 			h.writeError(ws, "failed to start container: "+err.Error())
 			return
 		}
-		// Poll for container readiness with context-aware timeout.
-		readyCtx, readyCancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer readyCancel()
-		ready := false
-		for i := 0; i < 25; i++ {
-			select {
-			case <-readyCtx.Done():
-				break
-			case <-time.After(200 * time.Millisecond):
-			}
-			if readyCtx.Err() != nil {
-				break
-			}
-			if st, stErr := h.container.ContainerStatus(readyCtx, containerName); stErr == nil && st.State == "running" {
-				ready = true
-				break
-			}
-		}
-		if !ready {
-			h.writeError(ws, "container did not become ready in time")
-			return
-		}
-	}
-
-	// Build exec config based on mode.
-	workingDir := "/crew/shared"
-	if init.AgentSlug != "" {
-		workingDir = "/crew/agents/" + init.AgentSlug
+		// Give the container a moment to fully initialize.
+		time.Sleep(time.Second)
 	}
 
 	interactive, ok := h.container.(provider.InteractiveExecProvider)
@@ -215,16 +171,74 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	execResult, err := interactive.ExecInteractive(r.Context(), provider.InteractiveExecConfig{
-		ContainerID: containerName,
-		Cmd:         []string{"/bin/bash", "--login"},
-		Env: []string{
+	// Build exec config based on mode.
+	var execCmd []string
+	var execEnv []string
+	var workingDir string
+
+	switch init.Mode {
+	case "attach":
+		// Attach to a running agent's tmux session.
+		tmuxSession := "agent-" + init.AgentSlug
+		if init.AgentSlug == "" {
+			h.writeError(ws, "agent_slug is required for attach mode")
+			return
+		}
+		// Check if tmux session exists (agent is running).
+		checkResult, err := h.container.Exec(r.Context(), provider.ExecConfig{
+			ContainerID: containerName,
+			Cmd:         []string{"tmux", "has-session", "-t", tmuxSession},
+			User:        "1001:1001",
+		})
+		if err != nil {
+			h.writeError(ws, "agent is not running")
+			return
+		}
+		// Read and discard output, check exit code.
+		if checkResult.Reader != nil {
+			io.Copy(io.Discard, checkResult.Reader)
+			checkResult.Reader.Close()
+		}
+		running, exitCode, _ := h.container.ExecInspect(r.Context(), checkResult.ExecID)
+		if running || exitCode != 0 {
+			h.writeError(ws, "agent is not running (no active tmux session)")
+			return
+		}
+
+		execCmd = []string{"tmux", "attach", "-t", tmuxSession}
+		execEnv = []string{"TERM=xterm-256color"}
+		workingDir = ""
+
+	default: // "shell"
+		workingDir = "/crew/shared"
+		if init.AgentSlug != "" {
+			workingDir = "/crew/agents/" + init.AgentSlug
+			// Ensure agent directory exists (it's created on first agent run,
+			// but user may open terminal before that).
+			mkdirResult, err := h.container.Exec(r.Context(), provider.ExecConfig{
+				ContainerID: containerName,
+				Cmd:         []string{"mkdir", "-p", workingDir},
+				User:        "1001:1001",
+			})
+			if err == nil && mkdirResult.Reader != nil {
+				io.Copy(io.Discard, mkdirResult.Reader)
+				mkdirResult.Reader.Close()
+			}
+		}
+		execCmd = []string{"/bin/bash", "--login"}
+		execEnv = []string{
 			"TERM=xterm-256color",
 			"HOME=/home/agent",
 			"PATH=/opt/crew-tools/bin:/home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		},
-		WorkingDir: workingDir,
-		User:       "1001:1001",
+		}
+	}
+
+	execResult, err := interactive.ExecInteractive(r.Context(), provider.InteractiveExecConfig{
+		ContainerID: containerName,
+		Cmd:         execCmd,
+		Env:         execEnv,
+		WorkingDir:  workingDir,
+		User:        "1001:1001",
 		Rows:       init.Rows,
 		Cols:       init.Cols,
 	})
@@ -233,17 +247,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(ws, "failed to start shell: "+err.Error())
 		return
 	}
-	var closeOnce sync.Once
-	closeIO := func() {
-		closeOnce.Do(func() {
-			_ = execResult.Conn.Close()
-			_ = ws.Close()
-		})
-	}
-	defer closeIO()
+	defer execResult.Conn.Close()
 
 	sessionID := fmt.Sprintf("term-%d", h.sessionID.Add(1))
-	ctx, cancel := context.WithCancel(r.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	session := &Session{
@@ -259,7 +266,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("terminal session started",
 		"session_id", sessionID,
 		"user_id", userID,
-		"crew_slug", crewSlug,
+		"crew_slug", actualSlug,
 		"agent_slug", init.AgentSlug,
 		"mode", init.Mode,
 	)
@@ -314,33 +321,34 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Wait for either goroutine to finish (connection closed, exec exited).
 	<-ctx.Done()
-	// Give goroutines a moment to clean up.
-	_ = ws.WriteControl(websocket.CloseMessage,
+	// Force close both sides to unblock goroutines.
+	execResult.Conn.Close()
+	ws.WriteControl(websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
 		time.Now().Add(time.Second))
-	closeIO()
 	wg.Wait()
 
 	h.logger.Info("terminal session ended", "session_id", sessionID, "user_id", userID)
 }
 
-// verifyAccessAndResolveSlug checks that the user belongs to the workspace that
-// owns the crew and returns the canonical crew slug from the database (never
-// trusting the client-supplied slug).
-func (h *Handler) verifyAccessAndResolveSlug(ctx context.Context, userID, crewID string) (string, error) {
+// verifyAccess checks that the user belongs to the workspace that owns the crew.
+func (h *Handler) verifyAccess(ctx context.Context, userID, crewID string) error {
 	if h.db == nil {
-		return "", fmt.Errorf("no database configured")
+		return nil // no DB = no auth check (dev mode)
 	}
-	var slug string
+	var count int
 	err := h.db.QueryRowContext(ctx, `
-		SELECT c.slug FROM workspace_members wm
+		SELECT COUNT(*) FROM workspace_members wm
 		JOIN crews c ON c.workspace_id = wm.workspace_id
 		WHERE wm.user_id = ? AND c.id = ?
-	`, userID, crewID).Scan(&slug)
+	`, userID, crewID).Scan(&count)
 	if err != nil {
-		return "", err // caller distinguishes sql.ErrNoRows from other errors
+		return fmt.Errorf("access check query: %w", err)
 	}
-	return slug, nil
+	if count == 0 {
+		return fmt.Errorf("user %s has no access to crew %s", userID, crewID)
+	}
+	return nil
 }
 
 // writeError sends a JSON error message to the WebSocket client.
