@@ -932,7 +932,8 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 
 	// Step 4: Create OAUTH2 credential in PENDING state
 	credID := generateCUID()
-	credName := req.ServerName + "-oauth"
+	// Use a unique name to avoid conflicts with previous OAuth attempts
+	credName := fmt.Sprintf("%s-oauth-%s", req.ServerName, credID[len(credID)-5:])
 	user := UserFromContext(r.Context())
 
 	var encSecret string
