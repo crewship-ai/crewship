@@ -252,7 +252,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			io.Copy(io.Discard, checkResult.Reader)
 			checkResult.Reader.Close()
 		}
-		running, exitCode, _ := h.container.ExecInspect(r.Context(), checkResult.ExecID)
+		running, exitCode, inspectErr := h.container.ExecInspect(r.Context(), checkResult.ExecID)
+		if inspectErr != nil {
+			h.logger.Error("terminal: exec inspect failed", "exec_id", checkResult.ExecID, "error", inspectErr)
+			h.writeError(ws, "failed to check agent session")
+			return
+		}
 		if !running && exitCode != 0 {
 			h.writeError(ws, "agent is not running (no active tmux session)")
 			return
@@ -273,7 +278,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Cmd:         []string{"mkdir", "-p", workingDir},
 				User:        "1001:1001",
 			})
-			if err == nil && mkdirResult.Reader != nil {
+			if err != nil {
+				h.logger.Debug("terminal: mkdir failed", "dir", workingDir, "error", err)
+			} else if mkdirResult.Reader != nil {
 				io.Copy(io.Discard, mkdirResult.Reader)
 				mkdirResult.Reader.Close()
 			}
