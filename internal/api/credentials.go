@@ -652,6 +652,13 @@ func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Clear credential references from agent bindings so integrations
+	// show a "credential missing" warning in the UI.
+	if _, err := h.db.ExecContext(r.Context(),
+		"UPDATE agent_mcp_bindings SET credential_id = NULL WHERE credential_id = ?", credID); err != nil {
+		h.logger.Warn("clear credential from MCP bindings", "credential_id", credID, "error", err)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 

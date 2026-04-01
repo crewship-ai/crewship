@@ -767,6 +767,25 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Collect credential IDs from bindings — cascade-delete OAuth credentials
+	// that were created specifically for this integration (auto-connect flow).
+	var credIDs []string
+	rows, err := tx.QueryContext(r.Context(),
+		`SELECT DISTINCT ab.credential_id FROM agent_mcp_bindings ab
+		 JOIN credentials c ON c.id = ab.credential_id
+		 WHERE ab.mcp_server_id = ? AND ab.mcp_server_scope = 'crew'
+		   AND c.type = 'OAUTH2' AND c.name LIKE '%oauth%'`,
+		id)
+	if err == nil {
+		for rows.Next() {
+			var cid string
+			if rows.Scan(&cid) == nil && cid != "" {
+				credIDs = append(credIDs, cid)
+			}
+		}
+		rows.Close()
+	}
+
 	// Delete agent bindings for this crew server
 	if _, err := tx.ExecContext(r.Context(),
 		"DELETE FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'crew'", id); err != nil {
@@ -774,6 +793,14 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		h.logger.Error("delete agent bindings for crew server", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
+	}
+
+	// Cascade-delete OAuth credentials that were auto-created for this integration
+	for _, cid := range credIDs {
+		if _, err := tx.ExecContext(r.Context(),
+			"DELETE FROM credentials WHERE id = ? AND workspace_id = ?", cid, workspaceID); err != nil {
+			h.logger.Warn("cascade delete OAuth credential", "credential_id", cid, "error", err)
+		}
 	}
 
 	result, err := tx.ExecContext(r.Context(), `
