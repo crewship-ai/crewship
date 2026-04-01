@@ -126,9 +126,11 @@ export function WebTerminal({
             )}
           </Button>
 
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleClose}>
-            <X className="h-3.5 w-3.5 text-neutral-400" />
-          </Button>
+          {onClose && (
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleClose}>
+              <X className="h-3.5 w-3.5 text-neutral-400" />
+            </Button>
+          )}
         </div>
       </div>
 
