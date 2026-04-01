@@ -153,28 +153,69 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(time.Second)
 	}
 
-	// Build exec config based on mode.
-	workingDir := "/crew/shared"
-	if init.AgentSlug != "" {
-		workingDir = "/crew/agents/" + init.AgentSlug
-	}
-
 	interactive, ok := h.container.(provider.InteractiveExecProvider)
 	if !ok {
 		h.writeError(ws, "terminal not supported by container provider")
 		return
 	}
 
-	execResult, err := interactive.ExecInteractive(r.Context(), provider.InteractiveExecConfig{
-		ContainerID: containerName,
-		Cmd:         []string{"/bin/bash", "--login"},
-		Env: []string{
+	// Build exec config based on mode.
+	var execCmd []string
+	var execEnv []string
+	var workingDir string
+
+	switch init.Mode {
+	case "attach":
+		// Attach to a running agent's tmux session.
+		tmuxSession := "agent-" + init.AgentSlug
+		if init.AgentSlug == "" {
+			h.writeError(ws, "agent_slug is required for attach mode")
+			return
+		}
+		// Check if tmux session exists (agent is running).
+		checkResult, err := h.container.Exec(r.Context(), provider.ExecConfig{
+			ContainerID: containerName,
+			Cmd:         []string{"tmux", "has-session", "-t", tmuxSession},
+			User:        "1001:1001",
+		})
+		if err != nil {
+			h.writeError(ws, "agent is not running")
+			return
+		}
+		// Read and discard output, check exit code.
+		if checkResult.Reader != nil {
+			io.Copy(io.Discard, checkResult.Reader)
+			checkResult.Reader.Close()
+		}
+		running, exitCode, _ := h.container.ExecInspect(r.Context(), checkResult.ExecID)
+		if running || exitCode != 0 {
+			h.writeError(ws, "agent is not running (no active tmux session)")
+			return
+		}
+
+		execCmd = []string{"tmux", "attach", "-t", tmuxSession}
+		execEnv = []string{"TERM=xterm-256color"}
+		workingDir = ""
+
+	default: // "shell"
+		workingDir = "/crew/shared"
+		if init.AgentSlug != "" {
+			workingDir = "/crew/agents/" + init.AgentSlug
+		}
+		execCmd = []string{"/bin/bash", "--login"}
+		execEnv = []string{
 			"TERM=xterm-256color",
 			"HOME=/home/agent",
 			"PATH=/opt/crew-tools/bin:/home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		},
-		WorkingDir: workingDir,
-		User:       "1001:1001",
+		}
+	}
+
+	execResult, err := interactive.ExecInteractive(r.Context(), provider.InteractiveExecConfig{
+		ContainerID: containerName,
+		Cmd:         execCmd,
+		Env:         execEnv,
+		WorkingDir:  workingDir,
+		User:        "1001:1001",
 		Rows:       init.Rows,
 		Cols:       init.Cols,
 	})

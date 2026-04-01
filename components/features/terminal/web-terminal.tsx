@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { TerminalSquare, Maximize2, Minimize2, X, Loader2, WifiOff } from "lucide-react"
+import { TerminalSquare, Maximize2, Minimize2, X, Loader2, WifiOff, Eye } from "lucide-react"
 import "@xterm/xterm/css/xterm.css"
 
 interface Agent {
@@ -24,6 +24,7 @@ interface WebTerminalProps {
   crewSlug: string
   agents?: Agent[]
   defaultAgentSlug?: string
+  defaultMode?: "shell" | "attach"
   onClose?: () => void
 }
 
@@ -45,19 +46,23 @@ export function WebTerminal({
   crewSlug,
   agents = [],
   defaultAgentSlug,
+  defaultMode = "shell",
   onClose,
 }: WebTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [agentSlug, setAgentSlug] = useState(defaultAgentSlug || "__crew_shared__")
+  const [mode, setMode] = useState<"shell" | "attach">(defaultMode)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isConnected, setIsConnected] = useState(true)
+
+  const effectiveAgentSlug = agentSlug === "__crew_shared__" ? undefined : agentSlug
 
   const { status, disconnect } = useTerminal({
     containerRef,
     crewId,
     crewSlug,
-    mode: "shell",
-    agentSlug: agentSlug === "__crew_shared__" ? undefined : agentSlug,
+    mode,
+    agentSlug: effectiveAgentSlug,
     enabled: isConnected,
   })
 
@@ -87,9 +92,15 @@ export function WebTerminal({
       {/* Toolbar */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-neutral-900 border-b border-neutral-800 shrink-0">
         <div className="flex items-center gap-2">
-          <TerminalSquare className="h-4 w-4 text-neutral-400" />
+          {mode === "attach" ? (
+            <Eye className="h-4 w-4 text-amber-400" />
+          ) : (
+            <TerminalSquare className="h-4 w-4 text-neutral-400" />
+          )}
           <StatusIndicator status={status} />
-          <span className="text-xs text-neutral-400">{targetLabel}</span>
+          <span className="text-xs text-neutral-400">
+            {mode === "attach" ? `Attached: ${targetLabel}` : targetLabel}
+          </span>
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -107,6 +118,23 @@ export function WebTerminal({
               ))}
             </SelectContent>
           </Select>
+
+          {/* Mode toggle: shell vs attach */}
+          {effectiveAgentSlug && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              title={mode === "shell" ? "Switch to Attach (observe running agent)" : "Switch to Shell"}
+              onClick={() => { setMode(mode === "shell" ? "attach" : "shell"); handleReconnect() }}
+            >
+              {mode === "shell" ? (
+                <Eye className="h-3.5 w-3.5 text-neutral-400" />
+              ) : (
+                <TerminalSquare className="h-3.5 w-3.5 text-neutral-400" />
+              )}
+            </Button>
+          )}
 
           {status === "disconnected" && (
             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleReconnect}>

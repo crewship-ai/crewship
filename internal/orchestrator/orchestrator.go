@@ -542,7 +542,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// Apple's container runtime buffers exec output which causes choppy
 	// streaming in chat. stdbuf -oL flushes on every newline so JSON
 	// stream events arrive immediately.
-	execCmd := append([]string{"stdbuf", "-oL"}, cmd...)
+	//
+	// When tmux is available, wrap the command inside a named tmux session
+	// so users can attach via the web terminal to observe the running agent.
+	// The tmux session is named "agent-{slug}" and stdout still flows through
+	// the exec pipe for chat streaming.
+	execCmd := o.buildExecCommand(cmd, req.AgentSlug)
 
 	execCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,
@@ -831,6 +836,7 @@ func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID s
 	return b.String()
 }
 
+<<<<<<< HEAD
 // mcpPackageDomains maps well-known MCP npm packages to the API domains
 // they need to reach. Used to auto-populate the sidecar allowlist in
 // restricted network mode so stdio MCP servers can make outbound API calls.
@@ -894,4 +900,39 @@ func normalizeNPMPackage(arg string) string {
 		return m[1]
 	}
 	return arg
+}
+
+// TmuxSessionName returns the tmux session name for a given agent slug.
+func TmuxSessionName(agentSlug string) string {
+	return "agent-" + agentSlug
+}
+
+// buildExecCommand wraps the agent CLI command for execution.
+func (o *Orchestrator) buildExecCommand(cmd []string, agentSlug string) []string {
+	session := TmuxSessionName(agentSlug)
+	var innerCmd strings.Builder
+	innerCmd.WriteString("stdbuf -oL")
+	for _, arg := range cmd {
+		innerCmd.WriteString(" '")
+		innerCmd.WriteString(strings.ReplaceAll(arg, "'", "'\\''"))
+		innerCmd.WriteString("'")
+	}
+	wrapperScript := fmt.Sprintf(`#!/bin/sh
+FIFO="/tmp/%s.fifo"
+SESSION="%s"
+tmux kill-session -t "$SESSION" 2>/dev/null || true
+rm -f "$FIFO"
+mkfifo "$FIFO"
+tmux new-session -d -s "$SESSION" -x 200 -y 50 \
+  "EXIT_CODE=0; %s > '$FIFO' 2>&1 || EXIT_CODE=\$?; echo \"\$EXIT_CODE\" > /tmp/%s.exit; rm -f '$FIFO'; tmux wait-for -S %s-done"
+cat "$FIFO" 2>/dev/null
+tmux wait-for "%s-done" 2>/dev/null || true
+EXIT_CODE=0
+if [ -f "/tmp/%s.exit" ]; then
+  EXIT_CODE=$(cat "/tmp/%s.exit" 2>/dev/null || echo 0)
+  rm -f "/tmp/%s.exit"
+fi
+exit $EXIT_CODE
+`, session, session, innerCmd.String(), session, session, session, session, session, session)
+	return []string{"sh", "-c", wrapperScript}
 }
