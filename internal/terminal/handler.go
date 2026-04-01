@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -92,6 +93,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer ws.Close()
 
+	// Limit read size to 1 MB to prevent unbounded memory allocation.
+	ws.SetReadLimit(1 << 20)
+
 	// Read auth message (first text message from client).
 	ws.SetReadDeadline(time.Now().Add(10 * time.Second))
 	_, authMsg, err := ws.ReadMessage()
@@ -148,10 +152,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify user has access to this crew's workspace and resolve canonical slug.
-	crewSlug, err := h.verifyAccessAndResolveSlug(r.Context(), userID, init.CrewID)
-	if err != nil {
-		h.logger.Warn("terminal access denied", "user_id", userID, "crew_id", init.CrewID, "error", err)
-		h.writeError(ws, "access denied")
+	crewSlug, accessErr := h.verifyAccessAndResolveSlug(r.Context(), userID, init.CrewID)
+	if accessErr != nil {
+		if errors.Is(accessErr, sql.ErrNoRows) {
+			h.logger.Warn("terminal access denied", "user_id", userID, "crew_id", init.CrewID)
+			h.writeError(ws, "access denied")
+		} else {
+			h.logger.Error("terminal access check failed", "user_id", userID, "crew_id", init.CrewID, "error", accessErr)
+			h.writeError(ws, "terminal unavailable")
+		}
 		return
 	}
 
@@ -170,12 +179,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeError(ws, "failed to start container: "+err.Error())
 			return
 		}
-		// Poll for container readiness.
-		for i := 0; i < 10; i++ {
-			time.Sleep(200 * time.Millisecond)
-			if st, stErr := h.container.ContainerStatus(r.Context(), containerName); stErr == nil && st.State == "running" {
+		// Poll for container readiness with context-aware timeout.
+		readyCtx, readyCancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer readyCancel()
+		ready := false
+		for i := 0; i < 25; i++ {
+			select {
+			case <-readyCtx.Done():
+				break
+			case <-time.After(200 * time.Millisecond):
+			}
+			if readyCtx.Err() != nil {
 				break
 			}
+			if st, stErr := h.container.ContainerStatus(readyCtx, containerName); stErr == nil && st.State == "running" {
+				ready = true
+				break
+			}
+		}
+		if !ready {
+			h.writeError(ws, "container did not become ready in time")
+			return
 		}
 	}
 
@@ -314,7 +338,7 @@ func (h *Handler) verifyAccessAndResolveSlug(ctx context.Context, userID, crewID
 		WHERE wm.user_id = ? AND c.id = ?
 	`, userID, crewID).Scan(&slug)
 	if err != nil {
-		return "", fmt.Errorf("user %s has no access to crew %s", userID, crewID)
+		return "", err // caller distinguishes sql.ErrNoRows from other errors
 	}
 	return slug, nil
 }

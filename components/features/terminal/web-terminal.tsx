@@ -107,7 +107,7 @@ export function WebTerminal({
             </SelectContent>
           </Select>
 
-          {status === "disconnected" && (
+          {(status === "disconnected" || status === "error") && (
             <Button aria-label="Reconnect terminal" variant="ghost" size="icon" className="h-6 w-6" onClick={handleReconnect}>
               <TerminalSquare className="h-3.5 w-3.5 text-neutral-400" />
             </Button>
