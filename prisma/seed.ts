@@ -736,7 +736,108 @@ NEVER ACCEPTABLE:
   }
   console.log(`  ✓ Assigned ${agentCredPairs.length} agent-credential links`)
 
-  // Step 11: Plan (max_agents bumped to 10 for 8-agent team)
+  // Step 11: MCP Integrations (Linear + GitHub for Engineering crew)
+  console.log("🔌 Seeding MCP integrations...")
+
+  // Linear MCP — remote HTTP with OAuth (token from SEED_LINEAR_OAUTH_ACCESS_TOKEN)
+  const linearServerId = `seed-linear-${engineering.id.slice(-8)}`
+  await prisma.$executeRawUnsafe(
+    `INSERT OR IGNORE INTO crew_mcp_servers (id, crew_id, name, display_name, transport, endpoint, enabled, created_at, updated_at)
+     VALUES (?, ?, 'linear', 'Linear', 'streamable-http', 'https://mcp.linear.app/mcp', 1, datetime('now'), datetime('now'))`,
+    linearServerId, engineering.id,
+  )
+
+  // GitHub MCP — remote HTTP with PAT (token from SEED_GITHUB_TOKEN)
+  const githubServerId = `seed-github-${engineering.id.slice(-8)}`
+  await prisma.$executeRawUnsafe(
+    `INSERT OR IGNORE INTO crew_mcp_servers (id, crew_id, name, display_name, transport, endpoint, enabled, created_at, updated_at)
+     VALUES (?, ?, 'github', 'GitHub', 'streamable-http', 'https://api.githubcopilot.com/mcp/', 1, datetime('now'), datetime('now'))`,
+    githubServerId, engineering.id,
+  )
+
+  console.log(`  ✓ MCP: Linear (Engineering crew)`)
+  console.log(`  ✓ MCP: GitHub (Engineering crew)`)
+
+  // Seed OAuth/token credentials + agent bindings for MCP servers
+  const mcpConfigs = [
+    {
+      envVar: "SEED_LINEAR_OAUTH_ACCESS_TOKEN",
+      serverId: linearServerId,
+      credName: "linear-oauth",
+      credType: "OAUTH2",
+      oauthClientId: process.env.SEED_LINEAR_OAUTH_CLIENT_ID || "",
+      oauthAuthUrl: "https://linear.app/oauth/authorize",
+      oauthTokenUrl: "https://api.linear.app/oauth/token",
+      oauthScopes: "read write",
+    },
+    {
+      envVar: "SEED_GITHUB_TOKEN",
+      serverId: githubServerId,
+      credName: "github-pat",
+      credType: "API_KEY",
+      oauthClientId: "",
+      oauthAuthUrl: "",
+      oauthTokenUrl: "",
+      oauthScopes: "",
+    },
+  ]
+
+  const engineeringAgents = [tomas, viktor, nela, martin]
+
+  for (const cfg of mcpConfigs) {
+    const tokenValue = process.env[cfg.envVar]
+    if (!tokenValue) {
+      console.log(`  ⚠ Skipping ${cfg.credName} credential (set ${cfg.envVar} in .env.local)`)
+      // Still create agent bindings without credential (so UI shows "No credential")
+      for (const agent of engineeringAgents) {
+        const bindingId = `seed-bind-${agent.id.slice(-6)}-${cfg.serverId.slice(-6)}`
+        await prisma.$executeRawUnsafe(
+          `INSERT OR IGNORE INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, cred_type, enabled, created_at)
+           VALUES (?, ?, ?, 'crew', 'bearer', 1, datetime('now'))`,
+          bindingId, agent.id, cfg.serverId,
+        )
+      }
+      continue
+    }
+
+    const credId = `seed-cred-${cfg.credName}-${org.id.slice(-6)}`
+    const encToken = encrypt(tokenValue)
+
+    if (cfg.credType === "OAUTH2") {
+      const encSecret = cfg.oauthClientId
+        ? (process.env.SEED_LINEAR_OAUTH_CLIENT_SECRET ? encrypt(process.env.SEED_LINEAR_OAUTH_CLIENT_SECRET) : "")
+        : ""
+      await prisma.$executeRawUnsafe(
+        `INSERT OR IGNORE INTO credentials (id, workspace_id, name, type, encrypted_value, status,
+          oauth_client_id, oauth_client_secret_enc, oauth_auth_url, oauth_token_url, oauth_scopes,
+          created_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'OAUTH2', ?, 'ACTIVE', ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+        credId, org.id, cfg.credName, encToken,
+        cfg.oauthClientId, encSecret, cfg.oauthAuthUrl, cfg.oauthTokenUrl, cfg.oauthScopes,
+        user.id,
+      )
+    } else {
+      await prisma.$executeRawUnsafe(
+        `INSERT OR IGNORE INTO credentials (id, workspace_id, name, type, encrypted_value, status,
+          provider, scope, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'ACTIVE', 'GITHUB', 'WORKSPACE', ?, datetime('now'), datetime('now'))`,
+        credId, org.id, cfg.credName, cfg.credType, encToken, user.id,
+      )
+    }
+
+    // Create agent bindings with credential for all engineering agents
+    for (const agent of engineeringAgents) {
+      const bindingId = `seed-bind-${agent.id.slice(-6)}-${cfg.serverId.slice(-6)}`
+      await prisma.$executeRawUnsafe(
+        `INSERT OR IGNORE INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, credential_id, cred_type, enabled, created_at)
+         VALUES (?, ?, ?, 'crew', ?, 'bearer', 1, datetime('now'))`,
+        bindingId, agent.id, cfg.serverId, credId,
+      )
+    }
+    console.log(`  ✓ Credential: ${cfg.credName} + bindings for ${engineeringAgents.length} agents`)
+  }
+
+  // Step 12: Plan (max_agents bumped to 10 for 8-agent team)
   console.log("📋 Seeding plans...")
   const freePlan = await prisma.plan.upsert({
     where: { tier: "FREE" },
