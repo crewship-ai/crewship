@@ -118,7 +118,7 @@ generate_env_local() {
   # files but is NOT re-emitted — the dev server proxy makes it unnecessary.
   local managed_keys=(
     NEXT_PUBLIC_GO_PORT
-    NEXT_PUBLIC_WS_URL
+    NEXT_PUBLIC_WS_URL  # removed from output but still stripped to clean up old values
     NEXTAUTH_URL
     CREWSHIP_PORT
     CREWSHIP_SOCKET_PATH
