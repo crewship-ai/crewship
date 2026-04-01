@@ -29,6 +29,8 @@ async function main() {
   if (existingUsers > 0 || existingAgents > 0) {
     console.warn(`  ⚠ DB is not clean: ${existingUsers} users, ${existingAgents} agents found`)
     console.warn("  → Deleting all data for a fresh seed...")
+    // Disable FK checks during cleanup to avoid ordering issues with Go-managed tables
+    await prisma.$executeRawUnsafe("PRAGMA foreign_keys = OFF")
     // Delete in dependency order (tables with FK references first)
     // Use raw SQL for tables managed by Go migrations (not in Prisma schema)
     await prisma.$executeRawUnsafe("DELETE FROM cli_tokens").catch(() => {})
@@ -62,6 +64,7 @@ async function main() {
     await prisma.workspaceMember.deleteMany()
     await prisma.workspace.deleteMany()
     await prisma.user.deleteMany()
+    await prisma.$executeRawUnsafe("PRAGMA foreign_keys = ON")
     console.log("  ✓ DB cleaned")
   } else {
     console.log("  ✓ DB is clean")
