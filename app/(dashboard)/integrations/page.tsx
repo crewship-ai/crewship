@@ -52,14 +52,18 @@ function OAuthAutoConnect({
   serverName,
   mcpURL,
   workspaceId,
+  authStatus,
   onCredentialCreated,
 }: {
   serverName: string
   mcpURL: string
   workspaceId: string | null
+  authStatus: "connected" | "missing" | "expired" | "none"
   onCredentialCreated: (credId: string) => Promise<void>
 }) {
-  const [status, setStatus] = React.useState<"idle" | "discovering" | "authorizing" | "polling" | "done" | "error">("idle")
+  const [status, setStatus] = React.useState<"idle" | "discovering" | "authorizing" | "polling" | "done" | "error">(
+    authStatus === "connected" ? "done" : "idle",
+  )
   const [error, setError] = React.useState("")
   const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -126,40 +130,60 @@ function OAuthAutoConnect({
     }
   }
 
-  if (status === "done") {
+  if (status === "done" && authStatus !== "missing" && authStatus !== "expired") {
     return (
       <div className="rounded-md border border-green-500/30 bg-green-500/5 p-4">
         <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
           <Check className="h-4 w-4" />
-          OAuth connected successfully
+          OAuth connected
         </div>
       </div>
     )
   }
 
+  const isMissing = authStatus === "missing"
+  const isExpired = authStatus === "expired"
+
   return (
-    <div className="rounded-md border bg-background p-4 space-y-3">
+    <div className={`rounded-md border p-4 space-y-3 ${
+      isMissing ? "border-destructive/50 bg-destructive/5" :
+      isExpired ? "border-yellow-500/50 bg-yellow-500/5" :
+      "bg-background"
+    }`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-medium">
           <ExternalLink className="h-4 w-4 text-muted-foreground" />
           Authentication
         </div>
+        {isMissing && (
+          <Badge variant="destructive" className="text-xs">Credential missing</Badge>
+        )}
+        {isExpired && (
+          <Badge variant="outline" className="text-xs border-yellow-500 text-yellow-600">Expired</Badge>
+        )}
       </div>
       <p className="text-xs text-muted-foreground">
-        Connect with OAuth to automatically authenticate with this service.
+        {isMissing
+          ? "The credential for this integration was deleted. Reconnect to restore access."
+          : isExpired
+            ? "The OAuth token has expired. Reconnect to refresh."
+            : "Connect with OAuth to automatically authenticate with this service."}
       </p>
       {error && (
         <p className="text-xs text-destructive">{error}</p>
       )}
       <Button
         size="sm"
+        variant={isMissing || isExpired ? "destructive" : "default"}
         onClick={handleConnect}
         disabled={status === "discovering" || status === "authorizing" || status === "polling"}
       >
         {(status === "discovering" || status === "authorizing") && (
           <Loader2 className="mr-2 h-3 w-3 animate-spin" />
         )}
-        {status === "authorizing" ? "Waiting for authorization..." : "Connect with OAuth"}
+        {status === "authorizing" ? "Waiting for authorization..."
+          : isMissing || isExpired ? "Reconnect with OAuth"
+          : "Connect with OAuth"}
       </Button>
     </div>
   )
@@ -186,6 +210,7 @@ interface CrewIntegration {
   created_at: string
   updated_at: string
   agent_binding_count: number
+  auth_status: "connected" | "missing" | "expired" | "none"
 }
 
 interface AgentInfo {
@@ -755,6 +780,17 @@ export default function IntegrationsPage() {
                     {server.transport === "streamable-http" ? "HTTP" : "Stdio"}
                   </span>
 
+                  {/* Auth status indicator */}
+                  {server.auth_status === "missing" && (
+                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0 shrink-0">No credential</Badge>
+                  )}
+                  {server.auth_status === "expired" && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 border-yellow-500 text-yellow-600">Expired</Badge>
+                  )}
+                  {server.auth_status === "connected" && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 border-green-500 text-green-600">Connected</Badge>
+                  )}
+
                   {/* Agent count */}
                   {server.agent_binding_count > 0 && (
                     <span className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground shrink-0">
@@ -1099,6 +1135,7 @@ function ExpandedPanel({
           serverName={server.name}
           mcpURL={server.endpoint}
           workspaceId={workspaceId}
+          authStatus={server.auth_status}
           onCredentialCreated={async (credId: string) => {
             if (!workspaceId) return
             // Update existing bindings with credential

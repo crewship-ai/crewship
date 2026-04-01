@@ -76,6 +76,7 @@ type crewMCPServerResponse struct {
 	CreatedAt             string  `json:"created_at"`
 	UpdatedAt             string  `json:"updated_at"`
 	AgentBindCount        int     `json:"agent_binding_count"`
+	AuthStatus            string  `json:"auth_status"` // "connected", "missing", "expired", "none"
 }
 
 type agentMCPBindingResponse struct {
@@ -498,6 +499,27 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 		}
 		s.Enabled = enabled == 1
 		results = append(results, s)
+	}
+	// Populate auth_status for each integration by checking bound credentials.
+	for i := range results {
+		s := &results[i]
+		if s.Transport != "streamable-http" || s.Endpoint == nil || *s.Endpoint == "" {
+			s.AuthStatus = "none" // stdio or no endpoint — no OAuth needed
+			continue
+		}
+		var credStatus sql.NullString
+		_ = h.db.QueryRowContext(r.Context(), `
+			SELECT c.status FROM agent_mcp_bindings ab
+			JOIN credentials c ON c.id = ab.credential_id AND c.deleted_at IS NULL
+			WHERE ab.mcp_server_id = ? AND ab.credential_id IS NOT NULL AND ab.credential_id != ''
+			LIMIT 1`, s.ID).Scan(&credStatus)
+		if !credStatus.Valid || credStatus.String == "" {
+			s.AuthStatus = "missing"
+		} else if credStatus.String == "EXPIRED" {
+			s.AuthStatus = "expired"
+		} else {
+			s.AuthStatus = "connected"
+		}
 	}
 	if results == nil {
 		results = []crewIntegrationOverview{}
