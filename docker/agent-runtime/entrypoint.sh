@@ -3,13 +3,24 @@ set -e
 
 export HOME=/home/agent
 
-# Pre-create Claude CLI config directory for credential injection
-mkdir -p /home/agent/.claude
+# First-boot skeleton: initialize home directory on empty volume.
+if [ ! -f /home/agent/.bashrc ]; then
+    cp /etc/skel/.bashrc /home/agent/.bashrc 2>/dev/null || true
+    cp /etc/skel/.profile /home/agent/.profile 2>/dev/null || true
+fi
+mkdir -p /home/agent/.claude /home/agent/.local/bin /home/agent/.ssh
+chmod 700 /home/agent/.ssh 2>/dev/null || true
 
-# Create ready marker for healthcheck
+# Ensure crew tools directory is usable.
+mkdir -p /opt/crew-tools/bin 2>/dev/null || true
+
+# Prepend persistent tool directories to PATH.
+export PATH="/opt/crew-tools/bin:/home/agent/.local/bin:$PATH"
+
+# Create ready marker for healthcheck.
 touch /workspace/.ready
 
-# PID 1: keep container alive for Docker exec pattern
+# PID 1: keep container alive for Docker exec pattern.
 exec sleep infinity
 
 # NOTE: The sidecar binary is started via Docker exec (by the orchestrator)
