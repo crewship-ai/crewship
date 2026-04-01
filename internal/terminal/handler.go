@@ -134,15 +134,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve actual crew slug from DB to prevent slug spoofing.
+	// The client supplies crew_slug for convenience, but we must use the slug
+	// that corresponds to the verified crew_id.
+	actualSlug := init.CrewSlug
+	if h.db != nil {
+		var dbSlug string
+		err := h.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", init.CrewID).Scan(&dbSlug)
+		if err == nil && dbSlug != "" {
+			actualSlug = dbSlug
+		}
+	}
+
 	// Ensure container is running (start if needed).
-	containerName := h.container.CrewContainerName(init.CrewSlug)
+	containerName := h.container.CrewContainerName(actualSlug)
 	status, err := h.container.ContainerStatus(r.Context(), containerName)
 	if err != nil || status.State != "running" {
-		h.logger.Info("terminal: starting container", "crew_slug", init.CrewSlug)
+		h.logger.Info("terminal: starting container", "crew_slug", actualSlug)
 		h.writeInfo(ws, "Starting container...")
 		_, err := h.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
 			ID:   init.CrewID,
-			Slug: init.CrewSlug,
+			Slug: actualSlug,
 		})
 		if err != nil {
 			h.logger.Error("terminal: failed to start container", "error", err)
@@ -254,7 +266,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("terminal session started",
 		"session_id", sessionID,
 		"user_id", userID,
-		"crew_slug", init.CrewSlug,
+		"crew_slug", actualSlug,
 		"agent_slug", init.AgentSlug,
 		"mode", init.Mode,
 	)
@@ -309,7 +321,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Wait for either goroutine to finish (connection closed, exec exited).
 	<-ctx.Done()
-	// Give goroutines a moment to clean up.
+	// Force close both sides to unblock goroutines.
+	execResult.Conn.Close()
 	ws.WriteControl(websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
 		time.Now().Add(time.Second))

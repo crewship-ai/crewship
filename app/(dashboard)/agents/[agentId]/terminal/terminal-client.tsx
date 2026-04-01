@@ -44,7 +44,6 @@ export function TerminalPageClient() {
         crewId={agent.crew_id}
         crewSlug={agent.crew.slug}
         defaultAgentSlug={agent.slug}
-        defaultMode="shell"
       />
     </div>
   )
