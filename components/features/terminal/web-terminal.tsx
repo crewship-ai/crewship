@@ -48,7 +48,7 @@ export function WebTerminal({
   onClose,
 }: WebTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [agentSlug, setAgentSlug] = useState(defaultAgentSlug || "")
+  const [agentSlug, setAgentSlug] = useState(defaultAgentSlug || "__crew_shared__")
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isConnected, setIsConnected] = useState(true)
 
@@ -57,7 +57,7 @@ export function WebTerminal({
     crewId,
     crewSlug,
     mode: "shell",
-    agentSlug: agentSlug || undefined,
+    agentSlug: agentSlug === "__crew_shared__" ? undefined : agentSlug,
     enabled: isConnected,
   })
 
@@ -73,8 +73,9 @@ export function WebTerminal({
     setTimeout(() => setIsConnected(true), 100)
   }
 
-  const targetLabel = agentSlug
-    ? agents.find((a) => a.slug === agentSlug)?.name || agentSlug
+  const effectiveSlug = agentSlug === "__crew_shared__" ? "" : agentSlug
+  const targetLabel = effectiveSlug
+    ? agents.find((a) => a.slug === effectiveSlug)?.name || effectiveSlug
     : "Crew Shared"
 
   return (
@@ -98,7 +99,7 @@ export function WebTerminal({
               <SelectValue placeholder="Crew Shared" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Crew Shared</SelectItem>
+              <SelectItem value="__crew_shared__">Crew Shared</SelectItem>
               {agents.map((agent) => (
                 <SelectItem key={agent.id} value={agent.slug}>
                   {agent.name}
