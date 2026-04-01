@@ -3,7 +3,7 @@ import type { MCPTemplate } from "../../types"
 export const sentry: MCPTemplate = {
   name: "sentry",
   label: "Sentry",
-  icon: "bug",
+  icon: "sentry",
   transport: "streamable-http",
   url: "https://mcp.sentry.dev/sse",
   envHint: "SENTRY_AUTH_TOKEN",

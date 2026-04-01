@@ -3,7 +3,7 @@ import type { MCPTemplate } from "../../types"
 export const supabase: MCPTemplate = {
   name: "supabase",
   label: "Supabase",
-  icon: "database",
+  icon: "supabase",
   transport: "stdio",
   command: "npx",
   args: "-y @supabase/mcp-server-supabase",

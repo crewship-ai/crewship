@@ -3,7 +3,7 @@ import type { MCPTemplate } from "../../types"
 export const gitlab: MCPTemplate = {
   name: "gitlab",
   label: "GitLab",
-  icon: "git-branch",
+  icon: "gitlab",
   transport: "streamable-http",
   url: "https://gitlab.com/api/v4/mcp",
   envHint: "GITLAB_TOKEN",

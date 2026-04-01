@@ -3,7 +3,7 @@ import type { MCPTemplate } from "../../types"
 export const googleWorkspace: MCPTemplate = {
   name: "google-workspace",
   label: "Google Workspace",
-  icon: "mail",
+  icon: "google-workspace",
   transport: "stdio",
   command: "npx",
   args: "-y @dguido/google-workspace-mcp",

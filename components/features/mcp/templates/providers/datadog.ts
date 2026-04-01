@@ -3,7 +3,7 @@ import type { MCPTemplate } from "../../types"
 export const datadog: MCPTemplate = {
   name: "datadog",
   label: "Datadog",
-  icon: "activity",
+  icon: "datadog",
   transport: "stdio",
   command: "npx",
   args: "-y @datadog/mcp-server",

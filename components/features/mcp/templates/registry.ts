@@ -1,7 +1,8 @@
+import { Folder, Database, Bug, Search } from "lucide-react"
 import {
-  GitBranch, Mail, Hash, Folder, Database, Bug,
-  Search, ListChecks, BookOpen, CreditCard, Activity, Cloud,
-} from "lucide-react"
+  SiGithub, SiGooglecloud, SiSlack, SiLinear, SiNotion,
+  SiStripe, SiSupabase, SiDatadog, SiCloudflare, SiGitlab, SiSentry,
+} from "react-icons/si"
 import type { MCPTemplate } from "../types"
 
 // --- Provider imports (add new providers here) ---
@@ -42,21 +43,26 @@ export const MCP_TEMPLATES: MCPTemplate[] = [
 ]
 
 // ---------------------------------------------------------------------------
-// Icon map — maps template icon strings to lucide-react components
+// Icon map — maps template icon strings to lucide-react or react-icons components.
+// Brand icons use react-icons/si (Simple Icons), generic ones use lucide-react.
 // ---------------------------------------------------------------------------
 
 export const TEMPLATE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  github: GitBranch,
-  "git-branch": GitBranch,
-  mail: Mail,
-  hash: Hash,
+  // Brand icons (react-icons/si)
+  github: SiGithub,
+  "google-workspace": SiGooglecloud,
+  slack: SiSlack,
+  linear: SiLinear,
+  notion: SiNotion,
+  stripe: SiStripe,
+  supabase: SiSupabase,
+  datadog: SiDatadog,
+  cloudflare: SiCloudflare,
+  gitlab: SiGitlab,
+  sentry: SiSentry,
+  // Generic icons (lucide-react)
+  search: Search,
   folder: Folder,
   database: Database,
   bug: Bug,
-  search: Search,
-  "list-checks": ListChecks,
-  "book-open": BookOpen,
-  "credit-card": CreditCard,
-  activity: Activity,
-  cloud: Cloud,
 }

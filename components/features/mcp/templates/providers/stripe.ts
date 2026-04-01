@@ -3,7 +3,7 @@ import type { MCPTemplate } from "../../types"
 export const stripe: MCPTemplate = {
   name: "stripe",
   label: "Stripe",
-  icon: "credit-card",
+  icon: "stripe",
   transport: "stdio",
   command: "npx",
   args: "-y @stripe/mcp",

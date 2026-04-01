@@ -3,7 +3,7 @@ import type { MCPTemplate } from "../../types"
 export const cloudflare: MCPTemplate = {
   name: "cloudflare",
   label: "Cloudflare",
-  icon: "cloud",
+  icon: "cloudflare",
   transport: "streamable-http",
   url: "https://docs.mcp.cloudflare.com/mcp",
   envHint: "CLOUDFLARE_API_TOKEN",

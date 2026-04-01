@@ -3,7 +3,7 @@ import type { MCPTemplate } from "../../types"
 export const notion: MCPTemplate = {
   name: "notion",
   label: "Notion",
-  icon: "book-open",
+  icon: "notion",
   transport: "stdio",
   command: "npx",
   args: "-y @notionhq/notion-mcp-server",
