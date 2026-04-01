@@ -99,7 +99,7 @@ export function WebTerminal({
         <div className="flex items-center gap-1.5">
           {/* Agent selector */}
           <Select value={agentSlug} onValueChange={(val) => { setAgentSlug(val); handleReconnect() }}>
-            <SelectTrigger className="h-6 w-[140px] text-xs bg-neutral-800 border-neutral-700">
+            <SelectTrigger aria-label="Terminal target" className="h-6 w-[140px] text-xs bg-neutral-800 border-neutral-700">
               <SelectValue placeholder="Crew Shared" />
             </SelectTrigger>
             <SelectContent>

@@ -162,15 +162,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve actual crew slug from DB to prevent slug spoofing.
-	// The client supplies crew_slug for convenience, but we must use the slug
-	// that corresponds to the verified crew_id.
-	actualSlug := init.CrewSlug
+	// Fail closed: if DB is available but lookup fails, reject the request.
+	var actualSlug string
 	if h.db != nil {
-		var dbSlug string
-		err := h.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", init.CrewID).Scan(&dbSlug)
-		if err == nil && dbSlug != "" {
-			actualSlug = dbSlug
+		err := h.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", init.CrewID).Scan(&actualSlug)
+		if err != nil {
+			h.logger.Error("terminal: crew slug lookup failed", "crew_id", init.CrewID, "error", err)
+			h.writeError(ws, "failed to resolve crew")
+			return
 		}
+	} else {
+		actualSlug = init.CrewSlug // dev mode only
 	}
 
 	// Ensure container is running (start if needed).
@@ -188,9 +190,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.writeError(ws, "failed to start container: "+err.Error())
 			return
 		}
-		// Give the container a moment to fully initialize.
-		h.logger.Debug("waiting 1s for container init", "crew_slug", actualSlug)
-		time.Sleep(time.Second)
+		// Poll for container readiness with timeout.
+		readyCtx, readyCancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer readyCancel()
+		ready := false
+		for {
+			if st, stErr := h.container.ContainerStatus(readyCtx, containerName); stErr == nil && st.State == "running" {
+				ready = true
+				break
+			}
+			select {
+			case <-readyCtx.Done():
+			case <-time.After(200 * time.Millisecond):
+				continue
+			}
+			break
+		}
+		if !ready {
+			h.writeError(ws, "container did not become ready in time")
+			return
+		}
 	}
 
 	interactive, ok := h.container.(provider.InteractiveExecProvider)
@@ -284,7 +303,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer execResult.Conn.Close()
 
 	sessionID := fmt.Sprintf("term-%d", h.sessionID.Add(1))
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
 	session := &Session{
