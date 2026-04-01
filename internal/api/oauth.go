@@ -933,6 +933,7 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	// Step 4: Create OAUTH2 credential in PENDING state
 	credID := generateCUID()
 	credName := req.ServerName + "-oauth"
+	user := UserFromContext(r.Context())
 
 	var encSecret string
 	if clientSecret != "" {
@@ -947,9 +948,9 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, status,
 			oauth_client_id, oauth_client_secret_enc, oauth_auth_url, oauth_token_url, oauth_scopes,
-			created_at, updated_at)
-		VALUES (?, ?, ?, 'OAUTH2', '', 'PENDING', ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		credID, workspaceID, credName, clientID, encSecret, authURL, tokenURL, scopes); err != nil {
+			created_by, created_at, updated_at)
+		VALUES (?, ?, ?, 'OAUTH2', '', 'PENDING', ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		credID, workspaceID, credName, clientID, encSecret, authURL, tokenURL, scopes, user.ID); err != nil {
 		h.logger.Error("create auto-connect credential", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create credential"})
 		return
