@@ -62,3 +62,33 @@ type ContainerProvider interface {
 type HostAddressProvider interface {
 	HostAddress() string
 }
+
+// VolumeManager is an optional interface for managing persistent volumes
+// associated with crew containers (home directories, tool storage).
+type VolumeManager interface {
+	RemoveCrewVolumes(ctx context.Context, slug string) error
+}
+
+// InteractiveExecConfig configures an interactive (TTY) exec session.
+type InteractiveExecConfig struct {
+	ContainerID string
+	Cmd         []string
+	Env         []string
+	WorkingDir  string
+	User        string
+	Rows        uint16
+	Cols        uint16
+}
+
+// InteractiveExecResult holds the bidirectional connection to an interactive exec.
+type InteractiveExecResult struct {
+	ExecID string
+	Conn   io.ReadWriteCloser // raw bidirectional PTY stream
+}
+
+// InteractiveExecProvider is an optional interface for providers that support
+// interactive (TTY + stdin) exec sessions, used by the web terminal.
+type InteractiveExecProvider interface {
+	ExecInteractive(ctx context.Context, cfg InteractiveExecConfig) (*InteractiveExecResult, error)
+	ExecResize(ctx context.Context, execID string, rows, cols uint16) error
+}

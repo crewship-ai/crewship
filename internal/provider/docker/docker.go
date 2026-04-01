@@ -17,11 +17,14 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	dockernetwork "github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
 var _ provider.ContainerProvider = (*Provider)(nil)
+var _ provider.InteractiveExecProvider = (*Provider)(nil)
+var _ provider.VolumeManager = (*Provider)(nil)
 
 // Config holds Docker provider configuration for container creation and runtime selection.
 type Config struct {
@@ -272,6 +275,66 @@ func (p *Provider) CrewContainerName(slug string) string {
 	return prefix + "-team-" + slug
 }
 
+// homeVolumeName returns the Docker named volume name for a crew's persistent home directory.
+func (p *Provider) homeVolumeName(slug string) string {
+	prefix := p.cfg.ContainerPrefix
+	if prefix == "" {
+		prefix = "crewship"
+	}
+	return prefix + "-home-" + slug
+}
+
+// toolsVolumeName returns the Docker named volume name for a crew's persistent tools directory.
+func (p *Provider) toolsVolumeName(slug string) string {
+	prefix := p.cfg.ContainerPrefix
+	if prefix == "" {
+		prefix = "crewship"
+	}
+	return prefix + "-tools-" + slug
+}
+
+// buildMounts returns the full list of mounts for a crew container, including
+// persistent bind mounts and named volumes for home/tools directories.
+func (p *Provider) buildMounts(slug, workspacePath, outputPath, crewPath, secretsPath string) []mount.Mount {
+	mounts := []mount.Mount{
+		{Type: mount.TypeBind, Source: workspacePath, Target: "/workspace"},
+		{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
+		{Type: mount.TypeBind, Source: crewPath, Target: "/crew"},
+		{Type: mount.TypeBind, Source: secretsPath, Target: "/secrets"},
+	}
+	if slug != "" {
+		mounts = append(mounts,
+			mount.Mount{Type: mount.TypeVolume, Source: p.homeVolumeName(slug), Target: "/home/agent"},
+			mount.Mount{Type: mount.TypeVolume, Source: p.toolsVolumeName(slug), Target: "/opt/crew-tools"},
+		)
+	}
+	return mounts
+}
+
+// ensureVolume creates a Docker named volume if it doesn't already exist.
+func (p *Provider) ensureVolume(ctx context.Context, name string) error {
+	_, err := p.client.VolumeCreate(ctx, volume.CreateOptions{
+		Name: name,
+		Labels: map[string]string{
+			"managed-by": "crewship",
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("volume create %s: %w", name, err)
+	}
+	return nil
+}
+
+// RemoveCrewVolumes removes persistent named volumes for a crew (home + tools).
+func (p *Provider) RemoveCrewVolumes(ctx context.Context, slug string) error {
+	for _, name := range []string{p.homeVolumeName(slug), p.toolsVolumeName(slug)} {
+		if err := p.client.VolumeRemove(ctx, name, true); err != nil {
+			p.logger.Warn("volume remove failed", "volume", name, "error", err)
+		}
+	}
+	return nil
+}
+
 // EnsureCrewRuntime creates or starts a Docker container for the given crew.
 // It applies security isolation (non-root UID, cap-drop ALL, read-only rootfs)
 // and resource limits (memory, CPU, PID). Returns the container ID.
@@ -391,6 +454,16 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 		}
 	}
 
+	// Ensure persistent named volumes for home directory and crew tools.
+	if team.Slug != "" {
+		if err := p.ensureVolume(ctx, p.homeVolumeName(team.Slug)); err != nil {
+			return "", err
+		}
+		if err := p.ensureVolume(ctx, p.toolsVolumeName(team.Slug)); err != nil {
+			return "", err
+		}
+	}
+
 	// Fix ownership for container user (1001:1001). The host process may not
 	// run as root, so os.Chown can fail. In that case we use a short-lived
 	// Docker container (running as root) to chown the bind-mount paths.
@@ -462,15 +535,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				NanoCPUs:  int64(cpus * 1e9),
 				PidsLimit: &pidsLimit,
 			},
-			Mounts: []mount.Mount{
-				{Type: mount.TypeBind, Source: workspacePath, Target: "/workspace"},
-				{Type: mount.TypeBind, Source: outputPath, Target: "/output"},
-				{Type: mount.TypeBind, Source: crewPath, Target: "/crew"},
-				{Type: mount.TypeBind, Source: secretsPath, Target: "/secrets"},
-			},
+			Mounts: p.buildMounts(team.Slug, workspacePath, outputPath, crewPath, secretsPath),
 			Tmpfs: map[string]string{
-				"/tmp":        "rw,size=500m",
-				"/home/agent": "rw,size=100m,uid=1001,gid=1001",
+				"/tmp": "rw,size=500m",
 			},
 			NetworkMode: container.NetworkMode(p.cfg.Network),
 		},
@@ -637,6 +704,55 @@ func (p *Provider) ExecInspect(ctx context.Context, execID string) (bool, int, e
 		return false, 0, fmt.Errorf("exec inspect: %w", err)
 	}
 	return resp.Running, resp.ExitCode, nil
+}
+
+// ExecInteractive creates an interactive TTY exec session with bidirectional I/O.
+// Unlike Exec(), this supports stdin and returns a raw connection for terminal use.
+func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.InteractiveExecConfig) (*provider.InteractiveExecResult, error) {
+	execCfg := container.ExecOptions{
+		Cmd:          cfg.Cmd,
+		Env:          cfg.Env,
+		WorkingDir:   cfg.WorkingDir,
+		AttachStdin:  true,
+		AttachStdout: true,
+		AttachStderr: true,
+		Tty:          true,
+		User:         cfg.User,
+	}
+	if execCfg.User == "" {
+		execCfg.User = "1001:1001"
+	}
+
+	exec, err := p.client.ContainerExecCreate(ctx, cfg.ContainerID, execCfg)
+	if err != nil {
+		return nil, fmt.Errorf("exec interactive create: %w", err)
+	}
+
+	resp, err := p.client.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{Tty: true})
+	if err != nil {
+		return nil, fmt.Errorf("exec interactive attach: %w", err)
+	}
+
+	// Set initial terminal size.
+	if cfg.Rows > 0 && cfg.Cols > 0 {
+		_ = p.client.ContainerExecResize(ctx, exec.ID, container.ResizeOptions{
+			Height: uint(cfg.Rows),
+			Width:  uint(cfg.Cols),
+		})
+	}
+
+	return &provider.InteractiveExecResult{
+		ExecID: exec.ID,
+		Conn:   resp.Conn,
+	}, nil
+}
+
+// ExecResize changes the terminal dimensions of a running interactive exec session.
+func (p *Provider) ExecResize(ctx context.Context, execID string, rows, cols uint16) error {
+	return p.client.ContainerExecResize(ctx, execID, container.ResizeOptions{
+		Height: uint(rows),
+		Width:  uint(cols),
+	})
 }
 
 // HostAddress returns the hostname that containers should use to reach the host.
