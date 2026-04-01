@@ -201,6 +201,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		workingDir = "/crew/shared"
 		if init.AgentSlug != "" {
 			workingDir = "/crew/agents/" + init.AgentSlug
+			// Ensure agent directory exists (it's created on first agent run,
+			// but user may open terminal before that).
+			mkdirResult, err := h.container.Exec(r.Context(), provider.ExecConfig{
+				ContainerID: containerName,
+				Cmd:         []string{"mkdir", "-p", workingDir},
+				User:        "1001:1001",
+			})
+			if err == nil && mkdirResult.Reader != nil {
+				io.Copy(io.Discard, mkdirResult.Reader)
+				mkdirResult.Reader.Close()
+			}
 		}
 		execCmd = []string{"/bin/bash", "--login"}
 		execEnv = []string{
