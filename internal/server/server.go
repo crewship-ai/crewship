@@ -15,8 +15,8 @@ import (
 	goapi "github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/config"
-	"github.com/crewship-ai/crewship/internal/fileserver"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/fileserver"
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -25,6 +25,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/terminal"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -53,10 +54,11 @@ type Server struct {
 	apiRouter      *goapi.Router
 	fileWatcher    *fileserver.Watcher
 	watchedCrews   sync.Map
-	statsCollector *StatsCollector
-	startedAt     time.Time
-	runCtx        context.Context
-	runCancel     context.CancelFunc
+	statsCollector  *StatsCollector
+	terminalHandler *terminal.Handler
+	startedAt       time.Time
+	runCtx          context.Context
+	runCancel       context.CancelFunc
 }
 
 type Deps struct {
@@ -198,26 +200,38 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		missionEngine = orchestrator.NewMissionEngine(deps.DB, orch, wsHub, logger)
 	}
 
+	// Create terminal handler for interactive container shells.
+	var termHandler *terminal.Handler
+	if ctr != nil && jwtValidator != nil {
+		var termDB *sql.DB
+		if deps != nil {
+			termDB = deps.DB
+		}
+		termHandler = terminal.New(ctr, jwtValidator, termDB, logger)
+		logger.Info("terminal handler configured")
+	}
+
 	s := &Server{
-		mux:           mux,
-		ipcMux:        ipcMux,
-		cfg:           cfg,
-		logger:        logger,
-		wsHub:         wsHub,
-		orchestrator:  orch,
-		missionEngine: missionEngine,
-		container:     ctr,
-		storage:       sto,
-		state:         sta,
-		logWriter:     logW,
-		logReader:     logR,
-		convStore:     convStore,
-		tokenPool:     tokenPool,
-		tokenSyncer:   tokenSyncer,
-		credMonitor:    credMonitor,
-		debugLogs:      debugLogs,
-		fileWatcher:    fileWatcher,
-		statsCollector: statsCollector,
+		mux:             mux,
+		ipcMux:          ipcMux,
+		cfg:             cfg,
+		logger:          logger,
+		wsHub:           wsHub,
+		orchestrator:    orch,
+		missionEngine:   missionEngine,
+		container:       ctr,
+		storage:         sto,
+		state:           sta,
+		logWriter:       logW,
+		logReader:       logR,
+		convStore:       convStore,
+		tokenPool:       tokenPool,
+		tokenSyncer:     tokenSyncer,
+		credMonitor:     credMonitor,
+		debugLogs:       debugLogs,
+		fileWatcher:     fileWatcher,
+		statsCollector:  statsCollector,
+		terminalHandler: termHandler,
 	}
 	if deps != nil {
 		s.db = deps.DB
@@ -289,11 +303,15 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	}
 
 	s.httpServer = &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      mainHandler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:        fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler:     mainHandler,
+		ReadTimeout: 15 * time.Second,
+		// WriteTimeout is deliberately unset (0 = no timeout) because
+		// x/net/websocket does not hijack the connection, so Go's HTTP
+		// server applies WriteTimeout to the entire WebSocket lifetime,
+		// killing long-lived connections after the deadline. The WS hub
+		// handles keep-alive via its own ping/pong mechanism.
+		IdleTimeout: 120 * time.Second,
 	}
 
 	s.ipcServer = &http.Server{
@@ -312,7 +330,8 @@ func (s *Server) combinedHandler() http.Handler {
 		path := r.URL.Path
 		if strings.HasPrefix(path, "/api/") ||
 			path == "/healthz" || path == "/readyz" ||
-			path == "/metrics" || path == "/ws" {
+			path == "/metrics" || path == "/ws" ||
+			path == "/ws/terminal" {
 			s.mux.ServeHTTP(w, r)
 			return
 		}
