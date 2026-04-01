@@ -285,6 +285,11 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("OAuth tokens stored", "credential_id", credentialID)
 
+	// Auto-bind credential to MCP server agent bindings.
+	// Find MCP servers whose name matches the credential name prefix (e.g., "linear-oauth-xxx" → "linear")
+	// and update any bindings that have no credential yet.
+	h.autoBindCredentialToMCPServers(r.Context(), credentialID, workspaceID)
+
 	// Redirect to frontend credentials page
 	w.Header().Set("Content-Type", "text/html")
 	fmt.Fprintf(w, `<html><body><script>window.close(); window.opener && window.opener.location.reload();</script><p>Authorization successful! You can close this window.</p></body></html>`)
@@ -565,6 +570,7 @@ func (h *OAuthHandler) runLoopbackServer(
 		}
 
 		h.logger.Info("OAuth loopback completed", "credential_id", credentialID)
+		h.autoBindCredentialToMCPServers(ctx, credentialID, workspaceID)
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, `<html><body><script>window.close()</script><h2>Authorization successful!</h2><p>You can close this window.</p></body></html>`)
 	})
@@ -994,6 +1000,78 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 		"auth_url":      fullAuthURL,
 		"credential_id": credID,
 	})
+}
+
+// autoBindCredentialToMCPServers finds MCP servers matching the credential's
+// name prefix and binds the credential to their agent bindings.
+// E.g., credential "linear-oauth-abc12" matches server "linear".
+func (h *OAuthHandler) autoBindCredentialToMCPServers(ctx context.Context, credentialID, workspaceID string) {
+	// Get credential name to derive server name prefix
+	var credName string
+	if err := h.db.QueryRowContext(ctx,
+		"SELECT name FROM credentials WHERE id = ?", credentialID).Scan(&credName); err != nil {
+		return
+	}
+
+	// Extract server name: "linear-oauth-abc12" → "linear"
+	serverName := credName
+	if idx := strings.Index(credName, "-oauth"); idx > 0 {
+		serverName = credName[:idx]
+	}
+
+	// Find matching MCP servers
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT cs.id, cs.crew_id FROM crew_mcp_servers cs
+		JOIN crews c ON c.id = cs.crew_id AND c.workspace_id = ?
+		WHERE cs.name = ? AND cs.deleted_at IS NULL`, workspaceID, serverName)
+	if err != nil {
+		h.logger.Warn("auto-bind: find MCP servers", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var serverID, crewID string
+		if rows.Scan(&serverID, &crewID) != nil {
+			continue
+		}
+
+		// Update existing bindings that have no credential
+		res, _ := h.db.ExecContext(ctx, `
+			UPDATE agent_mcp_bindings SET credential_id = ?, cred_type = 'bearer'
+			WHERE mcp_server_id = ? AND (credential_id IS NULL OR credential_id = '')`,
+			credentialID, serverID)
+		if affected, _ := res.RowsAffected(); affected > 0 {
+			h.logger.Info("auto-bound credential to existing bindings",
+				"credential_id", credentialID, "server", serverName, "count", affected)
+			continue
+		}
+
+		// No existing bindings — create bindings for ALL agents in the crew
+		agentRows, err := h.db.QueryContext(ctx,
+			"SELECT id FROM agents WHERE crew_id = ? AND deleted_at IS NULL", crewID)
+		if err != nil {
+			continue
+		}
+		var count int
+		for agentRows.Next() {
+			var agentID string
+			if agentRows.Scan(&agentID) != nil {
+				continue
+			}
+			if _, err := h.db.ExecContext(ctx, `
+				INSERT OR IGNORE INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, credential_id, cred_type, enabled, created_at)
+				VALUES (?, ?, ?, 'crew', ?, 'bearer', 1, datetime('now'))`,
+				generateCUID(), agentID, serverID, credentialID); err == nil {
+				count++
+			}
+		}
+		agentRows.Close()
+		if count > 0 {
+			h.logger.Info("auto-created bindings with credential",
+				"credential_id", credentialID, "server", serverName, "agents", count)
+		}
+	}
 }
 
 // matchKnownProvider checks if an MCP server URL matches a known OAuth provider.
