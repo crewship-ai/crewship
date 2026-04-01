@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -547,7 +548,11 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	// so users can attach via the web terminal to observe the running agent.
 	// The tmux session is named "agent-{slug}" and stdout still flows through
 	// the exec pipe for chat streaming.
-	execCmd := o.buildExecCommand(cmd, req.AgentSlug)
+	execCmd, tmuxErr := o.setupTmuxExec(ctx, req.ContainerID, cmd, req.AgentSlug, env)
+	if tmuxErr != nil {
+		o.logger.Warn("tmux setup failed, falling back to direct exec", "error", tmuxErr)
+		execCmd = append([]string{"stdbuf", "-oL"}, cmd...)
+	}
 
 	execCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,
@@ -836,7 +841,6 @@ func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID s
 	return b.String()
 }
 
-<<<<<<< HEAD
 // mcpPackageDomains maps well-known MCP npm packages to the API domains
 // they need to reach. Used to auto-populate the sidecar allowlist in
 // restricted network mode so stdio MCP servers can make outbound API calls.
@@ -907,32 +911,89 @@ func TmuxSessionName(agentSlug string) string {
 	return "agent-" + agentSlug
 }
 
-// buildExecCommand wraps the agent CLI command for execution.
-func (o *Orchestrator) buildExecCommand(cmd []string, agentSlug string) []string {
+// setupTmuxExec prepares a tmux-wrapped execution environment for an agent.
+// It writes command args, env vars, and a script to files in the container
+// (avoiding shell quoting issues), then returns a wrapper command that starts
+// tmux and streams output via FIFO. Falls back gracefully if setup fails.
+func (o *Orchestrator) setupTmuxExec(ctx context.Context, containerID string, cmd []string, agentSlug string, env []string) ([]string, error) {
 	session := TmuxSessionName(agentSlug)
-	var innerCmd strings.Builder
-	innerCmd.WriteString("stdbuf -oL")
+	argsFile := fmt.Sprintf("/tmp/%s.args", session)
+	scriptFile := fmt.Sprintf("/tmp/%s.sh", session)
+	fifo := fmt.Sprintf("/tmp/%s.fifo", session)
+	exitFile := fmt.Sprintf("/tmp/%s.exit", session)
+	doneSignal := session + "-done"
+	envFile := fmt.Sprintf("/tmp/%s.env", session)
+
+	// Step 1: Write null-separated command args to file via base64.
+	var argsBuf []byte
 	for _, arg := range cmd {
-		innerCmd.WriteString(" '")
-		innerCmd.WriteString(strings.ReplaceAll(arg, "'", "'\\''"))
-		innerCmd.WriteString("'")
+		argsBuf = append(argsBuf, []byte(arg)...)
+		argsBuf = append(argsBuf, 0)
 	}
-	wrapperScript := fmt.Sprintf(`#!/bin/sh
-FIFO="/tmp/%s.fifo"
-SESSION="%s"
-tmux kill-session -t "$SESSION" 2>/dev/null || true
-rm -f "$FIFO"
-mkfifo "$FIFO"
-tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-  "EXIT_CODE=0; %s > '$FIFO' 2>&1 || EXIT_CODE=\$?; echo \"\$EXIT_CODE\" > /tmp/%s.exit; rm -f '$FIFO'; tmux wait-for -S %s-done"
-cat "$FIFO" 2>/dev/null
-tmux wait-for "%s-done" 2>/dev/null || true
-EXIT_CODE=0
-if [ -f "/tmp/%s.exit" ]; then
-  EXIT_CODE=$(cat "/tmp/%s.exit" 2>/dev/null || echo 0)
-  rm -f "/tmp/%s.exit"
-fi
-exit $EXIT_CODE
-`, session, session, innerCmd.String(), session, session, session, session, session, session)
-	return []string{"sh", "-c", wrapperScript}
+	argsEncoded := base64.StdEncoding.EncodeToString(argsBuf)
+	writeArgsResult, err := o.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", fmt.Sprintf("printf '%%s' '%s' | base64 -d > '%s'", argsEncoded, argsFile)},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("write args file: %w", err)
+	}
+	io.Copy(io.Discard, writeArgsResult.Reader)
+	writeArgsResult.Reader.Close()
+
+	// Step 2: Write env vars as sourceable shell script.
+	var envScript strings.Builder
+	for _, e := range env {
+		if idx := strings.IndexByte(e, '='); idx > 0 {
+			key := e[:idx]
+			val := e[idx+1:]
+			escaped := strings.ReplaceAll(val, "'", "'\\''")
+			envScript.WriteString(fmt.Sprintf("export %s='%s'\n", key, escaped))
+		}
+	}
+	envEncoded := base64.StdEncoding.EncodeToString([]byte(envScript.String()))
+	envWriteResult, err := o.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", fmt.Sprintf("printf '%%s' '%s' | base64 -d > '%s'", envEncoded, envFile)},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("write env file: %w", err)
+	}
+	io.Copy(io.Discard, envWriteResult.Reader)
+	envWriteResult.Reader.Close()
+
+	// Step 3: Write inner script (sources env, runs command via xargs).
+	scriptContent := fmt.Sprintf("#!/bin/sh\n. '%s'\n"+
+		"EX=0\nxargs -0 stdbuf -oL < '%s' > '%s' 2>&1 || EX=$?\necho $EX > '%s'\nrm -f '%s'\ntmux wait-for -S '%s'\n",
+		envFile, argsFile, fifo, exitFile, fifo, doneSignal)
+	scriptEncoded := base64.StdEncoding.EncodeToString([]byte(scriptContent))
+	writeScriptResult, err := o.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", fmt.Sprintf("printf '%%s' '%s' | base64 -d > '%s' && chmod +x '%s'", scriptEncoded, scriptFile, scriptFile)},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("write script file: %w", err)
+	}
+	io.Copy(io.Discard, writeScriptResult.Reader)
+	writeScriptResult.Reader.Close()
+
+	// Step 4: Return outer wrapper.
+	wrapper := fmt.Sprintf(
+		"tmux kill-server 2>/dev/null; rm -f '%s' '%s'; mkfifo '%s'; "+
+			"tmux new-session -d -s '%s' -x 200 -y 50 'sh %s'; "+
+			"cat '%s' 2>/dev/null; "+
+			"tmux wait-for '%s' 2>/dev/null || true; "+
+			"EC=0; [ -f '%s' ] && EC=$(cat '%s') && rm -f '%s'; "+
+			"rm -f '%s' '%s' '%s'; exit $EC",
+		fifo, exitFile, fifo,
+		session, scriptFile,
+		fifo,
+		doneSignal,
+		exitFile, exitFile, exitFile,
+		scriptFile, argsFile, envFile,
+	)
+	return []string{"sh", "-c", wrapper}, nil
 }

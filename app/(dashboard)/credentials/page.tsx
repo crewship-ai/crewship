@@ -226,9 +226,9 @@ export default function CredentialsPage() {
             </TableHeader>
             <TableBody>
               {credentials.map((cred) => {
-                const typeConfig = TYPE_CONFIG[cred.type]
+                const typeConfig = TYPE_CONFIG[cred.type as keyof typeof TYPE_CONFIG] ?? { icon: Key, label: cred.type, color: "text-muted-foreground" }
                 const TypeIcon = typeConfig.icon
-                const statusConfig = STATUS_CONFIG[cred.status]
+                const statusConfig = STATUS_CONFIG[cred.status as keyof typeof STATUS_CONFIG] ?? { icon: AlertTriangle, label: cred.status, variant: "secondary" as const, color: "text-muted-foreground" }
                 const StatusIcon = statusConfig.icon
                 const showStatus = cred.type !== "SECRET"
 
