@@ -1,0 +1,356 @@
+package terminal
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/gorilla/websocket"
+)
+
+// Handler manages WebSocket-based terminal sessions into crew containers.
+type Handler struct {
+	container provider.ContainerProvider
+	logger    *slog.Logger
+	validator *auth.JWTValidator
+	db        *sql.DB
+	upgrader  websocket.Upgrader
+	sessions  sync.Map // sessionID -> *Session
+	sessionID atomic.Int64
+}
+
+// Session represents an active terminal connection.
+type Session struct {
+	id     string
+	execID string
+	conn   io.ReadWriteCloser // Docker hijacked / Apple pipe connection
+	ws     *websocket.Conn
+	cancel context.CancelFunc
+}
+
+// InitMessage is sent by the client as the first text message after connecting.
+type InitMessage struct {
+	Mode      string `json:"mode"`       // "shell"
+	CrewID    string `json:"crew_id"`    // crew UUID
+	CrewSlug  string `json:"crew_slug"`  // crew slug for container lookup
+	AgentSlug string `json:"agent_slug"` // optional: agent-level shell
+	Rows      uint16 `json:"rows"`
+	Cols      uint16 `json:"cols"`
+}
+
+// resizeMessage is a control message for terminal resize.
+type resizeMessage struct {
+	Type string `json:"type"` // "resize"
+	Rows uint16 `json:"rows"`
+	Cols uint16 `json:"cols"`
+}
+
+// New creates a new terminal Handler.
+func New(container provider.ContainerProvider, validator *auth.JWTValidator, db *sql.DB, logger *slog.Logger) *Handler {
+	return &Handler{
+		container: container,
+		logger:    logger,
+		validator: validator,
+		db:        db,
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  4096,
+			WriteBufferSize: 4096,
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true // non-browser clients (curl, etc.)
+				}
+				// Allow same-origin requests by comparing against the Host header.
+				host := r.Host
+				return origin == "http://"+host || origin == "https://"+host
+			},
+		},
+	}
+}
+
+// ServeHTTP handles the WebSocket upgrade and terminal session lifecycle.
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.validator == nil {
+		http.Error(w, "auth not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Upgrade to WebSocket first (auth happens post-open to avoid token in URL).
+	ws, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		h.logger.Error("terminal ws upgrade failed", "error", err)
+		return
+	}
+	defer ws.Close()
+
+	// Limit read size to 1 MB to prevent unbounded memory allocation.
+	ws.SetReadLimit(1 << 20)
+
+	// Read auth message (first text message from client).
+	ws.SetReadDeadline(time.Now().Add(10 * time.Second))
+	_, authMsg, err := ws.ReadMessage()
+	if err != nil {
+		h.logger.Warn("terminal auth read failed", "error", err)
+		h.writeError(ws, "failed to read auth message")
+		return
+	}
+
+	var authPayload struct {
+		Type  string `json:"type"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(authMsg, &authPayload); err != nil || authPayload.Type != "auth" || authPayload.Token == "" {
+		h.writeError(ws, "invalid auth message")
+		return
+	}
+
+	claims, err := h.validator.Validate(authPayload.Token)
+	if err != nil {
+		h.logger.Warn("terminal auth failed", "error", err)
+		h.writeError(ws, "invalid token")
+		return
+	}
+	userID := claims.ID
+
+	// Read init message (second text message from client).
+	_, msg, err := ws.ReadMessage()
+	if err != nil {
+		h.logger.Warn("terminal init read failed", "error", err)
+		h.writeError(ws, "failed to read init message")
+		return
+	}
+	ws.SetReadDeadline(time.Time{}) // clear deadline
+
+	var init InitMessage
+	if err := json.Unmarshal(msg, &init); err != nil {
+		h.writeError(ws, "invalid init message")
+		return
+	}
+
+	if init.CrewSlug == "" || init.CrewID == "" {
+		h.writeError(ws, "crew_slug and crew_id are required")
+		return
+	}
+	if init.Mode == "" {
+		init.Mode = "shell"
+	}
+	if init.Rows == 0 {
+		init.Rows = 24
+	}
+	if init.Cols == 0 {
+		init.Cols = 80
+	}
+
+	// Verify user has access to this crew's workspace and resolve canonical slug.
+	crewSlug, accessErr := h.verifyAccessAndResolveSlug(r.Context(), userID, init.CrewID)
+	if accessErr != nil {
+		if errors.Is(accessErr, sql.ErrNoRows) {
+			h.logger.Warn("terminal access denied", "user_id", userID, "crew_id", init.CrewID)
+			h.writeError(ws, "access denied")
+		} else {
+			h.logger.Error("terminal access check failed", "user_id", userID, "crew_id", init.CrewID, "error", accessErr)
+			h.writeError(ws, "terminal unavailable")
+		}
+		return
+	}
+
+	// Ensure container is running (start if needed).
+	containerName := h.container.CrewContainerName(crewSlug)
+	status, err := h.container.ContainerStatus(r.Context(), containerName)
+	if err != nil || status.State != "running" {
+		h.logger.Info("terminal: starting container", "crew_slug", crewSlug)
+		h.writeInfo(ws, "Starting container...")
+		_, err := h.container.EnsureCrewRuntime(r.Context(), provider.CrewConfig{
+			ID:   init.CrewID,
+			Slug: crewSlug,
+		})
+		if err != nil {
+			h.logger.Error("terminal: failed to start container", "error", err)
+			h.writeError(ws, "failed to start container: "+err.Error())
+			return
+		}
+		// Poll for container readiness with context-aware timeout.
+		readyCtx, readyCancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer readyCancel()
+		ready := false
+		for i := 0; i < 25; i++ {
+			select {
+			case <-readyCtx.Done():
+				break
+			case <-time.After(200 * time.Millisecond):
+			}
+			if readyCtx.Err() != nil {
+				break
+			}
+			if st, stErr := h.container.ContainerStatus(readyCtx, containerName); stErr == nil && st.State == "running" {
+				ready = true
+				break
+			}
+		}
+		if !ready {
+			h.writeError(ws, "container did not become ready in time")
+			return
+		}
+	}
+
+	// Build exec config based on mode.
+	workingDir := "/crew/shared"
+	if init.AgentSlug != "" {
+		workingDir = "/crew/agents/" + init.AgentSlug
+	}
+
+	interactive, ok := h.container.(provider.InteractiveExecProvider)
+	if !ok {
+		h.writeError(ws, "terminal not supported by container provider")
+		return
+	}
+
+	execResult, err := interactive.ExecInteractive(r.Context(), provider.InteractiveExecConfig{
+		ContainerID: containerName,
+		Cmd:         []string{"/bin/bash", "--login"},
+		Env: []string{
+			"TERM=xterm-256color",
+			"HOME=/home/agent",
+			"PATH=/opt/crew-tools/bin:/home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		},
+		WorkingDir: workingDir,
+		User:       "1001:1001",
+		Rows:       init.Rows,
+		Cols:       init.Cols,
+	})
+	if err != nil {
+		h.logger.Error("terminal exec failed", "error", err, "container", containerName)
+		h.writeError(ws, "failed to start shell: "+err.Error())
+		return
+	}
+	var closeOnce sync.Once
+	closeIO := func() {
+		closeOnce.Do(func() {
+			_ = execResult.Conn.Close()
+			_ = ws.Close()
+		})
+	}
+	defer closeIO()
+
+	sessionID := fmt.Sprintf("term-%d", h.sessionID.Add(1))
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	session := &Session{
+		id:     sessionID,
+		execID: execResult.ExecID,
+		conn:   execResult.Conn,
+		ws:     ws,
+		cancel: cancel,
+	}
+	h.sessions.Store(sessionID, session)
+	defer h.sessions.Delete(sessionID)
+
+	h.logger.Info("terminal session started",
+		"session_id", sessionID,
+		"user_id", userID,
+		"crew_slug", crewSlug,
+		"agent_slug", init.AgentSlug,
+		"mode", init.Mode,
+	)
+
+	// Bridge: two goroutines copying data between WebSocket and container exec.
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// container → ws (stdout)
+	go func() {
+		defer wg.Done()
+		defer cancel()
+		buf := make([]byte, 4096)
+		for {
+			n, err := execResult.Conn.Read(buf)
+			if n > 0 {
+				if writeErr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// ws → container (stdin + control messages)
+	go func() {
+		defer wg.Done()
+		defer cancel()
+		for {
+			msgType, data, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+
+			switch msgType {
+			case websocket.TextMessage:
+				// JSON control message (resize).
+				var ctrl resizeMessage
+				if json.Unmarshal(data, &ctrl) == nil && ctrl.Type == "resize" && ctrl.Rows > 0 && ctrl.Cols > 0 {
+					_ = interactive.ExecResize(ctx, execResult.ExecID, ctrl.Rows, ctrl.Cols)
+				}
+			case websocket.BinaryMessage:
+				// Raw terminal input.
+				if _, writeErr := execResult.Conn.Write(data); writeErr != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	// Wait for either goroutine to finish (connection closed, exec exited).
+	<-ctx.Done()
+	// Give goroutines a moment to clean up.
+	_ = ws.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+		time.Now().Add(time.Second))
+	closeIO()
+	wg.Wait()
+
+	h.logger.Info("terminal session ended", "session_id", sessionID, "user_id", userID)
+}
+
+// verifyAccessAndResolveSlug checks that the user belongs to the workspace that
+// owns the crew and returns the canonical crew slug from the database (never
+// trusting the client-supplied slug).
+func (h *Handler) verifyAccessAndResolveSlug(ctx context.Context, userID, crewID string) (string, error) {
+	if h.db == nil {
+		return "", fmt.Errorf("no database configured")
+	}
+	var slug string
+	err := h.db.QueryRowContext(ctx, `
+		SELECT c.slug FROM workspace_members wm
+		JOIN crews c ON c.workspace_id = wm.workspace_id
+		WHERE wm.user_id = ? AND c.id = ?
+	`, userID, crewID).Scan(&slug)
+	if err != nil {
+		return "", err // caller distinguishes sql.ErrNoRows from other errors
+	}
+	return slug, nil
+}
+
+// writeError sends a JSON error message to the WebSocket client.
+func (h *Handler) writeError(ws *websocket.Conn, msg string) {
+	data, _ := json.Marshal(map[string]string{"type": "error", "message": msg})
+	_ = ws.WriteMessage(websocket.TextMessage, data)
+}
+
+// writeInfo sends a JSON info message to the WebSocket client.
+func (h *Handler) writeInfo(ws *websocket.Conn, msg string) {
+	data, _ := json.Marshal(map[string]string{"type": "info", "message": msg})
+	_ = ws.WriteMessage(websocket.TextMessage, data)
+}

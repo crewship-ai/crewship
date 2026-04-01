@@ -26,6 +26,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /readyz", s.handleReadyz)
 	s.mux.HandleFunc("GET /metrics", s.handleMetrics)
 	s.mux.HandleFunc("GET /ws", s.handleWebSocket)
+	s.mux.HandleFunc("GET /ws/terminal", s.handleTerminalWebSocket)
 }
 
 func (s *Server) registerIPCRoutes() {
@@ -93,6 +94,14 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.wsHub.HandleUpgrade(w, r)
+}
+
+func (s *Server) handleTerminalWebSocket(w http.ResponseWriter, r *http.Request) {
+	if s.terminalHandler == nil {
+		http.Error(w, "terminal not available", http.StatusServiceUnavailable)
+		return
+	}
+	s.terminalHandler.ServeHTTP(w, r)
 }
 
 // IPC handlers -- wired to real providers

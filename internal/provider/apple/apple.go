@@ -19,6 +19,8 @@ import (
 )
 
 var _ provider.ContainerProvider = (*Provider)(nil)
+var _ provider.InteractiveExecProvider = (*Provider)(nil)
+var _ provider.VolumeManager = (*Provider)(nil)
 
 // Config holds Apple Container provider configuration.
 type Config struct {
@@ -519,6 +521,110 @@ func (p *Provider) ExecInspect(_ context.Context, execID string) (bool, int, err
 	default:
 		return true, 0, nil
 	}
+}
+
+// ExecInteractive creates an interactive TTY exec session with bidirectional I/O.
+func (p *Provider) ExecInteractive(ctx context.Context, cfg provider.InteractiveExecConfig) (*provider.InteractiveExecResult, error) {
+	args := []string{"exec", "--tty"}
+
+	for _, env := range cfg.Env {
+		args = append(args, "--env", env)
+	}
+	if cfg.WorkingDir != "" {
+		args = append(args, "--workdir", cfg.WorkingDir)
+	}
+	if cfg.User != "" {
+		args = append(args, "--user", cfg.User)
+	}
+
+	args = append(args, cfg.ContainerID)
+	args = append(args, cfg.Cmd...)
+
+	cmd := exec.CommandContext(ctx, "container", args...)
+
+	// Create a bidirectional pipe for the PTY stream.
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+
+	cmd.Stdin = stdinR
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stdoutW
+
+	if err := cmd.Start(); err != nil {
+		stdinR.Close()
+		stdinW.Close()
+		stdoutR.Close()
+		stdoutW.Close()
+		return nil, fmt.Errorf("exec interactive start: %w", err)
+	}
+
+	execID := fmt.Sprintf("apple-exec-%d", p.execSeq.Add(1))
+
+	entry := &execEntry{
+		cmd:  cmd,
+		done: make(chan struct{}),
+	}
+	p.mu.Lock()
+	p.execs[execID] = entry
+	p.mu.Unlock()
+
+	go func() {
+		defer stdoutW.Close()
+		defer stdinR.Close()
+		err := cmd.Wait()
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				entry.exitCode = exitErr.ExitCode()
+			} else {
+				entry.exitCode = -1
+			}
+		}
+		close(entry.done)
+	}()
+
+	conn := &pipeReadWriteCloser{
+		Reader: stdoutR,
+		Writer: stdinW,
+		closeFn: func() error {
+			stdinW.Close()
+			stdoutR.Close()
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			return nil
+		},
+	}
+
+	return &provider.InteractiveExecResult{
+		ExecID: execID,
+		Conn:   conn,
+	}, nil
+}
+
+// ExecResize is a no-op for Apple Containers (CLI does not support resize).
+func (p *Provider) ExecResize(_ context.Context, _ string, _, _ uint16) error {
+	return nil
+}
+
+// RemoveCrewVolumes removes persistent home/tools directories for a crew.
+// Apple Containers uses host-side directories instead of Docker named volumes.
+func (p *Provider) RemoveCrewVolumes(_ context.Context, slug string) error {
+	homePath := filepath.Join(p.cfg.OutputBasePath, "homes", slug)
+	if err := os.RemoveAll(homePath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove crew home %s: %w", slug, err)
+	}
+	return nil
+}
+
+// pipeReadWriteCloser wraps separate read/write pipes into a single io.ReadWriteCloser.
+type pipeReadWriteCloser struct {
+	io.Reader
+	io.Writer
+	closeFn func() error
+}
+
+func (p *pipeReadWriteCloser) Close() error {
+	return p.closeFn()
 }
 
 // Close stops the background gc goroutine and releases resources.

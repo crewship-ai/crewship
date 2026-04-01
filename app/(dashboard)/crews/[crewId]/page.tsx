@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
-  ArrowLeft, AlertTriangle, Paintbrush, RefreshCw, Loader2, ChevronDown, Settings2, FolderOpen,
+  ArrowLeft, AlertTriangle, Paintbrush, RefreshCw, Loader2, ChevronDown, Settings2, FolderOpen, TerminalSquare,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -29,7 +29,13 @@ import { useAbilities } from "@/hooks/use-abilities"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { CrewMember } from "@/lib/types/crew"
 import { toast } from "sonner"
+import dynamic from "next/dynamic"
 import Link from "next/link"
+
+const WebTerminal = dynamic(
+  () => import("@/components/features/terminal/web-terminal").then((m) => m.WebTerminal),
+  { ssr: false }
+)
 
 interface Crew {
   id: string
@@ -294,6 +300,34 @@ export default function CrewDetailPage() {
           </Card>
         </Collapsible>
       )}
+
+      {/* Terminal */}
+      {canEdit && <Collapsible>
+        <Card>
+          <CollapsibleTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full items-center justify-between p-4 text-left hover:bg-muted/50 transition-colors rounded-xl"
+            >
+              <div className="flex items-center gap-2">
+                <TerminalSquare className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Terminal</span>
+                <span className="text-xs text-muted-foreground">Connect to crew container</span>
+              </div>
+              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
+            </button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <CardContent className="px-4 pb-4 pt-0">
+              <WebTerminal
+                crewId={crew.id}
+                crewSlug={crew.slug}
+                agents={agents.map((a) => ({ id: a.id, slug: a.slug, name: a.name }))}
+              />
+            </CardContent>
+          </CollapsibleContent>
+        </Card>
+      </Collapsible>}
 
       {/* Agents */}
       <CrewAgents
