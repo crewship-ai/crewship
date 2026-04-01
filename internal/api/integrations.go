@@ -76,6 +76,7 @@ type crewMCPServerResponse struct {
 	CreatedAt             string  `json:"created_at"`
 	UpdatedAt             string  `json:"updated_at"`
 	AgentBindCount        int     `json:"agent_binding_count"`
+	AuthStatus            string  `json:"auth_status"` // "connected", "missing", "expired", "none"
 }
 
 type agentMCPBindingResponse struct {
@@ -499,6 +500,27 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 		s.Enabled = enabled == 1
 		results = append(results, s)
 	}
+	// Populate auth_status for each integration by checking bound credentials.
+	for i := range results {
+		s := &results[i]
+		if s.Transport != "streamable-http" || s.Endpoint == nil || *s.Endpoint == "" {
+			s.AuthStatus = "none" // stdio or no endpoint — no OAuth needed
+			continue
+		}
+		var credStatus sql.NullString
+		_ = h.db.QueryRowContext(r.Context(), `
+			SELECT c.status FROM agent_mcp_bindings ab
+			JOIN credentials c ON c.id = ab.credential_id AND c.deleted_at IS NULL
+			WHERE ab.mcp_server_id = ? AND ab.credential_id IS NOT NULL AND ab.credential_id != ''
+			LIMIT 1`, s.ID).Scan(&credStatus)
+		if !credStatus.Valid || credStatus.String == "" {
+			s.AuthStatus = "missing"
+		} else if credStatus.String == "EXPIRED" {
+			s.AuthStatus = "expired"
+		} else {
+			s.AuthStatus = "connected"
+		}
+	}
 	if results == nil {
 		results = []crewIntegrationOverview{}
 	}
@@ -767,6 +789,25 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// Collect credential IDs from bindings — cascade-delete OAuth credentials
+	// that were created specifically for this integration (auto-connect flow).
+	var credIDs []string
+	rows, err := tx.QueryContext(r.Context(),
+		`SELECT DISTINCT ab.credential_id FROM agent_mcp_bindings ab
+		 JOIN credentials c ON c.id = ab.credential_id
+		 WHERE ab.mcp_server_id = ? AND ab.mcp_server_scope = 'crew'
+		   AND c.type = 'OAUTH2' AND c.name LIKE '%oauth%'`,
+		id)
+	if err == nil {
+		for rows.Next() {
+			var cid string
+			if rows.Scan(&cid) == nil && cid != "" {
+				credIDs = append(credIDs, cid)
+			}
+		}
+		rows.Close()
+	}
+
 	// Delete agent bindings for this crew server
 	if _, err := tx.ExecContext(r.Context(),
 		"DELETE FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'crew'", id); err != nil {
@@ -774,6 +815,14 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		h.logger.Error("delete agent bindings for crew server", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
+	}
+
+	// Cascade-delete OAuth credentials that were auto-created for this integration
+	for _, cid := range credIDs {
+		if _, err := tx.ExecContext(r.Context(),
+			"DELETE FROM credentials WHERE id = ? AND workspace_id = ?", cid, workspaceID); err != nil {
+			h.logger.Warn("cascade delete OAuth credential", "credential_id", cid, "error", err)
+		}
 	}
 
 	result, err := tx.ExecContext(r.Context(), `

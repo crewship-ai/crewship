@@ -17,7 +17,7 @@ export const example: MCPTemplate = {
   label: "Example Service",
   // lucide-react icon name (must be mapped in registry.ts TEMPLATE_ICONS)
   icon: "plug",
-  // "stdio" for local process, "http" for remote endpoint
+  // "stdio" for local process, "streamable-http" for remote endpoint
   transport: "stdio",
   // For stdio: the command to run
   command: "npx",

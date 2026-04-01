@@ -14,6 +14,8 @@ import {
   Trash2,
   Settings2,
   KeyRound,
+  ExternalLink,
+  Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -43,6 +45,151 @@ import { CredentialPicker } from "@/components/features/mcp/components/credentia
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 
 // ---------------------------------------------------------------------------
+// OAuth Auto-Connect component
+// ---------------------------------------------------------------------------
+
+function OAuthAutoConnect({
+  serverName,
+  mcpURL,
+  workspaceId,
+  authStatus,
+  onCredentialCreated,
+}: {
+  serverName: string
+  mcpURL: string
+  workspaceId: string | null
+  authStatus: "connected" | "missing" | "expired" | "none"
+  onCredentialCreated: (credId: string) => Promise<void>
+}) {
+  const [status, setStatus] = React.useState<"idle" | "discovering" | "authorizing" | "polling" | "done" | "error">(
+    authStatus === "connected" ? "done" : "idle",
+  )
+  const [error, setError] = React.useState("")
+  const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+
+  React.useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+    }
+  }, [])
+
+  async function handleConnect() {
+    if (!workspaceId) return
+    setStatus("discovering")
+    setError("")
+
+    try {
+      const res = await fetch(`/api/v1/oauth/auto-connect?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mcp_url: mcpURL, server_name: serverName }),
+      })
+      const data = await res.json()
+
+      if (data.status === "authorize") {
+        setStatus("authorizing")
+        // Open browser for OAuth consent
+        window.open(data.auth_url, "_blank", "width=600,height=700")
+
+        // Poll credential status until ACTIVE
+        const credId = data.credential_id
+        pollRef.current = setInterval(async () => {
+          try {
+            const credRes = await fetch(`/api/v1/credentials/${credId}?workspace_id=${workspaceId}`)
+            if (credRes.ok) {
+              const cred = await credRes.json()
+              if (cred.status === "ACTIVE") {
+                if (pollRef.current) clearInterval(pollRef.current)
+                pollRef.current = null
+                setStatus("done")
+                await onCredentialCreated(credId)
+              }
+            }
+          } catch { /* keep polling */ }
+        }, 2000)
+
+        // Stop polling after 2 minutes
+        setTimeout(() => {
+          if (pollRef.current) {
+            clearInterval(pollRef.current)
+            pollRef.current = null
+            setStatus("error")
+            setError("Authorization timed out. Please try again.")
+          }
+        }, 120000)
+      } else if (data.status === "needs_client_id") {
+        setStatus("error")
+        setError(data.message || "Please provide Client ID manually via OAuth form in credential picker.")
+      } else {
+        setStatus("error")
+        setError(data.error || "Unknown error")
+      }
+    } catch {
+      setStatus("error")
+      setError("Network error")
+    }
+  }
+
+  if (status === "done" && authStatus !== "missing" && authStatus !== "expired") {
+    return (
+      <div className="rounded-md border border-green-500/30 bg-green-500/5 p-4">
+        <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+          <Check className="h-4 w-4" />
+          OAuth connected
+        </div>
+      </div>
+    )
+  }
+
+  const isMissing = authStatus === "missing"
+  const isExpired = authStatus === "expired"
+
+  return (
+    <div className={`rounded-md border p-4 space-y-3 ${
+      isMissing ? "border-destructive/50 bg-destructive/5" :
+      isExpired ? "border-yellow-500/50 bg-yellow-500/5" :
+      "bg-background"
+    }`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <ExternalLink className="h-4 w-4 text-muted-foreground" />
+          Authentication
+        </div>
+        {isMissing && (
+          <Badge variant="destructive" className="text-xs">Credential missing</Badge>
+        )}
+        {isExpired && (
+          <Badge variant="outline" className="text-xs border-yellow-500 text-yellow-600">Expired</Badge>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {isMissing
+          ? "The credential for this integration was deleted. Reconnect to restore access."
+          : isExpired
+            ? "The OAuth token has expired. Reconnect to refresh."
+            : "Connect with OAuth to automatically authenticate with this service."}
+      </p>
+      {error && (
+        <p className="text-xs text-destructive">{error}</p>
+      )}
+      <Button
+        size="sm"
+        variant={isMissing || isExpired ? "destructive" : "default"}
+        onClick={handleConnect}
+        disabled={status === "discovering" || status === "authorizing" || status === "polling"}
+      >
+        {(status === "discovering" || status === "authorizing") && (
+          <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+        )}
+        {status === "authorizing" ? "Waiting for authorization..."
+          : isMissing || isExpired ? "Reconnect with OAuth"
+          : "Connect with OAuth"}
+      </Button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -63,6 +210,7 @@ interface CrewIntegration {
   created_at: string
   updated_at: string
   agent_binding_count: number
+  auth_status: "connected" | "missing" | "expired" | "none"
 }
 
 interface AgentInfo {
@@ -329,7 +477,7 @@ export default function IntegrationsPage() {
         }
 
     try {
-      const res = await fetch(
+      let res = await fetch(
         `/api/v1/crews/${defaultCrewId}/integrations?workspace_id=${workspaceId}`,
         {
           method: "POST",
@@ -337,6 +485,18 @@ export default function IntegrationsPage() {
           body: JSON.stringify(payload),
         },
       )
+      // If name conflict, retry with a numbered suffix
+      if (res.status === 409 && payload.name) {
+        const suffixed = { ...payload, name: `${payload.name}-${Date.now().toString(36).slice(-4)}` }
+        res = await fetch(
+          `/api/v1/crews/${defaultCrewId}/integrations?workspace_id=${workspaceId}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(suffixed),
+          },
+        )
+      }
       if (!res.ok) {
         const d = await res.json().catch(() => null)
         toast.error(d?.error ?? "Failed to create server")
@@ -620,6 +780,17 @@ export default function IntegrationsPage() {
                     {server.transport === "streamable-http" ? "HTTP" : "Stdio"}
                   </span>
 
+                  {/* Auth status indicator */}
+                  {server.auth_status === "missing" && (
+                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0 shrink-0">No credential</Badge>
+                  )}
+                  {server.auth_status === "expired" && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 border-yellow-500 text-yellow-600">Expired</Badge>
+                  )}
+                  {server.auth_status === "connected" && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 border-green-500 text-green-600">Connected</Badge>
+                  )}
+
                   {/* Agent count */}
                   {server.agent_binding_count > 0 && (
                     <span className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground shrink-0">
@@ -636,6 +807,7 @@ export default function IntegrationsPage() {
                     crews={crews}
                     agents={agents}
                     agentBindings={agentBindings}
+                    bindingIds={bindingIds}
                     confirmDeleteId={confirmDeleteId}
                     canManage={canManage}
                     workspaceId={workspaceId}
@@ -646,6 +818,7 @@ export default function IntegrationsPage() {
                     }
                     onDelete={() => handleDelete(server)}
                     onConfirmDeleteChange={(v) => setConfirmDeleteId(v ? server.id : null)}
+                    onRefresh={() => { if (workspaceId) fetchAll(workspaceId) }}
                   />
                 )}
               </div>
@@ -666,7 +839,9 @@ function ExpandedPanel({
   crews,
   agents,
   agentBindings,
+  bindingIds,
   confirmDeleteId,
+  onRefresh,
   canManage,
   workspaceId,
   onPatch,
@@ -679,6 +854,7 @@ function ExpandedPanel({
   crews: CrewInfo[]
   agents: AgentInfo[]
   agentBindings: Record<string, Set<string>>
+  bindingIds: Record<string, Record<string, string>>
   confirmDeleteId: string | null
   canManage: boolean
   workspaceId: string | null
@@ -687,6 +863,7 @@ function ExpandedPanel({
   onAgentToggle: (agent: AgentInfo, hasAccess: boolean, hasAny: boolean) => Promise<void>
   onDelete: () => Promise<void>
   onConfirmDeleteChange: (v: boolean) => void
+  onRefresh: () => void
 }) {
   const { credentials, loading: credLoading, fetchCredentials, addCredential } = useCredentials(
     canManage ? (workspaceId ?? undefined) : undefined,
@@ -952,8 +1129,52 @@ function ExpandedPanel({
         )}
       </div>
 
-      {/* Section 3: Environment Variables */}
-      <div className="rounded-md border bg-background p-4 space-y-4">
+      {/* Section 3: OAuth Auto-Connect (HTTP servers only) */}
+      {canManage && server.transport === "streamable-http" && server.endpoint && (
+        <OAuthAutoConnect
+          serverName={server.name}
+          mcpURL={server.endpoint}
+          workspaceId={workspaceId}
+          authStatus={server.auth_status}
+          onCredentialCreated={async (credId: string) => {
+            if (!workspaceId) return
+            // Update existing bindings with credential
+            const bindingsForServer = agentBindings[server.id]
+            if (bindingsForServer && bindingsForServer.size > 0) {
+              for (const agentId of Array.from(bindingsForServer)) {
+                const bId = bindingIds[server.id]?.[agentId]
+                if (bId) {
+                  await fetch(`/api/v1/agents/${agentId}/integrations/${bId}?workspace_id=${workspaceId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ credential_id: credId, cred_type: "bearer" }),
+                  })
+                }
+              }
+            } else {
+              // No bindings yet — auto-grant access to ALL agents in the crew with credential
+              for (const agent of agents) {
+                await fetch(`/api/v1/agents/${agent.id}/integrations?workspace_id=${workspaceId}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    mcp_server_id: server.id,
+                    mcp_server_scope: "crew",
+                    credential_id: credId,
+                    cred_type: "bearer",
+                    enabled: true,
+                  }),
+                })
+              }
+            }
+            onRefresh()
+            toast.success("OAuth connected! All agents have access.")
+          }}
+        />
+      )}
+
+      {/* Section 4: Environment Variables (hidden for HTTP servers that use OAuth) */}
+      {!(server.transport === "streamable-http" && server.endpoint) && <div className="rounded-md border bg-background p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-medium">
             <KeyRound className="h-4 w-4 text-muted-foreground" />
@@ -1031,9 +1252,9 @@ function ExpandedPanel({
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
-      {/* Section 4: Actions */}
+      {/* Section 5: Actions */}
       {canManage && (
         <div className="flex justify-end">
           {isConfirming ? (

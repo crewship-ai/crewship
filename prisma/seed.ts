@@ -29,6 +29,8 @@ async function main() {
   if (existingUsers > 0 || existingAgents > 0) {
     console.warn(`  ⚠ DB is not clean: ${existingUsers} users, ${existingAgents} agents found`)
     console.warn("  → Deleting all data for a fresh seed...")
+    // Disable FK checks during cleanup to avoid ordering issues with Go-managed tables
+    await prisma.$executeRawUnsafe("PRAGMA foreign_keys = OFF")
     // Delete in dependency order (tables with FK references first)
     // Use raw SQL for tables managed by Go migrations (not in Prisma schema)
     await prisma.$executeRawUnsafe("DELETE FROM cli_tokens").catch(() => {})
@@ -38,6 +40,8 @@ async function main() {
     await prisma.$executeRawUnsafe("DELETE FROM skill_reviews").catch(() => {})
     await prisma.$executeRawUnsafe("DELETE FROM credential_crews").catch(() => {})
     await prisma.$executeRawUnsafe("DELETE FROM agent_mcp_bindings").catch(() => {})
+    await prisma.$executeRawUnsafe("DELETE FROM crew_mcp_servers").catch(() => {})
+    await prisma.$executeRawUnsafe("DELETE FROM workspace_mcp_servers").catch(() => {})
     await prisma.$executeRawUnsafe("DELETE FROM agent_config_history").catch(() => {})
     await prisma.$executeRawUnsafe("DELETE FROM keeper_requests").catch(() => {})
     await prisma.$executeRawUnsafe("DELETE FROM mission_tasks").catch(() => {})
@@ -60,6 +64,7 @@ async function main() {
     await prisma.workspaceMember.deleteMany()
     await prisma.workspace.deleteMany()
     await prisma.user.deleteMany()
+    await prisma.$executeRawUnsafe("PRAGMA foreign_keys = ON")
     console.log("  ✓ DB cleaned")
   } else {
     console.log("  ✓ DB is clean")
@@ -736,7 +741,102 @@ NEVER ACCEPTABLE:
   }
   console.log(`  ✓ Assigned ${agentCredPairs.length} agent-credential links`)
 
-  // Step 11: Plan (max_agents bumped to 10 for 8-agent team)
+  // Step 11: MCP Integrations (Linear + GitHub for Engineering crew)
+  console.log("🔌 Seeding MCP integrations...")
+
+  // Linear MCP — remote HTTP with OAuth (token from SEED_LINEAR_OAUTH_ACCESS_TOKEN)
+  const linearServerId = `seed-linear-${engineering.id.slice(-8)}`
+  await prisma.$executeRawUnsafe(
+    `INSERT OR IGNORE INTO crew_mcp_servers (id, crew_id, name, display_name, transport, endpoint, enabled, created_at, updated_at)
+     VALUES (?, ?, 'linear', 'Linear', 'streamable-http', 'https://mcp.linear.app/mcp', 1, datetime('now'), datetime('now'))`,
+    linearServerId, engineering.id,
+  )
+
+  // Google Workspace MCP — stdio with OAuth (token from SEED_GOOGLE_OAUTH_ACCESS_TOKEN)
+  const googleServerId = `seed-google-ws-${engineering.id.slice(-8)}`
+  await prisma.$executeRawUnsafe(
+    `INSERT OR IGNORE INTO crew_mcp_servers (id, crew_id, name, display_name, transport, command, args_json, env_json, enabled, created_at, updated_at)
+     VALUES (?, ?, 'google-workspace', 'Google Workspace', 'stdio', 'npx', '${JSON.stringify(["-y", "@anthropic-ai/google-workspace-mcp"])}', '${JSON.stringify({ GOOGLE_ACCESS_TOKEN: "" })}', 1, datetime('now'), datetime('now'))`,
+    googleServerId, engineering.id,
+  )
+
+  console.log(`  ✓ MCP: Linear (Engineering crew)`)
+  console.log(`  ✓ MCP: Google Workspace (Engineering crew)`)
+
+  // Seed OAuth/token credentials + agent bindings for MCP servers
+  const mcpConfigs = [
+    {
+      envVar: "SEED_LINEAR_OAUTH_ACCESS_TOKEN",
+      serverId: linearServerId,
+      credName: "linear-oauth",
+      credType: "OAUTH2",
+      oauthClientId: process.env.SEED_LINEAR_OAUTH_CLIENT_ID || "",
+      oauthClientSecretEnv: "SEED_LINEAR_OAUTH_CLIENT_SECRET",
+      oauthAuthUrl: "https://linear.app/oauth/authorize",
+      oauthTokenUrl: "https://api.linear.app/oauth/token",
+      oauthScopes: "read write",
+    },
+    {
+      envVar: "SEED_GOOGLE_OAUTH_ACCESS_TOKEN",
+      serverId: googleServerId,
+      credName: "google-workspace-oauth",
+      credType: "OAUTH2",
+      oauthClientId: process.env.SEED_GOOGLE_OAUTH_CLIENT_ID || "",
+      oauthClientSecretEnv: "SEED_GOOGLE_OAUTH_CLIENT_SECRET",
+      oauthAuthUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      oauthTokenUrl: "https://oauth2.googleapis.com/token",
+      oauthScopes: "https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/drive",
+    },
+  ]
+
+  const engineeringAgents = [tomas, viktor, nela, martin]
+
+  for (const cfg of mcpConfigs) {
+    const tokenValue = process.env[cfg.envVar]
+    const clientSecretRaw = cfg.oauthClientSecretEnv ? process.env[cfg.oauthClientSecretEnv] : undefined
+    const hasClientId = cfg.oauthClientId !== ""
+    const credId = `seed-cred-${cfg.credName}-${org.id.slice(-6)}`
+
+    if (cfg.credType === "OAUTH2" && (tokenValue || hasClientId)) {
+      // Create OAUTH2 credential — ACTIVE if we have a token, PENDING if only client_id
+      const encToken = tokenValue ? encrypt(tokenValue) : ""
+      const status = tokenValue ? "ACTIVE" : "PENDING"
+      const encSecret = clientSecretRaw ? encrypt(clientSecretRaw) : ""
+      await prisma.$executeRawUnsafe(
+        `INSERT OR IGNORE INTO credentials (id, workspace_id, name, type, encrypted_value, status,
+          oauth_client_id, oauth_client_secret_enc, oauth_auth_url, oauth_token_url, oauth_scopes,
+          created_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'OAUTH2', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+        credId, org.id, cfg.credName, encToken, status,
+        cfg.oauthClientId, encSecret, cfg.oauthAuthUrl, cfg.oauthTokenUrl, cfg.oauthScopes,
+        user.id,
+      )
+
+      // Create agent bindings with credential
+      for (const agent of engineeringAgents) {
+        const bindingId = `seed-${cfg.credName}-${agent.id.slice(-6)}`
+        await prisma.$executeRawUnsafe(
+          `INSERT OR IGNORE INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, credential_id, cred_type, enabled, created_at)
+           VALUES (?, ?, ?, 'crew', ?, 'bearer', 1, datetime('now'))`,
+          bindingId, agent.id, cfg.serverId, credId,
+        )
+      }
+      console.log(`  ✓ Credential: ${cfg.credName} (${status}) + bindings for ${engineeringAgents.length} agents`)
+    } else if (!tokenValue) {
+      console.log(`  ⚠ Skipping ${cfg.credName} credential (set ${cfg.envVar} in .env.local)`)
+      // Create agent bindings without credential (UI shows "No credential")
+      for (const agent of engineeringAgents) {
+        const bindingId = `seed-${cfg.credName}-${agent.id.slice(-6)}`
+        await prisma.$executeRawUnsafe(
+          `INSERT OR IGNORE INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, cred_type, enabled, created_at)
+           VALUES (?, ?, ?, 'crew', 'bearer', 1, datetime('now'))`,
+          bindingId, agent.id, cfg.serverId,
+        )
+      }
+    }
+  }
+
+  // Step 12: Plan (max_agents bumped to 10 for 8-agent team)
   console.log("📋 Seeding plans...")
   const freePlan = await prisma.plan.upsert({
     where: { tier: "FREE" },

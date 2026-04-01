@@ -18,6 +18,11 @@ const OAUTH_PROVIDER_SHORTCUTS: { key: string; label: string }[] = [
   { key: "github", label: "GitHub" },
   { key: "slack", label: "Slack" },
   { key: "microsoft", label: "Microsoft" },
+  { key: "linear", label: "Linear" },
+  { key: "gitlab", label: "GitLab" },
+  { key: "notion", label: "Notion" },
+  { key: "stripe", label: "Stripe" },
+  { key: "cloudflare", label: "Cloudflare" },
 ]
 
 // ---------------------------------------------------------------------------
