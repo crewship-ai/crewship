@@ -51,6 +51,31 @@ var OAuthProviders = map[string]OAuthProvider{
 		TokenURL:      "https://login.microsoftonline.com/common/oauth2/v2.0/token",
 		DefaultScopes: "Mail.Read Mail.Send Calendars.ReadWrite",
 	},
+	"linear": {
+		AuthURL:       "https://linear.app/oauth/authorize",
+		TokenURL:      "https://api.linear.app/oauth/token",
+		DefaultScopes: "read write",
+	},
+	"gitlab": {
+		AuthURL:       "https://gitlab.com/oauth/authorize",
+		TokenURL:      "https://gitlab.com/oauth/token",
+		DefaultScopes: "api read_user",
+	},
+	"cloudflare": {
+		AuthURL:       "https://dash.cloudflare.com/oauth2/authorize",
+		TokenURL:      "https://dash.cloudflare.com/oauth2/token",
+		DefaultScopes: "",
+	},
+	"stripe": {
+		AuthURL:       "https://connect.stripe.com/oauth/authorize",
+		TokenURL:      "https://connect.stripe.com/oauth/token",
+		DefaultScopes: "read_write",
+	},
+	"notion": {
+		AuthURL:       "https://api.notion.com/v1/oauth/authorize",
+		TokenURL:      "https://api.notion.com/v1/oauth/token",
+		DefaultScopes: "",
+	},
 }
 
 type OAuthHandler struct {
@@ -259,6 +284,11 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.logger.Info("OAuth tokens stored", "credential_id", credentialID)
+
+	// Auto-bind credential to MCP server agent bindings.
+	// Find MCP servers whose name matches the credential name prefix (e.g., "linear-oauth-xxx" → "linear")
+	// and update any bindings that have no credential yet.
+	h.autoBindCredentialToMCPServers(r.Context(), credentialID, workspaceID)
 
 	// Redirect to frontend credentials page
 	w.Header().Set("Content-Type", "text/html")
@@ -540,6 +570,7 @@ func (h *OAuthHandler) runLoopbackServer(
 		}
 
 		h.logger.Info("OAuth loopback completed", "credential_id", credentialID)
+		h.autoBindCredentialToMCPServers(ctx, credentialID, workspaceID)
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, `<html><body><script>window.close()</script><h2>Authorization successful!</h2><p>You can close this window.</p></body></html>`)
 	})
@@ -761,4 +792,306 @@ func refreshOAuthToken(ctx context.Context, tokenURL, clientID, clientSecret, re
 		return nil, fmt.Errorf("empty access_token in refresh response")
 	}
 	return &tokenResp, nil
+}
+
+// Discover handles OAuth metadata discovery for an MCP server URL.
+// Returns auth_url, token_url, registration_endpoint, and capabilities.
+func (h *OAuthHandler) Discover(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MCPURL string `json:"mcp_url"`
+	}
+	if err := readJSON(r, &req); err != nil || req.MCPURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_url is required"})
+		return
+	}
+
+	discovered, err := discoverOAuthFromMCPURL(r.Context(), req.MCPURL)
+	if err != nil {
+		h.logger.Debug("OAuth discovery failed, trying known providers", "url", req.MCPURL, "error", err)
+		// Fallback: check if URL matches a known provider
+		if provider := matchKnownProvider(req.MCPURL); provider != nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"auth_url":    provider.AuthURL,
+				"token_url":   provider.TokenURL,
+				"scopes":      provider.DefaultScopes,
+				"supports_dcr": false,
+				"supports_pkce": true,
+				"source":       "known_provider",
+			})
+			return
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Could not discover OAuth endpoints: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"auth_url":              discovered.AuthURL,
+		"token_url":             discovered.TokenURL,
+		"registration_endpoint": discovered.RegistrationEndpoint,
+		"scopes":                discovered.Scopes,
+		"supports_dcr":          discovered.SupportsDCR,
+		"supports_pkce":         discovered.SupportsPKCE,
+		"source":                "discovery",
+	})
+}
+
+// AutoConnect performs the OAuth auto-connect flow for an MCP server:
+// 1. Discover OAuth endpoints (or use known provider)
+// 2. Dynamic Client Registration (if supported)
+// 3. Create OAUTH2 credential in PENDING state
+// 4. Return auth URL for browser redirect (uses backend /api/v1/oauth/callback)
+func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	var req struct {
+		MCPURL       string `json:"mcp_url"`
+		ServerName   string `json:"server_name"`
+		ProviderHint string `json:"provider_hint"`
+	}
+	if err := readJSON(r, &req); err != nil || req.MCPURL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mcp_url is required"})
+		return
+	}
+	if req.ServerName == "" {
+		req.ServerName = "mcp-server"
+	}
+
+	// Step 1: Resolve OAuth endpoints
+	var authURL, tokenURL, scopes string
+	var registrationEndpoint string
+
+	if req.ProviderHint != "" {
+		if p, ok := OAuthProviders[req.ProviderHint]; ok {
+			authURL = p.AuthURL
+			tokenURL = p.TokenURL
+			scopes = p.DefaultScopes
+		}
+	}
+	if authURL == "" {
+		discovered, err := discoverOAuthFromMCPURL(r.Context(), req.MCPURL)
+		if err != nil {
+			if provider := matchKnownProvider(req.MCPURL); provider != nil {
+				authURL = provider.AuthURL
+				tokenURL = provider.TokenURL
+				scopes = provider.DefaultScopes
+			} else {
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error": "Cannot discover OAuth for this URL. This provider may require a Personal API Key instead.",
+				})
+				return
+			}
+		} else {
+			authURL = discovered.AuthURL
+			tokenURL = discovered.TokenURL
+			scopes = discovered.Scopes
+			registrationEndpoint = discovered.RegistrationEndpoint
+		}
+	}
+
+	// Step 2: Build redirect URI from request host (backend callback)
+	scheme := "http"
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	} else if r.TLS != nil {
+		scheme = "https"
+	}
+	host := r.Host
+	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+		host = fwdHost
+	}
+	redirectURI := fmt.Sprintf("%s://%s/api/v1/oauth/callback", scheme, host)
+
+	// Step 3: Dynamic Client Registration (if available)
+	var clientID, clientSecret string
+	if registrationEndpoint != "" {
+		dcr, err := dynamicClientRegister(r.Context(), registrationEndpoint, redirectURI)
+		if err != nil {
+			h.logger.Warn("DCR failed, returning needs_client_id", "error", err)
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"status":   "needs_client_id",
+				"auth_url": authURL,
+				"token_url": tokenURL,
+				"scopes":   scopes,
+				"message":  "Automatic registration not available. Please create an OAuth app and provide Client ID.",
+			})
+			return
+		}
+		clientID = dcr.ClientID
+		clientSecret = dcr.ClientSecret
+		h.logger.Info("DCR succeeded", "client_id", clientID, "server", req.ServerName)
+	} else {
+		// No DCR — return info so frontend can ask for Client ID
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":   "needs_client_id",
+			"auth_url": authURL,
+			"token_url": tokenURL,
+			"scopes":   scopes,
+			"message":  "This provider requires a Client ID. Create an OAuth app in the provider's settings.",
+		})
+		return
+	}
+
+	// Step 4: Create OAUTH2 credential in PENDING state
+	credID := generateCUID()
+	// Use a unique name to avoid conflicts with previous OAuth attempts
+	credName := fmt.Sprintf("%s-oauth-%s", req.ServerName, credID[len(credID)-5:])
+	user := UserFromContext(r.Context())
+
+	var encSecret string
+	if clientSecret != "" {
+		var err error
+		encSecret, err = encryption.Encrypt(clientSecret)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt client secret"})
+			return
+		}
+	}
+
+	if _, err := h.db.ExecContext(r.Context(), `
+		INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, status,
+			oauth_client_id, oauth_client_secret_enc, oauth_auth_url, oauth_token_url, oauth_scopes,
+			created_by, created_at, updated_at)
+		VALUES (?, ?, ?, 'OAUTH2', '', 'PENDING', ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		credID, workspaceID, credName, clientID, encSecret, authURL, tokenURL, scopes, user.ID); err != nil {
+		h.logger.Error("create auto-connect credential", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create credential"})
+		return
+	}
+
+	// Step 5: Store CSRF state
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate state"})
+		return
+	}
+	state := hex.EncodeToString(stateBytes)
+
+	if _, err := h.db.ExecContext(r.Context(),
+		"INSERT INTO oauth_states (state, credential_id, workspace_id, redirect_uri) VALUES (?, ?, ?, ?)",
+		state, credID, workspaceID, redirectURI); err != nil {
+		h.logger.Error("store OAuth state", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store state"})
+		return
+	}
+
+	// Step 6: Build auth URL
+	params := url.Values{
+		"client_id":     {clientID},
+		"redirect_uri":  {redirectURI},
+		"response_type": {"code"},
+		"state":         {state},
+		"access_type":   {"offline"},
+		"prompt":        {"consent"},
+	}
+	if scopes != "" {
+		params.Set("scope", scopes)
+	}
+	fullAuthURL := authURL + "?" + params.Encode()
+
+	h.logger.Info("OAuth auto-connect ready", "server", req.ServerName, "credential_id", credID)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":        "authorize",
+		"auth_url":      fullAuthURL,
+		"credential_id": credID,
+	})
+}
+
+// autoBindCredentialToMCPServers finds MCP servers matching the credential's
+// name prefix and binds the credential to their agent bindings.
+// E.g., credential "linear-oauth-abc12" matches server "linear".
+func (h *OAuthHandler) autoBindCredentialToMCPServers(ctx context.Context, credentialID, workspaceID string) {
+	// Get credential name to derive server name prefix
+	var credName string
+	if err := h.db.QueryRowContext(ctx,
+		"SELECT name FROM credentials WHERE id = ?", credentialID).Scan(&credName); err != nil {
+		return
+	}
+
+	// Extract server name: "linear-oauth-abc12" → "linear"
+	serverName := credName
+	if idx := strings.Index(credName, "-oauth"); idx > 0 {
+		serverName = credName[:idx]
+	}
+
+	// Find matching MCP servers
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT cs.id, cs.crew_id FROM crew_mcp_servers cs
+		JOIN crews c ON c.id = cs.crew_id AND c.workspace_id = ?
+		WHERE cs.name = ? AND cs.deleted_at IS NULL`, workspaceID, serverName)
+	if err != nil {
+		h.logger.Warn("auto-bind: find MCP servers", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var serverID, crewID string
+		if rows.Scan(&serverID, &crewID) != nil {
+			continue
+		}
+
+		// Update existing bindings that have no credential
+		res, _ := h.db.ExecContext(ctx, `
+			UPDATE agent_mcp_bindings SET credential_id = ?, cred_type = 'bearer'
+			WHERE mcp_server_id = ? AND (credential_id IS NULL OR credential_id = '')`,
+			credentialID, serverID)
+		if affected, _ := res.RowsAffected(); affected > 0 {
+			h.logger.Info("auto-bound credential to existing bindings",
+				"credential_id", credentialID, "server", serverName, "count", affected)
+			continue
+		}
+
+		// No existing bindings — create bindings for ALL agents in the crew
+		agentRows, err := h.db.QueryContext(ctx,
+			"SELECT id FROM agents WHERE crew_id = ? AND deleted_at IS NULL", crewID)
+		if err != nil {
+			continue
+		}
+		var count int
+		for agentRows.Next() {
+			var agentID string
+			if agentRows.Scan(&agentID) != nil {
+				continue
+			}
+			if _, err := h.db.ExecContext(ctx, `
+				INSERT OR IGNORE INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, credential_id, cred_type, enabled, created_at)
+				VALUES (?, ?, ?, 'crew', ?, 'bearer', 1, datetime('now'))`,
+				generateCUID(), agentID, serverID, credentialID); err == nil {
+				count++
+			}
+		}
+		agentRows.Close()
+		if count > 0 {
+			h.logger.Info("auto-created bindings with credential",
+				"credential_id", credentialID, "server", serverName, "agents", count)
+		}
+	}
+}
+
+// matchKnownProvider checks if an MCP server URL matches a known OAuth provider.
+func matchKnownProvider(mcpURL string) *OAuthProvider {
+	urlPatterns := map[string]string{
+		"linear.app":    "linear",
+		"gitlab.com":    "gitlab",
+		"cloudflare.com": "cloudflare",
+		"stripe.com":    "stripe",
+		"notion.com":    "notion",
+		"github.com":    "github",
+		"googleapis.com": "google",
+	}
+	lower := strings.ToLower(mcpURL)
+	for domain, providerKey := range urlPatterns {
+		if strings.Contains(lower, domain) {
+			if p, ok := OAuthProviders[providerKey]; ok {
+				return &p
+			}
+		}
+	}
+	return nil
 }

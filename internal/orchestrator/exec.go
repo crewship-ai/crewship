@@ -664,8 +664,13 @@ func startSidecar(
 		MCPServers    []sidecarMCPServer     `json:"mcp_servers,omitempty"`
 	}
 
+	// Only pass HTTP servers to sidecar — stdio servers are handled
+	// by Claude Code directly via .mcp.json, not the gateway.
 	var mcpInput []sidecarMCPServer
 	for _, s := range mcpServers {
+		if s.Transport != "streamable-http" {
+			continue
+		}
 		mcpInput = append(mcpInput, sidecarMCPServer{
 			ID: s.ID, Name: s.Name, DisplayName: s.DisplayName,
 			Transport: s.Transport, Endpoint: s.Endpoint,

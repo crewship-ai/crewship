@@ -100,7 +100,7 @@ export function entryFromTemplate(template: MCPTemplate): ServerEntry {
   const entry: ServerEntry = {
     _key: nextKey++,
     name: template.name,
-    transport: template.transport,
+    transport: template.transport === "streamable-http" ? "http" : template.transport,
     command: template.command ?? "",
     args: template.args ?? "",
     url: template.url ?? "",
@@ -109,7 +109,9 @@ export function entryFromTemplate(template: MCPTemplate): ServerEntry {
   }
 
   if (template.envHint) {
-    entry.env.push({ key: template.envHint, value: "" })
+    for (const key of template.envHint.split(",").map((s) => s.trim()).filter(Boolean)) {
+      entry.env.push({ key, value: "" })
+    }
   }
 
   if (template.headerHint) {

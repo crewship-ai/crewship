@@ -714,6 +714,99 @@ func TestBuildMCPConfig_APIKey(t *testing.T) {
 	}
 }
 
+func TestBuildMCPConfig_Mixed(t *testing.T) {
+	servers := []MCPServerConfig{
+		{
+			Name: "github", Transport: "stdio", Command: "npx",
+			Args: []string{"-y", "@modelcontextprotocol/server-github"},
+			Env:  map[string]string{"GITHUB_TOKEN": "ghp_test"},
+		},
+		{
+			Name: "sentry", Transport: "streamable-http", Endpoint: "https://mcp.sentry.dev/mcp",
+			Credential: &MCPCredential{PlainValue: "sntrys_xxx", Type: "bearer"},
+		},
+		{
+			Name: "no-command", Transport: "stdio", Command: "",
+		},
+	}
+	result, err := buildMCPConfig(servers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should include both stdio and HTTP servers
+	if !strings.Contains(result, `"github"`) {
+		t.Error("missing stdio server 'github'")
+	}
+	if !strings.Contains(result, `"sentry"`) {
+		t.Error("missing http server 'sentry'")
+	}
+	// Stdio server without command should be skipped
+	if strings.Contains(result, `"no-command"`) {
+		t.Error("server with empty command should be skipped")
+	}
+	// Verify stdio has env vars
+	if !strings.Contains(result, `"GITHUB_TOKEN":"ghp_test"`) {
+		t.Error("missing env var in stdio server")
+	}
+	// Verify HTTP has auth header
+	if !strings.Contains(result, `"Bearer sntrys_xxx"`) {
+		t.Error("missing bearer token in http server")
+	}
+}
+
+func TestMcpStdioDomains(t *testing.T) {
+	servers := []MCPServerConfig{
+		{Transport: "stdio", Command: "npx", Args: []string{"-y", "@modelcontextprotocol/server-github"}},
+		{Transport: "stdio", Command: "npx", Args: []string{"-y", "@anthropic-ai/brave-search-mcp"}},
+		{Transport: "stdio", Command: "npx", Args: []string{"-y", "@anthropic-ai/brave-search-mcp@latest"}}, // versioned
+		{Transport: "stdio", Command: "npx", Args: []string{"-y", "linear-mcp@^2.0.0"}},                     // unscoped versioned
+		{Transport: "streamable-http", Endpoint: "https://mcp.sentry.dev/mcp"},                                // should be ignored
+		{Transport: "stdio", Command: "npx", Args: []string{"-y", "unknown-package"}},                        // no match
+		{Transport: "stdio", Command: "python3", Args: []string{"@stripe/mcp"}},                               // non-launcher, should be ignored
+	}
+	domains := mcpStdioDomains(servers)
+	found := make(map[string]bool)
+	for _, d := range domains {
+		found[d] = true
+	}
+	if !found["api.github.com"] {
+		t.Error("missing api.github.com")
+	}
+	if !found["api.search.brave.com"] {
+		t.Error("missing api.search.brave.com")
+	}
+	if !found["api.linear.app"] {
+		t.Error("missing api.linear.app from versioned unscoped package")
+	}
+	if found["sentry.io"] {
+		t.Error("HTTP server domains should not be included")
+	}
+	// Verify output is sorted
+	for i := 1; i < len(domains); i++ {
+		if domains[i] < domains[i-1] {
+			t.Errorf("output not sorted: %v", domains)
+			break
+		}
+	}
+}
+
+func TestNormalizeNPMPackage(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"@anthropic-ai/brave-search-mcp", "@anthropic-ai/brave-search-mcp"},
+		{"@anthropic-ai/brave-search-mcp@latest", "@anthropic-ai/brave-search-mcp"},
+		{"@modelcontextprotocol/server-github@^2.0.0", "@modelcontextprotocol/server-github"},
+		{"linear-mcp@1.2.3", "linear-mcp"},
+		{"linear-mcp", "linear-mcp"},
+		{"-y", "-y"},
+	}
+	for _, tc := range cases {
+		got := normalizeNPMPackage(tc.in)
+		if got != tc.want {
+			t.Errorf("normalizeNPMPackage(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestBuildCLICommand_WithMCP(t *testing.T) {
 	req := AgentRunRequest{
 		CLIAdapter:  "CLAUDE_CODE",
