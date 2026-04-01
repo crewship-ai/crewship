@@ -365,15 +365,23 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 				if inspErr != nil {
 					return "", fmt.Errorf("inspect existing container %s: %w", containerName, inspErr)
 				}
-				needsRecreate := true
+				// Check required mounts: /crew, /home/agent (volume), /opt/crew-tools (volume).
+				requiredMounts := map[string]bool{"/crew": false, "/home/agent": false, "/opt/crew-tools": false}
 				for _, m := range inspect.Mounts {
-					if m.Destination == "/crew" {
-						needsRecreate = false
+					if _, ok := requiredMounts[m.Destination]; ok {
+						requiredMounts[m.Destination] = true
+					}
+				}
+				needsRecreate := false
+				for dest, found := range requiredMounts {
+					if !found {
+						needsRecreate = true
+						p.logger.Info("missing mount, will recreate container", "mount", dest, "container", containerName)
 						break
 					}
 				}
 				if needsRecreate {
-					p.logger.Info("recreating container (missing /crew mount)", "container", containerName)
+					p.logger.Info("recreating container (missing required mounts)", "container", containerName)
 					timeout := 10
 					_ = p.client.ContainerStop(ctx, c.ID, container.StopOptions{Timeout: &timeout})
 					_ = p.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})

@@ -30,12 +30,12 @@ import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { CrewMember } from "@/lib/types/crew"
 import { toast } from "sonner"
 import dynamic from "next/dynamic"
+import Link from "next/link"
 
 const WebTerminal = dynamic(
   () => import("@/components/features/terminal/web-terminal").then((m) => m.WebTerminal),
   { ssr: false }
 )
-import Link from "next/link"
 
 interface Crew {
   id: string
@@ -302,7 +302,7 @@ export default function CrewDetailPage() {
       )}
 
       {/* Terminal */}
-      <Collapsible>
+      {canEdit && <Collapsible>
         <Card>
           <CollapsibleTrigger asChild>
             <button
@@ -327,7 +327,7 @@ export default function CrewDetailPage() {
             </CardContent>
           </CollapsibleContent>
         </Card>
-      </Collapsible>
+      </Collapsible>}
 
       {/* Agents */}
       <CrewAgents

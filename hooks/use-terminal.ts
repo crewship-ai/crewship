@@ -69,7 +69,7 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
           const backendPort = 8080 + (devPort - 3001)
           host = window.location.hostname + ":" + backendPort
         }
-        const wsUrl = `${proto}//${host}/ws/terminal?token=${encodeURIComponent(token)}`
+        const wsUrl = `${proto}//${host}/ws/terminal`
 
         // Create terminal.
         const terminal = new Terminal({
@@ -94,14 +94,15 @@ export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
         terminalRef.current = terminal
         fitAddonRef.current = fitAddon
 
-        // Open WebSocket.
+        // Open WebSocket (without token in URL — authenticate after open).
         const ws = new WebSocket(wsUrl)
         ws.binaryType = "arraybuffer"
         wsRef.current = ws
 
         ws.onopen = () => {
           if (cancelled) { ws.close(); return }
-          // Send init message.
+          // Authenticate first, then send init message.
+          ws.send(JSON.stringify({ type: "auth", token }))
           const initMsg = JSON.stringify({
             mode,
             crew_id: crewId,

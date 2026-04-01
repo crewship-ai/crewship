@@ -95,7 +95,7 @@ export function WebTerminal({
         <div className="flex items-center gap-1.5">
           {/* Agent selector */}
           <Select value={agentSlug} onValueChange={(val) => { setAgentSlug(val); handleReconnect() }}>
-            <SelectTrigger className="h-6 w-[140px] text-xs bg-neutral-800 border-neutral-700">
+            <SelectTrigger aria-label="Terminal target" className="h-6 w-[140px] text-xs bg-neutral-800 border-neutral-700">
               <SelectValue placeholder="Crew Shared" />
             </SelectTrigger>
             <SelectContent>
@@ -109,12 +109,13 @@ export function WebTerminal({
           </Select>
 
           {status === "disconnected" && (
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleReconnect}>
+            <Button aria-label="Reconnect terminal" variant="ghost" size="icon" className="h-6 w-6" onClick={handleReconnect}>
               <TerminalSquare className="h-3.5 w-3.5 text-neutral-400" />
             </Button>
           )}
 
           <Button
+            aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
             variant="ghost"
             size="icon"
             className="h-6 w-6"
@@ -128,7 +129,7 @@ export function WebTerminal({
           </Button>
 
           {onClose && (
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleClose}>
+            <Button aria-label="Close terminal" variant="ghost" size="icon" className="h-6 w-6" onClick={handleClose}>
               <X className="h-3.5 w-3.5 text-neutral-400" />
             </Button>
           )}
