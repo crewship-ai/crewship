@@ -382,31 +382,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Wait for either goroutine to finish (connection closed, exec exited).
 	<-ctx.Done()
 	// Force close both sides to unblock goroutines.
-	execResult.Conn.Close()
-	ws.WriteControl(websocket.CloseMessage,
+	_ = execResult.Conn.Close()
+	_ = ws.WriteControl(websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
 		time.Now().Add(time.Second))
+	_ = ws.Close() // unblock ws.ReadMessage() in reader goroutine
 	wg.Wait()
 
 	h.logger.Info("terminal session ended", "session_id", sessionID, "user_id", userID)
 }
 
-// verifyAccess checks that the user belongs to the workspace that owns the crew.
+// verifyAccess checks that the user belongs to the workspace that owns the crew
+// and has at least MEMBER role (VIEWER cannot use terminal).
 func (h *Handler) verifyAccess(ctx context.Context, userID, crewID string) error {
 	if h.db == nil {
 		return nil // no DB = no auth check (dev mode)
 	}
-	var count int
+	var role string
 	err := h.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM workspace_members wm
+		SELECT wm.role FROM workspace_members wm
 		JOIN crews c ON c.workspace_id = wm.workspace_id
 		WHERE wm.user_id = ? AND c.id = ?
-	`, userID, crewID).Scan(&count)
+	`, userID, crewID).Scan(&role)
 	if err != nil {
 		return fmt.Errorf("access check query: %w", err)
 	}
-	if count == 0 {
-		return fmt.Errorf("user %s has no access to crew %s", userID, crewID)
+	if role == "VIEWER" {
+		return fmt.Errorf("user %s has insufficient role for terminal access", userID)
 	}
 	return nil
 }
