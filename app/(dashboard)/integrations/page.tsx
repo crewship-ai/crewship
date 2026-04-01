@@ -100,6 +100,7 @@ function OAuthAutoConnect({
               const cred = await credRes.json()
               if (cred.status === "ACTIVE") {
                 if (pollRef.current) clearInterval(pollRef.current)
+                pollRef.current = null
                 setStatus("done")
                 await onCredentialCreated(credId)
               }
@@ -111,10 +112,9 @@ function OAuthAutoConnect({
         setTimeout(() => {
           if (pollRef.current) {
             clearInterval(pollRef.current)
-            if (status === "authorizing") {
-              setStatus("error")
-              setError("Authorization timed out. Please try again.")
-            }
+            pollRef.current = null
+            setStatus("error")
+            setError("Authorization timed out. Please try again.")
           }
         }, 120000)
       } else if (data.status === "needs_client_id") {
