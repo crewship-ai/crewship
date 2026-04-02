@@ -43,7 +43,6 @@ export function TerminalPageClient() {
       <WebTerminal
         crewId={agent.crew_id}
         crewSlug={agent.crew.slug}
-        agents={[{ id: agent.id, slug: agent.slug, name: agent.name }]}
         defaultAgentSlug={agent.slug}
       />
     </div>
