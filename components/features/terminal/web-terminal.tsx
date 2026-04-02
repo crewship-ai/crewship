@@ -24,6 +24,7 @@ interface WebTerminalProps {
   crewSlug: string
   agents?: Agent[]
   defaultAgentSlug?: string
+  defaultMode?: "shell"
   onClose?: () => void
 }
 
@@ -45,31 +46,35 @@ export function WebTerminal({
   crewSlug,
   agents = [],
   defaultAgentSlug,
+  defaultMode = "shell",
   onClose,
 }: WebTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [agentSlug, setAgentSlug] = useState(defaultAgentSlug || "__crew_shared__")
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [reconnectKey, setReconnectKey] = useState(0)
+  const [isConnected, setIsConnected] = useState(true)
+
+  const effectiveAgentSlug = agentSlug === "__crew_shared__" ? undefined : agentSlug
 
   const { status, disconnect } = useTerminal({
     containerRef,
     crewId,
     crewSlug,
-    mode: "shell",
-    agentSlug: agentSlug === "__crew_shared__" ? undefined : agentSlug,
-    enabled: true,
-    key: reconnectKey,
+    mode: defaultMode,
+    agentSlug: effectiveAgentSlug,
+    enabled: isConnected,
   })
 
   const handleClose = () => {
     disconnect()
+    setIsConnected(false)
     onClose?.()
   }
 
   const handleReconnect = () => {
-    disconnect()
-    setReconnectKey((k) => k + 1)
+    setIsConnected(false)
+    // Force re-mount by toggling enabled.
+    setTimeout(() => setIsConnected(true), 100)
   }
 
   const effectiveSlug = agentSlug === "__crew_shared__" ? "" : agentSlug
@@ -108,16 +113,16 @@ export function WebTerminal({
           </Select>
 
           {(status === "disconnected" || status === "error") && (
-            <Button aria-label="Reconnect terminal" variant="ghost" size="icon" className="h-6 w-6" onClick={handleReconnect}>
+            <Button variant="ghost" size="icon" className="h-6 w-6" aria-label="Reconnect terminal" onClick={handleReconnect}>
               <TerminalSquare className="h-3.5 w-3.5 text-neutral-400" />
             </Button>
           )}
 
           <Button
-            aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
             variant="ghost"
             size="icon"
             className="h-6 w-6"
+            aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
             onClick={() => setIsFullscreen(!isFullscreen)}
           >
             {isFullscreen ? (
@@ -128,7 +133,7 @@ export function WebTerminal({
           </Button>
 
           {onClose && (
-            <Button aria-label="Close terminal" variant="ghost" size="icon" className="h-6 w-6" onClick={handleClose}>
+            <Button variant="ghost" size="icon" className="h-6 w-6" aria-label="Close terminal" onClick={handleClose}>
               <X className="h-3.5 w-3.5 text-neutral-400" />
             </Button>
           )}
