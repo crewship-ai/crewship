@@ -589,7 +589,12 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusInternalServerError, "Failed to start mission")
 		return
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("check rows affected", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 	if rows == 0 {
 		writeProblem(w, r, http.StatusConflict, "Mission was already started by another request")
 		return

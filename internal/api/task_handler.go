@@ -231,7 +231,11 @@ func (h *MissionHandler) applyTaskEditableFields(ctx context.Context, tx *sql.Tx
 		newStatus := "PENDING"
 		for _, dep := range depIDs {
 			var depStatus string
-			tx.QueryRowContext(ctx, `SELECT status FROM mission_tasks WHERE id = ?`, dep).Scan(&depStatus)
+			if err := tx.QueryRowContext(ctx, `SELECT status FROM mission_tasks WHERE id = ?`, dep).Scan(&depStatus); err != nil {
+				h.logger.Error("query dep status", "dep_id", dep, "error", err)
+				newStatus = "BLOCKED"
+				break
+			}
 			if depStatus != "COMPLETED" {
 				newStatus = "BLOCKED"
 				break

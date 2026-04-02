@@ -24,26 +24,37 @@ func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	missionID := r.PathValue("missionId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	var currentStatus string
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
-		missionID, crewID, wsID).Scan(&currentStatus)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Atomic CAS: only restart if not IN_PROGRESS or PLANNING (prevents TOCTOU race)
+	res, err := h.db.ExecContext(r.Context(),
+		`UPDATE missions SET status = 'PLANNING', updated_at = ?, completed_at = NULL
+		 WHERE id = ? AND crew_id = ? AND workspace_id = ? AND status NOT IN ('IN_PROGRESS', 'PLANNING')`,
+		now, missionID, crewID, wsID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Mission not found")
-			return
-		}
+		h.logger.Error("restart: claim mission", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-
-	if currentStatus == "IN_PROGRESS" || currentStatus == "PLANNING" {
-		writeProblem(w, r, http.StatusBadRequest,
+	claimed, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("restart: check rows affected", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if claimed == 0 {
+		var currentStatus string
+		qErr := h.db.QueryRowContext(r.Context(),
+			`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+			missionID, crewID, wsID).Scan(&currentStatus)
+		if qErr != nil {
+			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			return
+		}
+		writeProblem(w, r, http.StatusConflict,
 			fmt.Sprintf("cannot restart mission in %s state", currentStatus))
 		return
 	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -52,15 +63,8 @@ func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// Reset mission to PLANNING
-	if _, err = tx.ExecContext(r.Context(),
-		`UPDATE missions SET status = 'PLANNING', updated_at = ?, completed_at = NULL WHERE id = ?`,
-		now, missionID); err != nil {
-		writeProblem(w, r, http.StatusInternalServerError, "Failed to reset mission")
-		return
-	}
-
 	// Reset FAILED/PENDING/BLOCKED/SKIPPED tasks; increment iteration; clear errors
+	// (mission status already set to PLANNING by atomic CAS above)
 	if _, err = tx.ExecContext(r.Context(),
 		`UPDATE mission_tasks SET
 			status = CASE WHEN depends_on = '[]' OR depends_on IS NULL THEN 'PENDING' ELSE 'BLOCKED' END,
@@ -125,7 +129,12 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	claimed, _ := res.RowsAffected()
+	claimed, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("resume: check rows affected", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 	if claimed == 0 {
 		// Either not found or not in FAILED state — check which
 		var currentStatus string
@@ -268,6 +277,20 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	if err = tx.Commit(); err != nil {
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
+	}
+
+	// Validate DAG before starting (deps may have been modified while FAILED)
+	if h.missionEngine != nil {
+		if dagErr := h.missionEngine.ValidateDAG(r.Context(), missionID); dagErr != nil {
+			h.logger.Error("resume: invalid DAG after reset", "error", dagErr, "mission_id", missionID)
+			if _, rbErr := h.db.ExecContext(r.Context(),
+				`UPDATE missions SET status = 'FAILED', updated_at = ? WHERE id = ?`,
+				now, missionID); rbErr != nil {
+				h.logger.Error("resume: rollback mission status", "error", rbErr)
+			}
+			writeProblem(w, r, http.StatusBadRequest, "Invalid task DAG: "+dagErr.Error())
+			return
+		}
 	}
 
 	// Start DAG engine immediately
