@@ -311,7 +311,7 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 
 	// Build dynamic UPDATE
 	sets := []string{"updated_at = ?"}
-	args := []interface{}{now}
+	args := []any{now}
 	if req.DisplayName != nil {
 		sets = append(sets, "display_name = ?")
 		args = append(args, *req.DisplayName)
@@ -512,8 +512,9 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 	}
 
 	// Populate auth_status — batch query instead of N+1.
+	// Use MIN so that any EXPIRED credential dominates (E < connected alphabetically).
 	if len(results) > 0 {
-		serverIDs := make([]interface{}, len(results))
+		serverIDs := make([]any, len(results))
 		placeholders := make([]string, len(results))
 		serverIdx := make(map[string]int, len(results))
 		for i, s := range results {
@@ -522,13 +523,12 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 			serverIdx[s.ID] = i
 		}
 		authRows, err := h.db.QueryContext(r.Context(), `
-			SELECT ab.mcp_server_id, c.status FROM agent_mcp_bindings ab
+			SELECT ab.mcp_server_id, MIN(c.status) FROM agent_mcp_bindings ab
 			JOIN credentials c ON c.id = ab.credential_id AND c.deleted_at IS NULL
 			WHERE ab.mcp_server_id IN (`+strings.Join(placeholders, ",")+`)
 			  AND ab.credential_id IS NOT NULL AND ab.credential_id != ''
 			GROUP BY ab.mcp_server_id`, serverIDs...)
 		if err == nil {
-			defer authRows.Close()
 			for authRows.Next() {
 				var serverID, status string
 				if authRows.Scan(&serverID, &status) == nil {
@@ -541,8 +541,11 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 					}
 				}
 			}
+			if err := authRows.Err(); err != nil {
+				h.logger.Error("iterate auth status rows", "error", err)
+			}
+			authRows.Close()
 		}
-		// Fill defaults for servers without auth results
 		for i := range results {
 			if results[i].AuthStatus != "" {
 				continue
@@ -738,7 +741,7 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	sets := []string{"updated_at = ?"}
-	args := []interface{}{now}
+	args := []any{now}
 	if req.DisplayName != nil {
 		sets = append(sets, "display_name = ?")
 		args = append(args, *req.DisplayName)
@@ -1099,7 +1102,7 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 	}
 
 	sets := []string{}
-	args := []interface{}{}
+	args := []any{}
 	if req.CredentialID != nil {
 		if *req.CredentialID != "" {
 			// Verify credential
