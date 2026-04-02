@@ -191,6 +191,11 @@ func (h *IntegrationHandler) ListWorkspaceIntegrations(w http.ResponseWriter, r 
 		s.Enabled = enabled == 1
 		results = append(results, s)
 	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate workspace integrations", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 	if results == nil {
 		results = []workspaceMCPServerResponse{}
 	}
@@ -500,25 +505,54 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 		s.Enabled = enabled == 1
 		results = append(results, s)
 	}
-	// Populate auth_status for each integration by checking bound credentials.
-	for i := range results {
-		s := &results[i]
-		if s.Transport != "streamable-http" || s.Endpoint == nil || *s.Endpoint == "" {
-			s.AuthStatus = "none" // stdio or no endpoint — no OAuth needed
-			continue
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate crew integration overview", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	// Populate auth_status — batch query instead of N+1.
+	if len(results) > 0 {
+		serverIDs := make([]interface{}, len(results))
+		placeholders := make([]string, len(results))
+		serverIdx := make(map[string]int, len(results))
+		for i, s := range results {
+			serverIDs[i] = s.ID
+			placeholders[i] = "?"
+			serverIdx[s.ID] = i
 		}
-		var credStatus sql.NullString
-		_ = h.db.QueryRowContext(r.Context(), `
-			SELECT c.status FROM agent_mcp_bindings ab
+		authRows, err := h.db.QueryContext(r.Context(), `
+			SELECT ab.mcp_server_id, c.status FROM agent_mcp_bindings ab
 			JOIN credentials c ON c.id = ab.credential_id AND c.deleted_at IS NULL
-			WHERE ab.mcp_server_id = ? AND ab.credential_id IS NOT NULL AND ab.credential_id != ''
-			LIMIT 1`, s.ID).Scan(&credStatus)
-		if !credStatus.Valid || credStatus.String == "" {
-			s.AuthStatus = "missing"
-		} else if credStatus.String == "EXPIRED" {
-			s.AuthStatus = "expired"
-		} else {
-			s.AuthStatus = "connected"
+			WHERE ab.mcp_server_id IN (`+strings.Join(placeholders, ",")+`)
+			  AND ab.credential_id IS NOT NULL AND ab.credential_id != ''
+			GROUP BY ab.mcp_server_id`, serverIDs...)
+		if err == nil {
+			defer authRows.Close()
+			for authRows.Next() {
+				var serverID, status string
+				if authRows.Scan(&serverID, &status) == nil {
+					if idx, ok := serverIdx[serverID]; ok {
+						if status == "EXPIRED" {
+							results[idx].AuthStatus = "expired"
+						} else {
+							results[idx].AuthStatus = "connected"
+						}
+					}
+				}
+			}
+		}
+		// Fill defaults for servers without auth results
+		for i := range results {
+			if results[i].AuthStatus != "" {
+				continue
+			}
+			s := &results[i]
+			if s.Transport != "streamable-http" || s.Endpoint == nil || *s.Endpoint == "" {
+				s.AuthStatus = "none"
+			} else {
+				s.AuthStatus = "missing"
+			}
 		}
 	}
 	if results == nil {
@@ -581,6 +615,11 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 		}
 		s.Enabled = enabled == 1
 		results = append(results, s)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate crew integrations", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if results == nil {
 		results = []crewMCPServerResponse{}
@@ -760,14 +799,18 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 	// Return updated
 	var s crewMCPServerResponse
 	var enabled int
-	h.db.QueryRowContext(r.Context(), `
+	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT id, crew_id, workspace_mcp_server_id, name, display_name, transport,
 			endpoint, command, args_json, env_json, config_json, icon, enabled, created_at, updated_at,
 			(SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = crew_mcp_servers.id AND mcp_server_scope = 'crew')
 		FROM crew_mcp_servers WHERE id = ?`, id).Scan(
 		&s.ID, &s.CrewID, &s.WorkspaceMCPServerID, &s.Name, &s.DisplayName, &s.Transport,
 		&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
-		&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt, &s.AgentBindCount)
+		&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt, &s.AgentBindCount); err != nil {
+		h.logger.Error("fetch updated crew integration", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 	s.Enabled = enabled == 1
 	writeJSON(w, http.StatusOK, s)
 }
@@ -804,6 +847,9 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 			if rows.Scan(&cid) == nil && cid != "" {
 				credIDs = append(credIDs, cid)
 			}
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			h.logger.Error("iterate credential IDs for cascade delete", "error", rowsErr)
 		}
 		rows.Close()
 	}
@@ -905,6 +951,11 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 		}
 		b.Enabled = enabled == 1
 		results = append(results, b)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate agent bindings", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	if results == nil {
 		results = []agentMCPBindingResponse{}
@@ -1271,16 +1322,20 @@ func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *
 		}
 	}
 
-	// Check which servers have ANY bindings (for opt-in filtering).
+	// Check which servers have ANY bindings for agents in this workspace (for opt-in filtering).
 	serversWithBindings := make(map[string]bool)
 	if bcRows, err := h.db.QueryContext(r.Context(), `
-		SELECT mcp_server_id FROM agent_mcp_bindings
-		GROUP BY mcp_server_id HAVING COUNT(*) > 0`); err == nil {
+		SELECT b.mcp_server_id FROM agent_mcp_bindings b
+		JOIN agents a ON a.id = b.agent_id AND a.workspace_id = ?
+		GROUP BY b.mcp_server_id HAVING COUNT(*) > 0`, workspaceID); err == nil {
 		for bcRows.Next() {
 			var sid string
 			if bcRows.Scan(&sid) == nil {
 				serversWithBindings[sid] = true
 			}
+		}
+		if err := bcRows.Err(); err != nil {
+			h.logger.Error("iterate servers with bindings", "error", err)
 		}
 		bcRows.Close()
 	}
