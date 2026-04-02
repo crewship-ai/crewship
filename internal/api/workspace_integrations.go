@@ -1,0 +1,373 @@
+package api
+
+import (
+	"database/sql"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/ws"
+)
+
+// IntegrationHandler manages MCP server integrations at workspace, crew, and agent levels.
+type IntegrationHandler struct {
+	db     *sql.DB
+	logger *slog.Logger
+	hub    *ws.Hub
+}
+
+func NewIntegrationHandler(db *sql.DB, logger *slog.Logger) *IntegrationHandler {
+	return &IntegrationHandler{db: db, logger: logger}
+}
+
+func (h *IntegrationHandler) SetHub(hub *ws.Hub) { h.hub = hub }
+
+func (h *IntegrationHandler) broadcastEvent(eventType, workspaceID string, payload map[string]string) {
+	if h.hub == nil {
+		return
+	}
+	channel := "workspace:" + workspaceID
+	h.hub.Broadcast(channel, ws.ServerMessage{
+		Type:    eventType,
+		Channel: channel,
+		Payload: payload,
+	})
+}
+
+// --- Response types ---
+
+type workspaceMCPServerResponse struct {
+	ID               string  `json:"id"`
+	WorkspaceID      string  `json:"workspace_id"`
+	Name             string  `json:"name"`
+	DisplayName      string  `json:"display_name"`
+	Transport        string  `json:"transport"`
+	Endpoint         *string `json:"endpoint"`
+	Command          *string `json:"command"`
+	ArgsJSON         *string `json:"args_json"`
+	EnvJSON          *string `json:"env_json"`
+	ConfigJSON       *string `json:"config_json"`
+	Icon             *string `json:"icon"`
+	Enabled          bool    `json:"enabled"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
+	AgentBindCount   int     `json:"agent_binding_count"`
+	CrewServerCount  int     `json:"crew_server_count"`
+}
+
+// --- Request types ---
+
+type createWorkspaceIntegrationRequest struct {
+	Name        string  `json:"name"`
+	DisplayName string  `json:"display_name"`
+	Transport   string  `json:"transport"`
+	Endpoint    *string `json:"endpoint"`
+	Command     *string `json:"command"`
+	ArgsJSON    *string `json:"args_json"`
+	EnvJSON     *string `json:"env_json"`
+	ConfigJSON  *string `json:"config_json"`
+	Icon        *string `json:"icon"`
+}
+
+type updateIntegrationRequest struct {
+	DisplayName *string `json:"display_name"`
+	Transport   *string `json:"transport"`
+	Endpoint    *string `json:"endpoint"`
+	Command     *string `json:"command"`
+	ArgsJSON    *string `json:"args_json"`
+	EnvJSON     *string `json:"env_json"`
+	ConfigJSON  *string `json:"config_json"`
+	Icon        *string `json:"icon"`
+	Enabled     *bool   `json:"enabled"`
+}
+
+// ==========================================
+// Workspace MCP Servers
+// ==========================================
+
+func (h *IntegrationHandler) ListWorkspaceIntegrations(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT ws.id, ws.workspace_id, ws.name, ws.display_name, ws.transport,
+			ws.endpoint, ws.command, ws.args_json, ws.env_json, ws.config_json,
+			ws.icon, ws.enabled, ws.created_at, ws.updated_at,
+			(SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = ws.id AND mcp_server_scope = 'workspace') AS bind_count,
+			(SELECT COUNT(*) FROM crew_mcp_servers WHERE workspace_mcp_server_id = ws.id) AS crew_count
+		FROM workspace_mcp_servers ws
+		WHERE ws.workspace_id = ? AND ws.deleted_at IS NULL
+		ORDER BY ws.created_at DESC`, workspaceID)
+	if err != nil {
+		h.logger.Error("list workspace integrations", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	defer rows.Close()
+
+	var results []workspaceMCPServerResponse
+	for rows.Next() {
+		var s workspaceMCPServerResponse
+		var enabled int
+		if err := rows.Scan(&s.ID, &s.WorkspaceID, &s.Name, &s.DisplayName, &s.Transport,
+			&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
+			&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt,
+			&s.AgentBindCount, &s.CrewServerCount); err != nil {
+			h.logger.Error("scan workspace integration", "error", err)
+			continue
+		}
+		s.Enabled = enabled == 1
+		results = append(results, s)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate workspace integrations", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if results == nil {
+		results = []workspaceMCPServerResponse{}
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
+func (h *IntegrationHandler) CreateWorkspaceIntegration(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	var req createWorkspaceIntegrationRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		return
+	}
+	if req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	if req.DisplayName == "" {
+		req.DisplayName = req.Name
+	}
+	if req.Transport == "" {
+		req.Transport = "streamable-http"
+	}
+	if req.Transport != "streamable-http" && req.Transport != "stdio" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transport must be 'streamable-http' or 'stdio'"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	id := generateCUID()
+
+	_, err := h.db.ExecContext(r.Context(), `
+		INSERT INTO workspace_mcp_servers (id, workspace_id, name, display_name, transport,
+			endpoint, command, args_json, env_json, config_json, icon, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+		id, workspaceID, req.Name, req.DisplayName, req.Transport,
+		req.Endpoint, req.Command, req.ArgsJSON, req.EnvJSON, req.ConfigJSON, req.Icon, now, now)
+	if err != nil {
+		h.logger.Error("create workspace integration", "error", err)
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Integration with this name already exists"})
+		return
+	}
+
+	h.broadcastEvent("integration.created", workspaceID, map[string]string{
+		"id": id, "name": req.Name, "scope": "workspace",
+	})
+
+	writeJSON(w, http.StatusCreated, workspaceMCPServerResponse{
+		ID: id, WorkspaceID: workspaceID, Name: req.Name, DisplayName: req.DisplayName,
+		Transport: req.Transport, Endpoint: req.Endpoint, Command: req.Command,
+		ArgsJSON: req.ArgsJSON, EnvJSON: req.EnvJSON, ConfigJSON: req.ConfigJSON,
+		Icon: req.Icon, Enabled: true, CreatedAt: now, UpdatedAt: now,
+	})
+}
+
+func (h *IntegrationHandler) GetWorkspaceIntegration(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	id := r.PathValue("integrationId")
+
+	var s workspaceMCPServerResponse
+	var enabled int
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT ws.id, ws.workspace_id, ws.name, ws.display_name, ws.transport,
+			ws.endpoint, ws.command, ws.args_json, ws.env_json, ws.config_json,
+			ws.icon, ws.enabled, ws.created_at, ws.updated_at,
+			(SELECT COUNT(*) FROM agent_mcp_bindings WHERE mcp_server_id = ws.id AND mcp_server_scope = 'workspace') AS bind_count,
+			(SELECT COUNT(*) FROM crew_mcp_servers WHERE workspace_mcp_server_id = ws.id) AS crew_count
+		FROM workspace_mcp_servers ws
+		WHERE ws.id = ? AND ws.workspace_id = ?`, id, workspaceID).Scan(
+		&s.ID, &s.WorkspaceID, &s.Name, &s.DisplayName, &s.Transport,
+		&s.Endpoint, &s.Command, &s.ArgsJSON, &s.EnvJSON, &s.ConfigJSON,
+		&s.Icon, &enabled, &s.CreatedAt, &s.UpdatedAt,
+		&s.AgentBindCount, &s.CrewServerCount)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Integration not found"})
+		return
+	}
+	s.Enabled = enabled == 1
+	writeJSON(w, http.StatusOK, s)
+}
+
+func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	id := r.PathValue("integrationId")
+	var req updateIntegrationRequest
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		return
+	}
+
+	// Verify exists
+	var exists string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT id FROM workspace_mcp_servers WHERE id = ? AND workspace_id = ?",
+		id, workspaceID).Scan(&exists); err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Integration not found"})
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Build dynamic UPDATE
+	sets := []string{"updated_at = ?"}
+	args := []any{now}
+	if req.DisplayName != nil {
+		sets = append(sets, "display_name = ?")
+		args = append(args, *req.DisplayName)
+	}
+	if req.Transport != nil {
+		if *req.Transport != "streamable-http" && *req.Transport != "stdio" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transport must be 'streamable-http' or 'stdio'"})
+			return
+		}
+		sets = append(sets, "transport = ?")
+		args = append(args, *req.Transport)
+	}
+	if req.Endpoint != nil {
+		sets = append(sets, "endpoint = ?")
+		args = append(args, *req.Endpoint)
+	}
+	if req.Command != nil {
+		sets = append(sets, "command = ?")
+		args = append(args, *req.Command)
+	}
+	if req.ArgsJSON != nil {
+		sets = append(sets, "args_json = ?")
+		args = append(args, *req.ArgsJSON)
+	}
+	if req.EnvJSON != nil {
+		sets = append(sets, "env_json = ?")
+		args = append(args, *req.EnvJSON)
+	}
+	if req.ConfigJSON != nil {
+		sets = append(sets, "config_json = ?")
+		args = append(args, *req.ConfigJSON)
+	}
+	if req.Icon != nil {
+		sets = append(sets, "icon = ?")
+		args = append(args, *req.Icon)
+	}
+	if req.Enabled != nil {
+		enabled := 0
+		if *req.Enabled {
+			enabled = 1
+		}
+		sets = append(sets, "enabled = ?")
+		args = append(args, enabled)
+	}
+	args = append(args, id, workspaceID)
+
+	query := "UPDATE workspace_mcp_servers SET " + strings.Join(sets, ", ") + " WHERE id = ? AND workspace_id = ?"
+	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
+		h.logger.Error("update workspace integration", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	h.broadcastEvent("integration.updated", workspaceID, map[string]string{
+		"id": id, "scope": "workspace",
+	})
+
+	// Return updated record
+	h.GetWorkspaceIntegration(w, r)
+}
+
+func (h *IntegrationHandler) DeleteWorkspaceIntegration(w http.ResponseWriter, r *http.Request) {
+	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	id := r.PathValue("integrationId")
+
+	// Cascade: delete agent bindings → crew servers → workspace server
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	// Delete agent bindings for this workspace server
+	if _, err := tx.ExecContext(r.Context(),
+		"DELETE FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'workspace'", id); err != nil {
+		tx.Rollback()
+		h.logger.Error("delete agent bindings for workspace server", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	// Delete agent bindings for crew servers that override this workspace server
+	if _, err := tx.ExecContext(r.Context(), `
+		DELETE FROM agent_mcp_bindings WHERE mcp_server_scope = 'crew' AND mcp_server_id IN
+		(SELECT id FROM crew_mcp_servers WHERE workspace_mcp_server_id = ?)`, id); err != nil {
+		tx.Rollback()
+		h.logger.Error("delete crew agent bindings", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	// Delete crew server overrides
+	if _, err := tx.ExecContext(r.Context(),
+		"DELETE FROM crew_mcp_servers WHERE workspace_mcp_server_id = ?", id); err != nil {
+		tx.Rollback()
+		h.logger.Error("delete crew server overrides", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	// Delete the workspace server itself
+	result, err := tx.ExecContext(r.Context(),
+		"DELETE FROM workspace_mcp_servers WHERE id = ? AND workspace_id = ?", id, workspaceID)
+	if err != nil {
+		tx.Rollback()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		tx.Rollback()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Integration not found"})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	h.broadcastEvent("integration.deleted", workspaceID, map[string]string{
+		"id": id, "scope": "workspace",
+	})
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
