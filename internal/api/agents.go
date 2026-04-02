@@ -81,6 +81,11 @@ func (h *AgentHandler) FleetStatus(w http.ResponseWriter, r *http.Request) {
 			result.Idle += count
 		}
 	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate fleet status", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -386,7 +391,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if user != nil {
 		userID = user.ID
 	}
-	WriteAuditLog(r.Context(), h.db, "create", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
+	WriteAuditLog(r.Context(), h.db, "create", "AGENT", agentID, userID, workspaceID, map[string]any{
 		"name": req.Name, "slug": req.Slug, "cli_adapter": req.CLIAdapter,
 	})
 
@@ -496,7 +501,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	if err := readJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
 		return
@@ -579,7 +584,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var setClauses []string
-	var args []interface{}
+	var args []any
 	for jsonKey, col := range allowed {
 		if val, ok := body[jsonKey]; ok {
 			if col == "memory_enabled" || col == "schedule_enabled" {
@@ -617,7 +622,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if user != nil {
 		userID = user.ID
 	}
-	changes := make(map[string]interface{})
+	changes := make(map[string]any)
 	for jsonKey := range allowed {
 		if val, ok := body[jsonKey]; ok {
 			changes[jsonKey] = val
@@ -1017,9 +1022,11 @@ func (h *AgentHandler) RemoveCredential(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	workspaceID := WorkspaceIDFromContext(r.Context())
 	res, err := h.db.ExecContext(r.Context(),
-		"DELETE FROM agent_credentials WHERE id = ? AND agent_id = ?",
-		assignmentID, agentID)
+		`DELETE FROM agent_credentials WHERE id = ? AND agent_id = ?
+		 AND agent_id IN (SELECT id FROM agents WHERE workspace_id = ? AND deleted_at IS NULL)`,
+		assignmentID, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("remove agent credential", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
