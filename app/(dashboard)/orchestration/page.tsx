@@ -27,6 +27,7 @@ import { TaskDetailSheet } from "@/components/features/orchestration/task-detail
 import { CreateMissionWizard } from "@/components/features/orchestration/create-mission-wizard"
 import { CrewConnections } from "@/components/features/orchestration/crew-connections"
 import { ProposalReview } from "@/components/features/orchestration/proposal-review"
+import { GraphLegend } from "@/components/features/orchestration/graph-legend"
 import type { Mission, MissionTask } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 
@@ -100,6 +101,37 @@ export default function OrchestrationPage() {
 
   useRealtimeEvent("task.updated", handleTaskUpdate)
   useRealtimeEvent("mission.updated", useCallback(() => fetchData(), [fetchData]))
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Skip if user is typing in an input/textarea
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
+
+      switch (e.key.toLowerCase()) {
+        case "f":
+          e.preventDefault()
+          graphRef.current?.focusActive()
+          break
+        case "r":
+          e.preventDefault()
+          fetchData()
+          break
+        case "escape":
+          setSelectedTask(null)
+          break
+        case "1": setActiveTab("graph"); break
+        case "2": setActiveTab("timeline"); break
+        case "3": setActiveTab("activity"); break
+        case "4": setActiveTab("templates"); break
+        case "5": setActiveTab("proposals"); break
+        case "6": setActiveTab("connections"); break
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [fetchData])
 
   const filteredMissions = useMemo(() => {
     if (selectedMissionId === "all") return missions
@@ -211,6 +243,9 @@ export default function OrchestrationPage() {
               connections={connections}
               onTaskClick={handleNodeClick}
             />
+
+            {/* Floating legend — bottom-left of graph */}
+            <GraphLegend />
 
             {/* Floating stats overlay — top-left of graph */}
             <div className="absolute top-3 left-3 flex items-center gap-1.5 z-10">

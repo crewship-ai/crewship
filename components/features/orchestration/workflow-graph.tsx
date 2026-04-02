@@ -28,6 +28,16 @@ import { AgentNode } from "./agent-node"
 import { AnimatedEdge } from "./animated-edge"
 import { CrewGroupNode, crewColorMap } from "./crew-group-node"
 import { PermissionEdge, getPermissionMarkers } from "./permission-edge"
+import {
+  LAYOUT,
+  statusColors,
+  parseDependsOn,
+  pickEdgeColor,
+  computeTopologicalLevels,
+  computeCrewDimensions,
+  computeTaskPosition,
+  selectActiveMissions,
+} from "./graph-layout"
 
 export interface WorkflowGraphRef {
   focusActive: () => void
@@ -48,41 +58,6 @@ const nodeTypes: NodeTypes = {
 const edgeTypes: EdgeTypes = {
   animated: AnimatedEdge,
   permission: PermissionEdge,
-}
-
-const statusColors: Record<string, string> = {
-  COMPLETED: "#22c55e",
-  IN_PROGRESS: "#3b82f6",
-  FAILED: "#ef4444",
-  BLOCKED: "#f59e0b",
-  PENDING: "#64748b",
-  PLANNING: "#8b5cf6",
-  REVIEW: "#a855f7",
-  CANCELLED: "#6b7280",
-  SKIPPED: "#6b7280",
-}
-
-const edgeColorPalette = [
-  "#06b6d4", "#3b82f6", "#8b5cf6", "#22c55e",
-  "#f59e0b", "#ec4899", "#14b8a6", "#6366f1",
-]
-
-function pickEdgeColor(sourceId: string, targetId: string): string {
-  let h = 0
-  const key = sourceId + targetId
-  for (let i = 0; i < key.length; i++) h = ((h << 5) - h + key.charCodeAt(i)) | 0
-  return edgeColorPalette[Math.abs(h) % edgeColorPalette.length]
-}
-
-// Safe parser for depends_on — handles null, non-array, malformed JSON
-function parseDependsOn(raw: string | null | undefined): string[] {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : []
-  } catch {
-    return []
-  }
 }
 
 // -------------------------------------------------------------------
@@ -121,15 +96,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
   }
 
   // Select active or recent missions
-  const activeMissions = missions.filter(
-    (m) => m.status === "IN_PROGRESS" || m.status === "PLANNING" || m.status === "REVIEW"
-  )
-  if (activeMissions.length === 0) {
-    const recent = [...missions]
-      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-      .slice(0, 3)
-    activeMissions.push(...recent)
-  }
+  const activeMissions = selectActiveMissions(missions)
 
   // Collect all tasks grouped by crew
   const crewTasks = new Map<string, { mission: Mission; task: MissionTask }[]>()
@@ -162,16 +129,6 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
   })
 
   let crewX = 0
-  const CREW_GAP = 80
-  const TASK_WIDTH = 260
-  const TASK_HEIGHT = 150
-  const TASK_H_GAP = 60
-  const TASK_V_GAP = 15
-  const CREW_PADDING_TOP = 60
-  const CREW_PADDING_SIDE = 40
-  const CREW_PADDING_BOTTOM = 40
-  const COLLAPSED_WIDTH = 300
-  const COLLAPSED_HEIGHT = 50
 
   for (const crewId of sortedCrewIds) {
     const crew = crewById.get(crewId)
@@ -206,9 +163,9 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
           onToggleCollapse,
           crewId,
         },
-        style: { width: COLLAPSED_WIDTH, height: COLLAPSED_HEIGHT },
+        style: { width: LAYOUT.COLLAPSED_WIDTH, height: LAYOUT.COLLAPSED_HEIGHT },
       })
-      crewX += COLLAPSED_WIDTH + CREW_GAP
+      crewX += LAYOUT.COLLAPSED_WIDTH + LAYOUT.CREW_GAP
       continue
     }
 
@@ -220,27 +177,12 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
     }
 
     // Only keep deps that are within this crew's tasks
-    const taskIds = new Set(sortedTasks.map((t) => t.task.id))
+    const taskIdSet = new Set(sortedTasks.map((t) => t.task.id))
     for (const [taskId, taskDeps] of deps) {
-      deps.set(taskId, taskDeps.filter((d) => taskIds.has(d)))
+      deps.set(taskId, taskDeps.filter((d) => taskIdSet.has(d)))
     }
 
-    const levels = new Map<string, number>()
-    const visiting = new Set<string>()
-    function getLevel(taskId: string): number {
-      if (levels.has(taskId)) return levels.get(taskId)!
-      if (visiting.has(taskId)) return 0 // cycle detected — break recursion
-      visiting.add(taskId)
-      const taskDeps = deps.get(taskId) || []
-      if (taskDeps.length === 0) {
-        levels.set(taskId, 0)
-        return 0
-      }
-      const level = Math.max(...taskDeps.map(getLevel)) + 1
-      levels.set(taskId, level)
-      return level
-    }
-    for (const { task } of sortedTasks) getLevel(task.id)
+    const levels = computeTopologicalLevels([...taskIdSet], deps)
 
     const levelGroups = new Map<number, MissionTask[]>()
     for (const { task } of sortedTasks) {
@@ -252,8 +194,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
     const maxLevel = Math.max(...[...levelGroups.keys()], 0)
     const maxLevelSize = Math.max(...[...levelGroups.values()].map((g) => g.length), 1)
 
-    const crewWidth = (maxLevel + 1) * (TASK_WIDTH + TASK_H_GAP) + CREW_PADDING_SIDE * 2
-    const crewHeight = maxLevelSize * (TASK_HEIGHT + TASK_V_GAP) + CREW_PADDING_TOP + CREW_PADDING_BOTTOM
+    const { width: crewWidth, height: crewHeight } = computeCrewDimensions(maxLevel, maxLevelSize)
 
     // Create crew group node
     nodes.push({
@@ -280,8 +221,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
     // Create child task nodes (positions relative to crew group)
     for (const [level, levelTasks] of levelGroups) {
       levelTasks.forEach((task, idx) => {
-        const x = CREW_PADDING_SIDE + level * (TASK_WIDTH + TASK_H_GAP)
-        const y = CREW_PADDING_TOP + idx * (TASK_HEIGHT + TASK_V_GAP)
+        const { x, y } = computeTaskPosition(level, idx)
 
         nodes.push({
           id: task.id,
@@ -328,7 +268,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
       })
     }
 
-    crewX += crewWidth + CREW_GAP
+    crewX += crewWidth + LAYOUT.CREW_GAP
   }
 
   // Cross-crew dependency edges (tasks in different crews)
@@ -405,15 +345,7 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
   const nodes: Node[] = []
   const edges: Edge[] = []
 
-  const activeMissions = missions.filter(
-    (m) => m.status === "IN_PROGRESS" || m.status === "PLANNING" || m.status === "REVIEW"
-  )
-  if (activeMissions.length === 0) {
-    const recent = [...missions]
-      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-      .slice(0, 3)
-    activeMissions.push(...recent)
-  }
+  const activeMissions = selectActiveMissions(missions)
 
   let missionY = 0
 
@@ -459,22 +391,10 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
       deps.set(task.id, parseDependsOn(task.depends_on))
     }
 
-    const levels = new Map<string, number>()
-    const visiting = new Set<string>()
-    function getLevel(taskId: string): number {
-      if (levels.has(taskId)) return levels.get(taskId)!
-      if (visiting.has(taskId)) return 0 // cycle detected
-      visiting.add(taskId)
-      const taskDeps = deps.get(taskId) || []
-      if (taskDeps.length === 0) {
-        levels.set(taskId, 0)
-        return 0
-      }
-      const level = Math.max(...taskDeps.map(getLevel)) + 1
-      levels.set(taskId, level)
-      return level
-    }
-    for (const task of tasksByOrder) getLevel(task.id)
+    const levels = computeTopologicalLevels(
+      tasksByOrder.map((t) => t.id),
+      deps
+    )
 
     const levelGroups = new Map<number, MissionTask[]>()
     for (const task of tasksByOrder) {
