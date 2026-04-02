@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 
 interface FileRef {
@@ -37,6 +37,15 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
   const [editorSaving, setEditorSaving] = useState(false)
   const editorAbortRef = useRef<AbortController | null>(null)
   const saveRef = useRef<(() => void) | null>(null)
+
+  // Clear editor and abort in-flight downloads when agent/workspace context changes
+  useEffect(() => {
+    editorAbortRef.current?.abort()
+    setEditorFile(null)
+    setEditorContent(null)
+    setEditorDirty(false)
+    setEditorExpanded(false)
+  }, [agentId, workspaceId])
 
   const openFileEditor = useCallback((node: { path: string; name: string }) => {
     if (!workspaceId) return

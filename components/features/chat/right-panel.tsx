@@ -45,10 +45,11 @@ interface RightPanelProps {
   workspaceId: string | null
   files: FileEntry[]
   initialTab?: string
+  hideTabs?: boolean
   style?: React.CSSProperties
 }
 
-export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, files, initialTab, style }: RightPanelProps) {
+export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, files, initialTab, hideTabs, style }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState<string>(initialTab ?? "files")
   const [tree, setTree] = useState<TreeNode[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -103,7 +104,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
 
   return (
     <div className="flex flex-col border-l overflow-hidden" style={style}>
-      <div className="flex items-end shrink-0 overflow-x-auto scrollbar-none border-b h-[41px]">
+      {!hideTabs && <div className="flex items-end shrink-0 overflow-x-auto scrollbar-none border-b h-[41px]">
         {RIGHT_PANEL_TABS.map((tab) => (
           <button
             key={tab.id}
@@ -119,7 +120,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
             {tab.label}
           </button>
         ))}
-      </div>
+      </div>}
 
       {/* Tree area -- scrolls independently */}
       <div className={cn("overflow-y-auto", editorOpen ? "flex-1 min-h-0" : "flex-1")}>

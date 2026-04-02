@@ -196,6 +196,7 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
         workspaceId={workspaceId}
         files={files}
         initialTab="files"
+        hideTabs
         style={{ width: "100%" }}
       />
     )

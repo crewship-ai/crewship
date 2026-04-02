@@ -336,12 +336,6 @@ export const PromptInput = memo(({
             return (formData.get("message") as string) || "";
           })();
 
-      // Reset form immediately after capturing text to avoid race condition
-      // where user input during async blob conversion would be lost
-      if (!usingProvider) {
-        form.reset();
-      }
-
       try {
         // Convert blob URLs to data URLs asynchronously
         const convertedFiles: FileUIPart[] = await Promise.all(
@@ -364,6 +358,7 @@ export const PromptInput = memo(({
         if (result instanceof Promise) {
           try {
             await result;
+            if (!usingProvider) form.reset();
             clear();
             if (usingProvider) {
               controller.textInput.clear();
@@ -373,6 +368,7 @@ export const PromptInput = memo(({
           }
         } else {
           // Sync function completed without throwing, clear inputs
+          if (!usingProvider) form.reset();
           clear();
           if (usingProvider) {
             controller.textInput.clear();

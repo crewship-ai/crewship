@@ -114,26 +114,32 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	missionID := r.PathValue("missionId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	var currentStatus string
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
-		missionID, crewID, wsID).Scan(&currentStatus)
+	// Atomic compare-and-swap: claim the FAILED mission before reading tasks.
+	// Prevents two concurrent Resume requests from both resetting the same tasks.
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := h.db.ExecContext(r.Context(),
+		`UPDATE missions SET status = 'RESUMING', updated_at = ? WHERE id = ? AND crew_id = ? AND workspace_id = ? AND status = 'FAILED'`,
+		now, missionID, crewID, wsID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Mission not found")
-			return
-		}
+		h.logger.Error("claim mission for resume", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-
-	if currentStatus != "FAILED" {
-		writeProblem(w, r, http.StatusBadRequest,
+	claimed, _ := res.RowsAffected()
+	if claimed == 0 {
+		// Either not found or not in FAILED state — check which
+		var currentStatus string
+		qErr := h.db.QueryRowContext(r.Context(),
+			`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+			missionID, crewID, wsID).Scan(&currentStatus)
+		if qErr != nil {
+			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			return
+		}
+		writeProblem(w, r, http.StatusConflict,
 			fmt.Sprintf("can only resume FAILED missions, current status: %s", currentStatus))
 		return
 	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Collect all tasks to build dependency graph
 	type taskRow struct {
@@ -251,7 +257,7 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Set mission to IN_PROGRESS directly (skip PLANNING)
+	// Transition from RESUMING to IN_PROGRESS
 	if _, err = tx.ExecContext(r.Context(),
 		`UPDATE missions SET status = 'IN_PROGRESS', updated_at = ?, completed_at = NULL WHERE id = ?`,
 		now, missionID); err != nil {

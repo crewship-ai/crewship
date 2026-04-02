@@ -334,6 +334,14 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	unblockNeeded := false
 
+	// Reject conflicting updates: status and depends_on cannot be set simultaneously
+	// because depends_on recalculates status based on deps, which would silently
+	// override the explicit status transition.
+	if req.Status != nil && req.DependsOn != nil {
+		writeProblem(w, r, http.StatusBadRequest, "Cannot update status and depends_on in the same request")
+		return
+	}
+
 	// Apply status transition
 	if req.Status != nil {
 		if msg := validateTaskStatusTransition(currentStatus, *req.Status); msg != "" {

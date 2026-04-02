@@ -580,11 +580,18 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := h.db.ExecContext(r.Context(),
-		`UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ?`,
-		now, missionID); err != nil {
+	// Atomic compare-and-swap: only update if still PLANNING (prevents concurrent start race)
+	res, err := h.db.ExecContext(r.Context(),
+		`UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND status = 'PLANNING'`,
+		now, missionID)
+	if err != nil {
 		h.logger.Error("update mission status", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Failed to start mission")
+		return
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		writeProblem(w, r, http.StatusConflict, "Mission was already started by another request")
 		return
 	}
 
