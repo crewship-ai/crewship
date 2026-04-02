@@ -335,56 +335,44 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	sets := []string{"updated_at = ?"}
-	args := []any{now}
+	u := newUpdate()
 	if req.DisplayName != nil {
-		sets = append(sets, "display_name = ?")
-		args = append(args, *req.DisplayName)
+		u.Set("display_name", *req.DisplayName)
 	}
 	if req.Transport != nil {
 		if *req.Transport != "streamable-http" && *req.Transport != "stdio" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transport must be 'streamable-http' or 'stdio'"})
 			return
 		}
-		sets = append(sets, "transport = ?")
-		args = append(args, *req.Transport)
+		u.Set("transport", *req.Transport)
 	}
 	if req.Endpoint != nil {
-		sets = append(sets, "endpoint = ?")
-		args = append(args, *req.Endpoint)
+		u.Set("endpoint", *req.Endpoint)
 	}
 	if req.Command != nil {
-		sets = append(sets, "command = ?")
-		args = append(args, *req.Command)
+		u.Set("command", *req.Command)
 	}
 	if req.ArgsJSON != nil {
-		sets = append(sets, "args_json = ?")
-		args = append(args, *req.ArgsJSON)
+		u.Set("args_json", *req.ArgsJSON)
 	}
 	if req.EnvJSON != nil {
-		sets = append(sets, "env_json = ?")
-		args = append(args, *req.EnvJSON)
+		u.Set("env_json", *req.EnvJSON)
 	}
 	if req.ConfigJSON != nil {
-		sets = append(sets, "config_json = ?")
-		args = append(args, *req.ConfigJSON)
+		u.Set("config_json", *req.ConfigJSON)
 	}
 	if req.Icon != nil {
-		sets = append(sets, "icon = ?")
-		args = append(args, *req.Icon)
+		u.Set("icon", *req.Icon)
 	}
 	if req.Enabled != nil {
 		enabled := 0
 		if *req.Enabled {
 			enabled = 1
 		}
-		sets = append(sets, "enabled = ?")
-		args = append(args, enabled)
+		u.Set("enabled", enabled)
 	}
-	args = append(args, id)
 
-	query := "UPDATE crew_mcp_servers SET " + strings.Join(sets, ", ") + " WHERE id = ?"
+	query, args := u.Build("crew_mcp_servers", "id = ?", id)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update crew integration", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
