@@ -65,8 +65,10 @@ export function useFileEditor({ agentId, workspaceId }: UseFileEditorOptions): U
   }, [agentId, workspaceId])
 
   const closeEditor = useCallback(() => {
+    editorAbortRef.current?.abort()
     setEditorFile(null)
     setEditorContent(null)
+    setEditorLoading(false)
     setEditorDirty(false)
     setEditorExpanded(false)
   }, [])

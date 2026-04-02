@@ -59,6 +59,9 @@ func (h *QueryHandler) fetchAssignmentActivity(ctx context.Context, workspaceID 
 		item.Detail = resultSummary
 		items = append(items, item)
 	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration: assignments", "error", err)
+	}
 	return items
 }
 
@@ -95,6 +98,9 @@ func (h *QueryHandler) fetchPeerConversationActivity(ctx context.Context, worksp
 		item.Type = "peer_conversation"
 		items = append(items, item)
 	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration: peer_conversations", "error", err)
+	}
 	return items
 }
 
@@ -129,6 +135,9 @@ func (h *QueryHandler) fetchEscalationActivity(ctx context.Context, workspaceID 
 		}
 		item.Type = "escalation"
 		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration: escalations", "error", err)
 	}
 	return items
 }

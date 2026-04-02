@@ -167,7 +167,7 @@ export const KeeperTab = React.memo(function KeeperTab({
                             evt.decision === "ESCALATE" && "bg-amber-50 text-amber-700 border-amber-200",
                           )}
                         >
-                          {evt.decision}
+                          {evt.decision ?? "PENDING"}
                         </Badge>
                         <div className="min-w-0 flex-1">
                           <div className="text-xs">

@@ -47,7 +47,7 @@ func WriteAuditLog(ctx context.Context, db *sql.DB, action, entityType, entityID
 		VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)`,
 		workspaceID, userID, action, entityType, entityID, metaJSON, now)
 	if err != nil {
-		slog.Debug("audit log write failed", "error", err, "action", action)
+		slog.Warn("audit log write failed", "error", err, "action", action)
 	}
 }
 

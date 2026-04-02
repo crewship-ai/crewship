@@ -173,6 +173,10 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		tasks = append(tasks, t)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 
 	// Build reverse dependency map: taskID -> list of tasks that depend on it
 	reverseDeps := make(map[string][]string)
@@ -395,6 +399,10 @@ func (h *MissionHandler) Clone(w http.ResponseWriter, r *http.Request) {
 		origTasks = append(origTasks, t)
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
 
 	// Create new IDs and remap dependencies
 	newMissionID := generateCUID()
