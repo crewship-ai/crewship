@@ -44,8 +44,7 @@ func (h *QueryHandler) fetchStandupConversations(ctx context.Context, crewID, si
 		var nullResp sql.NullString
 		if err := rows.Scan(&c.question, &nullResp, &c.status, &c.escalated, &c.createdAt,
 			&c.fromName, &c.fromSlug, &c.toName, &c.toSlug); err != nil {
-			h.logger.Error("scan standup conversation", "error", err)
-			continue
+			return convs, fmt.Errorf("scanning standup conversation: %w", err)
 		}
 		c.response = nullResp.String
 		convs = append(convs, c)
@@ -74,8 +73,7 @@ func (h *QueryHandler) fetchStandupEscalations(ctx context.Context, crewID, sinc
 	for rows.Next() {
 		var e standupEscEntry
 		if err := rows.Scan(&e.reason, &e.status, &e.createdAt, &e.fromName, &e.fromSlug); err != nil {
-			h.logger.Error("scan standup escalation", "error", err)
-			continue
+			return escs, fmt.Errorf("scanning standup escalation: %w", err)
 		}
 		escs = append(escs, e)
 	}
@@ -175,8 +173,12 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 
 	since := r.URL.Query().Get("since")
 	if since == "" {
-		// Default to last 24 hours
 		since = time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
+	} else if t, err := time.Parse(time.RFC3339, since); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "since must be a valid RFC3339 timestamp"})
+		return
+	} else {
+		since = t.UTC().Format(time.RFC3339)
 	}
 
 	// Fetch data
