@@ -118,9 +118,9 @@ function PermissionMatrix({
         <table className="w-full border-collapse">
           <thead>
             <tr>
-              <th className="p-2 text-left text-xs text-white/30 font-medium min-w-[120px]">From \ To</th>
+              <th scope="col" className="p-2 text-left text-xs text-white/30 font-medium min-w-[120px]">From \ To</th>
               {sorted.map((crew) => (
-                <th key={crew.id} className="p-2 text-center text-xs text-white/60 font-medium min-w-[80px]">
+                <th scope="col" key={crew.id} className="p-2 text-center text-xs text-white/60 font-medium min-w-[80px]">
                   <div className="flex flex-col items-center gap-1">
                     <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: hashColor(crew.slug) }} />
                     <span className="truncate max-w-[80px]">{crew.name}</span>
@@ -132,12 +132,12 @@ function PermissionMatrix({
           <tbody>
             {sorted.map((fromCrew) => (
               <tr key={fromCrew.id} className="border-t border-white/[0.04]">
-                <td className="p-2 text-xs text-white/60 font-medium">
+                <th scope="row" className="p-2 text-xs text-white/60 font-medium text-left">
                   <div className="flex items-center gap-1.5">
                     <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: hashColor(fromCrew.slug) }} />
                     <span className="truncate max-w-[100px]">{fromCrew.name}</span>
                   </div>
-                </td>
+                </th>
                 {sorted.map((toCrew) => {
                   if (fromCrew.id === toCrew.id) {
                     return (
@@ -156,6 +156,7 @@ function PermissionMatrix({
                         <button
                           onClick={() => onConnect(fromCrew.id, toCrew.id)}
                           disabled={connecting}
+                          aria-label={`Connect ${fromCrew.name} to ${toCrew.name}`}
                           className="w-8 h-8 rounded-md border border-dashed border-white/[0.08] hover:border-white/20 hover:bg-white/[0.03] transition-colors flex items-center justify-center mx-auto cursor-pointer"
                           title={`Connect ${fromCrew.name} → ${toCrew.name}`}
                         >
@@ -165,6 +166,7 @@ function PermissionMatrix({
                         <button
                           onClick={() => connId && onDisconnect(connId)}
                           disabled={isDisconnecting}
+                          aria-label={`${type === "bidirectional" ? "Bidirectional" : "One-way"} connection between ${fromCrew.name} and ${toCrew.name}. Click to disconnect.`}
                           className={cn(
                             "w-8 h-8 rounded-md flex items-center justify-center mx-auto cursor-pointer transition-colors",
                             type === "bidirectional" && "bg-cyan-500/10 border border-cyan-500/30 hover:bg-cyan-500/20",

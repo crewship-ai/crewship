@@ -152,7 +152,13 @@ export default function OrchestrationPage() {
 
   const selectedMissionLabel = useMemo(() => {
     if (selectedMissionId === "all") return "All missions"
-    return missions.find((m) => m.id === selectedMissionId)?.title ?? "All missions"
+    const found = missions.find((m) => m.id === selectedMissionId)
+    if (!found) {
+      // Mission was deleted or workspace switched — reset
+      setSelectedMissionId("all")
+      return "All missions"
+    }
+    return found.title
   }, [missions, selectedMissionId])
 
   const filteredMissions = useMemo(() => {

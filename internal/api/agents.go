@@ -737,16 +737,19 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 
 	cutoff := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
 
+	// Only join tasks that are currently active/pending OR were completed/failed in the 24h window.
+	// This avoids scanning the full mission_tasks history for every agent.
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT
 			a.id, a.name, a.slug, a.status,
 			COALESCE(SUM(CASE WHEN mt.status = 'IN_PROGRESS' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN mt.status IN ('PENDING', 'BLOCKED') THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN mt.status = 'COMPLETED' AND mt.completed_at >= ? THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN mt.completed_at >= ? THEN COALESCE(mt.tokens_used, mt.token_count, 0) ELSE 0 END), 0),
+			COALESCE(SUM(COALESCE(mt.tokens_used, mt.token_count, 0)), 0),
 			COALESCE(SUM(CASE WHEN mt.status IN ('IN_PROGRESS', 'PENDING', 'BLOCKED') THEN COALESCE(mt.token_budget, 0) ELSE 0 END), 0)
 		FROM agents a
 		LEFT JOIN mission_tasks mt ON mt.assigned_agent_id = a.id
+			AND (mt.status IN ('IN_PROGRESS', 'PENDING', 'BLOCKED') OR mt.completed_at >= ?)
 		WHERE a.workspace_id = ? AND a.deleted_at IS NULL
 		GROUP BY a.id, a.name, a.slug, a.status
 		ORDER BY 5 DESC, 6 DESC`,
