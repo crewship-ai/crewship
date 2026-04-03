@@ -377,6 +377,7 @@ func (r *Router) registerRoutes() {
 
 	// Agents (require workspace context)
 	r.mux.Handle("GET /api/v1/agents/fleet-status", authed(wsCtx(http.HandlerFunc(agents.FleetStatus))))
+	r.mux.Handle("GET /api/v1/agent-load", authed(wsCtx(http.HandlerFunc(agents.Load))))
 	r.mux.Handle("GET /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.List))))
 	r.mux.Handle("POST /api/v1/agents", authed(wsCtx(http.HandlerFunc(agents.Create))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}", authed(wsCtx(http.HandlerFunc(agents.Get))))

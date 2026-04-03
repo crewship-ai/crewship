@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import type { Mission, MissionTask } from "@/lib/types/mission"
+import { TaskLiveLogs } from "./task-live-logs"
 
 interface TaskDetailSheetProps {
   task: MissionTask | null
@@ -490,6 +491,14 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                         </div>
                       </CollapsibleContent>
                     </Collapsible>
+                  </>
+                )}
+
+                {/* Live Logs */}
+                {!editing && task.agent_slug && (task.status === "IN_PROGRESS" || task.status === "COMPLETED" || task.status === "FAILED") && (
+                  <>
+                    <Separator className="bg-white/[0.06]" />
+                    <TaskLiveLogs agentSlug={task.agent_slug} taskStatus={task.status} />
                   </>
                 )}
 
