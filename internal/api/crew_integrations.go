@@ -603,7 +603,6 @@ func MigrateJSONBlobToCrewServers(ctx context.Context, db *sql.DB, logger *slog.
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	allInserted := true
 	for name, srv := range config.MCPServers {
 		transport := "stdio"
 		if srv.Transport == "streamable-http" || srv.Type == "http" || (srv.Command == "" && srv.URL != "") {
@@ -639,23 +638,23 @@ func MigrateJSONBlobToCrewServers(ctx context.Context, db *sql.DB, logger *slog.
 
 		id := generateCUID()
 
-		res, err := tx.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, `
 			INSERT OR IGNORE INTO crew_mcp_servers
 				(id, crew_id, name, display_name, transport, endpoint, command, args_json, env_json, enabled, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-			id, crewID, name, displayName, transport, endpoint, command, argsJSON, envJSON, now, now)
-		if err != nil {
+			id, crewID, name, displayName, transport, endpoint, command, argsJSON, envJSON, now, now); err != nil {
 			return fmt.Errorf("insert crew server %q: %w", name, err)
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			allInserted = false
 		}
 	}
 
-	// Only clear the JSON blob if all entries were inserted (or already existed).
-	// If some were skipped due to name conflicts with different data, keep the blob
-	// as the source of truth.
-	if allInserted {
+	// Clear the JSON blob only if all configured servers now exist in the table.
+	// This is idempotent: re-runs see existing rows and still clear the blob.
+	var existing int
+	if err := tx.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id = ?", crewID).Scan(&existing); err != nil {
+		return fmt.Errorf("count crew servers: %w", err)
+	}
+	if existing >= len(config.MCPServers) {
 		if _, err := tx.ExecContext(ctx, `UPDATE crews SET mcp_config_json = NULL WHERE id = ?`, crewID); err != nil {
 			return fmt.Errorf("clear mcp_config_json: %w", err)
 		}
