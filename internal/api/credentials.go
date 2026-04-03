@@ -51,7 +51,7 @@ func (h *CredentialHandler) loadAgentNamesBatch(ctx context.Context, credentialI
 		return result
 	}
 	placeholders := make([]string, len(credentialIDs))
-	args := make([]interface{}, len(credentialIDs))
+	args := make([]any, len(credentialIDs))
 	for i, id := range credentialIDs {
 		placeholders[i] = "?"
 		args[i] = id
@@ -69,6 +69,9 @@ func (h *CredentialHandler) loadAgentNamesBatch(ctx context.Context, credentialI
 			result[credID] = append(result[credID], agentName)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate agent names batch", "error", err)
+	}
 	return result
 }
 
@@ -79,7 +82,7 @@ func (h *CredentialHandler) loadMCPUsedBatch(ctx context.Context, credentialIDs 
 		return result
 	}
 	placeholders := make([]string, len(credentialIDs))
-	args := make([]interface{}, len(credentialIDs))
+	args := make([]any, len(credentialIDs))
 	for i, id := range credentialIDs {
 		placeholders[i] = "?"
 		args[i] = id
@@ -96,6 +99,9 @@ func (h *CredentialHandler) loadMCPUsedBatch(ctx context.Context, credentialIDs 
 		if rows.Scan(&credID) == nil {
 			result[credID] = true
 		}
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate MCP used batch", "error", err)
 	}
 	return result
 }
@@ -115,6 +121,9 @@ func (h *CredentialHandler) loadCrewIDs(ctx context.Context, credentialID string
 			ids = append(ids, id)
 		}
 	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate crew IDs", "error", err)
+	}
 	if ids == nil {
 		ids = []string{}
 	}
@@ -128,7 +137,7 @@ func (h *CredentialHandler) loadCrewIDsBatch(ctx context.Context, credentialIDs 
 		return result
 	}
 	placeholders := make([]string, len(credentialIDs))
-	args := make([]interface{}, len(credentialIDs))
+	args := make([]any, len(credentialIDs))
 	for i, id := range credentialIDs {
 		placeholders[i] = "?"
 		args[i] = id
@@ -145,6 +154,9 @@ func (h *CredentialHandler) loadCrewIDsBatch(ctx context.Context, credentialIDs 
 		if rows.Scan(&credID, &crewID) == nil {
 			result[credID] = append(result[credID], crewID)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("iterate crew IDs batch", "error", err)
 	}
 	return result
 }
@@ -332,10 +344,12 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		legacyCrewID = &crewIDs[0]
 	}
 
-	// Remove soft-deleted credential with same name
-	h.db.ExecContext(r.Context(),
+	// Remove soft-deleted credential with same name so the INSERT doesn't hit a unique constraint.
+	if _, err := h.db.ExecContext(r.Context(),
 		"DELETE FROM credentials WHERE workspace_id = ? AND name = ? AND deleted_at IS NOT NULL",
-		workspaceID, req.Name)
+		workspaceID, req.Name); err != nil {
+		h.logger.Warn("cleanup soft-deleted credential", "name", req.Name, "error", err)
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	credID := generateCUID()

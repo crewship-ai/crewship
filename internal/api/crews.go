@@ -437,7 +437,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Build dynamic update
 	query := "UPDATE crews SET updated_at = ?"
-	args := []interface{}{now}
+	args := []any{now}
 
 	if req.Name != nil {
 		query += ", name = ?"
@@ -924,7 +924,7 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	affected, _ := res.RowsAffected()
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"updated": affected,
 		"style":   body.AvatarStyle,
 	})
