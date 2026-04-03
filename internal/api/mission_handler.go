@@ -669,16 +669,26 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 24h mission stats (completed_at for COMPLETED, updated_at for FAILED since failed missions may lack completed_at)
+	// 24h mission counts (completed_at for COMPLETED, updated_at for FAILED since failed missions may lack completed_at)
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT
 			SUM(CASE WHEN status = 'COMPLETED' AND completed_at >= ? THEN 1 ELSE 0 END),
-			SUM(CASE WHEN status = 'FAILED' AND updated_at >= ? THEN 1 ELSE 0 END),
-			COALESCE(SUM(CASE WHEN updated_at >= ? THEN COALESCE(total_token_count, 0) ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN updated_at >= ? THEN COALESCE(total_estimated_cost, 0) ELSE 0 END), 0)
+			SUM(CASE WHEN status = 'FAILED' AND updated_at >= ? THEN 1 ELSE 0 END)
 		FROM missions WHERE workspace_id = ?`,
-		cutoff, cutoff, cutoff, cutoff, wsID).Scan(&m.Completed24h, &m.Failed24h, &m.TotalTokens24h, &m.TotalCost24h); err != nil {
-		h.logger.Warn("mission metrics: 24h stats query failed", "error", err)
+		cutoff, cutoff, wsID).Scan(&m.Completed24h, &m.Failed24h); err != nil {
+		h.logger.Warn("mission metrics: 24h mission counts query failed", "error", err)
+	}
+
+	// 24h token/cost from tasks completed in the window (avoids counting lifetime totals of long-running missions)
+	if err := h.db.QueryRowContext(r.Context(), `
+		SELECT
+			COALESCE(SUM(COALESCE(mt.tokens_used, mt.token_count, 0)), 0),
+			COALESCE(SUM(COALESCE(mt.estimated_cost, 0)), 0)
+		FROM mission_tasks mt
+		JOIN missions m ON m.id = mt.mission_id
+		WHERE m.workspace_id = ? AND mt.completed_at >= ?`,
+		wsID, cutoff).Scan(&m.TotalTokens24h, &m.TotalCost24h); err != nil {
+		h.logger.Warn("mission metrics: 24h token/cost query failed", "error", err)
 	}
 
 	// Average completion time (completed missions in last 24h)

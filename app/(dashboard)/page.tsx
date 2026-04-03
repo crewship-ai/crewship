@@ -495,7 +495,7 @@ export default function DashboardPage() {
                       </TableCell>
                       <TableCell>
                         <span className="text-body text-muted-foreground tabular-nums">
-                          {mission.total_estimated_cost ? formatCost(mission.total_estimated_cost) : "—"}
+                          {mission.total_estimated_cost != null ? formatCost(mission.total_estimated_cost) : "—"}
                         </span>
                       </TableCell>
                       <TableCell>
