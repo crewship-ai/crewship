@@ -532,7 +532,12 @@ func (h *MissionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
 			missionID, crewID, wsID).Scan(&currentStatus)
 		if qErr != nil {
-			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			if errors.Is(qErr, sql.ErrNoRows) {
+				writeProblem(w, r, http.StatusNotFound, "Mission not found")
+				return
+			}
+			h.logger.Error("delete mission follow-up query", "error", qErr)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		writeProblem(w, r, http.StatusBadRequest, "Only PLANNING or CANCELLED missions can be deleted")
@@ -607,7 +612,7 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 	if h.missionEngine != nil {
 		if err := h.missionEngine.StartMission(context.Background(), missionID); err != nil {
 			h.logger.Error("mission engine start failed, rolling back to PLANNING", "error", err, "mission_id", missionID)
-			if _, rbErr := h.db.ExecContext(r.Context(),
+			if _, rbErr := h.db.ExecContext(context.Background(),
 				`UPDATE missions SET status = 'PLANNING', updated_at = ? WHERE id = ?`,
 				now, missionID); rbErr != nil {
 				h.logger.Error("rollback mission status", "error", rbErr, "mission_id", missionID)

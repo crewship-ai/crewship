@@ -180,6 +180,9 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "redirect_to required when action is redirect"})
 		return
 	}
+	if body.Action != "redirect" {
+		body.RedirectTo = ""
+	}
 
 	var status, chatID, crewID, fromSlug, escalationType string
 	err := h.db.QueryRowContext(r.Context(), `
@@ -248,7 +251,13 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
-	if n, _ := result.RowsAffected(); n == 0 {
+	n, err := result.RowsAffected()
+	if err != nil {
+		h.logger.Error("resolve escalation rows affected", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if n == 0 {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "escalation already resolved"})
 		return
 	}

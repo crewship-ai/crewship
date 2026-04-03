@@ -26,10 +26,10 @@ func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Atomic CAS: only restart if not IN_PROGRESS or PLANNING (prevents TOCTOU race)
+	// Atomic CAS: only restart from terminal states (prevents restarting transient states like RESUMING)
 	res, err := h.db.ExecContext(r.Context(),
 		`UPDATE missions SET status = 'PLANNING', updated_at = ?, completed_at = NULL
-		 WHERE id = ? AND crew_id = ? AND workspace_id = ? AND status NOT IN ('IN_PROGRESS', 'PLANNING')`,
+		 WHERE id = ? AND crew_id = ? AND workspace_id = ? AND status IN ('COMPLETED', 'FAILED', 'CANCELLED')`,
 		now, missionID, crewID, wsID)
 	if err != nil {
 		h.logger.Error("restart: claim mission", "error", err)
@@ -170,7 +170,7 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		DependsOn string
 	}
 	rows, err := h.db.QueryContext(r.Context(),
-		`SELECT id, status, depends_on FROM mission_tasks WHERE mission_id = ?`, missionID)
+		`SELECT id, status, COALESCE(depends_on, '[]') FROM mission_tasks WHERE mission_id = ?`, missionID)
 	if err != nil {
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
@@ -397,7 +397,7 @@ func (h *MissionHandler) Clone(w http.ResponseWriter, r *http.Request) {
 		MaxIter     sql.NullInt64
 	}
 	rows, err := h.db.QueryContext(r.Context(),
-		`SELECT id, assigned_agent_id, title, description, task_order, depends_on, max_iterations
+		`SELECT id, assigned_agent_id, title, description, task_order, COALESCE(depends_on, '[]'), max_iterations
 		 FROM mission_tasks WHERE mission_id = ? ORDER BY task_order`, missionID)
 	if err != nil {
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")

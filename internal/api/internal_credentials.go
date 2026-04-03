@@ -92,6 +92,11 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 
 func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
+	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id query parameter is required"})
+		return
+	}
 
 	var body struct {
 		Status       string  `json:"status"`
@@ -122,16 +127,26 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 	}
 	defer tx.Rollback()
 
-	_, err = tx.ExecContext(r.Context(),
-		"UPDATE credentials SET status = ?, last_checked_at = ?, updated_at = ? WHERE id = ?",
-		body.Status, now, now, credID)
+	result, err := tx.ExecContext(r.Context(),
+		"UPDATE credentials SET status = ?, last_checked_at = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
+		body.Status, now, now, credID, workspaceID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		h.logger.Error("update credential rows affected", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if n == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		return
+	}
 
 	if body.LastError != nil {
-		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET last_error = ? WHERE id = ?", *body.LastError, credID); err != nil {
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET last_error = ? WHERE id = ? AND workspace_id = ?", *body.LastError, credID, workspaceID); err != nil {
 			h.logger.Error("update credential last_error", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
@@ -144,7 +159,7 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt token"})
 			return
 		}
-		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_value = ? WHERE id = ?", enc, credID); err != nil {
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_value = ? WHERE id = ? AND workspace_id = ?", enc, credID, workspaceID); err != nil {
 			h.logger.Error("update credential access token", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
@@ -157,14 +172,14 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt token"})
 			return
 		}
-		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_refresh_token = ? WHERE id = ?", enc, credID); err != nil {
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_refresh_token = ? WHERE id = ? AND workspace_id = ?", enc, credID, workspaceID); err != nil {
 			h.logger.Error("update credential refresh token", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
 	}
 	if body.TokenExpires != nil {
-		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET token_expires_at = ? WHERE id = ?", *body.TokenExpires, credID); err != nil {
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET token_expires_at = ? WHERE id = ? AND workspace_id = ?", *body.TokenExpires, credID, workspaceID); err != nil {
 			h.logger.Error("update credential token_expires_at", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
@@ -190,6 +205,10 @@ func (h *InternalHandler) GetWebhookSecret(w http.ResponseWriter, r *http.Reques
 		}
 		h.logger.Error("webhook secret lookup", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !secret.Valid || secret.String == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Webhook secret not configured for agent"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"webhook_secret": secret.String})

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -50,7 +51,7 @@ func (h *QueryHandler) fetchStandupConversations(ctx context.Context, crewID, si
 		convs = append(convs, c)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (standup convs)", "error", err)
+		return convs, fmt.Errorf("iterating standup conversations: %w", err)
 	}
 	return convs, nil
 }
@@ -79,7 +80,7 @@ func (h *QueryHandler) fetchStandupEscalations(ctx context.Context, crewID, sinc
 		escs = append(escs, e)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (standup escalations)", "error", err)
+		return escs, fmt.Errorf("iterating standup escalations: %w", err)
 	}
 	return escs, nil
 }
@@ -162,7 +163,12 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 		if err := h.db.QueryRowContext(r.Context(),
 			`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 			crewID, wsID).Scan(&exists); err != nil {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found in workspace"})
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found in workspace"})
+				return
+			}
+			h.logger.Error("standup workspace validation", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
 	}
