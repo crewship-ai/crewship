@@ -669,11 +669,11 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 24h mission stats (use completed_at for accurate time-windowed counts)
+	// 24h mission stats (completed_at for COMPLETED, updated_at for FAILED since failed missions may lack completed_at)
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT
 			SUM(CASE WHEN status = 'COMPLETED' AND completed_at >= ? THEN 1 ELSE 0 END),
-			SUM(CASE WHEN status = 'FAILED' AND completed_at >= ? THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'FAILED' AND updated_at >= ? THEN 1 ELSE 0 END),
 			COALESCE(SUM(CASE WHEN updated_at >= ? THEN COALESCE(total_token_count, 0) ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN updated_at >= ? THEN COALESCE(total_estimated_cost, 0) ELSE 0 END), 0)
 		FROM missions WHERE workspace_id = ?`,

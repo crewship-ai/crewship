@@ -358,7 +358,7 @@ export default function DashboardPage() {
               subtitle={
                 totalCost24h === 0
                   ? "No cost tracked"
-                  : `across ${totalMissionCount} missions`
+                  : "last 24 hours"
               }
               icon={Coins}
               iconClassName="bg-amber-500/10 text-amber-600"
