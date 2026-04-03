@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText, AlertCircle, Pause } from "lucide-react"
+import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText, AlertCircle, Pause, Target, Coins, Loader2, Square, ChevronRight, CheckCircle2 } from "lucide-react"
 import { BotIcon as AnimatedBot } from "@/components/ui/bot"
 import { ActivityIcon as AnimatedActivity } from "@/components/ui/activity"
 import { KeyIcon as AnimatedKey } from "@/components/ui/key"
@@ -23,6 +23,7 @@ import { useTick } from "@/hooks/use-tick"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
 import { getCrewDotColor } from "@/lib/crew-icon"
+import type { Mission } from "@/lib/types/mission"
 
 interface AgentCrew {
   name: string
@@ -84,6 +85,27 @@ const agentStatusConfig: Record<string, { label: string; variant: "default" | "s
   STOPPED: { label: "Stopped", variant: "outline", icon: Pause },
 }
 
+const missionStatusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ElementType }> = {
+  PLANNING: { label: "Planning", variant: "outline", icon: Clock },
+  IN_PROGRESS: { label: "Running", variant: "default", icon: Loader2 },
+  REVIEW: { label: "Review", variant: "secondary", icon: ChevronRight },
+  COMPLETED: { label: "Completed", variant: "secondary", icon: CheckCircle2 },
+  FAILED: { label: "Failed", variant: "destructive", icon: AlertTriangle },
+  CANCELLED: { label: "Cancelled", variant: "outline", icon: Square },
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`
+  return `${Math.floor(ms / 3_600_000)}h ${Math.floor((ms % 3_600_000) / 60_000)}m`
+}
+
+function formatCost(cost: number): string {
+  if (cost === 0) return "$0.00"
+  if (cost < 0.01) return "<$0.01"
+  return `$${cost.toFixed(2)}`
+}
+
 function formatTimeAgo(ts: string): string {
   const seconds = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
   if (seconds < 60) return `${seconds}s ago`
@@ -101,6 +123,8 @@ export default function DashboardPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [crewCount, setCrewCount] = useState(0)
+  const [missions, setMissions] = useState<Mission[]>([])
+  const [metrics, setMetrics] = useState<{ active_missions: number; total_cost_24h: number; total_missions: number } | null>(null)
   const [runsData, setRunsData] = useState<RunsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -134,11 +158,13 @@ export default function DashboardPage() {
       setError(null)
     }
     try {
-      const [agentsRes, credsRes, crewsRes, runsRes] = await Promise.all([
+      const [agentsRes, credsRes, crewsRes, runsRes, missionsRes, metricsRes] = await Promise.all([
         fetch(`/api/v1/agents?workspace_id=${workspaceId}`),
         fetch(`/api/v1/credentials?workspace_id=${workspaceId}`),
         fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
         fetch(`/api/v1/runs?workspace_id=${workspaceId}&limit=50`),
+        fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`),
+        fetch(`/api/v1/mission-metrics?workspace_id=${workspaceId}`),
       ])
 
       if (!agentsRes.ok || !credsRes.ok) {
@@ -153,11 +179,15 @@ export default function DashboardPage() {
 
       const crewsData = crewsRes.ok ? ((await crewsRes.json()) as unknown[]) : []
       const runsResult = runsRes.ok ? ((await runsRes.json()) as RunsResponse) : null
+      const missionsData = missionsRes.ok ? ((await missionsRes.json()) as Mission[]) : []
+      const metricsData = metricsRes.ok ? await metricsRes.json() : null
 
       setAgents(agentsData)
       setCredentials(credsData)
       setCrewCount(crewsData.length)
       setRunsData(runsResult)
+      setMissions(missionsData)
+      setMetrics(metricsData)
     } catch {
       if (showLoading) setError("Failed to load dashboard data")
     } finally {
@@ -176,6 +206,7 @@ export default function DashboardPage() {
   useRealtimeEvent("run.failed", useCallback(() => { fetchData(false) }, [fetchData]))
   useRealtimeEvent("agent.status", useCallback(() => { fetchData(false) }, [fetchData]))
   useRealtimeEvent("mission.updated", useCallback(() => { fetchData(false) }, [fetchData]))
+  useRealtimeEvent("task.updated", useCallback(() => { fetchData(false) }, [fetchData]))
   useRealtimeEvent("escalation.created", useCallback(() => { fetchData(false) }, [fetchData]))
   useRealtimeEvent("agent.created", useCallback(() => { fetchData(false) }, [fetchData]))
   useRealtimeEvent("agent.deleted", useCallback(() => { fetchData(false) }, [fetchData]))
@@ -202,6 +233,16 @@ export default function DashboardPage() {
   const totalAgents = agents.length
   const runningNow = agents.filter((a) => a.status === "RUNNING").length
   const apiKeysActive = credentials.length
+
+  // Mission stats from metrics API (accurate, not capped by limit=50)
+  const activeMissionCount = metrics?.active_missions ?? 0
+  const totalCost24h = metrics?.total_cost_24h ?? 0
+  const totalMissionCount = metrics?.total_missions ?? 0
+
+  // Recent missions sorted by activity
+  const recentMissions = [...missions]
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+    .slice(0, 10)
 
   // Build agent → last run map (keep most recent per agent)
   const agentLastRun = new Map<string, RunEntry>()
@@ -262,10 +303,10 @@ export default function DashboardPage() {
         </Button>
       </PageHeader>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {isLoading ? (
           <>
-            {Array.from({ length: 4 }).map((_, i) => (
+            {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-[104px] rounded-xl" />
             ))}
           </>
@@ -288,6 +329,17 @@ export default function DashboardPage() {
               animatedIcon={<AnimatedActivity size={16} />}
             />
             <StatCard
+              title="Active Missions"
+              value={activeMissionCount}
+              subtitle={
+                totalMissionCount === 0
+                  ? "No missions yet"
+                  : `${totalMissionCount} total`
+              }
+              icon={Target}
+              iconClassName="bg-purple-500/10 text-purple-600"
+            />
+            <StatCard
               title="Today's Runs"
               value={runsData?.stats.today ?? 0}
               subtitle={
@@ -299,6 +351,17 @@ export default function DashboardPage() {
               }
               icon={Hourglass}
               iconClassName={runsData?.stats.failed ? "bg-destructive/10 text-destructive" : undefined}
+            />
+            <StatCard
+              title="Cost (24h)"
+              value={formatCost(totalCost24h)}
+              subtitle={
+                totalCost24h === 0
+                  ? "No cost tracked"
+                  : "last 24 hours"
+              }
+              icon={Coins}
+              iconClassName="bg-amber-500/10 text-amber-600"
             />
             <StatCard
               title="API Keys Active"
@@ -346,6 +409,103 @@ export default function DashboardPage() {
                       <TableCell className={cpuColor + " font-medium text-xs"}>{stats.cpu_percent.toFixed(1)}%</TableCell>
                       <TableCell className={memColor + " text-xs"}>{memMB} / {memLimitMB} MB ({stats.memory_percent.toFixed(0)}%)</TableCell>
                       <TableCell className="text-xs">{stats.pids}</TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Missions Table */}
+      {!isLoading && recentMissions.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-heading font-semibold">Recent Missions</CardTitle>
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/orchestration">View All</Link>
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Mission</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Progress</TableHead>
+                  <TableHead>Lead</TableHead>
+                  <TableHead>Cost</TableHead>
+                  <TableHead>Updated</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recentMissions.map((mission) => {
+                  const cfg = missionStatusConfig[mission.status] ?? missionStatusConfig.PLANNING
+                  const StatusIcon = cfg.icon
+                  const stats = mission.task_stats
+                  const completed = stats?.completed ?? 0
+                  const total = stats?.total ?? 0
+                  const progressPct = total > 0 ? Math.round((completed / total) * 100) : 0
+                  const duration = mission.completed_at && mission.created_at
+                    ? new Date(mission.completed_at).getTime() - new Date(mission.created_at).getTime()
+                    : null
+
+                  return (
+                    <TableRow key={mission.id}>
+                      <TableCell>
+                        <Link href="/orchestration" className="hover:underline">
+                          <div className="font-medium text-body max-w-[240px] truncate">{mission.title}</div>
+                          {mission.pattern && (
+                            <div className="text-label text-muted-foreground">{mission.pattern.toLowerCase()}</div>
+                          )}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={cfg.variant} className="gap-1">
+                          {mission.status === "IN_PROGRESS" && (
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+                            </span>
+                          )}
+                          <StatusIcon className="h-3 w-3" />
+                          {cfg.label}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2 min-w-[100px]">
+                          <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-primary transition-all duration-500"
+                              style={{ width: `${progressPct}%` }}
+                            />
+                          </div>
+                          <span className="text-label text-muted-foreground tabular-nums">
+                            {completed}/{total}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-body text-muted-foreground">
+                          {mission.lead_agent_name ?? "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-body text-muted-foreground tabular-nums">
+                          {mission.total_estimated_cost != null ? formatCost(mission.total_estimated_cost) : "—"}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-body text-muted-foreground">
+                          {formatTimeAgo(mission.updated_at)}
+                          {duration !== null && (
+                            <span className="text-label ml-1">({formatDuration(duration)})</span>
+                          )}
+                        </span>
+                      </TableCell>
                     </TableRow>
                   )
                 })}
