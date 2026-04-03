@@ -143,13 +143,28 @@ func formatEscalations(b *strings.Builder, escs []standupEscEntry) (pending, res
 
 // Standup handles GET /api/v1/internal/standup (internal) and GET /api/v1/crews/{crewId}/standup (public).
 func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
-	crewID := r.URL.Query().Get("crew_id")
+	// Always prefer the path parameter to prevent query-param override bypass
+	// (e.g. /crews/A/standup?crew_id=B reading crew B's data).
+	crewID := r.PathValue("crewId")
 	if crewID == "" {
-		crewID = r.PathValue("crewId")
+		// Internal route has no path param — fall back to query param.
+		crewID = r.URL.Query().Get("crew_id")
 	}
 	if crewID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required"})
 		return
+	}
+
+	// When accessed via the public (authenticated) route, validate that the crew
+	// belongs to the caller's workspace to prevent cross-workspace data access.
+	if wsID := WorkspaceIDFromContext(r.Context()); wsID != "" {
+		var exists int
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+			crewID, wsID).Scan(&exists); err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found in workspace"})
+			return
+		}
 	}
 
 	since := r.URL.Query().Get("since")

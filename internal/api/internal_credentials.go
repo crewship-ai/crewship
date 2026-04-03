@@ -11,19 +11,20 @@ import (
 
 func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id is required"})
+		return
+	}
 	provider := r.URL.Query().Get("provider")
 
 	query := `SELECT id, workspace_id, name, type, provider, encrypted_value,
 		encrypted_refresh_token, token_expires_at, account_label, account_email, status
 		FROM credentials
 		WHERE status IN ('ACTIVE', 'EXPIRED', 'ERROR') AND deleted_at IS NULL
-		AND type IN ('AI_CLI_TOKEN', 'API_KEY') AND provider != 'NONE'`
+		AND type IN ('AI_CLI_TOKEN', 'API_KEY') AND provider != 'NONE'
+		AND workspace_id = ?`
 
-	var args []interface{}
-	if workspaceID != "" {
-		query += " AND workspace_id = ?"
-		args = append(args, workspaceID)
-	}
+	args := []any{workspaceID}
 	if provider != "" {
 		query += " AND provider = ?"
 		args = append(args, provider)

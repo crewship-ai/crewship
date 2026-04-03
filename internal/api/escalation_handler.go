@@ -30,6 +30,7 @@ func (h *QueryHandler) PendingEscalationCount(w http.ResponseWriter, r *http.Req
 }
 
 // CreateEscalation handles POST /api/v1/internal/escalations.
+// Auth: protected by internalAuth middleware (X-Internal-Token) in router.go.
 func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		FromSlug    string `json:"from_slug"`

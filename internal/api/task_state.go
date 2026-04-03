@@ -150,6 +150,19 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// After claiming RESUMING, any error must restore FAILED status so the
+	// mission doesn't get stuck in the unrecoverable RESUMING state.
+	resumeOK := false
+	defer func() {
+		if !resumeOK {
+			if _, rbErr := h.db.ExecContext(context.Background(),
+				`UPDATE missions SET status = 'FAILED', updated_at = ? WHERE id = ? AND status = 'RESUMING'`,
+				now, missionID); rbErr != nil {
+				h.logger.Error("resume: rollback mission to FAILED", "error", rbErr, "mission_id", missionID)
+			}
+		}
+	}()
+
 	// Collect all tasks to build dependency graph
 	type taskRow struct {
 		ID        string
@@ -210,6 +223,15 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	if len(toReset) == 0 {
 		writeProblem(w, r, http.StatusBadRequest, "No failed tasks to resume from")
 		return
+	}
+
+	// Validate DAG before modifying tasks (deps may have been modified while FAILED)
+	if h.missionEngine != nil {
+		if dagErr := h.missionEngine.ValidateDAG(r.Context(), missionID); dagErr != nil {
+			h.logger.Error("resume: invalid DAG", "error", dagErr, "mission_id", missionID)
+			writeProblem(w, r, http.StatusBadRequest, "Invalid task DAG: "+dagErr.Error())
+			return
+		}
 	}
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
@@ -283,33 +305,26 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate DAG before starting (deps may have been modified while FAILED)
-	if h.missionEngine != nil {
-		if dagErr := h.missionEngine.ValidateDAG(r.Context(), missionID); dagErr != nil {
-			h.logger.Error("resume: invalid DAG after reset", "error", dagErr, "mission_id", missionID)
-			if _, rbErr := h.db.ExecContext(r.Context(),
-				`UPDATE missions SET status = 'FAILED', updated_at = ? WHERE id = ?`,
-				now, missionID); rbErr != nil {
-				h.logger.Error("resume: rollback mission status", "error", rbErr)
-			}
-			writeProblem(w, r, http.StatusBadRequest, "Invalid task DAG: "+dagErr.Error())
-			return
-		}
-	}
-
-	// Start DAG engine immediately
+	// Start DAG engine immediately. If this fails, roll back to FAILED.
 	if h.missionEngine != nil {
 		if err := h.missionEngine.StartMission(context.Background(), missionID); err != nil {
 			h.logger.Error("resume: mission engine start failed, rolling back", "error", err, "mission_id", missionID)
-			if _, rbErr := h.db.ExecContext(r.Context(),
+			// Restore FAILED (the deferred rollback checks for RESUMING, but we
+			// already committed IN_PROGRESS — restore explicitly here).
+			if _, rbErr := h.db.ExecContext(context.Background(),
 				`UPDATE missions SET status = 'FAILED', updated_at = ? WHERE id = ?`,
 				now, missionID); rbErr != nil {
-				h.logger.Error("resume: rollback mission status", "error", rbErr)
+				h.logger.Error("resume: rollback mission status after engine failure", "error", rbErr)
 			}
+			// Mark as OK so the deferred rollback doesn't also fire (status is no longer RESUMING).
+			resumeOK = true
 			writeProblem(w, r, http.StatusInternalServerError, "Failed to start mission engine")
 			return
 		}
 	}
+
+	// All steps succeeded — prevent deferred rollback.
+	resumeOK = true
 
 	if h.hub != nil {
 		wsChannel := "workspace:" + wsID

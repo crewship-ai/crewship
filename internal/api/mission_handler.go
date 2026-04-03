@@ -509,29 +509,33 @@ func (h *MissionHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	missionID := r.PathValue("missionId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	var status string
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
-		missionID, crewID, wsID).Scan(&status)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Mission not found")
-			return
-		}
-		h.logger.Error("get mission for delete", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-
-	if status != "PLANNING" && status != "CANCELLED" {
-		writeProblem(w, r, http.StatusBadRequest, "Only PLANNING or CANCELLED missions can be deleted")
-		return
-	}
-
-	_, err = h.db.ExecContext(r.Context(), `DELETE FROM missions WHERE id = ?`, missionID)
+	// Atomic delete with status guard — prevents TOCTOU race where a concurrent
+	// Start flips the row to IN_PROGRESS between a separate check and delete.
+	res, err := h.db.ExecContext(r.Context(),
+		`DELETE FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ? AND status IN ('PLANNING', 'CANCELLED')`,
+		missionID, crewID, wsID)
 	if err != nil {
 		h.logger.Error("delete mission", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		h.logger.Error("delete mission rows affected", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if affected == 0 {
+		// Distinguish "not found" from "exists but wrong status"
+		var currentStatus string
+		qErr := h.db.QueryRowContext(r.Context(),
+			`SELECT status FROM missions WHERE id = ? AND crew_id = ? AND workspace_id = ?`,
+			missionID, crewID, wsID).Scan(&currentStatus)
+		if qErr != nil {
+			writeProblem(w, r, http.StatusNotFound, "Mission not found")
+			return
+		}
+		writeProblem(w, r, http.StatusBadRequest, "Only PLANNING or CANCELLED missions can be deleted")
 		return
 	}
 
