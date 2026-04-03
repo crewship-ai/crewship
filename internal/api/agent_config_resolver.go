@@ -107,6 +107,16 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Auto-migrate agent JSON blob to integration tables if present.
+	if data.agentMCPConfigJSON.Valid && data.agentMCPConfigJSON.String != "" && data.crewID.Valid {
+		if err := MigrateJSONBlobToAgentServers(r.Context(), h.db, h.logger, agentID, data.crewID.String, data.wsID, data.agentMCPConfigJSON.String); err != nil {
+			h.logger.Warn("auto-migrate agent MCP config in resolveAgentConfig", "agent_id", agentID, "error", err)
+		} else {
+			data.agentMCPConfigJSON.String = ""
+			data.agentMCPConfigJSON.Valid = false
+		}
+	}
+
 	creds, err := h.resolveAgentCredentials(r, agentID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
