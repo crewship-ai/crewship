@@ -3,18 +3,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Workflow, Clock, Activity, RefreshCw, Focus, LayoutTemplate,
-  Settings2, FileText,
+  Settings2, FileText, ChevronsUpDown, Check,
 } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
@@ -41,6 +47,7 @@ export default function OrchestrationPage() {
   const [selectedMissionId, setSelectedMissionId] = useState<string>("all")
   const [selectedTask, setSelectedTask] = useState<MissionTask | null>(null)
   const [activeTab, setActiveTab] = useState("graph")
+  const [missionPickerOpen, setMissionPickerOpen] = useState(false)
   const graphRef = useRef<WorkflowGraphRef>(null)
 
   const fetchData = useCallback(async () => {
@@ -135,6 +142,19 @@ export default function OrchestrationPage() {
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [fetchData])
 
+  // Group missions by status for the picker
+  const missionGroups = useMemo(() => {
+    const active = missions.filter((m) => m.status === "IN_PROGRESS" || m.status === "PLANNING" || m.status === "REVIEW")
+    const completed = missions.filter((m) => m.status === "COMPLETED")
+    const failed = missions.filter((m) => m.status === "FAILED" || m.status === "CANCELLED")
+    return { active, completed, failed }
+  }, [missions])
+
+  const selectedMissionLabel = useMemo(() => {
+    if (selectedMissionId === "all") return "All missions"
+    return missions.find((m) => m.id === selectedMissionId)?.title ?? "All missions"
+  }, [missions, selectedMissionId])
+
   const filteredMissions = useMemo(() => {
     if (selectedMissionId === "all") return missions
     return missions.filter((m) => m.id === selectedMissionId)
@@ -200,19 +220,78 @@ export default function OrchestrationPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Select value={selectedMissionId} onValueChange={setSelectedMissionId}>
-            <SelectTrigger className="w-[180px] h-7 text-xs bg-white/[0.03] border-white/[0.08]">
-              <SelectValue placeholder="All missions" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All missions</SelectItem>
-              {missions.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  <span className="truncate">{m.title}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Popover open={missionPickerOpen} onOpenChange={setMissionPickerOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={missionPickerOpen}
+                className="w-[200px] h-7 text-xs bg-white/[0.03] border-white/[0.08] justify-between font-normal"
+              >
+                <span className="truncate">{selectedMissionLabel}</span>
+                <ChevronsUpDown className="h-3 w-3 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[260px] p-0" align="end">
+              <Command>
+                <CommandInput placeholder="Search missions..." className="h-8 text-xs" />
+                <CommandList>
+                  <CommandEmpty>No missions found.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem
+                      value="all"
+                      onSelect={() => { setSelectedMissionId("all"); setMissionPickerOpen(false) }}
+                    >
+                      <Check className={cn("mr-2 h-3 w-3", selectedMissionId === "all" ? "opacity-100" : "opacity-0")} />
+                      All missions
+                    </CommandItem>
+                  </CommandGroup>
+                  {missionGroups.active.length > 0 && (
+                    <CommandGroup heading="Active">
+                      {missionGroups.active.map((m) => (
+                        <CommandItem
+                          key={m.id}
+                          value={m.title}
+                          onSelect={() => { setSelectedMissionId(m.id); setMissionPickerOpen(false) }}
+                        >
+                          <Check className={cn("mr-2 h-3 w-3", selectedMissionId === m.id ? "opacity-100" : "opacity-0")} />
+                          <span className="truncate">{m.title}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
+                  {missionGroups.completed.length > 0 && (
+                    <CommandGroup heading="Completed">
+                      {missionGroups.completed.map((m) => (
+                        <CommandItem
+                          key={m.id}
+                          value={m.title}
+                          onSelect={() => { setSelectedMissionId(m.id); setMissionPickerOpen(false) }}
+                        >
+                          <Check className={cn("mr-2 h-3 w-3", selectedMissionId === m.id ? "opacity-100" : "opacity-0")} />
+                          <span className="truncate">{m.title}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
+                  {missionGroups.failed.length > 0 && (
+                    <CommandGroup heading="Failed">
+                      {missionGroups.failed.map((m) => (
+                        <CommandItem
+                          key={m.id}
+                          value={m.title}
+                          onSelect={() => { setSelectedMissionId(m.id); setMissionPickerOpen(false) }}
+                        >
+                          <Check className={cn("mr-2 h-3 w-3", selectedMissionId === m.id ? "opacity-100" : "opacity-0")} />
+                          <span className="truncate">{m.title}</span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
           <Button variant="ghost" size="sm" aria-label="Focus active task" title="Focus active task (F)" className="h-7 px-2 text-white/40 hover:text-white/70" onClick={() => graphRef.current?.focusActive()}>
             <Focus className="h-3.5 w-3.5" />
           </Button>

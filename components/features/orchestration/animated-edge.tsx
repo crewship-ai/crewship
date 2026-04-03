@@ -43,19 +43,23 @@ export function AnimatedEdge({
     )
   }
 
-  const glowId = `glow-${id}`
   const gradId = `grad-${id}`
+
+  // Only create glow filter for active edges (avoids SVG filter overhead on inactive edges)
+  const glowId = active ? `glow-${id}` : undefined
 
   return (
     <>
       <defs>
-        <filter id={glowId} x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur stdDeviation={active ? "3.5" : "1.5"} result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
+        {glowId && (
+          <filter id={glowId} x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="3.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        )}
         <linearGradient id={gradId} gradientUnits="userSpaceOnUse"
           x1={sourceX} y1={sourceY} x2={targetX} y2={targetY}>
           <stop offset="0%" stopColor={color} stopOpacity={active ? 0.6 : 0.2} />
@@ -65,7 +69,7 @@ export function AnimatedEdge({
       </defs>
 
       {/* Broad glow underneath for active edges */}
-      {active && (
+      {active && glowId && (
         <path
           d={edgePath}
           fill="none"
@@ -85,7 +89,7 @@ export function AnimatedEdge({
         strokeDasharray={active ? "8 6" : "6 4"}
         strokeLinecap="round"
         markerEnd={markerEnd as string}
-        filter={active ? `url(#${glowId})` : undefined}
+        filter={glowId ? `url(#${glowId})` : undefined}
         style={{
           animation: active
             ? "edgeFlow 0.8s linear infinite"

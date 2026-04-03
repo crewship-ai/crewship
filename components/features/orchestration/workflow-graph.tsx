@@ -479,7 +479,13 @@ function WorkflowGraphInner(
   { missions, crews, agents, connections, onTaskClick }: WorkflowGraphProps,
   ref: React.ForwardedRef<WorkflowGraphRef>
 ) {
-  const [collapsedCrews, setCollapsedCrews] = useState<Set<string>>(new Set())
+  const [collapsedCrews, setCollapsedCrews] = useState<Set<string>>(() => {
+    // Auto-collapse all crews when there are 8+ to avoid performance issues
+    if (crews && crews.length >= 8) {
+      return new Set(crews.map((c) => c.id))
+    }
+    return new Set()
+  })
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null)
   const activities = useAgentActivity()
 
