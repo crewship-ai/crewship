@@ -176,6 +176,7 @@ func TestCrewIntegrations_CRUD(t *testing.T) {
 	// Create crew integration
 	req := makeReq(t, "POST", "/api/v1/crews/crew1/integrations", map[string]string{
 		"name": "slack", "display_name": "Slack", "transport": "streamable-http",
+		"endpoint": "https://mcp.example.com/slack",
 	}, wsID, "MANAGER")
 	req.SetPathValue("crewId", "crew1")
 	rr := httptest.NewRecorder()
@@ -204,8 +205,8 @@ func TestCrewIntegrations_CRUD(t *testing.T) {
 		t.Fatalf("expected 1 crew integration, got %d", len(crewList))
 	}
 
-	// Delete
-	req = makeReq(t, "DELETE", "/api/v1/crews/crew1/integrations/"+created.ID, nil, wsID, "MANAGER")
+	// Delete (requires manage = OWNER/ADMIN)
+	req = makeReq(t, "DELETE", "/api/v1/crews/crew1/integrations/"+created.ID, nil, wsID, "ADMIN")
 	req.SetPathValue("crewId", "crew1")
 	req.SetPathValue("integrationId", created.ID)
 	rr = httptest.NewRecorder()
@@ -224,6 +225,7 @@ func TestAgentMCPBindings_CRUD(t *testing.T) {
 	// Create workspace integration first
 	req := makeReq(t, "POST", "/api/v1/integrations", map[string]string{
 		"name": "gmail", "display_name": "Gmail", "transport": "streamable-http",
+		"endpoint": "https://mcp.example.com/gmail",
 	}, wsID, "ADMIN")
 	rr := httptest.NewRecorder()
 	h.CreateWorkspaceIntegration(rr, req)
@@ -419,6 +421,7 @@ func TestCascadeResolution_AgentOptOut(t *testing.T) {
 	// Create workspace integration
 	req := makeReq(t, "POST", "/api/v1/integrations", map[string]string{
 		"name": "slack", "display_name": "Slack",
+		"transport": "stdio", "command": "npx",
 	}, wsID, "ADMIN")
 	rr := httptest.NewRecorder()
 	h.CreateWorkspaceIntegration(rr, req)
@@ -457,6 +460,7 @@ func TestDeleteWorkspaceIntegration_Cascades(t *testing.T) {
 	// Create workspace integration
 	req := makeReq(t, "POST", "/api/v1/integrations", map[string]string{
 		"name": "gmail", "display_name": "Gmail",
+		"endpoint": "https://mcp.example.com/gmail",
 	}, wsID, "ADMIN")
 	rr := httptest.NewRecorder()
 	h.CreateWorkspaceIntegration(rr, req)

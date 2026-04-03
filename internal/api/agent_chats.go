@@ -93,22 +93,33 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upsert: if chat already exists, return it
-	var existingID string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM chats WHERE id = ? AND agent_id = ?",
-		chatID, agentID).Scan(&existingID); err == nil {
-		writeJSON(w, http.StatusOK, map[string]string{"id": existingID})
-		return
-	}
-
+	// Atomic upsert: insert only if agent is still active (prevents TOCTOU with soft-delete)
 	_, err := h.db.ExecContext(r.Context(),
-		`INSERT INTO chats (id, agent_id, workspace_id, created_by, status)
-		 VALUES (?, ?, ?, ?, 'ACTIVE')`,
-		chatID, agentID, workspaceID, userID)
+		`INSERT OR IGNORE INTO chats (id, agent_id, workspace_id, created_by, status)
+		 SELECT ?, ?, ?, ?, 'ACTIVE'
+		 WHERE EXISTS (SELECT 1 FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL)`,
+		chatID, agentID, workspaceID, userID, agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("create chat", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+
+	// Check outcome: either inserted, already existed (IGNORE), or agent was deleted
+	var ownerAgentID string
+	if err := h.db.QueryRowContext(r.Context(),
+		"SELECT agent_id FROM chats WHERE id = ?", chatID).Scan(&ownerAgentID); err != nil {
+		if err == sql.ErrNoRows {
+			// No row: agent was deleted between preflight and INSERT (WHERE EXISTS failed)
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("verify chat owner", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if ownerAgentID != agentID {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Chat belongs to a different agent"})
 		return
 	}
 

@@ -114,10 +114,13 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
-	// Populate auth_status via a single batch query (MIN picks worst-case status).
+	// Populate auth_status via a batch query. Use MAX on a priority CASE so
+	// EXPIRED (worst) wins over ACTIVE when multiple credentials are bound.
 	authStatusMap := make(map[string]string)
 	authRows, err := h.db.QueryContext(r.Context(), `
-		SELECT ab.mcp_server_id, MIN(c.status)
+		SELECT ab.mcp_server_id,
+			CASE MAX(CASE c.status WHEN 'EXPIRED' THEN 2 WHEN 'ERROR' THEN 2 WHEN 'REVOKED' THEN 2 ELSE 1 END)
+				WHEN 2 THEN 'EXPIRED' ELSE 'ACTIVE' END
 		FROM agent_mcp_bindings ab
 		JOIN credentials c ON c.id = ab.credential_id AND c.deleted_at IS NULL
 		WHERE ab.mcp_server_id IN (
@@ -126,23 +129,29 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 			WHERE cr.workspace_id = ?
 		) AND ab.credential_id IS NOT NULL AND ab.credential_id != ''
 		GROUP BY ab.mcp_server_id`, workspaceID)
-	if err == nil {
-		for authRows.Next() {
-			var sid string
-			var status sql.NullString
-			if authRows.Scan(&sid, &status) == nil && status.Valid {
-				authStatusMap[sid] = status.String
-			}
-		}
-		if err := authRows.Err(); err != nil {
-			h.logger.Error("iterate auth status batch", "error", err)
-		}
-		authRows.Close()
+	if err != nil {
+		h.logger.Error("query auth status batch", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
+	for authRows.Next() {
+		var sid string
+		var status sql.NullString
+		if authRows.Scan(&sid, &status) == nil && status.Valid {
+			authStatusMap[sid] = status.String
+		}
+	}
+	if err := authRows.Err(); err != nil {
+		h.logger.Error("iterate auth status batch", "error", err)
+		authRows.Close()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	authRows.Close()
 	for i := range results {
 		s := &results[i]
 		if s.Transport != "streamable-http" || s.Endpoint == nil || *s.Endpoint == "" {
-			s.AuthStatus = "none" // stdio or no endpoint — no OAuth needed
+			s.AuthStatus = "none"
 			continue
 		}
 		status, found := authStatusMap[s.ID]
@@ -220,10 +229,78 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
+	// Populate auth_status
+	if err := h.populateAuthStatus(r.Context(), results); err != nil {
+		h.logger.Error("populate auth status", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 	if results == nil {
 		results = []crewMCPServerResponse{}
 	}
 	writeJSON(w, http.StatusOK, results)
+}
+
+// populateAuthStatus fills in AuthStatus for crew MCP server responses
+// by batch-querying credential statuses from agent bindings.
+func (h *IntegrationHandler) populateAuthStatus(ctx context.Context, results []crewMCPServerResponse) error {
+	if len(results) == 0 {
+		return nil
+	}
+	// Collect server IDs
+	ids := make([]string, len(results))
+	for i, s := range results {
+		ids[i] = s.ID
+	}
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+
+	authStatusMap := make(map[string]string)
+	authRows, err := h.db.QueryContext(ctx, `
+		SELECT ab.mcp_server_id,
+			CASE MAX(CASE c.status WHEN 'EXPIRED' THEN 2 WHEN 'ERROR' THEN 2 WHEN 'REVOKED' THEN 2 ELSE 1 END)
+				WHEN 2 THEN 'EXPIRED' ELSE 'ACTIVE' END
+		FROM agent_mcp_bindings ab
+		JOIN credentials c ON c.id = ab.credential_id AND c.deleted_at IS NULL
+		WHERE ab.mcp_server_id IN (`+placeholders+`)
+			AND ab.credential_id IS NOT NULL AND ab.credential_id != ''
+		GROUP BY ab.mcp_server_id`, args...)
+	if err != nil {
+		return fmt.Errorf("query auth status: %w", err)
+	}
+	for authRows.Next() {
+		var sid string
+		var status sql.NullString
+		if authRows.Scan(&sid, &status) == nil && status.Valid {
+			authStatusMap[sid] = status.String
+		}
+	}
+	if err := authRows.Err(); err != nil {
+		authRows.Close()
+		return fmt.Errorf("iterate auth status: %w", err)
+	}
+	authRows.Close()
+	for i := range results {
+		s := &results[i]
+		if s.Transport != "streamable-http" || s.Endpoint == nil || *s.Endpoint == "" {
+			s.AuthStatus = "none"
+			continue
+		}
+		status, found := authStatusMap[s.ID]
+		if !found || status == "" {
+			s.AuthStatus = "missing"
+		} else if status == "EXPIRED" {
+			s.AuthStatus = "expired"
+		} else {
+			s.AuthStatus = "connected"
+		}
+	}
+	return nil
 }
 
 func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *http.Request) {
@@ -261,6 +338,14 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 	}
 	if req.Transport != "streamable-http" && req.Transport != "stdio" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transport must be 'streamable-http' or 'stdio'"})
+		return
+	}
+	if req.Transport == "streamable-http" && (req.Endpoint == nil || *req.Endpoint == "") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required for streamable-http transport"})
+		return
+	}
+	if req.Transport == "stdio" && (req.Command == nil || *req.Command == "") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required for stdio transport"})
 		return
 	}
 
@@ -310,7 +395,7 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
+	if !canRole(role, "manage") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 		return
 	}
@@ -324,12 +409,13 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Verify crew + server exist
+	// Verify crew + server exist and are not soft-deleted
 	var exists string
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT cs.id FROM crew_mcp_servers cs
 		JOIN crews c ON c.id = cs.crew_id
-		WHERE cs.id = ? AND cs.crew_id = ? AND c.workspace_id = ?`,
+		WHERE cs.id = ? AND cs.crew_id = ? AND c.workspace_id = ?
+			AND cs.deleted_at IS NULL AND c.deleted_at IS NULL`,
 		id, crewID, workspaceID).Scan(&exists); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew integration not found"})
 		return
@@ -372,6 +458,32 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 		u.Set("enabled", enabled)
 	}
 
+	// Validate transport/field combination against merged final state
+	if req.Transport != nil {
+		var existingEndpoint, existingCommand sql.NullString
+		_ = h.db.QueryRowContext(r.Context(),
+			"SELECT endpoint, command FROM crew_mcp_servers WHERE id = ?", id).
+			Scan(&existingEndpoint, &existingCommand)
+
+		finalEndpoint := existingEndpoint.String
+		if req.Endpoint != nil {
+			finalEndpoint = *req.Endpoint
+		}
+		finalCommand := existingCommand.String
+		if req.Command != nil {
+			finalCommand = *req.Command
+		}
+
+		if *req.Transport == "streamable-http" && finalEndpoint == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required for streamable-http transport"})
+			return
+		}
+		if *req.Transport == "stdio" && finalCommand == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required for stdio transport"})
+			return
+		}
+	}
+
 	query, args := u.Build("crew_mcp_servers", "id = ?", id)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update crew integration", "error", err)
@@ -405,7 +517,7 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
-	if !canRole(role, "create") {
+	if !canRole(role, "manage") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 		return
 	}
@@ -450,8 +562,17 @@ func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Cascade-delete OAuth credentials that were auto-created for this integration
+	// Cascade-delete OAuth credentials only if no other bindings reference them
 	for _, cid := range credIDs {
+		var remaining int
+		if err := tx.QueryRowContext(r.Context(),
+			"SELECT COUNT(*) FROM agent_mcp_bindings WHERE credential_id = ?", cid).Scan(&remaining); err != nil {
+			h.logger.Warn("check credential bindings", "credential_id", cid, "error", err)
+			continue
+		}
+		if remaining > 0 {
+			continue // still referenced elsewhere
+		}
 		if _, err := tx.ExecContext(r.Context(),
 			"DELETE FROM credentials WHERE id = ? AND workspace_id = ?", cid, workspaceID); err != nil {
 			h.logger.Warn("cascade delete OAuth credential", "credential_id", cid, "error", err)
@@ -556,19 +677,37 @@ func MigrateJSONBlobToCrewServers(ctx context.Context, db *sql.DB, logger *slog.
 
 		id := generateCUID()
 
-		_, err := tx.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, `
 			INSERT OR IGNORE INTO crew_mcp_servers
 				(id, crew_id, name, display_name, transport, endpoint, command, args_json, env_json, enabled, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-			id, crewID, name, displayName, transport, endpoint, command, argsJSON, envJSON, now, now)
-		if err != nil {
+			id, crewID, name, displayName, transport, endpoint, command, argsJSON, envJSON, now, now); err != nil {
 			return fmt.Errorf("insert crew server %q: %w", name, err)
 		}
 	}
 
-	// Clear the JSON blob now that data lives in the table.
-	if _, err := tx.ExecContext(ctx, `UPDATE crews SET mcp_config_json = NULL WHERE id = ?`, crewID); err != nil {
-		return fmt.Errorf("clear mcp_config_json: %w", err)
+	// Clear the JSON blob only if all configured server names exist in the table.
+	// This is idempotent: re-runs find existing rows by name and still clear the blob.
+	names := make([]any, 0, len(config.MCPServers)+1)
+	names = append(names, crewID)
+	placeholders := ""
+	for name := range config.MCPServers {
+		if placeholders != "" {
+			placeholders += ","
+		}
+		placeholders += "?"
+		names = append(names, name)
+	}
+	var matching int
+	if err := tx.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id = ? AND name IN ("+placeholders+")",
+		names...).Scan(&matching); err != nil {
+		return fmt.Errorf("count matching crew servers: %w", err)
+	}
+	if matching == len(config.MCPServers) {
+		if _, err := tx.ExecContext(ctx, `UPDATE crews SET mcp_config_json = NULL WHERE id = ?`, crewID); err != nil {
+			return fmt.Errorf("clear mcp_config_json: %w", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

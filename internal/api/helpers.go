@@ -30,7 +30,7 @@ type updateBuilder struct {
 }
 
 func newUpdate() *updateBuilder {
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	return &updateBuilder{
 		sets: []string{"updated_at = ?"},
 		args: []any{now},

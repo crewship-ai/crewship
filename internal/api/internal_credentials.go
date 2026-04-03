@@ -11,20 +11,19 @@ import (
 
 func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("workspace_id")
-	if workspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id is required"})
-		return
-	}
 	provider := r.URL.Query().Get("provider")
 
 	query := `SELECT id, workspace_id, name, type, provider, encrypted_value,
 		encrypted_refresh_token, token_expires_at, account_label, account_email, status
 		FROM credentials
 		WHERE status IN ('ACTIVE', 'EXPIRED', 'ERROR') AND deleted_at IS NULL
-		AND type IN ('AI_CLI_TOKEN', 'API_KEY') AND provider != 'NONE'
-		AND workspace_id = ?`
+		AND type IN ('AI_CLI_TOKEN', 'API_KEY') AND provider != 'NONE'`
 
-	args := []any{workspaceID}
+	var args []any
+	if workspaceID != "" {
+		query += " AND workspace_id = ?"
+		args = append(args, workspaceID)
+	}
 	if provider != "" {
 		query += " AND provider = ?"
 		args = append(args, provider)
@@ -92,11 +91,7 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 
 func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
-	workspaceID := r.URL.Query().Get("workspace_id")
-	if workspaceID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_id query parameter is required"})
-		return
-	}
+	workspaceID := r.URL.Query().Get("workspace_id") // optional for backwards compat
 
 	var body struct {
 		Status       string  `json:"status"`
@@ -120,6 +115,14 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Build WHERE clause — workspace_id is optional (internal callers may not send it)
+	where := "id = ?"
+	whereArgs := []any{credID}
+	if workspaceID != "" {
+		where += " AND workspace_id = ?"
+		whereArgs = append(whereArgs, workspaceID)
+	}
+
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -128,8 +131,8 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 	defer tx.Rollback()
 
 	result, err := tx.ExecContext(r.Context(),
-		"UPDATE credentials SET status = ?, last_checked_at = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
-		body.Status, now, now, credID, workspaceID)
+		"UPDATE credentials SET status = ?, last_checked_at = ?, updated_at = ? WHERE "+where,
+		append([]any{body.Status, now, now}, whereArgs...)...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
@@ -146,7 +149,7 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 	}
 
 	if body.LastError != nil {
-		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET last_error = ? WHERE id = ? AND workspace_id = ?", *body.LastError, credID, workspaceID); err != nil {
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET last_error = ? WHERE "+where, append([]any{*body.LastError}, whereArgs...)...); err != nil {
 			h.logger.Error("update credential last_error", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
@@ -159,7 +162,7 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt token"})
 			return
 		}
-		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_value = ? WHERE id = ? AND workspace_id = ?", enc, credID, workspaceID); err != nil {
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_value = ? WHERE "+where, append([]any{enc}, whereArgs...)...); err != nil {
 			h.logger.Error("update credential access token", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
@@ -172,14 +175,14 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt token"})
 			return
 		}
-		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_refresh_token = ? WHERE id = ? AND workspace_id = ?", enc, credID, workspaceID); err != nil {
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET encrypted_refresh_token = ? WHERE "+where, append([]any{enc}, whereArgs...)...); err != nil {
 			h.logger.Error("update credential refresh token", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
 	}
 	if body.TokenExpires != nil {
-		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET token_expires_at = ? WHERE id = ? AND workspace_id = ?", *body.TokenExpires, credID, workspaceID); err != nil {
+		if _, err := tx.ExecContext(r.Context(), "UPDATE credentials SET token_expires_at = ? WHERE "+where, append([]any{*body.TokenExpires}, whereArgs...)...); err != nil {
 			h.logger.Error("update credential token_expires_at", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
