@@ -669,34 +669,40 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 24h mission stats
-	_ = h.db.QueryRowContext(r.Context(), `
+	// 24h mission stats (use completed_at for accurate time-windowed counts)
+	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT
-			SUM(CASE WHEN status = 'COMPLETED' AND updated_at >= ? THEN 1 ELSE 0 END),
-			SUM(CASE WHEN status = 'FAILED' AND updated_at >= ? THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'COMPLETED' AND completed_at >= ? THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'FAILED' AND completed_at >= ? THEN 1 ELSE 0 END),
 			COALESCE(SUM(CASE WHEN updated_at >= ? THEN COALESCE(total_token_count, 0) ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN updated_at >= ? THEN COALESCE(total_estimated_cost, 0) ELSE 0 END), 0)
 		FROM missions WHERE workspace_id = ?`,
-		cutoff, cutoff, cutoff, cutoff, wsID).Scan(&m.Completed24h, &m.Failed24h, &m.TotalTokens24h, &m.TotalCost24h)
+		cutoff, cutoff, cutoff, cutoff, wsID).Scan(&m.Completed24h, &m.Failed24h, &m.TotalTokens24h, &m.TotalCost24h); err != nil {
+		h.logger.Warn("mission metrics: 24h stats query failed", "error", err)
+	}
 
 	// Average completion time (completed missions in last 24h)
-	_ = h.db.QueryRowContext(r.Context(), `
+	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(AVG(
 			CAST((julianday(completed_at) - julianday(created_at)) * 86400000 AS INTEGER)
 		), 0)
 		FROM missions
 		WHERE workspace_id = ? AND status = 'COMPLETED' AND completed_at >= ?`,
-		wsID, cutoff).Scan(&m.AvgCompletionTimeMs)
+		wsID, cutoff).Scan(&m.AvgCompletionTimeMs); err != nil {
+		h.logger.Warn("mission metrics: avg completion time query failed", "error", err)
+	}
 
 	// 24h task stats
-	_ = h.db.QueryRowContext(r.Context(), `
+	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT
 			SUM(CASE WHEN mt.status = 'COMPLETED' AND mt.completed_at >= ? THEN 1 ELSE 0 END),
 			SUM(CASE WHEN mt.status = 'FAILED' AND mt.updated_at >= ? THEN 1 ELSE 0 END)
 		FROM mission_tasks mt
 		JOIN missions m ON m.id = mt.mission_id
 		WHERE m.workspace_id = ?`,
-		cutoff, cutoff, wsID).Scan(&m.TasksCompleted24h, &m.TasksFailed24h)
+		cutoff, cutoff, wsID).Scan(&m.TasksCompleted24h, &m.TasksFailed24h); err != nil {
+		h.logger.Warn("mission metrics: task stats query failed", "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, m)
 }

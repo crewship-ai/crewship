@@ -386,13 +386,14 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
     }
 
     const tasksByOrder = [...tasks].sort((a, b) => a.task_order - b.task_order)
+    const taskIdSet = new Set(tasksByOrder.map((t) => t.id))
     const deps = new Map<string, string[]>()
     for (const task of tasksByOrder) {
-      deps.set(task.id, parseDependsOn(task.depends_on))
+      deps.set(task.id, parseDependsOn(task.depends_on).filter((depId) => taskIdSet.has(depId)))
     }
 
     const levels = computeTopologicalLevels(
-      tasksByOrder.map((t) => t.id),
+      [...taskIdSet],
       deps
     )
 

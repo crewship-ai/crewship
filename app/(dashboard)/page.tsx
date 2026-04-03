@@ -23,7 +23,7 @@ import { useTick } from "@/hooks/use-tick"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
 import { getCrewDotColor } from "@/lib/crew-icon"
-import type { Mission, MissionStatus } from "@/lib/types/mission"
+import type { Mission } from "@/lib/types/mission"
 
 interface AgentCrew {
   name: string
@@ -101,6 +101,7 @@ function formatDuration(ms: number): string {
 }
 
 function formatCost(cost: number): string {
+  if (cost === 0) return "$0.00"
   if (cost < 0.01) return "<$0.01"
   return `$${cost.toFixed(2)}`
 }
@@ -123,6 +124,7 @@ export default function DashboardPage() {
   const [credentials, setCredentials] = useState<Credential[]>([])
   const [crewCount, setCrewCount] = useState(0)
   const [missions, setMissions] = useState<Mission[]>([])
+  const [metrics, setMetrics] = useState<{ active_missions: number; total_cost_24h: number; total_missions: number } | null>(null)
   const [runsData, setRunsData] = useState<RunsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -156,12 +158,13 @@ export default function DashboardPage() {
       setError(null)
     }
     try {
-      const [agentsRes, credsRes, crewsRes, runsRes, missionsRes] = await Promise.all([
+      const [agentsRes, credsRes, crewsRes, runsRes, missionsRes, metricsRes] = await Promise.all([
         fetch(`/api/v1/agents?workspace_id=${workspaceId}`),
         fetch(`/api/v1/credentials?workspace_id=${workspaceId}`),
         fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
         fetch(`/api/v1/runs?workspace_id=${workspaceId}&limit=50`),
         fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`),
+        fetch(`/api/v1/mission-metrics?workspace_id=${workspaceId}`),
       ])
 
       if (!agentsRes.ok || !credsRes.ok) {
@@ -177,12 +180,14 @@ export default function DashboardPage() {
       const crewsData = crewsRes.ok ? ((await crewsRes.json()) as unknown[]) : []
       const runsResult = runsRes.ok ? ((await runsRes.json()) as RunsResponse) : null
       const missionsData = missionsRes.ok ? ((await missionsRes.json()) as Mission[]) : []
+      const metricsData = metricsRes.ok ? await metricsRes.json() : null
 
       setAgents(agentsData)
       setCredentials(credsData)
       setCrewCount(crewsData.length)
       setRunsData(runsResult)
       setMissions(missionsData)
+      setMetrics(metricsData)
     } catch {
       if (showLoading) setError("Failed to load dashboard data")
     } finally {
@@ -229,14 +234,10 @@ export default function DashboardPage() {
   const runningNow = agents.filter((a) => a.status === "RUNNING").length
   const apiKeysActive = credentials.length
 
-  // Mission stats
-  const activeMissions = missions.filter((m) => m.status === "IN_PROGRESS" || m.status === "PLANNING" || m.status === "REVIEW")
-  const totalCost24h = missions
-    .filter((m) => {
-      const updated = new Date(m.updated_at).getTime()
-      return Date.now() - updated < 86_400_000
-    })
-    .reduce((sum, m) => sum + (m.total_estimated_cost ?? 0), 0)
+  // Mission stats from metrics API (accurate, not capped by limit=50)
+  const activeMissionCount = metrics?.active_missions ?? 0
+  const totalCost24h = metrics?.total_cost_24h ?? 0
+  const totalMissionCount = metrics?.total_missions ?? 0
 
   // Recent missions sorted by activity
   const recentMissions = [...missions]
@@ -329,11 +330,11 @@ export default function DashboardPage() {
             />
             <StatCard
               title="Active Missions"
-              value={activeMissions.length}
+              value={activeMissionCount}
               subtitle={
-                missions.length === 0
+                totalMissionCount === 0
                   ? "No missions yet"
-                  : `${missions.length} total`
+                  : `${totalMissionCount} total`
               }
               icon={Target}
               iconClassName="bg-purple-500/10 text-purple-600"
@@ -353,11 +354,11 @@ export default function DashboardPage() {
             />
             <StatCard
               title="Cost (24h)"
-              value={totalCost24h > 0 ? formatCost(totalCost24h) : "$0.00"}
+              value={formatCost(totalCost24h)}
               subtitle={
                 totalCost24h === 0
                   ? "No cost tracked"
-                  : `across ${missions.filter((m) => Date.now() - new Date(m.updated_at).getTime() < 86_400_000).length} missions`
+                  : `across ${totalMissionCount} missions`
               }
               icon={Coins}
               iconClassName="bg-amber-500/10 text-amber-600"

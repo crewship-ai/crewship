@@ -5,13 +5,13 @@ import { Info, ChevronDown, ChevronUp } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const nodeStatuses = [
-  { color: "#3b82f6", label: "Running", dot: "bg-blue-500 animate-pulse" },
-  { color: "#22c55e", label: "Completed", dot: "bg-green-500" },
-  { color: "#ef4444", label: "Failed", dot: "bg-red-500" },
-  { color: "#f59e0b", label: "Blocked", dot: "bg-amber-500" },
-  { color: "#a855f7", label: "Review", dot: "bg-purple-500" },
-  { color: "#64748b", label: "Pending", dot: "bg-slate-400" },
-  { color: "#6b7280", label: "Skipped", dot: "bg-gray-400" },
+  { label: "Running", dot: "bg-blue-500 animate-pulse" },
+  { label: "Completed", dot: "bg-green-500" },
+  { label: "Failed", dot: "bg-red-500" },
+  { label: "Blocked", dot: "bg-amber-500" },
+  { label: "Review", dot: "bg-purple-500" },
+  { label: "Pending", dot: "bg-slate-400" },
+  { label: "Skipped", dot: "bg-gray-400" },
 ]
 
 const edgeTypes = [
@@ -28,6 +28,8 @@ export function GraphLegend() {
     <div className="absolute bottom-3 left-3 z-10">
       <button
         onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+        aria-controls="graph-legend-content"
         className={cn(
           "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium",
           "bg-[#0d0f14]/90 backdrop-blur-sm border border-white/[0.06]",
@@ -40,15 +42,12 @@ export function GraphLegend() {
       </button>
 
       {expanded && (
-        <div className="mt-1.5 p-3 rounded-lg bg-[#0d0f14]/95 backdrop-blur-sm border border-white/[0.06] min-w-[200px]">
+        <div id="graph-legend-content" className="mt-1.5 p-3 rounded-lg bg-[#0d0f14]/95 backdrop-blur-sm border border-white/[0.06] min-w-[200px]">
           <div className="text-[10px] uppercase tracking-wider text-white/30 font-medium mb-2">Task Status</div>
           <div className="space-y-1.5">
-            {nodeStatuses.map(({ color, label, dot }) => (
+            {nodeStatuses.map(({ label, dot }) => (
               <div key={label} className="flex items-center gap-2">
-                <div
-                  className={cn("w-2 h-2 rounded-full shrink-0", dot)}
-                  style={{ backgroundColor: color }}
-                />
+                <div className={cn("w-2 h-2 rounded-full shrink-0", dot)} />
                 <span className="text-xs text-white/60">{label}</span>
               </div>
             ))}

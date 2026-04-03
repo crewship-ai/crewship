@@ -105,6 +105,8 @@ export default function OrchestrationPage() {
   // Keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      // Skip modified keys (Ctrl+R, Cmd+R, etc.) and auto-repeat
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
       // Skip if user is typing in an input/textarea
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return
@@ -211,10 +213,10 @@ export default function OrchestrationPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="ghost" size="sm" className="h-7 px-2 text-white/40 hover:text-white/70" onClick={() => graphRef.current?.focusActive()}>
+          <Button variant="ghost" size="sm" aria-label="Focus active task" title="Focus active task (F)" className="h-7 px-2 text-white/40 hover:text-white/70" onClick={() => graphRef.current?.focusActive()}>
             <Focus className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" className="h-7 px-2 text-white/40 hover:text-white/70" onClick={fetchData}>
+          <Button variant="ghost" size="sm" aria-label="Refresh data" title="Refresh data (R)" className="h-7 px-2 text-white/40 hover:text-white/70" onClick={fetchData}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           {workspaceId && (
