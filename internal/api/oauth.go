@@ -5,15 +5,11 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
-	"sync"
 	"time"
 
 	"html"
@@ -212,8 +208,10 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete used state
-	h.db.ExecContext(r.Context(), "DELETE FROM oauth_states WHERE state = ?", state)
+	// Delete used state to prevent replay
+	if _, err := h.db.ExecContext(r.Context(), "DELETE FROM oauth_states WHERE state = ?", state); err != nil {
+		h.logger.Error("delete used OAuth state", "error", err)
+	}
 
 	// Load credential OAuth config for token exchange
 	var clientID, clientSecretEnc, tokenURL string
@@ -242,7 +240,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, code, redirectURI)
 	if err != nil {
 		h.logger.Error("OAuth token exchange failed", "error", err, "credential_id", credentialID)
-		http.Error(w, fmt.Sprintf("Token exchange failed: %v", err), http.StatusBadGateway)
+		http.Error(w, "Token exchange failed", http.StatusBadGateway)
 		return
 	}
 
@@ -342,7 +340,7 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 	tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, req.Code, req.RedirectURI)
 	if err != nil {
 		h.logger.Error("OAuth manual code exchange failed", "error", err, "credential_id", req.CredentialID)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Token exchange failed: " + err.Error()})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Token exchange failed"})
 		return
 	}
 
@@ -474,7 +472,7 @@ func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("OAuth loopback started", "port", port, "credential_id", credID)
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"auth_url":      fullAuthURL,
 		"loopback_port": port,
 		"state":         state,
@@ -521,7 +519,7 @@ func (h *OAuthHandler) runLoopbackServer(
 		if err != nil {
 			h.logger.Error("OAuth loopback token exchange", "error", err, "credential_id", credentialID)
 			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprintf(w, `<html><body><h2>Token exchange failed</h2><p>%s</p><p>You can close this window.</p></body></html>`, html.EscapeString(err.Error()))
+			fmt.Fprint(w, `<html><body><h2>Token exchange failed</h2><p>Please check the server logs for details.</p><p>You can close this window.</p></body></html>`)
 			return
 		}
 
@@ -590,210 +588,6 @@ func (h *OAuthHandler) runLoopbackServer(
 	server.Serve(listener)
 }
 
-// tokenResponse holds the OAuth token exchange response.
-type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int    `json:"expires_in"`
-	TokenType    string `json:"token_type"`
-	Scope        string `json:"scope"`
-}
-
-func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI string) (*tokenResponse, error) {
-	data := url.Values{
-		"grant_type":   {"authorization_code"},
-		"code":         {code},
-		"redirect_uri": {redirectURI},
-		"client_id":    {clientID},
-	}
-	if clientSecret != "" {
-		data.Set("client_secret", clientSecret)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("token request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	var tokenResp tokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, fmt.Errorf("parse token response: %w", err)
-	}
-	if tokenResp.AccessToken == "" {
-		return nil, fmt.Errorf("empty access_token in response")
-	}
-	return &tokenResp, nil
-}
-
-// --- Token Refresh Worker ---
-
-// StartOAuthRefreshWorker runs a background goroutine that refreshes expiring OAuth tokens.
-func StartOAuthRefreshWorker(db *sql.DB, hub *ws.Hub, logger *slog.Logger, stop <-chan struct{}, wg *sync.WaitGroup) {
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-
-		// Derive a context that cancels when stop is closed
-		ctx, cancel := context.WithCancel(context.Background())
-		go func() {
-			<-stop
-			cancel()
-		}()
-
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				refreshExpiringTokens(ctx, db, hub, logger)
-			}
-		}
-	}()
-}
-
-func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger *slog.Logger) {
-	// Find tokens expiring within 10 minutes
-	threshold := time.Now().Add(10 * time.Minute).UTC().Format(time.RFC3339)
-	rows, err := db.QueryContext(ctx, `
-		SELECT id, workspace_id, oauth_client_id, oauth_client_secret_enc, oauth_token_url, oauth_refresh_token_enc
-		FROM credentials
-		WHERE type = 'OAUTH2' AND status = 'ACTIVE'
-			AND oauth_token_expires_at != '' AND oauth_token_expires_at < ?
-			AND oauth_refresh_token_enc != '' AND deleted_at IS NULL`, threshold)
-	if err != nil {
-		logger.Error("query expiring OAuth tokens", "error", err)
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var id, wsID, clientID, clientSecretEnc, tokenURL, refreshTokenEnc string
-		if err := rows.Scan(&id, &wsID, &clientID, &clientSecretEnc, &tokenURL, &refreshTokenEnc); err != nil {
-			continue
-		}
-
-		clientSecret := ""
-		if clientSecretEnc != "" {
-			d, decErr := encryption.Decrypt(clientSecretEnc)
-			if decErr != nil {
-				logger.Error("decrypt OAuth client secret during refresh", "credential_id", id, "error", decErr)
-				continue
-			}
-			clientSecret = d
-		}
-		refreshToken := ""
-		if d, err := encryption.Decrypt(refreshTokenEnc); err == nil {
-			refreshToken = d
-		}
-		if refreshToken == "" {
-			continue
-		}
-
-		// Refresh the token
-		newToken, err := refreshOAuthToken(ctx, tokenURL, clientID, clientSecret, refreshToken)
-		if err != nil {
-			logger.Error("OAuth token refresh failed", "credential_id", id, "error", err)
-			if _, dbErr := db.ExecContext(ctx, "UPDATE credentials SET status = 'EXPIRED', updated_at = datetime('now') WHERE id = ?", id); dbErr != nil {
-				logger.Error("mark credential expired", "credential_id", id, "error", dbErr)
-			}
-			if hub != nil {
-				hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-					Type: "credential.expired", Channel: "workspace:" + wsID,
-					Payload: map[string]string{"credential_id": id, "reason": "OAuth token refresh failed"},
-				})
-			}
-			continue
-		}
-
-		encAccess, err := encryption.Encrypt(newToken.AccessToken)
-		if err != nil {
-			logger.Error("encrypt refreshed access token", "credential_id", id, "error", err)
-			continue
-		}
-		expiresAt := ""
-		if newToken.ExpiresIn > 0 {
-			expiresAt = time.Now().Add(time.Duration(newToken.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
-		}
-
-		// Update refresh token only if a new one was issued
-		if newToken.RefreshToken != "" {
-			encRefresh, err := encryption.Encrypt(newToken.RefreshToken)
-			if err != nil {
-				logger.Error("encrypt refreshed refresh token", "credential_id", id, "error", err)
-				continue
-			}
-			if _, err := db.ExecContext(ctx, "UPDATE credentials SET encrypted_value = ?, oauth_refresh_token_enc = ?, oauth_token_expires_at = ?, updated_at = datetime('now') WHERE id = ?",
-				encAccess, encRefresh, expiresAt, id); err != nil {
-				logger.Error("update refreshed tokens", "credential_id", id, "error", err)
-				continue
-			}
-		} else {
-			if _, err := db.ExecContext(ctx, "UPDATE credentials SET encrypted_value = ?, oauth_token_expires_at = ?, updated_at = datetime('now') WHERE id = ?",
-				encAccess, expiresAt, id); err != nil {
-				logger.Error("update refreshed token", "credential_id", id, "error", err)
-				continue
-			}
-		}
-
-		logger.Info("OAuth token refreshed", "credential_id", id)
-	}
-}
-
-func refreshOAuthToken(ctx context.Context, tokenURL, clientID, clientSecret, refreshToken string) (*tokenResponse, error) {
-	data := url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {refreshToken},
-		"client_id":     {clientID},
-	}
-	if clientSecret != "" {
-		data.Set("client_secret", clientSecret)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("refresh request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("refresh endpoint returned %d: %s", resp.StatusCode, string(body))
-	}
-
-	var tokenResp tokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, fmt.Errorf("parse refresh response: %w", err)
-	}
-	if tokenResp.AccessToken == "" {
-		return nil, fmt.Errorf("empty access_token in refresh response")
-	}
-	return &tokenResp, nil
-}
-
 // Discover handles OAuth metadata discovery for an MCP server URL.
 // Returns auth_url, token_url, registration_endpoint, and capabilities.
 func (h *OAuthHandler) Discover(w http.ResponseWriter, r *http.Request) {
@@ -810,7 +604,7 @@ func (h *OAuthHandler) Discover(w http.ResponseWriter, r *http.Request) {
 		h.logger.Debug("OAuth discovery failed, trying known providers", "url", req.MCPURL, "error", err)
 		// Fallback: check if URL matches a known provider
 		if provider := matchKnownProvider(req.MCPURL); provider != nil {
-			writeJSON(w, http.StatusOK, map[string]interface{}{
+			writeJSON(w, http.StatusOK, map[string]any{
 				"auth_url":    provider.AuthURL,
 				"token_url":   provider.TokenURL,
 				"scopes":      provider.DefaultScopes,
@@ -824,7 +618,7 @@ func (h *OAuthHandler) Discover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"auth_url":              discovered.AuthURL,
 		"token_url":             discovered.TokenURL,
 		"registration_endpoint": discovered.RegistrationEndpoint,
@@ -912,7 +706,7 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 		dcr, err := dynamicClientRegister(r.Context(), registrationEndpoint, redirectURI)
 		if err != nil {
 			h.logger.Warn("DCR failed, returning needs_client_id", "error", err)
-			writeJSON(w, http.StatusOK, map[string]interface{}{
+			writeJSON(w, http.StatusOK, map[string]any{
 				"status":   "needs_client_id",
 				"auth_url": authURL,
 				"token_url": tokenURL,
@@ -926,7 +720,7 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 		h.logger.Info("DCR succeeded", "client_id", clientID, "server", req.ServerName)
 	} else {
 		// No DCR — return info so frontend can ask for Client ID
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"status":   "needs_client_id",
 			"auth_url": authURL,
 			"token_url": tokenURL,
@@ -995,103 +789,9 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("OAuth auto-connect ready", "server", req.ServerName, "credential_id", credID)
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"status":        "authorize",
 		"auth_url":      fullAuthURL,
 		"credential_id": credID,
 	})
-}
-
-// autoBindCredentialToMCPServers finds MCP servers matching the credential's
-// name prefix and binds the credential to their agent bindings.
-// E.g., credential "linear-oauth-abc12" matches server "linear".
-func (h *OAuthHandler) autoBindCredentialToMCPServers(ctx context.Context, credentialID, workspaceID string) {
-	// Get credential name to derive server name prefix
-	var credName string
-	if err := h.db.QueryRowContext(ctx,
-		"SELECT name FROM credentials WHERE id = ?", credentialID).Scan(&credName); err != nil {
-		return
-	}
-
-	// Extract server name: "linear-oauth-abc12" → "linear"
-	serverName := credName
-	if idx := strings.Index(credName, "-oauth"); idx > 0 {
-		serverName = credName[:idx]
-	}
-
-	// Find matching MCP servers
-	rows, err := h.db.QueryContext(ctx, `
-		SELECT cs.id, cs.crew_id FROM crew_mcp_servers cs
-		JOIN crews c ON c.id = cs.crew_id AND c.workspace_id = ?
-		WHERE cs.name = ? AND cs.deleted_at IS NULL`, workspaceID, serverName)
-	if err != nil {
-		h.logger.Warn("auto-bind: find MCP servers", "error", err)
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var serverID, crewID string
-		if rows.Scan(&serverID, &crewID) != nil {
-			continue
-		}
-
-		// Update existing bindings that have no credential
-		res, _ := h.db.ExecContext(ctx, `
-			UPDATE agent_mcp_bindings SET credential_id = ?, cred_type = 'bearer'
-			WHERE mcp_server_id = ? AND (credential_id IS NULL OR credential_id = '')`,
-			credentialID, serverID)
-		if affected, _ := res.RowsAffected(); affected > 0 {
-			h.logger.Info("auto-bound credential to existing bindings",
-				"credential_id", credentialID, "server", serverName, "count", affected)
-			continue
-		}
-
-		// No existing bindings — create bindings for ALL agents in the crew
-		agentRows, err := h.db.QueryContext(ctx,
-			"SELECT id FROM agents WHERE crew_id = ? AND deleted_at IS NULL", crewID)
-		if err != nil {
-			continue
-		}
-		var count int
-		for agentRows.Next() {
-			var agentID string
-			if agentRows.Scan(&agentID) != nil {
-				continue
-			}
-			if _, err := h.db.ExecContext(ctx, `
-				INSERT OR IGNORE INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope, credential_id, cred_type, enabled, created_at)
-				VALUES (?, ?, ?, 'crew', ?, 'bearer', 1, datetime('now'))`,
-				generateCUID(), agentID, serverID, credentialID); err == nil {
-				count++
-			}
-		}
-		agentRows.Close()
-		if count > 0 {
-			h.logger.Info("auto-created bindings with credential",
-				"credential_id", credentialID, "server", serverName, "agents", count)
-		}
-	}
-}
-
-// matchKnownProvider checks if an MCP server URL matches a known OAuth provider.
-func matchKnownProvider(mcpURL string) *OAuthProvider {
-	urlPatterns := map[string]string{
-		"linear.app":    "linear",
-		"gitlab.com":    "gitlab",
-		"cloudflare.com": "cloudflare",
-		"stripe.com":    "stripe",
-		"notion.com":    "notion",
-		"github.com":    "github",
-		"googleapis.com": "google",
-	}
-	lower := strings.ToLower(mcpURL)
-	for domain, providerKey := range urlPatterns {
-		if strings.Contains(lower, domain) {
-			if p, ok := OAuthProviders[providerKey]; ok {
-				return &p
-			}
-		}
-	}
-	return nil
 }

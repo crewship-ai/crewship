@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -43,14 +44,13 @@ func (h *QueryHandler) fetchStandupConversations(ctx context.Context, crewID, si
 		var nullResp sql.NullString
 		if err := rows.Scan(&c.question, &nullResp, &c.status, &c.escalated, &c.createdAt,
 			&c.fromName, &c.fromSlug, &c.toName, &c.toSlug); err != nil {
-			h.logger.Error("scan standup conversation", "error", err)
-			continue
+			return convs, fmt.Errorf("scanning standup conversation: %w", err)
 		}
 		c.response = nullResp.String
 		convs = append(convs, c)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (standup convs)", "error", err)
+		return convs, fmt.Errorf("iterating standup conversations: %w", err)
 	}
 	return convs, nil
 }
@@ -73,13 +73,12 @@ func (h *QueryHandler) fetchStandupEscalations(ctx context.Context, crewID, sinc
 	for rows.Next() {
 		var e standupEscEntry
 		if err := rows.Scan(&e.reason, &e.status, &e.createdAt, &e.fromName, &e.fromSlug); err != nil {
-			h.logger.Error("scan standup escalation", "error", err)
-			continue
+			return escs, fmt.Errorf("scanning standup escalation: %w", err)
 		}
 		escs = append(escs, e)
 	}
 	if err := rows.Err(); err != nil {
-		h.logger.Error("rows iteration (standup escalations)", "error", err)
+		return escs, fmt.Errorf("iterating standup escalations: %w", err)
 	}
 	return escs, nil
 }
@@ -143,19 +142,43 @@ func formatEscalations(b *strings.Builder, escs []standupEscEntry) (pending, res
 
 // Standup handles GET /api/v1/internal/standup (internal) and GET /api/v1/crews/{crewId}/standup (public).
 func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
-	crewID := r.URL.Query().Get("crew_id")
+	// Always prefer the path parameter to prevent query-param override bypass
+	// (e.g. /crews/A/standup?crew_id=B reading crew B's data).
+	crewID := r.PathValue("crewId")
 	if crewID == "" {
-		crewID = r.PathValue("crewId")
+		// Internal route has no path param — fall back to query param.
+		crewID = r.URL.Query().Get("crew_id")
 	}
 	if crewID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "crew_id required"})
 		return
 	}
 
+	// When accessed via the public (authenticated) route, validate that the crew
+	// belongs to the caller's workspace to prevent cross-workspace data access.
+	if wsID := WorkspaceIDFromContext(r.Context()); wsID != "" {
+		var exists int
+		if err := h.db.QueryRowContext(r.Context(),
+			`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+			crewID, wsID).Scan(&exists); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found in workspace"})
+				return
+			}
+			h.logger.Error("standup workspace validation", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+	}
+
 	since := r.URL.Query().Get("since")
 	if since == "" {
-		// Default to last 24 hours
 		since = time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
+	} else if t, err := time.Parse(time.RFC3339, since); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "since must be a valid RFC3339 timestamp"})
+		return
+	} else {
+		since = t.UTC().Format(time.RFC3339)
 	}
 
 	// Fetch data
