@@ -94,7 +94,7 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Atomic upsert: insert only if agent is still active (prevents TOCTOU with soft-delete)
-	result, err := h.db.ExecContext(r.Context(),
+	_, err := h.db.ExecContext(r.Context(),
 		`INSERT OR IGNORE INTO chats (id, agent_id, workspace_id, created_by, status)
 		 SELECT ?, ?, ?, ?, 'ACTIVE'
 		 WHERE EXISTS (SELECT 1 FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL)`,
@@ -109,8 +109,8 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	var ownerAgentID string
 	if err := h.db.QueryRowContext(r.Context(),
 		"SELECT agent_id FROM chats WHERE id = ?", chatID).Scan(&ownerAgentID); err != nil {
-		// No row means the agent didn't exist (WHERE EXISTS failed) and no prior chat
-		if affected, _ := result.RowsAffected(); affected == 0 {
+		if err == sql.ErrNoRows {
+			// No row: agent was deleted between preflight and INSERT (WHERE EXISTS failed)
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 			return
 		}

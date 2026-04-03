@@ -682,14 +682,25 @@ func MigrateJSONBlobToCrewServers(ctx context.Context, db *sql.DB, logger *slog.
 		}
 	}
 
-	// Clear the JSON blob only if all configured servers now exist in the table.
-	// This is idempotent: re-runs see existing rows and still clear the blob.
-	var existing int
-	if err := tx.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id = ?", crewID).Scan(&existing); err != nil {
-		return fmt.Errorf("count crew servers: %w", err)
+	// Clear the JSON blob only if all configured server names exist in the table.
+	// This is idempotent: re-runs find existing rows by name and still clear the blob.
+	names := make([]any, 0, len(config.MCPServers)+1)
+	names = append(names, crewID)
+	placeholders := ""
+	for name := range config.MCPServers {
+		if placeholders != "" {
+			placeholders += ","
+		}
+		placeholders += "?"
+		names = append(names, name)
 	}
-	if existing >= len(config.MCPServers) {
+	var matching int
+	if err := tx.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM crew_mcp_servers WHERE crew_id = ? AND name IN ("+placeholders+")",
+		names...).Scan(&matching); err != nil {
+		return fmt.Errorf("count matching crew servers: %w", err)
+	}
+	if matching == len(config.MCPServers) {
 		if _, err := tx.ExecContext(ctx, `UPDATE crews SET mcp_config_json = NULL WHERE id = ?`, crewID); err != nil {
 			return fmt.Errorf("clear mcp_config_json: %w", err)
 		}
