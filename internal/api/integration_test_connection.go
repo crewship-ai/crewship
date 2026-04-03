@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -84,12 +86,62 @@ func testMCPConnection(ctx context.Context, transport, endpoint string, logger i
 	}
 }
 
+// isPrivateIP returns true if the given IP belongs to a private, loopback,
+// link-local, or otherwise non-routable address range.
+func isPrivateIP(ip net.IP) bool {
+	privateRanges := []net.IPNet{
+		{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(8, 32)},
+		{IP: net.ParseIP("172.16.0.0"), Mask: net.CIDRMask(12, 32)},
+		{IP: net.ParseIP("192.168.0.0"), Mask: net.CIDRMask(16, 32)},
+		{IP: net.ParseIP("127.0.0.0"), Mask: net.CIDRMask(8, 32)},
+		{IP: net.ParseIP("169.254.0.0"), Mask: net.CIDRMask(16, 32)},
+		{IP: net.ParseIP("::1"), Mask: net.CIDRMask(128, 128)},
+		{IP: net.ParseIP("fe80::"), Mask: net.CIDRMask(10, 128)},
+	}
+	for _, cidr := range privateRanges {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+}
+
 // testStreamableHTTPConnection sends a JSON-RPC initialize request to the MCP server endpoint.
 func testStreamableHTTPConnection(ctx context.Context, endpoint string) testConnectionResponse {
 	if endpoint == "" {
 		return testConnectionResponse{
 			Status:  "error",
 			Message: "No endpoint configured for this server",
+		}
+	}
+
+	// SSRF protection: resolve hostname and reject private/internal IPs.
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return testConnectionResponse{
+			Status:  "error",
+			Message: fmt.Sprintf("Invalid endpoint URL: %s", err.Error()),
+		}
+	}
+
+	hostname := parsed.Hostname()
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer resolveCancel()
+
+	ips, err := net.DefaultResolver.LookupIPAddr(resolveCtx, hostname)
+	if err != nil {
+		return testConnectionResponse{
+			Status:  "error",
+			Message: fmt.Sprintf("DNS resolution failed for %s: %s", hostname, err.Error()),
+		}
+	}
+
+	for _, ipAddr := range ips {
+		if isPrivateIP(ipAddr.IP) {
+			return testConnectionResponse{
+				Status:  "error",
+				Message: fmt.Sprintf("Endpoint resolves to a private/internal IP address (%s)", ipAddr.IP),
+			}
 		}
 	}
 

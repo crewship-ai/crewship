@@ -30,6 +30,7 @@ interface RegistryServer {
   description: string
   icon: string
   transport: string
+  command: string
   package_name: string
   endpoint: string
   auth_type: string
@@ -101,7 +102,7 @@ export function RegistryBrowser({
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
-  onAdd: (payload: RegistryAddPayload) => void
+  onAdd: (payload: RegistryAddPayload) => void | Promise<void>
 }) {
   const [query, setQuery] = React.useState("")
   const debouncedQuery = useDebouncedValue(query, 300)
@@ -187,7 +188,7 @@ export function RegistryBrowser({
     fetchServers(debouncedQuery, nextOffset, true)
   }
 
-  function handleAdd(server: RegistryServer) {
+  async function handleAdd(server: RegistryServer) {
     setAddingId(server.id)
 
     const envVars = parseEnvVars(server.env_vars_json)
@@ -198,22 +199,39 @@ export function RegistryBrowser({
 
     const isStdio = server.transport === "stdio"
 
+    let command: string | null = null
+    let args: string | null = null
+
+    if (isStdio) {
+      if (server.command) {
+        // Use command from registry as-is (e.g., "uvx mcp-server-fetch")
+        const parts = server.command.split(" ")
+        command = parts[0]
+        args = parts.slice(1).join(" ") || null
+      } else if (server.package_name) {
+        command = "npx"
+        args = `-y ${server.package_name}`
+      }
+    }
+
     const payload: RegistryAddPayload = {
       name: server.name,
       display_name: server.display_name || server.name,
       transport: isStdio ? "stdio" : "streamable-http",
-      command: isStdio ? "npx" : null,
-      args: isStdio && server.package_name ? `-y ${server.package_name}` : null,
+      command,
+      args,
       url: !isStdio ? server.endpoint : null,
       envHint,
     }
 
-    onAdd(payload)
-    // Brief delay so user sees feedback
-    setTimeout(() => {
-      setAddingId(null)
+    try {
+      await onAdd(payload)
       onOpenChange(false)
-    }, 300)
+    } catch {
+      // Keep dialog open on error
+    } finally {
+      setAddingId(null)
+    }
   }
 
   const hasMore = servers.length < total

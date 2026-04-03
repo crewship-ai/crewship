@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -225,8 +226,9 @@ func StartRegistrySyncWorker(db *sql.DB, logger *slog.Logger, stop <-chan struct
 
 // MCPRegistryHandler serves the local MCP registry cache.
 type MCPRegistryHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db       *sql.DB
+	logger   *slog.Logger
+	lastSync atomic.Int64 // unix timestamp of last manual sync
 }
 
 // NewMCPRegistryHandler creates a new MCPRegistryHandler.
@@ -360,8 +362,25 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Sync handles POST /api/v1/mcp-registry/sync — triggers manual sync.
+// Sync handles POST /api/v1/mcp-registry/sync — triggers manual sync (admin only).
 func (h *MCPRegistryHandler) Sync(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
+
+	const syncCooldown = int64(3600) // 1 hour in seconds
+	now := time.Now().Unix()
+	last := h.lastSync.Load()
+	if last > 0 && now-last < syncCooldown {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{
+			"error": "Sync was triggered recently, please wait before retrying",
+		})
+		return
+	}
+	h.lastSync.Store(now)
+
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()

@@ -112,7 +112,7 @@ func filterNpxServers(ctx context.Context, container provider.ContainerProvider,
 	// 2. Check npx availability in the container.
 	cfg := provider.ExecConfig{
 		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", "which npx 2>/dev/null"},
+		Cmd:         []string{"sh", "-c", "command -v npx >/dev/null 2>&1 && echo ok"},
 		User:        "1001:1001",
 	}
 	result, err := container.Exec(ctx, cfg)
@@ -944,18 +944,22 @@ func setupMCPConfig(
 	var mcpJSON string
 
 	// Primary path: raw JSON configs from crew/agent DB fields
+	usedPrimaryPath := false
 	if crewMCPJSON != "" || agentMCPJSON != "" {
+		usedPrimaryPath = true
 		merged, err := mergeMCPConfigs(crewMCPJSON, agentMCPJSON)
 		if err != nil {
 			return fmt.Errorf("merge MCP configs: %w", err)
 		}
-		// Check if any stdio servers in merged config require npx/npm
+		// Check if any stdio servers in merged config require npx/npm.
+		// If all servers are filtered out, filtered will be "" and we skip
+		// writing the config file entirely (do not fall through to legacy).
 		filtered, _ := filterMergedMCPConfigNpx(ctx, container, containerID, merged, logger)
 		mcpJSON = filtered
 	}
 
-	// Fallback: legacy per-binding model
-	if mcpJSON == "" && len(servers) > 0 {
+	// Fallback: legacy per-binding model (only when primary path was not used)
+	if !usedPrimaryPath && mcpJSON == "" && len(servers) > 0 {
 		servers = filterNpxServers(ctx, container, containerID, servers, logger)
 
 		var err error
