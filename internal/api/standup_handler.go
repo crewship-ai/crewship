@@ -192,8 +192,7 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	escs, err := h.fetchStandupEscalations(r.Context(), crewID, since)
 	if err != nil {
 		h.logger.Error("standup query escalations", "error", err)
-		// Non-fatal: continue with empty escalations
-		escs = nil
+		// Non-fatal: keep any partial results already read before the error
 	}
 
 	// Format report

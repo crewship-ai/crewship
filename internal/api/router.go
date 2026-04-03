@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/services"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -451,7 +452,8 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("DELETE /api/v1/captain/history", authed(wsCtx(http.HandlerFunc(captain.ClearHistory))))
 
 	// Onboarding (require auth, no workspace context needed)
-	onboarding := NewOnboardingHandler(r.db, r.logger)
+	onboardingSvc := services.NewOnboardingService(r.db, r.logger, generateCUID)
+	onboarding := NewOnboardingHandler(r.db, onboardingSvc, r.logger)
 	r.mux.Handle("GET /api/v1/onboarding/status", authed(http.HandlerFunc(onboarding.Status)))
 	r.mux.Handle("POST /api/v1/onboarding/complete", authed(http.HandlerFunc(onboarding.Complete)))
 	r.mux.Handle("POST /api/v1/onboarding/setup", authed(http.HandlerFunc(onboarding.Setup)))

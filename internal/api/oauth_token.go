@@ -124,9 +124,13 @@ func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger 
 			}
 			clientSecret = d
 		}
-		refreshToken := ""
-		if d, err := encryption.Decrypt(refreshTokenEnc); err == nil {
-			refreshToken = d
+		refreshToken, err := encryption.Decrypt(refreshTokenEnc)
+		if err != nil {
+			logger.Error("decrypt OAuth refresh token during refresh", "credential_id", id, "error", err)
+			if _, dbErr := db.ExecContext(ctx, "UPDATE credentials SET status = 'EXPIRED', updated_at = datetime('now') WHERE id = ?", id); dbErr != nil {
+				logger.Error("mark credential expired", "credential_id", id, "error", dbErr)
+			}
+			continue
 		}
 		if refreshToken == "" {
 			continue

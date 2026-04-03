@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/services"
 )
 
 var dashRegex = regexp.MustCompile(`-+`)
@@ -32,11 +32,12 @@ func resolveLLMProvider(provider string) llmProviderInfo {
 
 type OnboardingHandler struct {
 	db     *sql.DB
+	svc    *services.OnboardingService
 	logger *slog.Logger
 }
 
-func NewOnboardingHandler(db *sql.DB, logger *slog.Logger) *OnboardingHandler {
-	return &OnboardingHandler{db: db, logger: logger}
+func NewOnboardingHandler(db *sql.DB, svc *services.OnboardingService, logger *slog.Logger) *OnboardingHandler {
+	return &OnboardingHandler{db: db, svc: svc, logger: logger}
 }
 
 func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
@@ -113,12 +114,12 @@ func (h *OnboardingHandler) Complete(w http.ResponseWriter, r *http.Request) {
 }
 
 type onboardingSetupRequest struct {
-	WorkspaceName string `json:"workspace_name"`
-	CrewName      string `json:"crew_name"`
-	AgentName     string `json:"agent_name"`
-	CliAdapter    string `json:"cli_adapter"`
-	LlmProvider   string `json:"llm_provider"`
-	LlmModel      string `json:"llm_model"`
+	WorkspaceName   string `json:"workspace_name"`
+	CrewName        string `json:"crew_name"`
+	AgentName       string `json:"agent_name"`
+	CliAdapter      string `json:"cli_adapter"`
+	LlmProvider     string `json:"llm_provider"`
+	LlmModel        string `json:"llm_model"`
 	CredentialName  string `json:"credential_name"`
 	CredentialValue string `json:"credential_value"`
 }
@@ -174,149 +175,50 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	tx, err := h.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		h.logger.Error("begin tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	defer tx.Rollback()
-
-	// Atomic guard: claim onboarding (prevents TOCTOU race)
-	guardRes, err := tx.ExecContext(r.Context(),
-		"UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ? AND onboarding_completed = 0",
-		now, user.ID)
-	if err != nil {
-		h.logger.Error("lock onboarding", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	guardRows, err := guardRes.RowsAffected()
-	if err != nil {
-		h.logger.Error("lock onboarding rows affected", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	if guardRows == 0 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Onboarding already completed"})
-		return
-	}
-
-	// Update workspace name if provided
-	if req.WorkspaceName != "" {
-		_, err = tx.ExecContext(r.Context(),
-			"UPDATE workspaces SET name = ?, updated_at = ? WHERE id = ?",
-			req.WorkspaceName, now, workspaceID)
-		if err != nil {
-			h.logger.Error("update workspace name", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-			return
-		}
-	}
-
-	// Create crew
-	crewID := generateCUID()
-	crewSlug := makeSlug(req.CrewName)
-	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO crews (id, workspace_id, name, slug, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, crewID, workspaceID, req.CrewName, crewSlug, now, now)
-	if err != nil {
-		h.logger.Error("insert crew", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create crew"})
-		return
-	}
-
-	// Add user as crew member
-	crewMemberID := generateCUID()
-	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO crew_members (id, crew_id, user_id, created_at)
-		VALUES (?, ?, ?, ?)
-	`, crewMemberID, crewID, user.ID, now)
-	if err != nil {
-		h.logger.Error("insert crew member", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-
-	// Create agent
 	cliAdapter := req.CliAdapter
 	if cliAdapter == "" {
 		cliAdapter = "CLAUDE_CODE"
 	}
 	llm := resolveLLMProvider(req.LlmProvider)
-	agentID := generateCUID()
-	agentSlug := makeSlug(req.AgentName)
-	_, err = tx.ExecContext(r.Context(), `
-		INSERT INTO agents (id, crew_id, workspace_id, name, slug, cli_adapter, llm_provider, llm_model, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, agentID, crewID, workspaceID, req.AgentName, agentSlug, cliAdapter,
-		llm.provider, nullableString(req.LlmModel), now, now)
-	if err != nil {
-		h.logger.Error("insert agent", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create agent"})
-		return
+	credName := req.CredentialName
+	if credName == "" && req.CredentialValue != "" {
+		credName = "API Key"
 	}
 
-	// Create credential if provided
-	var credentialID string
-	if req.CredentialValue != "" {
-		credentialID = generateCUID()
-		credName := req.CredentialName
-		if credName == "" {
-			credName = "API Key"
-		}
-
-		encryptedValue, encErr := encryption.Encrypt(req.CredentialValue)
-		if encErr != nil {
-			h.logger.Error("encrypt credential", "error", encErr)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt credential"})
-			return
-		}
-
-		_, err = tx.ExecContext(r.Context(), `
-			INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, created_by, created_at, updated_at)
-			VALUES (?, ?, ?, ?, 'AI_CLI_TOKEN', ?, 'WORKSPACE', ?, ?, ?)
-		`, credentialID, workspaceID, credName, encryptedValue, llm.provider, user.ID, now, now)
-		if err != nil {
-			h.logger.Error("insert credential", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create credential"})
-			return
-		}
-
-		// Assign credential to agent
-		assignmentID := generateCUID()
-
-		_, err = tx.ExecContext(r.Context(), `
-			INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
-			VALUES (?, ?, ?, ?, 0, ?)
-		`, assignmentID, agentID, credentialID, llm.envVarName, now)
-		if err != nil {
-			h.logger.Error("assign credential", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to assign credential"})
-			return
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		h.logger.Error("commit tx", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"workspace_id":  workspaceID,
-		"crew_id":       crewID,
-		"agent_id":      agentID,
-		"credential_id": credentialID,
+	result, err := h.svc.Setup(r.Context(), services.SetupParams{
+		UserID:          user.ID,
+		WorkspaceID:     workspaceID,
+		WorkspaceName:   req.WorkspaceName,
+		CrewName:        req.CrewName,
+		CrewSlug:        makeSlug(req.CrewName),
+		AgentName:       req.AgentName,
+		AgentSlug:       makeSlug(req.AgentName),
+		CliAdapter:      cliAdapter,
+		LLMProvider:     llm.provider,
+		LLMModel:        stringPtr(req.LlmModel),
+		EnvVarName:      llm.envVarName,
+		CredentialName:  credName,
+		CredentialValue: req.CredentialValue,
+		Now:             time.Now().UTC().Format(time.RFC3339),
 	})
+	if err != nil {
+		switch {
+		case errors.Is(err, services.ErrOnboardingAlreadyCompleted):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "Onboarding already completed"})
+		case errors.Is(err, services.ErrWorkspaceNotFound):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No workspace found for user"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
 }
 
-func nullableString(s string) interface{} {
+func stringPtr(s string) *string {
 	if s == "" {
 		return nil
 	}
-	return s
+	return &s
 }
