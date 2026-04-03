@@ -638,3 +638,90 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{"id": missionID, "status": "IN_PROGRESS"})
 }
+
+// Metrics handles GET /api/v1/mission-metrics
+func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	type metricsResponse struct {
+		TotalMissions       int     `json:"total_missions"`
+		ActiveMissions      int     `json:"active_missions"`
+		Completed24h        int     `json:"completed_24h"`
+		Failed24h           int     `json:"failed_24h"`
+		TotalTokens24h      int     `json:"total_tokens_24h"`
+		TotalCost24h        float64 `json:"total_cost_24h"`
+		AvgCompletionTimeMs int     `json:"avg_completion_time_ms"`
+		TasksCompleted24h   int     `json:"tasks_completed_24h"`
+		TasksFailed24h      int     `json:"tasks_failed_24h"`
+	}
+
+	var m metricsResponse
+	cutoff := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
+
+	// Total and active missions
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT
+			COUNT(*),
+			COUNT(*) FILTER (WHERE status IN ('IN_PROGRESS', 'PLANNING', 'REVIEW'))
+		FROM missions WHERE workspace_id = ?`, wsID).Scan(&m.TotalMissions, &m.ActiveMissions)
+	if err != nil {
+		// SQLite doesn't support FILTER — fallback to CASE
+		err = h.db.QueryRowContext(r.Context(), `
+			SELECT
+				COUNT(*),
+				SUM(CASE WHEN status IN ('IN_PROGRESS', 'PLANNING', 'REVIEW') THEN 1 ELSE 0 END)
+			FROM missions WHERE workspace_id = ?`, wsID).Scan(&m.TotalMissions, &m.ActiveMissions)
+		if err != nil {
+			h.logger.Error("mission metrics: totals", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+	}
+
+	// 24h mission counts (completed_at for COMPLETED, updated_at for FAILED since failed missions may lack completed_at)
+	if err := h.db.QueryRowContext(r.Context(), `
+		SELECT
+			SUM(CASE WHEN status = 'COMPLETED' AND completed_at >= ? THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'FAILED' AND updated_at >= ? THEN 1 ELSE 0 END)
+		FROM missions WHERE workspace_id = ?`,
+		cutoff, cutoff, wsID).Scan(&m.Completed24h, &m.Failed24h); err != nil {
+		h.logger.Warn("mission metrics: 24h mission counts query failed", "error", err)
+	}
+
+	// 24h token/cost from tasks completed in the window (avoids counting lifetime totals of long-running missions)
+	if err := h.db.QueryRowContext(r.Context(), `
+		SELECT
+			COALESCE(SUM(COALESCE(mt.tokens_used, mt.token_count, 0)), 0),
+			COALESCE(SUM(COALESCE(mt.estimated_cost, 0)), 0)
+		FROM mission_tasks mt
+		JOIN missions m ON m.id = mt.mission_id
+		WHERE m.workspace_id = ? AND mt.completed_at >= ?`,
+		wsID, cutoff).Scan(&m.TotalTokens24h, &m.TotalCost24h); err != nil {
+		h.logger.Warn("mission metrics: 24h token/cost query failed", "error", err)
+	}
+
+	// Average completion time (completed missions in last 24h)
+	if err := h.db.QueryRowContext(r.Context(), `
+		SELECT COALESCE(AVG(
+			CAST((julianday(completed_at) - julianday(created_at)) * 86400000 AS INTEGER)
+		), 0)
+		FROM missions
+		WHERE workspace_id = ? AND status = 'COMPLETED' AND completed_at >= ?`,
+		wsID, cutoff).Scan(&m.AvgCompletionTimeMs); err != nil {
+		h.logger.Warn("mission metrics: avg completion time query failed", "error", err)
+	}
+
+	// 24h task stats
+	if err := h.db.QueryRowContext(r.Context(), `
+		SELECT
+			SUM(CASE WHEN mt.status = 'COMPLETED' AND mt.completed_at >= ? THEN 1 ELSE 0 END),
+			SUM(CASE WHEN mt.status = 'FAILED' AND mt.updated_at >= ? THEN 1 ELSE 0 END)
+		FROM mission_tasks mt
+		JOIN missions m ON m.id = mt.mission_id
+		WHERE m.workspace_id = ?`,
+		cutoff, cutoff, wsID).Scan(&m.TasksCompleted24h, &m.TasksFailed24h); err != nil {
+		h.logger.Warn("mission metrics: task stats query failed", "error", err)
+	}
+
+	writeJSON(w, http.StatusOK, m)
+}
