@@ -205,6 +205,8 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, services.ErrOnboardingAlreadyCompleted):
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "Onboarding already completed"})
+		case errors.Is(err, services.ErrWorkspaceNotFound):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No workspace found for user"})
 		default:
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		}

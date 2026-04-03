@@ -10,7 +10,10 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
-var ErrOnboardingAlreadyCompleted = errors.New("onboarding already completed")
+var (
+	ErrOnboardingAlreadyCompleted = errors.New("onboarding already completed")
+	ErrWorkspaceNotFound          = errors.New("workspace membership not found")
+)
 
 // SetupParams holds the validated input for onboarding setup.
 type SetupParams struct {
@@ -55,6 +58,14 @@ func NewOnboardingService(db *sql.DB, logger *slog.Logger, idFunc func() string)
 // It atomically claims onboarding (CAS guard) to prevent TOCTOU races.
 func (s *OnboardingService) Setup(ctx context.Context, p SetupParams) (*SetupResult, error) {
 	return database.WithTxResult(ctx, s.db, func(tx *sql.Tx) (*SetupResult, error) {
+		// Re-verify workspace membership inside transaction (prevents TOCTOU with membership removal)
+		var memberExists int
+		if err := tx.QueryRowContext(ctx,
+			"SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
+			p.WorkspaceID, p.UserID).Scan(&memberExists); err != nil {
+			return nil, ErrWorkspaceNotFound
+		}
+
 		// Atomic guard: claim onboarding (prevents TOCTOU race)
 		guardRes, err := tx.ExecContext(ctx,
 			"UPDATE users SET onboarding_completed = 1, updated_at = ? WHERE id = ? AND onboarding_completed = 0",

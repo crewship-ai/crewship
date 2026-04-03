@@ -281,20 +281,29 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 		u.Set("enabled", enabled)
 	}
 
-	// Validate transport/field combination against final state
+	// Validate transport/field combination against merged final state
 	if req.Transport != nil {
-		if *req.Transport == "streamable-http" {
-			// If endpoint is being cleared or was never set, check
-			if req.Endpoint != nil && *req.Endpoint == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required for streamable-http transport"})
-				return
-			}
+		var existingEndpoint, existingCommand sql.NullString
+		_ = h.db.QueryRowContext(r.Context(),
+			"SELECT endpoint, command FROM workspace_mcp_servers WHERE id = ?", id).
+			Scan(&existingEndpoint, &existingCommand)
+
+		finalEndpoint := existingEndpoint.String
+		if req.Endpoint != nil {
+			finalEndpoint = *req.Endpoint
 		}
-		if *req.Transport == "stdio" {
-			if req.Command != nil && *req.Command == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required for stdio transport"})
-				return
-			}
+		finalCommand := existingCommand.String
+		if req.Command != nil {
+			finalCommand = *req.Command
+		}
+
+		if *req.Transport == "streamable-http" && finalEndpoint == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required for streamable-http transport"})
+			return
+		}
+		if *req.Transport == "stdio" && finalCommand == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required for stdio transport"})
+			return
 		}
 	}
 

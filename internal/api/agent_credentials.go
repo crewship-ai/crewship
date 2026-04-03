@@ -109,21 +109,17 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify credential exists in same workspace
-	var credWS string
+	// Verify credential exists in this workspace (single query prevents enumeration)
+	var credExists string
 	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT workspace_id FROM credentials WHERE id = ? AND deleted_at IS NULL",
-		req.CredentialID).Scan(&credWS); err != nil {
+		"SELECT id FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		req.CredentialID, workspaceID).Scan(&credExists); err != nil {
 		if err == sql.ErrNoRows {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
 			return
 		}
 		h.logger.Error("check credential exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	if credWS != workspaceID {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Credential belongs to a different workspace"})
 		return
 	}
 

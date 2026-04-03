@@ -195,7 +195,7 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 	}
 
 	credType := "bearer"
-	if req.CredType != nil && *req.CredType != "" {
+	if req.CredType != nil {
 		credType = *req.CredType
 	}
 	if credType != "bearer" && credType != "api_key" && credType != "basic" {
