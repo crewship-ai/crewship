@@ -198,6 +198,10 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 	if req.CredType != nil && *req.CredType != "" {
 		credType = *req.CredType
 	}
+	if credType != "bearer" && credType != "api_key" && credType != "basic" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cred_type must be 'bearer', 'api_key', or 'basic'"})
+		return
+	}
 
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope,
@@ -276,12 +280,20 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 		args = append(args, enabled)
 	}
 	if req.CredType != nil {
+		if *req.CredType != "bearer" && *req.CredType != "api_key" && *req.CredType != "basic" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cred_type must be 'bearer', 'api_key', or 'basic'"})
+			return
+		}
 		sets = append(sets, "cred_type = ?")
 		args = append(args, *req.CredType)
 	}
 	if req.CredHeader != nil {
 		sets = append(sets, "cred_header = ?")
 		args = append(args, *req.CredHeader)
+	}
+	if req.EnvVarName != nil {
+		sets = append(sets, "env_var_name = ?")
+		args = append(args, *req.EnvVarName)
 	}
 	if req.ConfigOverride != nil {
 		sets = append(sets, "config_override_json = ?")

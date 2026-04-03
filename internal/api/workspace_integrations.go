@@ -158,6 +158,14 @@ func (h *IntegrationHandler) CreateWorkspaceIntegration(w http.ResponseWriter, r
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "transport must be 'streamable-http' or 'stdio'"})
 		return
 	}
+	if req.Transport == "streamable-http" && (req.Endpoint == nil || *req.Endpoint == "") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required for streamable-http transport"})
+		return
+	}
+	if req.Transport == "stdio" && (req.Command == nil || *req.Command == "") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required for stdio transport"})
+		return
+	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := generateCUID()
@@ -271,6 +279,23 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 			enabled = 1
 		}
 		u.Set("enabled", enabled)
+	}
+
+	// Validate transport/field combination against final state
+	if req.Transport != nil {
+		if *req.Transport == "streamable-http" {
+			// If endpoint is being cleared or was never set, check
+			if req.Endpoint != nil && *req.Endpoint == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "endpoint is required for streamable-http transport"})
+				return
+			}
+		}
+		if *req.Transport == "stdio" {
+			if req.Command != nil && *req.Command == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "command is required for stdio transport"})
+				return
+			}
+		}
 	}
 
 	query, args := u.Build("workspace_mcp_servers", "id = ? AND workspace_id = ?", id, workspaceID)
