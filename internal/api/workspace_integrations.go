@@ -2,10 +2,12 @@ package api
 
 import (
 	"database/sql"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -286,6 +288,8 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 	h.GetWorkspaceIntegration(w, r)
 }
 
+var errIntegrationNotFound = errors.New("integration not found")
+
 func (h *IntegrationHandler) DeleteWorkspaceIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -297,56 +301,43 @@ func (h *IntegrationHandler) DeleteWorkspaceIntegration(w http.ResponseWriter, r
 	id := r.PathValue("integrationId")
 
 	// Cascade: delete agent bindings → crew servers → workspace server
-	tx, err := h.db.BeginTx(r.Context(), nil)
+	err := database.WithTx(r.Context(), h.db, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(r.Context(),
+			"DELETE FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'workspace'", id); err != nil {
+			h.logger.Error("delete agent bindings for workspace server", "error", err)
+			return err
+		}
+
+		if _, err := tx.ExecContext(r.Context(), `
+			DELETE FROM agent_mcp_bindings WHERE mcp_server_scope = 'crew' AND mcp_server_id IN
+			(SELECT id FROM crew_mcp_servers WHERE workspace_mcp_server_id = ?)`, id); err != nil {
+			h.logger.Error("delete crew agent bindings", "error", err)
+			return err
+		}
+
+		if _, err := tx.ExecContext(r.Context(),
+			"DELETE FROM crew_mcp_servers WHERE workspace_mcp_server_id = ?", id); err != nil {
+			h.logger.Error("delete crew server overrides", "error", err)
+			return err
+		}
+
+		result, err := tx.ExecContext(r.Context(),
+			"DELETE FROM workspace_mcp_servers WHERE id = ? AND workspace_id = ?", id, workspaceID)
+		if err != nil {
+			return err
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			return errIntegrationNotFound
+		}
+		return nil
+	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-
-	// Delete agent bindings for this workspace server
-	if _, err := tx.ExecContext(r.Context(),
-		"DELETE FROM agent_mcp_bindings WHERE mcp_server_id = ? AND mcp_server_scope = 'workspace'", id); err != nil {
-		tx.Rollback()
-		h.logger.Error("delete agent bindings for workspace server", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-
-	// Delete agent bindings for crew servers that override this workspace server
-	if _, err := tx.ExecContext(r.Context(), `
-		DELETE FROM agent_mcp_bindings WHERE mcp_server_scope = 'crew' AND mcp_server_id IN
-		(SELECT id FROM crew_mcp_servers WHERE workspace_mcp_server_id = ?)`, id); err != nil {
-		tx.Rollback()
-		h.logger.Error("delete crew agent bindings", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-
-	// Delete crew server overrides
-	if _, err := tx.ExecContext(r.Context(),
-		"DELETE FROM crew_mcp_servers WHERE workspace_mcp_server_id = ?", id); err != nil {
-		tx.Rollback()
-		h.logger.Error("delete crew server overrides", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-
-	// Delete the workspace server itself
-	result, err := tx.ExecContext(r.Context(),
-		"DELETE FROM workspace_mcp_servers WHERE id = ? AND workspace_id = ?", id, workspaceID)
-	if err != nil {
-		tx.Rollback()
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
-		tx.Rollback()
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Integration not found"})
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		if errors.Is(err, errIntegrationNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Integration not found"})
+		} else {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		}
 		return
 	}
 
