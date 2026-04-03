@@ -514,7 +514,7 @@ func (c *mcpClient) sendRequest(ctx context.Context, rpcReq jsonRPCRequest) (*js
 	c.mu.Lock()
 	sid := c.sessionID
 	c.mu.Unlock()
-	if sid != "" {
+	if sid != "" && sid != "sse-connected" {
 		httpReq.Header.Set("Mcp-Session-Id", sid)
 	}
 	c.injectCredential(httpReq)
@@ -574,6 +574,7 @@ func tryParseSSEEvent(eventType string, dataLines []string) (*jsonRPCResponse, e
 // the deprecated MCP SSE transport where responses arrive as SSE events.
 func parseSSEResponse(body io.Reader) (*jsonRPCResponse, error) {
 	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // 1 MB max token size for large SSE frames
 	var eventType string
 	var dataLines []string
 
@@ -596,6 +597,10 @@ func parseSSEResponse(body io.Reader) (*jsonRPCResponse, error) {
 		} else if strings.HasPrefix(line, "data:") {
 			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read SSE stream: %w", err)
 	}
 
 	// Handle final event without trailing blank line

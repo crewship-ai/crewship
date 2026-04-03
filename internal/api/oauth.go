@@ -375,10 +375,28 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 		Code         string `json:"code"`
 		RedirectURI  string `json:"redirect_uri"`
 		CodeVerifier string `json:"code_verifier"`
+		State        string `json:"state"`
 	}
 	if err := readJSON(r, &req); err != nil || req.CredentialID == "" || req.Code == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "credential_id and code are required"})
 		return
+	}
+
+	// If no code_verifier provided but state is available, recover the
+	// server-side PKCE verifier that was stored during Initiate().
+	codeVerifier := req.CodeVerifier
+	if codeVerifier == "" && req.State != "" {
+		var storedVerifier string
+		err := h.db.QueryRowContext(r.Context(),
+			"SELECT code_verifier FROM oauth_states WHERE state = ?", req.State).Scan(&storedVerifier)
+		if err == nil {
+			codeVerifier = storedVerifier
+			// Delete used state to prevent replay
+			if _, delErr := h.db.ExecContext(r.Context(), "DELETE FROM oauth_states WHERE state = ?", req.State); delErr != nil {
+				h.logger.Error("delete used OAuth state in exchange", "error", delErr)
+			}
+		}
+		// If state lookup fails, proceed without verifier (backward compat)
 	}
 
 	// Load credential OAuth config
@@ -388,8 +406,8 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Exchange code for tokens (with PKCE verifier if provided)
-	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, req.Code, req.RedirectURI, req.CodeVerifier)
+	// Exchange code for tokens (with PKCE verifier if available)
+	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, req.Code, req.RedirectURI, codeVerifier)
 	if err != nil {
 		h.logger.Error("OAuth manual code exchange failed", "error", err, "credential_id", req.CredentialID)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Token exchange failed"})
