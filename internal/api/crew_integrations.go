@@ -143,6 +143,9 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 	}
 	if err := authRows.Err(); err != nil {
 		h.logger.Error("iterate auth status batch", "error", err)
+		authRows.Close()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
 	authRows.Close()
 	for i := range results {
@@ -278,7 +281,8 @@ func (h *IntegrationHandler) populateAuthStatus(ctx context.Context, results []c
 		}
 	}
 	if err := authRows.Err(); err != nil {
-		h.logger.Error("iterate auth status batch", "error", err)
+		authRows.Close()
+		return fmt.Errorf("iterate auth status: %w", err)
 	}
 	authRows.Close()
 	for i := range results {

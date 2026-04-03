@@ -292,8 +292,12 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 		args = append(args, *req.CredHeader)
 	}
 	if req.EnvVarName != nil {
-		sets = append(sets, "env_var_name = ?")
-		args = append(args, *req.EnvVarName)
+		if *req.EnvVarName == "" {
+			sets = append(sets, "env_var_name = NULL")
+		} else {
+			sets = append(sets, "env_var_name = ?")
+			args = append(args, *req.EnvVarName)
+		}
 	}
 	if req.ConfigOverride != nil {
 		sets = append(sets, "config_override_json = ?")
