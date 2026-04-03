@@ -480,6 +480,16 @@ function WorkflowGraphInner(
   ref: React.ForwardedRef<WorkflowGraphRef>
 ) {
   const [collapsedCrews, setCollapsedCrews] = useState<Set<string>>(new Set())
+
+  // Auto-collapse all crews when 8+ crews (re-runs on crew set change)
+  const prevCrewCountRef = useRef(crews?.length ?? 0)
+  useEffect(() => {
+    const count = crews?.length ?? 0
+    if (count >= 8 && prevCrewCountRef.current < 8) {
+      setCollapsedCrews(new Set(crews!.map((c) => c.id)))
+    }
+    prevCrewCountRef.current = count
+  }, [crews])
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null)
   const activities = useAgentActivity()
 

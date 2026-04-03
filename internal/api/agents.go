@@ -718,3 +718,69 @@ func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	h.broadcastAgentEvent("agent.deleted", workspaceID, map[string]string{"id": agentID})
 }
+
+// Load handles GET /api/v1/agent-load — per-agent workload metrics.
+func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	type agentLoadEntry struct {
+		AgentID         string `json:"agent_id"`
+		AgentName       string `json:"agent_name"`
+		AgentSlug       string `json:"agent_slug"`
+		AgentStatus     string `json:"agent_status"`
+		ActiveTasks     int    `json:"active_tasks"`
+		PendingTasks    int    `json:"pending_tasks"`
+		CompletedToday  int    `json:"completed_today"`
+		TokensUsedToday int    `json:"tokens_used_today"`
+		TokenBudget     int    `json:"token_budget"`
+	}
+
+	cutoff := time.Now().Add(-24 * time.Hour).UTC().Format(time.RFC3339)
+
+	// Only join tasks that are currently active/pending OR were completed/failed in the 24h window.
+	// This avoids scanning the full mission_tasks history for every agent.
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT
+			a.id, a.name, a.slug, a.status,
+			COALESCE(SUM(CASE WHEN mt.status = 'IN_PROGRESS' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN mt.status IN ('PENDING', 'BLOCKED') THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN mt.status = 'COMPLETED' AND mt.completed_at >= ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(COALESCE(mt.tokens_used, mt.token_count, 0)), 0),
+			COALESCE(SUM(CASE WHEN mt.status IN ('IN_PROGRESS', 'PENDING', 'BLOCKED') THEN COALESCE(mt.token_budget, 0) ELSE 0 END), 0)
+		FROM agents a
+		LEFT JOIN mission_tasks mt ON mt.assigned_agent_id = a.id
+			AND (mt.status IN ('IN_PROGRESS', 'PENDING', 'BLOCKED') OR mt.completed_at >= ?)
+		WHERE a.workspace_id = ? AND a.deleted_at IS NULL
+		GROUP BY a.id, a.name, a.slug, a.status
+		ORDER BY 5 DESC, 6 DESC`,
+		cutoff, cutoff, wsID)
+	if err != nil {
+		h.logger.Error("agent load query", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer rows.Close()
+
+	var result []agentLoadEntry
+	for rows.Next() {
+		var e agentLoadEntry
+		if err := rows.Scan(&e.AgentID, &e.AgentName, &e.AgentSlug, &e.AgentStatus,
+			&e.ActiveTasks, &e.PendingTasks, &e.CompletedToday,
+			&e.TokensUsedToday, &e.TokenBudget); err != nil {
+			h.logger.Error("scan agent load", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		result = append(result, e)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (agent load)", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if result == nil {
+		result = []agentLoadEntry{}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
