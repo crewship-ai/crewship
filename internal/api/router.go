@@ -312,6 +312,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.GetWorkspaceIntegration))))
 	r.mux.Handle("PATCH /api/v1/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.UpdateWorkspaceIntegration))))
 	r.mux.Handle("DELETE /api/v1/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.DeleteWorkspaceIntegration))))
+	r.mux.Handle("POST /api/v1/integrations/{integrationId}/test", authed(wsCtx(http.HandlerFunc(integrations.TestWorkspaceIntegrationConnection))))
 	// All crew integrations (cross-crew overview for Integrations page)
 	r.mux.Handle("GET /api/v1/integrations/crews", authed(wsCtx(http.HandlerFunc(integrations.ListAllCrewIntegrations))))
 	// Crew-level integrations
@@ -319,6 +320,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations", authed(wsCtx(http.HandlerFunc(integrations.CreateCrewIntegration))))
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.UpdateCrewIntegration))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/integrations/{integrationId}", authed(wsCtx(http.HandlerFunc(integrations.DeleteCrewIntegration))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/integrations/{integrationId}/test", authed(wsCtx(http.HandlerFunc(integrations.TestCrewIntegrationConnection))))
 	// Agent MCP bindings
 	r.mux.Handle("GET /api/v1/agents/{agentId}/integrations", authed(wsCtx(http.HandlerFunc(integrations.ListAgentBindings))))
 	r.mux.Handle("POST /api/v1/agents/{agentId}/integrations", authed(wsCtx(http.HandlerFunc(integrations.CreateAgentBinding))))
@@ -424,6 +426,12 @@ func (r *Router) registerRoutes() {
 	// MCP tool call audit (require workspace context)
 	mcpAudit := NewMCPAuditHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/mcp-tool-calls", authed(wsCtx(http.HandlerFunc(mcpAudit.List))))
+
+	// MCP Registry (public browsing, auth required; manual sync requires admin)
+	mcpRegistry := NewMCPRegistryHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/mcp-registry", authed(http.HandlerFunc(mcpRegistry.List)))
+	r.mux.Handle("GET /api/v1/mcp-registry/search", authed(http.HandlerFunc(mcpRegistry.Search)))
+	r.mux.Handle("POST /api/v1/mcp-registry/sync", authed(wsCtx(http.HandlerFunc(mcpRegistry.Sync))))
 
 	// OAuth flow (auth required for initiate, callback is unauthenticated — uses state token)
 	oauth := NewOAuthHandler(r.db, r.logger)

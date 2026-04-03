@@ -89,6 +89,127 @@ func BuildCLICommand(req AgentRunRequest) []string {
 	}
 }
 
+// isNpxCommand returns true if the command string starts with "npx" or "npm".
+func isNpxCommand(cmd string) bool {
+	return strings.HasPrefix(cmd, "npx") || strings.HasPrefix(cmd, "npm")
+}
+
+// filterNpxServers checks whether npx is available in the container and removes
+// stdio servers that require npx/npm if it is missing. Returns the filtered list.
+func filterNpxServers(ctx context.Context, container provider.ContainerProvider, containerID string, servers []MCPServerConfig, logger *slog.Logger) []MCPServerConfig {
+	// 1. Check if any server uses npx — if none, return unchanged.
+	hasNpx := false
+	for _, s := range servers {
+		if s.Transport == "stdio" && isNpxCommand(s.Command) {
+			hasNpx = true
+			break
+		}
+	}
+	if !hasNpx {
+		return servers
+	}
+
+	// 2. Check npx availability in the container.
+	cfg := provider.ExecConfig{
+		ContainerID: containerID,
+		Cmd:         []string{"sh", "-c", "which npx 2>/dev/null"},
+		User:        "1001:1001",
+	}
+	result, err := container.Exec(ctx, cfg)
+	if err == nil {
+		output, _ := io.ReadAll(result.Reader)
+		result.Reader.Close()
+		if strings.TrimSpace(string(output)) != "" {
+			return servers // npx available, return unchanged
+		}
+	}
+
+	// 3. npx not available — filter out npx servers.
+	var skipped []string
+	var filtered []MCPServerConfig
+	for _, s := range servers {
+		if s.Transport == "stdio" && isNpxCommand(s.Command) {
+			skipped = append(skipped, s.Name)
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	logger.Warn("npx/npm not found in container, skipping stdio MCP servers that require it",
+		"skipped_servers", skipped,
+		"container_id", containerID[:min(12, len(containerID))])
+	return filtered
+}
+
+// filterMergedMCPConfigNpx parses a merged .mcp.json config, checks if npx is available
+// in the container, and removes stdio servers that require npx/npm if it's missing.
+// Returns the (possibly filtered) JSON string and a list of skipped server names.
+func filterMergedMCPConfigNpx(
+	ctx context.Context,
+	container provider.ContainerProvider,
+	containerID string,
+	mcpJSON string,
+	logger *slog.Logger,
+) (string, []string) {
+	if mcpJSON == "" {
+		return mcpJSON, nil
+	}
+
+	type serverEntry struct {
+		Type    string `json:"type"`
+		Command string `json:"command"`
+	}
+	type wrapper struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	var w wrapper
+	if err := json.Unmarshal([]byte(mcpJSON), &w); err != nil {
+		return mcpJSON, nil
+	}
+
+	// Build MCPServerConfig slice so we can reuse filterNpxServers.
+	var configs []MCPServerConfig
+	nameOrder := make([]string, 0, len(w.MCPServers))
+	for name, raw := range w.MCPServers {
+		nameOrder = append(nameOrder, name)
+		var entry serverEntry
+		if err := json.Unmarshal(raw, &entry); err != nil {
+			configs = append(configs, MCPServerConfig{Name: name, Transport: entry.Type, Command: entry.Command})
+			continue
+		}
+		configs = append(configs, MCPServerConfig{Name: name, Transport: entry.Type, Command: entry.Command})
+	}
+
+	filtered := filterNpxServers(ctx, container, containerID, configs, logger)
+
+	// If nothing was removed, return original JSON unchanged.
+	if len(filtered) == len(configs) {
+		return mcpJSON, nil
+	}
+
+	// Build set of kept names and collect skipped names.
+	kept := make(map[string]bool, len(filtered))
+	for _, s := range filtered {
+		kept[s.Name] = true
+	}
+	var skipped []string
+	for _, name := range nameOrder {
+		if !kept[name] {
+			delete(w.MCPServers, name)
+			skipped = append(skipped, name)
+		}
+	}
+	if len(w.MCPServers) == 0 {
+		return "", skipped
+	}
+	out := map[string]interface{}{"mcpServers": w.MCPServers}
+	b, err := json.Marshal(out)
+	if err != nil {
+		logger.Error("failed to re-marshal MCP config after npx filtering", "error", err)
+		return mcpJSON, nil
+	}
+	return string(b), skipped
+}
+
 // buildMCPConfig converts resolved MCP server configs into Claude Code's --mcp-config JSON format.
 // Supports both HTTP (remote) and stdio (local npm/pip) MCP servers.
 func buildMCPConfig(servers []MCPServerConfig) (string, error) {
@@ -828,11 +949,15 @@ func setupMCPConfig(
 		if err != nil {
 			return fmt.Errorf("merge MCP configs: %w", err)
 		}
-		mcpJSON = merged
+		// Check if any stdio servers in merged config require npx/npm
+		filtered, _ := filterMergedMCPConfigNpx(ctx, container, containerID, merged, logger)
+		mcpJSON = filtered
 	}
 
 	// Fallback: legacy per-binding model
 	if mcpJSON == "" && len(servers) > 0 {
+		servers = filterNpxServers(ctx, container, containerID, servers, logger)
+
 		var err error
 		mcpJSON, err = buildMCPConfig(servers)
 		if err != nil {
