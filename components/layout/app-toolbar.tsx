@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import {
-  Search, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
+  Search, BookOpen, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
   LayoutDashboard, Bot, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck,
 } from "lucide-react"
 import { BellIcon as AnimatedBell } from "@/components/ui/bell"
@@ -361,6 +361,58 @@ export function AppToolbar() {
                   <div className="text-micro text-muted-foreground">You&apos;re all caught up.</div>
                 </>
               )}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:inline-flex" aria-label="Help">
+          <BookOpen className="h-4 w-4" />
+        </Button>
+
+        {/* Desktop: user menu */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="hidden md:flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent transition-colors" aria-label="User menu">
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-micro font-semibold text-primary-foreground">{userInitials}</div>
+              <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
+              <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64">
+            <div className="px-2 py-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">{userInitials}</div>
+                <div>
+                  <div className="text-sm font-medium">{userName}</div>
+                  <div className="text-xs text-muted-foreground">{userEmail}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 mt-2">
+                <Badge variant="outline" className="text-micro px-1.5 py-0.5">Owner</Badge>
+                <span className="text-micro text-muted-foreground">Unify Technology</span>
+              </div>
+            </div>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="gap-3 text-xs">
+              <User className="h-4 w-4 text-muted-foreground" />
+              Profile & Settings
+            </DropdownMenuItem>
+            <DropdownMenuItem className="gap-3 text-xs">
+              <HelpCircle className="h-4 w-4 text-muted-foreground" />
+              Help & Support
+            </DropdownMenuItem>
+            <DropdownMenuItem className="gap-3 text-xs">
+              <BookOpen className="h-4 w-4 text-muted-foreground" />
+              Documentation
+            </DropdownMenuItem>
+            <DropdownMenuItem className="gap-3 text-xs">
+              <GitBranch className="h-4 w-4 text-muted-foreground" />
+              GitHub
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="gap-3 text-xs text-destructive" onClick={() => { signOut().then(() => window.location.href = "/login") }}>
+              <LogOut className="h-4 w-4" />
+              Log out
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

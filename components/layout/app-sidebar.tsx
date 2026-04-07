@@ -18,15 +18,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ChevronDown,
-  LogOut,
-  User,
-  HelpCircle,
-  BookOpen,
-  GitBranch,
 } from "lucide-react"
 import { useAbilities } from "@/hooks/use-abilities"
-import { useAuth } from "@/hooks/use-auth"
-import { useWorkspace } from "@/hooks/use-workspace"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,7 +28,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Badge } from "@/components/ui/badge"
 import {
   Sidebar,
   SidebarContent,
@@ -87,26 +79,10 @@ const navSections = [
   },
 ]
 
-function getInitials(name: string): string {
-  if (!name.trim()) return "?"
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase()
-}
-
 export function AppSidebar() {
   const pathname = usePathname()
   const { role } = useAbilities()
   const { toggleSidebar, state } = useSidebar()
-  const { session, signOut } = useAuth()
-  const { role: wsRole } = useWorkspace()
-
-  const userName = session?.user?.name ?? "User"
-  const userEmail = session?.user?.email ?? ""
-  const userInitials = getInitials(userName)
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">
@@ -205,78 +181,9 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
-      {/* User menu + collapse toggle */}
+      {/* Collapse toggle */}
       <SidebarFooter className="p-2">
         <SidebarMenu>
-          {/* User dropdown */}
-          <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuButton size="lg" tooltip={userName}>
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[9px] font-semibold text-primary-foreground shrink-0">
-                    {userInitials}
-                  </div>
-                  <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                    <span className="truncate font-medium text-[12px]">{userName}</span>
-                    <span className="truncate text-[10px] text-muted-foreground">{userEmail}</span>
-                  </div>
-                  <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0 group-data-[collapsible=icon]:hidden" />
-                </SidebarMenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="top" className="w-64">
-                <div className="px-2 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
-                      {userInitials}
-                    </div>
-                    <div>
-                      <div className="text-sm font-medium">{userName}</div>
-                      <div className="text-xs text-muted-foreground">{userEmail}</div>
-                    </div>
-                  </div>
-                  {wsRole && (
-                    <div className="flex items-center gap-1.5 mt-2">
-                      <Badge variant="outline" className="text-micro px-1.5 py-0.5">{wsRole}</Badge>
-                      <span className="text-micro text-muted-foreground">Unify Technology</span>
-                    </div>
-                  )}
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild className="gap-3 text-xs">
-                  <Link href="/settings">
-                    <User className="h-4 w-4 text-muted-foreground" />
-                    Profile & Settings
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="gap-3 text-xs">
-                  <HelpCircle className="h-4 w-4 text-muted-foreground" />
-                  Help & Support
-                </DropdownMenuItem>
-                <DropdownMenuItem className="gap-3 text-xs">
-                  <BookOpen className="h-4 w-4 text-muted-foreground" />
-                  Documentation
-                </DropdownMenuItem>
-                <DropdownMenuItem className="gap-3 text-xs">
-                  <GitBranch className="h-4 w-4 text-muted-foreground" />
-                  GitHub
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="gap-3 text-xs text-destructive"
-                  onClick={() => {
-                    signOut().then(() => {
-                      window.location.href = "/login"
-                    })
-                  }}
-                >
-                  <LogOut className="h-4 w-4" />
-                  Log out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </SidebarMenuItem>
-
-          {/* Collapse toggle */}
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={toggleSidebar}
