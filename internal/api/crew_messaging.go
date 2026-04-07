@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -422,7 +423,19 @@ func (h *CrewMessagingHandler) canCommunicate(r *http.Request, fromCrewID, toCre
 	return true, nil
 }
 
+func (h *CrewMessagingHandler) resolveWorkspaceID(ctx context.Context, crewID string) string {
+	if crewID == "" {
+		return ""
+	}
+	var wsID string
+	h.db.QueryRowContext(ctx, "SELECT workspace_id FROM crews WHERE id = ?", crewID).Scan(&wsID)
+	return wsID
+}
+
 func (h *CrewMessagingHandler) logAudit(r *http.Request, workspaceID, action, fromCrewID, toCrewID, agentID string, details map[string]string) {
+	if workspaceID == "" {
+		workspaceID = h.resolveWorkspaceID(r.Context(), fromCrewID)
+	}
 	detailsJSON, _ := json.Marshal(details)
 	_, err := h.db.ExecContext(r.Context(), `
 		INSERT INTO crew_audit_log (id, workspace_id, action, from_crew_id, to_crew_id, agent_id, details, created_at)

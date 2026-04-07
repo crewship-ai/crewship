@@ -11,6 +11,7 @@ type CrewConfig struct {
 	Slug           string
 	MemoryMB       int
 	CPUs           float64
+	// Passed through for orchestrator/sidecar layer; not consumed by providers directly yet.
 	NetworkMode    string   // "free" (default) or "restricted"
 	AllowedDomains []string // domains allowed when NetworkMode is "restricted"
 	TTLHours       int      // auto-stop after idle period; 0 = no TTL

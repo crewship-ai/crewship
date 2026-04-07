@@ -89,9 +89,13 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Cross-crew connection check: if the assigning agent's crew differs
 	// from the target crew, verify an active crew connection exists.
 	var assignerCrewID string
-	_ = h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT a.crew_id FROM agents a JOIN chats ch ON ch.agent_id = a.id WHERE ch.id = ?`,
-		body.ChatID).Scan(&assignerCrewID)
+		body.ChatID).Scan(&assignerCrewID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		h.logger.Error("lookup assigner crew for connection check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
 	if assignerCrewID != "" && assignerCrewID != body.CrewID {
 		connected, connErr := AreCrewsConnected(r.Context(), h.db, assignerCrewID, body.CrewID)
 		if connErr != nil {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -122,15 +123,15 @@ func (s *Server) handleConnectionListMessages(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	url := fmt.Sprintf("/api/v1/internal/crew-messages?crew_id=%s&direction=all", s.ipc.CrewID)
+	apiURL := fmt.Sprintf("/api/v1/internal/crew-messages?crew_id=%s&direction=all", url.QueryEscape(s.ipc.CrewID))
 	if since := r.URL.Query().Get("since"); since != "" {
-		url += "&since=" + since
+		apiURL += "&since=" + url.QueryEscape(since)
 	}
 	if limit := r.URL.Query().Get("limit"); limit != "" {
-		url += "&limit=" + limit
+		apiURL += "&limit=" + url.QueryEscape(limit)
 	}
 
-	s.proxyToAPI(w, r, http.MethodGet, url)
+	s.proxyToAPI(w, r, http.MethodGet, apiURL)
 }
 
 // handleConnectionReadFiles handles GET /connections/{crew-slug}/files
@@ -158,13 +159,13 @@ func (s *Server) handleConnectionReadFiles(w http.ResponseWriter, r *http.Reques
 		filePath = "."
 	}
 
-	url := fmt.Sprintf("/api/v1/internal/crew-files/%s?path=%s&requester_crew_id=%s",
-		targetCrewID, filePath, s.ipc.CrewID)
+	fileURL := fmt.Sprintf("/api/v1/internal/crew-files/%s?path=%s&requester_crew_id=%s",
+		url.PathEscape(targetCrewID), url.QueryEscape(filePath), url.QueryEscape(s.ipc.CrewID))
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.ipc.BaseURL+url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.ipc.BaseURL+fileURL, nil)
 	if err != nil {
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
 		return
