@@ -13,6 +13,7 @@ import {
 import { Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Mission } from "@/lib/types/mission"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 interface OrchestrationActivityProps {
   missions: Mission[]
@@ -257,6 +258,13 @@ export function OrchestrationActivity({ missions }: OrchestrationActivityProps) 
                         </Badge>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5 pl-14">
+                        {event.agentSlug && (
+                          <img
+                            src={getAgentAvatarUrl(event.agentSlug)}
+                            alt=""
+                            className="w-4 h-4 rounded-full shrink-0"
+                          />
+                        )}
                         <span className="text-xs text-muted-foreground">{event.subtitle}</span>
                         {event.type === "task" && (
                           <span className="text-xs text-muted-foreground/50">

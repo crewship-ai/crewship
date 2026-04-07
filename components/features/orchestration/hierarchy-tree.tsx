@@ -11,6 +11,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { CrewSummary, AgentSummary } from "@/lib/types/orchestration"
 
 const crewColorMap: Record<string, string> = {
@@ -160,7 +161,7 @@ export function HierarchyTree({
                       )}
                       onClick={() => onAgentSelect(agent.slug)}
                     >
-                      <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 shrink-0" />
+                      <img src={getAgentAvatarUrl(agent.avatar_seed || agent.name, agent.avatar_style || agent.crew?.avatar_style)} alt="" className="w-4 h-4 rounded-full shrink-0" />
                       <span className="text-[11px] text-foreground/80 truncate flex-1">
                         {agent.name}
                       </span>

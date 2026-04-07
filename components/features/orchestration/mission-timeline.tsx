@@ -12,6 +12,7 @@ import {
 import { ChevronDown, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Mission, MissionTask, MissionStatus } from "@/lib/types/mission"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 interface MissionTimelineProps {
   missions: Mission[]
@@ -20,22 +21,6 @@ interface MissionTimelineProps {
 const LANE_H = 52
 const AGENT_W = 160
 const TICK_COUNT = 8
-
-const agentColors = ["emerald", "blue", "violet", "amber", "rose", "cyan"] as const
-function pickColor(slug: string) {
-  let h = 0
-  for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) | 0
-  return agentColors[Math.abs(h) % agentColors.length]
-}
-
-const colorMap: Record<string, { bg: string; text: string; border: string }> = {
-  emerald: { bg: "rgba(16,185,129,0.15)", text: "#34d399", border: "rgba(16,185,129,0.3)" },
-  blue:    { bg: "rgba(59,130,246,0.15)", text: "#60a5fa", border: "rgba(59,130,246,0.3)" },
-  violet:  { bg: "rgba(139,92,246,0.15)", text: "#a78bfa", border: "rgba(139,92,246,0.3)" },
-  amber:   { bg: "rgba(245,158,11,0.15)", text: "#fcd34d", border: "rgba(245,158,11,0.3)" },
-  rose:    { bg: "rgba(244,63,94,0.15)", text: "#fb7185", border: "rgba(244,63,94,0.3)" },
-  cyan:    { bg: "rgba(6,182,212,0.15)", text: "#22d3ee", border: "rgba(6,182,212,0.3)" },
-}
 
 const statusBadge: Record<MissionStatus, string> = {
   IN_PROGRESS: "border-blue-500 text-blue-400",
@@ -260,9 +245,6 @@ export function MissionTimeline({ missions }: MissionTimelineProps) {
                   {/* Swim lanes */}
                   {agents.map((slug) => {
                     const tasks = agentTasks.get(slug)!
-                    const color = pickColor(slug)
-                    const c = colorMap[color]
-                    const initial = slug.charAt(0).toUpperCase()
 
                     return (
                       <div key={slug} className="flex" style={{ minWidth: 900 }}>
@@ -271,12 +253,11 @@ export function MissionTimeline({ missions }: MissionTimelineProps) {
                           className="shrink-0 sticky left-0 z-20 bg-card border-r border-border border-b border-b-border/50 flex items-center gap-2 px-2.5 hover:bg-muted/30 transition-colors"
                           style={{ width: AGENT_W, height: LANE_H }}
                         >
-                          <div
-                            className="w-[26px] h-[26px] rounded-full flex items-center justify-center text-[10px] font-bold font-mono shrink-0"
-                            style={{ background: c.bg, color: c.text, border: `1.5px solid ${c.border}` }}
-                          >
-                            {initial}
-                          </div>
+                          <img
+                            src={getAgentAvatarUrl(slug)}
+                            alt={slug}
+                            className="w-[26px] h-[26px] rounded-full shrink-0"
+                          />
                           <div className="min-w-0">
                             <div className="text-[11px] font-mono font-medium truncate text-foreground">@{slug}</div>
                             <div className="text-[10px] text-muted-foreground truncate">

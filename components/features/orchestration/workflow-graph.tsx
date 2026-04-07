@@ -122,7 +122,11 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
   const nodes: Node[] = []
   const edges: Edge[] = []
 
-  // Build agent slug → crew id map
+  // Build agent slug → agent map and slug → crew id map
+  const agentBySlug = new Map<string, AgentSummary>()
+  for (const agent of agents) {
+    if (agent.slug) agentBySlug.set(agent.slug, agent)
+  }
   const agentCrewMap = new Map<string, string>()
   const crewById = new Map<string, CrewSummary>()
   const crewBySlug = new Map<string, CrewSummary>()
@@ -377,6 +381,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
           position: pos,
           data: {
             name: agent.name, slug: agent.slug,
+            avatarSeed: agent.avatar_seed, avatarStyle: agent.avatar_style,
             role: "", isLead: false,
             status: "idle", model: "",
             tokenCount: 0, cost: 0,
@@ -401,6 +406,8 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
         data: {
           label: task.title, status: task.status,
           agentName: task.agent_name || "Unassigned", agentSlug: task.agent_slug,
+          avatarSeed: (task.agent_slug && agentBySlug.get(task.agent_slug)?.avatar_seed) ?? null,
+          avatarStyle: (task.agent_slug && agentBySlug.get(task.agent_slug)?.avatar_style) ?? null,
           iteration: task.iteration, maxIterations: task.max_iterations,
           tokenCount: task.token_count, estimatedCost: task.estimated_cost,
           durationMs: task.duration_ms, missionId: task.mission_id,
@@ -555,6 +562,8 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
             status: task.status,
             agentName: task.agent_name || "Unassigned",
             agentSlug: task.agent_slug,
+            avatarSeed: null,
+            avatarStyle: null,
             iteration: task.iteration,
             maxIterations: task.max_iterations,
             tokenCount: task.token_count,

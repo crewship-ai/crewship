@@ -4,10 +4,13 @@ import { memo } from "react"
 import { type NodeProps } from "@xyflow/react"
 import { Brain, Crown, Cpu } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 export interface AgentCardData {
   name: string
   slug: string
+  avatarSeed: string | null
+  avatarStyle: string | null
   role: string
   isLead: boolean
   status: "active" | "idle" | "blocked" | "error"
@@ -83,6 +86,9 @@ function AgentCardNodeInner({ data }: NodeProps) {
             )}
           </div>
 
+          {/* Avatar */}
+          <img src={getAgentAvatarUrl(d.avatarSeed || d.slug, d.avatarStyle)} alt="" className="w-5 h-5 rounded-full shrink-0" />
+
           {/* Name */}
           <span className="text-[12px] font-semibold text-foreground truncate flex-1">
             {d.name}
@@ -103,12 +109,12 @@ function AgentCardNodeInner({ data }: NodeProps) {
         </div>
 
         {/* Role subtitle */}
-        <div className="text-[10px] text-muted-foreground mt-0.5 truncate pl-4">
+        <div className="text-[10px] text-muted-foreground mt-0.5 truncate pl-11">
           {d.role}
         </div>
 
         {/* Model + metrics row */}
-        <div className="flex items-center gap-2 mt-1.5 pl-4">
+        <div className="flex items-center gap-2 mt-1.5 pl-11">
           <div className="flex items-center gap-1 text-[9px] text-muted-foreground/70 font-mono">
             <Cpu className="h-2.5 w-2.5" />
             <span className="truncate max-w-[80px]">{d.model}</span>
@@ -124,7 +130,7 @@ function AgentCardNodeInner({ data }: NodeProps) {
 
         {/* Skill tags */}
         {d.skills.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1 mt-1.5 pl-4">
+          <div className="flex flex-wrap items-center gap-1 mt-1.5 pl-11">
             {visibleSkills.map((skill) => (
               <span
                 key={skill}
@@ -143,7 +149,7 @@ function AgentCardNodeInner({ data }: NodeProps) {
 
         {/* Current task */}
         {d.currentTask && (
-          <div className="mt-1.5 pt-1.5 border-t border-border pl-4">
+          <div className="mt-1.5 pt-1.5 border-t border-border pl-11">
             <p className="text-[9px] text-blue-300/50 italic truncate">
               {d.currentTask}
             </p>

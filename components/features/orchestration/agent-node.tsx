@@ -4,12 +4,15 @@ import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 interface AgentNodeData {
   label: string
   status: string
   agentName: string
   agentSlug: string | null
+  avatarSeed: string | null
+  avatarStyle: string | null
   iteration: number | null
   maxIterations: number | null
   tokenCount: number | null
@@ -152,12 +155,20 @@ function AgentNodeComponent({ data }: NodeProps) {
       <div className="px-3 py-2.5">
         <div className="flex items-start gap-2.5">
           {/* Avatar */}
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0"
-            style={{ backgroundColor: color }}
-          >
-            {initials}
-          </div>
+          {d.avatarSeed ? (
+            <img
+              src={getAgentAvatarUrl(d.avatarSeed, d.avatarStyle)}
+              alt={d.agentName}
+              className="w-8 h-8 rounded-lg shrink-0"
+            />
+          ) : (
+            <div
+              className="w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0"
+              style={{ backgroundColor: color }}
+            >
+              {initials}
+            </div>
+          )}
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-medium text-foreground leading-tight truncate">
               {d.label}
