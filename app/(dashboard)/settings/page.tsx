@@ -3,7 +3,8 @@
 import { useEffect, useState, type FormEvent } from "react"
 import {
   User, Palette, Bell, Shield, Building, Users, CreditCard,
-  AlertTriangle, Check, X, Key, ChevronsUpDown, Languages, Container
+  AlertTriangle, Check, X, Key, ChevronsUpDown, Languages,
+  Container, Network, ScrollText
 } from "lucide-react"
 import { useSession } from "@/hooks/use-auth"
 import {
@@ -68,6 +69,8 @@ const orgTabs: TabDef[] = [
   { key: "roles", label: "Roles & Permissions", icon: Shield },
   { type: "section", label: "INFRASTRUCTURE" },
   { key: "crews", label: "Crews & Containers", icon: Container },
+  { key: "connections", label: "Connections", icon: Network },
+  { key: "crew-audit", label: "Crew Audit Log", icon: ScrollText },
   { type: "section", label: "BILLING" },
   { key: "billing", label: "Billing & Usage", icon: CreditCard },
   { type: "section", label: "ADVANCED" },
@@ -519,6 +522,27 @@ export default function SettingsPage() {
         <CrewInfrastructure
           workspaceId={workspaceId!}
           canEdit={abilities.can("update", "Crew")}
+          section="overview"
+        />
+      )
+    }
+
+    if (tab === "connections") {
+      return (
+        <CrewInfrastructure
+          workspaceId={workspaceId!}
+          canEdit={abilities.can("update", "Crew")}
+          section="connections"
+        />
+      )
+    }
+
+    if (tab === "crew-audit") {
+      return (
+        <CrewInfrastructure
+          workspaceId={workspaceId!}
+          canEdit={abilities.can("update", "Crew")}
+          section="audit"
         />
       )
     }
