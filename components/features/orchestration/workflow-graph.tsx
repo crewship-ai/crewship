@@ -106,9 +106,9 @@ const TASK_WIDTH = 260
 const TASK_HEIGHT = 140
 const COLLAPSED_WIDTH = 300
 const COLLAPSED_HEIGHT = 50
-const CREW_PADDING_TOP = 60
-const CREW_PADDING_SIDE = 30
-const CREW_PADDING_BOTTOM = 30
+const CREW_PADDING_TOP = 65
+const CREW_PADDING_SIDE = 35
+const CREW_PADDING_BOTTOM = 35
 
 /**
  * Two-level dagre layout:
@@ -196,7 +196,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
     if (collapsedCrews.has(crewId) || tasks.length === 0) continue
 
     const localG = new DagreGraph()
-    localG.setGraph({ rankdir: "LR", ranksep: 60, nodesep: 20 })
+    localG.setGraph({ rankdir: "LR", ranksep: 80, nodesep: 25 })
     localG.setDefaultEdgeLabel(() => ({}))
 
     const localTaskIds = new Set(tasks.map((t) => t.task.id))
@@ -238,7 +238,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
 
   // ---- LEVEL 2: Layout crew groups using dagre ----
   const crewG = new DagreGraph()
-  crewG.setGraph({ rankdir: "TB", ranksep: 80, nodesep: 60 })
+  crewG.setGraph({ rankdir: "LR", ranksep: 120, nodesep: 80 })
   crewG.setDefaultEdgeLabel(() => ({}))
 
   for (const crewId of sortedCrewIds) {
