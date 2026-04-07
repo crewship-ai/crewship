@@ -26,6 +26,7 @@ import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orch
 import { Graph as DagreGraph, layout as dagreLayout } from "@dagrejs/dagre"
 import { useAgentActivity } from "@/hooks/use-agent-activity"
 import { AgentNode } from "./agent-node"
+import { AgentCardNode } from "./agent-card-node"
 import { AnimatedEdge } from "./animated-edge"
 import { CrewGroupNode, crewColorMap } from "./crew-group-node"
 import { PermissionEdge, getPermissionMarkers } from "./permission-edge"
@@ -44,6 +45,7 @@ interface WorkflowGraphProps {
 
 const nodeTypes: NodeTypes = {
   agent: AgentNode,
+  agentCard: AgentCardNode,
   crew: CrewGroupNode,
 }
 const edgeTypes: EdgeTypes = {
@@ -185,16 +187,55 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
   const crewLayouts = new Map<string, {
     width: number; height: number
     taskPositions: Map<string, { x: number; y: number }>
+    agentPositions?: Map<string, { x: number; y: number }>
   }>()
 
   const sortedCrewIds = [...usedCrewIds].sort((a, b) =>
     (crewById.get(a)?.name || "").localeCompare(crewById.get(b)?.name || "")
   )
 
+  // Agent card dimensions
+  const AGENT_CARD_WIDTH = 200
+  const AGENT_CARD_HEIGHT = 110
+  const AGENT_CARD_GAP = 12
+
   for (const crewId of sortedCrewIds) {
     const tasks = crewTasks.get(crewId) || []
-    if (collapsedCrews.has(crewId) || tasks.length === 0) continue
+    if (collapsedCrews.has(crewId)) continue
 
+    const crewAgents = agents.filter((a) => {
+      if (a.crew_id === crewId) return true
+      if (a.crew?.slug) {
+        const c = crewBySlug.get(a.crew.slug)
+        return c?.id === crewId
+      }
+      return false
+    })
+
+    if (tasks.length === 0) {
+      // No tasks — show agent cards in a grid (2 columns)
+      if (crewAgents.length === 0) continue
+      const cols = Math.min(crewAgents.length, 2)
+      const rows = Math.ceil(crewAgents.length / cols)
+      const agentPositions = new Map<string, { x: number; y: number }>()
+
+      crewAgents.forEach((agent, i) => {
+        const col = i % cols
+        const row = Math.floor(i / cols)
+        agentPositions.set(agent.id, {
+          x: CREW_PADDING_SIDE + col * (AGENT_CARD_WIDTH + AGENT_CARD_GAP),
+          y: CREW_PADDING_TOP + row * (AGENT_CARD_HEIGHT + AGENT_CARD_GAP),
+        })
+      })
+
+      const crewWidth = cols * AGENT_CARD_WIDTH + (cols - 1) * AGENT_CARD_GAP + CREW_PADDING_SIDE * 2
+      const crewHeight = rows * AGENT_CARD_HEIGHT + (rows - 1) * AGENT_CARD_GAP + CREW_PADDING_TOP + CREW_PADDING_BOTTOM
+
+      crewLayouts.set(crewId, { width: crewWidth, height: crewHeight, taskPositions: new Map(), agentPositions })
+      continue
+    }
+
+    // Crew has tasks — layout with dagre
     const localG = new DagreGraph()
     localG.setGraph({ rankdir: "LR", ranksep: 80, nodesep: 25 })
     localG.setDefaultEdgeLabel(() => ({}))
@@ -203,7 +244,6 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
     for (const { task } of tasks) {
       localG.setNode(task.id, { width: TASK_WIDTH, height: TASK_HEIGHT })
     }
-    // Only add intra-crew edges
     for (const dep of allDeps) {
       if (localTaskIds.has(dep.source) && localTaskIds.has(dep.target) && !dep.crossCrew) {
         localG.setEdge(dep.source, dep.target)
@@ -217,7 +257,6 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
     for (const { task } of tasks) {
       const dn = localG.node(task.id)
       if (!dn) continue
-      // Center to top-left
       const x = dn.x - TASK_WIDTH / 2
       const y = dn.y - TASK_HEIGHT / 2
       taskPositions.set(task.id, { x, y })
@@ -226,7 +265,6 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
       maxX = Math.max(maxX, x + TASK_WIDTH)
       maxY = Math.max(maxY, y + TASK_HEIGHT)
     }
-    // Normalize to 0,0 origin
     for (const [id, pos] of taskPositions) {
       taskPositions.set(id, { x: pos.x - minX + CREW_PADDING_SIDE, y: pos.y - minY + CREW_PADDING_TOP })
     }
@@ -306,6 +344,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
     const crewX = (dagrePos?.x ?? 0) - w / 2
     const crewY = (dagrePos?.y ?? 0) - h / 2
 
+    const hasLayout = !!layout
     nodes.push({
       id: crewNodeId,
       type: "crew",
@@ -313,14 +352,45 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
       data: {
         label: crew.name, slug: crew.slug, color: crew.color, icon: crew.icon,
         agentCount: crew._count?.agents || 0,
-        collapsed: collapsed || tasks.length === 0,
+        collapsed,
         taskCount, activeCount, completedCount, failedCount,
         onToggleCollapse, crewId,
       },
       style: { width: w, height: h },
     })
 
-    if (collapsed || tasks.length === 0 || !layout) continue
+    if (collapsed || !hasLayout) continue
+
+    // Add agent card nodes for crews with no tasks
+    if (layout.agentPositions) {
+      const crewAgents = agents.filter((a) => {
+        if (a.crew_id === crewId) return true
+        if (a.crew?.slug) {
+          const c = crewBySlug.get(a.crew.slug)
+          return c?.id === crewId
+        }
+        return false
+      })
+      for (const agent of crewAgents) {
+        const pos = layout.agentPositions.get(agent.id)
+        if (!pos) continue
+        nodes.push({
+          id: `agent-card-${agent.id}`,
+          type: "agentCard",
+          parentId: crewNodeId,
+          extent: "parent" as const,
+          position: pos,
+          data: {
+            name: agent.name, slug: agent.slug,
+            role: "", isLead: false,
+            status: "idle", model: "",
+            tokenCount: 0, cost: 0,
+            skills: [], memoryEnabled: false,
+            currentTask: null,
+          },
+        })
+      }
+    }
 
     // Add child task nodes with positions relative to crew
     for (const { task } of tasks) {
