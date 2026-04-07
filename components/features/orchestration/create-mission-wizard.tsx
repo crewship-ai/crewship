@@ -100,7 +100,7 @@ export function CreateMissionWizard({ workspaceId, onCreated }: CreateMissionWiz
     try {
       const mRes = await fetch(`/api/v1/crews/${crewId}/missions?workspace_id=${workspaceId}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), description: description.trim() || undefined, lead_agent_id: leadAgent.id, complexity: missionComplexity || undefined, pattern: missionPattern || undefined }),
+        body: JSON.stringify({ title: title.trim(), description: description.trim() || undefined, lead_agent_id: leadAgent.id }),
       })
       if (!mRes.ok) { const b = await mRes.json().catch(() => null); toast.error(b?.detail ?? "Failed to create mission"); return }
       const mission = await mRes.json()

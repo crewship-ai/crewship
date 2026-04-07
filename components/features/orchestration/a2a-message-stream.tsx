@@ -5,7 +5,7 @@ import { MessageSquare, ArrowDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
+
 
 export interface A2AMessage {
   id: string
@@ -105,8 +105,8 @@ export function A2AMessageStream({ messages, crewFilter, onFilterChange }: A2AMe
       </div>
 
       {/* Message list */}
-      <ScrollArea className="flex-1 min-h-0">
-        <div ref={scrollRef} className="divide-y divide-border">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
+        <div className="divide-y divide-border">
           {sorted.map(msg => (
             <div key={msg.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-accent/30 transition-colors" style={{ minHeight: 32 }}>
               <span className="text-[10px] font-mono text-muted-foreground/70 shrink-0 w-16">
@@ -126,7 +126,7 @@ export function A2AMessageStream({ messages, crewFilter, onFilterChange }: A2AMe
             </div>
           ))}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   )
 }

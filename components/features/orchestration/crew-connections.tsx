@@ -18,6 +18,7 @@ interface Crew {
   id: string
   name: string
   slug: string
+  color?: string | null
 }
 
 interface Connection {
@@ -37,18 +38,16 @@ interface CrewConnectionsProps {
   workspaceId: string
 }
 
-function hashColor(slug: string): string {
-  let h = 0
-  for (let i = 0; i < slug.length; i++) h = ((h << 5) - h + slug.charCodeAt(i)) | 0
-  const hue = Math.abs(h) % 360
-  return `hsl(${hue}, 60%, 50%)`
+const crewColorMap: Record<string, string> = {
+  blue: "#3b82f6", emerald: "#10b981", violet: "#8b5cf6", amber: "#f59e0b",
+  rose: "#f43f5e", cyan: "#06b6d4", lime: "#84cc16", fuchsia: "#d946ef",
 }
 
-function CrewBadge({ name, slug }: { name: string; slug: string }) {
-  const color = hashColor(slug)
+function CrewBadge({ name, slug, color }: { name: string; slug: string; color?: string | null }) {
+  const resolved = (color && crewColorMap[color]) || "#64748b"
   return (
     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/50 border border-border">
-      <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
+      <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: resolved }} />
       <div>
         <div className="text-sm font-medium text-foreground">{name}</div>
         <div className="text-[11px] text-muted-foreground/70 font-mono">{slug}</div>
@@ -199,7 +198,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
             <Card key={conn.id}>
               <CardContent className="py-3">
                 <div className="flex items-center gap-4">
-                  <CrewBadge name={conn.from_crew_name} slug={conn.from_crew_slug} />
+                  <CrewBadge name={conn.from_crew_name} slug={conn.from_crew_slug} color={crews.find(c => c.id === conn.from_crew_id)?.color} />
                   <div className="flex flex-col items-center gap-1 shrink-0">
                     {conn.direction === "bidirectional" ? (
                       <ArrowLeftRight className="h-5 w-5 text-muted-foreground/70" />
@@ -210,7 +209,7 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
                       {conn.direction}
                     </Badge>
                   </div>
-                  <CrewBadge name={conn.to_crew_name} slug={conn.to_crew_slug} />
+                  <CrewBadge name={conn.to_crew_name} slug={conn.to_crew_slug} color={crews.find(c => c.id === conn.to_crew_id)?.color} />
                   <div className="flex-1" />
                   <Badge
                     variant="outline"

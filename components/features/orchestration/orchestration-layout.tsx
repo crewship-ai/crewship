@@ -392,6 +392,31 @@ export function OrchestrationLayout({
     setSelectedTask(null)
   }, [])
 
+  const handleTaskAction = useCallback(async (action: "edit" | "retry" | "skip", taskId: string, missionId: string) => {
+    const mission = missions.find(m => m.id === missionId)
+    if (!mission) return
+    const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+
+    if (action === "retry") {
+      await fetch(`/api/v1/crews/${mission.crew_id}/missions/${missionId}/tasks/${taskId}${qs}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "PENDING" }),
+      })
+      toast.success("Task queued for retry")
+      onRefresh()
+    } else if (action === "skip") {
+      await fetch(`/api/v1/crews/${mission.crew_id}/missions/${missionId}/tasks/${taskId}${qs}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "SKIPPED" }),
+      })
+      toast.success("Task skipped")
+      onRefresh()
+    }
+    // "edit" — detail panel is already visible
+  }, [missions, workspaceId, onRefresh])
+
   const handleDrawerTabClick = useCallback((tab: DrawerTab) => {
     if (drawerOpen && drawerTab === tab) {
       setDrawerOpen(false)
@@ -719,7 +744,7 @@ export function OrchestrationLayout({
                   <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Detail</span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  <ContextDetailPanel context={detailContext} onClose={handleDetailClose} />
+                  <ContextDetailPanel context={detailContext} onClose={handleDetailClose} onTaskAction={handleTaskAction} />
                 </div>
               </motion.div>
             )}
@@ -742,6 +767,7 @@ export function OrchestrationLayout({
                   <ContextDetailPanel
                     context={detailContext}
                     onClose={handleDetailClose}
+                    onTaskAction={handleTaskAction}
                   />
                 </motion.div>
               )}

@@ -16,6 +16,11 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import type { Mission, MissionTask, MissionTaskStatus, TaskComplexity, EvaluationStatus } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 
+const crewColorMap: Record<string, string> = {
+  blue: "#3b82f6", emerald: "#10b981", violet: "#8b5cf6", amber: "#f59e0b",
+  rose: "#f43f5e", cyan: "#06b6d4", lime: "#84cc16", fuchsia: "#d946ef",
+}
+
 export type DetailContext =
   | { type: "task"; task: MissionTask; mission: Mission; allTasks: MissionTask[] }
   | { type: "crew"; crew: CrewSummary; agents: AgentSummary[]; connections: CrewConnection[] }
@@ -57,7 +62,7 @@ function formatTokens(tokens: number | null): string {
 function parseDependsOn(raw: string): string[] {
   try {
     const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed) ? (parsed as string[]) : []
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : []
   } catch {
     return []
   }
@@ -196,7 +201,7 @@ function CrewDetail({ crew, agents, connections }: { crew: CrewSummary; agents: 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        {crew.color && <span className={cn("size-2.5 rounded-full", `bg-${crew.color}-500`)} />}
+        {crew.color && <span className="size-2.5 rounded-full" style={{ backgroundColor: crewColorMap[crew.color] || "#64748b" }} />}
         <h3 className="text-sm font-semibold text-foreground">{crew.name}</h3>
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">

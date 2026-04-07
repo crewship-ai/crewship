@@ -1,12 +1,16 @@
 "use client"
 
 import { Container, Info } from "lucide-react"
-import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
 } from "@/components/ui/table"
 import type { CrewSummary } from "@/lib/types/orchestration"
+
+const crewColorMap: Record<string, string> = {
+  blue: "#3b82f6", emerald: "#10b981", violet: "#8b5cf6", amber: "#f59e0b",
+  rose: "#f43f5e", cyan: "#06b6d4", lime: "#84cc16", fuchsia: "#d946ef",
+}
 
 export interface DockerOverviewProps {
   crews: CrewSummary[]
@@ -49,7 +53,7 @@ export function DockerOverview({ crews }: DockerOverviewProps) {
                 <TableCell className="font-mono text-[11px] text-foreground/80">
                   <div className="flex items-center gap-1.5">
                     {crew.color && (
-                      <span className={cn("size-2 rounded-full", `bg-${crew.color}-500`)} />
+                      <span className="size-2 rounded-full" style={{ backgroundColor: crewColorMap[crew.color] || "#64748b" }} />
                     )}
                     crewship-team-{crew.slug}
                   </div>

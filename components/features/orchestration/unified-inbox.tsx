@@ -127,10 +127,13 @@ function InboxSection({
       <CollapsibleContent>
         <div className="ml-4 pl-2.5 border-l border-border space-y-px">
           {items.map(({ task, mission }) => (
-            <button
+            <div
               key={task.id}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors text-left group"
+              role="button"
+              tabIndex={0}
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors text-left group cursor-pointer"
               onClick={() => onTaskSelect(task, mission)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTaskSelect(task, mission) } }}
             >
               <div className="flex-1 min-w-0">
                 <div className="text-[11px] text-foreground/80 truncate">
@@ -158,7 +161,7 @@ function InboxSection({
                   Approve
                 </button>
               )}
-            </button>
+            </div>
           ))}
         </div>
       </CollapsibleContent>
