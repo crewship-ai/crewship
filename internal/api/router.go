@@ -427,7 +427,7 @@ func (r *Router) registerRoutes() {
 	mcpAudit := NewMCPAuditHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/mcp-tool-calls", authed(wsCtx(http.HandlerFunc(mcpAudit.List))))
 
-	// MCP Registry (public browsing, auth required; manual sync requires admin)
+	// MCP Registry (public browsing, auth required; manual sync requires workspace member)
 	mcpRegistry := NewMCPRegistryHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/mcp-registry", authed(http.HandlerFunc(mcpRegistry.List)))
 	r.mux.Handle("GET /api/v1/mcp-registry/search", authed(http.HandlerFunc(mcpRegistry.Search)))

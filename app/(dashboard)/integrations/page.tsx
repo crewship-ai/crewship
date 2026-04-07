@@ -1350,10 +1350,10 @@ function ExpandedPanel({
       </div>
 
       {/* Section 3: OAuth Auto-Connect (HTTP servers only) */}
-      {canManage && server.transport === "streamable-http" && (server.endpoint || url) && (server.auth_status !== "none" || oauthDiscovered) && (
+      {canManage && transport === "streamable-http" && (url || server.endpoint) && (server.auth_status !== "none" || oauthDiscovered) && (
         <OAuthAutoConnect
           serverName={server.name}
-          mcpURL={server.endpoint || url}
+          mcpURL={url || server.endpoint || ""}
           workspaceId={workspaceId}
           authStatus={server.auth_status}
           onCredentialCreated={async (credId: string) => {

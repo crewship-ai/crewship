@@ -942,6 +942,7 @@ func setupMCPConfig(
 	logger *slog.Logger,
 ) error {
 	var mcpJSON string
+	hadMCPInput := crewMCPJSON != "" || agentMCPJSON != "" || len(servers) > 0
 
 	// Primary path: raw JSON configs from crew/agent DB fields
 	usedPrimaryPath := false
@@ -970,7 +971,12 @@ func setupMCPConfig(
 	}
 
 	if mcpJSON == "" {
-		return nil
+		if !hadMCPInput {
+			return nil
+		}
+		// MCP servers were configured but all got filtered out (e.g. npx unavailable).
+		// Write an empty config so --mcp-config doesn't point at a missing file.
+		mcpJSON = `{"mcpServers":{}}`
 	}
 
 	homeDir := fmt.Sprintf("/crew/agents/%s", agentSlug)
