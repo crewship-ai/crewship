@@ -10,7 +10,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -18,7 +17,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 
-// ── Shared utilities ──
+// ── Helpers ──
 
 const roleCls: Record<string, string> = {
   OWNER: "bg-amber-500/20 text-amber-400 border-amber-500/30",
@@ -58,48 +57,40 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" })
 }
 
-function FieldRow({ label, children, className }: {
-  label: string; children: React.ReactNode; className?: string
+/** A single row inside a card: label left, content right */
+function Row({ label, description, children, border = true }: {
+  label: string
+  description?: string
+  children: React.ReactNode
+  border?: boolean
 }) {
   return (
-    <div className={cn("flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-0 py-2.5", className)}>
-      <span className="text-[13px] text-muted-foreground/50 sm:w-[140px] shrink-0">{label}</span>
-      <div className="flex-1 min-w-0 flex items-center gap-2">{children}</div>
+    <div className={cn("flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]", border && "border-b border-white/[0.04] last:border-b-0")}>
+      <div className="shrink-0">
+        <div className="text-[13px] text-foreground">{label}</div>
+        {description && <div className="text-[11px] text-muted-foreground/30 mt-0.5">{description}</div>}
+      </div>
+      <div className="flex items-center gap-2 min-w-0 justify-end">{children}</div>
     </div>
   )
 }
 
-function CopyableValue({ value, mono }: { value: string; mono?: boolean }) {
+function CopyableText({ value, mono }: { value: string; mono?: boolean }) {
   const [copied, setCopied] = useState(false)
-  function handleCopy() {
-    navigator.clipboard.writeText(value)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
   return (
     <TooltipProvider delayDuration={0}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button onClick={handleCopy} className={cn("text-[13px] text-foreground truncate text-left hover:text-foreground/80 transition-colors", mono && "font-mono")}>
+          <button
+            onClick={() => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+            className={cn("text-[13px] text-muted-foreground/60 hover:text-foreground transition-colors truncate text-right", mono && "font-mono")}
+          >
             {value}
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
-          {copied ? <span className="flex items-center gap-1"><Check className="h-3 w-3 text-emerald-400" /> Copied</span> : <span className="flex items-center gap-1"><Copy className="h-3 w-3" /> Click to copy</span>}
+          {copied ? <span className="flex items-center gap-1"><Check className="h-3 w-3 text-emerald-400" /> Copied</span> : <span className="flex items-center gap-1"><Copy className="h-3 w-3" /> Copy</span>}
         </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  )
-}
-
-function P2Chip() {
-  return (
-    <TooltipProvider delayDuration={0}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge variant="outline" className="text-[8px] px-1 py-0 h-4 border-white/[0.06] text-muted-foreground/25 cursor-default shrink-0">EDIT</Badge>
-        </TooltipTrigger>
-        <TooltipContent side="left" className="text-xs">Coming in Phase 2</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   )
@@ -195,77 +186,90 @@ export function ProfileSection({
   const revokedTokens = tokens.filter((t) => t.revoked_at)
 
   return (
-    <div className="space-y-5">
-      {/* ── Profile card ── */}
-      <Card className="border-white/[0.06]">
-        <CardContent className="p-0">
-          {/* Header */}
-          <div className="p-5 sm:p-6">
-            <div className="flex items-start sm:items-center gap-4 flex-col sm:flex-row">
-              <div className="w-14 h-14 rounded-full bg-primary/80 ring-2 ring-white/[0.08] flex items-center justify-center text-primary-foreground text-[15px] font-semibold shrink-0">
+    <div className="space-y-6">
+      {/* ── Account ── */}
+      <div>
+        <h3 className="text-[14px] font-medium text-foreground mb-3">Account</h3>
+        <Card className="border-white/[0.06]">
+          <CardContent className="p-0">
+            <Row label="Profile picture">
+              <div className="w-9 h-9 rounded-full bg-primary/80 ring-2 ring-white/[0.08] flex items-center justify-center text-primary-foreground text-[11px] font-semibold">
                 {initials}
               </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-[16px] font-semibold text-foreground truncate">{userName ?? "User"}</h3>
-                <p className="text-[13px] text-muted-foreground/40 mt-0.5 truncate font-mono">{userEmail ?? ""}</p>
-                <div className="flex flex-wrap items-center gap-2 mt-2">
-                  {role && <Badge variant="outline" className={cn("text-[10px] font-medium", roleCls[role] ?? "")}>{role}</Badge>}
-                  {workspaceName && <span className="text-[11px] text-muted-foreground/25">{workspaceName}</span>}
-                </div>
-              </div>
-            </div>
-          </div>
+            </Row>
+            <Row label="Email">
+              {userEmail ? <CopyableText value={userEmail} mono /> : <span className="text-[13px] text-muted-foreground/30">Not set</span>}
+            </Row>
+            <Row label="Full name">
+              <span className="text-[13px] text-muted-foreground/60">{userName ?? "Not set"}</span>
+            </Row>
+            <Row label="Password">
+              <span className="text-[13px] text-muted-foreground/25 tracking-[0.15em]">{"••••••••"}</span>
+            </Row>
+          </CardContent>
+        </Card>
+      </div>
 
-          <Separator className="bg-white/[0.06]" />
+      {/* ── Workspace ── */}
+      <div>
+        <h3 className="text-[14px] font-medium text-foreground mb-3">Workspace</h3>
+        <Card className="border-white/[0.06]">
+          <CardContent className="p-0">
+            <Row label="Role">
+              {role ? (
+                <Badge variant="outline" className={cn("text-[10px] font-medium", roleCls[role] ?? "")}>
+                  {role}
+                </Badge>
+              ) : (
+                <span className="text-[13px] text-muted-foreground/30">Not assigned</span>
+              )}
+            </Row>
+            {workspaceName && (
+              <Row label="Organization">
+                <span className="text-[13px] text-muted-foreground/60">{workspaceName}</span>
+              </Row>
+            )}
+            {joinedAt && (
+              <Row label="Joined">
+                <span className="text-[13px] text-muted-foreground/40 font-mono tabular-nums">
+                  {new Date(joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                </span>
+              </Row>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
-          {/* Account */}
-          <div className="px-5 sm:px-6 py-3">
-            <div className="text-[10px] font-semibold text-muted-foreground/25 uppercase tracking-wider mb-0.5">Account</div>
-            <FieldRow label="Full Name">
-              <span className="text-[13px] text-foreground truncate">{userName ?? "Not set"}</span>
-              <div className="ml-auto"><P2Chip /></div>
-            </FieldRow>
-            <FieldRow label="Email">
-              {userEmail ? <CopyableValue value={userEmail} mono /> : <span className="text-[13px] text-foreground">Not set</span>}
-              <div className="ml-auto"><P2Chip /></div>
-            </FieldRow>
-            <FieldRow label="Password">
-              <span className="text-[13px] text-muted-foreground/40 tracking-wider">{"•".repeat(10)}</span>
-              <div className="ml-auto"><P2Chip /></div>
-            </FieldRow>
-          </div>
-
-          <Separator className="bg-white/[0.06]" />
-
-          {/* Workspace */}
-          <div className="px-5 sm:px-6 py-3">
-            <div className="text-[10px] font-semibold text-muted-foreground/25 uppercase tracking-wider mb-0.5">Workspace</div>
-            <FieldRow label="Role">
-              {role ? <Badge variant="outline" className={cn("text-[10px] font-medium", roleCls[role] ?? "")}>{role}</Badge> : <span className="text-[13px] text-muted-foreground/40">Not assigned</span>}
-            </FieldRow>
-            {workspaceName && <FieldRow label="Organization"><span className="text-[13px] text-foreground">{workspaceName}</span></FieldRow>}
-            {joinedAt && <FieldRow label="Joined"><span className="text-[13px] text-muted-foreground/60">{new Date(joinedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span></FieldRow>}
-          </div>
-
-          <Separator className="bg-white/[0.06]" />
-
-          {/* Session */}
-          <div className="px-5 sm:px-6 py-3">
-            <div className="text-[10px] font-semibold text-muted-foreground/25 uppercase tracking-wider mb-0.5">Session</div>
-            <FieldRow label="Status">
+      {/* ── Session ── */}
+      <div>
+        <h3 className="text-[14px] font-medium text-foreground mb-3">Session</h3>
+        <Card className="border-white/[0.06]">
+          <CardContent className="p-0">
+            <Row label="Status">
               <span className="flex items-center gap-1.5 text-[13px] text-foreground">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />Active
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Active
               </span>
-            </FieldRow>
-            {expiresIn && <FieldRow label="Expires"><span className="text-[13px] text-muted-foreground/40">{expiresIn}</span></FieldRow>}
-            <div className="pt-2 pb-1">
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-[12px] text-red-400/60 hover:text-red-400 hover:bg-red-500/10 gap-1.5" onClick={onSignOut}>
-                <LogOut className="h-3 w-3" />Sign out
+            </Row>
+            {expiresIn && (
+              <Row label="Expires">
+                <span className="text-[13px] text-muted-foreground/40 font-mono tabular-nums">{expiresIn}</span>
+              </Row>
+            )}
+            <Row label="Sign out of this device" border={false}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2.5 text-[12px] text-red-400/60 hover:text-red-400 hover:bg-red-500/10"
+                onClick={onSignOut}
+              >
+                <LogOut className="h-3 w-3 mr-1.5" />
+                Sign out
               </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            </Row>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* ── New token reveal ── */}
       <AnimatePresence>
@@ -305,94 +309,82 @@ export function ProfileSection({
         )}
       </AnimatePresence>
 
-      {/* ── CLI Tokens card ── */}
-      <Card className="border-white/[0.06]">
-        <CardContent className="p-0">
-          <div className="flex items-center justify-between px-5 sm:px-6 py-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <Key className="h-3.5 w-3.5 text-muted-foreground/40" />
-                <h4 className="text-[13px] font-medium text-foreground">CLI Tokens</h4>
-              </div>
-              <p className="text-[11px] text-muted-foreground/30 mt-0.5 ml-[22px]">Authenticate the Crewship CLI.</p>
-            </div>
-            {!showCreateForm && (
-              <Button size="sm" variant="outline" className="h-7 gap-1.5 text-[11px] border-white/[0.08]" onClick={() => setShowCreateForm(true)}>
-                <Plus className="h-3 w-3" />New
-              </Button>
-            )}
-          </div>
-
-          {/* Create form */}
-          <AnimatePresence>
-            {showCreateForm && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                <div className="px-5 sm:px-6 pb-4 flex items-end gap-2">
-                  <Input
-                    value={tokenName} onChange={(e) => setTokenName(e.target.value)}
-                    placeholder="Token name, e.g. MacBook Pro"
-                    className="h-8 flex-1 bg-white/[0.03] border-white/[0.08] text-[12px]"
-                    onKeyDown={(e) => e.key === "Enter" && handleCreateToken()}
-                    autoFocus
-                  />
-                  <Button size="sm" className="h-8 text-[11px] gap-1" onClick={handleCreateToken} disabled={creating || !tokenName.trim()}>
-                    {creating && <Loader2 className="h-3 w-3 animate-spin" />}Create
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-8 text-[11px] text-muted-foreground/50" onClick={() => { setShowCreateForm(false); setTokenName("") }}>Cancel</Button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Token list */}
-          {tokensLoading ? (
-            <div className="px-6 pb-4 text-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground/20 mx-auto" /></div>
-          ) : tokens.length === 0 ? (
-            <div className="px-6 pb-5 text-center">
-              <p className="text-[12px] text-muted-foreground/25">No tokens yet</p>
-            </div>
-          ) : (
-            <div>
-              {activeTokens.map((token) => (
-                <div key={token.id} className="flex items-center gap-3 px-5 sm:px-6 py-2.5 border-t border-white/[0.04] hover:bg-white/[0.01] transition-colors">
-                  <Key className="h-3 w-3 text-emerald-400/50 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12px] font-medium text-foreground truncate">{token.name}</span>
-                      <span className="w-1 h-1 rounded-full bg-emerald-500 shrink-0" />
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-muted-foreground/25 font-mono flex items-center gap-1">
-                        <Clock className="h-2.5 w-2.5" />{timeAgo(token.created_at)}
-                      </span>
-                      {token.last_used_at && (
-                        <span className="text-[10px] text-muted-foreground/25 font-mono">used {timeAgo(token.last_used_at)}</span>
-                      )}
-                    </div>
-                  </div>
-                  <TooltipProvider delayDuration={0}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground/20 hover:text-red-400 hover:bg-red-500/10" onClick={() => setRevokeTarget(token)}>
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="left" className="text-xs">Revoke</TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-              ))}
-              {revokedTokens.map((token) => (
-                <div key={token.id} className="flex items-center gap-3 px-5 sm:px-6 py-2 border-t border-white/[0.04] opacity-35">
-                  <Key className="h-3 w-3 text-muted-foreground/30 shrink-0" />
-                  <span className="text-[12px] text-muted-foreground/50 line-through truncate">{token.name}</span>
-                  <span className="text-[10px] text-muted-foreground/20 font-mono ml-auto">revoked</span>
-                </div>
-              ))}
-            </div>
+      {/* ── CLI Tokens ── */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-[14px] font-medium text-foreground">CLI Tokens</h3>
+          {!showCreateForm && (
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-[11px] border-white/[0.08]" onClick={() => setShowCreateForm(true)}>
+              <Plus className="h-3 w-3" />New
+            </Button>
           )}
-        </CardContent>
-      </Card>
+        </div>
+        <Card className="border-white/[0.06]">
+          <CardContent className="p-0">
+            {/* Create form */}
+            <AnimatePresence>
+              {showCreateForm && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                  <div className="px-5 py-3.5 border-b border-white/[0.04] flex items-end gap-2">
+                    <Input
+                      value={tokenName} onChange={(e) => setTokenName(e.target.value)}
+                      placeholder="Token name, e.g. MacBook Pro"
+                      className="h-8 flex-1 bg-white/[0.03] border-white/[0.08] text-[12px]"
+                      onKeyDown={(e) => e.key === "Enter" && handleCreateToken()}
+                      autoFocus
+                    />
+                    <Button size="sm" className="h-8 text-[11px] gap-1" onClick={handleCreateToken} disabled={creating || !tokenName.trim()}>
+                      {creating && <Loader2 className="h-3 w-3 animate-spin" />}Create
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-8 text-[11px] text-muted-foreground/50" onClick={() => { setShowCreateForm(false); setTokenName("") }}>Cancel</Button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Token list */}
+            {tokensLoading ? (
+              <div className="px-5 py-6 text-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground/20 mx-auto" /></div>
+            ) : tokens.length === 0 && !showCreateForm ? (
+              <div className="px-5 py-6 text-center">
+                <p className="text-[12px] text-muted-foreground/25">No tokens yet</p>
+              </div>
+            ) : (
+              <>
+                {activeTokens.map((token) => (
+                  <Row key={token.id} label={token.name}>
+                    <span className="text-[10px] text-muted-foreground/25 font-mono flex items-center gap-1">
+                      <Clock className="h-2.5 w-2.5" />{timeAgo(token.created_at)}
+                    </span>
+                    {token.last_used_at && (
+                      <span className="text-[10px] text-muted-foreground/20 font-mono hidden sm:inline">
+                        used {timeAgo(token.last_used_at)}
+                      </span>
+                    )}
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground/20 hover:text-red-400 hover:bg-red-500/10" onClick={() => setRevokeTarget(token)}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="left" className="text-xs">Revoke</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </Row>
+                ))}
+                {revokedTokens.map((token) => (
+                  <div key={token.id} className="flex items-center justify-between px-5 py-2.5 border-b border-white/[0.04] last:border-b-0 opacity-35">
+                    <span className="text-[13px] text-muted-foreground/50 line-through">{token.name}</span>
+                    <span className="text-[10px] text-muted-foreground/20 font-mono">revoked</span>
+                  </div>
+                ))}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Revoke dialog */}
       <AlertDialog open={!!revokeTarget} onOpenChange={(open) => !open && setRevokeTarget(null)}>
