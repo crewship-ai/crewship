@@ -1,12 +1,12 @@
 "use client"
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, RefreshCw, Focus,
   FileText, PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
-  ChevronUp, ChevronDown, Play, Square, Loader2,
+  ChevronUp, ChevronDown, ChevronLeft, X, Play, Square, Loader2,
 } from "lucide-react"
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
@@ -35,6 +35,7 @@ import { MissionYamlEditor } from "@/components/features/orchestration/mission-y
 import { DockerOverview } from "@/components/features/orchestration/docker-overview"
 import type { Mission, MissionTask } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
+import { useIsMobile } from "@/hooks/use-mobile"
 
 import { toast } from "sonner"
 
@@ -100,6 +101,8 @@ export function OrchestrationLayout({
   onRefresh,
   onMissionCreated,
 }: OrchestrationLayoutProps) {
+  const isMobile = useIsMobile()
+
   // Panel state
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -116,6 +119,11 @@ export function OrchestrationLayout({
   const [a2aCrewFilter, setA2aCrewFilter] = useState<string | null>(null)
 
   const graphRef = useRef<WorkflowGraphRef>(null)
+
+  // Auto-collapse left panel on mobile
+  useEffect(() => {
+    if (isMobile) setLeftCollapsed(true)
+  }, [isMobile])
 
   // Derived data
   const filteredMissions = useMemo(() => {
@@ -279,36 +287,38 @@ export function OrchestrationLayout({
             </SelectContent>
           </Select>
 
-          {/* Inline stats / mission info */}
-          <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground">
-            {!selectedMission ? (
-              <>
-                {[
-                  { label: "Active", value: stats.active, color: "bg-blue-500", tc: stats.active > 0 ? "text-blue-400" : "" },
-                  { label: "Planning", value: stats.planning, color: "bg-purple-500", tc: stats.planning > 0 ? "text-purple-400" : "" },
-                  { label: "Done", value: stats.completed, color: "bg-green-500", tc: stats.completed > 0 ? "text-green-400" : "" },
-                  { label: "Failed", value: stats.failed, color: "bg-red-500", tc: stats.failed > 0 ? "text-red-400" : "" },
-                ].map(({ label, value, color, tc }) => (
-                  <div key={label} className="flex items-center gap-1">
-                    <div className={cn("w-1.5 h-1.5 rounded-full", color, value === 0 && "opacity-30")} />
-                    <span className={cn("tabular-nums", tc)}>{value}</span>
-                    <span className="text-muted-foreground/40 font-sans text-[10px]">{label}</span>
+          {/* Inline stats / mission info — hidden on mobile */}
+          {!isMobile && (
+            <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground">
+              {!selectedMission ? (
+                <>
+                  {[
+                    { label: "Active", value: stats.active, color: "bg-blue-500", tc: stats.active > 0 ? "text-blue-400" : "" },
+                    { label: "Planning", value: stats.planning, color: "bg-purple-500", tc: stats.planning > 0 ? "text-purple-400" : "" },
+                    { label: "Done", value: stats.completed, color: "bg-green-500", tc: stats.completed > 0 ? "text-green-400" : "" },
+                    { label: "Failed", value: stats.failed, color: "bg-red-500", tc: stats.failed > 0 ? "text-red-400" : "" },
+                  ].map(({ label, value, color, tc }) => (
+                    <div key={label} className="flex items-center gap-1">
+                      <div className={cn("w-1.5 h-1.5 rounded-full", color, value === 0 && "opacity-30")} />
+                      <span className={cn("tabular-nums", tc)}>{value}</span>
+                      <span className="text-muted-foreground/40 font-sans text-[10px]">{label}</span>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <>
+                  <span className="text-muted-foreground/50 font-sans">@{selectedMission.lead_agent_slug}</span>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-12 h-1 bg-white/[0.08] overflow-hidden rounded-full">
+                      <div className="h-full bg-blue-400 transition-all rounded-full" style={{ width: `${selectedMission.tasks?.length ? ((selectedMission.tasks.filter(t => t.status === "COMPLETED").length / selectedMission.tasks.length) * 100) : 0}%` }} />
+                    </div>
+                    <span className="tabular-nums">{selectedMission.tasks?.filter(t => t.status === "COMPLETED").length || 0}/{selectedMission.tasks?.length || 0}</span>
                   </div>
-                ))}
-              </>
-            ) : (
-              <>
-                <span className="text-muted-foreground/50 font-sans">@{selectedMission.lead_agent_slug}</span>
-                <div className="flex items-center gap-1.5">
-                  <div className="w-12 h-1 bg-white/[0.08] overflow-hidden rounded-full">
-                    <div className="h-full bg-blue-400 transition-all rounded-full" style={{ width: `${selectedMission.tasks?.length ? ((selectedMission.tasks.filter(t => t.status === "COMPLETED").length / selectedMission.tasks.length) * 100) : 0}%` }} />
-                  </div>
-                  <span className="tabular-nums">{selectedMission.tasks?.filter(t => t.status === "COMPLETED").length || 0}/{selectedMission.tasks?.length || 0}</span>
-                </div>
-                {(() => { const t = selectedMission.tasks || []; const tok = t.reduce((s, x) => s + (x.token_count || 0), 0); return tok > 0 ? <span className="tabular-nums">{(tok / 1000).toFixed(1)}k</span> : null })()}
-              </>
-            )}
-          </div>
+                  {(() => { const t = selectedMission.tasks || []; const tok = t.reduce((s, x) => s + (x.token_count || 0), 0); return tok > 0 ? <span className="tabular-nums">{(tok / 1000).toFixed(1)}k</span> : null })()}
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
@@ -325,7 +335,7 @@ export function OrchestrationLayout({
       </div>
 
       {/* ---- Row 2: Tab navigation ---- */}
-      <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3">
+      <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {([
           { id: "graph", label: "Graph", icon: Workflow },
           { id: "timeline", label: "Timeline", icon: Clock },
@@ -350,77 +360,152 @@ export function OrchestrationLayout({
 
       {/* ---- Main 3-column layout ---- */}
       <div
-        className="flex-1 min-h-0 grid transition-all duration-200"
+        className="flex-1 min-h-0 grid transition-all duration-200 relative"
         style={{
-          gridTemplateColumns: `${leftCollapsed ? "48px" : "260px"} 1fr ${showRightPanel ? "380px" : "0px"}`,
+          gridTemplateColumns: isMobile
+            ? "1fr"
+            : `${leftCollapsed ? "48px" : "260px"} 1fr ${showRightPanel ? "380px" : "0px"}`,
           gridTemplateRows: "1fr auto",
         }}
       >
         {/* ---- Left panel ---- */}
-        <div className={cn(
-          "row-span-1 border-r border-white/[0.1] bg-card flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
-        )}>
-          {/* Toggle */}
-          <div className="flex items-center justify-between px-2 py-1.5 border-b border-border shrink-0">
-            {!leftCollapsed && (
-              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Explorer
-              </span>
-            )}
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              className="text-muted-foreground/70 hover:text-foreground/70 ml-auto"
-              onClick={() => setLeftCollapsed(!leftCollapsed)}
-            >
-              {leftCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
-            </Button>
-          </div>
-
-          <AnimatePresence mode="wait">
-            {!leftCollapsed && (
-              <motion.div
-                key={selectedMissionId}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -8 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-                className="flex-1 min-h-0 flex flex-col"
+        {isMobile ? (
+          <>
+            {/* Mobile: explorer toggle button */}
+            {leftCollapsed && (
+              <button
+                className="absolute top-2 left-2 z-20 h-8 w-8 min-h-[44px] min-w-[44px] rounded-md bg-card border border-white/[0.1] flex items-center justify-center text-muted-foreground hover:text-foreground"
+                onClick={() => setLeftCollapsed(false)}
               >
-                {/* Hierarchy tree */}
-                <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
-                  <HierarchyTree
-                    crews={panelCrews}
-                    agents={panelAgents}
-                    selectedCrewId={selectedCrewId}
-                    selectedAgentSlug={selectedAgentSlug}
-                    onCrewSelect={handleCrewSelect}
-                    onAgentSelect={handleAgentSelect}
-                  />
-                </div>
-
-                {/* Unified Inbox */}
-                <div className="border-b border-border flex-1 min-h-0 flex flex-col">
-                  <UnifiedInbox
-                    missions={panelMissions}
-                    onTaskSelect={handleInboxTaskSelect}
-                  />
-                </div>
-
-                {/* Connection Map */}
-                <div className="p-2 shrink-0">
-                  <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
-                    Connections
-                  </div>
-                  <ConnectionMap
-                    crews={panelCrews}
-                    connections={panelConnections}
-                  />
-                </div>
-              </motion.div>
+                <PanelLeftOpen className="h-3.5 w-3.5" />
+              </button>
             )}
-          </AnimatePresence>
-        </div>
+            {/* Mobile: overlay panel */}
+            <AnimatePresence>
+              {!leftCollapsed && (
+                <>
+                  <motion.div
+                    className="fixed inset-0 bg-black/50 z-30"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    onClick={() => setLeftCollapsed(true)}
+                  />
+                  <motion.div
+                    className="fixed left-0 top-0 bottom-0 w-[280px] z-40 bg-card border-r border-white/[0.1] flex flex-col"
+                    initial={{ x: -280 }}
+                    animate={{ x: 0 }}
+                    exit={{ x: -280 }}
+                    transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                  >
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-white/[0.1]">
+                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Explorer</span>
+                      <button
+                        onClick={() => setLeftCollapsed(true)}
+                        className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="flex-1 min-h-0 flex flex-col">
+                      <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
+                        <HierarchyTree
+                          crews={panelCrews}
+                          agents={panelAgents}
+                          selectedCrewId={selectedCrewId}
+                          selectedAgentSlug={selectedAgentSlug}
+                          onCrewSelect={handleCrewSelect}
+                          onAgentSelect={handleAgentSelect}
+                        />
+                      </div>
+                      <div className="border-b border-border flex-1 min-h-0 flex flex-col">
+                        <UnifiedInbox
+                          missions={panelMissions}
+                          onTaskSelect={handleInboxTaskSelect}
+                        />
+                      </div>
+                      <div className="p-2 shrink-0">
+                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
+                          Connections
+                        </div>
+                        <ConnectionMap
+                          crews={panelCrews}
+                          connections={panelConnections}
+                        />
+                      </div>
+                    </div>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </>
+        ) : (
+          /* Desktop: grid column left panel */
+          <div className={cn(
+            "row-span-1 border-r border-white/[0.1] bg-card flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
+          )}>
+            {/* Toggle */}
+            <div className="flex items-center justify-between px-2 py-1.5 border-b border-border shrink-0">
+              {!leftCollapsed && (
+                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  Explorer
+                </span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground/70 hover:text-foreground/70 ml-auto"
+                onClick={() => setLeftCollapsed(!leftCollapsed)}
+              >
+                {leftCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
+              </Button>
+            </div>
+
+            <AnimatePresence mode="wait">
+              {!leftCollapsed && (
+                <motion.div
+                  key={selectedMissionId}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -8 }}
+                  transition={{ duration: 0.2, ease: "easeOut" }}
+                  className="flex-1 min-h-0 flex flex-col"
+                >
+                  {/* Hierarchy tree */}
+                  <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
+                    <HierarchyTree
+                      crews={panelCrews}
+                      agents={panelAgents}
+                      selectedCrewId={selectedCrewId}
+                      selectedAgentSlug={selectedAgentSlug}
+                      onCrewSelect={handleCrewSelect}
+                      onAgentSelect={handleAgentSelect}
+                    />
+                  </div>
+
+                  {/* Unified Inbox */}
+                  <div className="border-b border-border flex-1 min-h-0 flex flex-col">
+                    <UnifiedInbox
+                      missions={panelMissions}
+                      onTaskSelect={handleInboxTaskSelect}
+                    />
+                  </div>
+
+                  {/* Connection Map */}
+                  <div className="p-2 shrink-0">
+                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
+                      Connections
+                    </div>
+                    <ConnectionMap
+                      crews={panelCrews}
+                      connections={panelConnections}
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
 
         {/* ---- Center content area ---- */}
         <div className="row-span-1 relative overflow-hidden min-h-0">
@@ -463,32 +548,59 @@ export function OrchestrationLayout({
         </div>
 
         {/* ---- Right panel ---- */}
-        <div className={cn(
-          "row-span-1 transition-all duration-200 overflow-hidden min-h-0",
-          showRightPanel ? "w-[380px]" : "w-0",
-        )}>
-          <AnimatePresence mode="wait">
+        {isMobile ? (
+          <AnimatePresence>
             {showRightPanel && (
               <motion.div
-                key={detailContext.type === "task" ? `task-${(detailContext as { task: MissionTask }).task.id}` : detailContext.type}
-                initial={{ opacity: 0, x: 12 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 12 }}
-                transition={{ duration: 0.15, ease: "easeOut" }}
-                className="h-full"
+                className="fixed inset-0 z-40 bg-card flex flex-col"
+                initial={{ x: "100%" }}
+                animate={{ x: 0 }}
+                exit={{ x: "100%" }}
+                transition={{ type: "spring", damping: 25, stiffness: 300 }}
               >
-                <ContextDetailPanel
-                  context={detailContext}
-                  onClose={handleDetailClose}
-                />
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.1] shrink-0">
+                  <button
+                    onClick={handleDetailClose}
+                    className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Detail</span>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  <ContextDetailPanel context={detailContext} onClose={handleDetailClose} />
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
+        ) : (
+          <div className={cn(
+            "row-span-1 transition-all duration-200 overflow-hidden min-h-0",
+            showRightPanel ? "w-[380px]" : "w-0",
+          )}>
+            <AnimatePresence mode="wait">
+              {showRightPanel && (
+                <motion.div
+                  key={detailContext.type === "task" ? `task-${(detailContext as { task: MissionTask }).task.id}` : detailContext.type}
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 12 }}
+                  transition={{ duration: 0.15, ease: "easeOut" }}
+                  className="h-full"
+                >
+                  <ContextDetailPanel
+                    context={detailContext}
+                    onClose={handleDetailClose}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
 
         {/* ---- Bottom drawer ---- */}
         <motion.div
-          className="col-span-3 border-t border-white/[0.1] bg-card flex flex-col overflow-hidden"
+          className={cn("border-t border-white/[0.1] bg-card flex flex-col overflow-hidden", isMobile ? "col-span-1" : "col-span-3")}
           animate={{ height: drawerOpen ? 240 : 32 }}
           transition={{ duration: 0.2, ease: "easeInOut" }}
         >
@@ -519,7 +631,7 @@ export function OrchestrationLayout({
                 }}
               >
                 <Icon className="h-3 w-3" />
-                {label}
+                {!isMobile && label}
               </button>
             ))}
 
