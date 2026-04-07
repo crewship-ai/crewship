@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import {
-  Search, BookOpen, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
+  Search, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
   LayoutDashboard, Bot, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck,
 } from "lucide-react"
 import { BellIcon as AnimatedBell } from "@/components/ui/bell"
@@ -227,43 +227,18 @@ export function AppToolbar() {
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-white/[0.1]">
-      {/* Left: Org switcher + breadcrumb */}
+      {/* Left: breadcrumb only */}
       <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-1.5 rounded-md px-1.5 py-1 hover:bg-accent transition-colors shrink-0">
-              <div className="flex h-5 w-5 items-center justify-center rounded bg-primary text-[8px] font-bold text-primary-foreground">U</div>
-              <span className="text-sm font-medium hidden sm:inline">Unify Technology</span>
-              <ChevronDown className="h-3 w-3 text-muted-foreground" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-72">
-            <DropdownMenuLabel className="text-micro uppercase tracking-wider text-muted-foreground font-medium">Workspaces</DropdownMenuLabel>
-            <DropdownMenuItem className="flex items-center gap-3 py-2 bg-primary/5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-micro font-bold text-primary-foreground shrink-0">U</div>
-              <div className="min-w-0">
-                <div className="text-xs font-medium">Unify Technology</div>
-                <div className="text-micro text-muted-foreground">3 members</div>
-              </div>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-xs">Create workspace</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
-
         {renderBreadcrumbs()}
       </div>
 
-      {/* Right: Status indicators + search + help + notifications + user */}
+      {/* Right: Status indicators + search + notifications */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
         {/* Status indicators: System + Fleet + Escalations */}
         {(() => {
           const systemOnline = engineStatus === "connected" && wsStatus === "connected"
           const systemChecking = engineStatus === "checking" || wsStatus === "connecting"
 
-          // Fleet display logic (scales to 1000+ agents)
           let fleetLabel = ""
           let fleetColor: "emerald" | "amber" | "red" | "muted" = "muted"
           if (!fleetStatus) {
@@ -298,7 +273,6 @@ export function AppToolbar() {
 
           return (
             <div className="hidden lg:flex items-center gap-1.5 mr-1">
-              {/* System: combined engine + WS */}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div tabIndex={0} role="status" aria-label={`System ${systemOnline ? "online" : systemChecking ? "connecting" : "offline"}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
@@ -313,7 +287,6 @@ export function AppToolbar() {
                 </TooltipContent>
               </Tooltip>
 
-              {/* Fleet status */}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div tabIndex={0} role="status" aria-label={`Fleet: ${fleetLabel}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${fleetColors.bg}`}>
@@ -326,7 +299,6 @@ export function AppToolbar() {
                 </TooltipContent>
               </Tooltip>
 
-              {/* Pending escalations */}
               {pendingEscalations > 0 && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -358,10 +330,6 @@ export function AppToolbar() {
         {/* Mobile: search icon only */}
         <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" aria-label="Search" onClick={() => setCmdkOpen(true)}>
           <Search className="h-4 w-4" />
-        </Button>
-
-        <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:inline-flex" aria-label="Help">
-          <BookOpen className="h-4 w-4" />
         </Button>
 
         {/* Desktop: notifications */}
@@ -397,54 +365,6 @@ export function AppToolbar() {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Desktop: user menu */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="hidden md:flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent transition-colors" aria-label="User menu">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-micro font-semibold text-primary-foreground">{userInitials}</div>
-              <span className="text-xs font-medium hidden sm:inline">{userName.split(" ")[0]}</span>
-              <ChevronDown className="h-3 w-3 text-muted-foreground hidden sm:block" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64">
-            <div className="px-2 py-3">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">{userInitials}</div>
-                <div>
-                  <div className="text-sm font-medium">{userName}</div>
-                  <div className="text-xs text-muted-foreground">{userEmail}</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 mt-2">
-                <Badge variant="outline" className="text-micro px-1.5 py-0.5">Owner</Badge>
-                <span className="text-micro text-muted-foreground">Unify Technology</span>
-              </div>
-            </div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="gap-3 text-xs">
-              <User className="h-4 w-4 text-muted-foreground" />
-              Profile & Settings
-            </DropdownMenuItem>
-            <DropdownMenuItem className="gap-3 text-xs">
-              <HelpCircle className="h-4 w-4 text-muted-foreground" />
-              Help & Support
-            </DropdownMenuItem>
-            <DropdownMenuItem className="gap-3 text-xs">
-              <BookOpen className="h-4 w-4 text-muted-foreground" />
-              Documentation
-            </DropdownMenuItem>
-            <DropdownMenuItem className="gap-3 text-xs">
-              <GitBranch className="h-4 w-4 text-muted-foreground" />
-              GitHub
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="gap-3 text-xs text-destructive" onClick={() => { signOut().then(() => window.location.href = "/login") }}>
-              <LogOut className="h-4 w-4" />
-              Log out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
         {/* Mobile: hamburger for main navigation */}
         <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" aria-label="Navigation" onClick={() => setMobileNavOpen(true)}>
           <Menu className="h-4 w-4" />
@@ -460,7 +380,7 @@ export function AppToolbar() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="flex h-6 w-6 items-center justify-center rounded bg-primary text-[8px] font-bold text-primary-foreground">U</div>
-                  <SheetTitle className="text-sm">Crewship</SheetTitle>
+                  <SheetTitle className="text-sm">Unify Technology</SheetTitle>
                 </div>
                 <button onClick={() => setMobileNavOpen(false)} className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent">
                   <X className="h-4 w-4" />

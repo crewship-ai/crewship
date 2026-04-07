@@ -17,8 +17,25 @@ import {
   ShieldCheck,
   PanelLeftClose,
   PanelLeftOpen,
+  ChevronDown,
+  LogOut,
+  User,
+  HelpCircle,
+  BookOpen,
+  GitBranch,
 } from "lucide-react"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useAuth } from "@/hooks/use-auth"
+import { useWorkspace } from "@/hooks/use-workspace"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Badge } from "@/components/ui/badge"
 import {
   Sidebar,
   SidebarContent,
@@ -34,19 +51,6 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar"
-
-function CrewshipLogo({ className }: { className?: string }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="190 190 710 470" fill="currentColor" className={className}>
-      <path d="M415.978 643.199C394.751 639.37 373.822 636.562 352.809 634.248C326.436 631.343 300.012 630.21 273.515 631.406C263.713 631.849 253.913 632.739 244.168 633.893C239.955 634.391 237.319 633.559 235.22 629.676C224.052 609.02 212.738 588.443 201.35 567.907C199.583 564.721 200.982 563.48 203.587 562.185C226.108 550.996 248.47 539.478 271.138 528.598C298.76 515.341 326.551 502.431 354.416 489.692C394.25 471.482 434.623 454.51 475.028 437.605C507.907 423.849 540.95 410.503 574.136 397.523C616.157 381.088 658.373 365.15 700.791 349.753C744.302 333.958 788.135 319.103 832.028 304.417C833.744 303.843 835.42 302.991 837.634 303.468C839.113 307.377 837.499 311.253 836.777 315.001C828.73 356.781 816.766 397.458 801.3 437.066C777.028 499.226 745.989 557.845 707.705 612.526C686.991 642.111 657.919 658.481 622.564 664.132C594.192 668.667 565.861 667.057 537.461 663.855C497.035 659.297 457.441 650.052 417.401 643.34C417.073 643.285 416.738 643.277 415.978 643.199Z"/>
-      <path d="M728.188 262.76C703.625 254.267 680.124 258.582 656.967 266.862C625.892 277.974 597.672 294.807 569.338 311.347C521.729 339.139 474.066 366.844 426.688 395.025C369.294 429.164 311.637 462.867 254.835 497.994C253.592 498.763 252.422 499.72 250.573 499.502C250.396 497.212 252.262 496.694 253.461 495.846C287.741 471.618 322 447.36 356.362 423.247C389.086 400.284 421.773 377.262 454.743 354.655C502.543 321.88 549.921 288.454 599.308 258.065C622.648 243.703 647.852 233.693 674.993 229.428C698.681 225.706 721.961 227.037 743.271 239.612C762.439 250.921 773.646 268.003 778.308 289.619C779.338 294.391 776.38 295.691 772.893 296.997C747.631 306.454 722.301 315.735 697.158 325.5C644.849 345.815 592.927 367.085 541.247 388.959C501.372 405.837 461.747 423.282 422.406 441.343C373.221 463.923 324.133 486.737 276.278 512.081C274.592 512.974 273.051 514.483 270.512 514.056C270.876 511.886 272.662 511.261 274.089 510.4C316.881 484.61 359.763 458.969 402.459 433.021C441.175 409.492 479.651 385.569 518.304 361.935C557.099 338.212 595.321 313.536 634.763 290.893C654.867 279.352 675.696 269.105 698.993 265.453C712.707 263.303 726.159 264.624 739.325 269.333C736.171 266.399 732.395 264.591 728.188 262.76Z"/>
-      <path d="M751.552 610.568C737.523 622.541 723.215 633.553 707.613 643.331C784.582 542.455 840.563 431.781 866.885 306.227C871.06 310.299 872.186 314.584 873.577 318.527C881.988 342.369 885.182 366.89 883.669 392.195C880.764 440.786 860.888 482.753 833.742 521.881C810.625 555.201 782.686 584.147 751.552 610.568Z"/>
-      <path d="M524.435 274.458C511.05 283.712 497.965 292.764 485.115 301.653C482.273 299.819 482.97 297.624 482.96 295.754C482.851 275.938 483.065 256.117 482.636 236.309C482.47 228.674 485.609 223.273 490.979 218.559C503.715 207.377 519.078 202.333 535.409 199.732C544.66 198.259 553.968 197.751 563.035 201.035C570.113 203.598 571.837 206.029 571.926 213.603C572.013 220.93 571.907 228.261 572.13 235.582C572.259 239.833 570.72 242.81 567.175 245.205C552.97 254.802 538.872 264.559 524.435 274.458Z"/>
-      <path d="M459.217 252.112C462.131 250.598 464.568 247.034 467.325 248.389C470.516 249.959 468.986 254.1 469.012 257.119C469.151 273.78 469.015 290.444 469.22 307.103C469.275 311.59 467.813 314.635 463.955 316.994C459.173 319.92 454.673 323.307 450.412 326.246C448.294 325.349 448.482 324.125 448.471 322.97C448.324 307.315 448.62 291.638 447.864 276.012C447.369 265.791 451.018 258.256 459.217 252.112Z"/>
-      <path d="M423.754 345.805C420.695 347.693 418.516 350.427 415.142 350.942C413.218 349.425 413.769 347.457 413.747 345.72C413.61 334.905 413.504 324.089 413.482 313.273C413.461 302.901 422.979 291.335 432.407 290.184C433.728 291.322 433.332 292.904 433.36 294.339C433.599 306.314 433.549 318.301 434.128 330.259C434.409 336.046 433.105 340.319 427.599 342.864C426.276 343.476 425.217 344.66 423.754 345.805Z"/>
-    </svg>
-  )
-}
 
 const navSections = [
   {
@@ -83,24 +87,63 @@ const navSections = [
   },
 ]
 
+function getInitials(name: string): string {
+  if (!name.trim()) return "?"
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase()
+}
+
 export function AppSidebar() {
   const pathname = usePathname()
   const { role } = useAbilities()
   const { toggleSidebar, state } = useSidebar()
+  const { session, signOut } = useAuth()
+  const { role: wsRole } = useWorkspace()
+
+  const userName = session?.user?.name ?? "User"
+  const userEmail = session?.user?.email ?? ""
+  const userInitials = getInitials(userName)
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">
+      {/* Workspace switcher (replaces Crewship logo) */}
       <SidebarHeader className="p-2">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild tooltip="Crewship">
-              <Link href="/">
-                <CrewshipLogo className="size-5 shrink-0" />
-                <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                  <span className="truncate font-semibold">Crewship</span>
-                </div>
-              </Link>
-            </SidebarMenuButton>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton size="lg" tooltip="Unify Technology">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-[9px] font-bold text-primary-foreground shrink-0">
+                    U
+                  </div>
+                  <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+                    <span className="truncate font-semibold text-[13px]">Unify Technology</span>
+                    <span className="truncate text-[10px] text-muted-foreground">3 members</span>
+                  </div>
+                  <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0 group-data-[collapsible=icon]:hidden" />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="bottom" className="w-72">
+                <DropdownMenuLabel className="text-micro uppercase tracking-wider text-muted-foreground font-medium">
+                  Workspaces
+                </DropdownMenuLabel>
+                <DropdownMenuItem className="flex items-center gap-3 py-2 bg-primary/5">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-micro font-bold text-primary-foreground shrink-0">
+                    U
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium">Unify Technology</div>
+                    <div className="text-micro text-muted-foreground">3 members</div>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="text-xs">Create workspace</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
@@ -162,8 +205,78 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
+      {/* User menu + collapse toggle */}
       <SidebarFooter className="p-2">
         <SidebarMenu>
+          {/* User dropdown */}
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton size="lg" tooltip={userName}>
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[9px] font-semibold text-primary-foreground shrink-0">
+                    {userInitials}
+                  </div>
+                  <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+                    <span className="truncate font-medium text-[12px]">{userName}</span>
+                    <span className="truncate text-[10px] text-muted-foreground">{userEmail}</span>
+                  </div>
+                  <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0 group-data-[collapsible=icon]:hidden" />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="top" className="w-64">
+                <div className="px-2 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+                      {userInitials}
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium">{userName}</div>
+                      <div className="text-xs text-muted-foreground">{userEmail}</div>
+                    </div>
+                  </div>
+                  {wsRole && (
+                    <div className="flex items-center gap-1.5 mt-2">
+                      <Badge variant="outline" className="text-micro px-1.5 py-0.5">{wsRole}</Badge>
+                      <span className="text-micro text-muted-foreground">Unify Technology</span>
+                    </div>
+                  )}
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem asChild className="gap-3 text-xs">
+                  <Link href="/settings">
+                    <User className="h-4 w-4 text-muted-foreground" />
+                    Profile & Settings
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem className="gap-3 text-xs">
+                  <HelpCircle className="h-4 w-4 text-muted-foreground" />
+                  Help & Support
+                </DropdownMenuItem>
+                <DropdownMenuItem className="gap-3 text-xs">
+                  <BookOpen className="h-4 w-4 text-muted-foreground" />
+                  Documentation
+                </DropdownMenuItem>
+                <DropdownMenuItem className="gap-3 text-xs">
+                  <GitBranch className="h-4 w-4 text-muted-foreground" />
+                  GitHub
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="gap-3 text-xs text-destructive"
+                  onClick={() => {
+                    signOut().then(() => {
+                      window.location.href = "/login"
+                    })
+                  }}
+                >
+                  <LogOut className="h-4 w-4" />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+
+          {/* Collapse toggle */}
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={toggleSidebar}
