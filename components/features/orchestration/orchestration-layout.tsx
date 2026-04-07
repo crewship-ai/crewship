@@ -8,7 +8,7 @@ import {
   MessageSquare, Terminal, FileCode2, Container,
   ChevronUp, ChevronDown,
 } from "lucide-react"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+// Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
 import {
   Select,
@@ -186,33 +186,35 @@ export function OrchestrationLayout({
   const showRightPanel = detailContext.type !== "none"
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)] bg-[#0a0c10]">
+    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {/* ---- Top toolbar ---- */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-blue-500/10 bg-gradient-to-r from-[#0d1117] via-[#0d1420] to-[#0d1117] backdrop-blur-sm shrink-0 z-20">
+      <div className="flex items-center justify-between px-4 py-1.5 border-b border-border bg-sidebar backdrop-blur-sm shrink-0 z-20">
         <div className="flex items-center gap-3">
-          <h1 className="text-sm font-semibold text-white/80">Orchestration</h1>
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="h-7">
-              <TabsTrigger value="graph" className="text-xs h-6 px-2.5 gap-1">
-                <Workflow className="h-3 w-3" /> Graph
-              </TabsTrigger>
-              <TabsTrigger value="timeline" className="text-xs h-6 px-2.5 gap-1">
-                <Clock className="h-3 w-3" /> Timeline
-              </TabsTrigger>
-              <TabsTrigger value="activity" className="text-xs h-6 px-2.5 gap-1">
-                <Activity className="h-3 w-3" /> Activity
-              </TabsTrigger>
-              <TabsTrigger value="templates" className="text-xs h-6 px-2.5 gap-1">
-                <LayoutTemplate className="h-3 w-3" /> Templates
-              </TabsTrigger>
-              <TabsTrigger value="proposals" className="text-xs h-6 px-2.5 gap-1">
-                <FileText className="h-3 w-3" /> Proposals
-              </TabsTrigger>
-              <TabsTrigger value="connections" className="text-xs h-6 px-2.5 gap-1">
-                <Settings2 className="h-3 w-3" /> Connections
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <h1 className="text-sm font-semibold text-foreground/80">Orchestration</h1>
+          <nav className="flex items-center gap-0.5 bg-accent/50 rounded-lg p-0.5">
+            {([
+              { id: "graph", label: "Graph", icon: Workflow },
+              { id: "timeline", label: "Timeline", icon: Clock },
+              { id: "activity", label: "Activity", icon: Activity },
+              { id: "templates", label: "Templates", icon: LayoutTemplate },
+              { id: "proposals", label: "Proposals", icon: FileText },
+              { id: "connections", label: "Connections", icon: Settings2 },
+            ] as const).map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-150",
+                  activeTab === id
+                    ? "bg-primary/15 text-primary shadow-sm"
+                    : "text-muted-foreground hover:text-foreground/70 hover:bg-accent",
+                )}
+              >
+                <Icon className="h-3 w-3" />
+                {label}
+              </button>
+            ))}
+          </nav>
         </div>
 
         <div className="flex items-center gap-2">
@@ -270,10 +272,10 @@ export function OrchestrationLayout({
       >
         {/* ---- Left panel ---- */}
         <div className={cn(
-          "row-span-1 border-r border-blue-500/10 bg-[#0d1117] flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
+          "row-span-1 border-r border-border bg-sidebar flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
         )}>
           {/* Toggle */}
-          <div className="flex items-center justify-between px-2 py-1.5 border-b border-blue-900/20 shrink-0">
+          <div className="flex items-center justify-between px-2 py-1.5 border-b border-border shrink-0">
             {!leftCollapsed && (
               <span className="text-[10px] font-semibold text-white/40 uppercase tracking-wider">
                 Explorer
@@ -300,7 +302,7 @@ export function OrchestrationLayout({
                 className="flex-1 min-h-0 flex flex-col"
               >
                 {/* Hierarchy tree */}
-                <div className="border-b border-blue-900/20 shrink-0 max-h-[40%] overflow-y-auto">
+                <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
                   <HierarchyTree
                     crews={panelCrews}
                     agents={panelAgents}
@@ -312,7 +314,7 @@ export function OrchestrationLayout({
                 </div>
 
                 {/* Unified Inbox */}
-                <div className="border-b border-blue-900/20 flex-1 min-h-0 flex flex-col">
+                <div className="border-b border-border flex-1 min-h-0 flex flex-col">
                   <UnifiedInbox
                     missions={panelMissions}
                     onTaskSelect={handleInboxTaskSelect}
@@ -359,7 +361,7 @@ export function OrchestrationLayout({
                     key={key}
                     className={cn(
                       "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
-                      "bg-[#0d0f14]/90 backdrop-blur-sm border border-blue-900/20",
+                      "bg-[#0d0f14]/90 backdrop-blur-sm border border-border",
                       "transition-all cursor-default",
                       value > 0 && color === "blue" && "border-blue-500/30 text-blue-400",
                       value > 0 && color === "green" && "border-green-500/30 text-green-400",
@@ -442,7 +444,7 @@ export function OrchestrationLayout({
 
         {/* ---- Bottom drawer ---- */}
         <motion.div
-          className="col-span-3 border-t border-blue-500/10 bg-[#0d1117] flex flex-col overflow-hidden"
+          className="col-span-3 border-t border-border bg-sidebar flex flex-col overflow-hidden"
           animate={{ height: drawerOpen ? 240 : 32 }}
           transition={{ duration: 0.2, ease: "easeInOut" }}
         >
@@ -501,7 +503,7 @@ export function OrchestrationLayout({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 8 }}
                 transition={{ duration: 0.15 }}
-                className="flex-1 min-h-0 border-t border-blue-900/20"
+                className="flex-1 min-h-0 border-t border-border"
               >
                 {drawerTab === "messages" && (
                   <A2AMessageStream
