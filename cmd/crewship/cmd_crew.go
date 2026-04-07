@@ -268,11 +268,7 @@ var crewUpdateCmd = &cobra.Command{
 		}
 		if flags.Changed("ttl") {
 			v, _ := flags.GetInt("ttl")
-			if v == 0 {
-				body["container_ttl_hours"] = nil
-			} else {
-				body["container_ttl_hours"] = v
-			}
+			body["container_ttl_hours"] = v // 0 = clear TTL on server side
 		}
 		if flags.Changed("network-mode") {
 			v, _ := flags.GetString("network-mode")
