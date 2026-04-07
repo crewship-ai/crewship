@@ -101,7 +101,7 @@ function TaskDetail({ task, mission, allTasks, onAction }: {
   const deps = parseDependsOn(task.depends_on)
   const blockedBy = deps.map(id => allTasks.find(t => t.id === id)).filter(Boolean) as MissionTask[]
   const blocks = allTasks.filter(t => parseDependsOn(t.depends_on).includes(task.id))
-  const budgetPct = task.token_budget != null && task.tokens_used != null ? Math.round((task.tokens_used / task.token_budget) * 100) : null
+  const budgetPct = task.token_budget != null && task.token_budget > 0 && task.tokens_used != null ? Math.min(100, Math.round((task.tokens_used / task.token_budget) * 100)) : null
 
   return (
     <div className="space-y-4">

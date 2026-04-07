@@ -66,7 +66,7 @@ export function A2AMessageStream({ messages, crewFilter, onFilterChange }: A2AMe
     if (autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = 0
     }
-  }, [messages.length, autoScroll])
+  }, [messages.length, autoScroll, crewFilter])
 
   if (messages.length === 0) {
     return (
@@ -98,6 +98,7 @@ export function A2AMessageStream({ messages, crewFilter, onFilterChange }: A2AMe
             size="icon-xs"
             onClick={() => setAutoScroll(!autoScroll)}
             title={autoScroll ? "Auto-scroll on" : "Auto-scroll off"}
+            aria-label={autoScroll ? "Disable auto-scroll" : "Enable auto-scroll"}
           >
             <ArrowDown className="size-3" />
           </Button>
