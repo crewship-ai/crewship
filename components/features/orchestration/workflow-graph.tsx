@@ -334,6 +334,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
   // Cross-crew dependency edges (tasks in different crews)
   // Collect all visible node IDs to skip edges to/from collapsed crews
   const visibleNodeIds = new Set(nodes.map((n) => n.id))
+  let crossEdgeIdx = 0
 
   for (const mission of activeMissions) {
     const tasks = mission.tasks || []
@@ -349,10 +350,15 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
           if (!visibleNodeIds.has(task.id) || !visibleNodeIds.has(depId)) continue
 
           const edgeColor = "#a855f7" // purple for cross-crew
+          // Offset curvature to prevent overlapping bezier curves
+          const curvatureOffset = 0.2 + crossEdgeIdx * 0.15
+          crossEdgeIdx++
           edges.push({
             id: `e-cross-${depId}-${task.id}`,
             source: depId,
             target: task.id,
+            sourceHandle: null,
+            targetHandle: null,
             type: "animated",
             data: { color: edgeColor, active: task.status === "IN_PROGRESS" },
             style: { strokeWidth: 2 },
@@ -362,7 +368,8 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
               width: 14,
               height: 14,
             },
-          })
+            pathOptions: { curvature: curvatureOffset },
+          } as Edge)
         }
       }
     }
@@ -595,10 +602,32 @@ function WorkflowGraphInner(
   const { fitView, setCenter } = useReactFlow()
   const prevDataRef = useRef(graphData)
 
+  // Track user-dragged node positions so polling doesn't reset them
+  const userPositions = useRef(new Map<string, { x: number; y: number }>())
+
+  const onNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
+    userPositions.current.set(node.id, { ...node.position })
+  }, [])
+
   useEffect(() => {
     if (prevDataRef.current === graphData) return
     prevDataRef.current = graphData
-    setNodes(graphData.nodes)
+
+    // Merge: update data but preserve user-dragged positions
+    setNodes((prev) => {
+      const prevMap = new Map(prev.map((n) => [n.id, n]))
+      return graphData.nodes.map((newNode) => {
+        const userPos = userPositions.current.get(newNode.id)
+        if (userPos) {
+          return { ...newNode, position: userPos }
+        }
+        const existing = prevMap.get(newNode.id)
+        if (existing) {
+          return { ...newNode, position: existing.position }
+        }
+        return newNode
+      })
+    })
     setEdges(graphData.edges)
   }, [graphData, setNodes, setEdges])
 
@@ -748,6 +777,7 @@ function WorkflowGraphInner(
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeClick={onNodeClick}
+          onNodeDragStop={onNodeDragStop}
           onPaneClick={onPaneClick}
           fitView
           fitViewOptions={{ padding: 0.3 }}

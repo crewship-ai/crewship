@@ -274,7 +274,7 @@ export function OrchestrationLayout({
                 </div>
 
                 {/* Unified Inbox */}
-                <div className="border-b border-white/[0.06] max-h-[280px]">
+                <div className="border-b border-white/[0.06] max-h-[280px] overflow-hidden flex flex-col">
                   <UnifiedInbox
                     missions={missions}
                     onTaskSelect={handleInboxTaskSelect}
