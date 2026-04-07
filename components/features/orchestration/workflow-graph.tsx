@@ -276,7 +276,7 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
 
   // ---- LEVEL 2: Layout crew groups using dagre ----
   const crewG = new DagreGraph()
-  crewG.setGraph({ rankdir: "LR", ranksep: 120, nodesep: 80 })
+  crewG.setGraph({ rankdir: "LR", ranksep: 160, nodesep: 100 })
   crewG.setDefaultEdgeLabel(() => ({}))
 
   for (const crewId of sortedCrewIds) {
@@ -669,27 +669,40 @@ function WorkflowGraphInner(
     userPositions.current.set(node.id, { ...node.position })
   }, [])
 
+  const prevNodeIdsRef = useRef<string>("")
+
   useEffect(() => {
     if (prevDataRef.current === graphData) return
     prevDataRef.current = graphData
 
-    // Merge: update data but preserve user-dragged positions
+    // Detect if this is a mission switch (node IDs changed significantly)
+    const newNodeIds = graphData.nodes.map((n) => n.id).sort().join(",")
+    const isMissionSwitch = prevNodeIdsRef.current !== "" && prevNodeIdsRef.current !== newNodeIds
+    prevNodeIdsRef.current = newNodeIds
+
+    if (isMissionSwitch) {
+      // Mission changed — clear user positions and use fresh layout
+      userPositions.current.clear()
+      setNodes(graphData.nodes)
+      setEdges(graphData.edges)
+      // Animate zoom to fit new mission
+      setTimeout(() => fitView({ duration: 500, padding: 0.25 }), 50)
+      return
+    }
+
+    // Polling update — preserve user-dragged positions
     setNodes((prev) => {
       const prevMap = new Map(prev.map((n) => [n.id, n]))
       return graphData.nodes.map((newNode) => {
         const userPos = userPositions.current.get(newNode.id)
-        if (userPos) {
-          return { ...newNode, position: userPos }
-        }
+        if (userPos) return { ...newNode, position: userPos }
         const existing = prevMap.get(newNode.id)
-        if (existing) {
-          return { ...newNode, position: existing.position }
-        }
+        if (existing) return { ...newNode, position: existing.position }
         return newNode
       })
     })
     setEdges(graphData.edges)
-  }, [graphData, setNodes, setEdges])
+  }, [graphData, setNodes, setEdges, fitView])
 
   // Inject activity snippets into agent nodes
   useEffect(() => {
