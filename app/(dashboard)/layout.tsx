@@ -24,14 +24,15 @@ export default function DashboardLayout({
 
   useEffect(() => {
     if (status === "unauthenticated") {
-      router.push("/login")
+      // Immediate redirect — no spinner, no delay
+      window.location.replace("/login")
     }
-  }, [status, router])
+  }, [status])
 
   if (status === "loading" || status === "unauthenticated") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/40" />
       </div>
     )
   }
