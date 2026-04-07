@@ -24,6 +24,12 @@ const iconMap: Record<string, React.ElementType> = {
   "git-merge": GitMerge,
 }
 
+const stepColors = {
+  default: { fill: "#3b82f6", border: "#2563eb", text: "#93c5fd" },
+  loop: { fill: "#10b981", border: "#059669", text: "#6ee7b7" },
+  lead: { fill: "#8b5cf6", border: "#7c3aed", text: "#c4b5fd" },
+}
+
 function TemplateMiniGraph({ steps }: { steps: TemplateDefinition["steps"] }) {
   if (steps.length === 0) return null
 
@@ -48,69 +54,103 @@ function TemplateMiniGraph({ steps }: { steps: TemplateDefinition["steps"] }) {
 
   const maxLevel = Math.max(...levels.values(), 0)
   const nodePositions = new Map<string, { x: number; y: number }>()
-  const colWidth = 80
-  const rowHeight = 30
-  const nodeR = 8
+  const nodeW = 64
+  const nodeH = 24
+  const colGap = 32
+  const rowGap = 8
 
   for (const [level, groupSteps] of levelGroups) {
     groupSteps.forEach((step, idx) => {
       nodePositions.set(step.id, {
-        x: 20 + level * colWidth,
-        y: 15 + idx * rowHeight,
+        x: 8 + level * (nodeW + colGap),
+        y: 8 + idx * (nodeH + rowGap),
       })
     })
   }
 
   const maxRows = Math.max(...[...levelGroups.values()].map((g) => g.length))
-  const svgW = 40 + (maxLevel + 1) * colWidth
-  const svgH = Math.max(40, maxRows * rowHeight + 10)
+  const svgW = 16 + (maxLevel + 1) * (nodeW + colGap)
+  const svgH = Math.max(40, 16 + maxRows * (nodeH + rowGap))
 
   return (
     <svg width="100%" height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="overflow-visible">
+      <defs>
+        <marker id="tmpl-arrow" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto">
+          <path d="M0,0 L6,2 L0,4" fill="#3b82f6" opacity="0.6" />
+        </marker>
+      </defs>
+
+      {/* Edges */}
       {steps.flatMap((step) =>
         (step.depends_on || []).map((depId) => {
           const from = nodePositions.get(depId)
           const to = nodePositions.get(step.id)
           if (!from || !to) return null
+          const x1 = from.x + nodeW
+          const y1 = from.y + nodeH / 2
+          const x2 = to.x
+          const y2 = to.y + nodeH / 2
+          const mx = (x1 + x2) / 2
           return (
-            <line
-              key={`${depId}-${step.id}`}
-              x1={from.x + nodeR} y1={from.y}
-              x2={to.x - nodeR} y2={to.y}
-              stroke="hsl(var(--border))"
+            <path
+              key={`e-${depId}-${step.id}`}
+              d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
+              fill="none"
+              stroke="#3b82f6"
               strokeWidth={1.5}
-              markerEnd="url(#mini-arrow)"
+              strokeDasharray="4 3"
+              strokeOpacity={0.4}
+              markerEnd="url(#tmpl-arrow)"
             />
           )
         })
       )}
+
+      {/* Nodes */}
       {steps.map((step) => {
         const pos = nodePositions.get(step.id)
         if (!pos) return null
         const hasLoop = step.max_iterations && step.max_iterations > 1
+        const isLead = step.agent_role?.toLowerCase().includes("lead")
+        const colors = hasLoop ? stepColors.loop : isLead ? stepColors.lead : stepColors.default
+        const label = step.agent_role || step.title || step.id
         return (
           <g key={step.id}>
-            <circle
-              cx={pos.x} cy={pos.y} r={nodeR}
-              fill={hasLoop ? "hsl(var(--chart-4))" : "hsl(var(--chart-1))"}
-              stroke="hsl(var(--border))"
+            <rect
+              x={pos.x} y={pos.y}
+              width={nodeW} height={nodeH}
+              rx={4}
+              fill={colors.fill}
+              fillOpacity={0.15}
+              stroke={colors.border}
               strokeWidth={1}
+              strokeOpacity={0.5}
             />
             <text
-              x={pos.x} y={pos.y + nodeR + 10}
+              x={pos.x + nodeW / 2}
+              y={pos.y + nodeH / 2 + 3.5}
               textAnchor="middle"
-              className="fill-muted-foreground text-[8px]"
+              fill={colors.text}
+              fontSize={9}
+              fontFamily="system-ui"
+              fontWeight={500}
             >
-              {step.agent_role || step.id}
+              {label.length > 9 ? label.slice(0, 8) + "…" : label}
             </text>
+            {hasLoop && (
+              <text
+                x={pos.x + nodeW - 2} y={pos.y + 8}
+                textAnchor="end"
+                fill={colors.text}
+                fontSize={7}
+                fontFamily="system-ui"
+              >
+                ↻
+              </text>
+            )}
           </g>
         )
       })}
-      <defs>
-        <marker id="mini-arrow" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
-          <path d="M0,0 L6,3 L0,6" fill="none" stroke="hsl(var(--border))" strokeWidth="1" />
-        </marker>
-      </defs>
     </svg>
   )
 }
