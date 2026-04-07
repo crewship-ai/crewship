@@ -78,7 +78,6 @@ const pageConfig: Record<string, { title: string }> = {
 
 const settingsTabTitles: Record<string, string> = {
   profile: "Profile",
-  tokens: "API Tokens",
   crews: "Crews & Containers",
   connections: "Connections",
   audit: "Audit Log",

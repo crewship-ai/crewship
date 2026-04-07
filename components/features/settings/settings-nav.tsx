@@ -2,7 +2,7 @@
 
 import {
   User, Shield, Building, Users, CreditCard,
-  AlertTriangle, Key, Box, Link2, Activity,
+  AlertTriangle, Box, Link2, Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
@@ -25,7 +25,6 @@ const sections: NavSection[] = [
     label: "Account",
     items: [
       { key: "profile", label: "Profile", icon: User },
-      { key: "tokens", label: "API Tokens", icon: Key },
     ],
   },
   {
