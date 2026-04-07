@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useRef, useState } from "react"
+import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, RefreshCw, Focus, LayoutTemplate,
   Settings2, FileText, PanelLeftClose, PanelLeftOpen,
@@ -288,40 +289,49 @@ export function OrchestrationLayout({
             </Button>
           </div>
 
-          {!leftCollapsed && (
-            <div className="flex-1 min-h-0 flex flex-col">
-              {/* Hierarchy tree — shrinks if needed */}
-              <div className="border-b border-white/[0.06] shrink-0 max-h-[40%] overflow-y-auto">
-                <HierarchyTree
-                  crews={panelCrews}
-                  agents={panelAgents}
-                  selectedCrewId={selectedCrewId}
-                  selectedAgentSlug={selectedAgentSlug}
-                  onCrewSelect={handleCrewSelect}
-                  onAgentSelect={handleAgentSelect}
-                />
-              </div>
-
-              {/* Unified Inbox — takes remaining space, scrolls internally */}
-              <div className="border-b border-white/[0.06] flex-1 min-h-0 flex flex-col">
-                <UnifiedInbox
-                  missions={panelMissions}
-                  onTaskSelect={handleInboxTaskSelect}
-                />
-              </div>
-
-              {/* Connection Map — fixed at bottom */}
-              <div className="p-2 shrink-0">
-                <div className="text-[10px] font-semibold text-white/40 uppercase tracking-wider px-1 mb-1">
-                  Connections
+          <AnimatePresence mode="wait">
+            {!leftCollapsed && (
+              <motion.div
+                key={selectedMissionId}
+                initial={{ opacity: 0, x: -8 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -8 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+                className="flex-1 min-h-0 flex flex-col"
+              >
+                {/* Hierarchy tree */}
+                <div className="border-b border-white/[0.06] shrink-0 max-h-[40%] overflow-y-auto">
+                  <HierarchyTree
+                    crews={panelCrews}
+                    agents={panelAgents}
+                    selectedCrewId={selectedCrewId}
+                    selectedAgentSlug={selectedAgentSlug}
+                    onCrewSelect={handleCrewSelect}
+                    onAgentSelect={handleAgentSelect}
+                  />
                 </div>
-                <ConnectionMap
-                  crews={panelCrews}
-                  connections={panelConnections}
-                />
-              </div>
-            </div>
-          )}
+
+                {/* Unified Inbox */}
+                <div className="border-b border-white/[0.06] flex-1 min-h-0 flex flex-col">
+                  <UnifiedInbox
+                    missions={panelMissions}
+                    onTaskSelect={handleInboxTaskSelect}
+                  />
+                </div>
+
+                {/* Connection Map */}
+                <div className="p-2 shrink-0">
+                  <div className="text-[10px] font-semibold text-white/40 uppercase tracking-wider px-1 mb-1">
+                    Connections
+                  </div>
+                  <ConnectionMap
+                    crews={panelCrews}
+                    connections={panelConnections}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* ---- Center content area ---- */}
@@ -373,35 +383,37 @@ export function OrchestrationLayout({
             </>
           )}
 
-          {activeTab === "timeline" && (
-            <div className="p-4 h-full overflow-auto">
-              <MissionTimeline missions={filteredMissions} />
-            </div>
-          )}
+          <AnimatePresence mode="wait">
+            {activeTab === "timeline" && (
+              <motion.div key="timeline" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
+                <MissionTimeline missions={filteredMissions} />
+              </motion.div>
+            )}
 
-          {activeTab === "activity" && (
-            <div className="p-4 h-full overflow-auto">
-              <OrchestrationActivity missions={filteredMissions} />
-            </div>
-          )}
+            {activeTab === "activity" && (
+              <motion.div key="activity" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
+                <OrchestrationActivity missions={filteredMissions} />
+              </motion.div>
+            )}
 
-          {activeTab === "templates" && (
-            <div className="p-4 h-full overflow-auto">
-              <TemplateGallery workspaceId={workspaceId} />
-            </div>
-          )}
+            {activeTab === "templates" && (
+              <motion.div key="templates" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
+                <TemplateGallery workspaceId={workspaceId} />
+              </motion.div>
+            )}
 
-          {activeTab === "proposals" && (
-            <div className="p-4 h-full overflow-auto">
-              <ProposalReview workspaceId={workspaceId} />
-            </div>
-          )}
+            {activeTab === "proposals" && (
+              <motion.div key="proposals" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
+                <ProposalReview workspaceId={workspaceId} />
+              </motion.div>
+            )}
 
-          {activeTab === "connections" && (
-            <div className="p-4 h-full overflow-auto">
-              <CrewConnections workspaceId={workspaceId} />
-            </div>
-          )}
+            {activeTab === "connections" && (
+              <motion.div key="connections" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
+                <CrewConnections workspaceId={workspaceId} />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* ---- Right panel ---- */}
@@ -409,18 +421,30 @@ export function OrchestrationLayout({
           "row-span-1 transition-all duration-200 overflow-hidden min-h-0",
           showRightPanel ? "w-[380px]" : "w-0",
         )}>
-          {showRightPanel && (
-            <ContextDetailPanel
-              context={detailContext}
-              onClose={handleDetailClose}
-            />
-          )}
+          <AnimatePresence mode="wait">
+            {showRightPanel && (
+              <motion.div
+                key={detailContext.type === "task" ? `task-${(detailContext as { task: MissionTask }).task.id}` : detailContext.type}
+                initial={{ opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 12 }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
+                className="h-full"
+              >
+                <ContextDetailPanel
+                  context={detailContext}
+                  onClose={handleDetailClose}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* ---- Bottom drawer ---- */}
-        <div
-          className="col-span-3 border-t border-white/[0.06] bg-[#0d0f14] flex flex-col transition-all duration-200 overflow-hidden"
-          style={{ height: drawerOpen ? 240 : 32 }}
+        <motion.div
+          className="col-span-3 border-t border-white/[0.06] bg-[#0d0f14] flex flex-col overflow-hidden"
+          animate={{ height: drawerOpen ? 240 : 32 }}
+          transition={{ duration: 0.2, ease: "easeInOut" }}
         >
           {/* Drawer tab bar */}
           <div
@@ -469,36 +493,45 @@ export function OrchestrationLayout({
           </div>
 
           {/* Drawer content */}
-          {drawerOpen && (
-            <div className="flex-1 min-h-0 border-t border-white/[0.06]">
-              {drawerTab === "messages" && (
-                <A2AMessageStream
-                  messages={[]}
-                  crewFilter={a2aCrewFilter}
-                  onFilterChange={setA2aCrewFilter}
-                />
-              )}
+          <AnimatePresence mode="wait">
+            {drawerOpen && (
+              <motion.div
+                key={drawerTab}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                transition={{ duration: 0.15 }}
+                className="flex-1 min-h-0 border-t border-white/[0.06]"
+              >
+                {drawerTab === "messages" && (
+                  <A2AMessageStream
+                    messages={[]}
+                    crewFilter={a2aCrewFilter}
+                    onFilterChange={setA2aCrewFilter}
+                  />
+                )}
 
-              {drawerTab === "exec" && (
-                <div className="flex flex-col items-center justify-center h-full text-white/30">
-                  <Terminal className="h-6 w-6 mb-2" />
-                  <p className="text-xs">Exec log coming soon</p>
-                </div>
-              )}
+                {drawerTab === "exec" && (
+                  <div className="flex flex-col items-center justify-center h-full text-white/30">
+                    <Terminal className="h-6 w-6 mb-2" />
+                    <p className="text-xs">Exec log coming soon</p>
+                  </div>
+                )}
 
-              {drawerTab === "yaml" && (
-                <MissionYamlEditor
-                  mission={selectedMission}
-                  readOnly
-                />
-              )}
+                {drawerTab === "yaml" && (
+                  <MissionYamlEditor
+                    mission={selectedMission}
+                    readOnly
+                  />
+                )}
 
-              {drawerTab === "docker" && (
-                <DockerOverview crews={crews} />
-              )}
-            </div>
-          )}
-        </div>
+                {drawerTab === "docker" && (
+                  <DockerOverview crews={crews} />
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
       </div>
     </div>
   )
