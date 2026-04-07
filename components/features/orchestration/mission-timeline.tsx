@@ -28,6 +28,7 @@ const statusColors: Record<string, string> = {
   PLANNING: "bg-slate-400",
   REVIEW: "bg-purple-500",
   CANCELLED: "bg-gray-500",
+  AWAITING_APPROVAL: "bg-violet-500 animate-pulse",
 }
 
 function getTimeRange(missions: Mission[]): { start: number; end: number } {

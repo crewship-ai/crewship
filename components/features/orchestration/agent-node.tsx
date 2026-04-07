@@ -83,6 +83,14 @@ const statusConfig: Record<string, {
     glow: "",
     label: "Skipped",
   },
+  AWAITING_APPROVAL: {
+    accent: "#8b5cf6",
+    bg: "bg-[#150a1f]",
+    headerBg: "bg-gradient-to-r from-violet-600/30 to-violet-500/10",
+    dot: "bg-violet-500 animate-pulse",
+    glow: "shadow-[0_0_15px_rgba(139,92,246,0.2)]",
+    label: "Awaiting Approval",
+  },
 }
 
 function getInitials(name: string): string {

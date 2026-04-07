@@ -63,10 +63,19 @@ type missionTaskResponse struct {
 	TokenCount      *int     `json:"token_count"`
 	EstimatedCost   *float64 `json:"estimated_cost"`
 	StartedAt       *string  `json:"started_at"`
-	CompletedAt     *string  `json:"completed_at"`
-	DurationMs      *int     `json:"duration_ms"`
-	CreatedAt       string   `json:"created_at"`
-	UpdatedAt       string   `json:"updated_at"`
+	CompletedAt       *string  `json:"completed_at"`
+	DurationMs        *int     `json:"duration_ms"`
+	CreatedAt         string   `json:"created_at"`
+	UpdatedAt         string   `json:"updated_at"`
+	Confidence        *float64 `json:"confidence"`
+	NeedsReview       bool     `json:"needs_review"`
+	HandoffContext    *string  `json:"handoff_context"`
+	EvaluationStatus  *string  `json:"evaluation_status"`
+	EvaluationNotes   *string  `json:"evaluation_notes"`
+	ApprovalRequired  bool     `json:"approval_required"`
+	ApprovalStatus    *string  `json:"approval_status"`
+	ApprovedBy        *string  `json:"approved_by"`
+	ApprovedAt        *string  `json:"approved_at"`
 }
 
 type taskStats struct {
@@ -76,7 +85,8 @@ type taskStats struct {
 	InProgress int `json:"in_progress"`
 	Completed int `json:"completed"`
 	Failed    int `json:"failed"`
-	Skipped   int `json:"skipped"`
+	Skipped          int `json:"skipped"`
+	AwaitingApproval int `json:"awaiting_approval"`
 }
 
 var validMissionTransitions = map[string][]string{
@@ -89,6 +99,7 @@ var validTaskTransitions = map[string][]string{
 	"PENDING":     {"IN_PROGRESS", "SKIPPED"},
 	"BLOCKED":     {"PENDING", "SKIPPED"},
 	"IN_PROGRESS": {"COMPLETED", "FAILED", "SKIPPED"},
+	// AWAITING_APPROVAL intentionally excluded — transitions only via dedicated /approve endpoint.
 }
 
 // parseDependencyJSON unmarshals a JSON string array of task dependency IDs.
@@ -119,7 +130,10 @@ func (h *MissionHandler) loadTasksForMission(r *http.Request, missionID string) 
 		       mt.result_summary, mt.output_path, mt.error_message, mt.assignment_id,
 		       mt.token_count, mt.estimated_cost, mt.started_at, mt.completed_at,
 		       mt.duration_ms, mt.created_at, mt.updated_at,
-		       ag.name, ag.slug
+		       ag.name, ag.slug,
+		       mt.confidence, COALESCE(mt.needs_review, 0), mt.handoff_context,
+		       mt.evaluation_status, mt.evaluation_notes,
+		       COALESCE(mt.approval_required, 0), mt.approval_status, mt.approved_by, mt.approved_at
 		FROM mission_tasks mt
 		LEFT JOIN agents ag ON ag.id = mt.assigned_agent_id
 		WHERE mt.mission_id = ?
@@ -139,6 +153,9 @@ func (h *MissionHandler) loadTasksForMission(r *http.Request, missionID string) 
 			&t.TokenCount, &t.EstimatedCost, &t.StartedAt, &t.CompletedAt,
 			&t.DurationMs, &t.CreatedAt, &t.UpdatedAt,
 			&t.AgentName, &t.AgentSlug,
+			&t.Confidence, &t.NeedsReview, &t.HandoffContext,
+			&t.EvaluationStatus, &t.EvaluationNotes,
+			&t.ApprovalRequired, &t.ApprovalStatus, &t.ApprovedBy, &t.ApprovedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -177,6 +194,8 @@ func (h *MissionHandler) getTaskStats(r *http.Request, missionID string) (*taskS
 			stats.Failed = count
 		case "SKIPPED":
 			stats.Skipped = count
+		case "AWAITING_APPROVAL":
+			stats.AwaitingApproval = count
 		}
 	}
 	return stats, rows.Err()

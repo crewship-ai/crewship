@@ -23,7 +23,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 
 	schema := `
 		CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT, slug TEXT);
-		CREATE TABLE crews (id TEXT PRIMARY KEY, workspace_id TEXT, name TEXT, slug TEXT);
+		CREATE TABLE crews (id TEXT PRIMARY KEY, workspace_id TEXT, name TEXT, slug TEXT, escalation_config TEXT);
 		CREATE TABLE agents (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, name TEXT, slug TEXT,
 			agent_role TEXT DEFAULT 'AGENT', deleted_at TEXT);
 		CREATE TABLE missions (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, lead_agent_id TEXT,
@@ -35,7 +35,10 @@ func setupTestDB(t *testing.T) *sql.DB {
 			depends_on TEXT DEFAULT '[]', iteration INTEGER DEFAULT 1, max_iterations INTEGER,
 			result_summary TEXT, output_path TEXT, error_message TEXT, assignment_id TEXT,
 			token_count INTEGER, estimated_cost REAL, started_at TEXT, completed_at TEXT,
-			duration_ms INTEGER, created_at TEXT, updated_at TEXT);
+			duration_ms INTEGER, created_at TEXT, updated_at TEXT,
+			confidence REAL, needs_review INTEGER DEFAULT 0, handoff_context TEXT,
+			evaluation_status TEXT, evaluation_notes TEXT,
+			approval_required INTEGER DEFAULT 0, approval_status TEXT, approved_by TEXT, approved_at TEXT);
 		CREATE TABLE assignments (id TEXT PRIMARY KEY, workspace_id TEXT, chat_id TEXT,
 			assigned_by_id TEXT, assigned_to_id TEXT, task TEXT, status TEXT DEFAULT 'PENDING',
 			started_at TEXT, finished_at TEXT, result_summary TEXT, error_message TEXT,
@@ -687,5 +690,217 @@ func TestOutputCompression(t *testing.T) {
 	}
 	if !contains(stored, "truncated") {
 		t.Error("expected truncation marker in stored result")
+	}
+}
+
+// --- Approval Gate Tests ---
+
+func TestCheckApprovalGate_ExplicitFlag(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, approval_required, created_at, updated_at)
+		VALUES ('t-approval', ?, ?, 'Task Requiring Approval', 'COMPLETED', 1, '[]', 1, ?, ?)`,
+		missionID, agentID, now, now)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	status := engine.checkApprovalGate(context.Background(), "t-approval", missionID)
+	if status != "AWAITING_APPROVAL" {
+		t.Errorf("expected AWAITING_APPROVAL, got %s", status)
+	}
+}
+
+func TestCheckApprovalGate_NoFlag_NoConfig(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-normal', ?, ?, 'Normal Task', 'COMPLETED', 1, '[]', ?, ?)`,
+		missionID, agentID, now, now)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	status := engine.checkApprovalGate(context.Background(), "t-normal", missionID)
+	if status != "COMPLETED" {
+		t.Errorf("expected COMPLETED, got %s", status)
+	}
+}
+
+func TestCheckApprovalGate_ConfidenceThreshold(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+
+	cfg, _ := json.Marshal(EscalationConfig{
+		AutoApproveThreshold: 0.9,
+		RequireApprovalBelow: 0.5,
+		NotifyThreshold:      0.7,
+	})
+	db.Exec(`UPDATE crews SET escalation_config = ? WHERE id = ?`, string(cfg), crewID)
+
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	tests := []struct {
+		id         string
+		confidence float64
+		expected   string
+	}{
+		{"t-high", 0.95, "COMPLETED"},       // above auto-approve
+		{"t-low", 0.3, "AWAITING_APPROVAL"}, // below require_approval
+		{"t-mid", 0.6, "COMPLETED"},          // between thresholds (notify only)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	for _, tt := range tests {
+		db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, confidence, created_at, updated_at)
+			VALUES (?, ?, ?, 'Task', 'COMPLETED', 1, '[]', ?, ?, ?)`,
+			tt.id, missionID, agentID, tt.confidence, now, now)
+
+		status := engine.checkApprovalGate(context.Background(), tt.id, missionID)
+		if status != tt.expected {
+			t.Errorf("%s: confidence=%.2f, expected %s, got %s", tt.id, tt.confidence, tt.expected, status)
+		}
+	}
+}
+
+func TestApproveTask_Approve(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-await', ?, ?, 'Awaiting Task', 'AWAITING_APPROVAL', 1, '[]', ?, ?)`,
+		missionID, agentID, now, now)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	err := engine.ApproveTask(context.Background(), "t-await", "user-1", true, "looks good")
+	if err != nil {
+		t.Fatalf("ApproveTask: %v", err)
+	}
+
+	var status, approvalStatus, approvedBy string
+	db.QueryRow(`SELECT status, approval_status, approved_by FROM mission_tasks WHERE id = 't-await'`).Scan(&status, &approvalStatus, &approvedBy)
+	if status != "COMPLETED" {
+		t.Errorf("expected COMPLETED, got %s", status)
+	}
+	if approvalStatus != "APPROVED" {
+		t.Errorf("expected APPROVED, got %s", approvalStatus)
+	}
+	if approvedBy != "user-1" {
+		t.Errorf("expected user-1, got %s", approvedBy)
+	}
+}
+
+func TestApproveTask_Reject_CascadesFailure(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-parent', ?, ?, 'Parent', 'AWAITING_APPROVAL', 1, '[]', ?, ?)`,
+		missionID, agentID, now, now)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-child', ?, ?, 'Child', 'BLOCKED', 2, '["t-parent"]', ?, ?)`,
+		missionID, agentID, now, now)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	err := engine.ApproveTask(context.Background(), "t-parent", "user-1", false, "rejected")
+	if err != nil {
+		t.Fatalf("ApproveTask reject: %v", err)
+	}
+
+	var parentStatus, childStatus, childErr string
+	db.QueryRow(`SELECT status FROM mission_tasks WHERE id = 't-parent'`).Scan(&parentStatus)
+	db.QueryRow(`SELECT status, COALESCE(error_message, '') FROM mission_tasks WHERE id = 't-child'`).Scan(&childStatus, &childErr)
+
+	if parentStatus != "FAILED" {
+		t.Errorf("parent: expected FAILED, got %s", parentStatus)
+	}
+	if childStatus != "FAILED" {
+		t.Errorf("child: expected FAILED (cascade), got %s", childStatus)
+	}
+	if childErr == "" {
+		t.Error("child: expected error_message from cascade")
+	}
+}
+
+func TestApproveTask_DoubleApprove_ReturnsError(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-double', ?, ?, 'Double', 'AWAITING_APPROVAL', 1, '[]', ?, ?)`,
+		missionID, agentID, now, now)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	// First approve succeeds
+	if err := engine.ApproveTask(context.Background(), "t-double", "user-1", true, ""); err != nil {
+		t.Fatalf("first approve: %v", err)
+	}
+
+	// Second approve should fail (task is no longer AWAITING_APPROVAL)
+	err := engine.ApproveTask(context.Background(), "t-double", "user-2", true, "")
+	if err == nil {
+		t.Error("expected error on double approve, got nil")
+	}
+}
+
+func TestApproveTask_WrongStatus_ReturnsError(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, created_at, updated_at)
+		VALUES ('t-pending', ?, ?, 'Pending', 'PENDING', 1, '[]', ?, ?)`,
+		missionID, agentID, now, now)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	err := engine.ApproveTask(context.Background(), "t-pending", "user-1", true, "")
+	if err == nil {
+		t.Error("expected error when approving non-AWAITING_APPROVAL task")
+	}
+}
+
+func TestCheckApprovalGate_AutoApproveOverridesFlag(t *testing.T) {
+	db := setupTestDB(t)
+	wsID, crewID, leadID, agentID := seedTestData(t, db)
+
+	cfg, _ := json.Marshal(EscalationConfig{AutoApproveThreshold: 0.8})
+	db.Exec(`UPDATE crews SET escalation_config = ? WHERE id = ?`, string(cfg), crewID)
+
+	missionID := createTestMission(t, db, wsID, crewID, leadID)
+	now := time.Now().UTC().Format(time.RFC3339)
+	db.Exec(`INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, status, task_order, depends_on, approval_required, confidence, created_at, updated_at)
+		VALUES ('t-override', ?, ?, 'Override', 'COMPLETED', 1, '[]', 1, 0.95, ?, ?)`,
+		missionID, agentID, now, now)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	engine := NewMissionEngine(db, nil, nil, logger)
+
+	status := engine.checkApprovalGate(context.Background(), "t-override", missionID)
+	if status != "COMPLETED" {
+		t.Errorf("expected auto-approve to override flag, got %s", status)
 	}
 }

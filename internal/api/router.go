@@ -574,6 +574,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/internal/standup", internalAuth(http.HandlerFunc(queries.Standup)))
 	r.mux.Handle("POST /api/v1/internal/escalations", internalAuth(http.HandlerFunc(queries.CreateEscalation)))
 	r.mux.Handle("GET /api/v1/internal/escalations/{escalationId}/wait", internalAuth(http.HandlerFunc(queries.WaitForEscalationResponse)))
+	r.mux.Handle("POST /api/v1/internal/report-confidence", internalAuth(http.HandlerFunc(queries.ReportConfidence)))
 
 	// Crew peer conversations, standup, and escalations (public, authenticated)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/peer-conversations", authed(wsCtx(http.HandlerFunc(queries.ListPeerConversations))))
