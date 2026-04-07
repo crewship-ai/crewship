@@ -1,15 +1,23 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/layout/empty-state"
-import { Activity, CheckCircle, XCircle, Play, Pause, AlertTriangle } from "lucide-react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { Mission } from "@/lib/types/mission"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 interface OrchestrationActivityProps {
   missions: Mission[]
+  highlightSlugs?: Set<string> | null
 }
 
 interface ActivityEvent {
@@ -22,17 +30,8 @@ interface ActivityEvent {
   missionTitle: string
   agentSlug: string
   missionId: string
-}
-
-function getStatusIcon(status: string) {
-  switch (status) {
-    case "COMPLETED": return <CheckCircle className="h-4 w-4 text-green-500" />
-    case "FAILED": return <XCircle className="h-4 w-4 text-red-500" />
-    case "IN_PROGRESS": return <Play className="h-4 w-4 text-blue-500" />
-    case "BLOCKED": return <Pause className="h-4 w-4 text-amber-500" />
-    case "CANCELLED": return <XCircle className="h-4 w-4 text-gray-500" />
-    default: return <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-  }
+  tokenCount: number | null
+  estimatedCost: number | null
 }
 
 function buildActivityFeed(missions: Mission[]): ActivityEvent[] {
@@ -48,6 +47,8 @@ function buildActivityFeed(missions: Mission[]): ActivityEvent[] {
       missionTitle: mission.title,
       agentSlug: mission.lead_agent_slug,
       missionId: mission.id,
+      tokenCount: mission.total_token_count,
+      estimatedCost: mission.total_estimated_cost,
     })
     for (const task of mission.tasks || []) {
       if (task.status === "PENDING") continue
@@ -62,6 +63,8 @@ function buildActivityFeed(missions: Mission[]): ActivityEvent[] {
         missionTitle: mission.title,
         agentSlug: task.agent_slug || "",
         missionId: mission.id,
+        tokenCount: task.token_count,
+        estimatedCost: task.estimated_cost,
       })
     }
   }
@@ -79,10 +82,64 @@ function timeAgo(date: Date): string {
   return `${Math.floor(hours / 24)}d ago`
 }
 
+function getTimeGroup(date: Date): string {
+  const now = new Date()
+  const diff = now.getTime() - date.getTime()
+  const mins = diff / 60000
+  if (mins < 5) return "Just now"
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  if (date.getTime() >= startOfToday) return "Today"
+  const startOfYesterday = startOfToday - 86400000
+  if (date.getTime() >= startOfYesterday) return "Yesterday"
+  return "Earlier"
+}
+
+function formatTokens(count: number): string {
+  if (count >= 1000) return `${(count / 1000).toFixed(1)}k tok`
+  return `${count} tok`
+}
+
 const statusFilters = ["ALL", "IN_PROGRESS", "COMPLETED", "FAILED", "BLOCKED"] as const
 type StatusFilter = (typeof statusFilters)[number]
 
-export function OrchestrationActivity({ missions }: OrchestrationActivityProps) {
+const statusColors: Record<string, { dot: string; pulse?: string; pill: string }> = {
+  COMPLETED:   { dot: "bg-emerald-500", pill: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20" },
+  IN_PROGRESS: { dot: "bg-blue-500", pulse: "bg-blue-400", pill: "bg-blue-500/15 text-blue-400 border-blue-500/20" },
+  FAILED:      { dot: "bg-red-500", pill: "bg-red-500/15 text-red-400 border-red-500/20" },
+  BLOCKED:     { dot: "bg-amber-500", pill: "bg-amber-500/15 text-amber-400 border-amber-500/20" },
+  CANCELLED:   { dot: "bg-zinc-500", pill: "bg-zinc-500/15 text-zinc-400 border-zinc-500/20" },
+  PLANNING:    { dot: "bg-violet-500", pill: "bg-violet-500/15 text-violet-400 border-violet-500/20" },
+  REVIEW:      { dot: "bg-cyan-500", pill: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20" },
+  SKIPPED:     { dot: "bg-zinc-500", pill: "bg-zinc-500/15 text-zinc-400 border-zinc-500/20" },
+}
+
+const filterLabels: Record<StatusFilter, string> = {
+  ALL: "All", IN_PROGRESS: "Running", COMPLETED: "Done", FAILED: "Failed", BLOCKED: "Blocked",
+}
+
+function StatusDot({ status, isMission }: { status: string; isMission: boolean }) {
+  const colors = statusColors[status] || statusColors.CANCELLED
+  if (isMission) {
+    return (
+      <div className="relative flex items-center justify-center size-4">
+        <div className={cn("size-2.5 rotate-45 rounded-[1px]", colors.dot)} />
+        {status === "IN_PROGRESS" && colors.pulse && (
+          <div className={cn("absolute size-2.5 rotate-45 rounded-[1px] animate-ping opacity-40", colors.pulse)} />
+        )}
+      </div>
+    )
+  }
+  return (
+    <div className="relative flex items-center justify-center size-4">
+      <div className={cn("size-2.5 rounded-full", colors.dot)} />
+      {status === "IN_PROGRESS" && colors.pulse && (
+        <div className={cn("absolute size-2.5 rounded-full animate-ping opacity-40", colors.pulse)} />
+      )}
+    </div>
+  )
+}
+
+export function OrchestrationActivity({ missions, highlightSlugs }: OrchestrationActivityProps) {
   const allEvents = useMemo(() => buildActivityFeed(missions), [missions])
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL")
   const [agentFilter, setAgentFilter] = useState<string>("all")
@@ -106,88 +163,141 @@ export function OrchestrationActivity({ missions }: OrchestrationActivityProps) 
     return filtered
   }, [allEvents, statusFilter, agentFilter])
 
+  const grouped = useMemo(() => {
+    const groups: { label: string; items: ActivityEvent[] }[] = []
+    let currentLabel = ""
+    for (const event of events.slice(0, 100)) {
+      const label = getTimeGroup(event.timestamp)
+      if (label !== currentLabel) {
+        groups.push({ label, items: [] })
+        currentLabel = label
+      }
+      groups[groups.length - 1].items.push(event)
+    }
+    return groups
+  }, [events])
+
   if (allEvents.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-12">
-          <EmptyState
-            icon={Activity}
-            title="No activity yet"
-            description="Task status changes and mission events will appear here in real-time"
-          />
-        </CardContent>
-      </Card>
+      <div className="py-12">
+        <EmptyState
+          icon={Activity}
+          title="No activity yet"
+          description="Task status changes and mission events will appear here in real-time"
+        />
+      </div>
     )
   }
 
   return (
-    <Card>
-      <CardContent className="py-4 space-y-3">
-        {/* Filter chips */}
-        <div className="flex items-center gap-2 flex-wrap">
+    <div className="space-y-4">
+      {/* Filter bar */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5">
           {statusFilters.map((s) => (
-            <Badge
+            <button
               key={s}
-              variant={statusFilter === s ? "default" : "outline"}
-              className="cursor-pointer text-[11px] px-2 py-0.5"
               onClick={() => setStatusFilter(s)}
-            >
-              {s === "ALL" ? "All" : s.replace("_", " ")}
-            </Badge>
-          ))}
-          <span className="text-muted-foreground text-xs">|</span>
-          <Badge
-            variant={agentFilter === "all" ? "default" : "outline"}
-            className="cursor-pointer text-[11px] px-2 py-0.5"
-            onClick={() => setAgentFilter("all")}
-          >
-            All agents
-          </Badge>
-          {agents.slice(0, 8).map((slug) => (
-            <Badge
-              key={slug}
-              variant={agentFilter === slug ? "default" : "outline"}
-              className="cursor-pointer text-[11px] px-2 py-0.5"
-              onClick={() => setAgentFilter(slug)}
-            >
-              @{slug}
-            </Badge>
-          ))}
-        </div>
-
-        {/* Events */}
-        <div className="space-y-0">
-          {events.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-6">No matching events</p>
-          )}
-          {events.slice(0, 100).map((event, idx) => (
-            <div
-              key={event.id}
               className={cn(
-                "flex items-start gap-3 py-3 px-2 rounded-md transition-colors hover:bg-muted/50",
-                idx < events.length - 1 && "border-b border-border/50"
+                "px-3 py-1.5 rounded-md text-xs font-medium transition-colors",
+                statusFilter === s
+                  ? "bg-foreground/10 text-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-foreground/5"
               )}
             >
-              <div className="mt-0.5 shrink-0">{getStatusIcon(event.status)}</div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium truncate">{event.title}</span>
-                  <Badge
-                    variant={event.type === "mission" ? "default" : "outline"}
-                    className="text-[10px] px-1.5 py-0 shrink-0"
+              {filterLabels[s]}
+            </button>
+          ))}
+        </div>
+        <Select value={agentFilter} onValueChange={setAgentFilter}>
+          <SelectTrigger size="sm" className="w-[140px] text-xs">
+            <SelectValue placeholder="All agents" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All agents</SelectItem>
+            {agents.map((slug) => (
+              <SelectItem key={slug} value={slug}>@{slug}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Timeline */}
+      {events.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8">No matching events</p>
+      ) : (
+        <div className="space-y-0">
+          {grouped.map((group) => (
+            <div key={group.label}>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 pl-8 py-2">
+                {group.label}
+              </div>
+              {group.items.map((event, idx) => {
+                const colors = statusColors[event.status] || statusColors.CANCELLED
+                const isLast = idx === group.items.length - 1
+                return (
+                  <div
+                    key={event.id}
+                    className={cn(
+                      "flex items-stretch group",
+                      highlightSlugs && event.type === "task" && !highlightSlugs.has(event.agentSlug) && "opacity-20",
+                    )}
+                    style={{ transition: "opacity 0.3s ease" }}
                   >
-                    {event.type}
-                  </Badge>
-                </div>
-                <div className="text-xs text-muted-foreground mt-0.5">{event.subtitle}</div>
-              </div>
-              <div className="text-[11px] text-muted-foreground shrink-0 whitespace-nowrap mt-0.5">
-                {timeAgo(event.timestamp)}
-              </div>
+                    {/* Timeline rail */}
+                    <div className="flex flex-col items-center w-8 shrink-0">
+                      <div className={cn("w-px flex-1", isLast && idx === 0 ? "bg-transparent" : "bg-border/60")} />
+                      <div className="py-1"><StatusDot status={event.status} isMission={event.type === "mission"} /></div>
+                      <div className={cn("w-px flex-1", isLast ? "bg-transparent" : "bg-border/60")} />
+                    </div>
+                    {/* Content */}
+                    <div className="flex-1 min-w-0 py-2 pl-2 pr-1 rounded-md transition-colors hover:bg-muted/40">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-muted-foreground/60 shrink-0 w-14 tabular-nums">
+                          {timeAgo(event.timestamp)}
+                        </span>
+                        <span className={cn("text-sm font-medium truncate", event.type === "mission" && "text-foreground")}>
+                          {event.title}
+                        </span>
+                        <Badge
+                          className={cn("text-[10px] px-1.5 py-0 border shrink-0", colors.pill)}
+                        >
+                          {event.status.replace("_", " ")}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5 pl-14">
+                        {event.agentSlug && (
+                          <img
+                            src={getAgentAvatarUrl(event.agentSlug)}
+                            alt=""
+                            className="w-4 h-4 rounded-full shrink-0"
+                          />
+                        )}
+                        <span className="text-xs text-muted-foreground">{event.subtitle}</span>
+                        {event.type === "task" && (
+                          <span className="text-xs text-muted-foreground/50">
+                            · {event.missionTitle}
+                          </span>
+                        )}
+                        {event.tokenCount != null && event.tokenCount > 0 && (
+                          <span className="text-xs text-muted-foreground/50">
+                            · {formatTokens(event.tokenCount)}
+                          </span>
+                        )}
+                        {event.estimatedCost != null && event.estimatedCost > 0 && (
+                          <span className="text-xs text-muted-foreground/50">
+                            · ${event.estimatedCost.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           ))}
         </div>
-      </CardContent>
-    </Card>
+      )}
+    </div>
   )
 }

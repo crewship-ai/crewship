@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Orchestration Toolbar (Wireframe 33)</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --canvas:       #0a0c10;
+    --bar-bg:       #0d1117;
+    --bar-border:   #1c2128;
+    --strip-bg:     #0b0e14;
+    --strip-border: #161b22;
+    --text-primary: #e6edf3;
+    --text-muted:   #7d8590;
+    --text-dim:     #484f58;
+    --tab-active:   #4493f8;
+    --tab-border:   #4493f8;
+    --hover-bg:     #161b22;
+    --btn-bg:       #21262d;
+    --btn-border:   #30363d;
+    --btn-hover:    #30363d;
+    --dropdown-bg:  #161b22;
+    --dropdown-border: #30363d;
+
+    /* status colors */
+    --status-running:  #4493f8;
+    --status-done:     #3fb950;
+    --status-review:   #d29922;
+    --status-failed:   #f85149;
+    --status-planning: #a371f7;
+    --status-paused:   #7d8590;
+
+    --font-mono: 'SF Mono', Menlo, 'Cascadia Code', 'Fira Code', monospace;
+    --font-ui:   system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  body {
+    background: var(--canvas);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    color: var(--text-primary);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── DEMO CHROME ─────────────────────────────────────────── */
+  .demo-header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #1c2128;
+  }
+  .demo-header h1 {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .state-switcher {
+    display: flex;
+    gap: 8px;
+  }
+  .state-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    background: var(--btn-bg);
+    border: 1px solid var(--btn-border);
+    border-radius: 3px;
+    color: var(--text-muted);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
+  }
+  .state-btn:hover {
+    color: var(--text-primary);
+    background: var(--btn-hover);
+  }
+  .state-btn.active {
+    color: var(--tab-active);
+    border-color: var(--tab-active);
+    background: rgba(68,147,248,0.08);
+  }
+  .state-btn .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ─── TOOLBAR WRAPPER ─────────────────────────────────────── */
+  .toolbar-wrapper {
+    position: relative;
+  }
+
+  /* ─── ROW 1: PRIMARY BAR (32px) ───────────────────────────── */
+  .toolbar-row1 {
+    display: flex;
+    align-items: center;
+    height: 32px;
+    background: var(--bar-bg);
+    border-bottom: 1px solid var(--bar-border);
+    padding: 0 12px;
+    gap: 0;
+    position: relative;
+    z-index: 100;
+  }
+
+  /* Mission selector */
+  .mission-selector {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 100%;
+    padding: 0 8px 0 4px;
+    cursor: pointer;
+    border-right: 1px solid var(--bar-border);
+    margin-right: 0;
+    min-width: 0;
+    flex-shrink: 0;
+    position: relative;
+    user-select: none;
+    transition: background 0.1s;
+  }
+  .mission-selector:hover {
+    background: var(--hover-bg);
+  }
+  .mission-selector.open {
+    background: var(--hover-bg);
+  }
+  .mission-selector .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .mission-selector .mission-name {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mission-selector .chevron {
+    color: var(--text-dim);
+    flex-shrink: 0;
+    margin-left: 2px;
+    transition: transform 0.15s;
+  }
+  .mission-selector.open .chevron {
+    transform: rotate(180deg);
+  }
+
+  /* Tab nav */
+  .tab-nav {
+    display: flex;
+    align-items: stretch;
+    height: 100%;
+    flex: 1;
+    padding-left: 4px;
+  }
+  .tab-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 100%;
+    padding: 0 10px;
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+    transition: color 0.12s, border-color 0.12s;
+    user-select: none;
+    position: relative;
+    top: 1px; /* align border-bottom with row bottom */
+  }
+  .tab-item:hover {
+    color: var(--text-primary);
+  }
+  .tab-item.active {
+    color: var(--tab-active);
+    border-bottom-color: var(--tab-border);
+  }
+  .tab-item svg {
+    flex-shrink: 0;
+    opacity: 0.75;
+  }
+  .tab-item.active svg {
+    opacity: 1;
+  }
+
+  /* Right actions */
+  .toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    padding-left: 8px;
+    border-left: 1px solid var(--bar-border);
+    flex-shrink: 0;
+  }
+  .action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 8px;
+    background: var(--btn-bg);
+    border: 1px solid var(--btn-border);
+    border-radius: 3px;
+    color: var(--text-muted);
+    font-family: var(--font-ui);
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
+    white-space: nowrap;
+  }
+  .action-btn:hover {
+    color: var(--text-primary);
+    background: var(--btn-hover);
+  }
+  .action-btn.primary {
+    background: rgba(68,147,248,0.15);
+    border-color: rgba(68,147,248,0.35);
+    color: var(--tab-active);
+  }
+  .action-btn.primary:hover {
+    background: rgba(68,147,248,0.25);
+    border-color: rgba(68,147,248,0.55);
+  }
+  .action-btn.danger {
+    background: rgba(248,81,73,0.1);
+    border-color: rgba(248,81,73,0.3);
+    color: #f85149;
+  }
+  .action-btn.danger:hover {
+    background: rgba(248,81,73,0.2);
+    border-color: rgba(248,81,73,0.5);
+  }
+  .action-btn svg {
+    flex-shrink: 0;
+  }
+
+  /* ─── ROW 2: INFO STRIP (24px) ────────────────────────────── */
+  .toolbar-row2 {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    background: var(--strip-bg);
+    border-bottom: 1px solid var(--strip-border);
+    padding: 0 16px;
+    gap: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow: hidden;
+  }
+
+  .strip-segment {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 16px;
+    border-right: 1px solid #1c2128;
+    margin-right: 16px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .strip-segment:last-child {
+    border-right: none;
+    padding-right: 0;
+    margin-right: 0;
+  }
+  .strip-label {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-right: 2px;
+  }
+  .strip-value {
+    color: var(--text-muted);
+  }
+  .strip-value.highlight {
+    color: #9aa3ae;
+  }
+
+  /* Progress bar */
+  .progress-bar {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .progress-track {
+    width: 52px;
+    height: 4px;
+    background: #21262d;
+    border-radius: 0;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--status-running);
+    transition: width 0.3s;
+  }
+  .progress-fill.done {
+    background: var(--status-done);
+  }
+  .progress-fill.planning {
+    background: var(--status-planning);
+    opacity: 0.5;
+  }
+  .progress-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* Aggregate dots in "all missions" strip */
+  .agg-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding-right: 14px;
+    border-right: 1px solid #1c2128;
+    margin-right: 14px;
+    white-space: nowrap;
+  }
+  .agg-item:last-child {
+    border-right: none;
+    padding-right: 0;
+    margin-right: 0;
+  }
+  .agg-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .agg-count {
+    color: #9aa3ae;
+    font-weight: 500;
+  }
+  .agg-label {
+    color: var(--text-dim);
+  }
+
+  /* Running dot animation */
+  @keyframes pulse-running {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+  .dot-running {
+    animation: pulse-running 2s ease-in-out infinite;
+  }
+
+  /* ─── DROPDOWN ────────────────────────────────────────────── */
+  .mission-dropdown {
+    position: absolute;
+    top: 32px;
+    left: 0;
+    width: 280px;
+    background: var(--dropdown-bg);
+    border: 1px solid var(--dropdown-border);
+    border-top: none;
+    z-index: 200;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    display: none;
+  }
+  .mission-dropdown.open {
+    display: block;
+  }
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 12px;
+    cursor: pointer;
+    transition: background 0.1s;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    user-select: none;
+  }
+  .dropdown-item:hover {
+    background: var(--hover-bg);
+    color: var(--text-primary);
+  }
+  .dropdown-item.active {
+    color: var(--text-primary);
+    background: rgba(68,147,248,0.08);
+  }
+  .dropdown-item .item-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dropdown-item .item-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dropdown-item .item-status-text {
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .dropdown-divider {
+    height: 1px;
+    background: var(--dropdown-border);
+    margin: 2px 0;
+  }
+  .dropdown-section-label {
+    padding: 6px 12px 3px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  /* ─── DEMO CONTENT AREA ───────────────────────────────────── */
+  .demo-content {
+    padding: 24px;
+    color: var(--text-dim);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    line-height: 1.8;
+  }
+  .demo-annotation {
+    margin-top: 32px;
+    padding: 16px 20px;
+    background: var(--bar-bg);
+    border: 1px solid var(--bar-border);
+    border-left: 3px solid var(--tab-active);
+    max-width: 640px;
+  }
+  .demo-annotation h3 {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 10px;
+  }
+  .demo-annotation ul {
+    list-style: none;
+    padding: 0;
+  }
+  .demo-annotation li {
+    font-family: var(--font-ui);
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 3px 0;
+    padding-left: 14px;
+    position: relative;
+  }
+  .demo-annotation li::before {
+    content: '·';
+    position: absolute;
+    left: 0;
+    color: var(--text-dim);
+  }
+  .demo-annotation li code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: rgba(255,255,255,0.06);
+    padding: 1px 4px;
+    color: #9aa3ae;
+  }
+</style>
+</head>
+<body>
+
+<!-- Demo chrome -->
+<div class="demo-header">
+  <h1>Wireframe 33 — Orchestration Toolbar Redesign</h1>
+  <div class="state-switcher">
+    <button class="state-btn active" onclick="setState('all')" id="btn-all">
+      <span class="dot" style="background:#7d8590"></span>
+      All Missions
+    </button>
+    <button class="state-btn" onclick="setState('running')" id="btn-running">
+      <span class="dot" style="background:#4493f8"></span>
+      Running Mission
+    </button>
+    <button class="state-btn" onclick="setState('planning')" id="btn-planning">
+      <span class="dot" style="background:#a371f7"></span>
+      Planning Mission
+    </button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- TOOLBAR                                                     -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="toolbar-wrapper" id="toolbar">
+
+  <!-- ROW 1 -->
+  <div class="toolbar-row1">
+
+    <!-- Mission selector -->
+    <div class="mission-selector" id="missionSelector" onclick="toggleDropdown()">
+      <span class="status-dot" id="selectorDot"></span>
+      <span class="mission-name" id="selectorName">All missions</span>
+      <!-- chevron svg -->
+      <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </div>
+
+    <!-- Dropdown -->
+    <div class="mission-dropdown" id="missionDropdown">
+      <div class="dropdown-item active" onclick="selectMission('all')">
+        <span class="item-dot" style="background:#7d8590"></span>
+        <span class="item-name">All missions</span>
+      </div>
+      <div class="dropdown-divider"></div>
+      <div class="dropdown-section-label">Active</div>
+      <div class="dropdown-item" onclick="selectMission('running')">
+        <span class="item-dot dot-running" style="background:#4493f8"></span>
+        <span class="item-name">CRE-81 Code Quality Refactor</span>
+        <span class="item-status-text">IN_PROGRESS</span>
+      </div>
+      <div class="dropdown-item" onclick="selectMission('running2')">
+        <span class="item-dot dot-running" style="background:#4493f8"></span>
+        <span class="item-name">CRE-77 API Versioning</span>
+        <span class="item-status-text">IN_PROGRESS</span>
+      </div>
+      <div class="dropdown-divider"></div>
+      <div class="dropdown-section-label">Planning</div>
+      <div class="dropdown-item" onclick="selectMission('planning')">
+        <span class="item-dot" style="background:#a371f7"></span>
+        <span class="item-name">MCP Gateway Integration</span>
+        <span class="item-status-text">PLANNING</span>
+      </div>
+      <div class="dropdown-divider"></div>
+      <div class="dropdown-section-label">Completed</div>
+      <div class="dropdown-item" onclick="selectMission('done1')">
+        <span class="item-dot" style="background:#3fb950"></span>
+        <span class="item-name">CRE-72 Auth Refactor</span>
+        <span class="item-status-text">DONE</span>
+      </div>
+      <div class="dropdown-item" onclick="selectMission('done2')">
+        <span class="item-dot" style="background:#3fb950"></span>
+        <span class="item-name">CRE-68 Skills Engine</span>
+        <span class="item-status-text">DONE</span>
+      </div>
+      <div class="dropdown-item" onclick="selectMission('done3')">
+        <span class="item-dot" style="background:#3fb950"></span>
+        <span class="item-name">CRE-61 Memory System</span>
+        <span class="item-status-text">DONE</span>
+      </div>
+      <div class="dropdown-item" onclick="selectMission('done4')">
+        <span class="item-dot" style="background:#3fb950"></span>
+        <span class="item-name">CRE-55 Credential Vault</span>
+        <span class="item-status-text">DONE</span>
+      </div>
+      <div class="dropdown-divider"></div>
+      <div class="dropdown-section-label">Failed</div>
+      <div class="dropdown-item" onclick="selectMission('failed1')">
+        <span class="item-dot" style="background:#f85149"></span>
+        <span class="item-name">CRE-74 K8s Provider</span>
+        <span class="item-status-text">FAILED</span>
+      </div>
+    </div>
+
+    <!-- Tab navigation -->
+    <nav class="tab-nav" id="tabNav">
+      <!-- tabs injected by JS -->
+    </nav>
+
+    <!-- Right actions -->
+    <div class="toolbar-actions" id="toolbarActions">
+      <!-- buttons injected by JS -->
+    </div>
+
+  </div>
+
+  <!-- ROW 2: info strip -->
+  <div class="toolbar-row2" id="infoStrip">
+    <!-- content injected by JS -->
+  </div>
+
+</div>
+
+<!-- Demo content placeholder -->
+<div class="demo-content">
+  <!-- main page content below toolbar -->
+  <div style="color:#21262d; font-size: 11px;">
+    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░<br>
+    ░  Graph / Timeline / Activity view renders here                          ░<br>
+    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+  </div>
+
+  <div class="demo-annotation">
+    <h3>Design notes</h3>
+    <ul>
+      <li>Total toolbar height: <code>56px</code> (row 1: 32px + row 2: 24px). Previously ~110px.</li>
+      <li>Mission name appears once. Status badge lives in row 2 info strip, not repeated.</li>
+      <li>Row 2 uses <code>font-family: monospace</code> for data tokens (tokens, cost, time).</li>
+      <li>Active tab: 2px bottom border flush with row 1 bottom edge — no pill/rounded style.</li>
+      <li>Dropdown: sharp corners, dark overlay, grouped by status with section labels.</li>
+      <li>Row 2 swaps content based on selection: aggregate stats vs mission-specific data.</li>
+      <li>Action buttons shown contextually — hidden in "all missions" state.</li>
+      <li>Status dot in selector animates for <code>IN_PROGRESS</code> missions only.</li>
+      <li>Click outside dropdown or press <code>Esc</code> to close.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+// ── Data ──────────────────────────────────────────────────────
+const STATES = {
+  all: {
+    selectorDot: '#7d8590',
+    selectorName: 'All missions',
+    selectorAnimate: false,
+    tabs: ['graph','timeline','activity','templates','proposals','connections'],
+    activeTab: 'graph',
+    actions: [
+      { id: 'new', label: '+ New Mission', cls: 'primary' }
+    ],
+    strip: 'all'
+  },
+  running: {
+    selectorDot: '#4493f8',
+    selectorName: 'CRE-81 Code Quality Refactor',
+    selectorAnimate: true,
+    tabs: ['graph','timeline','activity','templates','proposals','connections'],
+    activeTab: 'graph',
+    actions: [
+      { id: 'cancel', label: 'Cancel', cls: 'danger' },
+      { id: 'clone', label: 'Clone', cls: '' },
+      { id: 'new', label: '+ New Mission', cls: 'primary' }
+    ],
+    strip: 'running'
+  },
+  planning: {
+    selectorDot: '#a371f7',
+    selectorName: 'MCP Gateway Integration',
+    selectorAnimate: false,
+    tabs: ['graph','timeline','activity','templates','proposals','connections'],
+    activeTab: 'proposals',
+    actions: [
+      { id: 'start', label: '▶ Start', cls: 'primary' },
+      { id: 'cancel', label: 'Cancel', cls: 'danger' },
+      { id: 'clone', label: 'Clone', cls: '' },
+      { id: 'new', label: '+ New Mission', cls: 'primary' }
+    ],
+    strip: 'planning'
+  }
+}
+
+const TABS = {
+  graph: {
+    label: 'Graph',
+    icon: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`
+  },
+  timeline: {
+    label: 'Timeline',
+    icon: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><polyline points="8 8 12 4 16 8"/><line x1="12" y1="4" x2="12" y2="20"/></svg>`
+  },
+  activity: {
+    label: 'Activity',
+    icon: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`
+  },
+  templates: {
+    label: 'Templates',
+    icon: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`
+  },
+  proposals: {
+    label: 'Proposals',
+    icon: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`
+  },
+  connections: {
+    label: 'Connections',
+    icon: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`
+  }
+}
+
+const STRIPS = {
+  all: `
+    <div class="agg-item">
+      <span class="agg-dot dot-running" style="background:#4493f8"></span>
+      <span class="agg-count">2</span>
+      <span class="agg-label">Active</span>
+    </div>
+    <div class="agg-item">
+      <span class="agg-dot" style="background:#a371f7"></span>
+      <span class="agg-count">1</span>
+      <span class="agg-label">Planning</span>
+    </div>
+    <div class="agg-item">
+      <span class="agg-dot" style="background:#3fb950"></span>
+      <span class="agg-count">4</span>
+      <span class="agg-label">Done</span>
+    </div>
+    <div class="agg-item">
+      <span class="agg-dot" style="background:#f85149"></span>
+      <span class="agg-count">1</span>
+      <span class="agg-label">Failed</span>
+    </div>
+  `,
+  running: `
+    <div class="strip-segment">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#7d8590" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span class="strip-value highlight">@tomas</span>
+    </div>
+    <div class="strip-segment">
+      <div class="progress-bar">
+        <div class="progress-track"><div class="progress-fill" style="width:75%"></div></div>
+        <span class="progress-count">3/4 tasks</span>
+      </div>
+    </div>
+    <div class="strip-segment">
+      <span class="strip-label">tok</span>
+      <span class="strip-value highlight">8,241</span>
+    </div>
+    <div class="strip-segment">
+      <span class="strip-label">cost</span>
+      <span class="strip-value highlight">$0.52</span>
+    </div>
+    <div class="strip-segment">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#484f58" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <span class="strip-value">1h 45m</span>
+    </div>
+    <div class="strip-segment">
+      <span class="agg-dot dot-running" style="background:#4493f8"></span>
+      <span style="color:#4493f8; font-family: var(--font-ui); font-size:11px; font-weight:500;">IN PROGRESS</span>
+    </div>
+  `,
+  planning: `
+    <div class="strip-segment">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#7d8590" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span class="strip-value highlight">@aria</span>
+    </div>
+    <div class="strip-segment">
+      <div class="progress-bar">
+        <div class="progress-track"><div class="progress-fill planning" style="width:0%"></div></div>
+        <span class="progress-count">0/4 tasks</span>
+      </div>
+    </div>
+    <div class="strip-segment">
+      <span class="strip-label">tok</span>
+      <span class="strip-value">—</span>
+    </div>
+    <div class="strip-segment">
+      <span class="strip-label">cost</span>
+      <span class="strip-value">—</span>
+    </div>
+    <div class="strip-segment">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#484f58" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      <span class="strip-value">—</span>
+    </div>
+    <div class="strip-segment">
+      <span class="agg-dot" style="background:#a371f7"></span>
+      <span style="color:#a371f7; font-family: var(--font-ui); font-size:11px; font-weight:500;">PLANNING</span>
+    </div>
+  `
+}
+
+// ── State ─────────────────────────────────────────────────────
+let currentState = 'all'
+let currentTab = 'graph'
+let dropdownOpen = false
+
+// ── Render ────────────────────────────────────────────────────
+function render(stateKey) {
+  const s = STATES[stateKey]
+
+  // Selector dot
+  const dot = document.getElementById('selectorDot')
+  dot.style.background = s.selectorDot
+  if (s.selectorAnimate) {
+    dot.classList.add('dot-running')
+  } else {
+    dot.classList.remove('dot-running')
+  }
+
+  // Selector name
+  document.getElementById('selectorName').textContent = s.selectorName
+
+  // Tabs
+  const tabNav = document.getElementById('tabNav')
+  const activeTab = currentState === stateKey ? currentTab : s.activeTab
+  tabNav.innerHTML = s.tabs.map(t => {
+    const tab = TABS[t]
+    const isActive = t === activeTab
+    return `<div class="tab-item${isActive ? ' active' : ''}" onclick="selectTab('${t}')" data-tab="${t}">
+      ${tab.icon}
+      ${tab.label}
+    </div>`
+  }).join('')
+
+  // Actions
+  const actionsEl = document.getElementById('toolbarActions')
+  actionsEl.innerHTML = s.actions.map(a =>
+    `<button class="action-btn ${a.cls}" onclick="handleAction('${a.id}')">${a.label}</button>`
+  ).join('')
+
+  // Info strip
+  document.getElementById('infoStrip').innerHTML = STRIPS[s.strip]
+
+  currentState = stateKey
+  if (stateKey !== currentState) currentTab = s.activeTab
+}
+
+function setState(key) {
+  currentTab = STATES[key].activeTab
+  render(key)
+  // Update state buttons
+  document.querySelectorAll('.state-btn').forEach(btn => btn.classList.remove('active'))
+  document.getElementById('btn-' + key).classList.add('active')
+
+  // Update dropdown active item
+  document.querySelectorAll('.dropdown-item').forEach(item => {
+    item.classList.remove('active')
+    if (item.getAttribute('onclick') === `selectMission('${key}')`) {
+      item.classList.add('active')
+    }
+  })
+
+  closeDropdown()
+}
+
+function selectTab(tabId) {
+  currentTab = tabId
+  // Re-render tabs only
+  const s = STATES[currentState]
+  const tabNav = document.getElementById('tabNav')
+  tabNav.innerHTML = s.tabs.map(t => {
+    const tab = TABS[t]
+    const isActive = t === tabId
+    return `<div class="tab-item${isActive ? ' active' : ''}" onclick="selectTab('${t}')" data-tab="${t}">
+      ${tab.icon}
+      ${tab.label}
+    </div>`
+  }).join('')
+}
+
+function toggleDropdown() {
+  const selector = document.getElementById('missionSelector')
+  const dropdown = document.getElementById('missionDropdown')
+  dropdownOpen = !dropdownOpen
+  dropdown.classList.toggle('open', dropdownOpen)
+  selector.classList.toggle('open', dropdownOpen)
+}
+
+function closeDropdown() {
+  dropdownOpen = false
+  document.getElementById('missionDropdown').classList.remove('open')
+  document.getElementById('missionSelector').classList.remove('open')
+}
+
+function selectMission(key) {
+  if (key === 'running2' || key === 'done1' || key === 'done2' || key === 'done3' || key === 'done4' || key === 'failed1') {
+    // These are placeholder missions — just close dropdown
+    closeDropdown()
+    return
+  }
+  setState(key)
+  // Update state switcher buttons to match
+  document.querySelectorAll('.state-btn').forEach(btn => btn.classList.remove('active'))
+  const btn = document.getElementById('btn-' + key)
+  if (btn) btn.classList.add('active')
+}
+
+function handleAction(actionId) {
+  // no-op in wireframe — visual only
+}
+
+// Close dropdown on outside click
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#missionSelector') && !e.target.closest('#missionDropdown')) {
+    closeDropdown()
+  }
+})
+
+// Close on Esc
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeDropdown()
+})
+
+// ── Init ──────────────────────────────────────────────────────
+render('all')
+</script>
+</body>
+</html>
