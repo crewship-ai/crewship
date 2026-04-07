@@ -53,7 +53,10 @@ export default function FleetPage() {
   const [loading, setLoading] = useState(true)
 
   const fetchData = useCallback(async (silent = false) => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      if (!silent) setLoading(false)
+      return
+    }
     if (!silent) setLoading(true)
     try {
       const [crewsRes, agentsRes, missionsRes] = await Promise.all([
@@ -83,7 +86,7 @@ export default function FleetPage() {
   useRealtimeEvent("crew.deleted", useCallback(() => { fetchData(true) }, [fetchData]))
   useRealtimeEvent("mission.updated", useCallback(() => { fetchData(true) }, [fetchData]))
 
-  if (loading || wsLoading) {
+  if (loading || wsLoading || !workspaceId) {
     return (
       <div className="h-full flex items-center justify-center">
         <Skeleton className="h-[600px] w-full m-6 rounded-xl" />
@@ -96,7 +99,7 @@ export default function FleetPage() {
       crews={crews}
       agents={agents}
       missions={missions}
-      workspaceId={workspaceId!}
+      workspaceId={workspaceId}
       onRefresh={() => fetchData()}
     />
   )

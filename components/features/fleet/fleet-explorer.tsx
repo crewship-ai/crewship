@@ -216,13 +216,20 @@ export function FleetExplorer({
                       if (!expanded) toggleCrew(crew.id)
                     }}
                   >
-                    <ChevronRight
-                      className={cn(
-                        "h-3 w-3 text-muted-foreground/50 transition-transform shrink-0",
-                        expanded && "rotate-90",
-                      )}
+                    <span
+                      role="button"
+                      tabIndex={-1}
+                      className="shrink-0"
                       onClick={(e) => { e.stopPropagation(); toggleCrew(crew.id) }}
-                    />
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); toggleCrew(crew.id) } }}
+                    >
+                      <ChevronRight
+                        className={cn(
+                          "h-3 w-3 text-muted-foreground/50 transition-transform",
+                          expanded && "rotate-90",
+                        )}
+                      />
+                    </span>
                     <CrewIcon icon={crew.icon || "briefcase"} color={crew.color} size="sm" />
                     <span className="text-[12px] font-medium truncate flex-1">{crew.name}</span>
                     <span className="text-[10px] text-muted-foreground/50 tabular-nums shrink-0">

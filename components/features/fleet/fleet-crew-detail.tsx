@@ -74,12 +74,13 @@ export interface FleetCrewDetailProps {
 }
 
 export function FleetCrewDetail({ crew, agents, missions, onAgentClick }: FleetCrewDetailProps) {
-  const crewMissions = useMemo(
-    () => missions.filter((m) => m.crew_id === crew.id).slice(0, 5),
+  const allCrewMissions = useMemo(
+    () => missions.filter((m) => m.crew_id === crew.id),
     [missions, crew.id],
   )
 
-  const missionCount = crewMissions.length
+  const crewMissions = useMemo(() => allCrewMissions.slice(0, 5), [allCrewMissions])
+  const missionCount = allCrewMissions.length
 
   return (
     <div className="p-4 sm:p-6 h-full overflow-y-auto space-y-5">
@@ -157,8 +158,11 @@ export function FleetCrewDetail({ crew, agents, missions, onAgentClick }: FleetC
               return (
                 <Card
                   key={agent.id}
-                  className="hover:border-primary/50 hover:bg-accent/30 hover:shadow-md transition-all duration-150 cursor-pointer"
+                  tabIndex={0}
+                  role="button"
+                  className="hover:border-primary/50 hover:bg-accent/30 hover:shadow-md transition-all duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 outline-none"
                   onClick={() => onAgentClick(agent.id)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onAgentClick(agent.id) } }}
                 >
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">

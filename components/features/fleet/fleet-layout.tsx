@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { getCrewDotColor } from "@/lib/crew-icon"
 import { FleetExplorer } from "@/components/features/fleet/fleet-explorer"
 import { FleetCrewDetail } from "@/components/features/fleet/fleet-crew-detail"
 import { FleetAgentDetail } from "@/components/features/fleet/fleet-agent-detail"
@@ -468,7 +469,7 @@ function AllCrewsOverview({
               <div className="flex items-start gap-3">
                 <div
                   className="h-8 w-8 rounded-lg flex items-center justify-center text-white text-[12px] font-bold shrink-0"
-                  style={{ backgroundColor: crew.color ? `#${crew.color.replace("#", "")}` : "#6b7280" }}
+                  style={{ backgroundColor: getCrewDotColor(crew.color) }}
                 >
                   {crew.name.charAt(0)}
                 </div>
@@ -592,7 +593,7 @@ function HealthOverview({ crews, agents }: { crews: CrewData[]; agents: AgentDat
               <div key={crew.id} className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-white/[0.04]">
                 <div
                   className="h-3 w-3 rounded-sm shrink-0"
-                  style={{ backgroundColor: crew.color ? `#${crew.color.replace("#", "")}` : "#6b7280" }}
+                  style={{ backgroundColor: getCrewDotColor(crew.color) }}
                 />
                 <span className="text-[12px] font-medium flex-1">{crew.name}</span>
                 <span className="text-[10px] text-muted-foreground tabular-nums">{total} agents</span>

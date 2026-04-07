@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import {
   X, MessageSquare, ScrollText, Settings, Crown, Bot, Cpu, Key, Clock,
-  ChevronRight, ExternalLink,
+  ExternalLink,
 } from "lucide-react"
 import { motion } from "motion/react"
 import { Button } from "@/components/ui/button"
@@ -80,16 +80,18 @@ export interface FleetAgentDetailProps {
 export function FleetAgentDetail({ agent, workspaceId, onClose }: FleetAgentDetailProps) {
   const status = STATUS_CONFIG[agent.status] || STATUS_CONFIG.IDLE
   const [runs, setRuns] = useState<RunData[]>([])
-  const [skillCount, setSkillCount] = useState(agent._count?.skills ?? 0)
-  const [credCount, setCredCount] = useState(agent._count?.credentials ?? 0)
+  const skillCount = agent._count?.skills ?? 0
+  const credCount = agent._count?.credentials ?? 0
 
-  // Fetch recent runs
+  // Fetch recent runs (abort stale requests on agent switch)
   useEffect(() => {
     if (!workspaceId) return
-    fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=5`)
+    const controller = new AbortController()
+    fetch(`/api/v1/agents/${agent.id}/chats?workspace_id=${workspaceId}&limit=5`, { signal: controller.signal })
       .then((r) => r.ok ? r.json() : [])
       .then((data: RunData[]) => setRuns(data))
       .catch(() => {})
+    return () => controller.abort()
   }, [agent.id, workspaceId])
 
   return (
