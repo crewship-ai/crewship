@@ -310,7 +310,7 @@ export function OrchestrationLayout({
           { id: "graph", label: "Graph", icon: Workflow },
           { id: "timeline", label: "Timeline", icon: Clock },
           { id: "activity", label: "Activity", icon: Activity },
-          { id: "proposals", label: "Proposals", icon: FileText },
+          { id: "proposals", label: "Approvals", icon: FileText },
           { id: "connections", label: "Connections", icon: Settings2 },
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
