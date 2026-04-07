@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useSession } from "@/hooks/use-auth"
+import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import { SettingsNav } from "./settings-nav"
@@ -48,7 +48,7 @@ const sectionTitles: Record<string, { title: string; description?: string }> = {
 }
 
 export function SettingsLayout() {
-  const { data: session } = useSession()
+  const { session, signOut } = useAuth()
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
   const { abilities } = useAbilities()
 
@@ -120,7 +120,18 @@ export function SettingsLayout() {
     }
 
     if (activeTab === "profile") {
-      return <ProfileSection userName={session?.user?.name} userEmail={session?.user?.email} role={role} />
+      const currentMember = members.find((m) => m.user.id === session?.user?.id)
+      return (
+        <ProfileSection
+          userName={session?.user?.name}
+          userEmail={session?.user?.email}
+          role={role}
+          workspaceName={org?.name}
+          joinedAt={currentMember?.created_at}
+          sessionExpires={session?.expires}
+          onSignOut={() => signOut().then(() => { window.location.href = "/login" })}
+        />
+      )
     }
     if (activeTab === "crews" && workspaceId) {
       return <CrewsContainersSection workspaceId={workspaceId} />
