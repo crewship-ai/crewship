@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -119,21 +120,27 @@ func generateOAuthState() (string, error) {
 }
 
 // buildOAuthURL constructs the full authorization URL with PKCE and standard params.
+// If authURL already contains query parameters, they are preserved and merged.
 func buildOAuthURL(authURL, clientID, redirectURI, state, codeChallenge, scopes string) string {
-	params := url.Values{
-		"client_id":             {clientID},
-		"redirect_uri":          {redirectURI},
-		"response_type":         {"code"},
-		"state":                 {state},
-		"access_type":           {"offline"},
-		"prompt":                {"consent"},
-		"code_challenge":        {codeChallenge},
-		"code_challenge_method": {"S256"},
+	parsed, err := url.Parse(authURL)
+	if err != nil {
+		parsed = &url.URL{Path: authURL}
 	}
+
+	params := parsed.Query() // preserve existing query params
+	params.Set("client_id", clientID)
+	params.Set("redirect_uri", redirectURI)
+	params.Set("response_type", "code")
+	params.Set("state", state)
+	params.Set("access_type", "offline")
+	params.Set("prompt", "consent")
+	params.Set("code_challenge", codeChallenge)
+	params.Set("code_challenge_method", "S256")
 	if scopes != "" {
 		params.Set("scope", scopes)
 	}
-	return authURL + "?" + params.Encode()
+	parsed.RawQuery = params.Encode()
+	return parsed.String()
 }
 
 // loadOAuthCredential loads and decrypts the full OAuth configuration for a credential.
@@ -145,7 +152,10 @@ func (h *OAuthHandler) loadOAuthCredential(ctx context.Context, credID, wsID str
 		FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		credID, wsID).Scan(&clientID, &clientSecretEnc, &authURL, &tokenURL, &scopes)
 	if err != nil {
-		return nil, err
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("credential not found: %w", err)
+		}
+		return nil, fmt.Errorf("load oauth credential: %w", err)
 	}
 
 	clientSecret := ""
@@ -239,7 +249,12 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 	// Load credential OAuth config
 	cred, err := h.loadOAuthCredential(r.Context(), req.CredentialID, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "OAuth credential not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "OAuth credential not found"})
+		} else {
+			h.logger.Error("load OAuth credential", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load credential"})
+		}
 		return
 	}
 	if cred.ClientID == "" || cred.AuthURL == "" {
@@ -328,7 +343,12 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	// Load credential OAuth config for token exchange
 	cred, loadErr := h.loadOAuthCredential(r.Context(), credentialID, workspaceID)
 	if loadErr != nil {
-		http.Error(w, "Credential not found", http.StatusNotFound)
+		if errors.Is(loadErr, sql.ErrNoRows) {
+			http.Error(w, "Credential not found", http.StatusNotFound)
+		} else {
+			h.logger.Error("load OAuth credential in callback", "error", loadErr)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -385,29 +405,45 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 	// If no code_verifier provided but state is available, recover the
 	// server-side PKCE verifier that was stored during Initiate().
 	codeVerifier := req.CodeVerifier
+	redirectURI := req.RedirectURI
 	if codeVerifier == "" && req.State != "" {
-		var storedVerifier string
+		var storedVerifier, storedRedirectURI, storedCredentialID string
 		err := h.db.QueryRowContext(r.Context(),
-			"SELECT code_verifier FROM oauth_states WHERE state = ?", req.State).Scan(&storedVerifier)
-		if err == nil {
-			codeVerifier = storedVerifier
-			// Delete used state to prevent replay
-			if _, delErr := h.db.ExecContext(r.Context(), "DELETE FROM oauth_states WHERE state = ?", req.State); delErr != nil {
-				h.logger.Error("delete used OAuth state in exchange", "error", delErr)
-			}
+			"SELECT code_verifier, redirect_uri, credential_id FROM oauth_states WHERE state = ?", req.State).
+			Scan(&storedVerifier, &storedRedirectURI, &storedCredentialID)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired OAuth state"})
+			return
 		}
-		// If state lookup fails, proceed without verifier (backward compat)
+		// Validate that the state belongs to this credential
+		if storedCredentialID != req.CredentialID {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OAuth state does not match credential"})
+			return
+		}
+		codeVerifier = storedVerifier
+		if redirectURI == "" {
+			redirectURI = storedRedirectURI
+		}
+		// Delete used state to prevent replay
+		if _, delErr := h.db.ExecContext(r.Context(), "DELETE FROM oauth_states WHERE state = ?", req.State); delErr != nil {
+			h.logger.Error("delete used OAuth state in exchange", "error", delErr)
+		}
 	}
 
 	// Load credential OAuth config
 	cred, err := h.loadOAuthCredential(r.Context(), req.CredentialID, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		} else {
+			h.logger.Error("load OAuth credential in exchange", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load credential"})
+		}
 		return
 	}
 
 	// Exchange code for tokens (with PKCE verifier if available)
-	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, req.Code, req.RedirectURI, codeVerifier)
+	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, req.Code, redirectURI, codeVerifier)
 	if err != nil {
 		h.logger.Error("OAuth manual code exchange failed", "error", err, "credential_id", req.CredentialID)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Token exchange failed"})

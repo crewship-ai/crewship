@@ -372,14 +372,18 @@ func (h *MCPRegistryHandler) Sync(w http.ResponseWriter, r *http.Request) {
 
 	const syncCooldown = int64(3600) // 1 hour in seconds
 	now := time.Now().Unix()
-	last := h.lastSync.Load()
-	if last > 0 && now-last < syncCooldown {
-		writeJSON(w, http.StatusTooManyRequests, map[string]string{
-			"error": "Sync was triggered recently, please wait before retrying",
-		})
-		return
+	for {
+		last := h.lastSync.Load()
+		if last > 0 && now-last < syncCooldown {
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{
+				"error": "Sync was triggered recently, please wait before retrying",
+			})
+			return
+		}
+		if h.lastSync.CompareAndSwap(last, now) {
+			break
+		}
 	}
-	h.lastSync.Store(now)
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

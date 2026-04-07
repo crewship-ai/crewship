@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -64,7 +65,7 @@ func (h *IntegrationHandler) TestCrewIntegrationConnection(w http.ResponseWriter
 
 	h.loadAndTestConnection(w, r,
 		`SELECT transport, endpoint FROM crew_mcp_servers
-		 WHERE id = ? AND crew_id = ?`,
+		 WHERE id = ? AND crew_id = ? AND deleted_at IS NULL`,
 		integrationID, crewID)
 }
 
@@ -106,6 +107,42 @@ func isPrivateIP(ip net.IP) bool {
 	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
 }
 
+// ssrfSafeTransport returns an http.Transport with a custom DialContext that
+// validates the resolved IP at connection time, preventing both SSRF and DNS
+// rebinding (TOCTOU) attacks.
+func ssrfSafeTransport() *http.Transport {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid address %q: %w", addr, err)
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, fmt.Errorf("DNS resolution failed for %s: %w", host, err)
+			}
+			for _, ipAddr := range ips {
+				if isPrivateIP(ipAddr.IP) {
+					return nil, fmt.Errorf("blocked connection to private/internal IP %s", ipAddr.IP)
+				}
+			}
+			// Connect to the first resolved IP directly to prevent re-resolution.
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		},
+	}
+}
+
+// looksLikeSSE checks whether the response body contains SSE framing (event: or data: lines).
+func looksLikeSSE(body []byte) bool {
+	limit := 4096
+	if len(body) < limit {
+		limit = len(body)
+	}
+	snippet := string(body[:limit])
+	return strings.Contains(snippet, "event:") || strings.Contains(snippet, "data:")
+}
+
 // testStreamableHTTPConnection sends a JSON-RPC initialize request to the MCP server endpoint.
 func testStreamableHTTPConnection(ctx context.Context, endpoint string) testConnectionResponse {
 	if endpoint == "" {
@@ -115,33 +152,11 @@ func testStreamableHTTPConnection(ctx context.Context, endpoint string) testConn
 		}
 	}
 
-	// SSRF protection: resolve hostname and reject private/internal IPs.
-	parsed, err := url.Parse(endpoint)
-	if err != nil {
+	// Validate URL structure before making any network call.
+	if _, err := url.Parse(endpoint); err != nil {
 		return testConnectionResponse{
 			Status:  "error",
 			Message: fmt.Sprintf("Invalid endpoint URL: %s", err.Error()),
-		}
-	}
-
-	hostname := parsed.Hostname()
-	resolveCtx, resolveCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer resolveCancel()
-
-	ips, err := net.DefaultResolver.LookupIPAddr(resolveCtx, hostname)
-	if err != nil {
-		return testConnectionResponse{
-			Status:  "error",
-			Message: fmt.Sprintf("DNS resolution failed for %s: %s", hostname, err.Error()),
-		}
-	}
-
-	for _, ipAddr := range ips {
-		if isPrivateIP(ipAddr.IP) {
-			return testConnectionResponse{
-				Status:  "error",
-				Message: fmt.Sprintf("Endpoint resolves to a private/internal IP address (%s)", ipAddr.IP),
-			}
 		}
 	}
 
@@ -181,7 +196,9 @@ func testStreamableHTTPConnection(ctx context.Context, endpoint string) testConn
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	// Use SSRF-safe transport that validates resolved IPs at connection time,
+	// preventing DNS rebinding (TOCTOU) attacks.
+	client := &http.Client{Timeout: 10 * time.Second, Transport: ssrfSafeTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return testConnectionResponse{
@@ -200,6 +217,8 @@ func testStreamableHTTPConnection(ctx context.Context, endpoint string) testConn
 			Message: "Server requires authentication",
 		}
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		contentType := resp.Header.Get("Content-Type")
+
 		// Try to parse as JSON-RPC response to extract server info
 		var rpcResp struct {
 			Result json.RawMessage `json:"result"`
@@ -212,10 +231,19 @@ func testStreamableHTTPConnection(ctx context.Context, endpoint string) testConn
 				ServerInfo: rpcResp.Result,
 			}
 		}
-		// SSE response or non-standard JSON — still consider it OK if 2xx
+
+		// SSE response: validate Content-Type or presence of SSE framing
+		if strings.Contains(contentType, "text/event-stream") || looksLikeSSE(respBody) {
+			return testConnectionResponse{
+				Status:  "ok",
+				Message: "Server responded with SSE stream",
+			}
+		}
+
+		// Non-JSON, non-SSE 2xx — not a valid MCP server response
 		return testConnectionResponse{
-			Status:  "ok",
-			Message: "Server responded successfully",
+			Status:  "error",
+			Message: "Server returned 2xx but response is not valid JSON-RPC or SSE",
 		}
 	default:
 		return testConnectionResponse{
