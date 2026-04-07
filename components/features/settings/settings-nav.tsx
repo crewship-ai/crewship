@@ -56,7 +56,7 @@ interface SettingsNavProps {
 
 export function SettingsNav({ activeTab, onTabChange, workspaceName }: SettingsNavProps) {
   return (
-    <div className="w-[220px] shrink-0 border-r border-white/[0.06] flex flex-col">
+    <div className="w-[220px] shrink-0 bg-card border-r border-white/[0.06] flex flex-col">
       {/* Back + title */}
       <div className="px-4 pt-4 pb-3">
         <Link
