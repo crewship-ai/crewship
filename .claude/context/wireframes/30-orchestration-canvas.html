@@ -1,0 +1,1862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Orchestration Canvas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ─── CSS Custom Properties ─── */
+:root {
+  --bg-root: #0a0c10;
+  --bg-panel: #0d0f14;
+  --bg-panel-hover: #12151c;
+  --bg-surface: #161923;
+  --bg-surface-raised: #1c2030;
+  --border: #1e2231;
+  --border-subtle: #161923;
+  --text-primary: #e2e8f0;
+  --text-secondary: #8892a8;
+  --text-muted: #4a5270;
+  --cyan: #06b6d4;
+  --cyan-dim: #0e7490;
+  --amber: #f59e0b;
+  --amber-dim: #92400e;
+  --emerald: #10b981;
+  --emerald-dim: #065f46;
+  --rose: #f43f5e;
+  --rose-dim: #881337;
+  --violet: #8b5cf6;
+  --violet-dim: #5b21b6;
+  --blue: #3b82f6;
+  --blue-dim: #1e3a5f;
+  --font-display: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --transition: 0.2s ease;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-display);
+  background: var(--bg-root);
+  color: var(--text-primary);
+  overflow: hidden;
+  height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Main Layout: 4-zone grid ─── */
+.layout {
+  display: grid;
+  grid-template-columns: 260px 1fr 380px;
+  grid-template-rows: 1fr auto;
+  height: 100vh;
+}
+.layout.left-collapsed {
+  grid-template-columns: 48px 1fr 380px;
+}
+.layout.left-collapsed .left-panel .lp-content { display: none; }
+.layout.left-collapsed .left-panel .lp-collapse-icon { transform: rotate(180deg); }
+
+/* ─── Left Panel ─── */
+.left-panel {
+  grid-row: 1;
+  grid-column: 1;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width var(--transition);
+}
+.lp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  min-height: 48px;
+}
+.lp-header h2 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.lp-collapse-btn {
+  background: none; border: none; color: var(--text-muted);
+  cursor: pointer; font-size: 16px; padding: 4px;
+  transition: color var(--transition);
+  display: flex; align-items: center;
+}
+.lp-collapse-btn:hover { color: var(--text-primary); }
+.lp-collapse-icon { transition: transform var(--transition); display: inline-block; }
+.lp-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 0;
+}
+.lp-content::-webkit-scrollbar { width: 4px; }
+.lp-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Tree */
+.tree-section { padding: 0 12px; margin-bottom: 16px; }
+.tree-section-title {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.8px; color: var(--text-muted); padding: 4px 8px; margin-bottom: 4px;
+}
+.tree-node {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 6px; cursor: pointer;
+  transition: background var(--transition);
+  font-size: 13px; color: var(--text-secondary);
+  user-select: none;
+}
+.tree-node:hover { background: var(--bg-surface); }
+.tree-node.active { background: var(--bg-surface-raised); color: var(--text-primary); }
+.tree-node .arrow {
+  width: 14px; text-align: center; font-size: 10px;
+  color: var(--text-muted); transition: transform 0.15s ease;
+}
+.tree-node .arrow.collapsed { transform: rotate(-90deg); }
+.tree-node .icon { font-size: 14px; }
+.tree-node .label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tree-node .badge {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-muted); flex-shrink: 0;
+}
+.tree-node .status-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+}
+.tree-node .lead-star { color: var(--amber); font-size: 11px; flex-shrink: 0; }
+.tree-children { padding-left: 16px; }
+.tree-children.collapsed { display: none; }
+.tree-mcp {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 8px 3px 24px; font-size: 11px; color: var(--text-muted);
+}
+
+/* Inbox */
+.inbox-section { padding: 0 12px; margin-top: 8px; border-top: 1px solid var(--border); padding-top: 12px; }
+.inbox-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px; border-radius: 6px; cursor: pointer;
+  transition: background var(--transition); margin-bottom: 4px;
+}
+.inbox-item:hover { background: var(--bg-surface); }
+.inbox-item .inbox-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.inbox-item .inbox-text { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+.inbox-item .inbox-text strong { color: var(--text-primary); font-weight: 500; }
+
+/* Mini connection map */
+.conn-map {
+  margin: 12px; padding: 12px; background: var(--bg-surface);
+  border-radius: var(--radius); border: 1px solid var(--border);
+}
+.conn-map-title {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 8px;
+}
+.conn-map svg { width: 100%; }
+
+/* ─── Canvas ─── */
+.canvas-area {
+  grid-row: 1;
+  grid-column: 2;
+  position: relative;
+  overflow: hidden;
+  background-color: var(--bg-root);
+  background-image: radial-gradient(circle, #1e2231 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.canvas-inner {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+}
+/* SVG layer behind HTML nodes */
+.canvas-svg {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+.canvas-svg path {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+/* HTML nodes layer */
+.canvas-nodes {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 2;
+  pointer-events: none;
+}
+.canvas-nodes > * { pointer-events: auto; }
+
+/* ─── Crew Group Node ─── */
+.crew-group {
+  position: absolute;
+  border-radius: 16px;
+  border: 1.5px solid var(--border);
+  background: rgba(13, 15, 20, 0.85);
+  backdrop-filter: blur(12px);
+  min-width: 380px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+  cursor: default;
+}
+.crew-group:hover {
+  border-color: rgba(255,255,255,0.1);
+  box-shadow: 0 0 30px rgba(0,0,0,0.4);
+}
+.crew-group-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  border-radius: 16px 16px 0 0;
+  user-select: none;
+}
+.crew-group-header .crew-icon {
+  font-size: 18px;
+}
+.crew-group-header .crew-name {
+  font-size: 15px; font-weight: 600; flex: 1;
+}
+.crew-group-header .crew-badges {
+  display: flex; gap: 6px; align-items: center;
+}
+.crew-badge {
+  font-family: var(--font-mono); font-size: 10px;
+  padding: 2px 8px; border-radius: 4px;
+  background: var(--bg-surface); color: var(--text-secondary);
+  border: 1px solid var(--border); white-space: nowrap;
+}
+.crew-badge.docker { color: var(--cyan); border-color: var(--cyan-dim); }
+.crew-badge.mcp { color: var(--violet); border-color: var(--violet-dim); }
+.crew-collapse-toggle {
+  background: none; border: none; color: var(--text-muted);
+  cursor: pointer; font-size: 14px; padding: 4px;
+  transition: transform 0.15s ease;
+}
+.crew-collapse-toggle.collapsed { transform: rotate(-90deg); }
+
+/* Agent cards grid inside crew */
+.crew-agents {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 12px;
+}
+.crew-agents.collapsed { display: none; }
+
+/* ─── Agent Card ─── */
+.agent-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
+  min-width: 160px;
+}
+.agent-card:hover {
+  border-color: rgba(255,255,255,0.15);
+  background: var(--bg-surface-raised);
+}
+.agent-card.active-glow {
+  animation: agentPulse 2.5s ease-in-out infinite;
+}
+@keyframes agentPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
+  50% { box-shadow: 0 0 12px 2px rgba(6, 182, 212, 0.15); }
+}
+.agent-card.selected {
+  border-color: var(--cyan);
+  box-shadow: 0 0 16px rgba(6, 182, 212, 0.2);
+}
+.agent-card-row {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 3px;
+}
+.agent-card-row:last-child { margin-bottom: 0; }
+.agent-status-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.agent-card-name {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.agent-card-role {
+  font-size: 11px; color: var(--text-secondary);
+}
+.agent-card-role .lead-badge {
+  font-size: 9px; font-weight: 700; padding: 1px 5px;
+  border-radius: 3px; background: var(--amber-dim); color: var(--amber);
+  margin-left: 4px; vertical-align: middle;
+}
+.agent-card-model {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-muted);
+}
+.agent-card-metrics {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-muted); display: flex; gap: 8px;
+}
+.agent-card-skills {
+  display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px;
+}
+.skill-tag {
+  font-size: 9px; font-family: var(--font-mono);
+  padding: 1px 6px; border-radius: 3px;
+  background: var(--bg-panel); color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* ─── Task Flow Nodes ─── */
+.task-flow {
+  position: absolute;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.task-node {
+  background: var(--bg-surface);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  min-width: 170px;
+  max-width: 200px;
+  cursor: pointer;
+  transition: border-color var(--transition), box-shadow var(--transition);
+  position: relative;
+}
+.task-node:hover {
+  border-color: rgba(255,255,255,0.15);
+  box-shadow: 0 0 20px rgba(0,0,0,0.3);
+}
+.task-node.selected {
+  border-color: var(--cyan);
+  box-shadow: 0 0 16px rgba(6, 182, 212, 0.2);
+}
+.task-node.completed { border-left: 3px solid var(--emerald); }
+.task-node.in-progress { border-left: 3px solid var(--blue); }
+.task-node.blocked { border-left: 3px solid var(--amber); }
+.task-node.pending { border-left: 3px solid var(--text-muted); }
+
+.task-node-title {
+  font-size: 12px; font-weight: 600; color: var(--text-primary);
+  margin-bottom: 4px; line-height: 1.3;
+}
+.task-node-status {
+  font-size: 10px; font-family: var(--font-mono);
+  margin-bottom: 3px;
+}
+.task-node-agent {
+  font-size: 11px; color: var(--text-secondary);
+}
+.task-node-agent .cross-crew {
+  color: var(--violet); font-size: 9px; font-weight: 600;
+}
+.task-node-progress {
+  margin-top: 5px; height: 3px; border-radius: 2px;
+  background: var(--border); overflow: hidden;
+}
+.task-node-progress-bar {
+  height: 100%; border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+/* Approval gate (diamond) */
+.gate-node {
+  position: absolute;
+  width: 64px; height: 64px;
+  cursor: pointer;
+  transition: filter var(--transition);
+}
+.gate-node:hover { filter: brightness(1.2); }
+.gate-node svg { width: 100%; height: 100%; }
+.gate-node-label {
+  position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; color: var(--text-secondary); white-space: nowrap;
+  text-align: center; font-weight: 500;
+}
+
+/* ─── SVG Arrows & Paths ─── */
+.svg-arrow {
+  fill: none;
+  stroke-width: 1.5;
+  transition: stroke var(--transition), stroke-width var(--transition);
+}
+.svg-arrow:hover {
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+.svg-arrow.dep-completed { stroke: var(--emerald); }
+.svg-arrow.dep-active { stroke: var(--blue); }
+.svg-arrow.dep-pending { stroke: var(--text-muted); stroke-dasharray: 6 4; }
+.svg-arrow.dep-blocked { stroke: var(--amber); stroke-dasharray: 6 4; }
+.svg-arrow.dep-gate { stroke: var(--amber); stroke-dasharray: 8 4; stroke-width: 1.5; }
+
+/* A2A crew-to-crew edge */
+.svg-a2a-edge {
+  fill: none;
+  stroke: var(--cyan);
+  stroke-width: 2.5;
+  stroke-dasharray: 8 6;
+  opacity: 0.7;
+  transition: opacity var(--transition), stroke-width var(--transition);
+}
+.svg-a2a-edge:hover {
+  opacity: 1;
+  stroke-width: 3.5;
+  filter: drop-shadow(0 0 6px var(--cyan));
+}
+
+/* Message count badge on edge */
+.edge-badge {
+  position: absolute;
+  background: var(--bg-surface);
+  border: 1.5px solid var(--cyan-dim);
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--cyan);
+  cursor: pointer;
+  z-index: 5;
+  transition: background var(--transition), border-color var(--transition);
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.edge-badge:hover {
+  background: var(--bg-surface-raised);
+  border-color: var(--cyan);
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.25);
+}
+
+/* Animated message dots */
+.msg-dot {
+  fill: var(--cyan);
+  opacity: 0.9;
+}
+
+/* ─── Right Panel ─── */
+.right-panel {
+  grid-row: 1;
+  grid-column: 3;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.rp-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.rp-tab {
+  flex: 1;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+  text-align: center;
+}
+.rp-tab:hover { color: var(--text-secondary); }
+.rp-tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+.rp-view {
+  display: none;
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+.rp-view.active { display: block; }
+.rp-view::-webkit-scrollbar { width: 4px; }
+.rp-view::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Right panel content styles */
+.rp-title {
+  font-size: 16px; font-weight: 700; margin-bottom: 12px;
+}
+.rp-section {
+  margin-bottom: 14px;
+}
+.rp-section-title {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.8px; color: var(--text-muted); margin-bottom: 6px;
+}
+.rp-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text-secondary);
+  padding: 3px 0;
+}
+.rp-row .rp-label {
+  color: var(--text-muted); min-width: 90px; font-size: 12px;
+}
+.rp-status-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 4px;
+}
+.rp-status-badge.in-progress { background: rgba(59,130,246,0.15); color: var(--blue); }
+.rp-status-badge.completed { background: rgba(16,185,129,0.15); color: var(--emerald); }
+.rp-status-badge.blocked { background: rgba(245,158,11,0.15); color: var(--amber); }
+.rp-status-badge.pending { background: rgba(74,82,112,0.15); color: var(--text-muted); }
+.rp-complexity-badge {
+  font-size: 10px; font-family: var(--font-mono); font-weight: 600;
+  padding: 1px 6px; border-radius: 3px;
+  border: 1px solid;
+}
+.rp-complexity-badge.complex { border-color: var(--rose-dim); color: var(--rose); }
+.rp-complexity-badge.medium { border-color: var(--amber-dim); color: var(--amber); }
+.rp-complexity-badge.simple { border-color: var(--emerald-dim); color: var(--emerald); }
+
+/* Token progress bar */
+.rp-progress {
+  height: 6px; border-radius: 3px; background: var(--border);
+  overflow: hidden; margin-top: 4px; margin-bottom: 2px;
+}
+.rp-progress-bar {
+  height: 100%; border-radius: 3px;
+}
+.rp-progress-text {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+}
+.rp-output {
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 12px;
+  font-size: 12px; color: var(--text-secondary); line-height: 1.6;
+  font-family: var(--font-mono);
+}
+.rp-actions {
+  display: flex; gap: 8px; margin-top: 12px;
+}
+.rp-btn {
+  padding: 6px 14px; border-radius: 6px; font-size: 12px;
+  font-weight: 500; cursor: pointer; border: 1px solid var(--border);
+  background: var(--bg-surface); color: var(--text-secondary);
+  transition: all var(--transition);
+}
+.rp-btn:hover { background: var(--bg-surface-raised); color: var(--text-primary); }
+
+/* Crew detail styles */
+.rp-docker-grid {
+  display: grid; grid-template-columns: auto 1fr; gap: 3px 12px;
+  font-size: 12px;
+}
+.rp-docker-grid .dk-label { color: var(--text-muted); font-family: var(--font-mono); }
+.rp-docker-grid .dk-value { color: var(--text-secondary); font-family: var(--font-mono); }
+
+/* A2A message list */
+.rp-msg {
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.rp-msg:last-child { border-bottom: none; }
+.rp-msg-header {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; margin-bottom: 4px;
+}
+.rp-msg-time {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+}
+.rp-msg-from { font-weight: 600; color: var(--text-primary); }
+.rp-msg-arrow { color: var(--text-muted); }
+.rp-msg-to { color: var(--text-secondary); }
+.rp-msg-type {
+  font-family: var(--font-mono); font-size: 10px;
+  padding: 1px 6px; border-radius: 3px;
+}
+.rp-msg-type.assign { background: rgba(59,130,246,0.15); color: var(--blue); }
+.rp-msg-type.ask { background: rgba(139,92,246,0.15); color: var(--violet); }
+.rp-msg-type.result { background: rgba(16,185,129,0.15); color: var(--emerald); }
+.rp-msg-body {
+  font-size: 12px; color: var(--text-secondary);
+  padding-left: 4px; line-height: 1.5;
+}
+
+/* ─── Bottom Drawer ─── */
+.bottom-drawer {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  transition: max-height 0.3s ease;
+}
+.bottom-drawer.collapsed {
+  max-height: 36px;
+}
+.bd-tabs {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 36px;
+}
+.bd-tab {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color var(--transition);
+  border-bottom: 2px solid transparent;
+}
+.bd-tab:hover { color: var(--text-secondary); }
+.bd-tab.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+.bd-toggle {
+  margin-left: auto; margin-right: 12px;
+  background: none; border: none; color: var(--text-muted);
+  cursor: pointer; font-size: 14px; padding: 4px 8px;
+  transition: transform 0.2s ease;
+}
+.bottom-drawer.collapsed .bd-toggle { transform: rotate(180deg); }
+.bd-content {
+  flex: 1; overflow-y: auto; padding: 8px 16px;
+  font-family: var(--font-mono); font-size: 12px;
+}
+.bottom-drawer.collapsed .bd-content { display: none; }
+.bd-content::-webkit-scrollbar { width: 4px; }
+.bd-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.bd-view { display: none; }
+.bd-view.active { display: block; }
+
+/* Log lines */
+.log-line {
+  display: flex; gap: 8px; padding: 2px 0; line-height: 1.6;
+}
+.log-time { color: var(--text-muted); flex-shrink: 0; }
+.log-level { flex-shrink: 0; font-weight: 600; }
+.log-level.info { color: var(--cyan); }
+.log-level.warn { color: var(--amber); }
+.log-agent { color: var(--blue); flex-shrink: 0; min-width: 60px; }
+.log-msg { color: var(--text-secondary); }
+
+/* YAML tab */
+.yaml-block {
+  white-space: pre; line-height: 1.6; color: var(--text-secondary);
+}
+.yaml-block .yk { color: var(--cyan); }
+.yaml-block .yv { color: var(--emerald); }
+.yaml-block .yc { color: var(--text-muted); }
+.yaml-block .yn { color: var(--amber); }
+
+/* Docker table */
+.docker-table {
+  width: 100%; border-collapse: collapse;
+}
+.docker-table th {
+  text-align: left; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text-muted); padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.docker-table td {
+  padding: 6px 12px; font-size: 12px; color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Messages in bottom drawer */
+.bd-msg-line {
+  display: flex; align-items: flex-start; gap: 8px; padding: 4px 0;
+  border-bottom: 1px solid rgba(30,34,49,0.5);
+}
+.bd-msg-line .bd-time { color: var(--text-muted); flex-shrink: 0; }
+.bd-msg-line .bd-from { color: var(--blue); font-weight: 600; }
+.bd-msg-line .bd-arrow { color: var(--text-muted); }
+.bd-msg-line .bd-to { color: var(--text-secondary); }
+.bd-msg-line .bd-type {
+  font-size: 10px; padding: 1px 5px; border-radius: 3px;
+}
+.bd-msg-line .bd-type.assign { background: rgba(59,130,246,0.12); color: var(--blue); }
+.bd-msg-line .bd-type.ask { background: rgba(139,92,246,0.12); color: var(--violet); }
+.bd-msg-line .bd-type.result { background: rgba(16,185,129,0.12); color: var(--emerald); }
+.bd-msg-line .bd-body { color: var(--text-secondary); flex: 1; }
+
+/* ─── Tooltip ─── */
+.tooltip {
+  position: fixed;
+  background: var(--bg-surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  max-width: 320px;
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  display: none;
+}
+.tooltip.show { display: block; }
+
+/* ─── MCP Badge ─── */
+.mcp-badge-list {
+  display: flex; gap: 6px; padding: 8px 16px 4px;
+  border-top: 1px solid var(--border);
+}
+</style>
+</head>
+<body>
+
+<div class="layout" id="layout">
+  <!-- ═══ LEFT PANEL ═══ -->
+  <div class="left-panel" id="leftPanel">
+    <div class="lp-header">
+      <h2>Explorer</h2>
+      <button class="lp-collapse-btn" onclick="toggleLeftPanel()" title="Collapse panel">
+        <span class="lp-collapse-icon" id="lpCollapseIcon">&#x25C0;</span>
+      </button>
+    </div>
+    <div class="lp-content" id="lpContent">
+      <!-- Hierarchy Tree -->
+      <div class="tree-section">
+        <div class="tree-section-title">Workspace</div>
+        <div class="tree-node" style="font-weight:600;" onclick="toggleTree('ws-root')">
+          <span class="arrow" id="arrow-ws-root">&#9662;</span>
+          <span class="icon">&#127970;</span>
+          <span class="label">Crewship HQ</span>
+          <span class="badge" style="color:var(--cyan);font-size:10px;">Coordinator</span>
+        </div>
+        <div class="tree-children" id="tree-ws-root">
+          <!-- Engineering crew -->
+          <div class="tree-node" style="color:var(--blue);" onclick="toggleTree('crew-eng'); selectCrewPanel('engineering')">
+            <span class="arrow" id="arrow-crew-eng">&#9662;</span>
+            <span class="icon">&#128187;</span>
+            <span class="label">Engineering</span>
+            <span class="badge">4 agents, 2 MCP</span>
+          </div>
+          <div class="tree-children" id="tree-crew-eng">
+            <div class="tree-node" onclick="selectAgent('tomas')">
+              <span class="lead-star">&#9733;</span>
+              <span class="status-dot" style="background:var(--emerald);"></span>
+              <span class="label">Tom&aacute;&scaron; &mdash; Tech Lead</span>
+              <span class="badge">8.4k</span>
+            </div>
+            <div class="tree-node" onclick="selectAgent('viktor')">
+              <span style="width:13px;display:inline-block;"></span>
+              <span class="status-dot" style="background:var(--emerald);"></span>
+              <span class="label">Viktor &mdash; Backend</span>
+              <span class="badge">5.1k</span>
+            </div>
+            <div class="tree-node" onclick="selectAgent('nela')">
+              <span style="width:13px;display:inline-block;"></span>
+              <span class="status-dot" style="background:var(--emerald);"></span>
+              <span class="label">Nela &mdash; Frontend</span>
+              <span class="badge">3.2k</span>
+            </div>
+            <div class="tree-node" onclick="selectAgent('martin')">
+              <span style="width:13px;display:inline-block;"></span>
+              <span class="status-dot" style="background:var(--text-muted);"></span>
+              <span class="label">Martin &mdash; Infra</span>
+              <span class="badge">0</span>
+            </div>
+            <div class="tree-mcp">
+              &#128225; Linear &bull; Google Workspace
+            </div>
+          </div>
+
+          <!-- Quality crew -->
+          <div class="tree-node" style="color:var(--emerald);" onclick="toggleTree('crew-qa'); selectCrewPanel('quality')">
+            <span class="arrow" id="arrow-crew-qa">&#9662;</span>
+            <span class="icon">&#128269;</span>
+            <span class="label">Quality</span>
+            <span class="badge">4 agents</span>
+          </div>
+          <div class="tree-children" id="tree-crew-qa">
+            <div class="tree-node" onclick="selectAgent('eva')">
+              <span class="lead-star">&#9733;</span>
+              <span class="status-dot" style="background:var(--emerald);"></span>
+              <span class="label">Eva &mdash; Quality Director</span>
+              <span class="badge">4.7k</span>
+            </div>
+            <div class="tree-node" onclick="selectAgent('daniel')">
+              <span style="width:13px;display:inline-block;"></span>
+              <span class="status-dot" style="background:var(--text-muted);"></span>
+              <span class="label">Daniel &mdash; Code Reviewer</span>
+              <span class="badge">1.2k</span>
+            </div>
+            <div class="tree-node" onclick="selectAgent('petra')">
+              <span style="width:13px;display:inline-block;"></span>
+              <span class="status-dot" style="background:var(--amber);"></span>
+              <span class="label">Petra &mdash; Test Engineer</span>
+              <span class="badge">2.8k</span>
+            </div>
+            <div class="tree-node" onclick="selectAgent('jakub')">
+              <span style="width:13px;display:inline-block;"></span>
+              <span class="status-dot" style="background:var(--text-muted);"></span>
+              <span class="label">Jakub &mdash; Security</span>
+              <span class="badge">0.9k</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Unified Inbox -->
+      <div class="inbox-section">
+        <div class="tree-section-title">Unified Inbox</div>
+        <div class="inbox-item" onclick="selectTask('task-8')">
+          <span class="inbox-icon">&#9671;</span>
+          <div class="inbox-text"><strong>Approval:</strong> "Final review gate" (Tom&aacute;&scaron;) &mdash; task-8</div>
+        </div>
+        <div class="inbox-item" onclick="showRightTab('messages')">
+          <span class="inbox-icon">&#128232;</span>
+          <div class="inbox-text"><strong>Proposal:</strong> "Add OAuth2 SSO flow" &mdash; by Coordinator</div>
+        </div>
+        <div class="inbox-item" onclick="selectTask('task-6')">
+          <span class="inbox-icon" style="color:var(--amber);">&#128992;</span>
+          <div class="inbox-text"><strong>Blocked:</strong> "E2E test coverage" (Petra) &mdash; waiting on task-5</div>
+        </div>
+      </div>
+
+      <!-- Mini Connection Map -->
+      <div class="conn-map">
+        <div class="conn-map-title">Connections</div>
+        <svg viewBox="0 0 220 50" height="50">
+          <defs>
+            <marker id="miniArrowR" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+              <polygon points="0 0, 6 2, 0 4" fill="#06b6d4"/>
+            </marker>
+            <marker id="miniArrowL" markerWidth="6" markerHeight="4" refX="1" refY="2" orient="auto">
+              <polygon points="6 0, 0 2, 6 4" fill="#06b6d4"/>
+            </marker>
+          </defs>
+          <rect x="8" y="15" width="70" height="22" rx="6" fill="#1e3a5f" stroke="#3b82f6" stroke-width="1"/>
+          <text x="43" y="30" text-anchor="middle" font-size="10" font-family="Outfit" fill="#e2e8f0">Engineering</text>
+          <rect x="142" y="15" width="70" height="22" rx="6" fill="#065f46" stroke="#10b981" stroke-width="1"/>
+          <text x="177" y="30" text-anchor="middle" font-size="10" font-family="Outfit" fill="#e2e8f0">Quality</text>
+          <line x1="80" y1="23" x2="140" y2="23" stroke="#06b6d4" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#miniArrowR)"/>
+          <line x1="140" y1="30" x2="80" y2="30" stroke="#06b6d4" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#miniArrowL)"/>
+          <text x="110" y="46" text-anchor="middle" font-size="9" font-family="JetBrains Mono" fill="#8892a8">7 msgs &bull; 1.8s avg</text>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ CANVAS ═══ -->
+  <div class="canvas-area" id="canvasArea">
+    <!-- SVG connection layer -->
+    <svg class="canvas-svg" id="canvasSvg">
+      <defs>
+        <!-- Arrowhead markers -->
+        <marker id="arrowGreen" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#10b981"/>
+        </marker>
+        <marker id="arrowBlue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#3b82f6"/>
+        </marker>
+        <marker id="arrowMuted" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#4a5270"/>
+        </marker>
+        <marker id="arrowAmber" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#f59e0b"/>
+        </marker>
+        <marker id="arrowCyan" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#06b6d4"/>
+        </marker>
+        <marker id="arrowCyanL" markerWidth="8" markerHeight="6" refX="1" refY="3" orient="auto">
+          <polygon points="8 0, 0 3, 8 6" fill="#06b6d4"/>
+        </marker>
+
+        <!-- A2A path for animation -->
+        <path id="pathEngToQuality" d="M 470,200 C 560,200 560,200 650,200" fill="none"/>
+        <path id="pathQualityToEng" d="M 650,220 C 560,220 560,220 470,220" fill="none"/>
+      </defs>
+
+      <!-- Task dependency arrows: task-1 -> task-3 -->
+      <path id="dep-1-3" class="svg-arrow dep-completed" d="M 225,520 C 265,520 275,520 315,520" marker-end="url(#arrowGreen)"/>
+      <!-- task-3 -> task-5 -->
+      <path id="dep-3-5" class="svg-arrow dep-completed" d="M 490,520 C 530,520 540,520 580,520" marker-end="url(#arrowGreen)"/>
+      <!-- task-5 -> task-6 -->
+      <path id="dep-5-6" class="svg-arrow dep-pending" d="M 750,520 C 790,520 800,520 840,520" marker-end="url(#arrowMuted)"/>
+
+      <!-- task-1 -> task-2 (cross-crew) -->
+      <path id="dep-1-2" class="svg-arrow dep-completed" d="M 180,546 C 180,580 330,620 330,656" marker-end="url(#arrowGreen)"/>
+      <!-- task-2 -> task-7 -->
+      <path id="dep-2-7" class="svg-arrow dep-active" d="M 420,656 C 460,656 500,656 540,656" marker-end="url(#arrowBlue)"/>
+      <!-- task-4 -> task-8 (gate) -->
+      <path id="dep-4-8" class="svg-arrow dep-gate" d="M 226,686 C 300,720 580,720 638,716" marker-end="url(#arrowAmber)"/>
+      <!-- task-6 -> task-8 (gate) -->
+      <path id="dep-6-8" class="svg-arrow dep-gate" d="M 900,546 C 920,580 700,700 665,710" marker-end="url(#arrowAmber)"/>
+      <!-- task-7 -> task-8 (gate) -->
+      <path id="dep-7-8" class="svg-arrow dep-gate" d="M 630,686 C 640,695 645,700 650,706" marker-end="url(#arrowAmber)"/>
+
+      <!-- ═══ A2A CREW-TO-CREW EDGE ═══ -->
+      <path id="a2a-eng-qa-top" class="svg-a2a-edge"
+            d="M 420,180 C 490,160 540,160 610,180"
+            marker-end="url(#arrowCyan)"
+            onmouseover="showEdgeTooltip(event)" onmouseout="hideTooltip()"/>
+      <path id="a2a-qa-eng-bottom" class="svg-a2a-edge"
+            d="M 610,220 C 540,240 490,240 420,220"
+            marker-end="url(#arrowCyan)"
+            onmouseover="showEdgeTooltip(event)" onmouseout="hideTooltip()"/>
+
+      <!-- Animated message dots on A2A path -->
+      <circle class="msg-dot" r="3.5">
+        <animateMotion dur="2.8s" repeatCount="indefinite">
+          <mpath href="#a2a-eng-qa-top"/>
+        </animateMotion>
+      </circle>
+      <circle class="msg-dot" r="3" opacity="0.6">
+        <animateMotion dur="2.8s" repeatCount="indefinite" begin="0.9s">
+          <mpath href="#a2a-eng-qa-top"/>
+        </animateMotion>
+      </circle>
+      <circle class="msg-dot" r="3" opacity="0.5">
+        <animateMotion dur="2.8s" repeatCount="indefinite" begin="1.8s">
+          <mpath href="#a2a-eng-qa-top"/>
+        </animateMotion>
+      </circle>
+      <circle class="msg-dot" r="3.5">
+        <animateMotion dur="3.2s" repeatCount="indefinite">
+          <mpath href="#a2a-qa-eng-bottom"/>
+        </animateMotion>
+      </circle>
+      <circle class="msg-dot" r="3" opacity="0.6">
+        <animateMotion dur="3.2s" repeatCount="indefinite" begin="1.1s">
+          <mpath href="#a2a-qa-eng-bottom"/>
+        </animateMotion>
+      </circle>
+    </svg>
+
+    <!-- HTML nodes layer -->
+    <div class="canvas-nodes" id="canvasNodes">
+
+      <!-- ═══ ENGINEERING CREW GROUP ═══ -->
+      <div class="crew-group" id="crew-engineering" style="left:40px; top:40px; border-color:rgba(59,130,246,0.3);">
+        <div class="crew-group-header" onclick="selectCrewPanel('engineering')" style="background:linear-gradient(90deg, rgba(59,130,246,0.12), transparent);">
+          <span class="crew-icon">&#128187;</span>
+          <span class="crew-name" style="color:#93bbfc;">Engineering</span>
+          <div class="crew-badges">
+            <span class="crew-badge docker">&#128051; node:18-slim</span>
+            <span class="crew-badge mcp">Linear</span>
+            <span class="crew-badge mcp">GWorkspace</span>
+          </div>
+          <button class="crew-collapse-toggle" onclick="event.stopPropagation(); toggleCrewAgents('engineering')" id="toggle-engineering">&#9662;</button>
+        </div>
+        <div class="crew-agents" id="agents-engineering">
+          <!-- Tomas -->
+          <div class="agent-card active-glow" id="card-tomas" onclick="selectAgent('tomas')">
+            <div class="agent-card-row">
+              <span class="agent-status-dot" style="background:var(--emerald);"></span>
+              <span class="agent-card-name">Tom&aacute;&scaron;</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-role">Tech Lead <span class="lead-badge">LEAD</span></span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-model">claude-haiku-4-5</span>
+            </div>
+            <div class="agent-card-metrics">
+              <span>8.4k tok</span>
+              <span>$0.52</span>
+            </div>
+            <div class="agent-card-skills">
+              <span class="skill-tag">Code Review</span>
+              <span class="skill-tag">DevOps</span>
+            </div>
+          </div>
+          <!-- Viktor -->
+          <div class="agent-card active-glow" id="card-viktor" onclick="selectAgent('viktor')">
+            <div class="agent-card-row">
+              <span class="agent-status-dot" style="background:var(--emerald);"></span>
+              <span class="agent-card-name">Viktor</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-role">Backend Engineer</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-model">claude-haiku-4-5</span>
+            </div>
+            <div class="agent-card-metrics">
+              <span>5.1k tok</span>
+              <span>$0.31</span>
+            </div>
+            <div class="agent-card-skills">
+              <span class="skill-tag">Coding Assistant</span>
+            </div>
+          </div>
+          <!-- Nela -->
+          <div class="agent-card active-glow" id="card-nela" onclick="selectAgent('nela')">
+            <div class="agent-card-row">
+              <span class="agent-status-dot" style="background:var(--emerald);"></span>
+              <span class="agent-card-name">Nela</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-role">Frontend Engineer</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-model">claude-haiku-4-5</span>
+            </div>
+            <div class="agent-card-metrics">
+              <span>3.2k tok</span>
+              <span>$0.19</span>
+            </div>
+            <div class="agent-card-skills">
+              <span class="skill-tag">Coding Assistant</span>
+            </div>
+          </div>
+          <!-- Martin -->
+          <div class="agent-card" id="card-martin" onclick="selectAgent('martin')">
+            <div class="agent-card-row">
+              <span class="agent-status-dot" style="background:var(--text-muted);"></span>
+              <span class="agent-card-name">Martin</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-role">Infrastructure Engineer</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-model">claude-haiku-4-5</span>
+            </div>
+            <div class="agent-card-metrics">
+              <span>0 tok</span>
+              <span>$0.00</span>
+            </div>
+            <div class="agent-card-skills">
+              <span class="skill-tag">DevOps</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ QUALITY CREW GROUP ═══ -->
+      <div class="crew-group" id="crew-quality" style="left:540px; top:40px; border-color:rgba(16,185,129,0.3);">
+        <div class="crew-group-header" onclick="selectCrewPanel('quality')" style="background:linear-gradient(90deg, rgba(16,185,129,0.12), transparent);">
+          <span class="crew-icon">&#128269;</span>
+          <span class="crew-name" style="color:#6ee7b7;">Quality</span>
+          <div class="crew-badges">
+            <span class="crew-badge docker">&#128051; python:3.11-slim</span>
+          </div>
+          <button class="crew-collapse-toggle" onclick="event.stopPropagation(); toggleCrewAgents('quality')" id="toggle-quality">&#9662;</button>
+        </div>
+        <div class="crew-agents" id="agents-quality">
+          <!-- Eva -->
+          <div class="agent-card active-glow" id="card-eva" onclick="selectAgent('eva')">
+            <div class="agent-card-row">
+              <span class="agent-status-dot" style="background:var(--emerald);"></span>
+              <span class="agent-card-name">Eva</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-role">Quality Director <span class="lead-badge">LEAD</span></span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-model">claude-haiku-4-5</span>
+            </div>
+            <div class="agent-card-metrics">
+              <span>4.7k tok</span>
+              <span>$0.29</span>
+            </div>
+            <div class="agent-card-skills">
+              <span class="skill-tag">Code Review</span>
+              <span class="skill-tag">Testing</span>
+              <span class="skill-tag">Security</span>
+            </div>
+          </div>
+          <!-- Daniel -->
+          <div class="agent-card" id="card-daniel" onclick="selectAgent('daniel')">
+            <div class="agent-card-row">
+              <span class="agent-status-dot" style="background:var(--text-muted);"></span>
+              <span class="agent-card-name">Daniel</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-role">Code Reviewer</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-model">claude-haiku-4-5</span>
+            </div>
+            <div class="agent-card-metrics">
+              <span>1.2k tok</span>
+              <span>$0.07</span>
+            </div>
+            <div class="agent-card-skills">
+              <span class="skill-tag">Code Review</span>
+            </div>
+          </div>
+          <!-- Petra -->
+          <div class="agent-card" id="card-petra" onclick="selectAgent('petra')" style="border-color:rgba(245,158,11,0.3);">
+            <div class="agent-card-row">
+              <span class="agent-status-dot" style="background:var(--amber);"></span>
+              <span class="agent-card-name">Petra</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-role">Test Engineer</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-model">claude-haiku-4-5</span>
+            </div>
+            <div class="agent-card-metrics">
+              <span>2.8k tok</span>
+              <span>$0.17</span>
+            </div>
+            <div class="agent-card-skills">
+              <span class="skill-tag">Testing</span>
+            </div>
+          </div>
+          <!-- Jakub -->
+          <div class="agent-card active-glow" id="card-jakub" onclick="selectAgent('jakub')">
+            <div class="agent-card-row">
+              <span class="agent-status-dot" style="background:var(--emerald);"></span>
+              <span class="agent-card-name">Jakub</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-role">Security Analyst</span>
+            </div>
+            <div class="agent-card-row">
+              <span class="agent-card-model">claude-haiku-4-5</span>
+            </div>
+            <div class="agent-card-metrics">
+              <span>0.9k tok</span>
+              <span>$0.05</span>
+            </div>
+            <div class="agent-card-skills">
+              <span class="skill-tag">Security Auditor</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TASK FLOW — ENGINEERING ROW ═══ -->
+      <div class="task-flow" style="left:55px; top:470px;">
+        <div class="task-node completed" id="task-1" onclick="selectTask('task-1')">
+          <div class="task-node-title">Split god files</div>
+          <div class="task-node-status" style="color:var(--emerald);">&#10003; COMPLETED</div>
+          <div class="task-node-agent">Viktor &mdash; <span class="rp-complexity-badge medium">MEDIUM</span></div>
+          <div class="task-node-progress"><div class="task-node-progress-bar" style="width:62%;background:var(--emerald);"></div></div>
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:3px;">3.1k / 5k tok</div>
+        </div>
+        <div class="task-node completed" id="task-3" onclick="selectTask('task-3')" style="margin-left:90px;">
+          <div class="task-node-title">Add rows.Err() checks</div>
+          <div class="task-node-status" style="color:var(--emerald);">&#10003; COMPLETED</div>
+          <div class="task-node-agent">Viktor &mdash; <span class="rp-complexity-badge simple">SIMPLE</span></div>
+          <div class="task-node-progress"><div class="task-node-progress-bar" style="width:60%;background:var(--emerald);"></div></div>
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:3px;">1.2k / 2k tok</div>
+        </div>
+        <div class="task-node pending" id="task-5" onclick="selectTask('task-5')" style="margin-left:90px;">
+          <div class="task-node-title">Frontend lint fixes</div>
+          <div class="task-node-status" style="color:var(--text-muted);">&#11036; PENDING</div>
+          <div class="task-node-agent">Nela &mdash; <span class="rp-complexity-badge simple">SIMPLE</span></div>
+          <div class="task-node-progress"><div class="task-node-progress-bar" style="width:0%;background:var(--text-muted);"></div></div>
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:3px;">0 / 3k tok</div>
+        </div>
+        <div class="task-node blocked" id="task-6" onclick="selectTask('task-6')" style="margin-left:90px;">
+          <div class="task-node-title">E2E test coverage</div>
+          <div class="task-node-status" style="color:var(--amber);">&#128992; BLOCKED</div>
+          <div class="task-node-agent">Petra &mdash; <span class="rp-complexity-badge medium">MEDIUM</span></div>
+          <div class="task-node-progress"><div class="task-node-progress-bar" style="width:0%;background:var(--amber);"></div></div>
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:3px;">0 / 5k tok</div>
+        </div>
+      </div>
+
+      <!-- ═══ TASK FLOW — QUALITY / CROSS-CREW ROW ═══ -->
+      <div class="task-flow" style="left:250px; top:610px;">
+        <div class="task-node in-progress" id="task-2" onclick="selectTask('task-2')">
+          <div class="task-node-title">Fix security issues</div>
+          <div class="task-node-status" style="color:var(--blue);">&#128309; IN_PROGRESS</div>
+          <div class="task-node-agent">Jakub <span class="cross-crew">(Quality)</span> &mdash; <span class="rp-complexity-badge complex">COMPLEX</span></div>
+          <div class="task-node-progress"><div class="task-node-progress-bar" style="width:35%;background:var(--blue);"></div></div>
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:3px;">2.8k / 8k tok</div>
+        </div>
+        <div class="task-node in-progress" id="task-4" onclick="selectTask('task-4')" style="margin-left:0;">
+          <div class="task-node-title">Review architecture</div>
+          <div class="task-node-status" style="color:var(--blue);">&#128309; IN_PROGRESS</div>
+          <div class="task-node-agent">Eva <span class="cross-crew">(Quality)</span> &mdash; <span class="rp-complexity-badge complex">COMPLEX</span></div>
+          <div class="task-node-progress"><div class="task-node-progress-bar" style="width:41%;background:var(--blue);"></div></div>
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:3px;">4.1k / 10k tok</div>
+        </div>
+        <div class="task-node pending" id="task-7" onclick="selectTask('task-7')" style="margin-left:90px;">
+          <div class="task-node-title">Security audit report</div>
+          <div class="task-node-status" style="color:var(--text-muted);">&#11036; PENDING</div>
+          <div class="task-node-agent">Jakub &mdash; <span class="rp-complexity-badge complex">COMPLEX</span></div>
+          <div class="task-node-progress"><div class="task-node-progress-bar" style="width:0%;background:var(--text-muted);"></div></div>
+          <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:3px;">0 / 8k tok</div>
+        </div>
+      </div>
+
+      <!-- ═══ APPROVAL GATE ═══ -->
+      <div class="gate-node" id="task-8" style="left:620px; top:690px;" onclick="selectTask('task-8')">
+        <svg viewBox="0 0 64 64">
+          <rect x="10" y="10" width="44" height="44" rx="6" transform="rotate(45 32 32)"
+                fill="rgba(245,158,11,0.1)" stroke="#f59e0b" stroke-width="2" stroke-dasharray="4 2"/>
+          <text x="32" y="37" text-anchor="middle" font-size="16" fill="#f59e0b" font-family="Outfit">&#9671;</text>
+        </svg>
+        <div class="gate-node-label">
+          Final review gate<br>
+          <span style="color:var(--text-muted);font-size:9px;">Tom&aacute;&scaron; &bull; needs_review</span>
+        </div>
+      </div>
+
+      <!-- ═══ A2A EDGE BADGE ═══ -->
+      <div class="edge-badge" id="edgeBadge" style="left:480px; top:186px;" onclick="showRightTab('messages')">
+        &#8596; 7 msgs &bull; 1.8s
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══ RIGHT PANEL ═══ -->
+  <div class="right-panel" id="rightPanel">
+    <div class="rp-tabs">
+      <button class="rp-tab active" data-tab="task" onclick="showRightTab('task')">Task</button>
+      <button class="rp-tab" data-tab="crew" onclick="showRightTab('crew')">Crew</button>
+      <button class="rp-tab" data-tab="messages" onclick="showRightTab('messages')">Messages</button>
+    </div>
+
+    <!-- ─── Task Detail View ─── -->
+    <div class="rp-view active" id="rpTask">
+      <div class="rp-title" id="rpTaskTitle">Fix security issues</div>
+      <div class="rp-section">
+        <div class="rp-row">
+          <span class="rp-label">Status</span>
+          <span class="rp-status-badge in-progress" id="rpTaskStatus">&#128309; IN_PROGRESS</span>
+          <span style="font-size:11px;color:var(--text-muted);margin-left:4px;">Iteration 1/2</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Agent</span>
+          <span id="rpTaskAgent">Jakub &mdash; Security Analyst (Quality Crew)</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Cross-crew</span>
+          <span style="color:var(--violet);" id="rpTaskCross">&#10003; Assigned from Engineering</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Complexity</span>
+          <span class="rp-complexity-badge complex" id="rpTaskComplexity">COMPLEX</span>
+        </div>
+      </div>
+      <div class="rp-section">
+        <div class="rp-section-title">Token Budget</div>
+        <div class="rp-progress">
+          <div class="rp-progress-bar" id="rpTaskProgress" style="width:35%;background:var(--blue);"></div>
+        </div>
+        <div class="rp-progress-text" id="rpTaskTokens">2,800 / 8,000 (35%)</div>
+      </div>
+      <div class="rp-section">
+        <div class="rp-row">
+          <span class="rp-label">Cost</span>
+          <span id="rpTaskCost" style="font-family:var(--font-mono);">$0.17 / $0.50 budget</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Confidence</span>
+          <span id="rpTaskConfidence">&mdash;</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Evaluation</span>
+          <span id="rpTaskEval">Pending</span>
+        </div>
+      </div>
+      <div class="rp-section">
+        <div class="rp-section-title">Dependencies</div>
+        <div class="rp-row" id="rpTaskDeps">
+          <span style="color:var(--emerald);">&#10003;</span>
+          <span>task-1 (Split god files)</span>
+        </div>
+        <div class="rp-section-title" style="margin-top:8px;">Blocks</div>
+        <div class="rp-row" id="rpTaskBlocks">
+          <span style="color:var(--text-muted);">&#11036;</span>
+          <span>task-7 (Security audit report)</span>
+        </div>
+      </div>
+      <div class="rp-section">
+        <div class="rp-section-title">Output</div>
+        <div class="rp-output" id="rpTaskOutput">Found 3 critical issues:
+1. OAuth error response leaks upstream token body
+2. Missing state token deletion check (replay attack)
+3. Cross-workspace query in RemoveCredential...</div>
+      </div>
+      <div class="rp-actions">
+        <button class="rp-btn">&#9998; Edit</button>
+        <button class="rp-btn">&#8635; Retry</button>
+        <button class="rp-btn">&#9193; Skip</button>
+      </div>
+    </div>
+
+    <!-- ─── Crew Detail View ─── -->
+    <div class="rp-view" id="rpCrew">
+      <div class="rp-title" id="rpCrewTitle">&#128187; Engineering Crew</div>
+      <div class="rp-section">
+        <div class="rp-row">
+          <span class="rp-label">Container</span>
+          <span style="font-family:var(--font-mono);" id="rpCrewContainer">crewship-team-engineering</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Image</span>
+          <span style="font-family:var(--font-mono);" id="rpCrewImage">node:18-slim</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Status</span>
+          <span style="color:var(--emerald);" id="rpCrewStatus">&#128994; Running &mdash; Uptime: 2h 34m</span>
+        </div>
+      </div>
+      <div class="rp-section">
+        <div class="rp-section-title">Docker Config</div>
+        <div class="rp-docker-grid" id="rpCrewDocker">
+          <span class="dk-label">Network</span><span class="dk-value">bridge (internet: ON)</span>
+          <span class="dk-label">Ports</span><span class="dk-value">3000:3000</span>
+          <span class="dk-label">Volumes</span><span class="dk-value">/output/engineering &rarr; /workspace</span>
+          <span class="dk-label">Resources</span><span class="dk-value">2 CPU / 4 GB RAM</span>
+          <span class="dk-label">Caps</span><span class="dk-value">--cap-drop=ALL</span>
+          <span class="dk-label">UID</span><span class="dk-value">1001 (agent) / 1002 (sidecar)</span>
+        </div>
+      </div>
+      <div class="rp-section">
+        <div class="rp-section-title">MCP Integrations</div>
+        <div class="rp-row" id="rpCrewMcp1">
+          &#128225; <strong>Linear</strong> (streamable-http) &mdash; mcp.linear.app
+        </div>
+        <div class="rp-row" id="rpCrewMcp2">
+          &#128225; <strong>Google Workspace</strong> (stdio) &mdash; npx @anthropic-ai/google-workspace-mcp
+        </div>
+      </div>
+      <div class="rp-section">
+        <div class="rp-row">
+          <span class="rp-label">Agents</span>
+          <span id="rpCrewAgentCount">4 (3 active, 1 idle)</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Total Tokens</span>
+          <span style="font-family:var(--font-mono);" id="rpCrewTokens">16.7k</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Total Cost</span>
+          <span style="font-family:var(--font-mono);" id="rpCrewCost">$1.02</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Connections</span>
+          <span id="rpCrewConns">&#8596; Quality (bidirectional)</span>
+        </div>
+      </div>
+      <div class="rp-actions">
+        <button class="rp-btn">&#8635; Restart</button>
+        <button class="rp-btn">&#128203; Logs</button>
+        <button class="rp-btn">&#128421; Shell</button>
+      </div>
+    </div>
+
+    <!-- ─── A2A Messages View ─── -->
+    <div class="rp-view" id="rpMessages">
+      <div class="rp-title">Engineering &#8596; Quality</div>
+      <div class="rp-section">
+        <div class="rp-row">
+          <span class="rp-label">Direction</span>
+          <span>Bidirectional</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Messages</span>
+          <span style="font-family:var(--font-mono);">7 total</span>
+        </div>
+        <div class="rp-row">
+          <span class="rp-label">Latency</span>
+          <span style="font-family:var(--font-mono);">~1.8s avg</span>
+        </div>
+      </div>
+      <div class="rp-section" style="margin-top:8px;">
+        <div class="rp-msg">
+          <div class="rp-msg-header">
+            <span class="rp-msg-time">12:18:00</span>
+            <span class="rp-msg-from">Eva</span>
+            <span class="rp-msg-arrow">&rarr;</span>
+            <span class="rp-msg-to">Petra</span>
+            <span class="rp-msg-type assign">@assign</span>
+          </div>
+          <div class="rp-msg-body">"Write E2E tests for new module structure"</div>
+        </div>
+        <div class="rp-msg">
+          <div class="rp-msg-header">
+            <span class="rp-msg-time">12:15:45</span>
+            <span class="rp-msg-from">Jakub</span>
+            <span class="rp-msg-arrow">&rarr;</span>
+            <span class="rp-msg-to">Tom&aacute;&scaron;</span>
+            <span class="rp-msg-type result">@result</span>
+          </div>
+          <div class="rp-msg-body">"Found 3 issues: OAuth error leak, missing state check, cross-workspace query"</div>
+        </div>
+        <div class="rp-msg">
+          <div class="rp-msg-header">
+            <span class="rp-msg-time">12:12:30</span>
+            <span class="rp-msg-from">Eva</span>
+            <span class="rp-msg-arrow">&rarr;</span>
+            <span class="rp-msg-to">Daniel</span>
+            <span class="rp-msg-type assign">@assign</span>
+          </div>
+          <div class="rp-msg-body">"Review Viktor's PR for god file split"</div>
+        </div>
+        <div class="rp-msg">
+          <div class="rp-msg-header">
+            <span class="rp-msg-time">12:08:15</span>
+            <span class="rp-msg-from">Tom&aacute;&scaron;</span>
+            <span class="rp-msg-arrow">&rarr;</span>
+            <span class="rp-msg-to">Jakub</span>
+            <span class="rp-msg-type assign">@assign</span>
+          </div>
+          <div class="rp-msg-body">"Audit security: credential handling, OAuth flows"</div>
+        </div>
+        <div class="rp-msg">
+          <div class="rp-msg-header">
+            <span class="rp-msg-time">12:06:41</span>
+            <span class="rp-msg-from">Tom&aacute;&scaron;</span>
+            <span class="rp-msg-arrow">&rarr;</span>
+            <span class="rp-msg-to">Eva</span>
+            <span class="rp-msg-type result">@result</span>
+          </div>
+          <div class="rp-msg-body">"Yes, include sidecar &mdash; check UID boundaries"</div>
+        </div>
+        <div class="rp-msg">
+          <div class="rp-msg-header">
+            <span class="rp-msg-time">12:05:22</span>
+            <span class="rp-msg-from">Eva</span>
+            <span class="rp-msg-arrow">&rarr;</span>
+            <span class="rp-msg-to">Tom&aacute;&scaron;</span>
+            <span class="rp-msg-type ask">@ask</span>
+          </div>
+          <div class="rp-msg-body">"Should I include sidecar proxy in scope?"</div>
+        </div>
+        <div class="rp-msg">
+          <div class="rp-msg-header">
+            <span class="rp-msg-time">12:03:01</span>
+            <span class="rp-msg-from">Tom&aacute;&scaron;</span>
+            <span class="rp-msg-arrow">&rarr;</span>
+            <span class="rp-msg-to">Eva</span>
+            <span class="rp-msg-type assign">@assign</span>
+          </div>
+          <div class="rp-msg-body">"Review architecture after split, focus on provider pattern"</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ BOTTOM DRAWER ═══ -->
+  <div class="bottom-drawer" id="bottomDrawer">
+    <div class="bd-tabs">
+      <button class="bd-tab active" data-tab="bd-messages" onclick="showBdTab('bd-messages')">Messages</button>
+      <button class="bd-tab" data-tab="bd-exec" onclick="showBdTab('bd-exec')">Exec Log</button>
+      <button class="bd-tab" data-tab="bd-yaml" onclick="showBdTab('bd-yaml')">YAML</button>
+      <button class="bd-tab" data-tab="bd-docker" onclick="showBdTab('bd-docker')">Docker</button>
+      <button class="bd-toggle" onclick="toggleDrawer()" title="Toggle drawer">&#9650;</button>
+    </div>
+    <div class="bd-content">
+      <!-- Messages tab -->
+      <div class="bd-view active" id="bd-messages">
+        <div class="bd-msg-line">
+          <span class="bd-time">12:18:00</span>
+          <span class="bd-from">Eva</span>
+          <span class="bd-arrow">&rarr;</span>
+          <span class="bd-to">Petra</span>
+          <span class="bd-type assign">@assign</span>
+          <span class="bd-body">"Write E2E tests for new module structure"</span>
+        </div>
+        <div class="bd-msg-line">
+          <span class="bd-time">12:15:45</span>
+          <span class="bd-from">Jakub</span>
+          <span class="bd-arrow">&rarr;</span>
+          <span class="bd-to">Tom&aacute;&scaron;</span>
+          <span class="bd-type result">@result</span>
+          <span class="bd-body">"Found 3 issues: OAuth error leak, missing state check, cross-workspace query"</span>
+        </div>
+        <div class="bd-msg-line">
+          <span class="bd-time">12:12:30</span>
+          <span class="bd-from">Eva</span>
+          <span class="bd-arrow">&rarr;</span>
+          <span class="bd-to">Daniel</span>
+          <span class="bd-type assign">@assign</span>
+          <span class="bd-body">"Review Viktor's PR for god file split"</span>
+        </div>
+        <div class="bd-msg-line">
+          <span class="bd-time">12:08:15</span>
+          <span class="bd-from">Tom&aacute;&scaron;</span>
+          <span class="bd-arrow">&rarr;</span>
+          <span class="bd-to">Jakub</span>
+          <span class="bd-type assign">@assign</span>
+          <span class="bd-body">"Audit security: credential handling, OAuth flows"</span>
+        </div>
+        <div class="bd-msg-line">
+          <span class="bd-time">12:06:41</span>
+          <span class="bd-from">Tom&aacute;&scaron;</span>
+          <span class="bd-arrow">&rarr;</span>
+          <span class="bd-to">Eva</span>
+          <span class="bd-type result">@result</span>
+          <span class="bd-body">"Yes, include sidecar &mdash; check UID boundaries"</span>
+        </div>
+        <div class="bd-msg-line">
+          <span class="bd-time">12:05:22</span>
+          <span class="bd-from">Eva</span>
+          <span class="bd-arrow">&rarr;</span>
+          <span class="bd-to">Tom&aacute;&scaron;</span>
+          <span class="bd-type ask">@ask</span>
+          <span class="bd-body">"Should I include sidecar proxy in scope?"</span>
+        </div>
+        <div class="bd-msg-line">
+          <span class="bd-time">12:03:01</span>
+          <span class="bd-from">Tom&aacute;&scaron;</span>
+          <span class="bd-arrow">&rarr;</span>
+          <span class="bd-to">Eva</span>
+          <span class="bd-type assign">@assign</span>
+          <span class="bd-body">"Review architecture after split, focus on provider pattern"</span>
+        </div>
+      </div>
+
+      <!-- Exec Log tab -->
+      <div class="bd-view" id="bd-exec">
+        <div class="log-line"><span class="log-time">12:18:00</span><span class="log-level info">[INFO]</span><span class="log-agent">Jakub</span><span class="log-msg">tool_call: grep("RemoveCredential", "internal/api/")</span></div>
+        <div class="log-line"><span class="log-time">12:17:55</span><span class="log-level info">[INFO]</span><span class="log-agent">Jakub</span><span class="log-msg">Analyzing credential deletion for cross-workspace scope...</span></div>
+        <div class="log-line"><span class="log-time">12:17:30</span><span class="log-level warn">[WARN]</span><span class="log-agent">Petra</span><span class="log-msg">BLOCKED: waiting on task-5 (Frontend lint fixes)</span></div>
+        <div class="log-line"><span class="log-time">12:15:45</span><span class="log-level info">[INFO]</span><span class="log-agent">Jakub</span><span class="log-msg">Completed security scan &mdash; 3 issues found</span></div>
+        <div class="log-line"><span class="log-time">12:15:00</span><span class="log-level info">[INFO]</span><span class="log-agent">Eva</span><span class="log-msg">Reviewing provider pattern in internal/orchestrator/</span></div>
+        <div class="log-line"><span class="log-time">12:12:30</span><span class="log-level info">[INFO]</span><span class="log-agent">Viktor</span><span class="log-msg">tool_call: write_file("internal/api/agent_bindings.go")</span></div>
+        <div class="log-line"><span class="log-time">12:10:00</span><span class="log-level info">[INFO]</span><span class="log-agent">Nela</span><span class="log-msg">Idle &mdash; waiting for assignment</span></div>
+      </div>
+
+      <!-- YAML tab -->
+      <div class="bd-view" id="bd-yaml">
+        <div class="yaml-block"><span class="yk">mission</span>:
+  <span class="yk">title</span>: <span class="yv">"CRE-81 Code Quality Refactor"</span>
+  <span class="yk">status</span>: <span class="yv">IN_PROGRESS</span>
+  <span class="yk">crew</span>: <span class="yv">engineering</span>
+  <span class="yk">lead</span>: <span class="yv">"@tomas"</span>
+  <span class="yk">budget</span>:
+    <span class="yk">tokens</span>: <span class="yn">41000</span>
+    <span class="yk">cost_usd</span>: <span class="yn">3.50</span>
+  <span class="yk">tasks</span>:
+    - <span class="yk">id</span>: <span class="yv">task-1</span>
+      <span class="yk">title</span>: <span class="yv">"Split god files"</span>
+      <span class="yk">agent</span>: <span class="yv">"@viktor"</span>
+      <span class="yk">complexity</span>: <span class="yv">MEDIUM</span>
+      <span class="yk">status</span>: <span class="yv">COMPLETED</span>
+      <span class="yk">token_budget</span>: <span class="yn">5000</span>
+      <span class="yk">tokens_used</span>: <span class="yn">3100</span>
+      <span class="yk">depends_on</span>: <span class="yv">[]</span>
+    - <span class="yk">id</span>: <span class="yv">task-2</span>
+      <span class="yk">title</span>: <span class="yv">"Fix security issues"</span>
+      <span class="yk">agent</span>: <span class="yv">"@jakub"</span>
+      <span class="yk">crew</span>: <span class="yv">quality</span>  <span class="yc"># cross-crew assignment</span>
+      <span class="yk">complexity</span>: <span class="yv">COMPLEX</span>
+      <span class="yk">status</span>: <span class="yv">IN_PROGRESS</span>
+      <span class="yk">token_budget</span>: <span class="yn">8000</span>
+      <span class="yk">tokens_used</span>: <span class="yn">2800</span>
+      <span class="yk">depends_on</span>: <span class="yv">["task-1"]</span>
+    - <span class="yk">id</span>: <span class="yv">task-3</span>
+      <span class="yk">title</span>: <span class="yv">"Add rows.Err() checks"</span>
+      <span class="yk">agent</span>: <span class="yv">"@viktor"</span>
+      <span class="yk">complexity</span>: <span class="yv">SIMPLE</span>
+      <span class="yk">status</span>: <span class="yv">COMPLETED</span>
+      <span class="yk">token_budget</span>: <span class="yn">2000</span>
+      <span class="yk">tokens_used</span>: <span class="yn">1200</span>
+      <span class="yk">depends_on</span>: <span class="yv">["task-1"]</span>
+    - <span class="yk">id</span>: <span class="yv">task-4</span>
+      <span class="yk">title</span>: <span class="yv">"Review architecture"</span>
+      <span class="yk">agent</span>: <span class="yv">"@eva"</span>
+      <span class="yk">crew</span>: <span class="yv">quality</span>  <span class="yc"># cross-crew assignment</span>
+      <span class="yk">complexity</span>: <span class="yv">COMPLEX</span>
+      <span class="yk">status</span>: <span class="yv">IN_PROGRESS</span>
+      <span class="yk">token_budget</span>: <span class="yn">10000</span>
+      <span class="yk">tokens_used</span>: <span class="yn">4100</span>
+      <span class="yk">depends_on</span>: <span class="yv">[]</span>
+    - <span class="yk">id</span>: <span class="yv">task-5</span>
+      <span class="yk">title</span>: <span class="yv">"Frontend lint fixes"</span>
+      <span class="yk">agent</span>: <span class="yv">"@nela"</span>
+      <span class="yk">complexity</span>: <span class="yv">SIMPLE</span>
+      <span class="yk">status</span>: <span class="yv">PENDING</span>
+      <span class="yk">token_budget</span>: <span class="yn">3000</span>
+      <span class="yk">tokens_used</span>: <span class="yn">0</span>
+      <span class="yk">depends_on</span>: <span class="yv">["task-3"]</span>
+    - <span class="yk">id</span>: <span class="yv">task-6</span>
+      <span class="yk">title</span>: <span class="yv">"E2E test coverage"</span>
+      <span class="yk">agent</span>: <span class="yv">"@petra"</span>
+      <span class="yk">complexity</span>: <span class="yv">MEDIUM</span>
+      <span class="yk">status</span>: <span class="yv">BLOCKED</span>
+      <span class="yk">token_budget</span>: <span class="yn">5000</span>
+      <span class="yk">tokens_used</span>: <span class="yn">0</span>
+      <span class="yk">depends_on</span>: <span class="yv">["task-5"]</span>
+    - <span class="yk">id</span>: <span class="yv">task-7</span>
+      <span class="yk">title</span>: <span class="yv">"Security audit report"</span>
+      <span class="yk">agent</span>: <span class="yv">"@jakub"</span>
+      <span class="yk">complexity</span>: <span class="yv">COMPLEX</span>
+      <span class="yk">status</span>: <span class="yv">PENDING</span>
+      <span class="yk">token_budget</span>: <span class="yn">8000</span>
+      <span class="yk">tokens_used</span>: <span class="yn">0</span>
+      <span class="yk">depends_on</span>: <span class="yv">["task-2"]</span>
+    - <span class="yk">id</span>: <span class="yv">task-8</span>
+      <span class="yk">title</span>: <span class="yv">"Final review gate"</span>
+      <span class="yk">agent</span>: <span class="yv">"@tomas"</span>
+      <span class="yk">type</span>: <span class="yv">APPROVAL_GATE</span>
+      <span class="yk">needs_review</span>: <span class="yn">true</span>
+      <span class="yk">depends_on</span>: <span class="yv">["task-4", "task-6", "task-7"]</span></div>
+      </div>
+
+      <!-- Docker tab -->
+      <div class="bd-view" id="bd-docker">
+        <table class="docker-table">
+          <thead>
+            <tr>
+              <th>Container</th>
+              <th>Image</th>
+              <th>Status</th>
+              <th>CPU</th>
+              <th>RAM</th>
+              <th>Network</th>
+              <th>Agents</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="font-family:var(--font-mono);">crewship-team-engineering</td>
+              <td style="font-family:var(--font-mono);">node:18-slim</td>
+              <td><span style="color:var(--emerald);">&#128994; Up</span></td>
+              <td>12%</td>
+              <td>256MB</td>
+              <td>bridge/ON</td>
+              <td>4 (3 active)</td>
+            </tr>
+            <tr>
+              <td style="font-family:var(--font-mono);">crewship-team-quality</td>
+              <td style="font-family:var(--font-mono);">python:3.11-slim</td>
+              <td><span style="color:var(--emerald);">&#128994; Up</span></td>
+              <td>8%</td>
+              <td>192MB</td>
+              <td>bridge/OFF</td>
+              <td>4 (2 active)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tooltip -->
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+/* ─── Left panel collapse ─── */
+function toggleLeftPanel() {
+  document.getElementById('layout').classList.toggle('left-collapsed');
+  recalcSvg();
+}
+
+/* ─── Tree expand/collapse ─── */
+function toggleTree(id) {
+  var el = document.getElementById('tree-' + id);
+  var arrow = document.getElementById('arrow-' + id);
+  if (el) {
+    el.classList.toggle('collapsed');
+  }
+  if (arrow) {
+    arrow.classList.toggle('collapsed');
+  }
+}
+
+/* ─── Crew agents collapse on canvas ─── */
+function toggleCrewAgents(crew) {
+  var agents = document.getElementById('agents-' + crew);
+  var toggle = document.getElementById('toggle-' + crew);
+  if (agents) {
+    agents.classList.toggle('collapsed');
+  }
+  if (toggle) {
+    toggle.classList.toggle('collapsed');
+  }
+  setTimeout(recalcSvg, 50);
+}
+
+/* ─── Right panel tab switching ─── */
+function showRightTab(tab) {
+  document.querySelectorAll('.rp-tab').forEach(function(t) {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+  document.querySelectorAll('.rp-view').forEach(function(v) {
+    v.classList.remove('active');
+  });
+  var viewId = tab === 'task' ? 'rpTask' : tab === 'crew' ? 'rpCrew' : 'rpMessages';
+  document.getElementById(viewId).classList.add('active');
+}
+
+/* ─── Bottom drawer ─── */
+function toggleDrawer() {
+  document.getElementById('bottomDrawer').classList.toggle('collapsed');
+}
+function showBdTab(tabId) {
+  document.querySelectorAll('.bd-tab').forEach(function(t) {
+    t.classList.toggle('active', t.dataset.tab === tabId);
+  });
+  document.querySelectorAll('.bd-view').forEach(function(v) {
+    v.classList.remove('active');
+  });
+  document.getElementById(tabId).classList.add('active');
+  // Ensure drawer is open
+  document.getElementById('bottomDrawer').classList.remove('collapsed');
+}
+
+/* ─── Agent selection ─── */
+var selectedAgent = null;
+function selectAgent(name) {
+  // Clear previous selection
+  document.querySelectorAll('.agent-card.selected').forEach(function(c) {
+    c.classList.remove('selected');
+  });
+  document.querySelectorAll('.tree-node.active').forEach(function(n) {
+    n.classList.remove('active');
+  });
+  var card = document.getElementById('card-' + name);
+  if (card) {
+    card.classList.add('selected');
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  selectedAgent = name;
+  // Show agent info in task panel (simplified for wireframe)
+  showRightTab('task');
+  updateAgentInPanel(name);
+}
+
+function updateAgentInPanel(name) {
+  var agents = {
+    tomas: { title: 'Tech Lead Overview', status: 'Active', role: 'Tech Lead (LEAD)', crew: 'Engineering', tokens: '8,400', cost: '$0.52', skills: 'Code Reviewer, DevOps Helper' },
+    viktor: { title: 'Backend Engineer Overview', status: 'Active', role: 'Backend Engineer', crew: 'Engineering', tokens: '5,100', cost: '$0.31', skills: 'Coding Assistant' },
+    nela: { title: 'Frontend Engineer Overview', status: 'Active', role: 'Frontend Engineer', crew: 'Engineering', tokens: '3,200', cost: '$0.19', skills: 'Coding Assistant' },
+    martin: { title: 'Infrastructure Engineer Overview', status: 'Idle', role: 'Infrastructure Engineer', crew: 'Engineering', tokens: '0', cost: '$0.00', skills: 'DevOps Helper' },
+    eva: { title: 'Quality Director Overview', status: 'Active', role: 'Quality Director (LEAD)', crew: 'Quality', tokens: '4,700', cost: '$0.29', skills: 'Code Reviewer, Testing, Security' },
+    daniel: { title: 'Code Reviewer Overview', status: 'Idle', role: 'Code Reviewer', crew: 'Quality', tokens: '1,200', cost: '$0.07', skills: 'Code Reviewer' },
+    petra: { title: 'Test Engineer Overview', status: 'Blocked', role: 'Test Engineer', crew: 'Quality', tokens: '2,800', cost: '$0.17', skills: 'Testing Specialist' },
+    jakub: { title: 'Security Analyst Overview', status: 'Active', role: 'Security Analyst', crew: 'Quality', tokens: '900', cost: '$0.05', skills: 'Security Auditor' }
+  };
+  var a = agents[name];
+  if (!a) return;
+  var cap = name.charAt(0).toUpperCase() + name.slice(1);
+  document.getElementById('rpTaskTitle').textContent = cap + ' \u2014 ' + a.title;
+  document.getElementById('rpTaskStatus').innerHTML = (a.status === 'Active' ? '\uD83D\uDFE2 ' : a.status === 'Blocked' ? '\uD83D\uDFE1 ' : '\u26AA ') + a.status;
+  document.getElementById('rpTaskAgent').textContent = cap + ' \u2014 ' + a.role + ' (' + a.crew + ')';
+  document.getElementById('rpTaskCross').textContent = '\u2014';
+  document.getElementById('rpTaskComplexity').textContent = '\u2014';
+  document.getElementById('rpTaskTokens').textContent = a.tokens + ' tokens \u2022 ' + a.cost;
+  document.getElementById('rpTaskOutput').textContent = 'Skills: ' + a.skills;
+}
+
+/* ─── Task selection ─── */
+function selectTask(taskId) {
+  document.querySelectorAll('.task-node.selected, .gate-node.selected').forEach(function(n) {
+    n.classList.remove('selected');
+  });
+  var node = document.getElementById(taskId);
+  if (node) {
+    node.classList.add('selected');
+  }
+  showRightTab('task');
+  updateTaskInPanel(taskId);
+}
+
+function updateTaskInPanel(taskId) {
+  var tasks = {
+    'task-1': { title: 'Split god files', status: 'COMPLETED', statusClass: 'completed', statusIcon: '\u2713', agent: 'Viktor \u2014 Backend Engineer (Engineering)', cross: '\u2014', complexity: 'MEDIUM', complexityClass: 'medium', pct: 62, tokens: '3,100 / 5,000 (62%)', cost: '$0.19 / $0.31 budget', deps: 'None', blocks: 'task-2, task-3', output: 'Successfully split 4 god files into 12 focused modules.' },
+    'task-2': { title: 'Fix security issues', status: 'IN_PROGRESS', statusClass: 'in-progress', statusIcon: '\uD83D\uDD35', agent: 'Jakub \u2014 Security Analyst (Quality Crew)', cross: '\u2713 Assigned from Engineering', complexity: 'COMPLEX', complexityClass: 'complex', pct: 35, tokens: '2,800 / 8,000 (35%)', cost: '$0.17 / $0.50 budget', deps: 'task-1 (\u2713 Split god files)', blocks: 'task-7 (Security audit report)', output: 'Found 3 critical issues:\n1. OAuth error response leaks upstream token body\n2. Missing state token deletion check (replay attack)\n3. Cross-workspace query in RemoveCredential...' },
+    'task-3': { title: 'Add rows.Err() checks', status: 'COMPLETED', statusClass: 'completed', statusIcon: '\u2713', agent: 'Viktor \u2014 Backend Engineer (Engineering)', cross: '\u2014', complexity: 'SIMPLE', complexityClass: 'simple', pct: 60, tokens: '1,200 / 2,000 (60%)', cost: '$0.07 / $0.12 budget', deps: 'task-1 (\u2713 Split god files)', blocks: 'task-5 (Frontend lint fixes)', output: 'Added rows.Err() checks to 8 query sites in internal/database/.' },
+    'task-4': { title: 'Review architecture', status: 'IN_PROGRESS', statusClass: 'in-progress', statusIcon: '\uD83D\uDD35', agent: 'Eva \u2014 Quality Director (Quality Crew)', cross: '\u2713 Assigned from Engineering', complexity: 'COMPLEX', complexityClass: 'complex', pct: 41, tokens: '4,100 / 10,000 (41%)', cost: '$0.25 / $0.62 budget', deps: 'None', blocks: 'task-8 (Final review gate)', output: 'Reviewing provider pattern in orchestrator, sidecar proxy UID boundary checks...' },
+    'task-5': { title: 'Frontend lint fixes', status: 'PENDING', statusClass: 'pending', statusIcon: '\u2B1C', agent: 'Nela \u2014 Frontend Engineer (Engineering)', cross: '\u2014', complexity: 'SIMPLE', complexityClass: 'simple', pct: 0, tokens: '0 / 3,000 (0%)', cost: '$0.00 / $0.19 budget', deps: 'task-3 (\u2713 rows.Err() checks)', blocks: 'task-6 (E2E test coverage)', output: 'Awaiting assignment...' },
+    'task-6': { title: 'E2E test coverage', status: 'BLOCKED', statusClass: 'blocked', statusIcon: '\uD83D\uDFE1', agent: 'Petra \u2014 Test Engineer (Quality Crew)', cross: '\u2014', complexity: 'MEDIUM', complexityClass: 'medium', pct: 0, tokens: '0 / 5,000 (0%)', cost: '$0.00 / $0.31 budget', deps: 'task-5 (\u2B1C Frontend lint fixes)', blocks: 'task-8 (Final review gate)', output: 'BLOCKED: Waiting for task-5 completion.' },
+    'task-7': { title: 'Security audit report', status: 'PENDING', statusClass: 'pending', statusIcon: '\u2B1C', agent: 'Jakub \u2014 Security Analyst (Quality Crew)', cross: '\u2014', complexity: 'COMPLEX', complexityClass: 'complex', pct: 0, tokens: '0 / 8,000 (0%)', cost: '$0.00 / $0.50 budget', deps: 'task-2 (\uD83D\uDD35 Fix security issues)', blocks: 'task-8 (Final review gate)', output: 'Awaiting task-2 completion...' },
+    'task-8': { title: 'Final review gate', status: 'APPROVAL GATE', statusClass: 'pending', statusIcon: '\u25C7', agent: 'Tomas \u2014 Tech Lead (Engineering)', cross: '\u2014', complexity: '\u2014', complexityClass: '', pct: 0, tokens: 'N/A (gate)', cost: 'N/A', deps: 'task-4, task-6, task-7', blocks: 'None \u2014 final gate', output: 'Approval required from Tech Lead before mission completion.\nneeds_review = true' }
+  };
+  var t = tasks[taskId];
+  if (!t) return;
+  document.getElementById('rpTaskTitle').textContent = t.title;
+  var statusBadge = document.getElementById('rpTaskStatus');
+  statusBadge.className = 'rp-status-badge ' + t.statusClass;
+  statusBadge.textContent = t.statusIcon + ' ' + t.status;
+  document.getElementById('rpTaskAgent').textContent = t.agent;
+  document.getElementById('rpTaskCross').textContent = t.cross;
+  var cBadge = document.getElementById('rpTaskComplexity');
+  cBadge.className = 'rp-complexity-badge ' + t.complexityClass;
+  cBadge.textContent = t.complexity;
+  var bar = document.getElementById('rpTaskProgress');
+  bar.style.width = t.pct + '%';
+  var colors = { 'completed': 'var(--emerald)', 'in-progress': 'var(--blue)', 'blocked': 'var(--amber)', 'pending': 'var(--text-muted)' };
+  bar.style.background = colors[t.statusClass] || 'var(--text-muted)';
+  document.getElementById('rpTaskTokens').textContent = t.tokens;
+  document.getElementById('rpTaskCost').textContent = t.cost;
+  document.getElementById('rpTaskDeps').innerHTML = t.deps;
+  document.getElementById('rpTaskBlocks').innerHTML = t.blocks;
+  document.getElementById('rpTaskOutput').textContent = t.output;
+}
+
+/* ─── Crew panel ─── */
+function selectCrewPanel(crew) {
+  showRightTab('crew');
+  if (crew === 'engineering') {
+    document.getElementById('rpCrewTitle').innerHTML = '&#128187; Engineering Crew';
+    document.getElementById('rpCrewContainer').textContent = 'crewship-team-engineering';
+    document.getElementById('rpCrewImage').textContent = 'node:18-slim';
+    document.getElementById('rpCrewStatus').innerHTML = '&#128994; Running \u2014 Uptime: 2h 34m';
+    document.getElementById('rpCrewDocker').innerHTML =
+      '<span class="dk-label">Network</span><span class="dk-value">bridge (internet: ON)</span>' +
+      '<span class="dk-label">Ports</span><span class="dk-value">3000:3000</span>' +
+      '<span class="dk-label">Volumes</span><span class="dk-value">/output/engineering \u2192 /workspace</span>' +
+      '<span class="dk-label">Resources</span><span class="dk-value">2 CPU / 4 GB RAM</span>' +
+      '<span class="dk-label">Caps</span><span class="dk-value">--cap-drop=ALL</span>' +
+      '<span class="dk-label">UID</span><span class="dk-value">1001 (agent) / 1002 (sidecar)</span>';
+    document.getElementById('rpCrewMcp1').innerHTML = '&#128225; <strong>Linear</strong> (streamable-http) \u2014 mcp.linear.app';
+    document.getElementById('rpCrewMcp2').innerHTML = '&#128225; <strong>Google Workspace</strong> (stdio) \u2014 npx @anthropic-ai/google-workspace-mcp';
+    document.getElementById('rpCrewMcp2').style.display = '';
+    document.getElementById('rpCrewAgentCount').textContent = '4 (3 active, 1 idle)';
+    document.getElementById('rpCrewTokens').textContent = '16.7k';
+    document.getElementById('rpCrewCost').textContent = '$1.02';
+    document.getElementById('rpCrewConns').innerHTML = '&#8596; Quality (bidirectional)';
+  } else {
+    document.getElementById('rpCrewTitle').innerHTML = '&#128269; Quality Crew';
+    document.getElementById('rpCrewContainer').textContent = 'crewship-team-quality';
+    document.getElementById('rpCrewImage').textContent = 'python:3.11-slim';
+    document.getElementById('rpCrewStatus').innerHTML = '&#128994; Running \u2014 Uptime: 2h 34m';
+    document.getElementById('rpCrewDocker').innerHTML =
+      '<span class="dk-label">Network</span><span class="dk-value">bridge (internet: OFF)</span>' +
+      '<span class="dk-label">Ports</span><span class="dk-value">\u2014</span>' +
+      '<span class="dk-label">Volumes</span><span class="dk-value">/output/quality \u2192 /workspace</span>' +
+      '<span class="dk-label">Resources</span><span class="dk-value">1 CPU / 2 GB RAM</span>' +
+      '<span class="dk-label">Caps</span><span class="dk-value">--cap-drop=ALL</span>' +
+      '<span class="dk-label">UID</span><span class="dk-value">1001 (agent) / 1002 (sidecar)</span>';
+    document.getElementById('rpCrewMcp1').innerHTML = '&#128225; <em>No MCP integrations</em>';
+    document.getElementById('rpCrewMcp2').style.display = 'none';
+    document.getElementById('rpCrewAgentCount').textContent = '4 (2 active, 1 blocked, 1 idle)';
+    document.getElementById('rpCrewTokens').textContent = '9.6k';
+    document.getElementById('rpCrewCost').textContent = '$0.58';
+    document.getElementById('rpCrewConns').innerHTML = '&#8596; Engineering (bidirectional)';
+  }
+}
+
+/* ─── Edge tooltip ─── */
+function showEdgeTooltip(e) {
+  var tip = document.getElementById('tooltip');
+  tip.innerHTML = '<strong>Engineering \u2194 Quality</strong><br>7 messages \u2022 1.8s avg latency<br><br><span style="color:var(--text-muted);">Last: Eva \u2192 Petra</span><br>"Write E2E tests for new module structure"';
+  tip.classList.add('show');
+  tip.style.left = (e.clientX + 12) + 'px';
+  tip.style.top = (e.clientY + 12) + 'px';
+}
+function hideTooltip() {
+  document.getElementById('tooltip').classList.remove('show');
+}
+
+/* ─── SVG recalc placeholder ─── */
+function recalcSvg() {
+  // In a real implementation this would recalculate bezier paths
+  // based on actual DOM node positions. For the wireframe, paths are static.
+}
+
+/* ─── Initialize: select task-2 by default ─── */
+document.addEventListener('DOMContentLoaded', function() {
+  selectTask('task-2');
+});
+</script>
+</body>
+</html>

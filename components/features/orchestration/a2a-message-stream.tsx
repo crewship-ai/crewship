@@ -1,0 +1,132 @@
+"use client"
+
+import { useState, useRef, useEffect } from "react"
+import { MessageSquare, ArrowDown } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
+
+export interface A2AMessage {
+  id: string
+  timestamp: string
+  fromAgent: string
+  fromCrew: string
+  toAgent: string
+  toCrew: string
+  type: "@assign" | "@ask" | "@broadcast" | "@result"
+  content: string
+}
+
+export interface A2AMessageStreamProps {
+  messages: A2AMessage[]
+  crewFilter: string | null
+  onFilterChange: (crew: string | null) => void
+}
+
+const TYPE_COLORS: Record<A2AMessage["type"], string> = {
+  "@assign": "bg-cyan-500/20 text-cyan-400",
+  "@ask": "bg-violet-500/20 text-violet-400",
+  "@result": "bg-emerald-500/20 text-emerald-400",
+  "@broadcast": "bg-amber-500/20 text-amber-400",
+}
+
+function formatTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso)
+    return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
+  } catch {
+    return "--:--:--"
+  }
+}
+
+function getCrewPairs(messages: A2AMessage[]): string[] {
+  const pairs = new Set<string>()
+  for (const m of messages) {
+    pairs.add(m.fromCrew)
+    pairs.add(m.toCrew)
+  }
+  return Array.from(pairs).sort()
+}
+
+export function A2AMessageStream({ messages, crewFilter, onFilterChange }: A2AMessageStreamProps) {
+  const [autoScroll, setAutoScroll] = useState(true)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const crewPairs = getCrewPairs(messages)
+
+  const filtered = crewFilter
+    ? messages.filter(m => m.fromCrew === crewFilter || m.toCrew === crewFilter)
+    : messages
+
+  // Newest first
+  const sorted = [...filtered].reverse()
+
+  useEffect(() => {
+    if (autoScroll && scrollRef.current) {
+      scrollRef.current.scrollTop = 0
+    }
+  }, [messages.length, autoScroll])
+
+  if (messages.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full py-8 text-white/30">
+        <MessageSquare className="size-6 mb-2" />
+        <p className="text-xs">No messages yet</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Filter bar */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/[0.06] shrink-0">
+        <select
+          value={crewFilter ?? ""}
+          onChange={e => onFilterChange(e.target.value || null)}
+          className="bg-white/[0.04] border border-white/[0.08] rounded text-xs text-white/70 px-2 py-1 outline-none focus:border-white/20"
+        >
+          <option value="">All crews</option>
+          {crewPairs.map(c => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button
+            variant={autoScroll ? "secondary" : "ghost"}
+            size="icon-xs"
+            onClick={() => setAutoScroll(!autoScroll)}
+            title={autoScroll ? "Auto-scroll on" : "Auto-scroll off"}
+          >
+            <ArrowDown className="size-3" />
+          </Button>
+          <span className="text-[10px] text-white/30">{filtered.length} msgs</span>
+        </div>
+      </div>
+
+      {/* Message list */}
+      <ScrollArea className="flex-1 min-h-0">
+        <div ref={scrollRef} className="divide-y divide-white/[0.04]">
+          {sorted.map(msg => (
+            <div key={msg.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.02] transition-colors" style={{ minHeight: 32 }}>
+              <span className="text-[10px] font-mono text-white/30 shrink-0 w-16">
+                {formatTimestamp(msg.timestamp)}
+              </span>
+              <span className="text-[11px] text-white/50 shrink-0 truncate max-w-[140px]">
+                <span className="text-white/70">{msg.fromCrew}</span>
+                <span className="text-white/20 mx-1">{"\u2192"}</span>
+                <span className="text-white/70">{msg.toCrew}</span>
+              </span>
+              <Badge className={cn("text-[9px] shrink-0", TYPE_COLORS[msg.type])}>
+                {msg.type}
+              </Badge>
+              <span className="text-xs text-white/50 truncate min-w-0">
+                {msg.content}
+              </span>
+            </div>
+          ))}
+        </div>
+      </ScrollArea>
+    </div>
+  )
+}
