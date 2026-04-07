@@ -31,6 +31,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
 import { getCrewDotColor } from "@/lib/crew-icon"
 import { CommandPalette } from "@/components/command-palette"
+import { useAppStore } from "@/lib/store"
 
 const mobileNavSections = [
   {
@@ -73,6 +74,18 @@ const pageConfig: Record<string, { title: string }> = {
   "/skills": { title: "Skills" },
   "/audit": { title: "Audit Log" },
   "/settings": { title: "Settings" },
+}
+
+const settingsTabTitles: Record<string, string> = {
+  profile: "Profile",
+  crews: "Crews & Containers",
+  connections: "Connections",
+  audit: "Audit Log",
+  general: "General",
+  members: "Members",
+  roles: "Roles & Permissions",
+  billing: "Billing & Usage",
+  danger: "Danger Zone",
 }
 
 function getInitials(name: string): string {
@@ -151,6 +164,7 @@ export function AppToolbar() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [cmdkOpen, setCmdkOpen] = useState(false)
   const { role } = useAbilities()
+  const settingsTab = useAppStore((s) => s.settingsTab)
 
   useEffect(() => {
     if (wsStatus === "connected") {
@@ -217,6 +231,22 @@ export function AppToolbar() {
           </Link>
           <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
           <span className="text-sm text-muted-foreground">...</span>
+        </>
+      )
+    }
+
+    // Settings breadcrumb: Settings / Profile
+    if (pathname === "/settings" && settingsTab) {
+      const tabTitle = settingsTabTitles[settingsTab]
+      return (
+        <>
+          <span className="text-sm text-muted-foreground">Settings</span>
+          {tabTitle && (
+            <>
+              <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+              <span className="text-sm font-semibold truncate">{tabTitle}</span>
+            </>
+          )}
         </>
       )
     }

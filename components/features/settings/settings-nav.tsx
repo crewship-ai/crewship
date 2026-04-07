@@ -3,9 +3,8 @@
 import {
   User, Palette, Bell, Shield, Building, Users, CreditCard,
   AlertTriangle, Key, Box, Link2, Activity,
-  MessageSquare, ArrowLeft,
+  MessageSquare,
 } from "lucide-react"
-import Link from "next/link"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
 
@@ -56,29 +55,16 @@ interface SettingsNavProps {
 
 export function SettingsNav({ activeTab, onTabChange, workspaceName }: SettingsNavProps) {
   return (
-    <div className="w-[220px] shrink-0 bg-card border-r border-white/[0.06] flex flex-col">
-      {/* Back + title */}
-      <div className="px-4 pt-4 pb-3">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors mb-3"
-        >
-          <ArrowLeft className="h-3 w-3" />
-          Back
-        </Link>
-        <h1 className="text-[15px] font-semibold text-foreground">Settings</h1>
-      </div>
-
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-2 pb-4">
+    <div className="w-[220px] shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col">
+      <nav className="flex-1 overflow-y-auto px-2 pt-3 pb-4">
         {sections.map((section) => (
           <div key={section.label} className="mb-1">
-            <div className="flex items-center gap-2 px-2 pt-4 pb-1.5">
-              <span className="text-[11px] font-medium text-muted-foreground/40">
+            <div className="flex items-center gap-2 px-2 pt-3 pb-1.5">
+              <span className="text-[11px] font-medium text-sidebar-foreground/40">
                 {section.label}
               </span>
               {section.label === "Workspace" && workspaceName && (
-                <span className="text-[10px] text-muted-foreground/25 truncate">
+                <span className="text-[10px] text-sidebar-foreground/20 truncate">
                   {workspaceName}
                 </span>
               )}
@@ -92,14 +78,14 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName }: SettingsN
                   className={cn(
                     "flex items-center gap-2 w-full px-2 py-[5px] rounded-md text-[13px] transition-colors",
                     isActive
-                      ? "bg-white/[0.07] text-foreground"
-                      : "text-muted-foreground/70 hover:text-foreground hover:bg-white/[0.03]",
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                      : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
                   )}
                 >
                   <item.icon className={cn("h-[14px] w-[14px] shrink-0", isActive ? "opacity-100" : "opacity-50")} />
                   <span className="truncate">{item.label}</span>
                   {item.badge === "P2" && (
-                    <span className="ml-auto text-[9px] text-muted-foreground/30 shrink-0">P2</span>
+                    <span className="ml-auto text-[9px] text-sidebar-foreground/20 shrink-0">P2</span>
                   )}
                   {item.badge === "OWNER" && (
                     <span className="ml-auto text-[9px] text-amber-500/60 shrink-0">Owner</span>
