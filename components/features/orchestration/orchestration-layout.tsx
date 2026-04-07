@@ -6,7 +6,7 @@ import {
   Workflow, Clock, Activity, RefreshCw, Focus, LayoutTemplate,
   Settings2, FileText, PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
-  ChevronUp, ChevronDown,
+  ChevronUp, ChevronDown, Play, Square, Loader2,
 } from "lucide-react"
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
@@ -22,7 +22,7 @@ import { WorkflowGraph, type WorkflowGraphRef } from "@/components/features/orch
 import { MissionTimeline } from "@/components/features/orchestration/mission-timeline"
 import { OrchestrationActivity } from "@/components/features/orchestration/orchestration-activity"
 import { TemplateGallery } from "@/components/features/orchestration/template-gallery"
-import { MissionControlBar } from "@/components/features/orchestration/mission-control-bar"
+// MissionControlBar replaced by inline info strip in unified toolbar
 import { CreateMissionWizard } from "@/components/features/orchestration/create-mission-wizard"
 import { CrewConnections } from "@/components/features/orchestration/crew-connections"
 import { ProposalReview } from "@/components/features/orchestration/proposal-review"
@@ -36,7 +36,46 @@ import { DockerOverview } from "@/components/features/orchestration/docker-overv
 import type { Mission, MissionTask } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 
+import { toast } from "sonner"
+
 type DrawerTab = "messages" | "exec" | "yaml" | "docker"
+
+/** Compact action button for the toolbar (Start/Cancel) */
+function MissionActionButton({ mission, action, workspaceId, onDone }: {
+  mission: Mission; action: "start" | "cancel"; workspaceId: string; onDone: () => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const handleClick = useCallback(async () => {
+    setLoading(true)
+    try {
+      const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+      const res = action === "start"
+        ? await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}/start${qs}`, { method: "POST" })
+        : await fetch(`/api/v1/crews/${mission.crew_id}/missions/${mission.id}${qs}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "CANCELLED" }),
+          })
+      if (!res.ok) { const b = await res.json().catch(() => null); toast.error(b?.detail ?? `Failed to ${action}`); return }
+      toast.success(action === "start" ? "Mission started" : "Mission cancelled")
+      onDone()
+    } catch { toast.error(`Failed to ${action}`) } finally { setLoading(false) }
+  }, [mission.id, mission.crew_id, workspaceId, action, onDone])
+
+  if (action === "start") {
+    return (
+      <button onClick={handleClick} disabled={loading} className="inline-flex items-center gap-1 h-[22px] px-2 rounded-[3px] text-[11.5px] font-medium bg-blue-500/15 border border-blue-500/35 text-blue-400 hover:bg-blue-500/25 transition-colors disabled:opacity-50">
+        {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+        Start
+      </button>
+    )
+  }
+  return (
+    <button onClick={handleClick} disabled={loading} className="inline-flex items-center gap-1 h-[22px] px-2 rounded-[3px] text-[11.5px] font-medium bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50">
+      {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+      Cancel
+    </button>
+  )
+}
 
 export interface OrchestrationLayoutProps {
   missions: Mission[]
@@ -187,20 +226,29 @@ export function OrchestrationLayout({
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
-      {/* ---- Top toolbar — 2 rows ---- */}
-      <div className="shrink-0 z-20 bg-card border-b border-white/[0.1]">
-        {/* Row 1: Mission context + actions */}
-        <div className="flex items-center justify-between px-4 h-10">
-          <div className="flex items-center gap-3 min-w-0">
-            <Workflow className="h-4 w-4 text-blue-400 shrink-0" />
+      {/* ---- Unified toolbar (2 rows, ~56px) ---- */}
+      <div className="shrink-0 z-20">
+        {/* Row 1: Mission selector + tabs + actions (32px) */}
+        <div className="flex items-center h-8 bg-card border-b border-white/[0.08] px-0">
+          {/* Mission selector */}
+          <div className="shrink-0 border-r border-white/[0.08] h-full">
             <Select value={selectedMissionId} onValueChange={onMissionChange}>
-              <SelectTrigger className="h-7 w-auto max-w-[280px] text-sm font-semibold bg-transparent border-none shadow-none text-foreground hover:text-blue-400 transition-colors px-0 gap-2">
-                <SelectValue placeholder="All missions" />
+              <SelectTrigger className="h-full w-auto max-w-[260px] text-[12.5px] font-medium bg-transparent border-none shadow-none rounded-none text-foreground hover:bg-white/[0.04] transition-colors px-3 gap-1.5">
+                <div className="flex items-center gap-1.5">
+                  <div className={cn(
+                    "w-[7px] h-[7px] rounded-full shrink-0",
+                    !selectedMission && "bg-blue-400",
+                    selectedMission?.status === "IN_PROGRESS" && "bg-blue-400 animate-pulse",
+                    selectedMission?.status === "PLANNING" && "bg-purple-400",
+                    selectedMission?.status === "COMPLETED" && "bg-green-400",
+                    selectedMission?.status === "FAILED" && "bg-red-400",
+                    selectedMission?.status === "REVIEW" && "bg-amber-400",
+                  )} />
+                  <SelectValue placeholder="All missions" />
+                </div>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">
-                  <span className="font-semibold">All missions</span>
-                </SelectItem>
+                <SelectItem value="all">All missions</SelectItem>
                 {missions.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
                     <div className="flex items-center gap-2">
@@ -211,7 +259,6 @@ export function OrchestrationLayout({
                         m.status === "COMPLETED" && "bg-green-500",
                         m.status === "FAILED" && "bg-red-500",
                         m.status === "REVIEW" && "bg-amber-500",
-                        m.status === "CANCELLED" && "bg-gray-500",
                       )} />
                       <span className="truncate">{m.title}</span>
                     </div>
@@ -219,78 +266,106 @@ export function OrchestrationLayout({
                 ))}
               </SelectContent>
             </Select>
-            {selectedMission && (
-              <span className={cn(
-                "text-[10px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0",
-                selectedMission.status === "IN_PROGRESS" && "bg-blue-500/15 text-blue-400",
-                selectedMission.status === "PLANNING" && "bg-purple-500/15 text-purple-400",
-                selectedMission.status === "COMPLETED" && "bg-green-500/15 text-green-400",
-                selectedMission.status === "FAILED" && "bg-red-500/15 text-red-400",
-                selectedMission.status === "REVIEW" && "bg-amber-500/15 text-amber-400",
-              )}>
-                {selectedMission.status.replace("_", " ")}
-              </span>
-            )}
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-muted-foreground hover:text-foreground/80"
-              onClick={() => graphRef.current?.focusActive()}
-            >
-              <Focus className="h-3.5 w-3.5" />
+          {/* Tab navigation — underline style, fills center */}
+          <nav className="flex items-stretch h-full flex-1 pl-1">
+            {([
+              { id: "graph", label: "Graph", icon: Workflow },
+              { id: "timeline", label: "Timeline", icon: Clock },
+              { id: "activity", label: "Activity", icon: Activity },
+              { id: "templates", label: "Templates", icon: LayoutTemplate },
+              { id: "proposals", label: "Proposals", icon: FileText },
+              { id: "connections", label: "Connections", icon: Settings2 },
+            ] as const).map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 text-[12px] font-medium border-b-2 transition-all duration-100 relative top-px",
+                  activeTab === id
+                    ? "border-blue-400 text-blue-400"
+                    : "border-transparent text-muted-foreground hover:text-foreground/80",
+                )}
+              >
+                <Icon className="h-3 w-3 opacity-75" />
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          {/* Right actions */}
+          <div className="flex items-center gap-1 px-2 border-l border-white/[0.08] h-full shrink-0">
+            {selectedMission && selectedMission.status === "PLANNING" && (
+              <MissionActionButton mission={selectedMission} action="start" workspaceId={workspaceId} onDone={onRefresh} />
+            )}
+            {selectedMission && (selectedMission.status === "PLANNING" || selectedMission.status === "IN_PROGRESS") && (
+              <MissionActionButton mission={selectedMission} action="cancel" workspaceId={workspaceId} onDone={onRefresh} />
+            )}
+            <Button variant="ghost" size="sm" className="h-[22px] px-2 text-muted-foreground hover:text-foreground/80" onClick={() => graphRef.current?.focusActive()}>
+              <Focus className="h-3 w-3" />
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-muted-foreground hover:text-foreground/80"
-              onClick={onRefresh}
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
+            <Button variant="ghost" size="sm" className="h-[22px] px-2 text-muted-foreground hover:text-foreground/80" onClick={onRefresh}>
+              <RefreshCw className="h-3 w-3" />
             </Button>
             <CreateMissionWizard workspaceId={workspaceId} onCreated={onMissionCreated} />
           </div>
         </div>
 
-        {/* Row 2: Tab navigation — underline style */}
-        <nav className="flex items-center gap-0 px-4 -mb-px">
-          {([
-            { id: "graph", label: "Graph", icon: Workflow },
-            { id: "timeline", label: "Timeline", icon: Clock },
-            { id: "activity", label: "Activity", icon: Activity },
-            { id: "templates", label: "Templates", icon: LayoutTemplate },
-            { id: "proposals", label: "Proposals", icon: FileText },
-            { id: "connections", label: "Connections", icon: Settings2 },
-          ] as const).map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-all duration-150",
-                activeTab === id
-                  ? "border-blue-400 text-blue-400"
-                  : "border-transparent text-muted-foreground hover:text-foreground/80 hover:border-white/[0.15]",
+        {/* Row 2: Info strip (24px) */}
+        <div className="flex items-center h-6 bg-background/50 border-b border-white/[0.06] px-4 gap-0 font-mono text-[11px] text-muted-foreground overflow-hidden">
+          {!selectedMission ? (
+            /* All missions — aggregate stats */
+            <>
+              {[
+                { label: "Active", value: stats.active, color: "bg-blue-500", textColor: stats.active > 0 ? "text-blue-400" : "" },
+                { label: "Planning", value: stats.planning, color: "bg-purple-500", textColor: stats.planning > 0 ? "text-purple-400" : "" },
+                { label: "Done", value: stats.completed, color: "bg-green-500", textColor: stats.completed > 0 ? "text-green-400" : "" },
+                { label: "Failed", value: stats.failed, color: "bg-red-500", textColor: stats.failed > 0 ? "text-red-400" : "" },
+              ].map(({ label, value, color, textColor }, i) => (
+                <div key={label} className={cn("flex items-center gap-1.5 shrink-0", i > 0 && "ml-4 pl-4 border-l border-white/[0.06]")}>
+                  <div className={cn("w-1.5 h-1.5 rounded-full", color, value === 0 && "opacity-30")} />
+                  <span className={cn("tabular-nums", textColor)}>{value}</span>
+                  <span className="text-muted-foreground/50 font-sans text-[11px]">{label}</span>
+                </div>
+              ))}
+            </>
+          ) : (
+            /* Selected mission — detail strip */
+            <>
+              <div className="flex items-center gap-1.5 shrink-0 pr-4 mr-4 border-r border-white/[0.06]">
+                <span className="font-sans text-muted-foreground/50">Lead</span>
+                <span>@{selectedMission.lead_agent_slug}</span>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0 pr-4 mr-4 border-r border-white/[0.06]">
+                <div className="w-[52px] h-1 bg-white/[0.08] overflow-hidden">
+                  <div
+                    className="h-full bg-blue-400 transition-all"
+                    style={{ width: `${selectedMission.tasks?.length ? ((selectedMission.tasks.filter(t => t.status === "COMPLETED").length / selectedMission.tasks.length) * 100) : 0}%` }}
+                  />
+                </div>
+                <span className="tabular-nums">
+                  {selectedMission.tasks?.filter(t => t.status === "COMPLETED").length || 0}/{selectedMission.tasks?.length || 0}
+                </span>
+                {(selectedMission.tasks?.filter(t => t.status === "IN_PROGRESS").length || 0) > 0 && (
+                  <span className="text-blue-400 tabular-nums">({selectedMission.tasks?.filter(t => t.status === "IN_PROGRESS").length} running)</span>
+                )}
+              </div>
+              {(selectedMission.total_token_count ?? 0) > 0 && (
+                <div className="flex items-center gap-1 shrink-0 pr-4 mr-4 border-r border-white/[0.06]">
+                  <span className="tabular-nums">{((selectedMission.total_token_count ?? 0) / 1000).toFixed(1)}k</span>
+                  <span className="text-muted-foreground/50 font-sans">tok</span>
+                </div>
               )}
-            >
-              <Icon className="h-3 w-3" />
-              {label}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {/* ---- Mission control bar ---- */}
-      {selectedMission && (
-        <div className="shrink-0">
-          <MissionControlBar
-            mission={selectedMission}
-            workspaceId={workspaceId}
-            onMissionChanged={onRefresh}
-          />
+              {(selectedMission.total_estimated_cost ?? 0) > 0 && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="tabular-nums">${(selectedMission.total_estimated_cost ?? 0).toFixed(2)}</span>
+                </div>
+              )}
+            </>
+          )}
         </div>
-      )}
+      </div>
 
       {/* ---- Main 3-column layout ---- */}
       <div
