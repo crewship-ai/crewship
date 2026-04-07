@@ -26,7 +26,7 @@ type tokenResponse struct {
 	Scope        string `json:"scope"`
 }
 
-func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI string) (*tokenResponse, error) {
+func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier string) (*tokenResponse, error) {
 	data := url.Values{
 		"grant_type":   {"authorization_code"},
 		"code":         {code},
@@ -35,6 +35,9 @@ func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, co
 	}
 	if clientSecret != "" {
 		data.Set("client_secret", clientSecret)
+	}
+	if codeVerifier != "" {
+		data.Set("code_verifier", codeVerifier)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))

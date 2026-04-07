@@ -16,6 +16,11 @@ import {
   KeyRound,
   ExternalLink,
   Loader2,
+  Search,
+  Zap,
+  AlertTriangle,
+  Info,
+  XCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -42,6 +47,8 @@ import { toast } from "sonner"
 import { MCP_TEMPLATES, TEMPLATE_ICONS } from "@/components/features/mcp/templates"
 import type { MCPTemplate } from "@/components/features/mcp/types"
 import { CredentialPicker } from "@/components/features/mcp/components/credential-picker"
+import { RegistryBrowser } from "@/components/features/mcp/components/registry-browser"
+import type { RegistryAddPayload } from "@/components/features/mcp/components/registry-browser"
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
 
 // ---------------------------------------------------------------------------
@@ -291,11 +298,13 @@ function TemplatePopover({
   open,
   onOpenChange,
   onSelect,
+  onBrowseRegistry,
   trigger,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   onSelect: (t: MCPTemplate | null) => void
+  onBrowseRegistry: () => void
   trigger: React.ReactNode
 }) {
   return (
@@ -320,14 +329,24 @@ function TemplatePopover({
               )
             })}
           </div>
-          <button
-            type="button"
-            className="flex w-full items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
-            onClick={() => onSelect(null)}
-          >
-            <Terminal className="h-4 w-4" />
-            Custom server
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="flex flex-1 items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
+              onClick={() => onSelect(null)}
+            >
+              <Terminal className="h-4 w-4" />
+              Custom server
+            </button>
+            <button
+              type="button"
+              className="flex flex-1 items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
+              onClick={onBrowseRegistry}
+            >
+              <Search className="h-4 w-4" />
+              Browse Registry
+            </button>
+          </div>
         </div>
       </PopoverContent>
     </Popover>
@@ -356,6 +375,7 @@ export default function IntegrationsPage() {
   const [templatePopoverOpen, setTemplatePopoverOpen] = React.useState(false)
   const [emptyPopoverOpen, setEmptyPopoverOpen] = React.useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null)
+  const [registryOpen, setRegistryOpen] = React.useState(false)
 
   // -------------------------------------------------------------------------
   // Fetch all data
@@ -500,7 +520,7 @@ export default function IntegrationsPage() {
       if (!res.ok) {
         const d = await res.json().catch(() => null)
         toast.error(d?.error ?? "Failed to create server")
-        return
+        throw new Error(d?.error ?? "Failed to create server")
       }
       const created = await res.json().catch(() => null)
       toast.success(`"${payload.display_name ?? payload.name}" added`)
@@ -512,9 +532,30 @@ export default function IntegrationsPage() {
         // Fallback: expand by name match
         setExpandedId(null)
       }
-    } catch {
-      toast.error("Network error")
+    } catch (err) {
+      if (!(err instanceof Error && err.message.includes("Failed to create"))) {
+        toast.error("Network error")
+      }
+      throw err
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Add from registry
+  // -------------------------------------------------------------------------
+
+  async function handleRegistryAdd(payload: RegistryAddPayload) {
+    const template: MCPTemplate = {
+      name: payload.name,
+      label: payload.display_name,
+      icon: "",
+      transport: payload.transport,
+      command: payload.command ?? undefined,
+      args: payload.args ?? undefined,
+      url: payload.url ?? undefined,
+      envHint: payload.envHint ?? undefined,
+    }
+    await handleAddServer(template)
   }
 
   // -------------------------------------------------------------------------
@@ -698,6 +739,10 @@ export default function IntegrationsPage() {
             open={templatePopoverOpen}
             onOpenChange={setTemplatePopoverOpen}
             onSelect={handleAddServer}
+            onBrowseRegistry={() => {
+              setTemplatePopoverOpen(false)
+              setRegistryOpen(true)
+            }}
             trigger={
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
@@ -719,6 +764,10 @@ export default function IntegrationsPage() {
               open={emptyPopoverOpen}
               onOpenChange={setEmptyPopoverOpen}
               onSelect={handleAddServer}
+              onBrowseRegistry={() => {
+                setEmptyPopoverOpen(false)
+                setRegistryOpen(true)
+              }}
               trigger={
                 <Button className="mt-4">
                   <Plus className="mr-2 h-4 w-4" />
@@ -825,6 +874,123 @@ export default function IntegrationsPage() {
             )
           })}
         </div>
+      )}
+
+      {/* Registry browser dialog */}
+      <RegistryBrowser
+        open={registryOpen}
+        onOpenChange={setRegistryOpen}
+        onAdd={handleRegistryAdd}
+      />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Test Connection button
+// ---------------------------------------------------------------------------
+
+interface TestResult {
+  status: "ok" | "auth_required" | "error" | "skipped"
+  message?: string
+}
+
+function TestConnectionButton({
+  serverId,
+  crewId,
+  workspaceId,
+}: {
+  serverId: string
+  crewId: string
+  workspaceId: string | null
+}) {
+  const [testing, setTesting] = React.useState(false)
+  const [result, setResult] = React.useState<TestResult | null>(null)
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  React.useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
+  async function handleTest() {
+    if (!workspaceId) return
+    setTesting(true)
+    setResult(null)
+    if (timerRef.current) clearTimeout(timerRef.current)
+
+    try {
+      const res = await fetch(
+        `/api/v1/crews/${crewId}/integrations/${serverId}/test?workspace_id=${workspaceId}`,
+        { method: "POST" },
+      )
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null)
+        setResult({ status: "error", message: errData?.error || `HTTP ${res.status}` })
+      } else {
+        const data: TestResult = await res.json()
+        setResult(data)
+      }
+
+      timerRef.current = setTimeout(() => {
+        setResult(null)
+        timerRef.current = null
+      }, 10000)
+    } catch {
+      setResult({ status: "error", message: "Network error" })
+      timerRef.current = setTimeout(() => {
+        setResult(null)
+        timerRef.current = null
+      }, 10000)
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <Button
+        variant="outline"
+        size="sm"
+        className="h-8 text-xs"
+        onClick={handleTest}
+        disabled={testing}
+      >
+        {testing ? (
+          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Zap className="mr-1.5 h-3.5 w-3.5" />
+        )}
+        Test Connection
+      </Button>
+      {result && (
+        <span className="inline-flex items-center gap-1.5 text-xs">
+          {result.status === "ok" && (
+            <>
+              <Check className="h-3.5 w-3.5 text-green-600" />
+              <span className="text-green-600">Connected</span>
+            </>
+          )}
+          {result.status === "auth_required" && (
+            <>
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+              <span className="text-amber-600">Authentication required</span>
+            </>
+          )}
+          {result.status === "error" && (
+            <>
+              <XCircle className="h-3.5 w-3.5 text-destructive" />
+              <span className="text-destructive">{result.message || "Connection failed"}</span>
+            </>
+          )}
+          {result.status === "skipped" && (
+            <>
+              <Info className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">Tested at runtime</span>
+            </>
+          )}
+        </span>
       )}
     </div>
   )
@@ -944,6 +1110,49 @@ function ExpandedPanel({
   function updateEnvVar(idx: number, field: "key" | "value", val: string) {
     setEnvVars((prev) => prev.map((e, i) => (i === idx ? { ...e, [field]: val } : e)))
   }
+
+  // OAuth discovery state
+  const [oauthDiscovered, setOauthDiscovered] = React.useState(false)
+  const [discovering, setDiscovering] = React.useState(false)
+
+  async function discoverOAuth(mcpUrl: string) {
+    if (!workspaceId || transport !== "streamable-http") return
+    try {
+      const parsed = new URL(mcpUrl)
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return
+    } catch {
+      setOauthDiscovered(false)
+      return
+    }
+    setDiscovering(true)
+    try {
+      const res = await fetch(
+        `/api/v1/oauth/discover?workspace_id=${workspaceId}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mcp_url: mcpUrl }),
+        },
+      )
+      if (res.ok) {
+        setOauthDiscovered(true)
+      } else {
+        setOauthDiscovered(false)
+      }
+    } catch {
+      setOauthDiscovered(false)
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  // Auto-discover on mount if URL is already set
+  React.useEffect(() => {
+    if (server.transport === "streamable-http" && server.endpoint && server.auth_status === "none") {
+      discoverOAuth(server.endpoint)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [server.id])
 
   const isConfirming = confirmDeleteId === server.id
 
@@ -1113,16 +1322,35 @@ function ExpandedPanel({
           </div>
         ) : (
           <div className="space-y-1.5">
-            <Label htmlFor={`url-${server.id}`} className="text-xs">
-              URL
-            </Label>
+            <div className="flex items-center gap-2">
+              <Label htmlFor={`url-${server.id}`} className="text-xs">
+                URL
+              </Label>
+              {discovering && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Checking...
+                </span>
+              )}
+              {!discovering && oauthDiscovered && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-500 text-blue-600">
+                  <ExternalLink className="mr-0.5 h-2.5 w-2.5" />
+                  OAuth detected
+                </Badge>
+              )}
+            </div>
             <Input
               id={`url-${server.id}`}
               className="h-8 text-xs font-mono"
               placeholder="https://example.com/mcp"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              onBlur={() => handleBlur("url", url)}
+              onBlur={() => {
+                handleBlur("url", url)
+                if (url && url !== (server.endpoint ?? "")) {
+                  discoverOAuth(url)
+                }
+              }}
               readOnly={!canManage}
             />
           </div>
@@ -1130,10 +1358,10 @@ function ExpandedPanel({
       </div>
 
       {/* Section 3: OAuth Auto-Connect (HTTP servers only) */}
-      {canManage && server.transport === "streamable-http" && server.endpoint && (
+      {canManage && transport === "streamable-http" && (url || server.endpoint) && (server.auth_status !== "none" || oauthDiscovered) && (
         <OAuthAutoConnect
           serverName={server.name}
-          mcpURL={server.endpoint}
+          mcpURL={url || server.endpoint || ""}
           workspaceId={workspaceId}
           authStatus={server.auth_status}
           onCredentialCreated={async (credId: string) => {
@@ -1254,7 +1482,14 @@ function ExpandedPanel({
         )}
       </div>}
 
-      {/* Section 5: Actions */}
+      {/* Section 5: Test Connection */}
+      {canManage && <TestConnectionButton
+        serverId={server.id}
+        crewId={server.crew_id}
+        workspaceId={workspaceId}
+      />}
+
+      {/* Section 6: Actions */}
       {canManage && (
         <div className="flex justify-end">
           {isConfirming ? (
