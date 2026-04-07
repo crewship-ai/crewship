@@ -235,23 +235,32 @@ export function OrchestrationLayout({
             <SelectTrigger className="h-full w-auto max-w-[280px] text-[12.5px] font-medium bg-transparent border-none shadow-none rounded-none text-foreground hover:bg-white/[0.04] transition-colors px-3 gap-2 shrink-0">
               <SelectValue placeholder="All missions" />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All missions</SelectItem>
-              {missions.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  <div className="flex items-center gap-2">
-                    <div className={cn(
-                      "w-1.5 h-1.5 rounded-full shrink-0",
-                      m.status === "IN_PROGRESS" && "bg-blue-500",
-                      m.status === "PLANNING" && "bg-purple-500",
-                      m.status === "COMPLETED" && "bg-green-500",
-                      m.status === "FAILED" && "bg-red-500",
-                      m.status === "REVIEW" && "bg-amber-500",
-                    )} />
-                    <span className="truncate">{m.title}</span>
-                  </div>
-                </SelectItem>
-              ))}
+            <SelectContent className="min-w-[280px]">
+              <SelectItem value="all" className="font-medium">All missions</SelectItem>
+              {/* Group missions by status */}
+              {(["IN_PROGRESS", "PLANNING", "REVIEW", "COMPLETED", "FAILED", "CANCELLED"] as const)
+                .filter((status) => missions.some((m) => m.status === status))
+                .map((status) => {
+                  const statusLabel: Record<string, string> = { IN_PROGRESS: "Running", PLANNING: "Planning", REVIEW: "In Review", COMPLETED: "Completed", FAILED: "Failed", CANCELLED: "Cancelled" }
+                  const statusColor: Record<string, string> = { IN_PROGRESS: "bg-blue-500", PLANNING: "bg-purple-500", REVIEW: "bg-amber-500", COMPLETED: "bg-green-500", FAILED: "bg-red-500", CANCELLED: "bg-gray-500" }
+                  const statusTextColor: Record<string, string> = { IN_PROGRESS: "text-blue-400", PLANNING: "text-purple-400", REVIEW: "text-amber-400", COMPLETED: "text-green-400", FAILED: "text-red-400", CANCELLED: "text-gray-400" }
+                  return (
+                    <div key={status}>
+                      <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">{statusLabel[status]}</div>
+                      {missions.filter((m) => m.status === status).map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          <div className="flex items-center gap-2 w-full">
+                            <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", statusColor[m.status], m.status === "IN_PROGRESS" && "animate-pulse")} />
+                            <span className="truncate flex-1">{m.title}</span>
+                            <span className={cn("text-[10px] font-mono shrink-0", statusTextColor[m.status])}>
+                              {m.tasks?.length || 0}t
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </div>
+                  )
+                })}
             </SelectContent>
           </Select>
 
