@@ -266,6 +266,11 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 		if ctx.Err() == context.DeadlineExceeded {
 			e.logger.Warn("mission timed out", "mission_id", ms.ID)
 			now := time.Now().UTC().Format(time.RFC3339)
+			// Fail any AWAITING_APPROVAL tasks that were never resolved.
+			e.db.ExecContext(context.Background(),
+				`UPDATE mission_tasks SET status = 'FAILED', error_message = 'mission timed out', updated_at = ?, completed_at = ?
+				 WHERE mission_id = ? AND status = 'AWAITING_APPROVAL'`,
+				now, now, ms.ID)
 			e.db.ExecContext(context.Background(),
 				`UPDATE missions SET status = 'FAILED', updated_at = ?, completed_at = ? WHERE id = ? AND status = 'IN_PROGRESS'`,
 				now, now, ms.ID)
@@ -1069,11 +1074,16 @@ func (e *MissionEngine) ApproveTask(ctx context.Context, taskID, userID string, 
 		approvalStatus = "REJECTED"
 	}
 
-	if _, err := e.db.ExecContext(ctx,
+	res, err := e.db.ExecContext(ctx,
 		`UPDATE mission_tasks SET status = ?, approval_status = ?, approved_by = ?, approved_at = ?,
 		 evaluation_notes = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'AWAITING_APPROVAL'`,
-		newStatus, approvalStatus, userID, now, notes, now, now, taskID); err != nil {
+		newStatus, approvalStatus, userID, now, notes, now, now, taskID)
+	if err != nil {
 		return fmt.Errorf("update task %s approval: %w", taskID, err)
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("%w: task %s was already approved or rejected by another user", ErrInvalidTaskStatus, taskID)
 	}
 
 	if approved {
@@ -1103,7 +1113,18 @@ func (e *MissionEngine) ApproveTask(ctx context.Context, taskID, userID string, 
 }
 
 // failDependentTasks cascades failure to BLOCKED tasks when a dependency is rejected.
+// Uses a visited set to prevent infinite recursion on circular dependencies.
 func (e *MissionEngine) failDependentTasks(ctx context.Context, missionID, failedTaskID, reason string) {
+	visited := make(map[string]bool)
+	e.failDependentTasksRecurse(ctx, missionID, failedTaskID, reason, visited)
+}
+
+func (e *MissionEngine) failDependentTasksRecurse(ctx context.Context, missionID, failedTaskID, reason string, visited map[string]bool) {
+	if visited[failedTaskID] {
+		return
+	}
+	visited[failedTaskID] = true
+
 	rows, err := e.db.QueryContext(ctx,
 		`SELECT id, depends_on FROM mission_tasks WHERE mission_id = ? AND status = 'BLOCKED'`, missionID)
 	if err != nil {
@@ -1136,6 +1157,9 @@ func (e *MissionEngine) failDependentTasks(ctx context.Context, missionID, faile
 	e.mu.Unlock()
 
 	for _, id := range toFail {
+		if visited[id] {
+			continue
+		}
 		if _, err := e.db.ExecContext(ctx,
 			`UPDATE mission_tasks SET status = 'FAILED', error_message = ?, updated_at = ?, completed_at = ? WHERE id = ?`,
 			reason, now, now, id); err != nil {
@@ -1145,7 +1169,7 @@ func (e *MissionEngine) failDependentTasks(ctx context.Context, missionID, faile
 		if ms != nil {
 			e.broadcastTaskStatus(ms, id, "FAILED")
 		}
-		e.failDependentTasks(ctx, missionID, id, reason)
+		e.failDependentTasksRecurse(ctx, missionID, id, reason, visited)
 	}
 }
 

@@ -504,6 +504,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
+			if cfg.AutoApproveThreshold > 0 && cfg.RequireApprovalBelow > 0 && cfg.AutoApproveThreshold <= cfg.RequireApprovalBelow {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "auto_approve_threshold must be greater than require_approval_below"})
+				return
+			}
 		}
 		query += ", escalation_config = ?"
 		if *req.EscalationConfig == "" {

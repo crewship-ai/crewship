@@ -61,7 +61,7 @@ export interface MissionTask {
   tool_calls_budget: number | null
   confidence: number | null
   approval_required: boolean
-  approval_status: string | null
+  approval_status: "APPROVED" | "REJECTED" | null
   approved_by: string | null
   approved_at: string | null
   needs_review: boolean

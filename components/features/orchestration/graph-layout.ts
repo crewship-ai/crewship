@@ -28,6 +28,7 @@ export const statusColors: Record<string, string> = {
   REVIEW: "#a855f7",
   CANCELLED: "#6b7280",
   SKIPPED: "#6b7280",
+  AWAITING_APPROVAL: "#8b5cf6",
 }
 
 export const edgeColorPalette = [

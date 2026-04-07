@@ -92,6 +92,7 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *QueryHandler) autoEscalateForConfidence(r *http.Request, agentID, crewID, workspaceID, chatID, taskID string, confidence float64, reason string) {
+	// NOTE: json_extract is SQLite-specific. Crewship uses modernc.org/sqlite exclusively.
 	var existing int
 	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT 1 FROM escalations

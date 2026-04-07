@@ -222,7 +222,8 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
   }, [task, mission, workspaceId, onTaskChanged])
 
   const handleApproval = useCallback(async (approved: boolean) => {
-    if (!task || !mission) return
+    if (!task || !mission || loading) return
+    if (!approved && !confirm("Rejecting will fail this task and all downstream dependents. Continue?")) return
     setLoading(approved ? "approve" : "reject")
     try {
       const res = await fetch(
@@ -357,6 +358,7 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                       onChange={(e) => setApprovalNotes(e.target.value)}
                       placeholder="Optional notes for your approval decision..."
                       className="min-h-[60px] bg-white/[0.03] border-white/[0.06] text-sm"
+                      maxLength={2000}
                     />
                     {task.confidence != null && (
                       <div className="flex items-center gap-2 text-xs">
@@ -364,7 +366,7 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                         <div className="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
                           <div
                             className={cn("h-full rounded-full", task.confidence >= 0.7 ? "bg-green-500" : task.confidence >= 0.4 ? "bg-amber-500" : "bg-red-500")}
-                            style={{ width: `${Math.round(task.confidence * 100)}%` }}
+                            style={{ width: `${Math.max(Math.round(task.confidence * 100), 2)}%` }}
                           />
                         </div>
                         <span className={cn("font-mono", task.confidence >= 0.7 ? "text-green-400" : task.confidence >= 0.4 ? "text-amber-400" : "text-red-400")}>
