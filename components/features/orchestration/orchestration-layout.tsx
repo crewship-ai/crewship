@@ -41,6 +41,94 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { toast } from "sonner"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
+const MSG_TYPE_COLORS: Record<string, string> = {
+  "task.updated": "text-blue-400",
+  "mission.updated": "text-purple-400",
+  "mission.started": "text-emerald-400",
+  "agent.log": "text-cyan-400",
+}
+const MSG_TYPE_LABELS: Record<string, string> = {
+  "task.updated": "task",
+  "mission.updated": "mission",
+  "mission.started": "started",
+  "agent.log": "log",
+}
+
+interface LiveMessage { ts: string; type: string; agent: string; crew: string; content: string; status?: string }
+
+/** Live messages panel — streams task.updated + mission.updated WebSocket events */
+function LiveMessagesPanel() {
+  const [messages, setMessages] = useState<LiveMessage[]>([])
+  const [autoScroll, setAutoScroll] = useState(true)
+  const endRef = useRef<HTMLDivElement>(null)
+
+  const handleTaskUpdate = useCallback((ev: RealtimeEvent) => {
+    const p = ev.payload
+    const agent = (p.agent_slug ?? p.agent ?? "") as string
+    const title = (p.title ?? p.task_title ?? "") as string
+    const status = (p.status ?? "") as string
+    if (!title) return
+    setMessages((prev) => [...prev.slice(-150), {
+      ts: new Date().toISOString(), type: "task.updated", agent,
+      crew: (p.crew_name ?? "") as string,
+      content: `${title} → ${status}`, status,
+    }])
+  }, [])
+
+  const handleMissionUpdate = useCallback((ev: RealtimeEvent) => {
+    const p = ev.payload
+    const title = (p.title ?? "") as string
+    const status = (p.status ?? "") as string
+    if (!title) return
+    setMessages((prev) => [...prev.slice(-150), {
+      ts: new Date().toISOString(), type: "mission.updated", agent: (p.lead_agent_slug ?? "") as string,
+      crew: "", content: `${title} → ${status}`, status,
+    }])
+  }, [])
+
+  useRealtimeEvent("task.updated", handleTaskUpdate)
+  useRealtimeEvent("mission.updated", handleMissionUpdate)
+
+  useEffect(() => {
+    if (autoScroll) endRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages, autoScroll])
+
+  if (messages.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground/50">
+        <MessageSquare className="h-5 w-5 mb-1.5" />
+        <p className="text-[11px]">No messages yet</p>
+        <p className="text-[10px] text-muted-foreground/30 mt-0.5">Task and mission updates appear here in real-time</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-3 py-1 border-b border-white/[0.06] shrink-0">
+        <span className="text-[10px] text-muted-foreground">{messages.length} messages</span>
+        <button onClick={() => setAutoScroll(!autoScroll)} className={cn("text-[10px] px-1.5 py-0.5 rounded", autoScroll ? "text-blue-400 bg-blue-400/10" : "text-muted-foreground")}>
+          Auto-scroll {autoScroll ? "ON" : "OFF"}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto font-mono text-[11px] px-3 py-1">
+        {messages.map((msg, i) => (
+          <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02]">
+            <span className="text-muted-foreground/40 tabular-nums shrink-0 w-[52px]">{msg.ts.slice(11, 19)}</span>
+            <span className={cn("shrink-0 text-[10px] px-1 rounded", MSG_TYPE_COLORS[msg.type] || "text-muted-foreground", "bg-white/[0.03]")}>
+              {MSG_TYPE_LABELS[msg.type] || msg.type}
+            </span>
+            {msg.agent && <img src={getAgentAvatarUrl(msg.agent)} alt="" className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5" />}
+            {msg.agent && <span className="text-muted-foreground shrink-0 w-[50px] truncate">@{msg.agent}</span>}
+            <span className="text-foreground/80 truncate">{msg.content}</span>
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+    </div>
+  )
+}
+
 const EVENT_COLORS: Record<string, string> = {
   text: "text-foreground", thinking: "text-muted-foreground", tool_call: "text-cyan-400",
   tool_result: "text-emerald-400", error: "text-red-400", status: "text-amber-400",
@@ -725,11 +813,7 @@ export function OrchestrationLayout({
                 className="flex-1 min-h-0 border-t border-border"
               >
                 {drawerTab === "messages" && (
-                  <A2AMessageStream
-                    messages={[]}
-                    crewFilter={a2aCrewFilter}
-                    onFilterChange={setA2aCrewFilter}
-                  />
+                  <LiveMessagesPanel />
                 )}
 
                 {drawerTab === "exec" && (
