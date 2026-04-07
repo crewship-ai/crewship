@@ -202,6 +202,17 @@ var startCmd = &cobra.Command{
 			}()
 		}
 
+		// Start MCP registry sync worker (syncs official registry every 24h)
+		if deps.DB != nil {
+			registryStop := make(chan struct{})
+			var registryWg sync.WaitGroup
+			api.StartRegistrySyncWorker(deps.DB, logger, registryStop, &registryWg)
+			defer func() {
+				close(registryStop)
+				registryWg.Wait()
+			}()
+		}
+
 		if err := srv.Start(ctx); err != nil {
 			return fmt.Errorf("server error: %w", err)
 		}

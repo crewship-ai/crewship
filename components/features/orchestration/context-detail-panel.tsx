@@ -40,6 +40,7 @@ const STATUS_COLORS: Record<MissionTaskStatus, string> = {
   COMPLETED: "bg-emerald-500/20 text-emerald-400",
   FAILED: "bg-red-500/20 text-red-400",
   SKIPPED: "bg-muted text-muted-foreground",
+  AWAITING_APPROVAL: "bg-violet-500/20 text-violet-400",
 }
 
 const COMPLEXITY_COLORS: Record<TaskComplexity, string> = {

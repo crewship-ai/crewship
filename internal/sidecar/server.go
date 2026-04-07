@@ -59,7 +59,7 @@ type MCPServerInput struct {
 	Name        string            `json:"name"`
 	DisplayName string            `json:"display_name"`
 	Scope       string            `json:"scope,omitempty"` // "workspace" or "crew"
-	Transport   string            `json:"transport"`       // "streamable-http" or "stdio"
+	Transport   string            `json:"transport"`       // "streamable-http", "sse", or "stdio"
 	Endpoint    string            `json:"endpoint,omitempty"`
 	Command     string            `json:"command,omitempty"`
 	Args        []string          `json:"args,omitempty"`
@@ -221,6 +221,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				return
 			case r.Method == http.MethodPost && r.URL.Path == "/escalate":
 				s.handleEscalate(w, r)
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/report-confidence":
+				s.handleReportConfidence(w, r)
 				return
 			case r.Method == http.MethodPost && r.URL.Path == "/mission/create":
 				s.handleMissionCreate(w, r)

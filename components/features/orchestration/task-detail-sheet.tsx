@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Clock, User, AlertCircle, CheckCircle, Repeat, Copy,
-  Play, SkipForward, Loader2, ArrowRight, Pencil, Save, X,
+  Play, SkipForward, Loader2, ArrowRight, Pencil, Save, X, XCircle,
 } from "lucide-react"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import type { Mission, MissionTask } from "@/lib/types/mission"
+import { TaskLiveLogs } from "./task-live-logs"
 
 interface TaskDetailSheetProps {
   task: MissionTask | null
@@ -41,6 +42,7 @@ const statusStyles: Record<string, { color: string; bg: string; label: string }>
   BLOCKED: { color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/30", label: "Blocked" },
   PENDING: { color: "text-slate-400", bg: "bg-slate-500/10 border-slate-500/30", label: "Pending" },
   SKIPPED: { color: "text-gray-400", bg: "bg-gray-500/10 border-gray-500/30", label: "Skipped" },
+  AWAITING_APPROVAL: { color: "text-violet-400", bg: "bg-violet-500/10 border-violet-500/30", label: "Awaiting Approval" },
 }
 
 function LiveDuration({ startedAt }: { startedAt: string }) {
@@ -81,6 +83,7 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
   const [editAgentId, setEditAgentId] = useState("")
   const [editDeps, setEditDeps] = useState<string[]>([])
   const [agents, setAgents] = useState<Agent[]>([])
+  const [approvalNotes, setApprovalNotes] = useState("")
 
   const isEditable = task?.status === "PENDING" || task?.status === "BLOCKED"
 
@@ -218,10 +221,38 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
     }
   }, [task, mission, workspaceId, onTaskChanged])
 
+  const handleApproval = useCallback(async (approved: boolean) => {
+    if (!task || !mission || loading) return
+    if (!approved && !confirm("Rejecting will fail this task and all downstream dependents. Continue?")) return
+    setLoading(approved ? "approve" : "reject")
+    try {
+      const res = await fetch(
+        `/api/v1/crews/${mission.crew_id}/missions/${mission.id}/tasks/${task.id}/approve?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approved, notes: approvalNotes }),
+        }
+      )
+      if (!res.ok) {
+        const b = await res.json().catch(() => null)
+        toast.error(b?.detail ?? `Failed to ${approved ? "approve" : "reject"} task`)
+        return
+      }
+      toast.success(approved ? "Task approved" : "Task rejected")
+      setApprovalNotes("")
+      onTaskChanged()
+    } catch {
+      toast.error(`Failed to ${approved ? "approve" : "reject"} task`)
+    } finally {
+      setLoading(null)
+    }
+  }, [task, mission, workspaceId, approvalNotes, onTaskChanged])
+
   const style = task ? (statusStyles[task.status] || statusStyles.PENDING) : statusStyles.PENDING
 
-  // Reset editing when task changes
-  useEffect(() => { setEditing(false) }, [task?.id])
+  // Reset editing and approval notes when task changes
+  useEffect(() => { setEditing(false); setApprovalNotes("") }, [task?.id])
 
   return (
     <Sheet open={!!task} onOpenChange={(open) => { if (!open) { setEditing(false); onClose() } }}>
@@ -300,9 +331,72 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                           Skip
                         </Button>
                       )}
+                      {task.status === "AWAITING_APPROVAL" && (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => handleApproval(true)} disabled={loading !== null}
+                            className="gap-1.5 h-7 text-xs border-green-500/30 text-green-400 hover:bg-green-500/10">
+                            {loading === "approve" ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
+                            Approve
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleApproval(false)} disabled={loading !== null}
+                            className="gap-1.5 h-7 text-xs border-red-500/30 text-red-400 hover:bg-red-500/10">
+                            {loading === "reject" ? <Loader2 className="h-3 w-3 animate-spin" /> : <XCircle className="h-3 w-3" />}
+                            Reject
+                          </Button>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
+
+                {/* Approval notes + confidence bar */}
+                {task.status === "AWAITING_APPROVAL" && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-white/40 uppercase tracking-wider">Review Notes</label>
+                    <Textarea
+                      value={approvalNotes}
+                      onChange={(e) => setApprovalNotes(e.target.value)}
+                      placeholder="Optional notes for your approval decision..."
+                      className="min-h-[60px] bg-white/[0.03] border-white/[0.06] text-sm"
+                      maxLength={2000}
+                    />
+                    {task.confidence != null && (
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-white/40">Confidence:</span>
+                        <div className="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                          <div
+                            className={cn("h-full rounded-full", task.confidence >= 0.7 ? "bg-green-500" : task.confidence >= 0.4 ? "bg-amber-500" : "bg-red-500")}
+                            style={{ width: `${Math.max(Math.round(task.confidence * 100), 2)}%` }}
+                          />
+                        </div>
+                        <span className={cn("font-mono", task.confidence >= 0.7 ? "text-green-400" : task.confidence >= 0.4 ? "text-amber-400" : "text-red-400")}>
+                          {Math.round(task.confidence * 100)}%
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Approval decision history */}
+                {task.approval_status && (
+                  <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className={cn("text-xs font-medium uppercase tracking-wider",
+                        task.approval_status === "APPROVED" ? "text-green-400" : "text-red-400"
+                      )}>
+                        {task.approval_status === "APPROVED" ? "Approved" : "Rejected"}
+                      </span>
+                      {task.approved_at && (
+                        <span className="text-xs text-white/30">
+                          {new Date(task.approved_at).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    {task.evaluation_notes && (
+                      <p className="text-xs text-white/50">{task.evaluation_notes}</p>
+                    )}
+                  </div>
+                )}
 
                 {/* Description — editable or static */}
                 {editing ? (
@@ -490,6 +584,14 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                         </div>
                       </CollapsibleContent>
                     </Collapsible>
+                  </>
+                )}
+
+                {/* Live Logs */}
+                {!editing && task.agent_slug && (task.status === "IN_PROGRESS" || task.status === "COMPLETED" || task.status === "FAILED") && (
+                  <>
+                    <Separator className="bg-white/[0.06]" />
+                    <TaskLiveLogs agentSlug={task.agent_slug} taskStatus={task.status} />
                   </>
                 )}
 

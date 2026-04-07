@@ -7,50 +7,17 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 
-const SECRET_RE = /(?:sk-[a-zA-Z0-9_-]{10,}|ghp_[a-zA-Z0-9]{36,}|gho_[a-zA-Z0-9]{36,}|xoxb-[a-zA-Z0-9-]+|AIza[a-zA-Z0-9_-]{35}|eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]+)/g
-function redactSecrets(s: string): string { return s.replace(SECRET_RE, "***") }
-
-interface LogEntry {
-  ts: string
-  level: string
-  agent: string
-  event: string
-  content?: string
-  metadata?: Record<string, unknown>
-}
+import {
+  redactSecrets,
+  formatLogTime,
+  LEVEL_COLORS,
+  EVENT_COLORS,
+  type LogEntry,
+} from "@/lib/utils/log-format"
 
 type LogLevel = "ALL" | "INFO" | "WARN" | "ERROR"
 
 const LEVELS: LogLevel[] = ["ALL", "INFO", "WARN", "ERROR"]
-
-function formatLogTime(ts: string): string {
-  try {
-    const d = new Date(ts)
-    return d.toISOString().slice(0, 19).replace("T", " ")
-  } catch {
-    return ts
-  }
-}
-
-const LEVEL_COLORS: Record<string, string> = {
-  INFO: "text-neutral-500",
-  WARN: "text-amber-500",
-  ERROR: "text-red-500",
-}
-
-const EVENT_COLORS: Record<string, string> = {
-  status: "text-yellow-400",
-  thinking: "text-neutral-500",
-  text: "text-white",
-  tool_call: "text-cyan-400",
-  tool_result: "text-emerald-400",
-  rate_limit: "text-amber-400",
-  failover: "text-yellow-400",
-  error: "text-red-400",
-  result: "text-purple-400",
-  system: "text-blue-400",
-  image: "text-pink-400",
-}
 
 /** Agent logs viewer with dark terminal style, filtering, and auto-refresh. */
 export function LogsPageClient() {

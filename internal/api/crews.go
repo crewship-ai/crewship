@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -123,6 +124,7 @@ type crewResponse struct {
 	NetworkMode       string           `json:"network_mode"`
 	AllowedDomains    []string         `json:"allowed_domains"`
 	MCPConfigJSON     *string          `json:"mcp_config_json,omitempty"`
+	EscalationConfig  *string          `json:"escalation_config,omitempty"`
 	CreatedAt         string           `json:"created_at"`
 	UpdatedAt         string           `json:"updated_at"`
 	Count             crewCountResponse `json:"_count"`
@@ -138,7 +140,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
-			c.mcp_config_json,
+			c.mcp_config_json, c.escalation_config,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -160,7 +162,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 			&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 			&c.NetworkMode, &allowedDomainsJSON,
-			&c.MCPConfigJSON,
+			&c.MCPConfigJSON, &c.EscalationConfig,
 			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
 			h.logger.Error("scan crew", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -333,7 +335,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
-			c.mcp_config_json,
+			c.mcp_config_json, c.escalation_config,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -342,7 +344,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 		&c.NetworkMode, &allowedDomainsJSON,
-		&c.MCPConfigJSON,
+		&c.MCPConfigJSON, &c.EscalationConfig,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -370,6 +372,7 @@ type updateCrewRequest struct {
 	NetworkMode       *string   `json:"network_mode"`
 	AllowedDomains    *[]string `json:"allowed_domains"`
 	MCPConfigJSON     *string   `json:"mcp_config_json"`
+	EscalationConfig  *string   `json:"escalation_config"`
 }
 
 func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -437,7 +440,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Build dynamic update
 	query := "UPDATE crews SET updated_at = ?"
-	args := []interface{}{now}
+	args := []any{now}
 
 	if req.Name != nil {
 		query += ", name = ?"
@@ -487,6 +490,31 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		query += ", mcp_config_json = ?"
 		args = append(args, *req.MCPConfigJSON)
+	}
+	if req.EscalationConfig != nil {
+		if *req.EscalationConfig != "" {
+			var cfg orchestrator.EscalationConfig
+			if err := json.Unmarshal([]byte(*req.EscalationConfig), &cfg); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "escalation_config is not valid JSON: " + err.Error()})
+				return
+			}
+			for _, v := range []float64{cfg.AutoApproveThreshold, cfg.NotifyThreshold, cfg.RequireApprovalBelow} {
+				if v < 0 || v > 1 {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "escalation_config thresholds must be between 0 and 1"})
+					return
+				}
+			}
+			if cfg.AutoApproveThreshold > 0 && cfg.RequireApprovalBelow > 0 && cfg.AutoApproveThreshold <= cfg.RequireApprovalBelow {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "auto_approve_threshold must be greater than require_approval_below"})
+				return
+			}
+		}
+		query += ", escalation_config = ?"
+		if *req.EscalationConfig == "" {
+			args = append(args, nil)
+		} else {
+			args = append(args, *req.EscalationConfig)
+		}
 	}
 	// Track whether the resolved mode is free — if so, always clear allowed_domains.
 	updatedModeFree := false
@@ -551,7 +579,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
-			c.mcp_config_json,
+			c.mcp_config_json, c.escalation_config,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -560,7 +588,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	`, crewID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 		&c.NetworkMode, &updatedDomainsJSON,
-		&c.MCPConfigJSON,
+		&c.MCPConfigJSON, &c.EscalationConfig,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		h.logger.Error("get crew after update", "error", err)
@@ -924,7 +952,7 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	affected, _ := res.RowsAffected()
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"updated": affected,
 		"style":   body.AvatarStyle,
 	})

@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -181,7 +183,7 @@ func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger
 	go g.auditWorker()
 
 	for _, s := range servers {
-		if s.Transport != "streamable-http" {
+		if s.Transport != "streamable-http" && s.Transport != "sse" {
 			logger.Debug("MCP server transport not supported by gateway, skipping", "name", s.Name, "transport", s.Transport)
 			continue
 		}
@@ -379,7 +381,7 @@ func (g *MCPGateway) Close() {
 
 // --- mcpClient methods ---
 
-// initialize performs the MCP initialize handshake (streamable-http).
+// initialize performs the MCP initialize handshake (streamable-http or sse).
 func (c *mcpClient) initialize(ctx context.Context) error {
 	req := jsonRPCRequest{
 		JSONRPC: "2.0",
@@ -402,6 +404,14 @@ func (c *mcpClient) initialize(ctx context.Context) error {
 		return fmt.Errorf("initialize error: %s", resp.Error.Message)
 	}
 
+	// SSE servers may not return Mcp-Session-Id; use a synthetic marker
+	// so the gateway treats the client as connected.
+	c.mu.Lock()
+	if c.sessionID == "" && c.transport == "sse" {
+		c.sessionID = "sse-connected"
+	}
+	c.mu.Unlock()
+
 	// Send initialized notification
 	notif := jsonRPCRequest{
 		JSONRPC: "2.0",
@@ -415,7 +425,7 @@ func (c *mcpClient) initialize(ctx context.Context) error {
 	c.mu.Lock()
 	sid := c.sessionID
 	c.mu.Unlock()
-	if sid != "" {
+	if sid != "" && sid != "sse-connected" {
 		httpReq.Header.Set("Mcp-Session-Id", sid)
 	}
 	c.injectCredential(httpReq)
@@ -504,7 +514,7 @@ func (c *mcpClient) sendRequest(ctx context.Context, rpcReq jsonRPCRequest) (*js
 	c.mu.Lock()
 	sid := c.sessionID
 	c.mu.Unlock()
-	if sid != "" {
+	if sid != "" && sid != "sse-connected" {
 		httpReq.Header.Set("Mcp-Session-Id", sid)
 	}
 	c.injectCredential(httpReq)
@@ -527,6 +537,12 @@ func (c *mcpClient) sendRequest(ctx context.Context, rpcReq jsonRPCRequest) (*js
 		return nil, fmt.Errorf("MCP server %q returned HTTP %d", c.serverName, resp.StatusCode)
 	}
 
+	// Handle SSE (text/event-stream) responses from legacy MCP servers.
+	contentType := resp.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "text/event-stream") {
+		return parseSSEResponse(resp.Body)
+	}
+
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
@@ -537,6 +553,62 @@ func (c *mcpClient) sendRequest(ctx context.Context, rpcReq jsonRPCRequest) (*js
 		return nil, fmt.Errorf("parse JSON-RPC response: %w", err)
 	}
 	return &rpcResp, nil
+}
+
+// tryParseSSEEvent attempts to parse a collected SSE event as a JSON-RPC response.
+// Returns nil, nil if the event type is not a message or there are no data lines.
+func tryParseSSEEvent(eventType string, dataLines []string) (*jsonRPCResponse, error) {
+	if (eventType == "" || eventType == "message") && len(dataLines) > 0 {
+		data := strings.Join(dataLines, "\n")
+		var rpcResp jsonRPCResponse
+		if err := json.Unmarshal([]byte(data), &rpcResp); err != nil {
+			return nil, fmt.Errorf("parse SSE JSON-RPC data: %w", err)
+		}
+		return &rpcResp, nil
+	}
+	return nil, nil
+}
+
+// parseSSEResponse reads a text/event-stream body and extracts the first
+// JSON-RPC response from a "message" event's data field. This supports
+// the deprecated MCP SSE transport where responses arrive as SSE events.
+func parseSSEResponse(body io.Reader) (*jsonRPCResponse, error) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024) // 1 MB max token size for large SSE frames
+	var eventType string
+	var dataLines []string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if line == "" {
+			// End of event
+			if resp, err := tryParseSSEEvent(eventType, dataLines); resp != nil || err != nil {
+				return resp, err
+			}
+			// Reset for next event
+			eventType = ""
+			dataLines = nil
+			continue
+		}
+
+		if strings.HasPrefix(line, "event:") {
+			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		} else if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read SSE stream: %w", err)
+	}
+
+	// Handle final event without trailing blank line
+	if resp, err := tryParseSSEEvent(eventType, dataLines); resp != nil || err != nil {
+		return resp, err
+	}
+
+	return nil, fmt.Errorf("no JSON-RPC message event found in SSE stream")
 }
 
 // injectCredential adds authentication headers to the request (Gateway Offload pattern).
@@ -561,13 +633,14 @@ func (c *mcpClient) injectCredential(req *http.Request) {
 }
 
 // terminateSession sends a DELETE request to end the MCP session.
+// SSE transport does not support session termination via DELETE.
 func (c *mcpClient) terminateSession() {
 	c.mu.Lock()
 	sid := c.sessionID
 	c.sessionID = ""
 	c.mu.Unlock()
 
-	if sid == "" {
+	if sid == "" || sid == "sse-connected" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
