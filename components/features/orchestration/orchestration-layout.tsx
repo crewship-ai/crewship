@@ -186,7 +186,7 @@ export function OrchestrationLayout({
   const showRightPanel = detailContext.type !== "none"
 
   return (
-    <div className="dark flex flex-col h-[calc(100vh-48px)] bg-background">
+    <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {/* ---- Top toolbar ---- */}
       <div className="flex items-center justify-between px-4 py-1.5 border-b border-border bg-card shrink-0 z-20">
         <div className="flex items-center gap-3">
