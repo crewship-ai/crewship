@@ -89,55 +89,89 @@ func BuildCLICommand(req AgentRunRequest) []string {
 	}
 }
 
-// isNpxCommand returns true if the command string starts with "npx" or "npm".
-func isNpxCommand(cmd string) bool {
-	return strings.HasPrefix(cmd, "npx") || strings.HasPrefix(cmd, "npm")
+// nodeJSLauncher extracts the first token from a command string and returns it
+// only if it is exactly "npx" or "npm". Returns empty string otherwise.
+func nodeJSLauncher(cmd string) string {
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return ""
+	}
+	switch parts[0] {
+	case "npx", "npm":
+		return parts[0]
+	default:
+		return ""
+	}
 }
 
-// filterNpxServers checks whether npx is available in the container and removes
-// stdio servers that require npx/npm if it is missing. Returns the filtered list.
+// isNpxCommand returns true if the command's first token is exactly "npx" or "npm".
+func isNpxCommand(cmd string) bool {
+	return nodeJSLauncher(cmd) != ""
+}
+
+// filterNpxServers checks whether npx/npm is available in the container and removes
+// stdio servers that require them if missing. Returns the filtered list.
 func filterNpxServers(ctx context.Context, container provider.ContainerProvider, containerID string, servers []MCPServerConfig, logger *slog.Logger) []MCPServerConfig {
-	// 1. Check if any server uses npx — if none, return unchanged.
-	hasNpx := false
+	// 1. Check if any server uses npx/npm — if none, return unchanged.
+	hasNodeLauncher := false
 	for _, s := range servers {
 		if s.Transport == "stdio" && isNpxCommand(s.Command) {
-			hasNpx = true
+			hasNodeLauncher = true
 			break
 		}
 	}
-	if !hasNpx {
+	if !hasNodeLauncher {
 		return servers
 	}
 
-	// 2. Collect unique launchers needed (npx, npm).
+	// 2. Collect unique launchers needed (only "npx" or "npm" are allowed).
+	// Value meaning: true = confirmed available, false = confirmed missing.
+	// Launchers with probe errors are removed from the map (kept by default).
 	launchers := map[string]bool{}
 	for _, s := range servers {
-		if s.Transport == "stdio" && isNpxCommand(s.Command) {
-			parts := strings.Fields(s.Command)
-			if len(parts) > 0 {
-				launchers[parts[0]] = false // default: not available
+		if s.Transport == "stdio" {
+			if l := nodeJSLauncher(s.Command); l != "" {
+				launchers[l] = false
 			}
 		}
 	}
 
-	// 3. Probe each unique launcher in the container.
+	// 3. Probe each launcher with a fixed, safe command (no interpolation).
+	probeCommands := map[string][]string{
+		"npx": {"sh", "-c", "command -v npx >/dev/null 2>&1 && echo ok"},
+		"npm": {"sh", "-c", "command -v npm >/dev/null 2>&1 && echo ok"},
+	}
 	for launcher := range launchers {
+		probe, ok := probeCommands[launcher]
+		if !ok {
+			// Unknown launcher — should not happen due to nodeJSLauncher filter,
+			// but keep the server by removing from the map (not filtering it out).
+			delete(launchers, launcher)
+			continue
+		}
 		cfg := provider.ExecConfig{
 			ContainerID: containerID,
-			Cmd:         []string{"sh", "-c", fmt.Sprintf("command -v %s >/dev/null 2>&1 && echo ok", launcher)},
+			Cmd:         probe,
 			User:        "1001:1001",
 		}
 		result, err := container.Exec(ctx, cfg)
-		if err == nil {
-			output, _ := io.ReadAll(result.Reader)
-			result.Reader.Close()
-			if strings.TrimSpace(string(output)) != "" {
-				launchers[launcher] = true
-			}
+		if err != nil {
+			// Exec failure (container not ready, timeout, etc.) — don't drop the
+			// server; remove from map so it won't be filtered out.
+			logger.Warn("probe exec failed, keeping servers that require "+launcher,
+				"error", err,
+				"container_id", containerID[:min(12, len(containerID))])
+			delete(launchers, launcher)
+			continue
+		}
+		output, _ := io.ReadAll(result.Reader)
+		result.Reader.Close()
+		if strings.TrimSpace(string(output)) != "" {
+			launchers[launcher] = true
 		}
 	}
 
-	// If all launchers available, return unchanged.
+	// If all remaining launchers available, return unchanged.
 	allAvailable := true
 	for _, available := range launchers {
 		if !available {
@@ -149,18 +183,22 @@ func filterNpxServers(ctx context.Context, container provider.ContainerProvider,
 		return servers
 	}
 
-	// 4. Filter out servers whose launcher is not available.
+	// 4. Filter out servers whose launcher is confirmed missing.
 	var skipped []string
 	var filtered []MCPServerConfig
 	for _, s := range servers {
-		if s.Transport == "stdio" && isNpxCommand(s.Command) {
-			parts := strings.Fields(s.Command)
-			if len(parts) > 0 && !launchers[parts[0]] {
-				skipped = append(skipped, s.Name)
-				continue
+		if s.Transport == "stdio" {
+			if l := nodeJSLauncher(s.Command); l != "" {
+				if available, probed := launchers[l]; probed && !available {
+					skipped = append(skipped, s.Name)
+					continue
+				}
 			}
 		}
 		filtered = append(filtered, s)
+	}
+	if len(skipped) == 0 {
+		return servers
 	}
 	logger.Warn("launcher not found in container, skipping stdio MCP servers",
 		"skipped_servers", skipped,
