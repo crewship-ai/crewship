@@ -2,11 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
+import { Menu } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { useAuth } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { SettingsNav } from "./settings-nav"
 import { ProfileSection } from "./sections/profile-section"
 import { GeneralSection } from "./sections/general-section"
@@ -52,7 +56,9 @@ export function SettingsLayout() {
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
   const { abilities } = useAbilities()
 
+  const isMobile = useIsMobile()
   const [activeTab, setActiveTab] = useState("profile")
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   const [org, setOrg] = useState<Org | null>(null)
   const [members, setMembers] = useState<Member[]>([])
@@ -160,28 +166,63 @@ export function SettingsLayout() {
     return <Phase2Section />
   }
 
+  function handleTabChange(tab: string) {
+    setActiveTab(tab)
+    setMobileNavOpen(false)
+  }
+
   return (
     <div className="flex h-[calc(100vh-48px)]">
-      {/* Sidebar nav */}
-      <SettingsNav
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        workspaceName={org?.name}
-      />
+      {/* Desktop sidebar nav */}
+      {!isMobile && (
+        <SettingsNav
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+          workspaceName={org?.name}
+        />
+      )}
+
+      {/* Mobile nav sheet */}
+      {isMobile && (
+        <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+          <SheetContent side="left" className="w-[260px] p-0">
+            <SheetHeader className="sr-only">
+              <SheetTitle>Settings Navigation</SheetTitle>
+            </SheetHeader>
+            <SettingsNav
+              activeTab={activeTab}
+              onTabChange={handleTabChange}
+              workspaceName={org?.name}
+            />
+          </SheetContent>
+        </Sheet>
+      )}
 
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea className="h-full">
-          <div className="max-w-3xl mx-auto px-8 py-8">
-            {/* Section header */}
-            {section && (
-              <div className="mb-6">
-                <h2 className="text-[18px] font-semibold text-foreground">{section.title}</h2>
-                {section.description && (
-                  <p className="text-[13px] text-muted-foreground/50 mt-1">{section.description}</p>
-                )}
-              </div>
-            )}
+          <div className="max-w-3xl mx-auto px-4 sm:px-8 py-6 sm:py-8">
+            {/* Mobile nav trigger + section header */}
+            <div className="flex items-start gap-3 mb-6">
+              {isMobile && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 mt-0.5"
+                  onClick={() => setMobileNavOpen(true)}
+                >
+                  <Menu className="h-4 w-4" />
+                </Button>
+              )}
+              {section && (
+                <div>
+                  <h2 className="text-[18px] font-semibold text-foreground">{section.title}</h2>
+                  {section.description && (
+                    <p className="text-[13px] text-muted-foreground/50 mt-1">{section.description}</p>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Section content */}
             <AnimatePresence mode="wait">
