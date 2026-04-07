@@ -225,7 +225,7 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
 
   return (
     <Sheet open={!!task} onOpenChange={(open) => { if (!open) { setEditing(false); onClose() } }}>
-      <SheetContent className="w-[420px] sm:w-[480px] p-0 bg-[#0d0f14] border-white/[0.06]">
+      <SheetContent className="w-[420px] sm:w-[480px] p-0 bg-card border-border">
         {task && (
           <>
             <SheetHeader className="px-6 pt-6 pb-4">
@@ -235,11 +235,11 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                     <Input
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
-                      className="text-base font-semibold bg-white/[0.05] border-white/[0.1] h-9"
+                      className="text-base font-semibold bg-accent border-border h-9"
                       placeholder="Task title"
                     />
                   ) : (
-                    <SheetTitle className="text-base font-semibold text-white leading-tight">
+                    <SheetTitle className="text-base font-semibold text-foreground leading-tight">
                       {task.title}
                     </SheetTitle>
                   )}
@@ -248,7 +248,7 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                   </SheetDescription>
                 </div>
                 {isEditable && !editing && (
-                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-white/30 hover:text-white/70" onClick={startEditing}>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground/70 hover:text-foreground/70" onClick={startEditing}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
                 )}
@@ -264,7 +264,7 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                     {style.label}
                   </Badge>
                   {task.max_iterations && task.max_iterations > 1 && (
-                    <Badge variant="outline" className="text-xs gap-1 text-white/50">
+                    <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
                       <Repeat className="h-3 w-3" />
                       {task.iteration || 1}/{task.max_iterations}
                     </Badge>
@@ -275,7 +275,7 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                   {editing ? (
                     <>
                       <Button size="sm" variant="outline" onClick={cancelEditing} disabled={loading !== null}
-                        className="gap-1 h-7 text-xs border-white/10 text-white/50">
+                        className="gap-1 h-7 text-xs border-border text-muted-foreground">
                         <X className="h-3 w-3" /> Cancel
                       </Button>
                       <Button size="sm" onClick={saveEdit} disabled={loading !== null || !editTitle.trim()}
@@ -307,39 +307,39 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                 {/* Description — editable or static */}
                 {editing ? (
                   <>
-                    <Separator className="bg-white/[0.06]" />
+                    <Separator className="bg-border" />
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-white/40 uppercase tracking-wider">Description</label>
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</label>
                       <Textarea
                         value={editDesc}
                         onChange={(e) => setEditDesc(e.target.value)}
                         placeholder="Task description..."
-                        className="min-h-[80px] bg-white/[0.05] border-white/[0.1] text-sm"
+                        className="min-h-[80px] bg-accent border-border text-sm"
                       />
                     </div>
                   </>
                 ) : task.description ? (
                   <>
-                    <Separator className="bg-white/[0.06]" />
-                    <p className="text-sm text-white/60 leading-relaxed">{task.description}</p>
+                    <Separator className="bg-border" />
+                    <p className="text-sm text-muted-foreground leading-relaxed">{task.description}</p>
                   </>
                 ) : null}
 
-                <Separator className="bg-white/[0.06]" />
+                <Separator className="bg-border" />
 
                 {/* Agent — editable or static */}
                 {editing ? (
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-white/40 uppercase tracking-wider">Assigned Agent</label>
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Assigned Agent</label>
                     <Select value={editAgentId || "unassigned"} onValueChange={(v) => setEditAgentId(v === "unassigned" ? "" : v)}>
-                      <SelectTrigger className="h-9 bg-white/[0.05] border-white/[0.1] text-sm">
+                      <SelectTrigger className="h-9 bg-accent border-border text-sm">
                         <SelectValue placeholder="Select agent..." />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="unassigned">Unassigned</SelectItem>
                         {agents.map((a) => (
                           <SelectItem key={a.id} value={a.id}>
-                            {a.name} <span className="text-white/30 ml-1">@{a.slug}</span>
+                            {a.name} <span className="text-muted-foreground/70 ml-1">@{a.slug}</span>
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -348,26 +348,26 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                 ) : (
                   <div className="space-y-3">
                     <div className="flex items-center gap-2 text-sm">
-                      <User className="h-4 w-4 text-white/30 shrink-0" />
-                      <span className="text-white/70">{task.agent_name || "Unassigned"}</span>
+                      <User className="h-4 w-4 text-muted-foreground/70 shrink-0" />
+                      <span className="text-foreground/80">{task.agent_name || "Unassigned"}</span>
                       {task.agent_slug && (
-                        <span className="text-xs text-white/30 font-mono">@{task.agent_slug}</span>
+                        <span className="text-xs text-muted-foreground/70 font-mono">@{task.agent_slug}</span>
                       )}
                     </div>
 
                     <div className="flex items-center gap-2 text-sm">
-                      <Clock className="h-4 w-4 text-white/30 shrink-0" />
+                      <Clock className="h-4 w-4 text-muted-foreground/70 shrink-0" />
                       {task.status === "IN_PROGRESS" && task.started_at ? (
                         <LiveDuration startedAt={task.started_at} />
                       ) : (
-                        <span className="text-white/70 font-mono">
+                        <span className="text-foreground/80 font-mono">
                           {task.duration_ms != null ? formatDuration(task.duration_ms) : "--"}
                         </span>
                       )}
                     </div>
 
                     {(task.token_count != null && task.token_count > 0) && (
-                      <div className="flex items-center gap-4 text-xs text-white/40">
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
                         <span className="font-mono">{task.token_count.toLocaleString()} tokens</span>
                         {task.estimated_cost != null && task.estimated_cost > 0 && (
                           <span className="font-mono">${task.estimated_cost.toFixed(4)}</span>
@@ -380,17 +380,17 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                 {/* Dependencies — editable or static */}
                 {editing ? (
                   <>
-                    <Separator className="bg-white/[0.06]" />
+                    <Separator className="bg-border" />
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-white/40 uppercase tracking-wider">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                         Dependencies
                       </label>
                       {otherTasks.length === 0 ? (
-                        <p className="text-xs text-white/30">No other tasks to depend on</p>
+                        <p className="text-xs text-muted-foreground/70">No other tasks to depend on</p>
                       ) : (
                         <div className="space-y-1.5">
                           {otherTasks.map((t) => (
-                            <label key={t.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.04] cursor-pointer hover:bg-white/[0.05] transition-colors">
+                            <label key={t.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/50 border border-border cursor-pointer hover:bg-accent/50 transition-colors">
                               <Checkbox
                                 checked={editDeps.includes(t.id)}
                                 onCheckedChange={(checked) => {
@@ -399,7 +399,7 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                                   )
                                 }}
                               />
-                              <span className="text-xs text-white/70 truncate flex-1">{t.title}</span>
+                              <span className="text-xs text-foreground/80 truncate flex-1">{t.title}</span>
                               <span className={cn("text-[10px] font-medium", (statusStyles[t.status] || statusStyles.PENDING).color)}>
                                 {(statusStyles[t.status] || statusStyles.PENDING).label}
                               </span>
@@ -413,21 +413,21 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                   <>
                     {depTasks.length > 0 && (
                       <>
-                        <Separator className="bg-white/[0.06]" />
+                        <Separator className="bg-border" />
                         <div className="space-y-2">
-                          <h4 className="text-xs font-semibold text-white/50 uppercase tracking-wider">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                             Depends on ({depTasks.length})
                           </h4>
                           {depTasks.map((dep) => {
                             const ds = statusStyles[dep.status] || statusStyles.PENDING
                             return (
-                              <div key={dep.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.04]">
+                              <div key={dep.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/50 border border-border">
                                 <div className={cn("w-2 h-2 rounded-full shrink-0",
                                   dep.status === "COMPLETED" ? "bg-green-500" :
                                   dep.status === "IN_PROGRESS" ? "bg-blue-500 animate-pulse" :
                                   dep.status === "FAILED" ? "bg-red-500" : "bg-slate-500"
                                 )} />
-                                <span className="text-xs text-white/70 truncate flex-1">{dep.title}</span>
+                                <span className="text-xs text-foreground/80 truncate flex-1">{dep.title}</span>
                                 <span className={cn("text-[10px] font-medium", ds.color)}>{ds.label}</span>
                               </div>
                             )
@@ -438,17 +438,17 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
 
                     {dependents.length > 0 && (
                       <>
-                        <Separator className="bg-white/[0.06]" />
+                        <Separator className="bg-border" />
                         <div className="space-y-2">
-                          <h4 className="text-xs font-semibold text-white/50 uppercase tracking-wider">
+                          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                             Blocks ({dependents.length})
                           </h4>
                           {dependents.map((dep) => {
                             const ds = statusStyles[dep.status] || statusStyles.PENDING
                             return (
-                              <div key={dep.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.04]">
-                                <ArrowRight className="h-3 w-3 text-white/20 shrink-0" />
-                                <span className="text-xs text-white/70 truncate flex-1">{dep.title}</span>
+                              <div key={dep.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/50 border border-border">
+                                <ArrowRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                                <span className="text-xs text-foreground/80 truncate flex-1">{dep.title}</span>
                                 <span className={cn("text-[10px] font-medium", ds.color)}>{ds.label}</span>
                               </div>
                             )
@@ -462,11 +462,11 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                 {/* Output / Result */}
                 {!editing && task.result_summary && (
                   <>
-                    <Separator className="bg-white/[0.06]" />
+                    <Separator className="bg-border" />
                     <Collapsible defaultOpen>
                       <CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
                         <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-                        <h4 className="text-xs font-semibold text-white/50 uppercase tracking-wider flex-1">
+                        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex-1">
                           Output
                         </h4>
                         <Button
@@ -483,8 +483,8 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                         </Button>
                       </CollapsibleTrigger>
                       <CollapsibleContent>
-                        <div className="mt-2 p-3 rounded-lg bg-white/[0.03] border border-white/[0.04]">
-                          <pre className="text-xs text-white/60 whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto">
+                        <div className="mt-2 p-3 rounded-lg bg-accent/50 border border-border">
+                          <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto">
                             {task.result_summary}
                           </pre>
                         </div>
@@ -496,7 +496,7 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                 {/* Error */}
                 {!editing && task.error_message && (
                   <>
-                    <Separator className="bg-white/[0.06]" />
+                    <Separator className="bg-border" />
                     <Collapsible defaultOpen>
                       <CollapsibleTrigger className="flex items-center gap-2 w-full text-left group">
                         <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
@@ -530,8 +530,8 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
                 {/* Meta */}
                 {!editing && (
                   <>
-                    <Separator className="bg-white/[0.06]" />
-                    <div className="text-[11px] text-white/20 space-y-1 font-mono">
+                    <Separator className="bg-border" />
+                    <div className="text-[11px] text-muted-foreground/50 space-y-1 font-mono">
                       <div>ID: {task.id}</div>
                       {task.assignment_id && <div>Assignment: {task.assignment_id}</div>}
                       <div>Created: {new Date(task.created_at).toLocaleString()}</div>

@@ -47,11 +47,11 @@ function hashColor(slug: string): string {
 function CrewBadge({ name, slug }: { name: string; slug: string }) {
   const color = hashColor(slug)
   return (
-    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/50 border border-border">
       <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
       <div>
-        <div className="text-sm font-medium text-white/80">{name}</div>
-        <div className="text-[11px] text-white/30 font-mono">{slug}</div>
+        <div className="text-sm font-medium text-foreground">{name}</div>
+        <div className="text-[11px] text-muted-foreground/70 font-mono">{slug}</div>
       </div>
     </div>
   )
@@ -202,9 +202,9 @@ export function CrewConnections({ workspaceId }: CrewConnectionsProps) {
                   <CrewBadge name={conn.from_crew_name} slug={conn.from_crew_slug} />
                   <div className="flex flex-col items-center gap-1 shrink-0">
                     {conn.direction === "bidirectional" ? (
-                      <ArrowLeftRight className="h-5 w-5 text-white/30" />
+                      <ArrowLeftRight className="h-5 w-5 text-muted-foreground/70" />
                     ) : (
-                      <ArrowRight className="h-5 w-5 text-white/30" />
+                      <ArrowRight className="h-5 w-5 text-muted-foreground/70" />
                     )}
                     <Badge variant="outline" className="text-[10px] px-1.5">
                       {conn.direction}
