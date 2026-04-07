@@ -31,7 +31,7 @@ const statusConfig = {
   idle: {
     dot: "bg-slate-400",
     pulse: false,
-    border: "border-white/[0.08]",
+    border: "border-border",
     bg: "bg-[#0f1115]/60",
   },
   blocked: {
@@ -84,7 +84,7 @@ function AgentCardNodeInner({ data }: NodeProps) {
           </div>
 
           {/* Name */}
-          <span className="text-[12px] font-semibold text-white/90 truncate flex-1">
+          <span className="text-[12px] font-semibold text-foreground truncate flex-1">
             {d.name}
           </span>
 
@@ -103,21 +103,21 @@ function AgentCardNodeInner({ data }: NodeProps) {
         </div>
 
         {/* Role subtitle */}
-        <div className="text-[10px] text-white/40 mt-0.5 truncate pl-4">
+        <div className="text-[10px] text-muted-foreground mt-0.5 truncate pl-4">
           {d.role}
         </div>
 
         {/* Model + metrics row */}
         <div className="flex items-center gap-2 mt-1.5 pl-4">
-          <div className="flex items-center gap-1 text-[9px] text-white/30 font-mono">
+          <div className="flex items-center gap-1 text-[9px] text-muted-foreground/70 font-mono">
             <Cpu className="h-2.5 w-2.5" />
             <span className="truncate max-w-[80px]">{d.model}</span>
           </div>
-          <span className="text-[9px] text-white/20">|</span>
-          <span className="text-[9px] text-white/30 font-mono tabular-nums">
+          <span className="text-[9px] text-muted-foreground/50">|</span>
+          <span className="text-[9px] text-muted-foreground/70 font-mono tabular-nums">
             {formatTokens(d.tokenCount)} tok
           </span>
-          <span className="text-[9px] text-white/30 font-mono tabular-nums">
+          <span className="text-[9px] text-muted-foreground/70 font-mono tabular-nums">
             ${d.cost.toFixed(2)}
           </span>
         </div>
@@ -128,13 +128,13 @@ function AgentCardNodeInner({ data }: NodeProps) {
             {visibleSkills.map((skill) => (
               <span
                 key={skill}
-                className="px-1.5 py-0.5 rounded text-[8px] font-medium text-white/40 bg-white/[0.05] border border-white/[0.06] truncate max-w-[70px]"
+                className="px-1.5 py-0.5 rounded text-[8px] font-medium text-muted-foreground bg-accent/50 border border-border truncate max-w-[70px]"
               >
                 {skill}
               </span>
             ))}
             {extraSkillCount > 0 && (
-              <span className="text-[8px] text-white/25 font-mono">
+              <span className="text-[8px] text-muted-foreground/50 font-mono">
                 +{extraSkillCount} more
               </span>
             )}
@@ -143,7 +143,7 @@ function AgentCardNodeInner({ data }: NodeProps) {
 
         {/* Current task */}
         {d.currentTask && (
-          <div className="mt-1.5 pt-1.5 border-t border-white/[0.05] pl-4">
+          <div className="mt-1.5 pt-1.5 border-t border-border pl-4">
             <p className="text-[9px] text-blue-300/50 italic truncate">
               {d.currentTask}
             </p>

@@ -72,7 +72,7 @@ function CountBadge({ count }: { count: number }) {
         >
           <Badge
             variant="secondary"
-            className="h-4 min-w-4 px-1 text-[10px] bg-white/[0.06] text-white/40 border-0"
+            className="h-4 min-w-4 px-1 text-[10px] bg-accent text-muted-foreground border-0"
           >
             {count}
           </Badge>
@@ -108,8 +108,8 @@ function InboxSection({
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger asChild>
-        <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.04] transition-colors">
-          <span className="text-white/30 shrink-0">
+        <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors">
+          <span className="text-muted-foreground/70 shrink-0">
             {open ? (
               <ChevronDown className="h-3 w-3" />
             ) : (
@@ -117,7 +117,7 @@ function InboxSection({
             )}
           </span>
           <span className={cn("shrink-0", accentClass)}>{icon}</span>
-          <span className="text-[11px] font-medium text-white/60 flex-1 text-left">
+          <span className="text-[11px] font-medium text-muted-foreground flex-1 text-left">
             {label}
           </span>
           <CountBadge count={items.length} />
@@ -125,24 +125,24 @@ function InboxSection({
       </CollapsibleTrigger>
 
       <CollapsibleContent>
-        <div className="ml-4 pl-2.5 border-l border-white/[0.06] space-y-px">
+        <div className="ml-4 pl-2.5 border-l border-border space-y-px">
           {items.map(({ task, mission }) => (
             <button
               key={task.id}
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.04] transition-colors text-left group"
+              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 transition-colors text-left group"
               onClick={() => onTaskSelect(task, mission)}
             >
               <div className="flex-1 min-w-0">
-                <div className="text-[11px] text-white/70 truncate">
+                <div className="text-[11px] text-foreground/80 truncate">
                   {task.title}
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   {task.agent_slug && (
-                    <span className="text-[10px] font-mono text-white/30">
+                    <span className="text-[10px] font-mono text-muted-foreground/70">
                       @{task.agent_slug}
                     </span>
                   )}
-                  <span className="text-[10px] text-white/20 truncate">
+                  <span className="text-[10px] text-muted-foreground/50 truncate">
                     {mission.title}
                   </span>
                 </div>
@@ -176,9 +176,9 @@ export function UnifiedInbox({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06]">
-        <Inbox className="h-3.5 w-3.5 text-white/40" />
-        <span className="text-xs font-semibold text-white/60">Inbox</span>
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+        <Inbox className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs font-semibold text-muted-foreground">Inbox</span>
         <CountBadge count={total} />
       </div>
 
@@ -210,7 +210,7 @@ export function UnifiedInbox({
           />
 
           {total === 0 && (
-            <div className="flex flex-col items-center justify-center py-8 gap-2 text-white/20">
+            <div className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground/50">
               <CheckCircle2 className="h-6 w-6" />
               <span className="text-xs">All clear</span>
             </div>

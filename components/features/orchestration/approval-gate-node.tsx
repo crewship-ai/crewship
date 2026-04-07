@@ -90,13 +90,13 @@ function ApprovalGateNodeInner({ data, id }: NodeProps) {
         </span>
 
         {/* Task title — tiny, truncated */}
-        <span className="text-[8px] text-white/30 max-w-[80px] truncate text-center leading-tight">
+        <span className="text-[8px] text-muted-foreground max-w-[80px] truncate text-center leading-tight">
           {d.taskTitle}
         </span>
 
         {/* Dependency count */}
         {d.dependencyNames.length > 0 && (
-          <span className="text-[8px] text-white/20 font-mono">
+          <span className="text-[8px] text-muted-foreground font-mono">
             {d.dependencyNames.length} dep{d.dependencyNames.length !== 1 ? "s" : ""}
           </span>
         )}
@@ -143,7 +143,7 @@ function ApprovalGateNodeInner({ data, id }: NodeProps) {
         id={`${id}-top`}
         className="!w-2.5 !h-2.5 !rounded-full !border-2"
         style={{
-          background: "#1a1d23",
+          background: "hsl(var(--muted))",
           borderColor: cfg.accent,
           top: 0,
           left: "50%",
@@ -156,7 +156,7 @@ function ApprovalGateNodeInner({ data, id }: NodeProps) {
         id={`${id}-right`}
         className="!w-2.5 !h-2.5 !rounded-full !border-2"
         style={{
-          background: "#1a1d23",
+          background: "hsl(var(--muted))",
           borderColor: cfg.accent,
           right: 0,
           top: "50%",
@@ -169,7 +169,7 @@ function ApprovalGateNodeInner({ data, id }: NodeProps) {
         id={`${id}-bottom`}
         className="!w-2.5 !h-2.5 !rounded-full !border-2"
         style={{
-          background: "#1a1d23",
+          background: "hsl(var(--muted))",
           borderColor: cfg.accent,
           bottom: 0,
           left: "50%",
@@ -182,7 +182,7 @@ function ApprovalGateNodeInner({ data, id }: NodeProps) {
         id={`${id}-left`}
         className="!w-2.5 !h-2.5 !rounded-full !border-2"
         style={{
-          background: "#1a1d23",
+          background: "hsl(var(--muted))",
           borderColor: cfg.accent,
           left: 0,
           top: "50%",

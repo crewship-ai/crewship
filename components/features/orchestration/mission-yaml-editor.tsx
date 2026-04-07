@@ -111,7 +111,7 @@ export function MissionYamlEditor({ mission, readOnly = false, onSave }: Mission
 
   if (!mission) {
     return (
-      <div className="flex flex-col items-center justify-center h-full py-8 text-white/30">
+      <div className="flex flex-col items-center justify-center h-full py-8 text-muted-foreground/70">
         <FileCode2 className="size-6 mb-2" />
         <p className="text-xs">Select a mission</p>
       </div>

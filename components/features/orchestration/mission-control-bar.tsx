@@ -139,7 +139,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
   }, [mission.id, mission.crew_id, workspaceId, onMissionChanged])
 
   return (
-    <div className="border-b border-white/[0.08] bg-[#0d1017] px-4 py-3">
+    <div className="border-b border-border bg-card px-4 py-3">
       <div className="flex items-center justify-between gap-4">
         {/* Left: mission info */}
         <div className="flex items-center gap-3 min-w-0">
@@ -148,8 +148,8 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
             {cfg.label}
           </Badge>
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-white truncate">{mission.title}</h3>
-            <p className="text-xs text-white/40">Lead: @{mission.lead_agent_slug}</p>
+            <h3 className="text-sm font-semibold text-foreground truncate">{mission.title}</h3>
+            <p className="text-xs text-muted-foreground">Lead: @{mission.lead_agent_slug}</p>
           </div>
         </div>
 
@@ -160,7 +160,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
             <div className="w-32">
               <Progress value={progress} className="h-2" />
             </div>
-            <span className="text-xs text-white/50 font-mono whitespace-nowrap">
+            <span className="text-xs text-muted-foreground font-mono whitespace-nowrap">
               {completed}/{total}
               {failed > 0 && <span className="text-red-400 ml-1">({failed} failed)</span>}
               {inProgress > 0 && <span className="text-blue-400 ml-1">({inProgress} running)</span>}
@@ -169,7 +169,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
 
           {/* Duration */}
           {earliestStart && (mission.status === "IN_PROGRESS" || mission.status === "REVIEW") && (
-            <div className="flex items-center gap-1.5 text-xs text-white/40">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Clock className="h-3.5 w-3.5" />
               <LiveDuration startedAt={earliestStart} />
             </div>
@@ -177,7 +177,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
 
           {/* Tokens/Cost */}
           {totalTokens > 0 && (
-            <div className="flex items-center gap-1.5 text-xs text-white/40">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Coins className="h-3.5 w-3.5" />
               <span className="font-mono">
                 {totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : totalTokens} tok
@@ -243,7 +243,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
             variant="outline"
             onClick={handleClone}
             disabled={loading !== null}
-            className="gap-1.5 border-white/10 text-white/50 hover:bg-white/5"
+            className="gap-1.5 border-border text-muted-foreground hover:bg-accent/50"
           >
             {loading === "clone" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
             Clone

@@ -186,12 +186,12 @@ export function OrchestrationLayout({
   const showRightPanel = detailContext.type !== "none"
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)] bg-[#0a0c10]">
+    <div className="dark flex flex-col h-[calc(100vh-48px)] bg-background">
       {/* ---- Top toolbar ---- */}
-      <div className="flex items-center justify-between px-4 py-1.5 border-b border-white/[0.08] bg-[#0d1017] shrink-0 z-20">
+      <div className="flex items-center justify-between px-4 py-1.5 border-b border-border bg-card shrink-0 z-20">
         <div className="flex items-center gap-3">
-          <h1 className="text-sm font-semibold text-white/80">Orchestration</h1>
-          <nav className="flex items-center gap-0.5 bg-white/[0.04] rounded-lg p-0.5">
+          <h1 className="text-sm font-semibold text-foreground">Orchestration</h1>
+          <nav className="flex items-center gap-0.5 bg-accent/50 rounded-lg p-0.5">
             {([
               { id: "graph", label: "Graph", icon: Workflow },
               { id: "timeline", label: "Timeline", icon: Clock },
@@ -207,7 +207,7 @@ export function OrchestrationLayout({
                   "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all duration-150",
                   activeTab === id
                     ? "bg-blue-500/15 text-blue-400 shadow-sm"
-                    : "text-white/40 hover:text-white/70 hover:bg-white/[0.06]",
+                    : "text-muted-foreground hover:text-foreground/80 hover:bg-accent",
                 )}
               >
                 <Icon className="h-3 w-3" />
@@ -219,7 +219,7 @@ export function OrchestrationLayout({
 
         <div className="flex items-center gap-2">
           <Select value={selectedMissionId} onValueChange={onMissionChange}>
-            <SelectTrigger className="w-[180px] h-7 text-xs bg-white/[0.03] border-white/[0.08]">
+            <SelectTrigger className="w-[180px] h-7 text-xs bg-accent/50 border-border">
               <SelectValue placeholder="All missions" />
             </SelectTrigger>
             <SelectContent>
@@ -234,7 +234,7 @@ export function OrchestrationLayout({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2 text-white/40 hover:text-white/70"
+            className="h-7 px-2 text-muted-foreground hover:text-foreground/80"
             onClick={() => graphRef.current?.focusActive()}
           >
             <Focus className="h-3.5 w-3.5" />
@@ -242,7 +242,7 @@ export function OrchestrationLayout({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2 text-white/40 hover:text-white/70"
+            className="h-7 px-2 text-muted-foreground hover:text-foreground/80"
             onClick={onRefresh}
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -272,19 +272,19 @@ export function OrchestrationLayout({
       >
         {/* ---- Left panel ---- */}
         <div className={cn(
-          "row-span-1 border-r border-white/[0.08] bg-[#0d1017] flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
+          "row-span-1 border-r border-border bg-card flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
         )}>
           {/* Toggle */}
-          <div className="flex items-center justify-between px-2 py-1.5 border-b border-white/[0.08] shrink-0">
+          <div className="flex items-center justify-between px-2 py-1.5 border-b border-border shrink-0">
             {!leftCollapsed && (
-              <span className="text-[10px] font-semibold text-white/40 uppercase tracking-wider">
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
                 Explorer
               </span>
             )}
             <Button
               variant="ghost"
               size="icon-xs"
-              className="text-white/30 hover:text-white/60 ml-auto"
+              className="text-muted-foreground/70 hover:text-foreground/70 ml-auto"
               onClick={() => setLeftCollapsed(!leftCollapsed)}
             >
               {leftCollapsed ? <PanelLeftOpen className="h-3.5 w-3.5" /> : <PanelLeftClose className="h-3.5 w-3.5" />}
@@ -302,7 +302,7 @@ export function OrchestrationLayout({
                 className="flex-1 min-h-0 flex flex-col"
               >
                 {/* Hierarchy tree */}
-                <div className="border-b border-white/[0.08] shrink-0 max-h-[40%] overflow-y-auto">
+                <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
                   <HierarchyTree
                     crews={panelCrews}
                     agents={panelAgents}
@@ -314,7 +314,7 @@ export function OrchestrationLayout({
                 </div>
 
                 {/* Unified Inbox */}
-                <div className="border-b border-white/[0.08] flex-1 min-h-0 flex flex-col">
+                <div className="border-b border-border flex-1 min-h-0 flex flex-col">
                   <UnifiedInbox
                     missions={panelMissions}
                     onTaskSelect={handleInboxTaskSelect}
@@ -323,7 +323,7 @@ export function OrchestrationLayout({
 
                 {/* Connection Map */}
                 <div className="p-2 shrink-0">
-                  <div className="text-[10px] font-semibold text-white/40 uppercase tracking-wider px-1 mb-1">
+                  <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
                     Connections
                   </div>
                   <ConnectionMap
@@ -361,13 +361,13 @@ export function OrchestrationLayout({
                     key={key}
                     className={cn(
                       "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
-                      "bg-[#0d0f14]/90 backdrop-blur-sm border border-white/[0.08]",
+                      "bg-card/90 backdrop-blur-sm border border-border",
                       "transition-all cursor-default",
                       value > 0 && color === "blue" && "border-blue-500/30 text-blue-400",
                       value > 0 && color === "green" && "border-green-500/30 text-green-400",
                       value > 0 && color === "red" && "border-red-500/30 text-red-400",
                       value > 0 && color === "purple" && "border-purple-500/30 text-purple-400",
-                      value === 0 && "text-white/30",
+                      value === 0 && "text-muted-foreground/70",
                     )}
                   >
                     <div className={cn(
@@ -378,7 +378,7 @@ export function OrchestrationLayout({
                       color === "red" && (value > 0 ? "bg-red-500" : "bg-red-500/30"),
                     )} />
                     <span>{value}</span>
-                    <span className="text-white/30">{label}</span>
+                    <span className="text-muted-foreground/70">{label}</span>
                   </div>
                 ))}
               </div>
@@ -444,7 +444,7 @@ export function OrchestrationLayout({
 
         {/* ---- Bottom drawer ---- */}
         <motion.div
-          className="col-span-3 border-t border-white/[0.08] bg-[#0d1017] flex flex-col overflow-hidden"
+          className="col-span-3 border-t border-border bg-card flex flex-col overflow-hidden"
           animate={{ height: drawerOpen ? 240 : 32 }}
           transition={{ duration: 0.2, ease: "easeInOut" }}
         >
@@ -466,8 +466,8 @@ export function OrchestrationLayout({
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium rounded-t transition-colors",
                   drawerOpen && drawerTab === id
-                    ? "text-white/80 bg-white/[0.04]"
-                    : "text-white/40 hover:text-white/60",
+                    ? "text-foreground bg-accent/50"
+                    : "text-muted-foreground hover:text-foreground/70",
                 )}
                 onClick={(e) => {
                   e.stopPropagation()
@@ -483,7 +483,7 @@ export function OrchestrationLayout({
               <Button
                 variant="ghost"
                 size="icon-xs"
-                className="text-white/30 hover:text-white/60"
+                className="text-muted-foreground/70 hover:text-foreground/70"
                 onClick={(e) => {
                   e.stopPropagation()
                   setDrawerOpen(!drawerOpen)
@@ -503,7 +503,7 @@ export function OrchestrationLayout({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 8 }}
                 transition={{ duration: 0.15 }}
-                className="flex-1 min-h-0 border-t border-white/[0.08]"
+                className="flex-1 min-h-0 border-t border-border"
               >
                 {drawerTab === "messages" && (
                   <A2AMessageStream
@@ -514,7 +514,7 @@ export function OrchestrationLayout({
                 )}
 
                 {drawerTab === "exec" && (
-                  <div className="flex flex-col items-center justify-center h-full text-white/30">
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground/70">
                     <Terminal className="h-6 w-6 mb-2" />
                     <p className="text-xs">Exec log coming soon</p>
                   </div>

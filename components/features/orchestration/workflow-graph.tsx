@@ -806,7 +806,7 @@ function WorkflowGraphInner(
 
   if (missions.length === 0) {
     return (
-      <div className="rounded-xl border border-white/[0.06] bg-[#0d0f14] p-16">
+      <div className="rounded-xl border border-border bg-card p-16">
         <EmptyState
           icon={Workflow}
           title="No missions yet"
@@ -817,7 +817,7 @@ function WorkflowGraphInner(
   }
 
   return (
-    <div className="h-full w-full overflow-hidden bg-[#0a0c10]">
+    <div className="h-full w-full overflow-hidden bg-background">
       <div className="h-full w-full">
         <ReactFlow
           nodes={displayNodes}
@@ -845,7 +845,7 @@ function WorkflowGraphInner(
           />
           <Controls
             showInteractive={false}
-            className="!bg-[#1a1d23] !border-white/10 !rounded-lg !shadow-xl [&_button]:!bg-[#1a1d23] [&_button]:!border-white/10 [&_button]:!text-white/60 [&_button:hover]:!bg-white/10"
+            className="!bg-muted !border-border !rounded-lg !shadow-xl [&_button]:!bg-muted [&_button]:!border-border [&_button]:!text-muted-foreground [&_button:hover]:!bg-accent"
           />
           <MiniMap
             nodeColor={(n) => {
@@ -858,7 +858,7 @@ function WorkflowGraphInner(
               return statusColors[(n.data?.status as string) || "PENDING"] || "#64748b"
             }}
             maskColor="rgba(10, 12, 16, 0.85)"
-            className="!bg-[#0d0f14] !border-white/[0.06] !rounded-lg"
+            className="!bg-card !border-border !rounded-lg"
             pannable
             zoomable
           />

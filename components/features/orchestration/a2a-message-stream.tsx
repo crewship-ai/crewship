@@ -70,7 +70,7 @@ export function A2AMessageStream({ messages, crewFilter, onFilterChange }: A2AMe
 
   if (messages.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full py-8 text-white/30">
+      <div className="flex flex-col items-center justify-center h-full py-8 text-muted-foreground/70">
         <MessageSquare className="size-6 mb-2" />
         <p className="text-xs">No messages yet</p>
       </div>
@@ -80,11 +80,11 @@ export function A2AMessageStream({ messages, crewFilter, onFilterChange }: A2AMe
   return (
     <div className="flex flex-col h-full">
       {/* Filter bar */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/[0.06] shrink-0">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border shrink-0">
         <select
           value={crewFilter ?? ""}
           onChange={e => onFilterChange(e.target.value || null)}
-          className="bg-white/[0.04] border border-white/[0.08] rounded text-xs text-white/70 px-2 py-1 outline-none focus:border-white/20"
+          className="bg-accent/50 border border-border rounded text-xs text-foreground/80 px-2 py-1 outline-none focus:border-white/20"
         >
           <option value="">All crews</option>
           {crewPairs.map(c => (
@@ -100,27 +100,27 @@ export function A2AMessageStream({ messages, crewFilter, onFilterChange }: A2AMe
           >
             <ArrowDown className="size-3" />
           </Button>
-          <span className="text-[10px] text-white/30">{filtered.length} msgs</span>
+          <span className="text-[10px] text-muted-foreground/70">{filtered.length} msgs</span>
         </div>
       </div>
 
       {/* Message list */}
       <ScrollArea className="flex-1 min-h-0">
-        <div ref={scrollRef} className="divide-y divide-white/[0.04]">
+        <div ref={scrollRef} className="divide-y divide-border">
           {sorted.map(msg => (
-            <div key={msg.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-white/[0.02] transition-colors" style={{ minHeight: 32 }}>
-              <span className="text-[10px] font-mono text-white/30 shrink-0 w-16">
+            <div key={msg.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-accent/30 transition-colors" style={{ minHeight: 32 }}>
+              <span className="text-[10px] font-mono text-muted-foreground/70 shrink-0 w-16">
                 {formatTimestamp(msg.timestamp)}
               </span>
-              <span className="text-[11px] text-white/50 shrink-0 truncate max-w-[140px]">
-                <span className="text-white/70">{msg.fromCrew}</span>
-                <span className="text-white/20 mx-1">{"\u2192"}</span>
-                <span className="text-white/70">{msg.toCrew}</span>
+              <span className="text-[11px] text-muted-foreground shrink-0 truncate max-w-[140px]">
+                <span className="text-foreground/80">{msg.fromCrew}</span>
+                <span className="text-muted-foreground/50 mx-1">{"\u2192"}</span>
+                <span className="text-foreground/80">{msg.toCrew}</span>
               </span>
               <Badge className={cn("text-[9px] shrink-0", TYPE_COLORS[msg.type])}>
                 {msg.type}
               </Badge>
-              <span className="text-xs text-white/50 truncate min-w-0">
+              <span className="text-xs text-muted-foreground truncate min-w-0">
                 {msg.content}
               </span>
             </div>

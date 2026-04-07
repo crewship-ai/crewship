@@ -82,7 +82,7 @@ export function ConnectionMap({ crews, connections, onConnectionClick }: Connect
 
   if (crews.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[140px] text-xs text-white/20">
+      <div className="flex items-center justify-center h-[140px] text-xs text-muted-foreground/50">
         No connections
       </div>
     )
@@ -106,7 +106,7 @@ export function ConnectionMap({ crews, connections, onConnectionClick }: Connect
             x={crews.length <= 2 ? pos.cx : lx}
             y={labelY}
             textAnchor={anchor}
-            className="fill-white/40"
+            className="fill-current text-muted-foreground"
             fontSize={8}
           >
             {truncate(crew.name)}
@@ -121,7 +121,7 @@ export function ConnectionMap({ crews, connections, onConnectionClick }: Connect
         <svg viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`} className="w-full" style={{ height: SVG_HEIGHT }}>
           {renderNodes(crews)}
         </svg>
-        <div className="text-center text-[10px] text-white/20">No connections</div>
+        <div className="text-center text-[10px] text-muted-foreground/50">No connections</div>
       </div>
     )
   }

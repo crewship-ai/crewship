@@ -77,7 +77,7 @@ export function HierarchyTree({
     <ScrollArea className="h-full">
       <div className="p-2 space-y-0.5">
         {/* Workspace root */}
-        <div className="flex items-center gap-2 px-2 py-1.5 rounded-md text-white/50">
+        <div className="flex items-center gap-2 px-2 py-1.5 rounded-md text-muted-foreground">
           <Network className="h-3.5 w-3.5 shrink-0" />
           <span className="text-[11px] font-semibold uppercase tracking-wider">
             Coordinator
@@ -101,9 +101,9 @@ export function HierarchyTree({
                 <button
                   className={cn(
                     "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors",
-                    "hover:bg-white/[0.04]",
+                    "hover:bg-accent/50",
                     selectedCrewId === crew.id &&
-                      "bg-white/[0.06] ring-1 ring-white/[0.08]",
+                      "bg-accent ring-1 ring-border",
                   )}
                   onClick={(e) => {
                     e.preventDefault()
@@ -111,7 +111,7 @@ export function HierarchyTree({
                     toggleCrew(crew.id)
                   }}
                 >
-                  <span className="shrink-0 text-white/30">
+                  <span className="shrink-0 text-muted-foreground/70">
                     {isExpanded ? (
                       <ChevronDown className="h-3 w-3" />
                     ) : (
@@ -133,13 +133,13 @@ export function HierarchyTree({
                     />
                   )}
 
-                  <span className="text-xs font-medium text-white/80 truncate flex-1">
+                  <span className="text-xs font-medium text-foreground truncate flex-1">
                     {crew.name}
                   </span>
 
                   <Badge
                     variant="secondary"
-                    className="h-4 min-w-4 px-1 text-[10px] bg-white/[0.06] text-white/40 border-0"
+                    className="h-4 min-w-4 px-1 text-[10px] bg-accent text-muted-foreground border-0"
                   >
                     <Users className="h-2.5 w-2.5 mr-0.5" />
                     {agentCount}
@@ -148,29 +148,29 @@ export function HierarchyTree({
               </CollapsibleTrigger>
 
               <CollapsibleContent>
-                <div className="ml-4 pl-2.5 border-l border-white/[0.06] space-y-px">
+                <div className="ml-4 pl-2.5 border-l border-border space-y-px">
                   {crewAgents.map((agent) => (
                     <button
                       key={agent.id}
                       className={cn(
                         "w-full flex items-center gap-2 px-2 py-1 rounded-md text-left transition-colors",
-                        "hover:bg-white/[0.04]",
+                        "hover:bg-accent/50",
                         selectedAgentSlug === agent.slug &&
-                          "bg-white/[0.06] ring-1 ring-white/[0.08]",
+                          "bg-accent ring-1 ring-border",
                       )}
                       onClick={() => onAgentSelect(agent.slug)}
                     >
-                      <span className="w-1.5 h-1.5 rounded-full bg-white/20 shrink-0" />
-                      <span className="text-[11px] text-white/70 truncate flex-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/50 shrink-0" />
+                      <span className="text-[11px] text-foreground/80 truncate flex-1">
                         {agent.name}
                       </span>
-                      <span className="text-[10px] font-mono text-white/30 truncate">
+                      <span className="text-[10px] font-mono text-muted-foreground/70 truncate">
                         @{agent.slug}
                       </span>
                     </button>
                   ))}
                   {crewAgents.length === 0 && (
-                    <div className="px-2 py-1 text-[10px] text-white/20 italic">
+                    <div className="px-2 py-1 text-[10px] text-muted-foreground/50 italic">
                       No agents
                     </div>
                   )}
@@ -181,7 +181,7 @@ export function HierarchyTree({
         })}
 
         {crews.length === 0 && (
-          <div className="px-2 py-4 text-center text-xs text-white/20">
+          <div className="px-2 py-4 text-center text-xs text-muted-foreground/50">
             No crews yet
           </div>
         )}

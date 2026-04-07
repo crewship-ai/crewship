@@ -127,7 +127,7 @@ function AgentNodeComponent({ data }: NodeProps) {
     <div
       className={cn(
         "rounded-xl overflow-hidden min-w-[230px] max-w-[260px] cursor-pointer transition-all duration-300",
-        "border border-white/[0.08] backdrop-blur-sm",
+        "border border-border backdrop-blur-sm",
         cfg.bg, cfg.glow,
         d.status === "IN_PROGRESS" && "scale-[1.03]"
       )}
@@ -142,7 +142,7 @@ function AgentNodeComponent({ data }: NodeProps) {
           </span>
         </div>
         {d.maxIterations && d.maxIterations > 1 && (
-          <span className="text-[10px] text-white/40 font-mono">
+          <span className="text-[10px] text-muted-foreground font-mono">
             {d.iteration || 1}/{d.maxIterations}
           </span>
         )}
@@ -159,7 +159,7 @@ function AgentNodeComponent({ data }: NodeProps) {
             {initials}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[13px] font-medium text-white/90 leading-tight truncate">
+            <div className="text-[13px] font-medium text-foreground leading-tight truncate">
               {d.label}
             </div>
             <div className="flex items-center gap-1 mt-0.5">
@@ -168,7 +168,7 @@ function AgentNodeComponent({ data }: NodeProps) {
               )}
               <span className={cn(
                 "text-[11px] truncate font-mono",
-                d.agentSlug ? "text-white/40" : "text-amber-400/70"
+                d.agentSlug ? "text-muted-foreground" : "text-amber-400/70"
               )}>
                 {d.agentSlug ? `@${d.agentSlug}` : "unassigned"}
               </span>
@@ -178,15 +178,15 @@ function AgentNodeComponent({ data }: NodeProps) {
 
         {/* Metrics row */}
         {(tokens || duration || d.estimatedCost) && (
-          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-white/[0.06]">
+          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border">
             {tokens && (
-              <span className="text-[10px] text-white/30 font-mono">{tokens} tok</span>
+              <span className="text-[10px] text-muted-foreground/70 font-mono">{tokens} tok</span>
             )}
             {d.estimatedCost != null && d.estimatedCost > 0 && (
-              <span className="text-[10px] text-white/30 font-mono">${d.estimatedCost.toFixed(4)}</span>
+              <span className="text-[10px] text-muted-foreground/70 font-mono">${d.estimatedCost.toFixed(4)}</span>
             )}
             {duration && (
-              <span className="text-[10px] text-white/30 font-mono">{duration}</span>
+              <span className="text-[10px] text-muted-foreground/70 font-mono">{duration}</span>
             )}
           </div>
         )}
@@ -206,13 +206,13 @@ function AgentNodeComponent({ data }: NodeProps) {
         type="target"
         position={Position.Left}
         className="!w-3 !h-3 !rounded-full !border-2 !-left-1.5"
-        style={{ background: "#1a1d23", borderColor: cfg.accent }}
+        style={{ background: "hsl(var(--muted))", borderColor: cfg.accent }}
       />
       <Handle
         type="source"
         position={Position.Right}
         className="!w-3 !h-3 !rounded-full !border-2 !-right-1.5"
-        style={{ background: "#1a1d23", borderColor: cfg.accent }}
+        style={{ background: "hsl(var(--muted))", borderColor: cfg.accent }}
       />
     </div>
   )
