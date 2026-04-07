@@ -176,9 +176,9 @@ export function SettingsLayout() {
     if (activeTab === "billing" && org) {
       return (
         <BillingSection
-          agentCount={org._count.agents}
-          crewCount={org._count.crews}
-          memberCount={org._count.members}
+          agentCount={org._count?.agents ?? 0}
+          crewCount={org._count?.crews ?? 0}
+          memberCount={org._count?.members ?? 0}
           workspaceName={org.name}
         />
       )
