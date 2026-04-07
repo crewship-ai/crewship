@@ -29,14 +29,17 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	var taskID, missionID string
+	// Resolve task, workspace and chat from DB instead of trusting request body.
+	var taskID, missionID, resolvedWsID, resolvedChatID string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT mt.id, mt.mission_id FROM mission_tasks mt
+		`SELECT mt.id, mt.mission_id, m.workspace_id, ch.id
+		 FROM mission_tasks mt
 		 JOIN missions m ON m.id = mt.mission_id
+		 LEFT JOIN chats ch ON ch.id = m.id
 		 WHERE mt.assigned_agent_id = ? AND mt.status = 'IN_PROGRESS'
 		   AND m.crew_id = ? AND m.status = 'IN_PROGRESS'
 		 ORDER BY mt.updated_at DESC LIMIT 1`,
-		body.AgentID, body.CrewID).Scan(&taskID, &missionID)
+		body.AgentID, body.CrewID).Scan(&taskID, &missionID, &resolvedWsID, &resolvedChatID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no active task found for agent"})
@@ -59,7 +62,9 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT c.escalation_config FROM crews c JOIN missions m ON m.crew_id = c.id WHERE m.id = ?`,
 		missionID).Scan(&configJSON); err != nil && err != sql.ErrNoRows {
-		h.logger.Error("load escalation config for confidence", "error", err)
+		h.logger.Error("load escalation config for confidence", "error", err, "mission_id", missionID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load escalation config"})
+		return
 	}
 
 	action := "none"
@@ -68,14 +73,14 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 		if err := json.Unmarshal([]byte(configJSON.String), &cfg); err == nil {
 			if cfg.RequireApprovalBelow > 0 && body.Confidence < cfg.RequireApprovalBelow {
 				action = "escalated"
-				h.autoEscalateForConfidence(r, body.AgentID, body.CrewID, body.WorkspaceID, body.ChatID,
+				h.autoEscalateForConfidence(r, body.AgentID, body.CrewID, resolvedWsID, resolvedChatID,
 					taskID, body.Confidence, body.Reason)
 			} else if cfg.NotifyThreshold > 0 && body.Confidence < cfg.NotifyThreshold {
 				action = "notified"
 				if h.hub != nil {
-					h.hub.Broadcast("workspace:"+body.WorkspaceID, ws.ServerMessage{
+					h.hub.Broadcast("workspace:"+resolvedWsID, ws.ServerMessage{
 						Type:    "confidence.low",
-						Channel: "workspace:" + body.WorkspaceID,
+						Channel: "workspace:" + resolvedWsID,
 						Payload: map[string]interface{}{
 							"task_id": taskID, "mission_id": missionID,
 							"confidence": body.Confidence, "reason": body.Reason,
@@ -94,13 +99,18 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 func (h *QueryHandler) autoEscalateForConfidence(r *http.Request, agentID, crewID, workspaceID, chatID, taskID string, confidence float64, reason string) {
 	// NOTE: json_extract is SQLite-specific. Crewship uses modernc.org/sqlite exclusively.
 	var existing int
-	if err := h.db.QueryRowContext(r.Context(),
+	err := h.db.QueryRowContext(r.Context(),
 		`SELECT 1 FROM escalations
 		 WHERE crew_id = ? AND status = 'PENDING'
 		   AND json_extract(metadata, '$.task_id') = ?
 		   AND json_extract(metadata, '$.source') = 'auto_confidence_gate'`,
-		crewID, taskID).Scan(&existing); err == nil {
-		return
+		crewID, taskID).Scan(&existing)
+	if err == nil {
+		return // already escalated
+	}
+	if err != sql.ErrNoRows {
+		h.logger.Error("dedup check for auto-escalation failed", "error", err, "task_id", taskID)
+		return // on DB error, skip escalation rather than risk duplicates
 	}
 
 	escalationID := generateCUID()
@@ -109,7 +119,7 @@ func (h *QueryHandler) autoEscalateForConfidence(r *http.Request, agentID, crewI
 	}
 	metadata, _ := json.Marshal(map[string]string{"task_id": taskID, "source": "auto_confidence_gate"})
 
-	_, err := h.db.ExecContext(r.Context(),
+	_, err = h.db.ExecContext(r.Context(),
 		`INSERT INTO escalations (id, workspace_id, crew_id, chat_id, from_agent_id, reason, context, type, metadata, status, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, 'TEXT', ?, 'PENDING', datetime('now'))`,
 		escalationID, workspaceID, crewID, chatID, agentID,

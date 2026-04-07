@@ -364,9 +364,14 @@ func (s *Server) handleReportConfidence(w http.ResponseWriter, r *http.Request) 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		writeJSONResponse(w, http.StatusBadGateway, map[string]string{
-			"error": "invalid response from confidence endpoint",
+			"error":       "invalid response from confidence endpoint",
+			"status_code": fmt.Sprintf("%d", resp.StatusCode),
 		})
 		return
 	}
-	writeJSONResponse(w, resp.StatusCode, result)
+	if resp.StatusCode >= 400 {
+		writeJSONResponse(w, resp.StatusCode, result)
+		return
+	}
+	writeJSONResponse(w, http.StatusOK, result)
 }
