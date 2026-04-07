@@ -226,7 +226,7 @@ export function AppToolbar() {
   }
 
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between bg-card px-3 sm:px-4">
+    <header className="flex h-12 shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-white/[0.1]">
       {/* Left: Org switcher + breadcrumb */}
       <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
         <DropdownMenu>
