@@ -23,21 +23,13 @@ import { EmptyState } from "@/components/layout/empty-state"
 import { Workflow } from "lucide-react"
 import type { Mission, MissionTask } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
+import { Graph as DagreGraph, layout as dagreLayout } from "@dagrejs/dagre"
 import { useAgentActivity } from "@/hooks/use-agent-activity"
 import { AgentNode } from "./agent-node"
+import { AgentCardNode } from "./agent-card-node"
 import { AnimatedEdge } from "./animated-edge"
 import { CrewGroupNode, crewColorMap } from "./crew-group-node"
 import { PermissionEdge, getPermissionMarkers } from "./permission-edge"
-import {
-  LAYOUT,
-  statusColors,
-  parseDependsOn,
-  pickEdgeColor,
-  computeTopologicalLevels,
-  computeCrewDimensions,
-  computeTaskPosition,
-  selectActiveMissions,
-} from "./graph-layout"
 
 export interface WorkflowGraphRef {
   focusActive: () => void
@@ -49,15 +41,52 @@ interface WorkflowGraphProps {
   agents?: AgentSummary[]
   connections?: CrewConnection[]
   onTaskClick?: (task: MissionTask) => void
+  highlightAgentSlug?: string | null
 }
 
 const nodeTypes: NodeTypes = {
   agent: AgentNode,
+  agentCard: AgentCardNode,
   crew: CrewGroupNode,
 }
 const edgeTypes: EdgeTypes = {
   animated: AnimatedEdge,
   permission: PermissionEdge,
+}
+
+const statusColors: Record<string, string> = {
+  COMPLETED: "#22c55e",
+  IN_PROGRESS: "#3b82f6",
+  FAILED: "#ef4444",
+  BLOCKED: "#f59e0b",
+  PENDING: "#64748b",
+  PLANNING: "#8b5cf6",
+  REVIEW: "#a855f7",
+  CANCELLED: "#6b7280",
+  SKIPPED: "#6b7280",
+}
+
+const edgeColorPalette = [
+  "#06b6d4", "#3b82f6", "#8b5cf6", "#22c55e",
+  "#f59e0b", "#ec4899", "#14b8a6", "#6366f1",
+]
+
+function pickEdgeColor(sourceId: string, targetId: string): string {
+  let h = 0
+  const key = sourceId + targetId
+  for (let i = 0; i < key.length; i++) h = ((h << 5) - h + key.charCodeAt(i)) | 0
+  return edgeColorPalette[Math.abs(h) % edgeColorPalette.length]
+}
+
+// Safe parser for depends_on — handles null, non-array, malformed JSON
+function parseDependsOn(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : []
+  } catch {
+    return []
+  }
 }
 
 // -------------------------------------------------------------------
@@ -73,12 +102,32 @@ interface BuildInput {
   onToggleCollapse: (crewId: string) => void
 }
 
+// -------------------------------------------------------------------
+// Dagre-based layout constants
+// -------------------------------------------------------------------
+const TASK_WIDTH = 260
+const TASK_HEIGHT = 140
+const COLLAPSED_WIDTH = 300
+const COLLAPSED_HEIGHT = 50
+const CREW_PADDING_TOP = 65
+const CREW_PADDING_SIDE = 35
+const CREW_PADDING_BOTTOM = 35
+
+/**
+ * Two-level dagre layout:
+ *  1. Layout tasks WITHIN each crew using dagre (local LR graph)
+ *  2. Layout crew groups as a global top-down grid based on cross-crew edges
+ */
 function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
   const { missions, crews, agents, connections, collapsedCrews, onToggleCollapse } = input
   const nodes: Node[] = []
   const edges: Edge[] = []
 
-  // Build agent slug → crew id map (crew response has no id, so resolve via slug)
+  // Build agent slug → agent map and slug → crew id map
+  const agentBySlug = new Map<string, AgentSummary>()
+  for (const agent of agents) {
+    if (agent.slug) agentBySlug.set(agent.slug, agent)
+  }
   const agentCrewMap = new Map<string, string>()
   const crewById = new Map<string, CrewSummary>()
   const crewBySlug = new Map<string, CrewSummary>()
@@ -96,219 +145,302 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
   }
 
   // Select active or recent missions
-  const activeMissions = selectActiveMissions(missions)
+  const activeMissions = missions.filter(
+    (m) => m.status === "IN_PROGRESS" || m.status === "PLANNING" || m.status === "REVIEW"
+  )
+  if (activeMissions.length === 0) {
+    const recent = [...missions]
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, 3)
+    activeMissions.push(...recent)
+  }
 
-  // Collect all tasks grouped by crew
+  // Collect tasks grouped by crew
   const crewTasks = new Map<string, { mission: Mission; task: MissionTask }[]>()
   const usedCrewIds = new Set<string>()
-
   for (const mission of activeMissions) {
-    const tasks = mission.tasks || []
-    for (const task of tasks) {
+    for (const task of mission.tasks || []) {
       const crewId = (task.agent_slug && agentCrewMap.get(task.agent_slug)) || mission.crew_id
       if (!crewId) continue
       usedCrewIds.add(crewId)
       if (!crewTasks.has(crewId)) crewTasks.set(crewId, [])
       crewTasks.get(crewId)!.push({ mission, task })
     }
-    // Ensure mission's crew is always shown
-    if (mission.crew_id) usedCrewIds.add(mission.crew_id)
   }
 
-  // Also include crews with connections even if no tasks
+  // Collect all dependency info
+  const allDeps: { source: string; target: string; crossCrew: boolean; task: MissionTask }[] = []
+  for (const mission of activeMissions) {
+    for (const task of mission.tasks || []) {
+      const taskCrewId = (task.agent_slug && agentCrewMap.get(task.agent_slug)) || mission.crew_id
+      for (const depId of parseDependsOn(task.depends_on)) {
+        const depTask = mission.tasks?.find((t) => t.id === depId)
+        if (!depTask) continue
+        const depCrewId = (depTask.agent_slug && agentCrewMap.get(depTask.agent_slug)) || mission.crew_id
+        allDeps.push({ source: depId, target: task.id, crossCrew: depCrewId !== taskCrewId, task })
+      }
+    }
+  }
+
+  // ---- LEVEL 1: Layout tasks within each crew using dagre ----
+  // Returns relative positions of tasks inside each crew, plus computed crew size
+  const crewLayouts = new Map<string, {
+    width: number; height: number
+    taskPositions: Map<string, { x: number; y: number }>
+    agentPositions?: Map<string, { x: number; y: number }>
+  }>()
+
+  const sortedCrewIds = [...usedCrewIds].sort((a, b) =>
+    (crewById.get(a)?.name || "").localeCompare(crewById.get(b)?.name || "")
+  )
+
+  // Agent card dimensions
+  const AGENT_CARD_WIDTH = 200
+  const AGENT_CARD_HEIGHT = 110
+  const AGENT_CARD_GAP = 12
+
+  for (const crewId of sortedCrewIds) {
+    const tasks = crewTasks.get(crewId) || []
+    if (collapsedCrews.has(crewId)) continue
+
+    const crewAgents = agents.filter((a) => {
+      if (a.crew_id === crewId) return true
+      if (a.crew?.slug) {
+        const c = crewBySlug.get(a.crew.slug)
+        return c?.id === crewId
+      }
+      return false
+    })
+
+    if (tasks.length === 0) {
+      // No tasks — show agent cards in a grid (2 columns)
+      if (crewAgents.length === 0) continue
+      const cols = Math.min(crewAgents.length, 2)
+      const rows = Math.ceil(crewAgents.length / cols)
+      const agentPositions = new Map<string, { x: number; y: number }>()
+
+      crewAgents.forEach((agent, i) => {
+        const col = i % cols
+        const row = Math.floor(i / cols)
+        agentPositions.set(agent.id, {
+          x: CREW_PADDING_SIDE + col * (AGENT_CARD_WIDTH + AGENT_CARD_GAP),
+          y: CREW_PADDING_TOP + row * (AGENT_CARD_HEIGHT + AGENT_CARD_GAP),
+        })
+      })
+
+      const crewWidth = cols * AGENT_CARD_WIDTH + (cols - 1) * AGENT_CARD_GAP + CREW_PADDING_SIDE * 2
+      const crewHeight = rows * AGENT_CARD_HEIGHT + (rows - 1) * AGENT_CARD_GAP + CREW_PADDING_TOP + CREW_PADDING_BOTTOM
+
+      crewLayouts.set(crewId, { width: crewWidth, height: crewHeight, taskPositions: new Map(), agentPositions })
+      continue
+    }
+
+    // Crew has tasks — layout with dagre
+    const localG = new DagreGraph()
+    localG.setGraph({ rankdir: "LR", ranksep: 80, nodesep: 25 })
+    localG.setDefaultEdgeLabel(() => ({}))
+
+    const localTaskIds = new Set(tasks.map((t) => t.task.id))
+    for (const { task } of tasks) {
+      localG.setNode(task.id, { width: TASK_WIDTH, height: TASK_HEIGHT })
+    }
+    for (const dep of allDeps) {
+      if (localTaskIds.has(dep.source) && localTaskIds.has(dep.target) && !dep.crossCrew) {
+        localG.setEdge(dep.source, dep.target)
+      }
+    }
+
+    dagreLayout(localG)
+
+    const taskPositions = new Map<string, { x: number; y: number }>()
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const { task } of tasks) {
+      const dn = localG.node(task.id)
+      if (!dn) continue
+      const x = dn.x - TASK_WIDTH / 2
+      const y = dn.y - TASK_HEIGHT / 2
+      taskPositions.set(task.id, { x, y })
+      minX = Math.min(minX, x)
+      minY = Math.min(minY, y)
+      maxX = Math.max(maxX, x + TASK_WIDTH)
+      maxY = Math.max(maxY, y + TASK_HEIGHT)
+    }
+    for (const [id, pos] of taskPositions) {
+      taskPositions.set(id, { x: pos.x - minX + CREW_PADDING_SIDE, y: pos.y - minY + CREW_PADDING_TOP })
+    }
+    const crewWidth = (maxX - minX) + CREW_PADDING_SIDE * 2
+    const crewHeight = (maxY - minY) + CREW_PADDING_TOP + CREW_PADDING_BOTTOM
+
+    crewLayouts.set(crewId, { width: crewWidth, height: crewHeight, taskPositions })
+  }
+
+  // ---- LEVEL 2: Layout crew groups using dagre ----
+  const crewG = new DagreGraph()
+  crewG.setGraph({ rankdir: "LR", ranksep: 160, nodesep: 100 })
+  crewG.setDefaultEdgeLabel(() => ({}))
+
+  for (const crewId of sortedCrewIds) {
+    const layout = crewLayouts.get(crewId)
+    const w = layout?.width ?? COLLAPSED_WIDTH
+    const h = layout?.height ?? COLLAPSED_HEIGHT
+    crewG.setNode(`crew-${crewId}`, { width: w, height: h })
+  }
+
+  // Add cross-crew dependency edges between crew nodes (for ordering)
+  const crewEdgesAdded = new Set<string>()
+  for (const dep of allDeps) {
+    if (!dep.crossCrew) continue
+    // Find crew of source and target
+    let srcCrew: string | null = null
+    let tgtCrew: string | null = null
+    for (const [cid, tasks] of crewTasks) {
+      if (tasks.some((t) => t.task.id === dep.source)) srcCrew = cid
+      if (tasks.some((t) => t.task.id === dep.target)) tgtCrew = cid
+    }
+    if (srcCrew && tgtCrew && srcCrew !== tgtCrew) {
+      const key = `${srcCrew}-${tgtCrew}`
+      if (!crewEdgesAdded.has(key)) {
+        crewEdgesAdded.add(key)
+        crewG.setEdge(`crew-${srcCrew}`, `crew-${tgtCrew}`)
+      }
+    }
+  }
+
+  // Also add connection-based edges for crews without task deps
   for (const conn of connections) {
-    if (crewById.has(conn.from_crew_id)) usedCrewIds.add(conn.from_crew_id)
-    if (crewById.has(conn.to_crew_id)) usedCrewIds.add(conn.to_crew_id)
+    const fromKey = `crew-${conn.from_crew_id}`
+    const toKey = `crew-${conn.to_crew_id}`
+    if (crewG.hasNode(fromKey) && crewG.hasNode(toKey)) {
+      const key = `${conn.from_crew_id}-${conn.to_crew_id}`
+      if (!crewEdgesAdded.has(key)) {
+        crewEdgesAdded.add(key)
+        crewG.setEdge(fromKey, toKey)
+      }
+    }
   }
 
-  // Layout crew groups horizontally
-  const sortedCrewIds = [...usedCrewIds].sort((a, b) => {
-    const aName = crewById.get(a)?.name || ""
-    const bName = crewById.get(b)?.name || ""
-    return aName.localeCompare(bName)
-  })
+  dagreLayout(crewG)
 
-  let crewX = 0
-
+  // ---- BUILD REACT FLOW NODES ----
   for (const crewId of sortedCrewIds) {
     const crew = crewById.get(crewId)
     if (!crew) continue
 
     const tasks = crewTasks.get(crewId) || []
     const collapsed = collapsedCrews.has(crewId)
+    const crewNodeId = `crew-${crewId}`
+    const dagrePos = crewG.node(crewNodeId)
 
-    // Compute task stats for header
     const taskCount = tasks.length
     const activeCount = tasks.filter((t) => t.task.status === "IN_PROGRESS").length
     const completedCount = tasks.filter((t) => t.task.status === "COMPLETED").length
     const failedCount = tasks.filter((t) => t.task.status === "FAILED").length
 
-    if (collapsed || tasks.length === 0) {
-      // Collapsed crew node
-      nodes.push({
-        id: `crew-${crewId}`,
-        type: "crew",
-        position: { x: crewX, y: 0 },
-        data: {
-          label: crew.name,
-          slug: crew.slug,
-          color: crew.color,
-          icon: crew.icon,
-          agentCount: crew._count?.agents || 0,
-          collapsed: true,
-          taskCount,
-          activeCount,
-          completedCount,
-          failedCount,
-          onToggleCollapse,
-          crewId,
-        },
-        style: { width: LAYOUT.COLLAPSED_WIDTH, height: LAYOUT.COLLAPSED_HEIGHT },
-      })
-      crewX += LAYOUT.COLLAPSED_WIDTH + LAYOUT.CREW_GAP
-      continue
-    }
+    const layout = crewLayouts.get(crewId)
+    const w = layout?.width ?? COLLAPSED_WIDTH
+    const h = layout?.height ?? COLLAPSED_HEIGHT
 
-    // Topological layout of tasks inside this crew
-    const sortedTasks = [...tasks].sort((a, b) => a.task.task_order - b.task.task_order)
-    const deps = new Map<string, string[]>()
-    for (const { task } of sortedTasks) {
-      deps.set(task.id, parseDependsOn(task.depends_on))
-    }
+    // Crew group position from global dagre (center → top-left)
+    const crewX = (dagrePos?.x ?? 0) - w / 2
+    const crewY = (dagrePos?.y ?? 0) - h / 2
 
-    // Only keep deps that are within this crew's tasks
-    const taskIdSet = new Set(sortedTasks.map((t) => t.task.id))
-    for (const [taskId, taskDeps] of deps) {
-      deps.set(taskId, taskDeps.filter((d) => taskIdSet.has(d)))
-    }
-
-    const levels = computeTopologicalLevels([...taskIdSet], deps)
-
-    const levelGroups = new Map<number, MissionTask[]>()
-    for (const { task } of sortedTasks) {
-      const level = levels.get(task.id) || 0
-      if (!levelGroups.has(level)) levelGroups.set(level, [])
-      levelGroups.get(level)!.push(task)
-    }
-
-    const maxLevel = Math.max(...[...levelGroups.keys()], 0)
-    const maxLevelSize = Math.max(...[...levelGroups.values()].map((g) => g.length), 1)
-
-    const { width: crewWidth, height: crewHeight } = computeCrewDimensions(maxLevel, maxLevelSize)
-
-    // Create crew group node
+    const hasLayout = !!layout
     nodes.push({
-      id: `crew-${crewId}`,
+      id: crewNodeId,
       type: "crew",
-      position: { x: crewX, y: 0 },
+      position: { x: crewX, y: crewY },
       data: {
-        label: crew.name,
-        slug: crew.slug,
-        color: crew.color,
-        icon: crew.icon,
+        label: crew.name, slug: crew.slug, color: crew.color, icon: crew.icon,
         agentCount: crew._count?.agents || 0,
-        collapsed: false,
-        taskCount,
-        activeCount,
-        completedCount,
-        failedCount,
-        onToggleCollapse,
-        crewId,
+        collapsed,
+        taskCount, activeCount, completedCount, failedCount,
+        onToggleCollapse, crewId,
       },
-      style: { width: crewWidth, height: crewHeight },
+      style: { width: w, height: h },
     })
 
-    // Create child task nodes (positions relative to crew group)
-    for (const [level, levelTasks] of levelGroups) {
-      levelTasks.forEach((task, idx) => {
-        const { x, y } = computeTaskPosition(level, idx)
+    if (collapsed || !hasLayout) continue
 
-        nodes.push({
-          id: task.id,
-          type: "agent",
-          parentId: `crew-${crewId}`,
-          extent: "parent" as const,
-          position: { x, y },
-          data: {
-            label: task.title,
-            status: task.status,
-            agentName: task.agent_name || "Unassigned",
-            agentSlug: task.agent_slug,
-            iteration: task.iteration,
-            maxIterations: task.max_iterations,
-            tokenCount: task.token_count,
-            estimatedCost: task.estimated_cost,
-            durationMs: task.duration_ms,
-            missionId: task.mission_id,
-          },
-          sourcePosition: Position.Right,
-          targetPosition: Position.Left,
-        })
-
-        // Dependency edges (within crew)
-        const taskDeps = deps.get(task.id) || []
-        for (const depId of taskDeps) {
-          const isActive = task.status === "IN_PROGRESS"
-          const edgeColor = isActive ? statusColors.IN_PROGRESS : pickEdgeColor(depId, task.id)
-          edges.push({
-            id: `e-${depId}-${task.id}`,
-            source: depId,
-            target: task.id,
-            type: "animated",
-            data: { color: edgeColor, active: isActive },
-            style: { strokeWidth: 2 },
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              color: edgeColor,
-              width: 14,
-              height: 14,
-            },
-          })
+    // Add agent card nodes for crews with no tasks
+    if (layout.agentPositions) {
+      const crewAgents = agents.filter((a) => {
+        if (a.crew_id === crewId) return true
+        if (a.crew?.slug) {
+          const c = crewBySlug.get(a.crew.slug)
+          return c?.id === crewId
         }
+        return false
       })
-    }
-
-    crewX += crewWidth + LAYOUT.CREW_GAP
-  }
-
-  // Cross-crew dependency edges (tasks in different crews)
-  // Collect all visible node IDs to skip edges to/from collapsed crews
-  const visibleNodeIds = new Set(nodes.map((n) => n.id))
-
-  for (const mission of activeMissions) {
-    const tasks = mission.tasks || []
-    for (const task of tasks) {
-      const taskDeps = parseDependsOn(task.depends_on)
-      const taskCrewId = (task.agent_slug && agentCrewMap.get(task.agent_slug)) || mission.crew_id
-      for (const depId of taskDeps) {
-        const depTask = tasks.find((t) => t.id === depId)
-        if (!depTask) continue
-        const depCrewId = (depTask.agent_slug && agentCrewMap.get(depTask.agent_slug)) || mission.crew_id
-        if (depCrewId !== taskCrewId) {
-          // Skip if either endpoint is hidden (crew collapsed)
-          if (!visibleNodeIds.has(task.id) || !visibleNodeIds.has(depId)) continue
-
-          const edgeColor = "#a855f7" // purple for cross-crew
-          edges.push({
-            id: `e-cross-${depId}-${task.id}`,
-            source: depId,
-            target: task.id,
-            type: "animated",
-            data: { color: edgeColor, active: task.status === "IN_PROGRESS" },
-            style: { strokeWidth: 2 },
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              color: edgeColor,
-              width: 14,
-              height: 14,
-            },
-          })
-        }
+      for (const agent of crewAgents) {
+        const pos = layout.agentPositions.get(agent.id)
+        if (!pos) continue
+        nodes.push({
+          id: `agent-card-${agent.id}`,
+          type: "agentCard",
+          parentId: crewNodeId,
+          extent: "parent" as const,
+          position: pos,
+          data: {
+            name: agent.name, slug: agent.slug,
+            avatarSeed: agent.avatar_seed, avatarStyle: agent.avatar_style,
+            role: "", isLead: false,
+            status: "idle", model: "",
+            tokenCount: 0, cost: 0,
+            skills: [], memoryEnabled: false,
+            currentTask: null,
+          },
+        })
       }
     }
+
+    // Add child task nodes with positions relative to crew
+    for (const { task } of tasks) {
+      const localPos = layout.taskPositions.get(task.id)
+      if (!localPos) continue
+
+      nodes.push({
+        id: task.id,
+        type: "agent",
+        parentId: crewNodeId,
+        extent: "parent" as const,
+        position: localPos,
+        data: {
+          label: task.title, status: task.status,
+          agentName: task.agent_name || "Unassigned", agentSlug: task.agent_slug,
+          avatarSeed: (task.agent_slug && agentBySlug.get(task.agent_slug)?.avatar_seed) ?? null,
+          avatarStyle: (task.agent_slug && agentBySlug.get(task.agent_slug)?.avatar_style) ?? null,
+          iteration: task.iteration, maxIterations: task.max_iterations,
+          tokenCount: task.token_count, estimatedCost: task.estimated_cost,
+          durationMs: task.duration_ms, missionId: task.mission_id,
+        },
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+      })
+    }
   }
 
-  // Permission edges between crews
+  // ---- BUILD EDGES ----
+  const visibleNodeIds = new Set(nodes.map((n) => n.id))
+
+  for (const dep of allDeps) {
+    if (!visibleNodeIds.has(dep.source) || !visibleNodeIds.has(dep.target)) continue
+    const isActive = dep.task.status === "IN_PROGRESS"
+    const edgeColor = dep.crossCrew
+      ? "#a855f7"
+      : isActive ? statusColors.IN_PROGRESS : pickEdgeColor(dep.source, dep.target)
+
+    edges.push({
+      id: `e-${dep.crossCrew ? "x-" : ""}${dep.source}-${dep.target}`,
+      source: dep.source,
+      target: dep.target,
+      type: "animated",
+      data: { color: edgeColor, active: isActive },
+      style: { strokeWidth: dep.crossCrew ? 2.5 : 2 },
+      markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor, width: 14, height: 14 },
+    })
+  }
+
+  // Permission edges
   for (const conn of connections) {
     if (!usedCrewIds.has(conn.from_crew_id) || !usedCrewIds.has(conn.to_crew_id)) continue
     const markers = getPermissionMarkers(conn.direction)
@@ -319,20 +451,13 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
       sourceHandle: `crew-${conn.from_crew_id}-perm-source`,
       targetHandle: `crew-${conn.to_crew_id}-perm-target`,
       type: "permission",
-      data: {
-        direction: conn.direction,
-        status: conn.status,
-      },
+      data: { direction: conn.direction, status: conn.status },
       ...markers,
     })
   }
 
-  // Sort: crew group nodes must come before their children
-  nodes.sort((a, b) => {
-    const aIsCrew = a.type === "crew" ? 0 : 1
-    const bIsCrew = b.type === "crew" ? 0 : 1
-    return aIsCrew - bIsCrew
-  })
+  // Sort: crew nodes before children
+  nodes.sort((a, b) => (a.type === "crew" ? 0 : 1) - (b.type === "crew" ? 0 : 1))
 
   return { nodes, edges }
 }
@@ -345,7 +470,15 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
   const nodes: Node[] = []
   const edges: Edge[] = []
 
-  const activeMissions = selectActiveMissions(missions)
+  const activeMissions = missions.filter(
+    (m) => m.status === "IN_PROGRESS" || m.status === "PLANNING" || m.status === "REVIEW"
+  )
+  if (activeMissions.length === 0) {
+    const recent = [...missions]
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, 3)
+    activeMissions.push(...recent)
+  }
 
   let missionY = 0
 
@@ -386,16 +519,27 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
     }
 
     const tasksByOrder = [...tasks].sort((a, b) => a.task_order - b.task_order)
-    const taskIdSet = new Set(tasksByOrder.map((t) => t.id))
     const deps = new Map<string, string[]>()
     for (const task of tasksByOrder) {
-      deps.set(task.id, parseDependsOn(task.depends_on).filter((depId) => taskIdSet.has(depId)))
+      deps.set(task.id, parseDependsOn(task.depends_on))
     }
 
-    const levels = computeTopologicalLevels(
-      [...taskIdSet],
-      deps
-    )
+    const levels = new Map<string, number>()
+    const visiting = new Set<string>()
+    function getLevel(taskId: string): number {
+      if (levels.has(taskId)) return levels.get(taskId)!
+      if (visiting.has(taskId)) return 0 // cycle detected
+      visiting.add(taskId)
+      const taskDeps = deps.get(taskId) || []
+      if (taskDeps.length === 0) {
+        levels.set(taskId, 0)
+        return 0
+      }
+      const level = Math.max(...taskDeps.map(getLevel)) + 1
+      levels.set(taskId, level)
+      return level
+    }
+    for (const task of tasksByOrder) getLevel(task.id)
 
     const levelGroups = new Map<number, MissionTask[]>()
     for (const task of tasksByOrder) {
@@ -419,6 +563,8 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
             status: task.status,
             agentName: task.agent_name || "Unassigned",
             agentSlug: task.agent_slug,
+            avatarSeed: null,
+            avatarStyle: null,
             iteration: task.iteration,
             maxIterations: task.max_iterations,
             tokenCount: task.token_count,
@@ -476,20 +622,10 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
 // -------------------------------------------------------------------
 
 function WorkflowGraphInner(
-  { missions, crews, agents, connections, onTaskClick }: WorkflowGraphProps,
+  { missions, crews, agents, connections, onTaskClick, highlightAgentSlug }: WorkflowGraphProps,
   ref: React.ForwardedRef<WorkflowGraphRef>
 ) {
   const [collapsedCrews, setCollapsedCrews] = useState<Set<string>>(new Set())
-
-  // Auto-collapse all crews when 8+ crews (re-runs on crew set change)
-  const prevCrewCountRef = useRef(crews?.length ?? 0)
-  useEffect(() => {
-    const count = crews?.length ?? 0
-    if (count >= 8 && prevCrewCountRef.current < 8) {
-      setCollapsedCrews(new Set(crews!.map((c) => c.id)))
-    }
-    prevCrewCountRef.current = count
-  }, [crews])
   const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null)
   const activities = useAgentActivity()
 
@@ -526,12 +662,47 @@ function WorkflowGraphInner(
   const { fitView, setCenter } = useReactFlow()
   const prevDataRef = useRef(graphData)
 
+  // Track user-dragged node positions so polling doesn't reset them
+  const userPositions = useRef(new Map<string, { x: number; y: number }>())
+
+  const onNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
+    userPositions.current.set(node.id, { ...node.position })
+  }, [])
+
+  const prevNodeIdsRef = useRef<string>("")
+
   useEffect(() => {
     if (prevDataRef.current === graphData) return
     prevDataRef.current = graphData
-    setNodes(graphData.nodes)
+
+    // Detect if this is a mission switch (node IDs changed significantly)
+    const newNodeIds = graphData.nodes.map((n) => n.id).sort().join(",")
+    const isMissionSwitch = prevNodeIdsRef.current !== "" && prevNodeIdsRef.current !== newNodeIds
+    prevNodeIdsRef.current = newNodeIds
+
+    if (isMissionSwitch) {
+      // Mission changed — clear user positions and use fresh layout
+      userPositions.current.clear()
+      setNodes(graphData.nodes)
+      setEdges(graphData.edges)
+      // Animate zoom to fit new mission
+      setTimeout(() => fitView({ duration: 500, padding: 0.25 }), 50)
+      return
+    }
+
+    // Polling update — preserve user-dragged positions
+    setNodes((prev) => {
+      const prevMap = new Map(prev.map((n) => [n.id, n]))
+      return graphData.nodes.map((newNode) => {
+        const userPos = userPositions.current.get(newNode.id)
+        if (userPos) return { ...newNode, position: userPos }
+        const existing = prevMap.get(newNode.id)
+        if (existing) return { ...newNode, position: existing.position }
+        return newNode
+      })
+    })
     setEdges(graphData.edges)
-  }, [graphData, setNodes, setEdges])
+  }, [graphData, setNodes, setEdges, fitView])
 
   // Inject activity snippets into agent nodes
   useEffect(() => {
@@ -586,8 +757,26 @@ function WorkflowGraphInner(
     }
   }, [highlightedNodeId, nodes, edgesState])
 
-  // Apply dimming styles to nodes and edges
+  // Apply dimming styles to nodes and edges (Shift+Click highlight OR agent highlight from left panel)
   const displayNodes = useMemo(() => {
+    // Agent highlight from left panel — dim nodes not belonging to that agent
+    if (highlightAgentSlug) {
+      return nodes.map((n) => {
+        const nodeSlug = (n.data as Record<string, unknown>)?.agentSlug as string | undefined
+        const isMatch = nodeSlug === highlightAgentSlug
+        const isCrewParent = n.type === "crew" && nodes.some(
+          (child) => child.parentId === n.id && (child.data as Record<string, unknown>)?.agentSlug === highlightAgentSlug
+        )
+        return {
+          ...n,
+          style: {
+            ...n.style,
+            opacity: isMatch || isCrewParent ? 1 : 0.15,
+            transition: "opacity 0.3s ease",
+          },
+        }
+      })
+    }
     if (!highlightedNodeId) return nodes
     return nodes.map((n) => ({
       ...n,
@@ -597,7 +786,7 @@ function WorkflowGraphInner(
         transition: "opacity 0.3s ease",
       },
     }))
-  }, [nodes, highlightedNodeId, dimmedNodeIds])
+  }, [nodes, highlightedNodeId, dimmedNodeIds, highlightAgentSlug])
 
   const displayEdges = useMemo(() => {
     if (!highlightedNodeId) return edgesState
@@ -658,7 +847,7 @@ function WorkflowGraphInner(
 
   if (missions.length === 0) {
     return (
-      <div className="rounded-xl border border-white/[0.06] bg-[#0d0f14] p-16">
+      <div className="rounded-xl border border-border bg-card p-16">
         <EmptyState
           icon={Workflow}
           title="No missions yet"
@@ -669,7 +858,7 @@ function WorkflowGraphInner(
   }
 
   return (
-    <div className="h-full w-full overflow-hidden bg-[#0a0c10]">
+    <div className="h-full w-full overflow-hidden bg-background">
       <div className="h-full w-full">
         <ReactFlow
           nodes={displayNodes}
@@ -679,6 +868,7 @@ function WorkflowGraphInner(
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeClick={onNodeClick}
+          onNodeDragStop={onNodeDragStop}
           onPaneClick={onPaneClick}
           fitView
           fitViewOptions={{ padding: 0.3 }}
@@ -696,7 +886,7 @@ function WorkflowGraphInner(
           />
           <Controls
             showInteractive={false}
-            className="!bg-[#1a1d23] !border-white/10 !rounded-lg !shadow-xl [&_button]:!bg-[#1a1d23] [&_button]:!border-white/10 [&_button]:!text-white/60 [&_button:hover]:!bg-white/10"
+            className="!bg-muted !border-border !rounded-lg !shadow-xl [&_button]:!bg-muted [&_button]:!border-border [&_button]:!text-muted-foreground [&_button:hover]:!bg-accent"
           />
           <MiniMap
             nodeColor={(n) => {
@@ -709,7 +899,7 @@ function WorkflowGraphInner(
               return statusColors[(n.data?.status as string) || "PENDING"] || "#64748b"
             }}
             maskColor="rgba(10, 12, 16, 0.85)"
-            className="!bg-[#0d0f14] !border-white/[0.06] !rounded-lg"
+            className="!bg-card !border-border !rounded-lg"
             pannable
             zoomable
           />

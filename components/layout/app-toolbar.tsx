@@ -29,7 +29,6 @@ import { usePendingEscalations } from "@/hooks/use-pending-escalations"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
-import { ThemeToggle } from "@/components/ui/theme-toggle"
 import { getCrewDotColor } from "@/lib/crew-icon"
 import { CommandPalette } from "@/components/command-palette"
 
@@ -227,7 +226,7 @@ export function AppToolbar() {
   }
 
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between bg-card px-3 sm:px-4">
+    <header className="flex h-12 shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-white/[0.1]">
       {/* Left: Org switcher + breadcrumb */}
       <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
         <DropdownMenu>
@@ -439,11 +438,6 @@ export function AppToolbar() {
               GitHub
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-micro text-muted-foreground font-normal">Theme</DropdownMenuLabel>
-            <div className="px-2 pb-2">
-              <ThemeToggle />
-            </div>
-            <DropdownMenuSeparator />
             <DropdownMenuItem className="gap-3 text-xs text-destructive" onClick={() => { signOut().then(() => window.location.href = "/login") }}>
               <LogOut className="h-4 w-4" />
               Log out
@@ -503,9 +497,6 @@ export function AppToolbar() {
                     })}
                 </div>
               ))}
-            </div>
-            <div className="border-t px-4 py-3">
-              <ThemeToggle />
             </div>
             <div className="border-t p-4">
               <div className="flex items-center gap-3">

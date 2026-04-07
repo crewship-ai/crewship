@@ -152,7 +152,7 @@ export function ProposalReview({ workspaceId }: ProposalReviewProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-48 text-white/30">
+      <div className="flex items-center justify-center h-48 text-muted-foreground/70">
         <Loader2 className="h-5 w-5 animate-spin" />
       </div>
     )
@@ -198,7 +198,7 @@ export function ProposalReview({ workspaceId }: ProposalReviewProps) {
 
       {processed.length > 0 && (
         <div className="space-y-3">
-          <h2 className="text-xs font-medium text-white/30 uppercase tracking-wider">
+          <h2 className="text-xs font-medium text-muted-foreground/70 uppercase tracking-wider">
             Previous ({processed.length})
           </h2>
           {processed.map((p) => (
@@ -244,13 +244,13 @@ function ProposalCard({
 
   return (
     <Card className={cn(
-      "bg-white/[0.02] border-white/[0.06] transition-all",
+      "bg-accent/50 border-border transition-all",
       p.status === "PENDING" && "border-amber-500/20",
     )}>
       <CardHeader className="py-3 px-4 cursor-pointer" onClick={onToggle}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {expanded ? <ChevronDown className="h-3.5 w-3.5 text-white/30" /> : <ChevronRight className="h-3.5 w-3.5 text-white/30" />}
+            {expanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/70" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/70" />}
             <CardTitle className="text-sm font-medium">{p.title}</CardTitle>
             <Badge variant="outline" className={cn(
               "text-[10px] h-5 gap-1",
@@ -263,13 +263,13 @@ function ProposalCard({
               {config.label}
             </Badge>
           </div>
-          <div className="flex items-center gap-2 text-[10px] text-white/30">
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground/70">
             {p.proposer_name && (
               <span>by @{p.proposer_slug || p.proposer_name}</span>
             )}
             <span>{new Date(p.created_at).toLocaleDateString()}</span>
             {p.missions && (
-              <Badge variant="outline" className="text-[10px] h-4 border-white/10">
+              <Badge variant="outline" className="text-[10px] h-4 border-border">
                 {p.missions.length} mission{p.missions.length !== 1 ? "s" : ""}
               </Badge>
             )}
@@ -280,42 +280,42 @@ function ProposalCard({
       {expanded && (
         <CardContent className="pt-0 px-4 pb-4 space-y-4">
           {p.description && (
-            <p className="text-xs text-white/50">{p.description}</p>
+            <p className="text-xs text-muted-foreground">{p.description}</p>
           )}
 
           {p.plan && (
-            <div className="rounded-lg bg-white/[0.02] border border-white/[0.06] p-3">
-              <h4 className="text-[10px] font-medium text-white/40 uppercase tracking-wider mb-2">Plan</h4>
-              <p className="text-xs text-white/60 whitespace-pre-wrap">{p.plan}</p>
+            <div className="rounded-lg bg-accent/50 border border-border p-3">
+              <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">Plan</h4>
+              <p className="text-xs text-muted-foreground whitespace-pre-wrap">{p.plan}</p>
             </div>
           )}
 
           {p.missions && p.missions.length > 0 && (
             <div className="space-y-2">
-              <h4 className="text-[10px] font-medium text-white/40 uppercase tracking-wider">
+              <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
                 Proposed Missions ({p.missions.length})
               </h4>
               {p.missions.map((m, i) => (
-                <div key={i} className="rounded-lg bg-white/[0.02] border border-white/[0.06] p-3">
+                <div key={i} className="rounded-lg bg-accent/50 border border-border p-3">
                   <div className="flex items-center gap-2 mb-2">
-                    <Users className="h-3 w-3 text-white/30" />
+                    <Users className="h-3 w-3 text-muted-foreground/70" />
                     <span className="text-xs font-medium">{m.title}</span>
-                    <Badge variant="outline" className="text-[10px] h-4 border-white/10">
+                    <Badge variant="outline" className="text-[10px] h-4 border-border">
                       crew: {m.crew_id.slice(0, 8)}...
                     </Badge>
                   </div>
                   {m.description && (
-                    <p className="text-[11px] text-white/40 mb-2">{m.description}</p>
+                    <p className="text-[11px] text-muted-foreground mb-2">{m.description}</p>
                   )}
                   {m.tasks.length > 0 && (
                     <div className="space-y-1">
                       {m.tasks.map((t, j) => (
-                        <div key={j} className="flex items-center gap-2 text-[11px] text-white/50">
-                          <span className="text-white/20">#{t.task_order}</span>
-                          <ArrowRight className="h-2.5 w-2.5 text-white/15" />
+                        <div key={j} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                          <span className="text-muted-foreground/50">#{t.task_order}</span>
+                          <ArrowRight className="h-2.5 w-2.5 text-muted-foreground/50" />
                           <span>{t.title}</span>
                           {t.depends_on && t.depends_on.length > 0 && (
-                            <span className="text-white/20">(depends on {t.depends_on.length})</span>
+                            <span className="text-muted-foreground/50">(depends on {t.depends_on.length})</span>
                           )}
                         </div>
                       ))}
@@ -327,9 +327,9 @@ function ProposalCard({
           )}
 
           {p.review_notes && (
-            <div className="rounded-lg bg-white/[0.02] border border-white/[0.06] p-3">
-              <h4 className="text-[10px] font-medium text-white/40 uppercase tracking-wider mb-1">Review Notes</h4>
-              <p className="text-xs text-white/50">{p.review_notes}</p>
+            <div className="rounded-lg bg-accent/50 border border-border p-3">
+              <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Review Notes</h4>
+              <p className="text-xs text-muted-foreground">{p.review_notes}</p>
             </div>
           )}
 
@@ -340,12 +340,12 @@ function ProposalCard({
           )}
 
           {!compact && p.status === "PENDING" && (
-            <div className="space-y-3 pt-2 border-t border-white/[0.06]">
+            <div className="space-y-3 pt-2 border-t border-border">
               <Textarea
                 placeholder="Review notes (optional)..."
                 value={reviewNotes || ""}
                 onChange={(e) => onNotesChange?.(e.target.value)}
-                className="text-xs h-16 bg-white/[0.02] border-white/[0.08] resize-none"
+                className="text-xs h-16 bg-accent/50 border-border resize-none"
               />
               <div className="flex items-center justify-between">
                 <Button
