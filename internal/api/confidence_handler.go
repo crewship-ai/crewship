@@ -24,13 +24,14 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
-	if body.AgentID == "" || body.Confidence < 0 || body.Confidence > 1 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id required, confidence must be 0-1"})
+	if body.AgentID == "" || body.CrewID == "" || body.Confidence < 0 || body.Confidence > 1 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id and crew_id required, confidence must be 0-1"})
 		return
 	}
 
 	// Resolve task, workspace and chat from DB instead of trusting request body.
-	var taskID, missionID, resolvedWsID, resolvedChatID string
+	var taskID, missionID, resolvedWsID string
+	var resolvedChatID sql.NullString
 	err := h.db.QueryRowContext(r.Context(),
 		`SELECT mt.id, mt.mission_id, m.workspace_id, ch.id
 		 FROM mission_tasks mt
@@ -73,7 +74,11 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 		if err := json.Unmarshal([]byte(configJSON.String), &cfg); err == nil {
 			if cfg.RequireApprovalBelow > 0 && body.Confidence < cfg.RequireApprovalBelow {
 				action = "escalated"
-				h.autoEscalateForConfidence(r, body.AgentID, body.CrewID, resolvedWsID, resolvedChatID,
+				chatID := ""
+				if resolvedChatID.Valid {
+					chatID = resolvedChatID.String
+				}
+				h.autoEscalateForConfidence(r, body.AgentID, body.CrewID, resolvedWsID, chatID,
 					taskID, body.Confidence, body.Reason)
 			} else if cfg.NotifyThreshold > 0 && body.Confidence < cfg.NotifyThreshold {
 				action = "notified"
