@@ -33,11 +33,74 @@ import { ContextDetailPanel, type DetailContext } from "@/components/features/or
 import { A2AMessageStream } from "@/components/features/orchestration/a2a-message-stream"
 import { MissionYamlEditor } from "@/components/features/orchestration/mission-yaml-editor"
 import { DockerOverview } from "@/components/features/orchestration/docker-overview"
+import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import type { Mission, MissionTask } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
 
 import { toast } from "sonner"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+
+const EVENT_COLORS: Record<string, string> = {
+  text: "text-foreground", thinking: "text-muted-foreground", tool_call: "text-cyan-400",
+  tool_result: "text-emerald-400", error: "text-red-400", status: "text-amber-400",
+  result: "text-purple-400", system: "text-blue-400", rate_limit: "text-amber-400",
+}
+
+interface LogEntry { ts: string; agent: string; event: string; content: string }
+
+/** Live exec log panel — streams agent.log WebSocket events */
+function ExecLogPanel() {
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [autoScroll, setAutoScroll] = useState(true)
+  const endRef = useRef<HTMLDivElement>(null)
+
+  const handleLog = useCallback((ev: RealtimeEvent) => {
+    const agent = (ev.payload.agent ?? ev.payload.agent_slug ?? "") as string
+    const content = (ev.payload.content ?? "") as string
+    const event = (ev.payload.event ?? "text") as string
+    if (!content) return
+    setLogs((prev) => [...prev.slice(-200), { ts: new Date().toISOString(), agent, event, content: content.length > 200 ? content.slice(0, 197) + "..." : content }])
+  }, [])
+
+  useRealtimeEvent("agent.log", handleLog)
+
+  useEffect(() => {
+    if (autoScroll) endRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [logs, autoScroll])
+
+  if (logs.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground/50">
+        <Terminal className="h-5 w-5 mb-1.5" />
+        <p className="text-[11px]">Waiting for agent activity...</p>
+        <p className="text-[10px] text-muted-foreground/30 mt-0.5">Logs appear here when agents run</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-3 py-1 border-b border-white/[0.06] shrink-0">
+        <span className="text-[10px] text-muted-foreground">{logs.length} entries</span>
+        <button onClick={() => setAutoScroll(!autoScroll)} className={cn("text-[10px] px-1.5 py-0.5 rounded", autoScroll ? "text-blue-400 bg-blue-400/10" : "text-muted-foreground")}>
+          Auto-scroll {autoScroll ? "ON" : "OFF"}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto font-mono text-[11px] px-3 py-1">
+        {logs.map((log, i) => (
+          <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02]">
+            <span className="text-muted-foreground/40 tabular-nums shrink-0 w-[52px]">{log.ts.slice(11, 19)}</span>
+            <img src={getAgentAvatarUrl(log.agent)} alt="" className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5" />
+            <span className="text-muted-foreground shrink-0 w-[60px] truncate">@{log.agent}</span>
+            <span className={cn("truncate", EVENT_COLORS[log.event] || "text-foreground")}>{log.content}</span>
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+    </div>
+  )
+}
 
 type DrawerTab = "messages" | "exec" | "yaml" | "docker"
 
@@ -670,10 +733,7 @@ export function OrchestrationLayout({
                 )}
 
                 {drawerTab === "exec" && (
-                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground/70">
-                    <Terminal className="h-6 w-6 mb-2" />
-                    <p className="text-xs">Exec log coming soon</p>
-                  </div>
+                  <ExecLogPanel />
                 )}
 
                 {drawerTab === "yaml" && (
