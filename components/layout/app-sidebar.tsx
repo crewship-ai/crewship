@@ -16,7 +16,9 @@ import {
   Store,
   ShieldCheck,
   PanelLeftClose,
-  PanelLeftOpen,
+  Pin,
+  PinOff,
+  MousePointer2,
   ChevronDown,
 } from "lucide-react"
 import { useAbilities } from "@/hooks/use-abilities"
@@ -82,7 +84,7 @@ const navSections = [
 export function AppSidebar() {
   const pathname = usePathname()
   const { role } = useAbilities()
-  const { toggleSidebar, state } = useSidebar()
+  const { state, sidebarMode, setSidebarMode } = useSidebar()
 
   return (
     <Sidebar variant="sidebar" collapsible="icon">
@@ -181,23 +183,39 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
-      {/* Collapse toggle */}
+      {/* Sidebar mode toggle */}
       <SidebarFooter className="p-2">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              onClick={toggleSidebar}
-              aria-label="Toggle sidebar"
-              tooltip={state === "expanded" ? "Collapse" : "Expand"}
+              onClick={() => {
+                // Cycle: hover → pinned → collapsed → hover
+                const next = sidebarMode === "hover" ? "pinned" : sidebarMode === "pinned" ? "collapsed" : "hover"
+                setSidebarMode(next)
+              }}
+              aria-label={`Sidebar: ${sidebarMode}`}
+              tooltip={
+                sidebarMode === "hover" ? "Hover mode — click to pin"
+                  : sidebarMode === "pinned" ? "Pinned — click to collapse"
+                  : "Collapsed — click for hover mode"
+              }
               size="sm"
             >
-              {state === "expanded" ? (
+              {sidebarMode === "hover" ? (
                 <>
-                  <PanelLeftClose />
-                  <span>Collapse</span>
+                  <MousePointer2 />
+                  <span>Hover</span>
+                </>
+              ) : sidebarMode === "pinned" ? (
+                <>
+                  <Pin />
+                  <span>Pinned</span>
                 </>
               ) : (
-                <PanelLeftOpen />
+                <>
+                  <PanelLeftClose />
+                  <span>Collapsed</span>
+                </>
               )}
             </SidebarMenuButton>
           </SidebarMenuItem>

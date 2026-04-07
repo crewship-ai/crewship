@@ -39,7 +39,7 @@ export default function DashboardLayout({
 
   return (
     <RealtimeProvider>
-      <SidebarProvider defaultOpen={false}>
+      <SidebarProvider>
         <AppSidebar />
         <SidebarInset>
           <AppToolbar />

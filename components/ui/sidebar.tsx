@@ -31,6 +31,9 @@ const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "4rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
+const SIDEBAR_MODE_KEY = "crewship_sidebar_mode"
+
+type SidebarMode = "hover" | "collapsed" | "pinned"
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
@@ -42,6 +45,8 @@ type SidebarContextProps = {
   toggleSidebar: () => void
   hoverExpanded: boolean
   setHoverExpanded: (expanded: boolean) => void
+  sidebarMode: SidebarMode
+  setSidebarMode: (mode: SidebarMode) => void
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
@@ -72,9 +77,21 @@ function SidebarProvider({
   const [openMobile, setOpenMobile] = React.useState(false)
   const [hoverExpanded, setHoverExpanded] = React.useState(false)
 
-  // This is the internal state of the sidebar.
-  // We use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(defaultOpen)
+  // Sidebar mode: hover (default), collapsed, pinned — persisted in localStorage
+  const [sidebarMode, _setSidebarMode] = React.useState<SidebarMode>(() => {
+    if (typeof window === "undefined") return "hover"
+    const stored = localStorage.getItem(SIDEBAR_MODE_KEY)
+    if (stored === "collapsed" || stored === "pinned" || stored === "hover") return stored
+    return "hover"
+  })
+
+  const setSidebarMode = React.useCallback((mode: SidebarMode) => {
+    _setSidebarMode(mode)
+    localStorage.setItem(SIDEBAR_MODE_KEY, mode)
+  }, [])
+
+  // Derive open state from mode (pinned = open, hover/collapsed = closed)
+  const [_open, _setOpen] = React.useState(sidebarMode === "pinned")
   const open = openProp ?? _open
   const setOpen = React.useCallback(
     (value: boolean | ((value: boolean) => boolean)) => {
@@ -85,11 +102,16 @@ function SidebarProvider({
         _setOpen(openState)
       }
 
-      // This sets the cookie to keep the sidebar state.
       document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`
     },
     [setOpenProp, open]
   )
+
+  // Sync open state when mode changes
+  React.useEffect(() => {
+    if (isMobile) return
+    _setOpen(sidebarMode === "pinned")
+  }, [sidebarMode, isMobile])
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
@@ -104,16 +126,21 @@ function SidebarProvider({
         (event.metaKey || event.ctrlKey)
       ) {
         event.preventDefault()
-        toggleSidebar()
+        // Cycle modes: hover → pinned → collapsed → hover
+        if (!isMobile) {
+          setSidebarMode(
+            sidebarMode === "hover" ? "pinned" : sidebarMode === "pinned" ? "collapsed" : "hover"
+          )
+        } else {
+          toggleSidebar()
+        }
       }
     }
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [toggleSidebar])
+  }, [toggleSidebar, sidebarMode, setSidebarMode, isMobile])
 
-  // We add a state so that we can do data-state="expanded" or "collapsed".
-  // This makes it easier to style the sidebar with Tailwind classes.
   const state = open ? "expanded" : "collapsed"
 
   const contextValue = React.useMemo<SidebarContextProps>(
@@ -127,8 +154,10 @@ function SidebarProvider({
       toggleSidebar,
       hoverExpanded,
       setHoverExpanded,
+      sidebarMode,
+      setSidebarMode,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, hoverExpanded, setHoverExpanded]
+    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, hoverExpanded, setHoverExpanded, sidebarMode, setSidebarMode]
   )
 
   return (
@@ -169,11 +198,12 @@ function Sidebar({
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
   const ctx = React.useContext(SidebarContext)!
-  const { isMobile, state, openMobile, setOpenMobile, hoverExpanded } = ctx
+  const { isMobile, state, openMobile, setOpenMobile, hoverExpanded, sidebarMode } = ctx
   const hoverTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleMouseEnter = React.useCallback(() => {
-    if (state !== "collapsed" || isMobile) return
+    // Only hover-expand in "hover" mode
+    if (sidebarMode !== "hover" || state !== "collapsed" || isMobile) return
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current)
       hoverTimeoutRef.current = null
@@ -181,7 +211,7 @@ function Sidebar({
     hoverTimeoutRef.current = setTimeout(() => {
       ctx.setHoverExpanded(true)
     }, 80)
-  }, [state, isMobile, ctx])
+  }, [state, isMobile, ctx, sidebarMode])
 
   const handleMouseLeave = React.useCallback(() => {
     if (hoverTimeoutRef.current) {
