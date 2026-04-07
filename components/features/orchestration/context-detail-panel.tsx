@@ -1,10 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import {
   X, CheckCircle2, XCircle, Clock, AlertTriangle, ArrowRight,
   GitBranch, Users, Box, ChevronDown, ChevronRight, RotateCcw,
-  SkipForward, Pencil, MousePointerClick,
+  SkipForward, MousePointerClick,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -101,7 +101,7 @@ function TaskDetail({ task, mission, allTasks, onAction }: {
   const deps = parseDependsOn(task.depends_on)
   const blockedBy = deps.map(id => allTasks.find(t => t.id === id)).filter(Boolean) as MissionTask[]
   const blocks = allTasks.filter(t => parseDependsOn(t.depends_on).includes(task.id))
-  const budgetPct = task.token_budget && task.tokens_used ? Math.round((task.tokens_used / task.token_budget) * 100) : null
+  const budgetPct = task.token_budget != null && task.tokens_used != null ? Math.round((task.tokens_used / task.token_budget) * 100) : null
 
   return (
     <div className="space-y-4">
@@ -179,9 +179,6 @@ function TaskDetail({ task, mission, allTasks, onAction }: {
 
       {onAction && (
         <div className="flex gap-2 pt-1">
-          {(task.status === "PENDING" || task.status === "BLOCKED") && (
-            <Button variant="outline" size="xs" onClick={() => onAction("edit", task.id, mission.id)}><Pencil className="size-3" /> Edit</Button>
-          )}
           {task.status === "FAILED" && (
             <Button variant="outline" size="xs" onClick={() => onAction("retry", task.id, mission.id)}><RotateCcw className="size-3" /> Retry</Button>
           )}
@@ -281,6 +278,12 @@ function MissionDetail({ mission }: { mission: Mission }) {
 }
 
 export function ContextDetailPanel({ context, onTaskAction, onClose }: ContextDetailPanelProps) {
+  const [activeDetailTab, setActiveDetailTab] = useState("detail")
+
+  useEffect(() => {
+    setActiveDetailTab("detail")
+  }, [context])
+
   return (
     <div className="h-full flex flex-col bg-card border-l border-border">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
@@ -288,13 +291,13 @@ export function ContextDetailPanel({ context, onTaskAction, onClose }: ContextDe
           {context.type === "task" ? "Task" : context.type === "crew" ? "Crew" : context.type === "mission" ? "Mission" : "Details"}
         </span>
         {onClose && (
-          <Button variant="ghost" size="icon-xs" onClick={onClose} className="text-muted-foreground/70 hover:text-foreground/70">
+          <Button variant="ghost" size="icon-xs" onClick={onClose} aria-label="Close details" className="text-muted-foreground/70 hover:text-foreground/70">
             <X className="size-3.5" />
           </Button>
         )}
       </div>
 
-      <Tabs defaultValue="detail" className="flex-1 min-h-0">
+      <Tabs value={activeDetailTab} onValueChange={setActiveDetailTab} className="flex-1 min-h-0">
         <TabsList variant="line" className="px-3 border-b border-border">
           <TabsTrigger value="detail" className="text-xs">Detail</TabsTrigger>
           <TabsTrigger value="logs" className="text-xs">Logs</TabsTrigger>

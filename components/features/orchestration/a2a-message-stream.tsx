@@ -84,6 +84,7 @@ export function A2AMessageStream({ messages, crewFilter, onFilterChange }: A2AMe
         <select
           value={crewFilter ?? ""}
           onChange={e => onFilterChange(e.target.value || null)}
+          aria-label="Filter by crew"
           className="bg-accent/50 border border-border rounded text-xs text-foreground/80 px-2 py-1 outline-none focus:border-white/20"
         >
           <option value="">All crews</option>
