@@ -93,6 +93,8 @@ var migrations = []migration{
 	{32, "add_oauth_credentials", migrationAddOAuthCredentials},
 	{33, "add_mcp_config_json", migrationAddMCPConfigJSON},
 	{34, "add_approval_gates", migrationAddApprovalGates},
+	{35, "add_pkce_code_verifier", migrationAddPKCECodeVerifier},
+	{36, "add_mcp_registry_cache", migrationAddMCPRegistryCache},
 }
 
 const migrationAddKeeperObservability = `
@@ -1058,6 +1060,10 @@ ALTER TABLE mission_tasks ADD COLUMN approved_at TEXT;
 ALTER TABLE crews ADD COLUMN escalation_config TEXT;
 `
 
+const migrationAddPKCECodeVerifier = `
+ALTER TABLE oauth_states ADD COLUMN code_verifier TEXT NOT NULL DEFAULT '';
+`
+
 const migrationAddOAuthCredentials = `
 -- OAuth 2.0 credential fields (extends existing credentials table)
 ALTER TABLE credentials ADD COLUMN oauth_client_id TEXT;
@@ -1076,4 +1082,32 @@ CREATE TABLE IF NOT EXISTS oauth_states (
 	redirect_uri TEXT NOT NULL,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+`
+
+const migrationAddMCPRegistryCache = `
+CREATE TABLE IF NOT EXISTS mcp_registry_servers (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL UNIQUE,
+	display_name TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	icon TEXT NOT NULL DEFAULT '',
+	transport TEXT NOT NULL DEFAULT 'stdio',
+	homepage_url TEXT NOT NULL DEFAULT '',
+	source_url TEXT NOT NULL DEFAULT '',
+	-- For stdio servers
+	package_name TEXT NOT NULL DEFAULT '',
+	package_registry TEXT NOT NULL DEFAULT '',
+	command TEXT NOT NULL DEFAULT '',
+	-- For remote/HTTP servers
+	endpoint TEXT NOT NULL DEFAULT '',
+	-- Auth info
+	auth_type TEXT NOT NULL DEFAULT '',
+	env_vars_json TEXT NOT NULL DEFAULT '[]',
+	-- Metadata
+	category TEXT NOT NULL DEFAULT '',
+	is_verified INTEGER NOT NULL DEFAULT 0,
+	synced_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_registry_name ON mcp_registry_servers(name);
+CREATE INDEX IF NOT EXISTS idx_mcp_registry_category ON mcp_registry_servers(category);
 `

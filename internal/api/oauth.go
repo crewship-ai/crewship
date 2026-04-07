@@ -3,8 +3,11 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -17,6 +20,18 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
+
+// generatePKCE creates a PKCE code_verifier and S256 code_challenge per RFC 7636.
+func generatePKCE() (verifier, challenge string, err error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", "", err
+	}
+	verifier = base64.RawURLEncoding.EncodeToString(buf)
+	h := sha256.Sum256([]byte(verifier))
+	challenge = base64.RawURLEncoding.EncodeToString(h[:])
+	return verifier, challenge, nil
+}
 
 // OAuthProvider holds pre-configured OAuth provider endpoints.
 type OAuthProvider struct {
@@ -86,6 +101,124 @@ func NewOAuthHandler(db *sql.DB, logger *slog.Logger) *OAuthHandler {
 
 func (h *OAuthHandler) SetHub(hub *ws.Hub) { h.hub = hub }
 
+// oauthCredConfig holds the decrypted OAuth configuration for a credential.
+type oauthCredConfig struct {
+	ClientID     string
+	ClientSecret string // decrypted
+	AuthURL      string
+	TokenURL     string
+	Scopes       string
+}
+
+// generateOAuthState produces a hex-encoded 16-byte random state token.
+func generateOAuthState() (string, error) {
+	stateBytes := make([]byte, 16)
+	if _, err := rand.Read(stateBytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(stateBytes), nil
+}
+
+// buildOAuthURL constructs the full authorization URL with PKCE and standard params.
+// If authURL already contains query parameters, they are preserved and merged.
+func buildOAuthURL(authURL, clientID, redirectURI, state, codeChallenge, scopes string) string {
+	parsed, err := url.Parse(authURL)
+	if err != nil {
+		parsed = &url.URL{Path: authURL}
+	}
+
+	params := parsed.Query() // preserve existing query params
+	params.Set("client_id", clientID)
+	params.Set("redirect_uri", redirectURI)
+	params.Set("response_type", "code")
+	params.Set("state", state)
+	params.Set("access_type", "offline")
+	params.Set("prompt", "consent")
+	params.Set("code_challenge", codeChallenge)
+	params.Set("code_challenge_method", "S256")
+	if scopes != "" {
+		params.Set("scope", scopes)
+	}
+	parsed.RawQuery = params.Encode()
+	return parsed.String()
+}
+
+// loadOAuthCredential loads and decrypts the full OAuth configuration for a credential.
+func (h *OAuthHandler) loadOAuthCredential(ctx context.Context, credID, wsID string) (*oauthCredConfig, error) {
+	var clientID, clientSecretEnc, authURL, tokenURL, scopes string
+	err := h.db.QueryRowContext(ctx, `
+		SELECT oauth_client_id, COALESCE(oauth_client_secret_enc, ''),
+			oauth_auth_url, oauth_token_url, COALESCE(oauth_scopes, '')
+		FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
+		credID, wsID).Scan(&clientID, &clientSecretEnc, &authURL, &tokenURL, &scopes)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("credential not found: %w", err)
+		}
+		return nil, fmt.Errorf("load oauth credential: %w", err)
+	}
+
+	clientSecret := ""
+	if clientSecretEnc != "" {
+		decrypted, decErr := encryption.Decrypt(clientSecretEnc)
+		if decErr != nil {
+			return nil, fmt.Errorf("decrypt client secret: %w", decErr)
+		}
+		clientSecret = decrypted
+	}
+
+	return &oauthCredConfig{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		AuthURL:      authURL,
+		TokenURL:     tokenURL,
+		Scopes:       scopes,
+	}, nil
+}
+
+// storeOAuthTokens encrypts and persists token response fields into the credentials table.
+func (h *OAuthHandler) storeOAuthTokens(ctx context.Context, credID string, resp *tokenResponse) error {
+	encAccessToken, err := encryption.Encrypt(resp.AccessToken)
+	if err != nil {
+		return fmt.Errorf("encrypt access token: %w", err)
+	}
+
+	var encRefreshToken string
+	if resp.RefreshToken != "" {
+		encRefreshToken, err = encryption.Encrypt(resp.RefreshToken)
+		if err != nil {
+			return fmt.Errorf("encrypt refresh token: %w", err)
+		}
+	}
+
+	expiresAt := ""
+	if resp.ExpiresIn > 0 {
+		expiresAt = time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
+	}
+
+	_, err = h.db.ExecContext(ctx, `
+		UPDATE credentials SET
+			encrypted_value = ?,
+			oauth_refresh_token_enc = CASE WHEN ? != '' THEN ? ELSE oauth_refresh_token_enc END,
+			oauth_token_expires_at = ?,
+			status = 'ACTIVE',
+			updated_at = datetime('now')
+		WHERE id = ?`,
+		encAccessToken, encRefreshToken, encRefreshToken, expiresAt, credID)
+	if err != nil {
+		return fmt.Errorf("update credentials: %w", err)
+	}
+	return nil
+}
+
+// storeStateWithPKCE persists the OAuth state, credential context, and PKCE verifier.
+func (h *OAuthHandler) storeStateWithPKCE(ctx context.Context, state, credID, wsID, redirectURI, codeVerifier string) error {
+	_, err := h.db.ExecContext(ctx,
+		"INSERT INTO oauth_states (state, credential_id, workspace_id, redirect_uri, code_verifier) VALUES (?, ?, ?, ?, ?)",
+		state, credID, wsID, redirectURI, codeVerifier)
+	return err
+}
+
 // ListProviders returns pre-configured OAuth providers.
 func (h *OAuthHandler) ListProviders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, OAuthProviders)
@@ -114,28 +247,28 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load credential OAuth config
-	var clientID, authURL, scopes string
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT oauth_client_id, oauth_auth_url, COALESCE(oauth_scopes, '')
-		FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		req.CredentialID, workspaceID).Scan(&clientID, &authURL, &scopes)
+	cred, err := h.loadOAuthCredential(r.Context(), req.CredentialID, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "OAuth credential not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "OAuth credential not found"})
+		} else {
+			h.logger.Error("load OAuth credential", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load credential"})
+		}
 		return
 	}
-	if clientID == "" || authURL == "" {
+	if cred.ClientID == "" || cred.AuthURL == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Credential missing oauth_client_id or oauth_auth_url"})
 		return
 	}
 
 	// Generate state token
-	stateBytes := make([]byte, 16)
-	if _, err := rand.Read(stateBytes); err != nil {
+	state, err := generateOAuthState()
+	if err != nil {
 		h.logger.Error("generate OAuth state", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate state token"})
 		return
 	}
-	state := hex.EncodeToString(stateBytes)
 
 	// Default redirect URI = Crewship backend callback
 	redirectURI := req.RedirectURI
@@ -153,29 +286,23 @@ func (h *OAuthHandler) Initiate(w http.ResponseWriter, r *http.Request) {
 		redirectURI = fmt.Sprintf("%s://%s/api/v1/oauth/callback", scheme, host)
 	}
 
-	// Store state for CSRF validation
-	if _, err := h.db.ExecContext(r.Context(),
-		"INSERT INTO oauth_states (state, credential_id, workspace_id, redirect_uri) VALUES (?, ?, ?, ?)",
-		state, req.CredentialID, workspaceID, redirectURI); err != nil {
+	// Generate PKCE
+	codeVerifier, codeChallenge, err := generatePKCE()
+	if err != nil {
+		h.logger.Error("generate PKCE", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate PKCE"})
+		return
+	}
+
+	// Store state + PKCE verifier for CSRF validation and token exchange
+	if err := h.storeStateWithPKCE(r.Context(), state, req.CredentialID, workspaceID, redirectURI, codeVerifier); err != nil {
 		h.logger.Error("store OAuth state", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store OAuth state"})
 		return
 	}
 
-	// Build auth URL
-	params := url.Values{
-		"client_id":     {clientID},
-		"redirect_uri":  {redirectURI},
-		"response_type": {"code"},
-		"state":         {state},
-		"access_type":   {"offline"}, // Request refresh token
-		"prompt":        {"consent"},
-	}
-	if scopes != "" {
-		params.Set("scope", scopes)
-	}
-
-	fullURL := authURL + "?" + params.Encode()
+	// Build auth URL with PKCE
+	fullURL := buildOAuthURL(cred.AuthURL, cred.ClientID, redirectURI, state, codeChallenge, cred.Scopes)
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"auth_url": fullURL,
@@ -198,13 +325,18 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate state token
-	var credentialID, workspaceID, redirectURI string
+	// Validate state token and retrieve PKCE verifier
+	var credentialID, workspaceID, redirectURI, codeVerifier string
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT credential_id, workspace_id, redirect_uri FROM oauth_states WHERE state = ?", state).
-		Scan(&credentialID, &workspaceID, &redirectURI)
+		"SELECT credential_id, workspace_id, redirect_uri, code_verifier FROM oauth_states WHERE state = ?", state).
+		Scan(&credentialID, &workspaceID, &redirectURI, &codeVerifier)
 	if err != nil {
-		http.Error(w, "Invalid or expired state token", http.StatusBadRequest)
+		if err == sql.ErrNoRows {
+			http.Error(w, "Invalid or expired state token", http.StatusBadRequest)
+		} else {
+			h.logger.Error("query oauth_states", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -214,30 +346,19 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load credential OAuth config for token exchange
-	var clientID, clientSecretEnc, tokenURL string
-	err = h.db.QueryRowContext(r.Context(), `
-		SELECT oauth_client_id, COALESCE(oauth_client_secret_enc, ''), oauth_token_url
-		FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		credentialID, workspaceID).Scan(&clientID, &clientSecretEnc, &tokenURL)
-	if err != nil {
-		http.Error(w, "Credential not found", http.StatusNotFound)
+	cred, loadErr := h.loadOAuthCredential(r.Context(), credentialID, workspaceID)
+	if loadErr != nil {
+		if errors.Is(loadErr, sql.ErrNoRows) {
+			http.Error(w, "Credential not found", http.StatusNotFound)
+		} else {
+			h.logger.Error("load OAuth credential in callback", "error", loadErr)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 
-	// Decrypt client secret — fail closed if decryption fails
-	clientSecret := ""
-	if clientSecretEnc != "" {
-		decrypted, decErr := encryption.Decrypt(clientSecretEnc)
-		if decErr != nil {
-			h.logger.Error("decrypt OAuth client secret", "error", decErr, "credential_id", credentialID)
-			http.Error(w, "Failed to decrypt client secret", http.StatusInternalServerError)
-			return
-		}
-		clientSecret = decrypted
-	}
-
-	// Exchange code for tokens
-	tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, code, redirectURI)
+	// Exchange code for tokens (with PKCE verifier if present)
+	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, code, redirectURI, codeVerifier)
 	if err != nil {
 		h.logger.Error("OAuth token exchange failed", "error", err, "credential_id", credentialID)
 		http.Error(w, "Token exchange failed", http.StatusBadGateway)
@@ -245,37 +366,7 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Encrypt and store tokens
-	encAccessToken, err := encryption.Encrypt(tokenResp.AccessToken)
-	if err != nil {
-		http.Error(w, "Failed to encrypt token", http.StatusInternalServerError)
-		return
-	}
-
-	var encRefreshToken string
-	if tokenResp.RefreshToken != "" {
-		encRefreshToken, err = encryption.Encrypt(tokenResp.RefreshToken)
-		if err != nil {
-			h.logger.Error("encrypt refresh token", "error", err)
-			http.Error(w, "Failed to encrypt refresh token", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	expiresAt := ""
-	if tokenResp.ExpiresIn > 0 {
-		expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
-	}
-
-	_, err = h.db.ExecContext(r.Context(), `
-		UPDATE credentials SET
-			encrypted_value = ?,
-			oauth_refresh_token_enc = CASE WHEN ? != '' THEN ? ELSE oauth_refresh_token_enc END,
-			oauth_token_expires_at = ?,
-			status = 'ACTIVE',
-			updated_at = datetime('now')
-		WHERE id = ?`,
-		encAccessToken, encRefreshToken, encRefreshToken, expiresAt, credentialID)
-	if err != nil {
+	if err := h.storeOAuthTokens(r.Context(), credentialID, tokenResp); err != nil {
 		h.logger.Error("store OAuth tokens", "error", err)
 		http.Error(w, "Failed to store tokens", http.StatusInternalServerError)
 		return
@@ -308,36 +399,56 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 		CredentialID string `json:"credential_id"`
 		Code         string `json:"code"`
 		RedirectURI  string `json:"redirect_uri"`
+		CodeVerifier string `json:"code_verifier"`
+		State        string `json:"state"`
 	}
 	if err := readJSON(r, &req); err != nil || req.CredentialID == "" || req.Code == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "credential_id and code are required"})
 		return
 	}
 
+	// If no code_verifier provided but state is available, recover the
+	// server-side PKCE verifier that was stored during Initiate().
+	codeVerifier := req.CodeVerifier
+	redirectURI := req.RedirectURI
+	if codeVerifier == "" && req.State != "" {
+		var storedVerifier, storedRedirectURI, storedCredentialID string
+		err := h.db.QueryRowContext(r.Context(),
+			"SELECT code_verifier, redirect_uri, credential_id FROM oauth_states WHERE state = ?", req.State).
+			Scan(&storedVerifier, &storedRedirectURI, &storedCredentialID)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired OAuth state"})
+			return
+		}
+		// Validate that the state belongs to this credential
+		if storedCredentialID != req.CredentialID {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OAuth state does not match credential"})
+			return
+		}
+		codeVerifier = storedVerifier
+		if redirectURI == "" {
+			redirectURI = storedRedirectURI
+		}
+		// Delete used state to prevent replay
+		if _, delErr := h.db.ExecContext(r.Context(), "DELETE FROM oauth_states WHERE state = ?", req.State); delErr != nil {
+			h.logger.Error("delete used OAuth state in exchange", "error", delErr)
+		}
+	}
+
 	// Load credential OAuth config
-	var clientID, clientSecretEnc, tokenURL string
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT oauth_client_id, COALESCE(oauth_client_secret_enc, ''), oauth_token_url
-		FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		req.CredentialID, workspaceID).Scan(&clientID, &clientSecretEnc, &tokenURL)
+	cred, err := h.loadOAuthCredential(r.Context(), req.CredentialID, workspaceID)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		} else {
+			h.logger.Error("load OAuth credential in exchange", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load credential"})
+		}
 		return
 	}
 
-	clientSecret := ""
-	if clientSecretEnc != "" {
-		decrypted, decErr := encryption.Decrypt(clientSecretEnc)
-		if decErr != nil {
-			h.logger.Error("decrypt OAuth client secret", "error", decErr, "credential_id", req.CredentialID)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to decrypt client secret"})
-			return
-		}
-		clientSecret = decrypted
-	}
-
-	// Exchange code for tokens
-	tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, req.Code, req.RedirectURI)
+	// Exchange code for tokens (with PKCE verifier if available)
+	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, req.Code, redirectURI, codeVerifier)
 	if err != nil {
 		h.logger.Error("OAuth manual code exchange failed", "error", err, "credential_id", req.CredentialID)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Token exchange failed"})
@@ -345,37 +456,7 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Encrypt and store tokens
-	encAccessToken, err := encryption.Encrypt(tokenResp.AccessToken)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt token"})
-		return
-	}
-
-	var encRefreshToken string
-	if tokenResp.RefreshToken != "" {
-		encRefreshToken, err = encryption.Encrypt(tokenResp.RefreshToken)
-		if err != nil {
-			h.logger.Error("encrypt refresh token", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt refresh token"})
-			return
-		}
-	}
-
-	expiresAt := ""
-	if tokenResp.ExpiresIn > 0 {
-		expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
-	}
-
-	_, err = h.db.ExecContext(r.Context(), `
-		UPDATE credentials SET
-			encrypted_value = ?,
-			oauth_refresh_token_enc = CASE WHEN ? != '' THEN ? ELSE oauth_refresh_token_enc END,
-			oauth_token_expires_at = ?,
-			status = 'ACTIVE',
-			updated_at = datetime('now')
-		WHERE id = ?`,
-		encAccessToken, encRefreshToken, encRefreshToken, expiresAt, req.CredentialID)
-	if err != nil {
+	if err := h.storeOAuthTokens(r.Context(), req.CredentialID, tokenResp); err != nil {
 		h.logger.Error("store OAuth tokens from exchange", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store tokens"})
 		return
@@ -406,31 +487,14 @@ func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load credential OAuth config
-	var clientID, clientSecretEnc, authURL, tokenURL, scopes string
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT oauth_client_id, COALESCE(oauth_client_secret_enc, ''),
-			oauth_auth_url, oauth_token_url, COALESCE(oauth_scopes, '')
-		FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		req.CredentialID, workspaceID).Scan(&clientID, &clientSecretEnc, &authURL, &tokenURL, &scopes)
+	cred, err := h.loadOAuthCredential(r.Context(), req.CredentialID, workspaceID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "OAuth credential not found"})
 		return
 	}
-	if clientID == "" || authURL == "" || tokenURL == "" {
+	if cred.ClientID == "" || cred.AuthURL == "" || cred.TokenURL == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Credential missing OAuth configuration"})
 		return
-	}
-
-	// Decrypt client secret — fail closed
-	clientSecret := ""
-	if clientSecretEnc != "" {
-		dec, decErr := encryption.Decrypt(clientSecretEnc)
-		if decErr != nil {
-			h.logger.Error("decrypt OAuth client secret for loopback", "error", decErr, "credential_id", req.CredentialID)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to decrypt client secret"})
-			return
-		}
-		clientSecret = dec
 	}
 
 	// Find a free port for the loopback server
@@ -444,31 +508,27 @@ func (h *OAuthHandler) Loopback(w http.ResponseWriter, r *http.Request) {
 	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
 
 	// Generate state token
-	stateBytes := make([]byte, 16)
-	if _, err := rand.Read(stateBytes); err != nil {
+	state, err := generateOAuthState()
+	if err != nil {
 		listener.Close()
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate state"})
 		return
 	}
-	state := hex.EncodeToString(stateBytes)
 
-	// Build auth URL
-	params := url.Values{
-		"client_id":     {clientID},
-		"redirect_uri":  {redirectURI},
-		"response_type": {"code"},
-		"state":         {state},
-		"access_type":   {"offline"},
-		"prompt":        {"consent"},
+	// Generate PKCE
+	codeVerifier, codeChallenge, err := generatePKCE()
+	if err != nil {
+		listener.Close()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate PKCE"})
+		return
 	}
-	if scopes != "" {
-		params.Set("scope", scopes)
-	}
-	fullAuthURL := authURL + "?" + params.Encode()
+
+	// Build auth URL with PKCE
+	fullAuthURL := buildOAuthURL(cred.AuthURL, cred.ClientID, redirectURI, state, codeChallenge, cred.Scopes)
 
 	// Start loopback callback server in background
 	credID := req.CredentialID
-	go h.runLoopbackServer(listener, state, credID, workspaceID, clientID, clientSecret, tokenURL, redirectURI)
+	go h.runLoopbackServer(listener, state, credID, workspaceID, cred.ClientID, cred.ClientSecret, cred.TokenURL, redirectURI, codeVerifier)
 
 	h.logger.Info("OAuth loopback started", "port", port, "credential_id", credID)
 
@@ -489,6 +549,7 @@ func (h *OAuthHandler) runLoopbackServer(
 	clientSecret string,
 	tokenURL string,
 	redirectURI string,
+	codeVerifier string,
 ) {
 	defer listener.Close()
 
@@ -514,8 +575,8 @@ func (h *OAuthHandler) runLoopbackServer(
 			return
 		}
 
-		// Exchange code for tokens
-		tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, code, redirectURI)
+		// Exchange code for tokens (with PKCE verifier)
+		tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier)
 		if err != nil {
 			h.logger.Error("OAuth loopback token exchange", "error", err, "credential_id", credentialID)
 			w.Header().Set("Content-Type", "text/html")
@@ -524,43 +585,10 @@ func (h *OAuthHandler) runLoopbackServer(
 		}
 
 		// Encrypt and store
-		encAccess, err := encryption.Encrypt(tokenResp.AccessToken)
-		if err != nil {
-			h.logger.Error("encrypt loopback token", "error", err)
-			w.Header().Set("Content-Type", "text/html")
-			fmt.Fprint(w, `<html><body><h2>Failed to store token</h2><p>You can close this window.</p></body></html>`)
-			return
-		}
-
-		var encRefresh string
-		if tokenResp.RefreshToken != "" {
-			encRefresh, err = encryption.Encrypt(tokenResp.RefreshToken)
-			if err != nil {
-				h.logger.Error("encrypt loopback refresh token", "error", err)
-				w.Header().Set("Content-Type", "text/html")
-				fmt.Fprint(w, `<html><body><h2>Failed to store refresh token</h2><p>You can close this window.</p></body></html>`)
-				return
-			}
-		}
-
-		expiresAt := ""
-		if tokenResp.ExpiresIn > 0 {
-			expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
-		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		_, err = h.db.ExecContext(ctx, `
-			UPDATE credentials SET
-				encrypted_value = ?,
-				oauth_refresh_token_enc = CASE WHEN ? != '' THEN ? ELSE oauth_refresh_token_enc END,
-				oauth_token_expires_at = ?,
-				status = 'ACTIVE',
-				updated_at = datetime('now')
-			WHERE id = ?`,
-			encAccess, encRefresh, encRefresh, expiresAt, credentialID)
-		if err != nil {
+		if err := h.storeOAuthTokens(ctx, credentialID, tokenResp); err != nil {
 			h.logger.Error("store loopback tokens", "error", err)
 			w.Header().Set("Content-Type", "text/html")
 			fmt.Fprint(w, `<html><body><h2>Failed to store token</h2><p>You can close this window.</p></body></html>`)
@@ -757,35 +785,27 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 5: Store CSRF state
-	stateBytes := make([]byte, 16)
-	if _, err := rand.Read(stateBytes); err != nil {
+	// Step 5: Store CSRF state + PKCE
+	state, err := generateOAuthState()
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate state"})
 		return
 	}
-	state := hex.EncodeToString(stateBytes)
 
-	if _, err := h.db.ExecContext(r.Context(),
-		"INSERT INTO oauth_states (state, credential_id, workspace_id, redirect_uri) VALUES (?, ?, ?, ?)",
-		state, credID, workspaceID, redirectURI); err != nil {
+	codeVerifier, codeChallenge, err := generatePKCE()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate PKCE"})
+		return
+	}
+
+	if err := h.storeStateWithPKCE(r.Context(), state, credID, workspaceID, redirectURI, codeVerifier); err != nil {
 		h.logger.Error("store OAuth state", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to store state"})
 		return
 	}
 
-	// Step 6: Build auth URL
-	params := url.Values{
-		"client_id":     {clientID},
-		"redirect_uri":  {redirectURI},
-		"response_type": {"code"},
-		"state":         {state},
-		"access_type":   {"offline"},
-		"prompt":        {"consent"},
-	}
-	if scopes != "" {
-		params.Set("scope", scopes)
-	}
-	fullAuthURL := authURL + "?" + params.Encode()
+	// Step 6: Build auth URL with PKCE
+	fullAuthURL := buildOAuthURL(authURL, clientID, redirectURI, state, codeChallenge, scopes)
 
 	h.logger.Info("OAuth auto-connect ready", "server", req.ServerName, "credential_id", credID)
 
