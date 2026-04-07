@@ -155,9 +155,9 @@ function AgentNodeComponent({ data }: NodeProps) {
       <div className="px-3 py-2.5">
         <div className="flex items-start gap-2.5">
           {/* Avatar */}
-          {d.avatarSeed ? (
+          {(d.avatarSeed || d.agentSlug || d.agentName) ? (
             <img
-              src={getAgentAvatarUrl(d.avatarSeed, d.avatarStyle)}
+              src={getAgentAvatarUrl(d.avatarSeed || d.agentSlug || d.agentName, d.avatarStyle)}
               alt={d.agentName}
               className="w-8 h-8 rounded-lg shrink-0"
             />
