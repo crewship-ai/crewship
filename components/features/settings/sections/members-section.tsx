@@ -2,17 +2,11 @@
 
 import { useState } from "react"
 import { motion } from "motion/react"
-import { Check, ChevronRight, Trash2, X } from "lucide-react"
+import { ChevronRight, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table"
-import {
-  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
-} from "@/components/ui/tooltip"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -60,28 +54,19 @@ const roleCls: Record<string, string> = {
   VIEWER: "bg-white/[0.06] text-muted-foreground border-white/[0.08]",
 }
 
-const permMatrix = [
-  { role: "Owner", perms: [true, true, true, "All", true, true] },
-  { role: "Admin", perms: [true, true, true, "All", true, true] },
-  { role: "Manager", perms: [false, true, "Crew", "Crew", false, false] },
-  { role: "Member", perms: [false, false, false, "Own", false, false] },
-  { role: "Viewer", perms: [false, false, false, false, false, false] },
-] as const
-
-const permHeaders = [
-  "See all crews",
-  "Create agents",
-  "Manage creds",
-  "Audit access",
-  "Manage members",
-  "Billing",
-]
-
 const roleColors: Record<string, string> = {
   Owner: "text-amber-400",
   Admin: "text-blue-400",
   Manager: "text-teal-400",
 }
+
+const roleSummaries: { role: string; summary: string }[] = [
+  { role: "Owner", summary: "All permissions" },
+  { role: "Admin", summary: "All permissions except billing transfer" },
+  { role: "Manager", summary: "Crew-level access, create agents, manage credentials" },
+  { role: "Member", summary: "Own resource access only" },
+  { role: "Viewer", summary: "Read only" },
+]
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -115,6 +100,31 @@ function initials(name: string | null, email: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Row component
+// ---------------------------------------------------------------------------
+
+function Row({ label, description, children, border = true }: {
+  label?: string; description?: string; children: React.ReactNode; border?: boolean
+}) {
+  return (
+    <div className={cn(
+      "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
+      border && "border-b border-white/[0.04] last:border-b-0",
+    )}>
+      {label ? (
+        <div className="shrink-0">
+          <div className="text-[13px] text-foreground">{label}</div>
+          {description && <div className="text-[11px] text-muted-foreground/30 mt-0.5">{description}</div>}
+        </div>
+      ) : (
+        <div className="min-w-0 flex-1" />
+      )}
+      <div className="flex items-center gap-2 min-w-0 justify-end">{children}</div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -126,7 +136,7 @@ export function MembersSection({
   onRefresh,
 }: MembersSectionProps) {
   const [removingId, setRemovingId] = useState<string | null>(null)
-  const [matrixOpen, setMatrixOpen] = useState(false)
+  const [rolesOpen, setRolesOpen] = useState(false)
 
   async function handleRemove(memberId: string) {
     setRemovingId(memberId)
@@ -151,229 +161,162 @@ export function MembersSection({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {/* ------------------------------------------------------------------ */}
-      {/* Members Card                                                        */}
+      {/* Members                                                             */}
       {/* ------------------------------------------------------------------ */}
-      <div className="bg-card border border-white/[0.06] rounded-lg">
-        {/* Top bar */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06]">
+      <div>
+        {/* Section title above card */}
+        <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
-            <h4 className="text-[14px] font-medium text-foreground">Members</h4>
-            <div className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-              <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-              <span className="tabular-nums">{members.length}</span>
-            </div>
+            <h4 className="text-[13px] font-medium text-foreground">Members</h4>
+            <span className="font-mono text-[11px] text-muted-foreground/40 tabular-nums">
+              {members.length}
+            </span>
           </div>
           {canInvite && (
             <InviteMemberDialog workspaceId={workspaceId} onInvited={onRefresh} />
           )}
         </div>
 
-        {/* Members table */}
-        {members.length > 0 && (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-white/[0.06] hover:bg-transparent">
-                  <TableHead className="text-[10px] text-muted-foreground/40 uppercase tracking-wider font-semibold">
-                    Name
-                  </TableHead>
-                  <TableHead className="text-[10px] text-muted-foreground/40 uppercase tracking-wider font-semibold">
-                    Email
-                  </TableHead>
-                  <TableHead className="text-[10px] text-muted-foreground/40 uppercase tracking-wider font-semibold">
-                    Role
-                  </TableHead>
-                  <TableHead className="text-[10px] text-muted-foreground/40 uppercase tracking-wider font-semibold">
-                    Joined
-                  </TableHead>
-                  <TableHead className="text-[10px] text-muted-foreground/40 uppercase tracking-wider font-semibold w-[60px]">
-                    <span className="sr-only">Actions</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {members.map((member) => {
-                  const isSelf = currentUserId === member.user.id
-                  const isOwner = member.role === "OWNER"
+        {/* Members card */}
+        <div className="bg-card border border-white/[0.06] rounded-lg">
+          {members.map((member, idx) => {
+            const isSelf = currentUserId === member.user.id
+            const isOwner = member.role === "OWNER"
+            const isLast = idx === members.length - 1
 
-                  return (
-                    <TableRow
-                      key={member.id}
-                      className="border-white/[0.04] hover:bg-white/[0.02]"
-                    >
-                      {/* Name + avatar */}
-                      <TableCell>
-                        <div className="flex items-center gap-2.5">
-                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/80">
-                            <span className="text-[9px] font-semibold text-primary-foreground leading-none">
-                              {initials(member.user.full_name, member.user.email)}
-                            </span>
-                          </div>
-                          <span className="text-[13px] font-medium text-foreground">
-                            {member.user.full_name ?? "\u2014"}
-                          </span>
-                        </div>
-                      </TableCell>
-
-                      {/* Email */}
-                      <TableCell className="text-[12px] text-muted-foreground font-mono">
+            return (
+              <div
+                key={member.id}
+                className={cn(
+                  "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
+                  !isLast && "border-b border-white/[0.04]",
+                )}
+              >
+                {/* Left: avatar + name + email */}
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/80">
+                    <span className="text-[8px] font-semibold text-primary-foreground leading-none">
+                      {initials(member.user.full_name, member.user.email)}
+                    </span>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[13px] text-foreground truncate">
+                      {member.user.full_name ?? member.user.email}
+                    </div>
+                    {member.user.full_name && (
+                      <div className="text-[11px] text-muted-foreground/30 font-mono truncate mt-0.5">
                         {member.user.email}
-                      </TableCell>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
-                      {/* Role badge (disabled select -- P2) */}
-                      <TableCell>
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button type="button" disabled className="cursor-not-allowed">
-                                <Badge
-                                  variant="outline"
-                                  className={cn(
-                                    "text-[10px] font-medium pointer-events-none",
-                                    roleCls[member.role] ?? "",
-                                  )}
-                                >
-                                  {member.role}
-                                </Badge>
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" sideOffset={4}>
-                              Role editing coming soon (P2)
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </TableCell>
-
-                      {/* Joined */}
-                      <TableCell className="text-[11px] text-muted-foreground/60 font-mono tabular-nums">
-                        {relativeTime(member.created_at)}
-                      </TableCell>
-
-                      {/* Actions */}
-                      <TableCell>
-                        {!isOwner && !isSelf && (
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10"
-                                disabled={removingId === member.id}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                <span className="sr-only">Remove member</span>
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent size="sm">
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Remove member</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  Are you sure you want to remove{" "}
-                                  <span className="font-medium text-foreground">
-                                    {member.user.full_name ?? member.user.email}
-                                  </span>{" "}
-                                  from this workspace? This action cannot be undone.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                  variant="destructive"
-                                  onClick={() => handleRemove(member.id)}
-                                >
-                                  Remove
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                {/* Right: role badge + joined + remove */}
+                <div className="flex items-center gap-3 shrink-0">
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-[10px] font-medium",
+                      roleCls[member.role] ?? "",
+                    )}
+                  >
+                    {member.role}
+                  </Badge>
+                  <span className="text-[11px] text-muted-foreground/40 font-mono tabular-nums w-[52px] text-right">
+                    {relativeTime(member.created_at)}
+                  </span>
+                  <div className="w-7 flex justify-center">
+                    {!isOwner && !isSelf ? (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground/20 hover:text-red-400 hover:bg-red-500/10"
+                            disabled={removingId === member.id}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span className="sr-only">Remove member</span>
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent size="sm">
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Remove member</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Are you sure you want to remove{" "}
+                              <span className="font-medium text-foreground">
+                                {member.user.full_name ?? member.user.email}
+                              </span>{" "}
+                              from this workspace? This action cannot be undone.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              variant="destructive"
+                              onClick={() => handleRemove(member.id)}
+                            >
+                              Remove
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Collapsible Roles & Permissions Matrix                              */}
+      {/* Roles & Permissions (collapsible)                                   */}
       {/* ------------------------------------------------------------------ */}
-      <Collapsible open={matrixOpen} onOpenChange={setMatrixOpen}>
-        <div className="bg-card border border-white/[0.06] rounded-lg">
+      <div>
+        <Collapsible open={rolesOpen} onOpenChange={setRolesOpen}>
+          {/* Section title above card */}
           <CollapsibleTrigger asChild>
             <button
               type="button"
-              className="flex w-full items-center gap-2 px-6 py-3.5 text-left group"
+              className="flex items-center gap-2 mb-3 group"
             >
               <motion.div
-                animate={{ rotate: matrixOpen ? 90 : 0 }}
+                animate={{ rotate: rolesOpen ? 90 : 0 }}
                 transition={{ duration: 0.15 }}
               >
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40" />
               </motion.div>
-              <span className="text-[13px] font-medium text-muted-foreground/60 group-hover:text-muted-foreground transition-colors">
+              <h4 className="text-[13px] font-medium text-muted-foreground/60 group-hover:text-muted-foreground transition-colors">
                 Roles &amp; Permissions
-              </span>
+              </h4>
             </button>
           </CollapsibleTrigger>
 
           <CollapsibleContent>
-            <div className="border-t border-white/[0.06] overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-white/[0.06] hover:bg-transparent">
-                    <TableHead className="w-24 text-[10px] text-muted-foreground/40 uppercase tracking-wider font-semibold">
-                      Role
-                    </TableHead>
-                    {permHeaders.map((h) => (
-                      <TableHead
-                        key={h}
-                        className="text-center text-[10px] text-muted-foreground/40 uppercase tracking-wider font-semibold"
-                      >
-                        {h}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {permMatrix.map((row) => (
-                    <TableRow
-                      key={row.role}
-                      className="border-white/[0.04] hover:bg-white/[0.02]"
-                    >
-                      <TableCell
-                        className={cn(
-                          "text-[12px] font-medium",
-                          roleColors[row.role] ?? "text-muted-foreground",
-                        )}
-                      >
-                        {row.role}
-                      </TableCell>
-                      {row.perms.map((v, i) => (
-                        <TableCell key={i} className="text-center">
-                          {v === true ? (
-                            <Check className="h-3.5 w-3.5 text-emerald-400 mx-auto" />
-                          ) : v === false ? (
-                            <X className="h-3.5 w-3.5 text-muted-foreground/20 mx-auto" />
-                          ) : (
-                            <span className="text-[10px] text-muted-foreground/60 font-mono">
-                              {v}
-                            </span>
-                          )}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="bg-card border border-white/[0.06] rounded-lg">
+              {roleSummaries.map((item, idx) => (
+                <Row
+                  key={item.role}
+                  label={item.role}
+                  border={idx < roleSummaries.length - 1}
+                >
+                  <span
+                    className={cn(
+                      "text-[12px] font-mono",
+                      roleColors[item.role] ?? "text-muted-foreground/40",
+                    )}
+                  >
+                    {item.summary}
+                  </span>
+                </Row>
+              ))}
             </div>
           </CollapsibleContent>
-        </div>
-      </Collapsible>
+        </Collapsible>
+      </div>
     </div>
   )
 }

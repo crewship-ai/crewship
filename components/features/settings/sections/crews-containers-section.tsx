@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Box, ChevronRight, Globe, Save, Shield, Users } from "lucide-react"
+import { Box, Globe, Loader2, Save, Shield, Users } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { toast } from "sonner"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -69,6 +70,39 @@ interface CrewsContainersSectionProps {
   workspaceId: string
 }
 
+function Row({
+  label,
+  description,
+  children,
+  border = true,
+}: {
+  label: string
+  description?: string
+  children: React.ReactNode
+  border?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
+        border && "border-b border-white/[0.04] last:border-b-0",
+      )}
+    >
+      <div className="shrink-0">
+        <div className="text-[13px] text-foreground">{label}</div>
+        {description && (
+          <div className="text-[11px] text-muted-foreground/30 mt-0.5">
+            {description}
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-2 min-w-0 justify-end">
+        {children}
+      </div>
+    </div>
+  )
+}
+
 function buildDraft(crew: CrewData): CrewDraft {
   return {
     container_memory_mb: crew.container_memory_mb ?? 512,
@@ -81,22 +115,32 @@ function buildDraft(crew: CrewData): CrewDraft {
 function hasResourceChanges(draft: CrewDraft, crew: CrewData): boolean {
   const origMemory = crew.container_memory_mb ?? 512
   const origCpus = crew.container_cpus ?? 1
-  return draft.container_memory_mb !== origMemory || draft.container_cpus !== origCpus
+  return (
+    draft.container_memory_mb !== origMemory ||
+    draft.container_cpus !== origCpus
+  )
 }
 
 function hasNetworkChanges(draft: CrewDraft, crew: CrewData): boolean {
   const origMode = crew.network_mode ?? "free"
   const origDomains = crew.allowed_domains ?? ""
-  return draft.network_mode !== origMode || draft.allowed_domains !== origDomains
+  return (
+    draft.network_mode !== origMode || draft.allowed_domains !== origDomains
+  )
 }
 
-export function CrewsContainersSection({ workspaceId }: CrewsContainersSectionProps) {
+export function CrewsContainersSection({
+  workspaceId,
+}: CrewsContainersSectionProps) {
   const [crews, setCrews] = useState<CrewData[]>([])
   const [loading, setLoading] = useState(true)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, CrewDraft>>({})
-  const [savingResources, setSavingResources] = useState<Record<string, boolean>>({})
-  const [savingNetwork, setSavingNetwork] = useState<Record<string, boolean>>({})
+  const [savingResources, setSavingResources] = useState<
+    Record<string, boolean>
+  >({})
+  const [savingNetwork, setSavingNetwork] = useState<Record<string, boolean>>(
+    {},
+  )
 
   const fetchCrews = useCallback(async () => {
     try {
@@ -224,332 +268,331 @@ export function CrewsContainersSection({ workspaceId }: CrewsContainersSectionPr
     )
   }
 
+  if (crews.length === 0) {
+    return (
+      <div className="space-y-5">
+        <div className="text-[11px] font-semibold text-muted-foreground/40 uppercase tracking-wider">
+          Overview
+        </div>
+        <Card className="border-white/[0.06]">
+          <CardContent className="p-0">
+            <div className="p-8">
+              <EmptyState
+                icon={Box}
+                title="No crews yet"
+                description="Create your first crew to get started with agent orchestration"
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-4">
-      {/* Stats strip */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Crews", value: crews.length, color: "bg-blue-500" },
-          { label: "Agents", value: totalAgents, color: "bg-emerald-500" },
-          { label: "Containers", value: crews.length, color: "bg-cyan-500" },
-        ].map(({ label, value, color }) => (
-          <div
-            key={label}
-            className="bg-card border border-white/[0.06] rounded-lg px-4 py-3"
-          >
-            <div className="flex items-center gap-1.5 mb-1">
-              <div className={`w-1.5 h-1.5 rounded-full ${color}`} />
-              <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider font-medium">
-                {label}
+    <div className="space-y-6">
+      {/* Overview section */}
+      <div>
+        <div className="text-[11px] font-semibold text-muted-foreground/40 uppercase tracking-wider mb-2">
+          Overview
+        </div>
+        <Card className="border-white/[0.06]">
+          <CardContent className="p-0">
+            <Row label="Crews">
+              <span className="text-[13px] font-mono tabular-nums text-foreground">
+                <AnimatedNumber value={crews.length} />
               </span>
-            </div>
-            <div className="text-[18px] font-mono font-semibold text-foreground tabular-nums">
-              <AnimatedNumber value={value} />
-            </div>
-          </div>
-        ))}
+            </Row>
+            <Row label="Agents">
+              <span className="text-[13px] font-mono tabular-nums text-foreground">
+                <AnimatedNumber value={totalAgents} />
+              </span>
+            </Row>
+            <Row label="Containers" border={false}>
+              <span className="text-[13px] font-mono tabular-nums text-foreground">
+                <AnimatedNumber value={crews.length} />
+              </span>
+            </Row>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Crew list */}
-      {crews.length === 0 ? (
-        <div className="bg-card border border-white/[0.06] rounded-lg p-8">
-          <EmptyState
-            icon={Box}
-            title="No crews yet"
-            description="Create your first crew to get started with agent orchestration"
-          />
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {crews.map((crew, index) => {
-            const isExpanded = expandedId === crew.id
-            const resolvedColor =
-              (crew.color && crewColorMap[crew.color]) || "#64748b"
-            const draft = drafts[crew.id]
-            const resourceChanged = draft ? hasResourceChanges(draft, crew) : false
-            const networkChanged = draft ? hasNetworkChanges(draft, crew) : false
+      {/* Per-crew sections */}
+      {crews.map((crew, index) => {
+        const resolvedColor =
+          (crew.color && crewColorMap[crew.color]) || "#64748b"
+        const draft = drafts[crew.id]
+        const resourceChanged = draft
+          ? hasResourceChanges(draft, crew)
+          : false
+        const networkChanged = draft ? hasNetworkChanges(draft, crew) : false
+        const hasChanges = resourceChanged || networkChanged
 
-            return (
-              <motion.div
-                key={crew.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.25, delay: index * 0.05 }}
-                className="bg-card border border-white/[0.06] rounded-lg overflow-hidden transition-colors hover:border-white/[0.1]"
-              >
-                {/* Crew header */}
-                <button
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left"
-                  onClick={() =>
-                    setExpandedId(isExpanded ? null : crew.id)
-                  }
-                >
-                  <ChevronRight
+        return (
+          <motion.div
+            key={crew.id}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, delay: index * 0.05 }}
+          >
+            {/* Section title */}
+            <div className="flex items-center gap-2.5 mb-2">
+              <div
+                className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ backgroundColor: resolvedColor }}
+              />
+              <span className="text-[11px] font-semibold text-muted-foreground/40 uppercase tracking-wider">
+                {crew.name}
+              </span>
+              <span className="text-[10px] text-muted-foreground/20 font-mono">
+                {crew.slug}
+              </span>
+            </div>
+
+            <Card className="border-white/[0.06]">
+              <CardContent className="p-0">
+                {/* Agents count */}
+                <Row label="Agents">
+                  <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground/60 font-mono tabular-nums">
+                    <Users className="h-3 w-3" />
+                    {crew._count?.agents ?? 0}
+                  </div>
+                </Row>
+
+                {/* Status */}
+                <Row label="Status">
+                  <Badge
+                    variant="outline"
                     className={cn(
-                      "h-3.5 w-3.5 text-muted-foreground/40 transition-transform duration-150 shrink-0",
-                      isExpanded && "rotate-90",
+                      "text-[9px] font-medium",
+                      (crew.status ?? "active") === "active"
+                        ? "border-emerald-500/30 text-emerald-400"
+                        : "border-white/[0.08] text-muted-foreground/50",
                     )}
-                  />
-                  <div
-                    className="w-3 h-3 rounded-full shrink-0"
-                    style={{ backgroundColor: resolvedColor }}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-medium text-foreground truncate">
-                        {crew.name}
-                      </span>
-                      <span className="text-[11px] text-muted-foreground/40 font-mono">
-                        {crew.slug}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className="flex items-center gap-1 text-[11px] text-muted-foreground/50 font-mono">
-                      <Users className="h-3 w-3" />
-                      <span className="tabular-nums">
-                        {crew._count?.agents ?? 0}
-                      </span>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-[9px] font-medium",
-                        crew.status === "active"
-                          ? "border-emerald-500/30 text-emerald-400"
-                          : "border-white/[0.08] text-muted-foreground/50",
-                      )}
-                    >
-                      {crew.status ?? "active"}
-                    </Badge>
-                  </div>
-                </button>
+                  >
+                    {crew.status ?? "active"}
+                  </Badge>
+                </Row>
 
-                {/* Expanded content */}
-                <AnimatePresence initial={false}>
-                  {isExpanded && draft && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.2, ease: "easeInOut" }}
-                      className="overflow-hidden"
+                {/* Container name */}
+                <Row label="Container name">
+                  <span className="text-[12px] font-mono text-muted-foreground/50">
+                    crewship-team-{crew.slug}
+                  </span>
+                </Row>
+
+                {/* Memory */}
+                {draft && (
+                  <Row label="Memory">
+                    <Select
+                      value={String(draft.container_memory_mb)}
+                      onValueChange={(val) =>
+                        updateDraft(crew.id, {
+                          container_memory_mb: Number(val),
+                        })
+                      }
                     >
-                      <div className="px-4 pb-4 pt-1 border-t border-white/[0.04]">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
-                          {/* Container Resources */}
-                          <div className="bg-white/[0.02] border border-white/[0.04] rounded-md p-3">
-                            <div className="text-[10px] font-semibold text-muted-foreground/25 uppercase tracking-wider mb-3">
-                              Container Resources
+                      <SelectTrigger
+                        size="sm"
+                        className="w-[120px] h-8 bg-white/[0.03] border-white/[0.08] text-[12px]"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MEMORY_OPTIONS.map((opt) => (
+                          <SelectItem
+                            key={opt.value}
+                            value={opt.value}
+                            className="text-[12px]"
+                          >
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Row>
+                )}
+
+                {/* CPUs */}
+                {draft && (
+                  <Row label="CPUs">
+                    <Select
+                      value={String(draft.container_cpus)}
+                      onValueChange={(val) =>
+                        updateDraft(crew.id, {
+                          container_cpus: Number(val),
+                        })
+                      }
+                    >
+                      <SelectTrigger
+                        size="sm"
+                        className="w-[120px] h-8 bg-white/[0.03] border-white/[0.08] text-[12px]"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CPU_OPTIONS.map((opt) => (
+                          <SelectItem
+                            key={opt.value}
+                            value={opt.value}
+                            className="text-[12px]"
+                          >
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Row>
+                )}
+
+                {/* Network mode */}
+                {draft && (
+                  <Row
+                    label="Network mode"
+                    border={
+                      draft.network_mode !== "restricted" && !hasChanges
+                    }
+                  >
+                    <div className="flex gap-0 rounded-md overflow-hidden border border-white/[0.08]">
+                      <button
+                        onClick={() =>
+                          updateDraft(crew.id, { network_mode: "free" })
+                        }
+                        className={cn(
+                          "flex items-center justify-center gap-1.5 h-7 px-3 text-[11px] font-medium transition-colors",
+                          draft.network_mode === "free"
+                            ? "bg-emerald-500/15 text-emerald-400 border-r border-emerald-500/25"
+                            : "bg-white/[0.02] text-muted-foreground/50 border-r border-white/[0.06] hover:bg-white/[0.04]",
+                        )}
+                      >
+                        <Globe className="h-3 w-3" />
+                        Free
+                      </button>
+                      <button
+                        onClick={() =>
+                          updateDraft(crew.id, {
+                            network_mode: "restricted",
+                          })
+                        }
+                        className={cn(
+                          "flex items-center justify-center gap-1.5 h-7 px-3 text-[11px] font-medium transition-colors",
+                          draft.network_mode === "restricted"
+                            ? "bg-amber-500/15 text-amber-400"
+                            : "bg-white/[0.02] text-muted-foreground/50 hover:bg-white/[0.04]",
+                        )}
+                      >
+                        <Shield className="h-3 w-3" />
+                        Restricted
+                      </button>
+                    </div>
+                  </Row>
+                )}
+
+                {/* Allowed domains (restricted only) */}
+                {draft && (
+                  <AnimatePresence initial={false}>
+                    {draft.network_mode === "restricted" && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.15, ease: "easeInOut" }}
+                        className="overflow-hidden"
+                      >
+                        <div
+                          className={cn(
+                            "flex items-start justify-between gap-4 px-5 py-3.5",
+                            hasChanges &&
+                              "border-b border-white/[0.04]",
+                          )}
+                        >
+                          <div className="shrink-0 pt-1.5">
+                            <div className="text-[13px] text-foreground">
+                              Allowed domains
                             </div>
-                            <div className="space-y-3">
-                              {/* Memory */}
-                              <div className="space-y-1">
-                                <label className="text-[11px] text-muted-foreground/50">
-                                  Memory
-                                </label>
-                                <Select
-                                  value={String(draft.container_memory_mb)}
-                                  onValueChange={(val) =>
-                                    updateDraft(crew.id, {
-                                      container_memory_mb: Number(val),
-                                    })
-                                  }
-                                >
-                                  <SelectTrigger
-                                    size="sm"
-                                    className="w-full h-8 bg-white/[0.03] border-white/[0.08] text-[12px]"
-                                  >
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {MEMORY_OPTIONS.map((opt) => (
-                                      <SelectItem
-                                        key={opt.value}
-                                        value={opt.value}
-                                        className="text-[12px]"
-                                      >
-                                        {opt.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-
-                              {/* CPUs */}
-                              <div className="space-y-1">
-                                <label className="text-[11px] text-muted-foreground/50">
-                                  CPUs
-                                </label>
-                                <Select
-                                  value={String(draft.container_cpus)}
-                                  onValueChange={(val) =>
-                                    updateDraft(crew.id, {
-                                      container_cpus: Number(val),
-                                    })
-                                  }
-                                >
-                                  <SelectTrigger
-                                    size="sm"
-                                    className="w-full h-8 bg-white/[0.03] border-white/[0.08] text-[12px]"
-                                  >
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {CPU_OPTIONS.map((opt) => (
-                                      <SelectItem
-                                        key={opt.value}
-                                        value={opt.value}
-                                        className="text-[12px]"
-                                      >
-                                        {opt.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-
-                              {/* Save resources */}
-                              <div className="flex items-center gap-2 pt-1">
-                                {resourceChanged && (
-                                  <motion.button
-                                    initial={{ opacity: 0, scale: 0.95 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.95 }}
-                                    disabled={savingResources[crew.id]}
-                                    onClick={() => saveResources(crew)}
-                                    className="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-[4px] text-[11px] font-medium bg-blue-500/15 border border-blue-500/35 text-blue-400 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
-                                  >
-                                    <Save className="h-3 w-3" />
-                                    {savingResources[crew.id]
-                                      ? "Saving..."
-                                      : "Save"}
-                                  </motion.button>
-                                )}
-                                {resourceChanged && (
-                                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                )}
-                              </div>
+                            <div className="text-[11px] text-muted-foreground/30 mt-0.5">
+                              Comma-separated
                             </div>
                           </div>
+                          <textarea
+                            value={draft.allowed_domains}
+                            onChange={(e) =>
+                              updateDraft(crew.id, {
+                                allowed_domains: e.target.value,
+                              })
+                            }
+                            placeholder="github.com, api.openai.com, registry.npmjs.org"
+                            rows={2}
+                            className="w-[280px] resize-none rounded-md bg-white/[0.03] border border-white/[0.08] text-[12px] text-foreground placeholder:text-muted-foreground/30 px-2.5 py-2 focus:outline-none focus:border-white/[0.15] transition-colors"
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                )}
 
-                          {/* Network & Security */}
-                          <div className="bg-white/[0.02] border border-white/[0.04] rounded-md p-3">
-                            <div className="text-[10px] font-semibold text-muted-foreground/25 uppercase tracking-wider mb-3">
-                              Network & Security
-                            </div>
-                            <div className="space-y-3">
-                              {/* Network mode toggle */}
-                              <div className="space-y-1">
-                                <label className="text-[11px] text-muted-foreground/50">
-                                  Network Mode
-                                </label>
-                                <div className="flex gap-0 rounded-md overflow-hidden border border-white/[0.08]">
-                                  <button
-                                    onClick={() =>
-                                      updateDraft(crew.id, {
-                                        network_mode: "free",
-                                      })
-                                    }
-                                    className={cn(
-                                      "flex-1 flex items-center justify-center gap-1.5 h-8 text-[11px] font-medium transition-colors",
-                                      draft.network_mode === "free"
-                                        ? "bg-emerald-500/15 text-emerald-400 border-r border-emerald-500/25"
-                                        : "bg-white/[0.02] text-muted-foreground/50 border-r border-white/[0.06] hover:bg-white/[0.04]",
-                                    )}
-                                  >
-                                    <Globe className="h-3 w-3" />
-                                    Free
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      updateDraft(crew.id, {
-                                        network_mode: "restricted",
-                                      })
-                                    }
-                                    className={cn(
-                                      "flex-1 flex items-center justify-center gap-1.5 h-8 text-[11px] font-medium transition-colors",
-                                      draft.network_mode === "restricted"
-                                        ? "bg-amber-500/15 text-amber-400"
-                                        : "bg-white/[0.02] text-muted-foreground/50 hover:bg-white/[0.04]",
-                                    )}
-                                  >
-                                    <Shield className="h-3 w-3" />
-                                    Restricted
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* Allowed domains (restricted only) */}
-                              <AnimatePresence initial={false}>
-                                {draft.network_mode === "restricted" && (
-                                  <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: "auto", opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    transition={{
-                                      duration: 0.15,
-                                      ease: "easeInOut",
-                                    }}
-                                    className="overflow-hidden"
-                                  >
-                                    <div className="space-y-1">
-                                      <label className="text-[11px] text-muted-foreground/50">
-                                        Allowed Domains
-                                      </label>
-                                      <textarea
-                                        value={draft.allowed_domains}
-                                        onChange={(e) =>
-                                          updateDraft(crew.id, {
-                                            allowed_domains: e.target.value,
-                                          })
-                                        }
-                                        placeholder="github.com, api.openai.com, registry.npmjs.org"
-                                        rows={3}
-                                        className="w-full resize-none rounded-md bg-white/[0.03] border border-white/[0.08] text-[12px] text-foreground placeholder:text-muted-foreground/30 px-2.5 py-2 focus:outline-none focus:border-white/[0.15] transition-colors"
-                                      />
-                                      <p className="text-[10px] text-muted-foreground/30">
-                                        Comma-separated list of domains the
-                                        container can access
-                                      </p>
-                                    </div>
-                                  </motion.div>
+                {/* Save row */}
+                {draft && (
+                  <AnimatePresence initial={false}>
+                    {hasChanges && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="flex items-center justify-between gap-4 px-5 py-3.5">
+                          <div className="flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            <span className="text-[11px] text-muted-foreground/40">
+                              Unsaved changes
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {resourceChanged && (
+                              <button
+                                disabled={savingResources[crew.id]}
+                                onClick={() => saveResources(crew)}
+                                className="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-[4px] text-[11px] font-medium bg-blue-500/15 border border-blue-500/35 text-blue-400 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
+                              >
+                                {savingResources[crew.id] ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Save className="h-3 w-3" />
                                 )}
-                              </AnimatePresence>
-
-                              {/* Save network */}
-                              <div className="flex items-center gap-2 pt-1">
-                                {networkChanged && (
-                                  <motion.button
-                                    initial={{ opacity: 0, scale: 0.95 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.95 }}
-                                    disabled={savingNetwork[crew.id]}
-                                    onClick={() => saveNetwork(crew)}
-                                    className="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-[4px] text-[11px] font-medium bg-blue-500/15 border border-blue-500/35 text-blue-400 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
-                                  >
-                                    <Save className="h-3 w-3" />
-                                    {savingNetwork[crew.id]
-                                      ? "Saving..."
-                                      : "Save"}
-                                  </motion.button>
+                                {savingResources[crew.id]
+                                  ? "Saving..."
+                                  : "Save Resources"}
+                              </button>
+                            )}
+                            {networkChanged && (
+                              <button
+                                disabled={savingNetwork[crew.id]}
+                                onClick={() => saveNetwork(crew)}
+                                className="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-[4px] text-[11px] font-medium bg-blue-500/15 border border-blue-500/35 text-blue-400 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
+                              >
+                                {savingNetwork[crew.id] ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Save className="h-3 w-3" />
                                 )}
-                                {networkChanged && (
-                                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                )}
-                              </div>
-                            </div>
+                                {savingNetwork[crew.id]
+                                  ? "Saving..."
+                                  : "Save Network"}
+                              </button>
+                            )}
                           </div>
                         </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </motion.div>
-            )
-          })}
-        </div>
-      )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+        )
+      })}
     </div>
   )
 }
