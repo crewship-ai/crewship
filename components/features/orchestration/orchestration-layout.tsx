@@ -188,7 +188,7 @@ export function OrchestrationLayout({
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {/* ---- Top toolbar ---- */}
-      <div className="flex items-center justify-between px-4 py-1.5 border-b border-border bg-card shrink-0 z-20">
+      <div className="flex items-center justify-between px-4 py-1.5 border-b border-white/[0.1] bg-card shrink-0 z-20">
         <div className="flex items-center gap-3">
           <h1 className="text-sm font-semibold text-foreground">Orchestration</h1>
           <nav className="flex items-center gap-0.5 bg-accent/50 rounded-lg p-0.5">
@@ -272,7 +272,7 @@ export function OrchestrationLayout({
       >
         {/* ---- Left panel ---- */}
         <div className={cn(
-          "row-span-1 border-r border-border bg-card flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
+          "row-span-1 border-r border-white/[0.1] bg-card flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
         )}>
           {/* Toggle */}
           <div className="flex items-center justify-between px-2 py-1.5 border-b border-border shrink-0">
@@ -444,7 +444,7 @@ export function OrchestrationLayout({
 
         {/* ---- Bottom drawer ---- */}
         <motion.div
-          className="col-span-3 border-t border-border bg-card flex flex-col overflow-hidden"
+          className="col-span-3 border-t border-white/[0.1] bg-card flex flex-col overflow-hidden"
           animate={{ height: drawerOpen ? 240 : 32 }}
           transition={{ duration: 0.2, ease: "easeInOut" }}
         >
