@@ -235,10 +235,12 @@ func filterMergedMCPConfigNpx(
 	// Build MCPServerConfig slice so we can reuse filterNpxServers.
 	var configs []MCPServerConfig
 	nameOrder := make([]string, 0, len(w.MCPServers))
+	parseFailed := make(map[string]bool)
 	for name, raw := range w.MCPServers {
 		nameOrder = append(nameOrder, name)
 		var entry serverEntry
 		if err := json.Unmarshal(raw, &entry); err != nil {
+			parseFailed[name] = true
 			continue
 		}
 		configs = append(configs, MCPServerConfig{Name: name, Transport: entry.Type, Command: entry.Command})
@@ -252,13 +254,14 @@ func filterMergedMCPConfigNpx(
 	}
 
 	// Build set of kept names and collect skipped names.
+	// Preserve entries that failed to parse — they weren't filtered by npx logic.
 	kept := make(map[string]bool, len(filtered))
 	for _, s := range filtered {
 		kept[s.Name] = true
 	}
 	var skipped []string
 	for _, name := range nameOrder {
-		if !kept[name] {
+		if !kept[name] && !parseFailed[name] {
 			delete(w.MCPServers, name)
 			skipped = append(skipped, name)
 		}
