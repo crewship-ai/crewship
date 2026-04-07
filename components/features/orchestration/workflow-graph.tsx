@@ -161,11 +161,6 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
       if (!crewTasks.has(crewId)) crewTasks.set(crewId, [])
       crewTasks.get(crewId)!.push({ mission, task })
     }
-    if (mission.crew_id) usedCrewIds.add(mission.crew_id)
-  }
-  for (const conn of connections) {
-    if (crewById.has(conn.from_crew_id)) usedCrewIds.add(conn.from_crew_id)
-    if (crewById.has(conn.to_crew_id)) usedCrewIds.add(conn.to_crew_id)
   }
 
   // Collect all dependency info
