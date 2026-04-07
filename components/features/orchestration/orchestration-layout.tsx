@@ -188,17 +188,20 @@ export function OrchestrationLayout({
   }, [missions])
 
   const handleCrewSelect = useCallback((crewId: string) => {
-    setSelectedCrewId(crewId)
     setSelectedAgentSlug(null)
-    const crew = crews.find((c) => c.id === crewId)
-    if (crew) {
-      setDetailContext({
-        type: "crew",
-        crew,
-        agents,
-        connections,
-      })
-    }
+    setSelectedCrewId((prev) => {
+      if (prev === crewId) {
+        // Deselect — close detail panel
+        setDetailContext({ type: "none" })
+        return null
+      }
+      // Select — open crew detail
+      const crew = crews.find((c) => c.id === crewId)
+      if (crew) {
+        setDetailContext({ type: "crew", crew, agents, connections })
+      }
+      return crewId
+    })
   }, [crews, agents, connections])
 
   const handleAgentSelect = useCallback((agentSlug: string) => {

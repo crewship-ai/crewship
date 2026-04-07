@@ -99,10 +99,11 @@ export function HierarchyTree({
             >
               <div
                 className={cn(
-                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors",
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-all duration-200",
                   "hover:bg-accent/50 cursor-pointer",
-                  selectedCrewId === crew.id &&
-                    "bg-accent ring-1 ring-border",
+                  selectedCrewId === crew.id
+                    ? "bg-accent/80 border-l-2 border-l-blue-400 pl-1.5"
+                    : "border-l-2 border-l-transparent",
                 )}
                 onClick={() => onCrewSelect(crew.id)}
               >
@@ -156,10 +157,11 @@ export function HierarchyTree({
                     <button
                       key={agent.id}
                       className={cn(
-                        "w-full flex items-center gap-2 px-2 py-1 rounded-md text-left transition-colors",
+                        "w-full flex items-center gap-2 px-2 py-1 rounded-md text-left transition-all duration-200",
                         "hover:bg-accent/50",
-                        selectedAgentSlug === agent.slug &&
-                          "bg-accent ring-1 ring-border",
+                        selectedAgentSlug === agent.slug
+                          ? "bg-accent/80 border-l-2 border-l-blue-400 pl-1.5"
+                          : "border-l-2 border-l-transparent",
                       )}
                       onClick={() => onAgentSelect(agent.slug)}
                     >
