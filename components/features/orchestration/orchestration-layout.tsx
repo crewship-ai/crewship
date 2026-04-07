@@ -188,7 +188,7 @@ export function OrchestrationLayout({
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-[#0a0c10]">
       {/* ---- Top toolbar ---- */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/[0.06] bg-[#0a0c10]/80 backdrop-blur-sm shrink-0 z-20">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-blue-500/10 bg-gradient-to-r from-[#0d1117] via-[#0d1420] to-[#0d1117] backdrop-blur-sm shrink-0 z-20">
         <div className="flex items-center gap-3">
           <h1 className="text-sm font-semibold text-white/80">Orchestration</h1>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -270,10 +270,10 @@ export function OrchestrationLayout({
       >
         {/* ---- Left panel ---- */}
         <div className={cn(
-          "row-span-1 border-r border-white/[0.06] bg-[#0d0f14] flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
+          "row-span-1 border-r border-blue-500/10 bg-[#0d1117] flex flex-col min-h-0 transition-all duration-200 overflow-hidden",
         )}>
           {/* Toggle */}
-          <div className="flex items-center justify-between px-2 py-1.5 border-b border-white/[0.06] shrink-0">
+          <div className="flex items-center justify-between px-2 py-1.5 border-b border-blue-900/20 shrink-0">
             {!leftCollapsed && (
               <span className="text-[10px] font-semibold text-white/40 uppercase tracking-wider">
                 Explorer
@@ -300,7 +300,7 @@ export function OrchestrationLayout({
                 className="flex-1 min-h-0 flex flex-col"
               >
                 {/* Hierarchy tree */}
-                <div className="border-b border-white/[0.06] shrink-0 max-h-[40%] overflow-y-auto">
+                <div className="border-b border-blue-900/20 shrink-0 max-h-[40%] overflow-y-auto">
                   <HierarchyTree
                     crews={panelCrews}
                     agents={panelAgents}
@@ -312,7 +312,7 @@ export function OrchestrationLayout({
                 </div>
 
                 {/* Unified Inbox */}
-                <div className="border-b border-white/[0.06] flex-1 min-h-0 flex flex-col">
+                <div className="border-b border-blue-900/20 flex-1 min-h-0 flex flex-col">
                   <UnifiedInbox
                     missions={panelMissions}
                     onTaskSelect={handleInboxTaskSelect}
@@ -359,7 +359,7 @@ export function OrchestrationLayout({
                     key={key}
                     className={cn(
                       "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
-                      "bg-[#0d0f14]/90 backdrop-blur-sm border border-white/[0.06]",
+                      "bg-[#0d0f14]/90 backdrop-blur-sm border border-blue-900/20",
                       "transition-all cursor-default",
                       value > 0 && color === "blue" && "border-blue-500/30 text-blue-400",
                       value > 0 && color === "green" && "border-green-500/30 text-green-400",
@@ -442,7 +442,7 @@ export function OrchestrationLayout({
 
         {/* ---- Bottom drawer ---- */}
         <motion.div
-          className="col-span-3 border-t border-white/[0.06] bg-[#0d0f14] flex flex-col overflow-hidden"
+          className="col-span-3 border-t border-blue-500/10 bg-[#0d1117] flex flex-col overflow-hidden"
           animate={{ height: drawerOpen ? 240 : 32 }}
           transition={{ duration: 0.2, ease: "easeInOut" }}
         >
@@ -501,7 +501,7 @@ export function OrchestrationLayout({
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 8 }}
                 transition={{ duration: 0.15 }}
-                className="flex-1 min-h-0 border-t border-white/[0.06]"
+                className="flex-1 min-h-0 border-t border-blue-900/20"
               >
                 {drawerTab === "messages" && (
                   <A2AMessageStream

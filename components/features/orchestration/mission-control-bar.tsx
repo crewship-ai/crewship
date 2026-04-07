@@ -139,7 +139,7 @@ export function MissionControlBar({ mission, workspaceId, onMissionChanged }: Mi
   }, [mission.id, mission.crew_id, workspaceId, onMissionChanged])
 
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-[#0d0f14] p-4">
+    <div className="border-b border-blue-500/10 bg-gradient-to-r from-[#0d1117] via-[#0f1525] to-[#0d1117] px-4 py-3">
       <div className="flex items-center justify-between gap-4">
         {/* Left: mission info */}
         <div className="flex items-center gap-3 min-w-0">
