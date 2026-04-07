@@ -241,7 +241,7 @@ export function MembersSection({
                             <span className="sr-only">Remove member</span>
                           </Button>
                         </AlertDialogTrigger>
-                        <AlertDialogContent size="sm">
+                        <AlertDialogContent>
                           <AlertDialogHeader>
                             <AlertDialogTitle>Remove member</AlertDialogTitle>
                             <AlertDialogDescription>
@@ -255,7 +255,7 @@ export function MembersSection({
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
                             <AlertDialogAction
-                              variant="destructive"
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                               onClick={() => handleRemove(member.id)}
                             >
                               Remove

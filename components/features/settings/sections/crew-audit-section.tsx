@@ -1,17 +1,17 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useState } from "react"
-import { Shield, ChevronRight, Search } from "lucide-react"
+import { useCallback, useEffect, useState } from "react"
+import { Shield, ChevronRight, ChevronLeft, Search } from "lucide-react"
+import { motion, AnimatePresence } from "motion/react"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 
 interface AuditLog {
@@ -75,6 +75,24 @@ function getActionColor(action: string): string {
   return "bg-white/[0.06] text-muted-foreground border-white/[0.08]"
 }
 
+const PAGE_SIZE = 50
+
+function Row({ label, description, children, border = true }: {
+  label?: string; description?: string; children: React.ReactNode; border?: boolean
+}) {
+  return (
+    <div className={cn("flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]", border && "border-b border-white/[0.04] last:border-b-0")}>
+      {label ? (
+        <div className="shrink-0">
+          <div className="text-[13px] text-foreground">{label}</div>
+          {description && <div className="text-[11px] text-muted-foreground/30 mt-0.5">{description}</div>}
+        </div>
+      ) : <div />}
+      <div className="flex items-center gap-2 min-w-0 justify-end">{children}</div>
+    </div>
+  )
+}
+
 interface CrewAuditSectionProps {
   workspaceId: string
 }
@@ -86,11 +104,13 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
   const [category, setCategory] = useState("all")
   const [dateRange, setDateRange] = useState("7d")
   const [searchQuery, setSearchQuery] = useState("")
+  const [page, setPage] = useState(1)
+  const [pagination, setPagination] = useState<AuditResponse["pagination"] | null>(null)
 
   const fetchLogs = useCallback(async () => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ workspace_id: workspaceId })
+      const params = new URLSearchParams({ workspace_id: workspaceId, page: String(page), limit: String(PAGE_SIZE) })
       if (category !== "all") params.set("entity_type", category)
       const dateFrom = getDateFrom(dateRange)
       if (dateFrom) params.set("date_from", dateFrom)
@@ -99,12 +119,15 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       if (res.ok) {
         const data = (await res.json()) as AuditResponse
         setLogs(data.data)
+        setPagination(data.pagination)
       }
     } catch { /* ignore */ }
     finally { setLoading(false) }
-  }, [workspaceId, category, dateRange])
+  }, [workspaceId, category, dateRange, page])
 
   useEffect(() => { fetchLogs() }, [fetchLogs])
+
+  useEffect(() => { setPage(1) }, [category, dateRange])
 
   const filteredLogs = searchQuery
     ? logs.filter(
@@ -115,27 +138,32 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
       )
     : logs
 
+  const total = pagination?.total ?? 0
+  const totalPages = pagination?.total_pages ?? 1
+  const rangeStart = (page - 1) * PAGE_SIZE + 1
+  const rangeEnd = Math.min(page * PAGE_SIZE, total)
+
   return (
     <div className="space-y-4">
       {/* Filter bar */}
       <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-0.5">
+          {categories.map((cat) => (
+            <button
+              key={cat.value}
+              onClick={() => setCategory(cat.value)}
+              className={cn(
+                "h-7 px-2.5 rounded-[4px] text-[11px] font-medium transition-colors",
+                category === cat.value
+                  ? "bg-white/[0.08] text-foreground"
+                  : "text-muted-foreground/50 hover:text-foreground/80 hover:bg-white/[0.03]",
+              )}
+            >
+              {cat.label}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-0.5">
-            {categories.map((cat) => (
-              <button
-                key={cat.value}
-                onClick={() => setCategory(cat.value)}
-                className={cn(
-                  "h-7 px-2.5 rounded-[4px] text-[11px] font-medium transition-colors",
-                  category === cat.value
-                    ? "bg-white/[0.08] text-foreground"
-                    : "text-muted-foreground/60 hover:text-foreground/80 hover:bg-white/[0.03]",
-                )}
-              >
-                {cat.label}
-              </button>
-            ))}
-          </div>
           <Select value={dateRange} onValueChange={setDateRange}>
             <SelectTrigger className="w-[120px] h-7 text-[11px] bg-white/[0.03] border-white/[0.08]">
               <SelectValue />
@@ -146,135 +174,176 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
               ))}
             </SelectContent>
           </Select>
-        </div>
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/40" />
-          <Input
-            placeholder="Search events..."
-            className="pl-8 h-7 text-[11px] w-44 bg-white/[0.03] border-white/[0.08]"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/40" />
+            <Input
+              placeholder="Search events..."
+              className="pl-8 h-7 text-[11px] w-44 bg-white/[0.03] border-white/[0.08]"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
         </div>
       </div>
 
       {/* Content */}
       {loading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-11 rounded-md" />
-          ))}
-        </div>
+        <Card className="border-white/[0.06]">
+          <CardContent className="p-0">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Row key={i} border={i < 4}>
+                <Skeleton className="h-4 w-full" />
+              </Row>
+            ))}
+          </CardContent>
+        </Card>
       ) : filteredLogs.length === 0 ? (
-        <div className="bg-card border border-white/[0.06] rounded-lg p-8">
-          <EmptyState
-            icon={Shield}
-            title="No activity yet"
-            description="All state-changing actions will be logged here."
-          />
-        </div>
+        <Card className="border-white/[0.06]">
+          <CardContent className="p-8">
+            <EmptyState
+              icon={Shield}
+              title="No activity yet"
+              description="All state-changing actions will be logged here."
+            />
+          </CardContent>
+        </Card>
       ) : (
-        <div className="bg-card border border-white/[0.06] rounded-lg overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-white/[0.06] hover:bg-transparent">
-                <TableHead className="w-8" />
-                <TableHead className="text-[10px] text-muted-foreground/50 uppercase tracking-wider font-semibold">Time</TableHead>
-                <TableHead className="text-[10px] text-muted-foreground/50 uppercase tracking-wider font-semibold">User</TableHead>
-                <TableHead className="text-[10px] text-muted-foreground/50 uppercase tracking-wider font-semibold">Action</TableHead>
-                <TableHead className="text-[10px] text-muted-foreground/50 uppercase tracking-wider font-semibold">Entity</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredLogs.map((log) => {
+        <>
+          <Card className="border-white/[0.06] overflow-hidden">
+            <CardContent className="p-0">
+              {filteredLogs.map((log, idx) => {
                 const isExpanded = expandedId === log.id
+                const isLast = idx === filteredLogs.length - 1
                 return (
-                  <Fragment key={log.id}>
-                    <TableRow
+                  <div key={log.id}>
+                    <div
                       className={cn(
-                        "cursor-pointer border-white/[0.04]",
+                        "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px] cursor-pointer transition-colors",
+                        !isLast && !isExpanded && "border-b border-white/[0.04]",
                         isExpanded ? "bg-white/[0.03]" : "hover:bg-white/[0.02]",
                       )}
                       onClick={() => setExpandedId(isExpanded ? null : log.id)}
                     >
-                      <TableCell className="text-muted-foreground/40">
+                      <div className="flex items-center gap-3 min-w-0">
                         <ChevronRight
                           className={cn(
-                            "h-3 w-3 transition-transform duration-150",
+                            "h-3 w-3 shrink-0 text-muted-foreground/40 transition-transform duration-150",
                             isExpanded && "rotate-90",
                           )}
                         />
-                      </TableCell>
-                      <TableCell className="text-[11px] text-muted-foreground/60 font-mono tabular-nums">
-                        {new Date(log.created_at).toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-[12px] text-foreground">
-                        {log.user?.full_name ?? log.user?.email ?? "System"}
-                      </TableCell>
-                      <TableCell>
+                        <span className="text-[11px] text-muted-foreground/50 font-mono tabular-nums shrink-0">
+                          {new Date(log.created_at).toLocaleString()}
+                        </span>
+                        <span className="text-[12px] text-foreground truncate">
+                          {log.user?.full_name ?? log.user?.email ?? "System"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2.5 shrink-0">
                         <Badge
                           variant="outline"
                           className={cn("text-[9px] font-medium", getActionColor(log.action))}
                         >
                           {log.action}
                         </Badge>
-                      </TableCell>
-                      <TableCell className="text-[12px] text-muted-foreground/60">
-                        {log.entity_type}
+                        <span className="text-[12px] text-muted-foreground/60">
+                          {log.entity_type}
+                        </span>
                         {log.entity_id && (
-                          <span className="ml-1 font-mono text-[10px] text-muted-foreground/30">
-                            ({log.entity_id.slice(0, 8)})
+                          <span className="font-mono text-[10px] text-muted-foreground/30">
+                            {log.entity_id.slice(0, 8)}
                           </span>
                         )}
-                      </TableCell>
-                    </TableRow>
-                    {isExpanded && (
-                      <TableRow className="bg-white/[0.02] border-white/[0.04]">
-                        <TableCell />
-                        <TableCell colSpan={4} className="pb-4 pt-2">
-                          <div className="bg-white/[0.02] border border-white/[0.06] rounded-md p-4 max-w-2xl">
-                            <div className="grid grid-cols-2 gap-4 text-[11px] mb-3">
-                              <div>
-                                <span className="text-muted-foreground/50 uppercase tracking-wider text-[10px]">
-                                  IP Address
-                                </span>
-                                <div className="font-mono text-foreground mt-0.5">
-                                  {log.ip_address ?? "\u2014"}
+                      </div>
+                    </div>
+
+                    <AnimatePresence initial={false}>
+                      {isExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.15, ease: "easeInOut" }}
+                          className={cn(
+                            "overflow-hidden bg-white/[0.02]",
+                            !isLast && "border-b border-white/[0.04]",
+                          )}
+                        >
+                          <div className="px-5 py-4 pl-11">
+                            <div className="bg-white/[0.02] border border-white/[0.06] rounded-md p-4 max-w-2xl">
+                              <div className="grid grid-cols-2 gap-4 text-[11px] mb-3">
+                                <div>
+                                  <span className="text-muted-foreground/50 uppercase tracking-wider text-[10px]">
+                                    IP Address
+                                  </span>
+                                  <div className="font-mono text-foreground mt-0.5">
+                                    {log.ip_address ?? "\u2014"}
+                                  </div>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground/50 uppercase tracking-wider text-[10px]">
+                                    User Agent
+                                  </span>
+                                  <div className="font-mono text-foreground mt-0.5 truncate">
+                                    {log.user_agent ?? "\u2014"}
+                                  </div>
                                 </div>
                               </div>
-                              <div>
-                                <span className="text-muted-foreground/50 uppercase tracking-wider text-[10px]">
-                                  User Agent
-                                </span>
-                                <div className="font-mono text-foreground mt-0.5 truncate">
-                                  {log.user_agent ?? "\u2014"}
-                                </div>
+                              {log.metadata && Object.keys(log.metadata).length > 0 && (
+                                <>
+                                  <div className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1.5">
+                                    Metadata
+                                  </div>
+                                  <pre className="bg-white/[0.02] border border-white/[0.06] rounded p-2.5 text-[11px] font-mono text-muted-foreground overflow-auto max-h-28">
+                                    {JSON.stringify(log.metadata, null, 2)}
+                                  </pre>
+                                </>
+                              )}
+                              <div className="flex items-center gap-1.5 mt-3 text-[10px] text-muted-foreground/40">
+                                <Shield className="h-3 w-3" />
+                                This record is immutable.
                               </div>
-                            </div>
-                            {log.metadata && Object.keys(log.metadata).length > 0 && (
-                              <>
-                                <div className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1.5">
-                                  Metadata
-                                </div>
-                                <pre className="bg-white/[0.02] border border-white/[0.06] rounded p-2.5 text-[11px] font-mono text-muted-foreground overflow-auto max-h-28">
-                                  {JSON.stringify(log.metadata, null, 2)}
-                                </pre>
-                              </>
-                            )}
-                            <div className="flex items-center gap-1.5 mt-3 text-[10px] text-muted-foreground/40">
-                              <Shield className="h-3 w-3" />
-                              This record is immutable.
                             </div>
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </Fragment>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                 )
               })}
-            </TableBody>
-          </Table>
-        </div>
+            </CardContent>
+          </Card>
+
+          {/* Pagination */}
+          {total > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-muted-foreground/40">
+                Showing {rangeStart}-{rangeEnd} of {total}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[11px] px-2.5 border-white/[0.08] bg-white/[0.03]"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft className="h-3 w-3 mr-1" />
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-[11px] px-2.5 border-white/[0.08] bg-white/[0.03]"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                  <ChevronRight className="h-3 w-3 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
