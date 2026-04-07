@@ -9,7 +9,6 @@ import {
 } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
@@ -259,40 +258,38 @@ export function OrchestrationLayout({
           </div>
 
           {!leftCollapsed && (
-            <ScrollArea className="flex-1 min-h-0">
-              <div className="flex flex-col">
-                {/* Hierarchy tree */}
-                <div className="border-b border-white/[0.06]">
-                  <HierarchyTree
-                    crews={crews}
-                    agents={agents}
-                    selectedCrewId={selectedCrewId}
-                    selectedAgentSlug={selectedAgentSlug}
-                    onCrewSelect={handleCrewSelect}
-                    onAgentSelect={handleAgentSelect}
-                  />
-                </div>
-
-                {/* Unified Inbox */}
-                <div className="border-b border-white/[0.06] max-h-[280px] overflow-hidden flex flex-col">
-                  <UnifiedInbox
-                    missions={missions}
-                    onTaskSelect={handleInboxTaskSelect}
-                  />
-                </div>
-
-                {/* Connection Map */}
-                <div className="p-2">
-                  <div className="text-[10px] font-semibold text-white/40 uppercase tracking-wider px-1 mb-1">
-                    Connections
-                  </div>
-                  <ConnectionMap
-                    crews={crews}
-                    connections={connections}
-                  />
-                </div>
+            <div className="flex-1 min-h-0 flex flex-col">
+              {/* Hierarchy tree — shrinks if needed */}
+              <div className="border-b border-white/[0.06] shrink-0 max-h-[40%] overflow-y-auto">
+                <HierarchyTree
+                  crews={crews}
+                  agents={agents}
+                  selectedCrewId={selectedCrewId}
+                  selectedAgentSlug={selectedAgentSlug}
+                  onCrewSelect={handleCrewSelect}
+                  onAgentSelect={handleAgentSelect}
+                />
               </div>
-            </ScrollArea>
+
+              {/* Unified Inbox — takes remaining space, scrolls internally */}
+              <div className="border-b border-white/[0.06] flex-1 min-h-0 flex flex-col">
+                <UnifiedInbox
+                  missions={missions}
+                  onTaskSelect={handleInboxTaskSelect}
+                />
+              </div>
+
+              {/* Connection Map — fixed at bottom */}
+              <div className="p-2 shrink-0">
+                <div className="text-[10px] font-semibold text-white/40 uppercase tracking-wider px-1 mb-1">
+                  Connections
+                </div>
+                <ConnectionMap
+                  crews={crews}
+                  connections={connections}
+                />
+              </div>
+            </div>
           )}
         </div>
 
