@@ -369,6 +369,7 @@ type updateCrewRequest struct {
 	AvatarStyle       *string   `json:"avatar_style"`
 	ContainerMemoryMB *int      `json:"container_memory_mb"`
 	ContainerCPUs     *float64  `json:"container_cpus"`
+	ContainerTTLHours *int      `json:"container_ttl_hours"`
 	NetworkMode       *string   `json:"network_mode"`
 	AllowedDomains    *[]string `json:"allowed_domains"`
 	MCPConfigJSON     *string   `json:"mcp_config_json"`
@@ -473,6 +474,14 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.ContainerCPUs != nil {
 		query += ", container_cpus = ?"
 		args = append(args, *req.ContainerCPUs)
+	}
+	if req.ContainerTTLHours != nil {
+		if *req.ContainerTTLHours == 0 {
+			query += ", container_ttl_hours = NULL"
+		} else {
+			query += ", container_ttl_hours = ?"
+			args = append(args, *req.ContainerTTLHours)
+		}
 	}
 	if req.MCPConfigJSON != nil {
 		if *req.MCPConfigJSON != "" {
