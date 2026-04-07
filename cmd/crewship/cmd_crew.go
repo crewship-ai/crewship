@@ -758,7 +758,7 @@ func init() {
 	crewUpdateCmd.Flags().String("icon", "", "Emoji icon")
 	crewUpdateCmd.Flags().Int("memory-mb", 0, "Container memory limit in MB")
 	crewUpdateCmd.Flags().Float64("cpus", 0, "Container CPU limit")
-	crewUpdateCmd.Flags().Int("ttl", 0, "Auto-stop after idle hours (0 = disable TTL)")
+	crewUpdateCmd.Flags().Int("ttl", -1, "Auto-stop after idle hours (0 = disable TTL)")
 	crewUpdateCmd.Flags().String("network-mode", "", "Network policy mode: free or restricted")
 	crewUpdateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode")
 
