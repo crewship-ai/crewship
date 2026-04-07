@@ -33,6 +33,7 @@
     "@codemirror/state": "^6.6.0",
     "@codemirror/theme-one-dark": "^6.1.3",
     "@codemirror/view": "^6.40.0",
+    "@dagrejs/dagre": "^3.0.0",
     "@dicebear/adventurer": "^9.4.2",
     "@dicebear/avataaars": "^9.4.2",
     "@dicebear/big-smile": "^9.4.2",

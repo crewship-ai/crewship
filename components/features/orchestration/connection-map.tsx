@@ -27,128 +27,138 @@ export interface ConnectionMapProps {
 }
 
 const NODE_RADIUS = 10
-const PADDING_X = 24
-const LABEL_OFFSET = 18
-const SVG_HEIGHT = 120
+const SVG_WIDTH = 200
+const SVG_HEIGHT = 140
+const LABEL_PUSH = 18
 
-export function ConnectionMap({
-  crews,
-  connections,
-  onConnectionClick,
-}: ConnectionMapProps) {
-  const layout = useMemo(() => {
-    if (crews.length === 0) return { positions: new Map<string, number>(), width: 0 }
+interface NodePos {
+  cx: number
+  cy: number
+  angle: number
+}
 
-    const spacing = crews.length === 1 ? 0 : 1 / (crews.length - 1)
-    const positions = new Map<string, number>()
-    crews.forEach((crew, i) => {
-      positions.set(crew.id, crews.length === 1 ? 0.5 : i * spacing)
+function computePositions(crews: CrewSummary[]): Map<string, NodePos> {
+  const positions = new Map<string, NodePos>()
+  const centerX = SVG_WIDTH / 2
+  const centerY = SVG_HEIGHT / 2
+  const count = crews.length
+
+  if (count === 1) {
+    positions.set(crews[0].id, { cx: centerX, cy: centerY, angle: -Math.PI / 2 })
+    return positions
+  }
+
+  if (count === 2) {
+    positions.set(crews[0].id, { cx: centerX - 50, cy: centerY, angle: Math.PI })
+    positions.set(crews[1].id, { cx: centerX + 50, cy: centerY, angle: 0 })
+    return positions
+  }
+
+  const radius = Math.min(SVG_WIDTH, SVG_HEIGHT) * 0.28
+  crews.forEach((crew, i) => {
+    const angle = i * (2 * Math.PI / count) - Math.PI / 2
+    positions.set(crew.id, {
+      cx: centerX + radius * Math.cos(angle),
+      cy: centerY + radius * Math.sin(angle),
+      angle,
     })
-    return { positions, width: crews.length }
-  }, [crews])
+  })
+  return positions
+}
+
+function textAnchorForAngle(angle: number): "start" | "middle" | "end" {
+  const deg = ((angle * 180) / Math.PI + 360) % 360
+  if (deg > 110 && deg < 250) return "end"
+  if (deg < 70 || deg > 290) return "start"
+  return "middle"
+}
+
+function truncate(name: string, max = 12): string {
+  return name.length > max ? name.slice(0, max - 1) + "\u2026" : name
+}
+
+export function ConnectionMap({ crews, connections, onConnectionClick }: ConnectionMapProps) {
+  const positions = useMemo(() => computePositions(crews), [crews])
 
   if (crews.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[120px] text-xs text-white/20">
+      <div className="flex items-center justify-center h-[140px] text-xs text-white/20">
         No connections
       </div>
     )
   }
 
-  if (connections.length === 0 && crews.length > 0) {
+  const renderNodes = (crewList: CrewSummary[]) =>
+    crewList.map((crew) => {
+      const pos = positions.get(crew.id)
+      if (!pos) return null
+      const fill = resolveColor(crew.color)
+      const lx = pos.cx + LABEL_PUSH * Math.cos(pos.angle)
+      const ly = pos.cy + LABEL_PUSH * Math.sin(pos.angle)
+      const anchor = crews.length <= 2 ? "middle" : textAnchorForAngle(pos.angle)
+      const labelY = crews.length <= 2 ? pos.cy + LABEL_PUSH : ly + 3
+
+      return (
+        <g key={crew.id}>
+          <circle cx={pos.cx} cy={pos.cy} r={NODE_RADIUS + 3} fill="none" stroke={fill} strokeWidth={0.5} opacity={0.3} />
+          <circle cx={pos.cx} cy={pos.cy} r={NODE_RADIUS} fill={fill} opacity={0.8} />
+          <text
+            x={crews.length <= 2 ? pos.cx : lx}
+            y={labelY}
+            textAnchor={anchor}
+            className="fill-white/40"
+            fontSize={8}
+          >
+            {truncate(crew.name)}
+          </text>
+        </g>
+      )
+    })
+
+  if (connections.length === 0) {
     return (
       <div className="space-y-2">
-        <svg
-          viewBox={`0 0 200 ${SVG_HEIGHT}`}
-          className="w-full"
-          style={{ height: SVG_HEIGHT }}
-        >
-          {crews.map((crew, i) => {
-            const cx = PADDING_X + ((200 - PADDING_X * 2) * (crews.length === 1 ? 0.5 : i / Math.max(crews.length - 1, 1)))
-            const cy = SVG_HEIGHT / 2 - 8
-            const fill = resolveColor(crew.color)
-            return (
-              <g key={crew.id}>
-                <circle cx={cx} cy={cy} r={NODE_RADIUS} fill={fill} opacity={0.8} />
-                <text
-                  x={cx}
-                  y={cy + LABEL_OFFSET}
-                  textAnchor="middle"
-                  className="fill-white/40"
-                  fontSize={8}
-                >
-                  {crew.name.length > 10 ? crew.name.slice(0, 9) + "\u2026" : crew.name}
-                </text>
-              </g>
-            )
-          })}
+        <svg viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`} className="w-full" style={{ height: SVG_HEIGHT }}>
+          {renderNodes(crews)}
         </svg>
         <div className="text-center text-[10px] text-white/20">No connections</div>
       </div>
     )
   }
 
-  const svgWidth = 200
-
   return (
-    <svg
-      viewBox={`0 0 ${svgWidth} ${SVG_HEIGHT}`}
-      className="w-full"
-      style={{ height: SVG_HEIGHT }}
-    >
+    <svg viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`} className="w-full" style={{ height: SVG_HEIGHT }}>
       <defs>
-        <marker
-          id="arrow-bi"
-          viewBox="0 0 6 6"
-          refX={3}
-          refY={3}
-          markerWidth={6}
-          markerHeight={6}
-          orient="auto-start-reverse"
-        >
+        <marker id="arrow-bi" viewBox="0 0 6 6" refX={3} refY={3} markerWidth={6} markerHeight={6} orient="auto-start-reverse">
           <path d="M0,0 L6,3 L0,6 Z" fill="#06b6d4" />
         </marker>
-        <marker
-          id="arrow-uni"
-          viewBox="0 0 6 6"
-          refX={6}
-          refY={3}
-          markerWidth={6}
-          markerHeight={6}
-          orient="auto"
-        >
+        <marker id="arrow-uni" viewBox="0 0 6 6" refX={6} refY={3} markerWidth={6} markerHeight={6} orient="auto">
           <path d="M0,0 L6,3 L0,6 Z" fill="#f59e0b" />
         </marker>
       </defs>
 
-      {/* Connection lines */}
       {connections.map((conn) => {
-        const fromT = layout.positions.get(conn.from_crew_id)
-        const toT = layout.positions.get(conn.to_crew_id)
-        if (fromT === undefined || toT === undefined) return null
+        const from = positions.get(conn.from_crew_id)
+        const to = positions.get(conn.to_crew_id)
+        if (!from || !to) return null
 
-        const usable = svgWidth - PADDING_X * 2
-        const x1 = PADDING_X + usable * fromT
-        const x2 = PADDING_X + usable * toT
-        const cy = SVG_HEIGHT / 2 - 8
         const isBi = conn.direction === "bidirectional"
         const stroke = isBi ? "#06b6d4" : "#f59e0b"
-
-        // Curve the line slightly above the nodes
-        const mx = (x1 + x2) / 2
-        const curveY = cy - 20
+        const mx = (from.cx + to.cx) / 2
+        const my = (from.cy + to.cy) / 2
+        const cx = SVG_WIDTH / 2
+        const cy = SVG_HEIGHT / 2
+        const pullX = mx + (cx - mx) * 0.4
+        const pullY = my + (cy - my) * 0.4
 
         return (
           <g
             key={conn.id}
-            className={cn(
-              "cursor-pointer",
-              onConnectionClick && "hover:opacity-80",
-            )}
+            className={cn("cursor-pointer", onConnectionClick && "hover:opacity-80")}
             onClick={() => onConnectionClick?.(conn)}
           >
             <path
-              d={`M${x1},${cy} Q${mx},${curveY} ${x2},${cy}`}
+              d={`M${from.cx},${from.cy} Q${pullX},${pullY} ${to.cx},${to.cy}`}
               fill="none"
               stroke={stroke}
               strokeWidth={1.5}
@@ -157,9 +167,8 @@ export function ConnectionMap({
               markerEnd={isBi ? "url(#arrow-bi)" : "url(#arrow-uni)"}
               markerStart={isBi ? "url(#arrow-bi)" : undefined}
             />
-            {/* Invisible wider hit area */}
             <path
-              d={`M${x1},${cy} Q${mx},${curveY} ${x2},${cy}`}
+              d={`M${from.cx},${from.cy} Q${pullX},${pullY} ${to.cx},${to.cy}`}
               fill="none"
               stroke="transparent"
               strokeWidth={12}
@@ -168,46 +177,7 @@ export function ConnectionMap({
         )
       })}
 
-      {/* Crew nodes */}
-      {crews.map((crew) => {
-        const t = layout.positions.get(crew.id) ?? 0
-        const usable = svgWidth - PADDING_X * 2
-        const cx = PADDING_X + usable * t
-        const cy = SVG_HEIGHT / 2 - 8
-        const fill = resolveColor(crew.color)
-        const label =
-          crew.name.length > 10 ? crew.name.slice(0, 9) + "\u2026" : crew.name
-
-        return (
-          <g key={crew.id}>
-            <circle
-              cx={cx}
-              cy={cy}
-              r={NODE_RADIUS}
-              fill={fill}
-              opacity={0.8}
-            />
-            <circle
-              cx={cx}
-              cy={cy}
-              r={NODE_RADIUS + 3}
-              fill="none"
-              stroke={fill}
-              strokeWidth={0.5}
-              opacity={0.3}
-            />
-            <text
-              x={cx}
-              y={cy + LABEL_OFFSET}
-              textAnchor="middle"
-              className="fill-white/40"
-              fontSize={8}
-            >
-              {label}
-            </text>
-          </g>
-        )
-      })}
+      {renderNodes(crews)}
     </svg>
   )
 }
