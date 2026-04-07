@@ -95,6 +95,37 @@ export function OrchestrationLayout({
     failed: missions.filter((m) => m.status === "FAILED").length,
   }), [missions])
 
+  // Left panel filtered by selected mission
+  const panelCrews = useMemo(() => {
+    if (selectedMissionId === "all") return crews
+    const mission = missions.find((m) => m.id === selectedMissionId)
+    if (!mission) return crews
+    const crewIds = new Set<string>()
+    crewIds.add(mission.crew_id)
+    for (const task of mission.tasks || []) {
+      const agent = agents.find((a) => a.slug === task.agent_slug)
+      if (agent?.crew_id) crewIds.add(agent.crew_id)
+    }
+    return crews.filter((c) => crewIds.has(c.id))
+  }, [selectedMissionId, missions, crews, agents])
+
+  const panelAgents = useMemo(() => {
+    if (selectedMissionId === "all") return agents
+    const crewIds = new Set(panelCrews.map((c) => c.id))
+    return agents.filter((a) => a.crew_id && crewIds.has(a.crew_id))
+  }, [selectedMissionId, panelCrews, agents])
+
+  const panelConnections = useMemo(() => {
+    if (selectedMissionId === "all") return connections
+    const crewIds = new Set(panelCrews.map((c) => c.id))
+    return connections.filter((c) => crewIds.has(c.from_crew_id) && crewIds.has(c.to_crew_id))
+  }, [selectedMissionId, panelCrews, connections])
+
+  const panelMissions = useMemo(() => {
+    if (selectedMissionId === "all") return missions
+    return missions.filter((m) => m.id === selectedMissionId)
+  }, [selectedMissionId, missions])
+
   // Handlers
   const handleNodeClick = useCallback((task: MissionTask) => {
     setSelectedTask(task)
@@ -262,8 +293,8 @@ export function OrchestrationLayout({
               {/* Hierarchy tree — shrinks if needed */}
               <div className="border-b border-white/[0.06] shrink-0 max-h-[40%] overflow-y-auto">
                 <HierarchyTree
-                  crews={crews}
-                  agents={agents}
+                  crews={panelCrews}
+                  agents={panelAgents}
                   selectedCrewId={selectedCrewId}
                   selectedAgentSlug={selectedAgentSlug}
                   onCrewSelect={handleCrewSelect}
@@ -274,7 +305,7 @@ export function OrchestrationLayout({
               {/* Unified Inbox — takes remaining space, scrolls internally */}
               <div className="border-b border-white/[0.06] flex-1 min-h-0 flex flex-col">
                 <UnifiedInbox
-                  missions={missions}
+                  missions={panelMissions}
                   onTaskSelect={handleInboxTaskSelect}
                 />
               </div>
@@ -285,8 +316,8 @@ export function OrchestrationLayout({
                   Connections
                 </div>
                 <ConnectionMap
-                  crews={crews}
-                  connections={connections}
+                  crews={panelCrews}
+                  connections={panelConnections}
                 />
               </div>
             </div>
