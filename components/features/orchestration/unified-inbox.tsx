@@ -12,7 +12,6 @@ import {
 } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Collapsible,
   CollapsibleContent,
@@ -183,8 +182,8 @@ export function UnifiedInbox({
         <CountBadge count={total} />
       </div>
 
-      {/* Content */}
-      <ScrollArea className="flex-1">
+      {/* Content — native scroll, Radix ScrollArea doesn't work with flex-1 */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="p-2 space-y-0.5">
           <InboxSection
             label="Approvals"
@@ -217,7 +216,7 @@ export function UnifiedInbox({
             </div>
           )}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   )
 }
