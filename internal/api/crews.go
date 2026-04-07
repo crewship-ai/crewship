@@ -121,6 +121,7 @@ type crewResponse struct {
 	AvatarStyle       *string          `json:"avatar_style"`
 	ContainerMemoryMB int              `json:"container_memory_mb"`
 	ContainerCPUs     float64          `json:"container_cpus"`
+	ContainerTTLHours *int             `json:"container_ttl_hours"`
 	NetworkMode       string           `json:"network_mode"`
 	AllowedDomains    []string         `json:"allowed_domains"`
 	MCPConfigJSON     *string          `json:"mcp_config_json,omitempty"`
@@ -139,7 +140,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
@@ -161,7 +162,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		var allowedDomainsJSON *string
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 			&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-			&c.NetworkMode, &allowedDomainsJSON,
+			&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON,
 			&c.MCPConfigJSON, &c.EscalationConfig,
 			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
 			h.logger.Error("scan crew", "error", err)
@@ -334,7 +335,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var allowedDomainsJSON *string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
@@ -587,7 +588,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var updatedDomainsJSON *string
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
@@ -596,7 +597,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		WHERE c.id = ? AND c.deleted_at IS NULL
 	`, crewID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.NetworkMode, &updatedDomainsJSON,
+		&c.ContainerTTLHours, &c.NetworkMode, &updatedDomainsJSON,
 		&c.MCPConfigJSON, &c.EscalationConfig,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
