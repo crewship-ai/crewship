@@ -1061,12 +1061,11 @@ ALTER TABLE mission_tasks ADD COLUMN approved_at TEXT;
 ALTER TABLE crews ADD COLUMN escalation_config TEXT;
 `
 
-<<<<<<< HEAD
 const migrationAddPKCECodeVerifier = `
 ALTER TABLE oauth_states ADD COLUMN code_verifier TEXT NOT NULL DEFAULT '';
-=======
+`
+
 const migrationAddCrewMessagingAndAudit = `
--- Cross-crew messages delivered via sidecar → crewshipd → sidecar.
 CREATE TABLE IF NOT EXISTS crew_messages (
 	id TEXT PRIMARY KEY,
 	workspace_id TEXT NOT NULL,
@@ -1081,7 +1080,6 @@ CREATE TABLE IF NOT EXISTS crew_messages (
 CREATE INDEX IF NOT EXISTS idx_crew_msg_to ON crew_messages(to_crew_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_crew_msg_from ON crew_messages(from_crew_id, created_at);
 
--- Audit log for cross-crew operations (messages, files, connection changes).
 CREATE TABLE IF NOT EXISTS crew_audit_log (
 	id TEXT PRIMARY KEY,
 	workspace_id TEXT NOT NULL,
@@ -1094,7 +1092,6 @@ CREATE TABLE IF NOT EXISTS crew_audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_crew_audit_ws ON crew_audit_log(workspace_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_crew_audit_crew ON crew_audit_log(from_crew_id, created_at);
->>>>>>> 058f210 (feat: cross-crew messaging and file sharing via sidecar API (CRE-105))
 `
 
 const migrationAddOAuthCredentials = `
