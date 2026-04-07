@@ -128,7 +128,7 @@ export function AppSidebar() {
 
       <SidebarContent>
         {navSections.map((section) => (
-          <SidebarGroup key={section.label} className="px-2 py-1">
+          <SidebarGroup key={section.label} className="px-2 py-1 group-data-[collapsible=icon]:px-1 group-data-[collapsible=icon]:py-0.5">
             <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
