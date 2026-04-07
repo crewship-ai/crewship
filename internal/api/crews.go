@@ -344,7 +344,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
 	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.NetworkMode, &allowedDomainsJSON,
+		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON,
 		&c.MCPConfigJSON, &c.EscalationConfig,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
