@@ -22,6 +22,7 @@ import { DangerSection } from "./sections/danger-section"
 import { CrewsContainersSection } from "./sections/crews-containers-section"
 import { ConnectionsSection } from "./sections/connections-section"
 import { CrewAuditSection } from "./sections/crew-audit-section"
+import { ApiTokensSection } from "./sections/api-tokens-section"
 import { Phase2Section } from "./sections/phase2-section"
 
 interface Org {
@@ -42,6 +43,7 @@ interface Member {
 // Section titles for the content area header
 const sectionTitles: Record<string, { title: string; description?: string }> = {
   profile: { title: "Profile", description: "Your account details" },
+  tokens: { title: "API Tokens", description: "Manage CLI authentication tokens" },
   crews: { title: "Crews & Containers", description: "Manage crews and their container configuration" },
   connections: { title: "Connections", description: "Cross-crew communication links" },
   audit: { title: "Audit Log", description: "Track workspace activity" },
@@ -152,6 +154,9 @@ export function SettingsLayout() {
           onSignOut={() => signOut().then(() => { window.location.href = "/login" })}
         />
       )
+    }
+    if (activeTab === "tokens" && workspaceId) {
+      return <ApiTokensSection workspaceId={workspaceId} />
     }
     if (activeTab === "crews" && workspaceId) {
       return <CrewsContainersSection workspaceId={workspaceId} />

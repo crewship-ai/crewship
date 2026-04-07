@@ -1,9 +1,8 @@
 "use client"
 
 import {
-  User, Palette, Bell, Shield, Building, Users, CreditCard,
+  User, Shield, Building, Users, CreditCard,
   AlertTriangle, Key, Box, Link2, Activity,
-  MessageSquare,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
@@ -26,10 +25,7 @@ const sections: NavSection[] = [
     label: "Account",
     items: [
       { key: "profile", label: "Profile", icon: User },
-      { key: "chats", label: "Chats", icon: MessageSquare, badge: "P2" },
-      { key: "appearance", label: "Appearance", icon: Palette, badge: "P2" },
-      { key: "notifications", label: "Notifications", icon: Bell, badge: "P2" },
-      { key: "tokens", label: "API Tokens", icon: Key, badge: "P2" },
+      { key: "tokens", label: "API Tokens", icon: Key },
     ],
   },
   {
