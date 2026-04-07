@@ -394,7 +394,9 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 	}
 
 	// Chown to agent user (1001:1001) so container can read it.
-	_ = os.Chown(absPath, 1001, 1001)
+	if err := os.Chown(absPath, 1001, 1001); err != nil {
+		h.logger.Warn("chown uploaded file failed", "path", absPath, "error", err)
+	}
 
 	h.logAudit(r, "", "file_written", requesterCrewID, targetCrewID, "", map[string]string{
 		"path":          destPath,
