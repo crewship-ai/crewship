@@ -150,10 +150,17 @@ export function OrchestrationLayout({
   }, [selectedMissionId, missions, crews, agents])
 
   const panelAgents = useMemo(() => {
-    if (selectedMissionId === "all") return agents
-    const crewIds = new Set(panelCrews.map((c) => c.id))
-    return agents.filter((a) => a.crew_id && crewIds.has(a.crew_id))
-  }, [selectedMissionId, panelCrews, agents])
+    // Only show agents that have tasks in the visible missions
+    const activeSlugs = new Set<string>()
+    const visibleMissions = selectedMissionId === "all" ? missions : missions.filter((m) => m.id === selectedMissionId)
+    for (const m of visibleMissions) {
+      for (const t of m.tasks || []) {
+        if (t.agent_slug) activeSlugs.add(t.agent_slug)
+      }
+    }
+    if (activeSlugs.size === 0) return agents // fallback: show all if no missions
+    return agents.filter((a) => activeSlugs.has(a.slug))
+  }, [selectedMissionId, missions, agents])
 
   const panelConnections = useMemo(() => {
     if (selectedMissionId === "all") return connections
