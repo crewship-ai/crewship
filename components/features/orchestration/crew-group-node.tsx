@@ -49,7 +49,7 @@ function CrewGroupNodeInner({ data, id }: NodeProps) {
 
   return (
     <div
-      className="rounded-xl border-2 overflow-hidden"
+      className="rounded-xl border-2 overflow-hidden w-full h-full"
       style={{
         borderColor: `${accent}50`,
         background: `linear-gradient(180deg, ${accent}10 0%, rgba(13, 15, 20, 0.85) 60px)`,
