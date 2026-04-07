@@ -331,7 +331,12 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		"SELECT credential_id, workspace_id, redirect_uri, code_verifier FROM oauth_states WHERE state = ?", state).
 		Scan(&credentialID, &workspaceID, &redirectURI, &codeVerifier)
 	if err != nil {
-		http.Error(w, "Invalid or expired state token", http.StatusBadRequest)
+		if err == sql.ErrNoRows {
+			http.Error(w, "Invalid or expired state token", http.StatusBadRequest)
+		} else {
+			h.logger.Error("query oauth_states", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
 		return
 	}
 

@@ -520,7 +520,7 @@ export default function IntegrationsPage() {
       if (!res.ok) {
         const d = await res.json().catch(() => null)
         toast.error(d?.error ?? "Failed to create server")
-        return
+        throw new Error(d?.error ?? "Failed to create server")
       }
       const created = await res.json().catch(() => null)
       toast.success(`"${payload.display_name ?? payload.name}" added`)
@@ -532,8 +532,11 @@ export default function IntegrationsPage() {
         // Fallback: expand by name match
         setExpandedId(null)
       }
-    } catch {
-      toast.error("Network error")
+    } catch (err) {
+      if (!(err instanceof Error && err.message.includes("Failed to create"))) {
+        toast.error("Network error")
+      }
+      throw err
     }
   }
 
@@ -922,8 +925,13 @@ function TestConnectionButton({
         `/api/v1/crews/${crewId}/integrations/${serverId}/test?workspace_id=${workspaceId}`,
         { method: "POST" },
       )
-      const data: TestResult = await res.json()
-      setResult(data)
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null)
+        setResult({ status: "error", message: errData?.error || `HTTP ${res.status}` })
+      } else {
+        const data: TestResult = await res.json()
+        setResult(data)
+      }
 
       timerRef.current = setTimeout(() => {
         setResult(null)

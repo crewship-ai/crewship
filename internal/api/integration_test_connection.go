@@ -232,8 +232,27 @@ func testStreamableHTTPConnection(ctx context.Context, endpoint string) testConn
 			}
 		}
 
-		// SSE response: validate Content-Type or presence of SSE framing
+		// SSE response: validate Content-Type or presence of SSE framing,
+		// and check for JSON-RPC errors in the SSE data.
 		if strings.Contains(contentType, "text/event-stream") || looksLikeSSE(respBody) {
+			// Try to parse SSE data lines for JSON-RPC error responses
+			var sseRPC struct {
+				Error *struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			for _, line := range strings.Split(string(respBody), "\n") {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "data:") {
+					data := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+					if json.Unmarshal([]byte(data), &sseRPC) == nil && sseRPC.Error != nil {
+						return testConnectionResponse{
+							Status:  "error",
+							Message: fmt.Sprintf("Server returned JSON-RPC error: %s", sseRPC.Error.Message),
+						}
+					}
+				}
+			}
 			return testConnectionResponse{
 				Status:  "ok",
 				Message: "Server responded with SSE stream",
