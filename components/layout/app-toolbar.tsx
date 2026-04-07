@@ -78,14 +78,11 @@ const pageConfig: Record<string, { title: string }> = {
 
 const settingsTabTitles: Record<string, string> = {
   profile: "Profile",
+  general: "General",
   crews: "Crews & Containers",
   connections: "Connections",
-  audit: "Audit Log",
-  general: "General",
   members: "Members",
-  roles: "Roles & Permissions",
-  billing: "Billing & Usage",
-  danger: "Danger Zone",
+  audit: "Audit Log",
 }
 
 function getInitials(name: string): string {

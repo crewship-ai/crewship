@@ -16,13 +16,9 @@ import { SettingsNav } from "./settings-nav"
 import { ProfileSection } from "./sections/profile-section"
 import { GeneralSection } from "./sections/general-section"
 import { MembersSection } from "./sections/members-section"
-import { RolesSection } from "./sections/roles-section"
-import { BillingSection } from "./sections/billing-section"
-import { DangerSection } from "./sections/danger-section"
 import { CrewsContainersSection } from "./sections/crews-containers-section"
 import { ConnectionsSection } from "./sections/connections-section"
 import { CrewAuditSection } from "./sections/crew-audit-section"
-import { Phase2Section } from "./sections/phase2-section"
 
 interface Org {
   id: string
@@ -42,14 +38,11 @@ interface Member {
 // Section titles for the content area header
 const sectionTitles: Record<string, { title: string; description?: string }> = {
   profile: { title: "Profile", description: "Your account details" },
-  crews: { title: "Crews & Containers", description: "Manage crews and their container configuration" },
+  general: { title: "General", description: "Workspace identity, usage and settings" },
+  crews: { title: "Crews & Containers", description: "Manage crews, resources and network policies" },
   connections: { title: "Connections", description: "Cross-crew communication links" },
+  members: { title: "Members", description: "Team members and permissions" },
   audit: { title: "Audit Log", description: "Track workspace activity" },
-  general: { title: "General", description: "Workspace identity and preferences" },
-  members: { title: "Members", description: "Manage workspace members" },
-  roles: { title: "Roles & Permissions", description: "Permission matrix reference" },
-  billing: { title: "Billing & Usage", description: "Workspace resource usage" },
-  danger: { title: "Danger Zone", description: "Irreversible workspace actions" },
 }
 
 export function SettingsLayout() {
@@ -163,21 +156,33 @@ export function SettingsLayout() {
       return <CrewAuditSection workspaceId={workspaceId} />
     }
     if (activeTab === "general" && org && workspaceId) {
-      return <GeneralSection workspaceId={workspaceId} orgName={org.name} orgSlug={org.slug} preferredLanguage={org.preferred_language} onUpdated={handleOrgUpdated} />
+      return (
+        <GeneralSection
+          workspaceId={workspaceId}
+          orgName={org.name}
+          orgSlug={org.slug}
+          preferredLanguage={org.preferred_language}
+          agentCount={org._count?.agents ?? 0}
+          crewCount={org._count?.crews ?? 0}
+          memberCount={org._count?.members ?? 0}
+          role={role}
+          onUpdated={handleOrgUpdated}
+          onDelete={() => { window.location.href = "/" }}
+        />
+      )
     }
     if (activeTab === "members" && workspaceId) {
-      return <MembersSection members={members} workspaceId={workspaceId} canInvite={abilities.can("create", "Member")} onRefresh={handleRefresh} />
+      return (
+        <MembersSection
+          members={members}
+          workspaceId={workspaceId}
+          currentUserId={session?.user?.id}
+          canInvite={abilities.can("create", "Member")}
+          onRefresh={handleRefresh}
+        />
+      )
     }
-    if (activeTab === "roles") {
-      return <RolesSection />
-    }
-    if (activeTab === "billing" && org) {
-      return <BillingSection agentCount={org._count?.agents ?? 0} crewCount={org._count?.crews ?? 0} memberCount={org._count?.members ?? 0} workspaceName={org.name} />
-    }
-    if (activeTab === "danger" && workspaceId) {
-      return <DangerSection workspaceId={workspaceId} role={role} />
-    }
-    return <Phase2Section />
+    return null
   }
 
   function handleTabChange(tab: string) {

@@ -1,8 +1,8 @@
 "use client"
 
 import {
-  User, Shield, Building, Users, CreditCard,
-  AlertTriangle, Box, Link2, Activity,
+  User, Building, Users,
+  Box, Link2, Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
@@ -30,14 +30,11 @@ const sections: NavSection[] = [
   {
     label: "Workspace",
     items: [
+      { key: "general", label: "General", icon: Building },
       { key: "crews", label: "Crews & Containers", icon: Box },
       { key: "connections", label: "Connections", icon: Link2 },
-      { key: "audit", label: "Audit Log", icon: Activity },
-      { key: "general", label: "General", icon: Building },
       { key: "members", label: "Members", icon: Users },
-      { key: "roles", label: "Roles & Permissions", icon: Shield },
-      { key: "billing", label: "Billing & Usage", icon: CreditCard },
-      { key: "danger", label: "Danger Zone", icon: AlertTriangle, badge: "OWNER" },
+      { key: "audit", label: "Audit Log", icon: Activity },
     ],
   },
 ]
