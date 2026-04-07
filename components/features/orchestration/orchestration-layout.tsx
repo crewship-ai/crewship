@@ -226,49 +226,38 @@ export function OrchestrationLayout({
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
-      {/* ---- Unified toolbar (2 rows, ~56px) ---- */}
-      <div className="shrink-0 z-20">
-        {/* Row 1: Mission selector + tabs + actions (32px) */}
-        <div className="flex items-center h-8 bg-card border-b border-white/[0.08] px-0">
-          {/* Mission selector */}
-          <div className="shrink-0 border-r border-white/[0.08] h-full">
-            <Select value={selectedMissionId} onValueChange={onMissionChange}>
-              <SelectTrigger className="h-full w-auto max-w-[260px] text-[12.5px] font-medium bg-transparent border-none shadow-none rounded-none text-foreground hover:bg-white/[0.04] transition-colors px-3 gap-1.5">
-                <div className="flex items-center gap-1.5">
-                  <div className={cn(
-                    "w-[7px] h-[7px] rounded-full shrink-0",
-                    !selectedMission && "bg-blue-400",
-                    selectedMission?.status === "IN_PROGRESS" && "bg-blue-400 animate-pulse",
-                    selectedMission?.status === "PLANNING" && "bg-purple-400",
-                    selectedMission?.status === "COMPLETED" && "bg-green-400",
-                    selectedMission?.status === "FAILED" && "bg-red-400",
-                    selectedMission?.status === "REVIEW" && "bg-amber-400",
-                  )} />
-                  <SelectValue placeholder="All missions" />
-                </div>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All missions</SelectItem>
-                {missions.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    <div className="flex items-center gap-2">
-                      <div className={cn(
-                        "w-1.5 h-1.5 rounded-full shrink-0",
-                        m.status === "IN_PROGRESS" && "bg-blue-500",
-                        m.status === "PLANNING" && "bg-purple-500",
-                        m.status === "COMPLETED" && "bg-green-500",
-                        m.status === "FAILED" && "bg-red-500",
-                        m.status === "REVIEW" && "bg-amber-500",
-                      )} />
-                      <span className="truncate">{m.title}</span>
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+      {/* ---- Unified toolbar ---- */}
+      <div className="shrink-0 z-20 bg-card">
+        {/* Row 1: Mission selector | Tabs | Utility buttons (32px) */}
+        <div className="flex items-center h-8 border-b border-white/[0.08]">
+          {/* Mission selector — single dot, no border trigger */}
+          <Select value={selectedMissionId} onValueChange={onMissionChange}>
+            <SelectTrigger className="h-full w-auto max-w-[280px] text-[12.5px] font-medium bg-transparent border-none shadow-none rounded-none text-foreground hover:bg-white/[0.04] transition-colors px-3 gap-2 shrink-0">
+              <SelectValue placeholder="All missions" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All missions</SelectItem>
+              {missions.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "w-1.5 h-1.5 rounded-full shrink-0",
+                      m.status === "IN_PROGRESS" && "bg-blue-500",
+                      m.status === "PLANNING" && "bg-purple-500",
+                      m.status === "COMPLETED" && "bg-green-500",
+                      m.status === "FAILED" && "bg-red-500",
+                      m.status === "REVIEW" && "bg-amber-500",
+                    )} />
+                    <span className="truncate">{m.title}</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-          {/* Tab navigation — underline style, fills center */}
+          <div className="w-px h-4 bg-white/[0.08] shrink-0" />
+
+          {/* Tab navigation */}
           <nav className="flex items-stretch h-full flex-1 pl-1">
             {([
               { id: "graph", label: "Graph", icon: Workflow },
@@ -294,75 +283,65 @@ export function OrchestrationLayout({
             ))}
           </nav>
 
-          {/* Right actions */}
-          <div className="flex items-center gap-1 px-2 border-l border-white/[0.08] h-full shrink-0">
-            {selectedMission && selectedMission.status === "PLANNING" && (
-              <MissionActionButton mission={selectedMission} action="start" workspaceId={workspaceId} onDone={onRefresh} />
-            )}
-            {selectedMission && (selectedMission.status === "PLANNING" || selectedMission.status === "IN_PROGRESS") && (
-              <MissionActionButton mission={selectedMission} action="cancel" workspaceId={workspaceId} onDone={onRefresh} />
-            )}
-            <Button variant="ghost" size="sm" className="h-[22px] px-2 text-muted-foreground hover:text-foreground/80" onClick={() => graphRef.current?.focusActive()}>
+          {/* Utility buttons */}
+          <div className="flex items-center gap-1 px-2 shrink-0">
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground/80" onClick={() => graphRef.current?.focusActive()}>
               <Focus className="h-3 w-3" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-[22px] px-2 text-muted-foreground hover:text-foreground/80" onClick={onRefresh}>
+            <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground/80" onClick={onRefresh}>
               <RefreshCw className="h-3 w-3" />
             </Button>
             <CreateMissionWizard workspaceId={workspaceId} onCreated={onMissionCreated} />
           </div>
         </div>
 
-        {/* Row 2: Info strip (24px) */}
-        <div className="flex items-center h-6 bg-background/50 border-b border-white/[0.06] px-4 gap-0 font-mono text-[11px] text-muted-foreground overflow-hidden">
-          {!selectedMission ? (
-            /* All missions — aggregate stats */
-            <>
-              {[
-                { label: "Active", value: stats.active, color: "bg-blue-500", textColor: stats.active > 0 ? "text-blue-400" : "" },
-                { label: "Planning", value: stats.planning, color: "bg-purple-500", textColor: stats.planning > 0 ? "text-purple-400" : "" },
-                { label: "Done", value: stats.completed, color: "bg-green-500", textColor: stats.completed > 0 ? "text-green-400" : "" },
-                { label: "Failed", value: stats.failed, color: "bg-red-500", textColor: stats.failed > 0 ? "text-red-400" : "" },
-              ].map(({ label, value, color, textColor }, i) => (
-                <div key={label} className={cn("flex items-center gap-1.5 shrink-0", i > 0 && "ml-4 pl-4 border-l border-white/[0.06]")}>
-                  <div className={cn("w-1.5 h-1.5 rounded-full", color, value === 0 && "opacity-30")} />
-                  <span className={cn("tabular-nums", textColor)}>{value}</span>
-                  <span className="text-muted-foreground/50 font-sans text-[11px]">{label}</span>
+        {/* Row 2: Info strip (24px) — stats or mission detail + actions */}
+        <div className="flex items-center justify-between h-6 border-b border-white/[0.06] px-4 font-mono text-[11px] text-muted-foreground overflow-hidden">
+          <div className="flex items-center gap-0">
+            {!selectedMission ? (
+              <>
+                {[
+                  { label: "Active", value: stats.active, color: "bg-blue-500", tc: stats.active > 0 ? "text-blue-400" : "" },
+                  { label: "Planning", value: stats.planning, color: "bg-purple-500", tc: stats.planning > 0 ? "text-purple-400" : "" },
+                  { label: "Done", value: stats.completed, color: "bg-green-500", tc: stats.completed > 0 ? "text-green-400" : "" },
+                  { label: "Failed", value: stats.failed, color: "bg-red-500", tc: stats.failed > 0 ? "text-red-400" : "" },
+                ].map(({ label, value, color, tc }, i) => (
+                  <div key={label} className={cn("flex items-center gap-1.5 shrink-0", i > 0 && "ml-4 pl-4 border-l border-white/[0.06]")}>
+                    <div className={cn("w-1.5 h-1.5 rounded-full", color, value === 0 && "opacity-30")} />
+                    <span className={cn("tabular-nums", tc)}>{value}</span>
+                    <span className="text-muted-foreground/50 font-sans">{label}</span>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <>
+                <span className="font-sans text-muted-foreground/50 mr-1">Lead</span>
+                <span className="pr-3 mr-3 border-r border-white/[0.06]">@{selectedMission.lead_agent_slug}</span>
+                <div className="w-[52px] h-1 bg-white/[0.08] overflow-hidden mr-1.5">
+                  <div className="h-full bg-blue-400 transition-all" style={{ width: `${selectedMission.tasks?.length ? ((selectedMission.tasks.filter(t => t.status === "COMPLETED").length / selectedMission.tasks.length) * 100) : 0}%` }} />
                 </div>
-              ))}
-            </>
-          ) : (
-            /* Selected mission — detail strip */
-            <>
-              <div className="flex items-center gap-1.5 shrink-0 pr-4 mr-4 border-r border-white/[0.06]">
-                <span className="font-sans text-muted-foreground/50">Lead</span>
-                <span>@{selectedMission.lead_agent_slug}</span>
-              </div>
-              <div className="flex items-center gap-1.5 shrink-0 pr-4 mr-4 border-r border-white/[0.06]">
-                <div className="w-[52px] h-1 bg-white/[0.08] overflow-hidden">
-                  <div
-                    className="h-full bg-blue-400 transition-all"
-                    style={{ width: `${selectedMission.tasks?.length ? ((selectedMission.tasks.filter(t => t.status === "COMPLETED").length / selectedMission.tasks.length) * 100) : 0}%` }}
-                  />
-                </div>
-                <span className="tabular-nums">
+                <span className="tabular-nums pr-3 mr-3 border-r border-white/[0.06]">
                   {selectedMission.tasks?.filter(t => t.status === "COMPLETED").length || 0}/{selectedMission.tasks?.length || 0}
+                  {(selectedMission.tasks?.filter(t => t.status === "IN_PROGRESS").length || 0) > 0 && (
+                    <span className="text-blue-400 ml-1">({selectedMission.tasks?.filter(t => t.status === "IN_PROGRESS").length} running)</span>
+                  )}
                 </span>
-                {(selectedMission.tasks?.filter(t => t.status === "IN_PROGRESS").length || 0) > 0 && (
-                  <span className="text-blue-400 tabular-nums">({selectedMission.tasks?.filter(t => t.status === "IN_PROGRESS").length} running)</span>
-                )}
-              </div>
-              {(selectedMission.total_token_count ?? 0) > 0 && (
-                <div className="flex items-center gap-1 shrink-0 pr-4 mr-4 border-r border-white/[0.06]">
-                  <span className="tabular-nums">{((selectedMission.total_token_count ?? 0) / 1000).toFixed(1)}k</span>
-                  <span className="text-muted-foreground/50 font-sans">tok</span>
-                </div>
+                {(() => { const t = selectedMission.tasks || []; const tok = t.reduce((s, x) => s + (x.token_count || 0), 0); const cost = t.reduce((s, x) => s + (x.estimated_cost || 0), 0); return tok > 0 ? (
+                  <span className="tabular-nums">{(tok / 1000).toFixed(1)}k tok{cost > 0 && ` · $${cost.toFixed(2)}`}</span>
+                ) : null })()}
+              </>
+            )}
+          </div>
+          {/* Mission actions in info strip */}
+          {selectedMission && (
+            <div className="flex items-center gap-1 shrink-0">
+              {selectedMission.status === "PLANNING" && (
+                <MissionActionButton mission={selectedMission} action="start" workspaceId={workspaceId} onDone={onRefresh} />
               )}
-              {(selectedMission.total_estimated_cost ?? 0) > 0 && (
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="tabular-nums">${(selectedMission.total_estimated_cost ?? 0).toFixed(2)}</span>
-                </div>
+              {(selectedMission.status === "PLANNING" || selectedMission.status === "IN_PROGRESS") && (
+                <MissionActionButton mission={selectedMission} action="cancel" workspaceId={workspaceId} onDone={onRefresh} />
               )}
-            </>
+            </div>
           )}
         </div>
       </div>
@@ -454,39 +433,6 @@ export function OrchestrationLayout({
                 onTaskClick={handleNodeClick}
               />
 
-              {/* Floating stats overlay */}
-              <div className="absolute top-3 left-3 flex items-center gap-1.5 z-10">
-                {[
-                  { key: "active", value: stats.active, label: "Active", color: "blue" },
-                  { key: "planning", value: stats.planning, label: "Planning", color: "purple" },
-                  { key: "completed", value: stats.completed, label: "Done", color: "green" },
-                  { key: "failed", value: stats.failed, label: "Failed", color: "red" },
-                ].map(({ key, value, label, color }) => (
-                  <div
-                    key={key}
-                    className={cn(
-                      "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
-                      "bg-card/90 backdrop-blur-sm border border-border",
-                      "transition-all cursor-default",
-                      value > 0 && color === "blue" && "border-blue-500/30 text-blue-400",
-                      value > 0 && color === "green" && "border-green-500/30 text-green-400",
-                      value > 0 && color === "red" && "border-red-500/30 text-red-400",
-                      value > 0 && color === "purple" && "border-purple-500/30 text-purple-400",
-                      value === 0 && "text-muted-foreground/70",
-                    )}
-                  >
-                    <div className={cn(
-                      "w-1.5 h-1.5 rounded-full",
-                      color === "blue" && (value > 0 ? "bg-blue-500 animate-pulse" : "bg-blue-500/30"),
-                      color === "purple" && (value > 0 ? "bg-purple-500" : "bg-purple-500/30"),
-                      color === "green" && (value > 0 ? "bg-green-500" : "bg-green-500/30"),
-                      color === "red" && (value > 0 ? "bg-red-500" : "bg-red-500/30"),
-                    )} />
-                    <span>{value}</span>
-                    <span className="text-muted-foreground/70">{label}</span>
-                  </div>
-                ))}
-              </div>
             </>
           )}
 
