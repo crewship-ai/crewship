@@ -41,6 +41,7 @@ interface WorkflowGraphProps {
   agents?: AgentSummary[]
   connections?: CrewConnection[]
   onTaskClick?: (task: MissionTask) => void
+  highlightAgentSlug?: string | null
 }
 
 const nodeTypes: NodeTypes = {
@@ -621,7 +622,7 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
 // -------------------------------------------------------------------
 
 function WorkflowGraphInner(
-  { missions, crews, agents, connections, onTaskClick }: WorkflowGraphProps,
+  { missions, crews, agents, connections, onTaskClick, highlightAgentSlug }: WorkflowGraphProps,
   ref: React.ForwardedRef<WorkflowGraphRef>
 ) {
   const [collapsedCrews, setCollapsedCrews] = useState<Set<string>>(new Set())
@@ -743,8 +744,26 @@ function WorkflowGraphInner(
     }
   }, [highlightedNodeId, nodes, edgesState])
 
-  // Apply dimming styles to nodes and edges
+  // Apply dimming styles to nodes and edges (Shift+Click highlight OR agent highlight from left panel)
   const displayNodes = useMemo(() => {
+    // Agent highlight from left panel — dim nodes not belonging to that agent
+    if (highlightAgentSlug) {
+      return nodes.map((n) => {
+        const nodeSlug = (n.data as Record<string, unknown>)?.agentSlug as string | undefined
+        const isMatch = nodeSlug === highlightAgentSlug
+        const isCrewParent = n.type === "crew" && nodes.some(
+          (child) => child.parentId === n.id && (child.data as Record<string, unknown>)?.agentSlug === highlightAgentSlug
+        )
+        return {
+          ...n,
+          style: {
+            ...n.style,
+            opacity: isMatch || isCrewParent ? 1 : 0.15,
+            transition: "opacity 0.3s ease",
+          },
+        }
+      })
+    }
     if (!highlightedNodeId) return nodes
     return nodes.map((n) => ({
       ...n,
@@ -754,7 +773,7 @@ function WorkflowGraphInner(
         transition: "opacity 0.3s ease",
       },
     }))
-  }, [nodes, highlightedNodeId, dimmedNodeIds])
+  }, [nodes, highlightedNodeId, dimmedNodeIds, highlightAgentSlug])
 
   const displayEdges = useMemo(() => {
     if (!highlightedNodeId) return edgesState

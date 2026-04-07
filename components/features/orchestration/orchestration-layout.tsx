@@ -195,7 +195,7 @@ export function OrchestrationLayout({
   }, [crews, agents, connections])
 
   const handleAgentSelect = useCallback((agentSlug: string) => {
-    setSelectedAgentSlug(agentSlug)
+    setSelectedAgentSlug((prev) => prev === agentSlug ? null : agentSlug)
   }, [])
 
   const handleInboxTaskSelect = useCallback((task: MissionTask, mission: Mission) => {
@@ -414,6 +414,7 @@ export function OrchestrationLayout({
                 agents={agents}
                 connections={connections}
                 onTaskClick={handleNodeClick}
+                highlightAgentSlug={selectedAgentSlug}
               />
 
             </>

@@ -96,29 +96,32 @@ export function HierarchyTree({
             <Collapsible
               key={crew.id}
               open={isExpanded}
-              onOpenChange={() => toggleCrew(crew.id)}
             >
-              <CollapsibleTrigger asChild>
-                <button
-                  className={cn(
-                    "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors",
-                    "hover:bg-accent/50",
-                    selectedCrewId === crew.id &&
-                      "bg-accent ring-1 ring-border",
-                  )}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    onCrewSelect(crew.id)
-                    toggleCrew(crew.id)
-                  }}
-                >
-                  <span className="shrink-0 text-muted-foreground/70">
+              <div
+                className={cn(
+                  "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors",
+                  "hover:bg-accent/50 cursor-pointer",
+                  selectedCrewId === crew.id &&
+                    "bg-accent ring-1 ring-border",
+                )}
+                onClick={() => onCrewSelect(crew.id)}
+              >
+                {/* Chevron — only this toggles expand/collapse */}
+                <CollapsibleTrigger asChild>
+                  <button
+                    className="shrink-0 text-muted-foreground/70 hover:text-foreground transition-colors p-0.5 -m-0.5 rounded"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleCrew(crew.id)
+                    }}
+                  >
                     {isExpanded ? (
                       <ChevronDown className="h-3 w-3" />
                     ) : (
                       <ChevronRight className="h-3 w-3" />
                     )}
-                  </span>
+                  </button>
+                </CollapsibleTrigger>
 
                   {crew.icon ? (
                     <CrewIcon
@@ -145,8 +148,7 @@ export function HierarchyTree({
                     <Users className="h-2.5 w-2.5 mr-0.5" />
                     {agentCount}
                   </Badge>
-                </button>
-              </CollapsibleTrigger>
+              </div>
 
               <CollapsibleContent>
                 <div className="ml-4 pl-2.5 border-l border-border space-y-px">
