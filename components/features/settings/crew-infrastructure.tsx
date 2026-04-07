@@ -289,7 +289,7 @@ function CrewSettingsPanel({ crew, status, connections, canEdit, onContainerActi
       await onPatchCrew(crew.id, {
         container_memory_mb: mem,
         container_cpus: cpu,
-        container_ttl_hours: ttl === "" ? null : parseInt(ttl),
+        container_ttl_hours: ttl.trim() === "" || isNaN(parseInt(ttl)) ? null : parseInt(ttl),
         network_mode: netMode,
         allowed_domains: parsed,
       })

@@ -123,7 +123,20 @@ func (s *Server) handleConnectionListMessages(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	apiURL := fmt.Sprintf("/api/v1/internal/crew-messages?crew_id=%s&direction=all", url.QueryEscape(s.ipc.CrewID))
+	slug := extractConnectionSlug(r.URL.Path)
+	if slug == "" {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "missing crew slug in path"})
+		return
+	}
+
+	targetCrewID, err := s.resolveCrewIDBySlug(r.Context(), slug)
+	if err != nil || targetCrewID == "" {
+		writeJSONResponse(w, http.StatusNotFound, map[string]string{"error": "target crew not found"})
+		return
+	}
+
+	apiURL := fmt.Sprintf("/api/v1/internal/crew-messages?crew_id=%s&peer_crew_id=%s&direction=all",
+		url.QueryEscape(s.ipc.CrewID), url.QueryEscape(targetCrewID))
 	if since := r.URL.Query().Get("since"); since != "" {
 		apiURL += "&since=" + url.QueryEscape(since)
 	}

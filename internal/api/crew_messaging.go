@@ -137,24 +137,30 @@ func (h *CrewMessagingHandler) ListMessages(w http.ResponseWriter, r *http.Reque
 		limit = 50
 	}
 
-	since := r.URL.Query().Get("since") // RFC3339 timestamp
+	since := r.URL.Query().Get("since")     // RFC3339 timestamp
+	peerCrewID := r.URL.Query().Get("peer_crew_id") // optional: filter to specific peer
 
 	var query string
 	var args []interface{}
 
+	cols := `id, workspace_id, from_crew_id, to_crew_id, from_agent_id, content, metadata, delivered_at, created_at`
+
 	switch direction {
 	case "outgoing":
-		query = `SELECT id, workspace_id, from_crew_id, to_crew_id, from_agent_id, content, metadata, delivered_at, created_at
-			FROM crew_messages WHERE from_crew_id = ?`
+		query = `SELECT ` + cols + ` FROM crew_messages WHERE from_crew_id = ?`
 		args = []interface{}{crewID}
 	case "all":
-		query = `SELECT id, workspace_id, from_crew_id, to_crew_id, from_agent_id, content, metadata, delivered_at, created_at
-			FROM crew_messages WHERE from_crew_id = ? OR to_crew_id = ?`
+		query = `SELECT ` + cols + ` FROM crew_messages WHERE (from_crew_id = ? OR to_crew_id = ?)`
 		args = []interface{}{crewID, crewID}
 	default: // "incoming"
-		query = `SELECT id, workspace_id, from_crew_id, to_crew_id, from_agent_id, content, metadata, delivered_at, created_at
-			FROM crew_messages WHERE to_crew_id = ?`
+		query = `SELECT ` + cols + ` FROM crew_messages WHERE to_crew_id = ?`
 		args = []interface{}{crewID}
+	}
+
+	// Filter to a specific peer crew (scopes messages to one connection).
+	if peerCrewID != "" {
+		query += " AND (from_crew_id = ? OR to_crew_id = ?)"
+		args = append(args, peerCrewID, peerCrewID)
 	}
 
 	if since != "" {
