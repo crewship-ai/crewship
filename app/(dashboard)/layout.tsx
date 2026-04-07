@@ -2,7 +2,6 @@
 
 import { useEffect } from "react"
 import { useSession } from "@/hooks/use-auth"
-import { useRouter } from "next/navigation"
 import { Loader2 } from "lucide-react"
 import { AppSidebar } from "@/components/layout/app-sidebar"
 import { AppToolbar } from "@/components/layout/app-toolbar"
@@ -20,7 +19,6 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   const { status } = useSession()
-  const router = useRouter()
 
   useEffect(() => {
     if (status === "unauthenticated") {

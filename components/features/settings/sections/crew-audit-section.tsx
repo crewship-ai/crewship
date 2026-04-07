@@ -216,9 +216,12 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                 const isLast = idx === filteredLogs.length - 1
                 return (
                   <div key={log.id}>
-                    <div
+                    <button
+                      type="button"
+                      aria-expanded={isExpanded}
+                      aria-controls={`audit-detail-${log.id}`}
                       className={cn(
-                        "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px] cursor-pointer transition-colors",
+                        "flex w-full items-center justify-between gap-4 px-5 py-3.5 min-h-[48px] cursor-pointer transition-colors text-left",
                         !isLast && !isExpanded && "border-b border-white/[0.04]",
                         isExpanded ? "bg-white/[0.03]" : "hover:bg-white/[0.02]",
                       )}
@@ -254,11 +257,13 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                           </span>
                         )}
                       </div>
-                    </div>
+                    </button>
 
                     <AnimatePresence initial={false}>
                       {isExpanded && (
                         <motion.div
+                          id={`audit-detail-${log.id}`}
+                          role="region"
                           initial={{ height: 0, opacity: 0 }}
                           animate={{ height: "auto", opacity: 1 }}
                           exit={{ height: 0, opacity: 0 }}
