@@ -109,7 +109,7 @@ export function A2AMessageStream({ messages, crewFilter, onFilterChange }: A2AMe
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
         <div className="divide-y divide-border">
           {sorted.map(msg => (
-            <div key={msg.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-accent/30 transition-colors" style={{ minHeight: 32 }}>
+            <div key={msg.id} className="flex items-center gap-2 px-3 py-1.5 hover:bg-accent/30 transition-colors min-h-8">
               <span className="text-[10px] font-mono text-muted-foreground/70 shrink-0 w-16">
                 {formatTimestamp(msg.timestamp)}
               </span>

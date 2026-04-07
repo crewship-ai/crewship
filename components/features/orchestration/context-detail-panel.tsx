@@ -16,9 +16,9 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/component
 import type { Mission, MissionTask, MissionTaskStatus, TaskComplexity, EvaluationStatus } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 
-const crewColorMap: Record<string, string> = {
-  blue: "#3b82f6", emerald: "#10b981", violet: "#8b5cf6", amber: "#f59e0b",
-  rose: "#f43f5e", cyan: "#06b6d4", lime: "#84cc16", fuchsia: "#d946ef",
+const crewBgClass: Record<string, string> = {
+  blue: "bg-blue-500", emerald: "bg-emerald-500", violet: "bg-violet-500", amber: "bg-amber-500",
+  rose: "bg-rose-500", cyan: "bg-cyan-500", lime: "bg-lime-500", fuchsia: "bg-fuchsia-500",
 }
 
 export type DetailContext =
@@ -198,7 +198,7 @@ function CrewDetail({ crew, agents, connections }: { crew: CrewSummary; agents: 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2">
-        {crew.color && <span className="size-2.5 rounded-full" style={{ backgroundColor: crewColorMap[crew.color] || "#64748b" }} />}
+        {crew.color && <span className={cn("size-2.5 rounded-full", crewBgClass[crew.color] || "bg-muted-foreground")} />}
         <h3 className="text-sm font-semibold text-foreground">{crew.name}</h3>
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
