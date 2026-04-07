@@ -205,6 +205,16 @@ export function OrchestrationLayout({
     setSelectedAgentSlug((prev) => prev === agentSlug ? null : agentSlug)
   }, [])
 
+  // Computed: which agent slugs are highlighted (agent click or crew click)
+  const highlightSlugs = useMemo<Set<string> | null>(() => {
+    if (selectedAgentSlug) return new Set([selectedAgentSlug])
+    if (selectedCrewId) {
+      const crewAgentSlugs = agents.filter((a) => a.crew_id === selectedCrewId).map((a) => a.slug)
+      return crewAgentSlugs.length > 0 ? new Set(crewAgentSlugs) : null
+    }
+    return null
+  }, [selectedAgentSlug, selectedCrewId, agents])
+
   const handleInboxTaskSelect = useCallback((task: MissionTask, mission: Mission) => {
     setSelectedTask(task)
     setDetailContext({
@@ -429,13 +439,13 @@ export function OrchestrationLayout({
           <AnimatePresence mode="wait">
             {activeTab === "timeline" && (
               <motion.div key="timeline" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
-                <MissionTimeline missions={filteredMissions} />
+                <MissionTimeline missions={filteredMissions} highlightSlugs={highlightSlugs} />
               </motion.div>
             )}
 
             {activeTab === "activity" && (
               <motion.div key="activity" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
-                <OrchestrationActivity missions={filteredMissions} />
+                <OrchestrationActivity missions={filteredMissions} highlightSlugs={highlightSlugs} />
               </motion.div>
             )}
 

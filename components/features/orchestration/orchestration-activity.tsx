@@ -17,6 +17,7 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 interface OrchestrationActivityProps {
   missions: Mission[]
+  highlightSlugs?: Set<string> | null
 }
 
 interface ActivityEvent {
@@ -138,7 +139,7 @@ function StatusDot({ status, isMission }: { status: string; isMission: boolean }
   )
 }
 
-export function OrchestrationActivity({ missions }: OrchestrationActivityProps) {
+export function OrchestrationActivity({ missions, highlightSlugs }: OrchestrationActivityProps) {
   const allEvents = useMemo(() => buildActivityFeed(missions), [missions])
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL")
   const [agentFilter, setAgentFilter] = useState<string>("all")
@@ -235,7 +236,14 @@ export function OrchestrationActivity({ missions }: OrchestrationActivityProps) 
                 const colors = statusColors[event.status] || statusColors.CANCELLED
                 const isLast = idx === group.items.length - 1
                 return (
-                  <div key={event.id} className="flex items-stretch group">
+                  <div
+                    key={event.id}
+                    className={cn(
+                      "flex items-stretch group",
+                      highlightSlugs && event.type === "task" && !highlightSlugs.has(event.agentSlug) && "opacity-20",
+                    )}
+                    style={{ transition: "opacity 0.3s ease" }}
+                  >
                     {/* Timeline rail */}
                     <div className="flex flex-col items-center w-8 shrink-0">
                       <div className={cn("w-px flex-1", isLast && idx === 0 ? "bg-transparent" : "bg-border/60")} />

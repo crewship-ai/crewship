@@ -16,6 +16,7 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 interface MissionTimelineProps {
   missions: Mission[]
+  highlightSlugs?: Set<string> | null
 }
 
 const LANE_H = 52
@@ -154,7 +155,7 @@ function TaskBar({ task, timeRange }: { task: MissionTask; timeRange: { start: n
   )
 }
 
-export function MissionTimeline({ missions }: MissionTimelineProps) {
+export function MissionTimeline({ missions, highlightSlugs }: MissionTimelineProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   const activeMissions = useMemo(() => {
@@ -247,7 +248,14 @@ export function MissionTimeline({ missions }: MissionTimelineProps) {
                     const tasks = agentTasks.get(slug)!
 
                     return (
-                      <div key={slug} className="flex" style={{ minWidth: 900 }}>
+                      <div
+                        key={slug}
+                        className={cn(
+                          "flex",
+                          highlightSlugs && !highlightSlugs.has(slug) && "opacity-20"
+                        )}
+                        style={{ minWidth: 900, transition: "opacity 0.3s ease" }}
+                      >
                         {/* Agent info column */}
                         <div
                           className="shrink-0 sticky left-0 z-20 bg-card border-r border-border border-b border-b-border/50 flex items-center gap-2 px-2.5 hover:bg-muted/30 transition-colors"
