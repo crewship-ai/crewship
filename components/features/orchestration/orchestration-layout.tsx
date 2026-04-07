@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, RefreshCw, Focus,
-  Settings2, FileText, PanelLeftClose, PanelLeftOpen,
+  FileText, PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
   ChevronUp, ChevronDown, Play, Square, Loader2,
 } from "lucide-react"
@@ -24,7 +24,7 @@ import { OrchestrationActivity } from "@/components/features/orchestration/orche
 // TemplateGallery removed — workflow templates not needed in orchestration UI yet
 // MissionControlBar replaced by inline info strip in unified toolbar
 import { CreateMissionWizard } from "@/components/features/orchestration/create-mission-wizard"
-import { CrewConnections } from "@/components/features/orchestration/crew-connections"
+// CrewConnections moved to Settings (CRE-105)
 import { ProposalReview } from "@/components/features/orchestration/proposal-review"
 import { HierarchyTree } from "@/components/features/orchestration/hierarchy-tree"
 import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"
@@ -318,7 +318,6 @@ export function OrchestrationLayout({
           { id: "timeline", label: "Timeline", icon: Clock },
           { id: "activity", label: "Activity", icon: Activity },
           { id: "proposals", label: "Approvals", icon: FileText },
-          { id: "connections", label: "Connections", icon: Settings2 },
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -447,11 +446,6 @@ export function OrchestrationLayout({
               </motion.div>
             )}
 
-            {activeTab === "connections" && (
-              <motion.div key="connections" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
-                <CrewConnections workspaceId={workspaceId} />
-              </motion.div>
-            )}
           </AnimatePresence>
         </div>
 
