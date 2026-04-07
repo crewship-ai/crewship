@@ -3,8 +3,8 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
-  Workflow, Clock, Activity, RefreshCw, Focus, LayoutTemplate,
-  Settings2, FileText, PanelLeftClose, PanelLeftOpen,
+  Workflow, Clock, Activity, RefreshCw, Focus,
+  Settings2, PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
   ChevronUp, ChevronDown, Play, Square, Loader2,
 } from "lucide-react"
@@ -21,11 +21,11 @@ import { cn } from "@/lib/utils"
 import { WorkflowGraph, type WorkflowGraphRef } from "@/components/features/orchestration/workflow-graph"
 import { MissionTimeline } from "@/components/features/orchestration/mission-timeline"
 import { OrchestrationActivity } from "@/components/features/orchestration/orchestration-activity"
-import { TemplateGallery } from "@/components/features/orchestration/template-gallery"
+// TemplateGallery removed — workflow templates not needed in orchestration UI yet
 // MissionControlBar replaced by inline info strip in unified toolbar
 import { CreateMissionWizard } from "@/components/features/orchestration/create-mission-wizard"
 import { CrewConnections } from "@/components/features/orchestration/crew-connections"
-import { ProposalReview } from "@/components/features/orchestration/proposal-review"
+// ProposalReview removed — Coordinator agent (Phase 2) doesn't exist yet
 import { HierarchyTree } from "@/components/features/orchestration/hierarchy-tree"
 import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"
 import { ConnectionMap } from "@/components/features/orchestration/connection-map"
@@ -310,8 +310,6 @@ export function OrchestrationLayout({
           { id: "graph", label: "Graph", icon: Workflow },
           { id: "timeline", label: "Timeline", icon: Clock },
           { id: "activity", label: "Activity", icon: Activity },
-          { id: "templates", label: "Templates", icon: LayoutTemplate },
-          { id: "proposals", label: "Proposals", icon: FileText },
           { id: "connections", label: "Connections", icon: Settings2 },
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
@@ -433,17 +431,6 @@ export function OrchestrationLayout({
               </motion.div>
             )}
 
-            {activeTab === "templates" && (
-              <motion.div key="templates" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
-                <TemplateGallery workspaceId={workspaceId} />
-              </motion.div>
-            )}
-
-            {activeTab === "proposals" && (
-              <motion.div key="proposals" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
-                <ProposalReview workspaceId={workspaceId} />
-              </motion.div>
-            )}
 
             {activeTab === "connections" && (
               <motion.div key="connections" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
