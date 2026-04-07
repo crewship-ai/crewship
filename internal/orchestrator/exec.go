@@ -109,32 +109,60 @@ func filterNpxServers(ctx context.Context, container provider.ContainerProvider,
 		return servers
 	}
 
-	// 2. Check npx availability in the container.
-	cfg := provider.ExecConfig{
-		ContainerID: containerID,
-		Cmd:         []string{"sh", "-c", "command -v npx >/dev/null 2>&1 && echo ok"},
-		User:        "1001:1001",
-	}
-	result, err := container.Exec(ctx, cfg)
-	if err == nil {
-		output, _ := io.ReadAll(result.Reader)
-		result.Reader.Close()
-		if strings.TrimSpace(string(output)) != "" {
-			return servers // npx available, return unchanged
+	// 2. Collect unique launchers needed (npx, npm).
+	launchers := map[string]bool{}
+	for _, s := range servers {
+		if s.Transport == "stdio" && isNpxCommand(s.Command) {
+			parts := strings.Fields(s.Command)
+			if len(parts) > 0 {
+				launchers[parts[0]] = false // default: not available
+			}
 		}
 	}
 
-	// 3. npx not available — filter out npx servers.
+	// 3. Probe each unique launcher in the container.
+	for launcher := range launchers {
+		cfg := provider.ExecConfig{
+			ContainerID: containerID,
+			Cmd:         []string{"sh", "-c", fmt.Sprintf("command -v %s >/dev/null 2>&1 && echo ok", launcher)},
+			User:        "1001:1001",
+		}
+		result, err := container.Exec(ctx, cfg)
+		if err == nil {
+			output, _ := io.ReadAll(result.Reader)
+			result.Reader.Close()
+			if strings.TrimSpace(string(output)) != "" {
+				launchers[launcher] = true
+			}
+		}
+	}
+
+	// If all launchers available, return unchanged.
+	allAvailable := true
+	for _, available := range launchers {
+		if !available {
+			allAvailable = false
+			break
+		}
+	}
+	if allAvailable {
+		return servers
+	}
+
+	// 4. Filter out servers whose launcher is not available.
 	var skipped []string
 	var filtered []MCPServerConfig
 	for _, s := range servers {
 		if s.Transport == "stdio" && isNpxCommand(s.Command) {
-			skipped = append(skipped, s.Name)
-			continue
+			parts := strings.Fields(s.Command)
+			if len(parts) > 0 && !launchers[parts[0]] {
+				skipped = append(skipped, s.Name)
+				continue
+			}
 		}
 		filtered = append(filtered, s)
 	}
-	logger.Warn("npx/npm not found in container, skipping stdio MCP servers that require it",
+	logger.Warn("launcher not found in container, skipping stdio MCP servers",
 		"skipped_servers", skipped,
 		"container_id", containerID[:min(12, len(containerID))])
 	return filtered
@@ -173,7 +201,6 @@ func filterMergedMCPConfigNpx(
 		nameOrder = append(nameOrder, name)
 		var entry serverEntry
 		if err := json.Unmarshal(raw, &entry); err != nil {
-			configs = append(configs, MCPServerConfig{Name: name, Transport: entry.Type, Command: entry.Command})
 			continue
 		}
 		configs = append(configs, MCPServerConfig{Name: name, Transport: entry.Type, Command: entry.Command})
