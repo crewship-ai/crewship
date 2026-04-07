@@ -3,7 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react"
 import {
   User, Palette, Bell, Shield, Building, Users, CreditCard,
-  AlertTriangle, Check, X, Key, ChevronsUpDown, Languages
+  AlertTriangle, Check, X, Key, ChevronsUpDown, Languages, Container
 } from "lucide-react"
 import { useSession } from "@/hooks/use-auth"
 import {
@@ -38,6 +38,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useAbilities } from "@/hooks/use-abilities"
 import { cn } from "@/lib/utils"
 import { LANGUAGES } from "@/lib/languages"
+import { CrewInfrastructure } from "@/components/features/settings/crew-infrastructure"
 
 type Scope = "user" | "org"
 
@@ -65,6 +66,8 @@ const orgTabs: TabDef[] = [
   { key: "general", label: "General", icon: Building },
   { key: "members", label: "Members", icon: Users },
   { key: "roles", label: "Roles & Permissions", icon: Shield },
+  { type: "section", label: "INFRASTRUCTURE" },
+  { key: "crews", label: "Crews & Containers", icon: Container },
   { type: "section", label: "BILLING" },
   { key: "billing", label: "Billing & Usage", icon: CreditCard },
   { type: "section", label: "ADVANCED" },
@@ -508,6 +511,15 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </div>
+      )
+    }
+
+    if (tab === "crews") {
+      return (
+        <CrewInfrastructure
+          workspaceId={workspaceId!}
+          canEdit={abilities.can("update", "Crew")}
+        />
       )
     }
 
