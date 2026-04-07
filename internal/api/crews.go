@@ -186,13 +186,16 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type createCrewRequest struct {
-	Name           string   `json:"name"`
-	Slug           string   `json:"slug"`
-	Description    *string  `json:"description"`
-	Color          *string  `json:"color"`
-	Icon           *string  `json:"icon"`
-	NetworkMode    *string  `json:"network_mode"`
-	AllowedDomains []string `json:"allowed_domains"`
+	Name              string   `json:"name"`
+	Slug              string   `json:"slug"`
+	Description       *string  `json:"description"`
+	Color             *string  `json:"color"`
+	Icon              *string  `json:"icon"`
+	ContainerMemoryMB *int     `json:"container_memory_mb"`
+	ContainerCPUs     *float64 `json:"container_cpus"`
+	ContainerTTLHours *int     `json:"container_ttl_hours"`
+	NetworkMode       *string  `json:"network_mode"`
+	AllowedDomains    []string `json:"allowed_domains"`
 }
 
 func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -291,10 +294,23 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	crewID := generateCUID()
 
+	memoryMB := 4096
+	if req.ContainerMemoryMB != nil && *req.ContainerMemoryMB > 0 {
+		memoryMB = *req.ContainerMemoryMB
+	}
+	cpus := 2.0
+	if req.ContainerCPUs != nil && *req.ContainerCPUs > 0 {
+		cpus = *req.ContainerCPUs
+	}
+	var ttlHours *int
+	if req.ContainerTTLHours != nil && *req.ContainerTTLHours > 0 {
+		ttlHours = req.ContainerTTLHours
+	}
+
 	_, err = h.db.ExecContext(r.Context(),
-		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, network_mode, allowed_domains, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, networkMode, allowedDomainsDB, now, now)
+		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, now, now)
 	if err != nil {
 		h.logger.Error("insert crew", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -309,8 +325,9 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description:       req.Description,
 		Color:             req.Color,
 		Icon:              req.Icon,
-		ContainerMemoryMB: 4096,
-		ContainerCPUs:     2.0,
+		ContainerMemoryMB: memoryMB,
+		ContainerCPUs:     cpus,
+		ContainerTTLHours: ttlHours,
 		NetworkMode:       networkMode,
 		AllowedDomains:    allowedDomainsOut,
 		CreatedAt:         now,
