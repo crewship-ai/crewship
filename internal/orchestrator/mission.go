@@ -58,6 +58,16 @@ type MissionEngine struct {
 	failures map[string]int // agentID -> consecutive failure count
 }
 
+// ErrInvalidTaskStatus is returned when a task is not in the expected status for an operation.
+var ErrInvalidTaskStatus = errors.New("invalid task status")
+
+// EscalationConfig holds tiered escalation thresholds per crew.
+type EscalationConfig struct {
+	AutoApproveThreshold float64 `json:"auto_approve_threshold"`
+	NotifyThreshold      float64 `json:"notify_threshold"`
+	RequireApprovalBelow float64 `json:"require_approval_below"`
+}
+
 const (
 	circuitBreakerThreshold = 3     // consecutive failures before tripping
 	maxResultSummaryLen     = 8000
@@ -855,6 +865,11 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		)
 	}
 
+	// Approval gate: check if this task requires human approval before unblocking dependents.
+	if taskStatus == "COMPLETED" {
+		taskStatus = e.checkApprovalGate(ctx, taskID, missionID)
+	}
+
 	// Calculate task duration
 	var startedAt sql.NullString
 	e.db.QueryRowContext(ctx, `SELECT started_at FROM mission_tasks WHERE id = ?`, taskID).Scan(&startedAt)
@@ -934,6 +949,18 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 			Summary:   resultSummary,
 			Error:     errorMessage,
 		})
+
+		// Notify workspace about pending approval for dashboard badge.
+		if taskStatus == "AWAITING_APPROVAL" && e.hub != nil {
+			e.hub.Broadcast("workspace:"+ms.WorkspaceID, ws.ServerMessage{
+				Type:    "approval.required",
+				Channel: "workspace:" + ms.WorkspaceID,
+				Payload: map[string]string{
+					"task_id":    taskID,
+					"mission_id": missionID,
+				},
+			})
+		}
 	}
 
 	e.logger.Info("task updated from assignment",
@@ -943,6 +970,183 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 	)
 
 	return nil
+}
+
+
+// checkApprovalGate determines whether a completed task should be held for human approval.
+func (e *MissionEngine) checkApprovalGate(ctx context.Context, taskID, missionID string) string {
+	var approvalRequired int
+	var confRaw sql.NullFloat64
+	var configJSON sql.NullString
+
+	err := e.db.QueryRowContext(ctx,
+		`SELECT COALESCE(mt.approval_required, 0), mt.confidence, c.escalation_config
+		 FROM mission_tasks mt
+		 JOIN missions m ON m.id = mt.mission_id
+		 JOIN crews c ON c.id = m.crew_id
+		 WHERE mt.id = ?`, taskID).Scan(&approvalRequired, &confRaw, &configJSON)
+	if err != nil {
+		e.logger.Error("check approval gate", "error", err, "task_id", taskID)
+		return "COMPLETED"
+	}
+
+	var cfg EscalationConfig
+	hasConfig := false
+	if configJSON.Valid && configJSON.String != "" {
+		if err := json.Unmarshal([]byte(configJSON.String), &cfg); err != nil {
+			e.logger.Error("parse escalation_config", "error", err, "mission_id", missionID)
+		} else {
+			hasConfig = true
+		}
+	}
+
+	hasConf := confRaw.Valid
+	conf := float64(0)
+	if hasConf {
+		conf = confRaw.Float64
+	}
+
+	if hasConfig && hasConf && cfg.AutoApproveThreshold > 0 && conf >= cfg.AutoApproveThreshold {
+		return "COMPLETED"
+	}
+
+	if approvalRequired == 1 {
+		e.logger.Info("task held for approval (explicit flag)", "task_id", taskID, "mission_id", missionID)
+		return "AWAITING_APPROVAL"
+	}
+
+	if !hasConfig || !hasConf {
+		return "COMPLETED"
+	}
+
+	if cfg.RequireApprovalBelow > 0 && conf < cfg.RequireApprovalBelow {
+		e.logger.Info("task held for approval (confidence below threshold)", "task_id", taskID, "confidence", conf)
+		return "AWAITING_APPROVAL"
+	}
+
+	if cfg.NotifyThreshold > 0 && conf < cfg.NotifyThreshold {
+		e.mu.Lock()
+		ms := e.active[missionID]
+		e.mu.Unlock()
+		if ms != nil && e.hub != nil {
+			e.hub.Broadcast("workspace:"+ms.WorkspaceID, ws.ServerMessage{
+				Type:    "confidence.low",
+				Channel: "workspace:" + ms.WorkspaceID,
+				Payload: map[string]string{"task_id": taskID, "mission_id": missionID, "level": "notify"},
+			})
+		}
+	}
+
+	return "COMPLETED"
+}
+
+// ApproveTask approves or rejects a task in AWAITING_APPROVAL status.
+func (e *MissionEngine) ApproveTask(ctx context.Context, taskID, userID string, approved bool, notes string) error {
+	if userID == "" {
+		return fmt.Errorf("userID is required for approval audit trail")
+	}
+
+	var currentStatus, missionID, missionStatus string
+	if err := e.db.QueryRowContext(ctx,
+		`SELECT mt.status, mt.mission_id, m.status
+		 FROM mission_tasks mt JOIN missions m ON m.id = mt.mission_id
+		 WHERE mt.id = ?`, taskID).Scan(&currentStatus, &missionID, &missionStatus); err != nil {
+		return fmt.Errorf("lookup task %s: %w", taskID, err)
+	}
+
+	if missionStatus != "IN_PROGRESS" {
+		return fmt.Errorf("%w: mission is %s, approvals only allowed when IN_PROGRESS", ErrInvalidTaskStatus, missionStatus)
+	}
+	if currentStatus != "AWAITING_APPROVAL" {
+		return fmt.Errorf("%w: task %s is %s, expected AWAITING_APPROVAL", ErrInvalidTaskStatus, taskID, currentStatus)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	newStatus := "COMPLETED"
+	approvalStatus := "APPROVED"
+	if !approved {
+		newStatus = "FAILED"
+		approvalStatus = "REJECTED"
+	}
+
+	if _, err := e.db.ExecContext(ctx,
+		`UPDATE mission_tasks SET status = ?, approval_status = ?, approved_by = ?, approved_at = ?,
+		 evaluation_notes = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = 'AWAITING_APPROVAL'`,
+		newStatus, approvalStatus, userID, now, notes, now, now, taskID); err != nil {
+		return fmt.Errorf("update task %s approval: %w", taskID, err)
+	}
+
+	if approved {
+		e.unblockDependentTasks(ctx, missionID, taskID)
+	} else {
+		e.failDependentTasks(ctx, missionID, taskID, "upstream task rejected")
+	}
+
+	e.mu.Lock()
+	ms := e.active[missionID]
+	e.mu.Unlock()
+
+	if ms != nil {
+		e.broadcastTaskStatus(ms, taskID, newStatus)
+		if e.hub != nil {
+			e.hub.Broadcast("workspace:"+ms.WorkspaceID, ws.ServerMessage{
+				Type:    "approval.resolved",
+				Channel: "workspace:" + ms.WorkspaceID,
+				Payload: map[string]string{"task_id": taskID, "mission_id": missionID, "action": approvalStatus},
+			})
+		}
+		e.checkMissionCompletion(ctx, ms) //nolint:errcheck
+	}
+
+	e.logger.Info("task approval decision", "task_id", taskID, "approved", approved, "user_id", userID)
+	return nil
+}
+
+// failDependentTasks cascades failure to BLOCKED tasks when a dependency is rejected.
+func (e *MissionEngine) failDependentTasks(ctx context.Context, missionID, failedTaskID, reason string) {
+	rows, err := e.db.QueryContext(ctx,
+		`SELECT id, depends_on FROM mission_tasks WHERE mission_id = ? AND status = 'BLOCKED'`, missionID)
+	if err != nil {
+		e.logger.Error("query blocked tasks for cascade", "error", err)
+		return
+	}
+
+	var toFail []string
+	for rows.Next() {
+		var id, depsJSON string
+		if err := rows.Scan(&id, &depsJSON); err != nil {
+			continue
+		}
+		deps, parseErr := parseDependsOn(depsJSON)
+		if parseErr != nil || len(deps) == 0 {
+			continue
+		}
+		for _, d := range deps {
+			if d == failedTaskID {
+				toFail = append(toFail, id)
+				break
+			}
+		}
+	}
+	rows.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	e.mu.Lock()
+	ms := e.active[missionID]
+	e.mu.Unlock()
+
+	for _, id := range toFail {
+		if _, err := e.db.ExecContext(ctx,
+			`UPDATE mission_tasks SET status = 'FAILED', error_message = ?, updated_at = ?, completed_at = ? WHERE id = ?`,
+			reason, now, now, id); err != nil {
+			e.logger.Error("cascade fail task", "task_id", id, "error", err)
+			continue
+		}
+		if ms != nil {
+			e.broadcastTaskStatus(ms, id, "FAILED")
+		}
+		e.failDependentTasks(ctx, missionID, id, reason)
+	}
 }
 
 // checkMissionCompletion checks if all tasks are in a terminal state
@@ -1368,8 +1572,8 @@ func (e *MissionEngine) detectDeadlock(ctx context.Context, missionID string) bo
 	}
 	for _, t := range tasks {
 		switch t.Status {
-		case "PENDING", "IN_PROGRESS":
-			return false // can still make progress
+		case "PENDING", "IN_PROGRESS", "AWAITING_APPROVAL":
+			return false // can still make progress (AWAITING_APPROVAL = waiting for human)
 		case "COMPLETED", "SKIPPED":
 			continue // terminal, OK
 		case "FAILED":

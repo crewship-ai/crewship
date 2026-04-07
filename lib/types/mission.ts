@@ -13,6 +13,7 @@ export type MissionTaskStatus =
   | "COMPLETED"
   | "FAILED"
   | "SKIPPED"
+  | "AWAITING_APPROVAL"
 
 export interface TaskStats {
   total: number
@@ -22,6 +23,7 @@ export interface TaskStats {
   completed: number
   failed: number
   skipped: number
+  awaiting_approval: number
 }
 
 export type TaskComplexity = "SIMPLE" | "MEDIUM" | "COMPLEX"
@@ -58,6 +60,10 @@ export interface MissionTask {
   tool_calls_count: number | null
   tool_calls_budget: number | null
   confidence: number | null
+  approval_required: boolean
+  approval_status: string | null
+  approved_by: string | null
+  approved_at: string | null
   needs_review: boolean
   handoff_context: string | null
   evaluation_status: EvaluationStatus | null

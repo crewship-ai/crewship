@@ -309,3 +309,64 @@ func (s *Server) handleEscalate(w http.ResponseWriter, r *http.Request) {
 
 	writeJSONResponse(w, http.StatusOK, waitResult)
 }
+
+// handleReportConfidence handles POST /report-confidence — agent reports mid-task confidence.
+func (s *Server) handleReportConfidence(w http.ResponseWriter, r *http.Request) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
+
+	var req struct {
+		Confidence float64 `json:"confidence"`
+		Reason     string  `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+
+	body := map[string]interface{}{
+		"agent_id":     s.ipc.AgentID,
+		"crew_id":      s.ipc.CrewID,
+		"workspace_id": s.ipc.WorkspaceID,
+		"chat_id":      s.ipc.ChatID,
+		"confidence":   req.Confidence,
+		"reason":       req.Reason,
+	}
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to serialize request"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		s.ipc.BaseURL+"/api/v1/internal/report-confidence", bytes.NewReader(bodyJSON))
+	if err != nil {
+		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
+
+	resp, err := ipcClient.Do(httpReq)
+	if err != nil {
+		writeJSONResponse(w, http.StatusBadGateway, map[string]string{
+			"error": fmt.Sprintf("confidence report failed: %v", err),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		writeJSONResponse(w, http.StatusBadGateway, map[string]string{
+			"error": "invalid response from confidence endpoint",
+		})
+		return
+	}
+	writeJSONResponse(w, resp.StatusCode, result)
+}

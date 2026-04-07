@@ -201,6 +201,12 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
                   style={{ width: `${(taskStats.failed / taskStats.total) * 100}%` }}
                 />
               )}
+              {taskStats.awaiting_approval > 0 && (
+                <div
+                  className="h-full bg-violet-500 transition-all duration-700 ease-out"
+                  style={{ width: `${(taskStats.awaiting_approval / taskStats.total) * 100}%` }}
+                />
+              )}
               {taskStats.blocked > 0 && (
                 <div
                   className="h-full bg-orange-500 transition-all duration-700 ease-out"
@@ -219,6 +225,9 @@ export function MissionBoard({ tasks, taskStats }: MissionBoardProps) {
                 </span>
                 {taskStats.in_progress} working
               </span>
+            )}
+            {taskStats.awaiting_approval > 0 && (
+              <span className="text-violet-600">{taskStats.awaiting_approval} awaiting approval</span>
             )}
             {taskStats.blocked > 0 && (
               <span className="text-orange-600">{taskStats.blocked} blocked</span>

@@ -92,6 +92,7 @@ var migrations = []migration{
 	{31, "add_mcp_binding_env_var", migrationAddMCPBindingEnvVar},
 	{32, "add_oauth_credentials", migrationAddOAuthCredentials},
 	{33, "add_mcp_config_json", migrationAddMCPConfigJSON},
+	{34, "add_approval_gates", migrationAddApprovalGates},
 }
 
 const migrationAddKeeperObservability = `
@@ -1044,6 +1045,17 @@ const migrationAddMCPConfigJSON = `
 -- natively expands ${VAR} references from container env vars.
 ALTER TABLE crews ADD COLUMN mcp_config_json TEXT;
 ALTER TABLE agents ADD COLUMN mcp_config_json TEXT;
+`
+
+const migrationAddApprovalGates = `
+-- Approval gate columns on mission tasks.
+ALTER TABLE mission_tasks ADD COLUMN approval_required INTEGER DEFAULT 0;
+ALTER TABLE mission_tasks ADD COLUMN approval_status TEXT;
+ALTER TABLE mission_tasks ADD COLUMN approved_by TEXT;
+ALTER TABLE mission_tasks ADD COLUMN approved_at TEXT;
+
+-- Tiered escalation config per crew.
+ALTER TABLE crews ADD COLUMN escalation_config TEXT;
 `
 
 const migrationAddOAuthCredentials = `

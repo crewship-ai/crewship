@@ -222,6 +222,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/escalate":
 				s.handleEscalate(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/report-confidence":
+				s.handleReportConfidence(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/mission/create":
 				s.handleMissionCreate(w, r)
 				return
