@@ -20,6 +20,7 @@ import (
 // *orchestrator.MissionEngine satisfies this interface.
 type MissionStarter interface {
 	StartMission(ctx context.Context, missionID string) error
+	ApproveTask(ctx context.Context, taskID, userID string, approved bool, notes string) error
 }
 
 // captainRateLimiter is a per-user sliding window rate limiter (20 req/min).

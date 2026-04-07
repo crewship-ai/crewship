@@ -75,6 +75,9 @@ func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 			completed_at = NULL,
 			duration_ms = NULL,
 			assignment_id = NULL,
+			approval_status = NULL,
+			approved_by = NULL,
+			approved_at = NULL,
 			updated_at = ?
 		WHERE mission_id = ? AND status != 'COMPLETED'`,
 		now, missionID); err != nil {
@@ -200,11 +203,11 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Find FAILED tasks and cascade downstream via BFS
+	// Find FAILED and AWAITING_APPROVAL tasks and cascade downstream via BFS
 	toReset := make(map[string]bool)
 	queue := []string{}
 	for _, t := range tasks {
-		if t.Status == "FAILED" {
+		if t.Status == "FAILED" || t.Status == "AWAITING_APPROVAL" {
 			toReset[t.ID] = true
 			queue = append(queue, t.ID)
 		}
@@ -284,6 +287,9 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 				completed_at = NULL,
 				duration_ms = NULL,
 				assignment_id = NULL,
+				approval_status = NULL,
+				approved_by = NULL,
+				approved_at = NULL,
 				updated_at = ?
 			WHERE id = ?`,
 			newStatus, now, id); err != nil {

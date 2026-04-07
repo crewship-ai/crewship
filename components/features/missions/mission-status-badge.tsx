@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   XCircle,
   MinusCircle,
+  ShieldAlert,
   FileEdit,
   Eye,
   Ban,
@@ -85,6 +86,11 @@ const TASK_STATUS_CONFIG: Record<
     label: "Skipped",
     className: "bg-gray-100 text-gray-800 dark:bg-gray-900/40 dark:text-gray-300",
     icon: MinusCircle,
+  },
+  AWAITING_APPROVAL: {
+    label: "Awaiting Approval",
+    className: "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300",
+    icon: ShieldAlert,
   },
 }
 
