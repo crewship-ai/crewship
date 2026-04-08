@@ -521,6 +521,20 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"mcp_config_json": "mcp_config_json",
 	}
 
+	// Validate slug format if being updated
+	if slugVal, ok := body["slug"]; ok {
+		if slugStr, ok := slugVal.(string); ok {
+			if slugStr == "" || len(slugStr) < 2 || len(slugStr) > 50 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
+				return
+			}
+			if !validSlugFormat(slugStr) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must contain only lowercase letters, numbers, underscores, and hyphens"})
+				return
+			}
+		}
+	}
+
 	// Validate agent_role if being updated
 	if roleVal, ok := body["agent_role"]; ok {
 		roleStr, _ := roleVal.(string)

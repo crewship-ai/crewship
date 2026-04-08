@@ -433,9 +433,10 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 	codeVerifier := req.CodeVerifier
 	redirectURI := req.RedirectURI
 	if codeVerifier == "" && req.State != "" {
+		// Atomically consume the state (same as Callback handler)
 		var storedVerifier, storedRedirectURI, storedCredentialID string
 		err := h.db.QueryRowContext(r.Context(),
-			"SELECT code_verifier, redirect_uri, credential_id FROM oauth_states WHERE state = ?", req.State).
+			"DELETE FROM oauth_states WHERE state = ? RETURNING code_verifier, redirect_uri, credential_id", req.State).
 			Scan(&storedVerifier, &storedRedirectURI, &storedCredentialID)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired OAuth state"})
@@ -458,10 +459,6 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 		codeVerifier = storedVerifier
 		if redirectURI == "" {
 			redirectURI = storedRedirectURI
-		}
-		// Delete used state to prevent replay
-		if _, delErr := h.db.ExecContext(r.Context(), "DELETE FROM oauth_states WHERE state = ?", req.State); delErr != nil {
-			h.logger.Error("delete used OAuth state in exchange", "error", delErr)
 		}
 	}
 

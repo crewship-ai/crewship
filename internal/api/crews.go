@@ -443,6 +443,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
 		return
 	}
+	if req.Slug != nil && !validSlugFormat(*req.Slug) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must contain only lowercase letters, numbers, underscores, and hyphens"})
+		return
+	}
 
 	if req.Slug != nil {
 		var slugOwnerID string
