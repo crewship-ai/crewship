@@ -215,6 +215,10 @@ export function FleetExplorer({
                       onCrewSelect(crew.id)
                       if (!expanded) toggleCrew(crew.id)
                     }}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowRight" && !expanded) { e.preventDefault(); toggleCrew(crew.id) }
+                      if (e.key === "ArrowLeft" && expanded) { e.preventDefault(); toggleCrew(crew.id) }
+                    }}
                   >
                     <span
                       role="button"

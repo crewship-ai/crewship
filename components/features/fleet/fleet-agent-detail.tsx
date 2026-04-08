@@ -37,7 +37,8 @@ interface RunData {
   id: string
   status: string
   created_at: string
-  duration_ms: number | null
+  started_at: string | null
+  ended_at: string | null
 }
 
 const STATUS_CONFIG: Record<string, { label: string; className: string; badgeClass: string; pulse?: boolean }> = {
@@ -203,9 +204,9 @@ export function FleetAgentDetail({ agent, workspaceId, onClose }: FleetAgentDeta
                     {run.status}
                   </span>
                   <span className="flex-1" />
-                  {run.duration_ms != null && (
+                  {run.started_at && run.ended_at && (
                     <span className="text-[10px] text-muted-foreground/50 tabular-nums">
-                      {formatDuration(run.duration_ms)}
+                      {formatDuration(new Date(run.ended_at).getTime() - new Date(run.started_at).getTime())}
                     </span>
                   )}
                   <span className="text-[10px] text-muted-foreground/50">
