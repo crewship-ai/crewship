@@ -407,8 +407,8 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Insert label associations
 	for _, labelID := range req.Labels {
 		_, err = tx.ExecContext(r.Context(),
-			`INSERT INTO mission_labels (id, mission_id, label_id, created_at) VALUES (?, ?, ?, ?)`,
-			generateCUID(), id, labelID, now)
+			`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
+			id, labelID)
 		if err != nil {
 			h.logger.Error("insert mission label", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")

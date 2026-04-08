@@ -76,6 +76,7 @@ func init() {
 	rootCmd.AddCommand(escalationCmd)
 	rootCmd.AddCommand(templateCmd)
 	rootCmd.AddCommand(systemCmd)
+	rootCmd.AddCommand(issueCmd)
 }
 
 func main() {

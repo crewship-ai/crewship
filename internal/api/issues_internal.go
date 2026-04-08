@@ -143,7 +143,27 @@ func (h *InternalIssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
+	// Load labels
 	issue.Labels = []labelResponse{}
+	labelRows, err := h.db.QueryContext(r.Context(), `
+		SELECT l.id, l.name, l.color, l.label_group
+		FROM mission_labels ml JOIN labels l ON ml.label_id = l.id
+		WHERE ml.mission_id = ?`, issue.ID)
+	if err == nil {
+		defer labelRows.Close()
+		for labelRows.Next() {
+			var lbl labelResponse
+			if err := labelRows.Scan(&lbl.ID, &lbl.Name, &lbl.Color, &lbl.LabelGroup); err == nil {
+				issue.Labels = append(issue.Labels, lbl)
+			}
+		}
+	}
+
+	// Load comment count
+	_ = h.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM mission_comments WHERE mission_id = ?`,
+		issue.ID).Scan(&issue.CommentCount)
+
 	writeJSON(w, http.StatusOK, issue)
 }
 
