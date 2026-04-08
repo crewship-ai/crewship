@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import {
   Search, BookOpen, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
-  LayoutDashboard, Bot, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck,
+  LayoutDashboard, Bot, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck, Ship,
 } from "lucide-react"
 import { BellIcon as AnimatedBell } from "@/components/ui/bell"
 import { WifiIcon as AnimatedWifi, type WifiIconHandle } from "@/components/ui/wifi"
@@ -70,6 +70,7 @@ const pageConfig: Record<string, { title: string }> = {
   "/": { title: "Dashboard" },
   "/agents": { title: "Agents" },
   "/crews": { title: "Crews" },
+  "/fleet": { title: "Crews & Agents" },
   "/credentials": { title: "Credentials" },
   "/skills": { title: "Skills" },
   "/audit": { title: "Audit Log" },
@@ -191,6 +192,17 @@ export function AppToolbar() {
   const userInitials = getInitials(userName)
 
   const isAgentPage = AGENT_PATH_RE.test(pathname)
+  const isFleetPage = pathname === "/fleet"
+
+  // Crew count for fleet breadcrumb
+  const [crewCount, setCrewCount] = useState(0)
+  useEffect(() => {
+    if (!isFleetPage || !workspaceId) return
+    fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: unknown[]) => setCrewCount(data.length))
+      .catch(() => {})
+  }, [isFleetPage, workspaceId])
 
   function renderBreadcrumbs() {
     if (isAgentPage && agentBreadcrumb) {
@@ -228,6 +240,33 @@ export function AppToolbar() {
           </Link>
           <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
           <span className="text-sm text-muted-foreground">...</span>
+        </>
+      )
+    }
+
+    // Fleet breadcrumb: title + stats pills
+    if (isFleetPage) {
+      const agentTotal = fleetStatus?.total ?? 0
+      const running = fleetStatus?.running ?? 0
+      const errors = fleetStatus?.error ?? 0
+      return (
+        <>
+          <Ship className="h-4 w-4 text-muted-foreground shrink-0" />
+          <span className="text-sm font-semibold">Crews & Agents</span>
+          <div className="hidden md:flex items-center gap-3 font-mono text-[11px] text-muted-foreground ml-3">
+            {[
+              { label: "crews", value: crewCount, color: "bg-violet-500", tc: "text-violet-400" },
+              { label: "agents", value: agentTotal, color: "bg-blue-500", tc: "text-blue-400" },
+              { label: "running", value: running, color: "bg-emerald-500", tc: running > 0 ? "text-emerald-400" : "" },
+              { label: "error", value: errors, color: "bg-red-500", tc: errors > 0 ? "text-red-400" : "" },
+            ].map(({ label, value, color, tc }) => (
+              <div key={label} className="flex items-center gap-1">
+                <div className={`w-1.5 h-1.5 rounded-full ${color} ${value === 0 ? "opacity-30" : ""}`} />
+                <span className={`tabular-nums ${tc}`}>{value}</span>
+                <span className="text-muted-foreground/40 font-sans text-[10px]">{label}</span>
+              </div>
+            ))}
+          </div>
         </>
       )
     }
