@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Shield, ChevronRight, ChevronLeft, Search } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { EmptyState } from "@/components/layout/empty-state"
@@ -26,10 +26,7 @@ interface AuditLog {
   created_at: string
 }
 
-interface AuditResponse {
-  data: AuditLog[]
-  pagination: { page: number; limit: number; total: number; total_pages: number }
-}
+interface AuditPagination { page: number; limit: number; total: number; total_pages: number }
 
 const categories = [
   { label: "All", value: "all" },
@@ -77,20 +74,34 @@ function getActionColor(action: string): string {
 
 const PAGE_SIZE = 50
 
-function Row({ label, description, children, border = true }: {
-  label?: string; description?: string; children: React.ReactNode; border?: boolean
-}) {
-  return (
-    <div className={cn("flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]", border && "border-b border-white/[0.04] last:border-b-0")}>
-      {label ? (
-        <div className="shrink-0">
-          <div className="text-[13px] text-foreground">{label}</div>
-          {description && <div className="text-[11px] text-muted-foreground/30 mt-0.5">{description}</div>}
-        </div>
-      ) : <div />}
-      <div className="flex items-center gap-2 min-w-0 justify-end">{children}</div>
-    </div>
-  )
+/** Normalize API response — handles both nested and flat user/metadata shapes */
+function normalizeLog(raw: Record<string, unknown>): AuditLog {
+  let user: AuditLog["user"] = null
+  if (raw.user && typeof raw.user === "object") {
+    const u = raw.user as Record<string, unknown>
+    user = { id: String(u.id ?? ""), email: String(u.email ?? ""), full_name: (u.full_name as string | null) ?? null }
+  } else if (raw.user_email) {
+    user = { id: "", email: String(raw.user_email), full_name: (raw.user_name as string | null) ?? null }
+  }
+
+  let metadata: Record<string, unknown> | null = null
+  if (typeof raw.metadata === "string") {
+    try { metadata = JSON.parse(raw.metadata) } catch { metadata = null }
+  } else if (raw.metadata && typeof raw.metadata === "object") {
+    metadata = raw.metadata as Record<string, unknown>
+  }
+
+  return {
+    id: String(raw.id ?? ""),
+    action: String(raw.action ?? ""),
+    entity_type: String(raw.entity_type ?? ""),
+    entity_id: (raw.entity_id as string | null) ?? null,
+    metadata,
+    ip_address: (raw.ip_address as string | null) ?? null,
+    user_agent: (raw.user_agent as string | null) ?? null,
+    user,
+    created_at: String(raw.created_at ?? ""),
+  }
 }
 
 interface CrewAuditSectionProps {
@@ -100,34 +111,57 @@ interface CrewAuditSectionProps {
 export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [category, setCategory] = useState("all")
   const [dateRange, setDateRange] = useState("7d")
   const [searchQuery, setSearchQuery] = useState("")
   const [page, setPage] = useState(1)
-  const [pagination, setPagination] = useState<AuditResponse["pagination"] | null>(null)
+  const [pagination, setPagination] = useState<AuditPagination | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const fetchLogs = useCallback(async () => {
+    // Abort any in-flight request
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     setLoading(true)
+    setError(null)
     try {
       const params = new URLSearchParams({ workspace_id: workspaceId, page: String(page), limit: String(PAGE_SIZE) })
       if (category !== "all") params.set("entity_type", category)
       const dateFrom = getDateFrom(dateRange)
       if (dateFrom) params.set("date_from", dateFrom)
 
-      const res = await fetch(`/api/v1/audit?${params}`)
-      if (res.ok) {
-        const data = (await res.json()) as AuditResponse
-        setLogs(data.data)
-        setPagination(data.pagination)
+      const res = await fetch(`/api/v1/audit?${params}`, { signal: controller.signal })
+      if (!res.ok) {
+        setError(`Failed to load audit logs (${res.status})`)
+        return
       }
-    } catch { /* ignore */ }
-    finally { setLoading(false) }
+      const raw = await res.json()
+      const data = Array.isArray(raw.data) ? raw.data.map(normalizeLog) : []
+      setLogs(data)
+      setPagination(raw.pagination ?? null)
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return
+      setError("Failed to load audit logs")
+    } finally {
+      setLoading(false)
+    }
   }, [workspaceId, category, dateRange, page])
 
   useEffect(() => { fetchLogs() }, [fetchLogs])
 
-  useEffect(() => { setPage(1) }, [category, dateRange])
+  // Reset page when filters change
+  function handleCategoryChange(value: string) {
+    setCategory(value)
+    setPage(1)
+  }
+  function handleDateRangeChange(value: string) {
+    setDateRange(value)
+    setPage(1)
+  }
 
   const filteredLogs = searchQuery
     ? logs.filter(
@@ -147,11 +181,12 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
     <div className="space-y-4">
       {/* Filter bar */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5" role="group" aria-label="Filter by category">
           {categories.map((cat) => (
             <button
               key={cat.value}
-              onClick={() => setCategory(cat.value)}
+              aria-pressed={category === cat.value}
+              onClick={() => handleCategoryChange(cat.value)}
               className={cn(
                 "h-7 px-2.5 rounded-[4px] text-[11px] font-medium transition-colors",
                 category === cat.value
@@ -164,8 +199,8 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <Select value={dateRange} onValueChange={setDateRange}>
-            <SelectTrigger className="w-[120px] h-7 text-[11px] bg-white/[0.03] border-white/[0.08]">
+          <Select value={dateRange} onValueChange={handleDateRangeChange}>
+            <SelectTrigger aria-label="Date range" className="w-[120px] h-7 text-[11px] bg-white/[0.03] border-white/[0.08]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -177,7 +212,8 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/40" />
             <Input
-              placeholder="Search events..."
+              aria-label="Filter events on this page"
+              placeholder="Filter this page..."
               className="pl-8 h-7 text-[11px] w-44 bg-white/[0.03] border-white/[0.08]"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -186,14 +222,23 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         </div>
       </div>
 
+      {/* Error */}
+      {error && (
+        <Card className="border-red-500/20">
+          <CardContent className="p-4">
+            <p className="text-[12px] text-red-400">{error}</p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Content */}
       {loading ? (
         <Card className="border-white/[0.06]">
           <CardContent className="p-0">
             {Array.from({ length: 5 }).map((_, i) => (
-              <Row key={i} border={i < 4}>
+              <div key={i} className={cn("px-5 py-3.5", i < 4 && "border-b border-white/[0.04]")}>
                 <Skeleton className="h-4 w-full" />
-              </Row>
+              </div>
             ))}
           </CardContent>
         </Card>
@@ -202,8 +247,8 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
           <CardContent className="p-8">
             <EmptyState
               icon={Shield}
-              title="No activity yet"
-              description="All state-changing actions will be logged here."
+              title={searchQuery ? "No matching events" : "No activity yet"}
+              description={searchQuery ? "Try a different search term" : "All state-changing actions will be logged here."}
             />
           </CardContent>
         </Card>
@@ -277,27 +322,17 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                             <div className="bg-white/[0.02] border border-white/[0.06] rounded-md p-4 max-w-2xl">
                               <div className="grid grid-cols-2 gap-4 text-[11px] mb-3">
                                 <div>
-                                  <span className="text-muted-foreground/50 uppercase tracking-wider text-[10px]">
-                                    IP Address
-                                  </span>
-                                  <div className="font-mono text-foreground mt-0.5">
-                                    {log.ip_address ?? "\u2014"}
-                                  </div>
+                                  <span className="text-muted-foreground/50 uppercase tracking-wider text-[10px]">IP Address</span>
+                                  <div className="font-mono text-foreground mt-0.5">{log.ip_address ?? "\u2014"}</div>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground/50 uppercase tracking-wider text-[10px]">
-                                    User Agent
-                                  </span>
-                                  <div className="font-mono text-foreground mt-0.5 truncate">
-                                    {log.user_agent ?? "\u2014"}
-                                  </div>
+                                  <span className="text-muted-foreground/50 uppercase tracking-wider text-[10px]">User Agent</span>
+                                  <div className="font-mono text-foreground mt-0.5 truncate">{log.user_agent ?? "\u2014"}</div>
                                 </div>
                               </div>
                               {log.metadata && Object.keys(log.metadata).length > 0 && (
                                 <>
-                                  <div className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1.5">
-                                    Metadata
-                                  </div>
+                                  <div className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1.5">Metadata</div>
                                   <pre className="bg-white/[0.02] border border-white/[0.06] rounded p-2.5 text-[11px] font-mono text-muted-foreground overflow-auto max-h-28">
                                     {JSON.stringify(log.metadata, null, 2)}
                                   </pre>
