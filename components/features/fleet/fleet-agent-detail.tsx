@@ -10,7 +10,12 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { getCrewDotColor } from "@/lib/crew-icon"
+
+const CREW_DOT_CLASS: Record<string, string> = {
+  blue: "bg-blue-500", emerald: "bg-emerald-500", violet: "bg-violet-500",
+  amber: "bg-amber-500", rose: "bg-rose-500", cyan: "bg-cyan-500",
+  lime: "bg-lime-500", fuchsia: "bg-fuchsia-500",
+}
 import { timeAgo, formatDuration } from "@/lib/time"
 import Link from "next/link"
 
@@ -146,8 +151,7 @@ export function FleetAgentDetail({ agent, workspaceId, onClose }: FleetAgentDeta
               value={
                 <span className="flex items-center gap-1.5">
                   <span
-                    className="h-2 w-2 rounded-full shrink-0"
-                    style={{ backgroundColor: getCrewDotColor(agent.crew.color) }}
+                    className={cn("h-2 w-2 rounded-full shrink-0", CREW_DOT_CLASS[agent.crew.color || ""] || "bg-gray-500")}
                   />
                   {agent.crew.name}
                 </span>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ChevronRight, Search, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react"
@@ -73,6 +73,18 @@ export function FleetExplorer({
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [expandedCrews, setExpandedCrews] = useState<Set<string>>(() => new Set(crews.map((c) => c.id)))
+
+  // Auto-expand newly added crews
+  useEffect(() => {
+    setExpandedCrews((prev) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const crew of crews) {
+        if (!next.has(crew.id)) { next.add(crew.id); changed = true }
+      }
+      return changed ? next : prev
+    })
+  }, [crews])
 
   const toggleCrew = useCallback((crewId: string) => {
     setExpandedCrews((prev) => {
@@ -309,6 +321,7 @@ export function FleetExplorer({
                   return (
                     <button
                       key={agent.id}
+                      aria-current={isAgentSelected ? "true" : undefined}
                       className={cn(
                         "w-full flex items-center gap-2 px-2 py-1 rounded-md text-left transition-colors",
                         isAgentSelected
