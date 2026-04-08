@@ -2,11 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
-  ChevronRight, Search, PanelLeftClose, PanelLeftOpen,
+  ChevronRight, Search, PanelLeftClose, PanelLeftOpen, Filter, ChevronDown,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CrewIcon } from "@/components/ui/crew-icon"
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
@@ -173,36 +176,43 @@ export function FleetExplorer({
 
       {!collapsed && (
         <div className="flex-1 min-h-0 flex flex-col">
-          {/* Search */}
-          <div className="px-2 pt-2 pb-1 shrink-0">
-            <div className="relative">
+          {/* Search + filter dropdown in one row */}
+          <div className="px-2 py-2 shrink-0 flex items-center gap-1.5">
+            <div className="relative flex-1">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
               <Input
-                placeholder="Filter crews & agents..."
+                placeholder="Search..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="h-7 pl-7 text-[12px] bg-white/[0.04] border-white/[0.1]"
               />
             </div>
-          </div>
-
-          {/* Status filters */}
-          <div className="px-2 pb-2 flex items-center gap-1 flex-wrap shrink-0">
-            {STATUS_FILTERS.map((f) => (
-              <button
-                key={f.value}
-                onClick={() => setStatusFilter(f.value)}
-                className={cn(
-                  "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors",
-                  statusFilter === f.value
-                    ? "bg-blue-500/15 border border-blue-500/35 text-blue-400"
-                    : "bg-white/[0.04] border border-white/[0.08] text-muted-foreground hover:text-foreground/80",
-                )}
-              >
-                {f.dot && <span className={cn("h-1.5 w-1.5 rounded-full", f.dot)} />}
-                {f.label}
-              </button>
-            ))}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className={cn(
+                  "inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium border transition-colors shrink-0",
+                  statusFilter !== "all"
+                    ? "bg-blue-500/15 border-blue-500/35 text-blue-400"
+                    : "bg-white/[0.04] border-white/[0.1] text-muted-foreground hover:text-foreground/80",
+                )}>
+                  <Filter className="h-3 w-3" />
+                  {statusFilter === "all" ? "All" : STATUS_FILTERS.find((f) => f.value === statusFilter)?.label}
+                  <ChevronDown className="h-2.5 w-2.5 opacity-50" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[140px]">
+                {STATUS_FILTERS.map((f) => (
+                  <DropdownMenuItem
+                    key={f.value}
+                    onClick={() => setStatusFilter(f.value)}
+                    className={cn("text-[12px] gap-2", statusFilter === f.value && "font-medium text-blue-400")}
+                  >
+                    {f.dot ? <span className={cn("h-2 w-2 rounded-full", f.dot)} /> : <span className="h-2 w-2" />}
+                    {f.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           {/* Tree */}
