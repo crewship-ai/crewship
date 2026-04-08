@@ -151,7 +151,7 @@ export function FleetAgentDetail({ agent, workspaceId, onClose }: FleetAgentDeta
               value={
                 <span className="flex items-center gap-1.5">
                   <span
-                    className={cn("h-2 w-2 rounded-full shrink-0", CREW_DOT_CLASS[agent.crew.color || ""] || "bg-gray-500")}
+                    className={cn("h-2 w-2 rounded-full shrink-0", CREW_DOT_CLASS[agent.crew.color || ""] || CREW_DOT_CLASS.blue)}
                   />
                   {agent.crew.name}
                 </span>
