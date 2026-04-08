@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
-  Network, Bot, RefreshCw, Plus, LayoutGrid, Activity,
+  Bot, RefreshCw, Plus, LayoutGrid, Activity,
   Share2, HeartPulse, ChevronUp, ChevronDown, Layers, Download,
   ChevronLeft, PanelLeftOpen,
 } from "lucide-react"
@@ -128,34 +128,10 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
-      {/* Unified toolbar: title + stats | tabs | actions */}
-      <div className="shrink-0 z-20 flex items-stretch h-9 bg-card border-b border-white/[0.1] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {/* Left: title + stats */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
-            <Network className="h-4 w-4 text-muted-foreground" />
-            Crews & Agents
-          </div>
-          {!isMobile && (
-            <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground ml-2">
-              {[
-                { label: "crews", value: stats.crews, color: "bg-violet-500", tc: "text-violet-400" },
-                { label: "agents", value: stats.agents, color: "bg-blue-500", tc: "text-blue-400" },
-                { label: "running", value: stats.running, color: "bg-emerald-500", tc: stats.running > 0 ? "text-emerald-400" : "" },
-                { label: "error", value: stats.error, color: "bg-red-500", tc: stats.error > 0 ? "text-red-400" : "" },
-              ].map(({ label, value, color, tc }) => (
-                <div key={label} className="flex items-center gap-1">
-                  <div className={cn("w-1.5 h-1.5 rounded-full", color, value === 0 && "opacity-30")} />
-                  <span className={cn("tabular-nums", tc)}>{value}</span>
-                  <span className="text-muted-foreground/40 font-sans text-[10px]">{label}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Center: tabs */}
-        <div className="flex items-stretch ml-6">
+      {/* Toolbar: tabs | actions */}
+      <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        {/* Left: tabs */}
+        <div className="flex items-stretch">
           {([
             { id: "overview" as const, label: "Overview", icon: LayoutGrid },
             { id: "activity" as const, label: "Activity", icon: Activity },
