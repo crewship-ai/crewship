@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { motion, AnimatePresence } from "motion/react"
 import {
-  Bot, RefreshCw, Plus, LayoutGrid, Activity,
+  Bot, Plus, LayoutGrid, Activity,
   Share2, HeartPulse, ChevronUp, ChevronDown, Layers, Download,
   ChevronLeft, PanelLeftOpen,
 } from "lucide-react"
@@ -156,9 +156,6 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
 
         {/* Right: actions */}
         <div className="flex items-center gap-1.5 ml-auto shrink-0">
-          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground/80" onClick={onRefresh}>
-            <RefreshCw className="h-3 w-3" />
-          </Button>
           <Button size="sm" className="h-[22px] px-2 text-[11.5px] font-medium gap-1" asChild>
             <Link href="/crews/new">
               <Plus className="h-3 w-3" />
