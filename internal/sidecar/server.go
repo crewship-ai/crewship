@@ -292,6 +292,22 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodGet && r.URL.Path == "/mcp/status":
 				s.handleMCPStatus(w, r)
 				return
+			// Cross-crew connection routes
+			case r.Method == http.MethodGet && r.URL.Path == "/connections":
+				s.handleConnectionsList(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/connections/") && strings.HasSuffix(r.URL.Path, "/message"):
+				s.handleConnectionSendMessage(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/connections/") && strings.HasSuffix(r.URL.Path, "/messages"):
+				s.handleConnectionListMessages(w, r)
+				return
+			case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/connections/") && strings.HasSuffix(r.URL.Path, "/files"):
+				s.handleConnectionReadFiles(w, r)
+				return
+			case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/connections/") && strings.HasSuffix(r.URL.Path, "/files"):
+				s.handleConnectionWriteFiles(w, r)
+				return
 			}
 		}
 		proxy.ServeHTTP(w, r)

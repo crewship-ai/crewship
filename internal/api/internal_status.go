@@ -221,8 +221,9 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ListCrewConnections handles GET /api/v1/internal/crew-connections?workspace_id=...
+// ListCrewConnections handles GET /api/v1/internal/crew-connections?workspace_id=...&crew_id=...
 // Used by the sidecar on behalf of COORDINATOR agents.
+// When crew_id is provided, only connections involving that crew are returned.
 func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Request) {
 	wsID := r.URL.Query().Get("workspace_id")
 	if wsID == "" {
@@ -230,14 +231,23 @@ func (h *InternalHandler) ListCrewConnections(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	rows, err := h.db.QueryContext(r.Context(), `
+	query := `
 		SELECT cc.id, cc.from_crew_id, cc.to_crew_id, cc.direction, cc.status,
 		       fc.name, fc.slug, tc.name, tc.slug
 		FROM crew_connections cc
 		JOIN crews fc ON fc.id = cc.from_crew_id
 		JOIN crews tc ON tc.id = cc.to_crew_id
-		WHERE cc.workspace_id = ? AND cc.status = 'active'
-		ORDER BY cc.created_at DESC`, wsID)
+		WHERE cc.workspace_id = ? AND cc.status = 'active'`
+	args := []interface{}{wsID}
+
+	if crewID := r.URL.Query().Get("crew_id"); crewID != "" {
+		query += " AND (cc.from_crew_id = ? OR cc.to_crew_id = ?)"
+		args = append(args, crewID, crewID)
+	}
+
+	query += " ORDER BY cc.created_at DESC"
+
+	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("list crew connections internal", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})

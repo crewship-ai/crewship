@@ -104,6 +104,7 @@ var crewGetCmd = &cobra.Command{
 			Icon           *string  `json:"icon"`
 			MemoryMB       int      `json:"container_memory_mb"`
 			CPUs           float64  `json:"container_cpus"`
+			TTLHours       *int     `json:"container_ttl_hours"`
 			NetworkMode    string   `json:"network_mode"`
 			AllowedDomains []string `json:"allowed_domains"`
 			CreatedAt      string   `json:"created_at"`
@@ -125,6 +126,10 @@ var crewGetCmd = &cobra.Command{
 		if networkMode == "" {
 			networkMode = "free"
 		}
+		ttlStr := "Never stop"
+		if crew.TTLHours != nil && *crew.TTLHours > 0 {
+			ttlStr = fmt.Sprintf("%d hours", *crew.TTLHours)
+		}
 		pairs := [][]string{
 			{"Name", crew.Name},
 			{"Slug", crew.Slug},
@@ -132,6 +137,7 @@ var crewGetCmd = &cobra.Command{
 			{"Description", desc},
 			{"Memory", fmt.Sprintf("%dMB", crew.MemoryMB)},
 			{"CPUs", fmt.Sprintf("%.1f", crew.CPUs)},
+			{"TTL", ttlStr},
 			{"Network Mode", networkMode},
 			{"Allowed Domains", domainsStr},
 			{"Created", crew.CreatedAt},
@@ -175,6 +181,9 @@ var crewCreateCmd = &cobra.Command{
 		}
 		if v, _ := flags.GetFloat64("cpus"); v > 0 {
 			body["container_cpus"] = v
+		}
+		if v, _ := flags.GetInt("ttl"); v > 0 {
+			body["container_ttl_hours"] = v
 		}
 		if v, _ := flags.GetString("network-mode"); v != "" {
 			body["network_mode"] = v
@@ -256,6 +265,10 @@ var crewUpdateCmd = &cobra.Command{
 		if flags.Changed("cpus") {
 			v, _ := flags.GetFloat64("cpus")
 			body["container_cpus"] = v
+		}
+		if flags.Changed("ttl") {
+			v, _ := flags.GetInt("ttl")
+			body["container_ttl_hours"] = v // 0 = clear TTL on server side
 		}
 		if flags.Changed("network-mode") {
 			v, _ := flags.GetString("network-mode")
@@ -731,6 +744,7 @@ func init() {
 	crewCreateCmd.Flags().String("icon", "", "Emoji icon")
 	crewCreateCmd.Flags().Int("memory-mb", 0, "Container memory limit in MB")
 	crewCreateCmd.Flags().Float64("cpus", 0, "Container CPU limit")
+	crewCreateCmd.Flags().Int("ttl", 0, "Auto-stop after idle hours (0 = never stop)")
 	crewCreateCmd.Flags().String("network-mode", "", "Network policy mode: free or restricted")
 	crewCreateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode")
 
@@ -740,6 +754,7 @@ func init() {
 	crewUpdateCmd.Flags().String("icon", "", "Emoji icon")
 	crewUpdateCmd.Flags().Int("memory-mb", 0, "Container memory limit in MB")
 	crewUpdateCmd.Flags().Float64("cpus", 0, "Container CPU limit")
+	crewUpdateCmd.Flags().Int("ttl", -1, "Auto-stop after idle hours (0 = disable TTL)")
 	crewUpdateCmd.Flags().String("network-mode", "", "Network policy mode: free or restricted")
 	crewUpdateCmd.Flags().String("allowed-domains", "", "Comma-separated allowed domains for restricted mode")
 

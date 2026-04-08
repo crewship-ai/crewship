@@ -31,6 +31,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
 import { getCrewDotColor } from "@/lib/crew-icon"
 import { CommandPalette } from "@/components/command-palette"
+import { useAppStore } from "@/lib/store"
 
 const mobileNavSections = [
   {
@@ -69,10 +70,20 @@ const pageConfig: Record<string, { title: string }> = {
   "/": { title: "Dashboard" },
   "/agents": { title: "Agents" },
   "/crews": { title: "Crews" },
+  "/fleet": { title: "Crews & Agents" },
   "/credentials": { title: "Credentials" },
   "/skills": { title: "Skills" },
   "/audit": { title: "Audit Log" },
   "/settings": { title: "Settings" },
+}
+
+const settingsTabTitles: Record<string, string> = {
+  profile: "Profile",
+  general: "General",
+  crews: "Crews & Containers",
+  connections: "Connections",
+  members: "Members",
+  audit: "Audit Log",
 }
 
 function getInitials(name: string): string {
@@ -151,6 +162,7 @@ export function AppToolbar() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [cmdkOpen, setCmdkOpen] = useState(false)
   const { role } = useAbilities()
+  const settingsTab = useAppStore((s) => s.settingsTab)
 
   useEffect(() => {
     if (wsStatus === "connected") {
@@ -180,6 +192,17 @@ export function AppToolbar() {
   const userInitials = getInitials(userName)
 
   const isAgentPage = AGENT_PATH_RE.test(pathname)
+  const isFleetPage = pathname === "/fleet"
+
+  // Crew count for fleet breadcrumb
+  const [crewCount, setCrewCount] = useState(0)
+  useEffect(() => {
+    if (!isFleetPage || !workspaceId) return
+    fetch(`/api/v1/crews?workspace_id=${workspaceId}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: unknown[]) => setCrewCount(data.length))
+      .catch(() => {})
+  }, [isFleetPage, workspaceId])
 
   function renderBreadcrumbs() {
     if (isAgentPage && agentBreadcrumb) {
@@ -221,49 +244,68 @@ export function AppToolbar() {
       )
     }
 
+    // Fleet breadcrumb: title + stats pills
+    if (isFleetPage) {
+      const agentTotal = fleetStatus?.total ?? 0
+      const running = fleetStatus?.running ?? 0
+      const errors = fleetStatus?.error ?? 0
+      return (
+        <>
+          <span className="text-sm text-muted-foreground">Fleet</span>
+          <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+          <span className="text-sm font-semibold">Crews & Agents</span>
+          <div className="hidden md:flex items-center gap-3 font-mono text-[11px] text-muted-foreground ml-3">
+            {[
+              { label: "crews", value: crewCount, color: "bg-violet-500", tc: "text-violet-400" },
+              { label: "agents", value: agentTotal, color: "bg-blue-500", tc: "text-blue-400" },
+              { label: "running", value: running, color: "bg-emerald-500", tc: running > 0 ? "text-emerald-400" : "" },
+              { label: "error", value: errors, color: "bg-red-500", tc: errors > 0 ? "text-red-400" : "" },
+            ].map(({ label, value, color, tc }) => (
+              <div key={label} className="flex items-center gap-1">
+                <div className={`w-1.5 h-1.5 rounded-full ${color} ${value === 0 ? "opacity-30" : ""}`} />
+                <span className={`tabular-nums ${tc}`}>{value}</span>
+                <span className="text-muted-foreground/40 font-sans text-[10px]">{label}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )
+    }
+
+    // Settings breadcrumb: Settings / Profile
+    if (pathname === "/settings" && settingsTab) {
+      const tabTitle = settingsTabTitles[settingsTab]
+      return (
+        <>
+          <span className="text-sm text-muted-foreground">Settings</span>
+          {tabTitle && (
+            <>
+              <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
+              <span className="text-sm font-semibold truncate">{tabTitle}</span>
+            </>
+          )}
+        </>
+      )
+    }
+
     const title = config?.title ?? "Crewship"
     return <span className="text-sm font-semibold truncate">{title}</span>
   }
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between bg-card px-3 sm:px-4 border-b border-white/[0.1]">
-      {/* Left: Org switcher + breadcrumb */}
+      {/* Left: breadcrumb only */}
       <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-1.5 rounded-md px-1.5 py-1 hover:bg-accent transition-colors shrink-0">
-              <div className="flex h-5 w-5 items-center justify-center rounded bg-primary text-[8px] font-bold text-primary-foreground">U</div>
-              <span className="text-sm font-medium hidden sm:inline">Unify Technology</span>
-              <ChevronDown className="h-3 w-3 text-muted-foreground" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-72">
-            <DropdownMenuLabel className="text-micro uppercase tracking-wider text-muted-foreground font-medium">Workspaces</DropdownMenuLabel>
-            <DropdownMenuItem className="flex items-center gap-3 py-2 bg-primary/5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-micro font-bold text-primary-foreground shrink-0">U</div>
-              <div className="min-w-0">
-                <div className="text-xs font-medium">Unify Technology</div>
-                <div className="text-micro text-muted-foreground">3 members</div>
-              </div>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-xs">Create workspace</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
-
         {renderBreadcrumbs()}
       </div>
 
-      {/* Right: Status indicators + search + help + notifications + user */}
+      {/* Right: Status indicators + search + notifications */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
         {/* Status indicators: System + Fleet + Escalations */}
         {(() => {
           const systemOnline = engineStatus === "connected" && wsStatus === "connected"
           const systemChecking = engineStatus === "checking" || wsStatus === "connecting"
 
-          // Fleet display logic (scales to 1000+ agents)
           let fleetLabel = ""
           let fleetColor: "emerald" | "amber" | "red" | "muted" = "muted"
           if (!fleetStatus) {
@@ -298,7 +340,6 @@ export function AppToolbar() {
 
           return (
             <div className="hidden lg:flex items-center gap-1.5 mr-1">
-              {/* System: combined engine + WS */}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div tabIndex={0} role="status" aria-label={`System ${systemOnline ? "online" : systemChecking ? "connecting" : "offline"}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${sysColors.bg}`}>
@@ -313,7 +354,6 @@ export function AppToolbar() {
                 </TooltipContent>
               </Tooltip>
 
-              {/* Fleet status */}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <div tabIndex={0} role="status" aria-label={`Fleet: ${fleetLabel}`} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${fleetColors.bg}`}>
@@ -326,7 +366,6 @@ export function AppToolbar() {
                 </TooltipContent>
               </Tooltip>
 
-              {/* Pending escalations */}
               {pendingEscalations > 0 && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -358,10 +397,6 @@ export function AppToolbar() {
         {/* Mobile: search icon only */}
         <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" aria-label="Search" onClick={() => setCmdkOpen(true)}>
           <Search className="h-4 w-4" />
-        </Button>
-
-        <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:inline-flex" aria-label="Help">
-          <BookOpen className="h-4 w-4" />
         </Button>
 
         {/* Desktop: notifications */}
@@ -396,6 +431,10 @@ export function AppToolbar() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:inline-flex" aria-label="Help">
+          <BookOpen className="h-4 w-4" />
+        </Button>
 
         {/* Desktop: user menu */}
         <DropdownMenu>
@@ -460,7 +499,7 @@ export function AppToolbar() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="flex h-6 w-6 items-center justify-center rounded bg-primary text-[8px] font-bold text-primary-foreground">U</div>
-                  <SheetTitle className="text-sm">Crewship</SheetTitle>
+                  <SheetTitle className="text-sm">Unify Technology</SheetTitle>
                 </div>
                 <button onClick={() => setMobileNavOpen(false)} className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-accent">
                   <X className="h-4 w-4" />
