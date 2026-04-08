@@ -256,6 +256,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			opts = append(opts, goapi.WithMissionCallback(missionEngine))
 		}
 		opts = append(opts, goapi.WithAllowSignup(cfg.Auth.AllowSignup))
+		opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath))
 
 		// Wire Keeper gatekeeper (Ollama-based credential access control)
 		opts = append(opts, goapi.WithKeeperConfig(&cfg.Keeper))

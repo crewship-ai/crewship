@@ -121,6 +121,7 @@ type crewResponse struct {
 	AvatarStyle       *string          `json:"avatar_style"`
 	ContainerMemoryMB int              `json:"container_memory_mb"`
 	ContainerCPUs     float64          `json:"container_cpus"`
+	ContainerTTLHours *int             `json:"container_ttl_hours"`
 	NetworkMode       string           `json:"network_mode"`
 	AllowedDomains    []string         `json:"allowed_domains"`
 	MCPConfigJSON     *string          `json:"mcp_config_json,omitempty"`
@@ -139,7 +140,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
@@ -161,7 +162,7 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		var allowedDomainsJSON *string
 		if err := rows.Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 			&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-			&c.NetworkMode, &allowedDomainsJSON,
+			&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON,
 			&c.MCPConfigJSON, &c.EscalationConfig,
 			&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members); err != nil {
 			h.logger.Error("scan crew", "error", err)
@@ -185,13 +186,16 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 type createCrewRequest struct {
-	Name           string   `json:"name"`
-	Slug           string   `json:"slug"`
-	Description    *string  `json:"description"`
-	Color          *string  `json:"color"`
-	Icon           *string  `json:"icon"`
-	NetworkMode    *string  `json:"network_mode"`
-	AllowedDomains []string `json:"allowed_domains"`
+	Name              string   `json:"name"`
+	Slug              string   `json:"slug"`
+	Description       *string  `json:"description"`
+	Color             *string  `json:"color"`
+	Icon              *string  `json:"icon"`
+	ContainerMemoryMB *int     `json:"container_memory_mb"`
+	ContainerCPUs     *float64 `json:"container_cpus"`
+	ContainerTTLHours *int     `json:"container_ttl_hours"`
+	NetworkMode       *string  `json:"network_mode"`
+	AllowedDomains    []string `json:"allowed_domains"`
 }
 
 func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -290,10 +294,23 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	crewID := generateCUID()
 
+	memoryMB := 4096
+	if req.ContainerMemoryMB != nil && *req.ContainerMemoryMB > 0 {
+		memoryMB = *req.ContainerMemoryMB
+	}
+	cpus := 2.0
+	if req.ContainerCPUs != nil && *req.ContainerCPUs > 0 {
+		cpus = *req.ContainerCPUs
+	}
+	var ttlHours *int
+	if req.ContainerTTLHours != nil && *req.ContainerTTLHours > 0 {
+		ttlHours = req.ContainerTTLHours
+	}
+
 	_, err = h.db.ExecContext(r.Context(),
-		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, network_mode, allowed_domains, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, networkMode, allowedDomainsDB, now, now)
+		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		crewID, workspaceID, req.Name, req.Slug, req.Description, req.Color, req.Icon, memoryMB, cpus, ttlHours, networkMode, allowedDomainsDB, now, now)
 	if err != nil {
 		h.logger.Error("insert crew", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -308,8 +325,9 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Description:       req.Description,
 		Color:             req.Color,
 		Icon:              req.Icon,
-		ContainerMemoryMB: 4096,
-		ContainerCPUs:     2.0,
+		ContainerMemoryMB: memoryMB,
+		ContainerCPUs:     cpus,
+		ContainerTTLHours: ttlHours,
 		NetworkMode:       networkMode,
 		AllowedDomains:    allowedDomainsOut,
 		CreatedAt:         now,
@@ -334,7 +352,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var allowedDomainsJSON *string
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
@@ -343,7 +361,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL
 	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.NetworkMode, &allowedDomainsJSON,
+		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON,
 		&c.MCPConfigJSON, &c.EscalationConfig,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
@@ -369,6 +387,7 @@ type updateCrewRequest struct {
 	AvatarStyle       *string   `json:"avatar_style"`
 	ContainerMemoryMB *int      `json:"container_memory_mb"`
 	ContainerCPUs     *float64  `json:"container_cpus"`
+	ContainerTTLHours *int      `json:"container_ttl_hours"`
 	NetworkMode       *string   `json:"network_mode"`
 	AllowedDomains    *[]string `json:"allowed_domains"`
 	MCPConfigJSON     *string   `json:"mcp_config_json"`
@@ -474,6 +493,18 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		query += ", container_cpus = ?"
 		args = append(args, *req.ContainerCPUs)
 	}
+	if req.ContainerTTLHours != nil {
+		if *req.ContainerTTLHours < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "container_ttl_hours cannot be negative"})
+			return
+		}
+		if *req.ContainerTTLHours == 0 {
+			query += ", container_ttl_hours = NULL"
+		} else {
+			query += ", container_ttl_hours = ?"
+			args = append(args, *req.ContainerTTLHours)
+		}
+	}
 	if req.MCPConfigJSON != nil {
 		if *req.MCPConfigJSON != "" {
 			var mcpCheck struct {
@@ -578,7 +609,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var updatedDomainsJSON *string
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
-			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
+			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
 			c.mcp_config_json, c.escalation_config,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
@@ -587,7 +618,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		WHERE c.id = ? AND c.deleted_at IS NULL
 	`, crewID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
-		&c.NetworkMode, &updatedDomainsJSON,
+		&c.ContainerTTLHours, &c.NetworkMode, &updatedDomainsJSON,
 		&c.MCPConfigJSON, &c.EscalationConfig,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
