@@ -56,6 +56,7 @@ type Router struct {
 	allowSignup          bool
 	license          *license.License
 	agentHandler     *AgentHandler
+	storagePath      string // base path for crew file storage
 }
 
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
@@ -171,6 +172,12 @@ func WithKeeperConfig(cfg *config.KeeperConfig) RouterOption {
 func WithAllowSignup(allow bool) RouterOption {
 	return func(r *Router) {
 		r.allowSignup = allow
+	}
+}
+
+func WithStoragePath(path string) RouterOption {
+	return func(r *Router) {
+		r.storagePath = path
 	}
 }
 
@@ -543,6 +550,13 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("POST /api/v1/internal/agents", internalAuth(http.HandlerFunc(internal.CreateAgent)))
 	r.mux.Handle("GET /api/v1/internal/crew-connections", internalAuth(http.HandlerFunc(internal.ListCrewConnections)))
 	r.mux.Handle("POST /api/v1/internal/mcp-tool-calls", internalAuth(http.HandlerFunc(internal.RecordMCPToolCall)))
+
+	// Cross-crew messaging and file sharing (called by sidecar)
+	crewMsg := NewCrewMessagingHandler(r.db, r.storagePath, r.logger)
+	r.mux.Handle("POST /api/v1/internal/crew-messages", internalAuth(http.HandlerFunc(crewMsg.SendMessage)))
+	r.mux.Handle("GET /api/v1/internal/crew-messages", internalAuth(http.HandlerFunc(crewMsg.ListMessages)))
+	r.mux.Handle("GET /api/v1/internal/crew-files/{crewId}", internalAuth(http.HandlerFunc(crewMsg.ReadFile)))
+	r.mux.Handle("POST /api/v1/internal/crew-files/{crewId}", internalAuth(http.HandlerFunc(crewMsg.WriteFile)))
 
 	// Assignment routes (internal auth, called by sidecar on behalf of lead agents)
 	assign := NewAssignmentHandler(r.db, r.orch, r.hub, r.internalToken, r.logger)
