@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Sidebar + Toolbar Navigation Variants</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Open Sans', sans-serif;
+    background: #0a0a0a;
+    color: #fff;
+    padding: 40px 24px;
+  }
+
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+  h1 span { color: #6366f1; }
+
+  .subtitle {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 48px;
+  }
+
+  .variant-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #6366f1;
+    margin-bottom: 12px;
+  }
+  .variant-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .variant-desc {
+    font-size: 13px;
+    color: #888;
+    margin-bottom: 20px;
+    max-width: 700px;
+    line-height: 1.5;
+  }
+  .variant-section {
+    margin-bottom: 64px;
+  }
+
+  /* ---- Shell ---- */
+  .shell {
+    display: flex;
+    height: 560px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+  }
+
+  /* ---- Sidebar ---- */
+  .sidebar {
+    width: 224px;
+    background: #0f0f0f;
+    border-right: 1px solid rgba(255,255,255,0.08);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    padding: 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .sidebar-header-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .sidebar-header-item:hover {
+    background: rgba(255,255,255,0.04);
+  }
+
+  .ws-badge {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: #6366f1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .ws-badge.small {
+    width: 22px;
+    height: 22px;
+    font-size: 9px;
+    border-radius: 4px;
+  }
+
+  .ws-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .ws-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e5e5e5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ws-meta {
+    font-size: 10px;
+    color: #555;
+  }
+
+  .chevron {
+    font-size: 10px;
+    color: #555;
+    flex-shrink: 0;
+  }
+
+  .logo-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+  }
+  .logo-icon {
+    width: 22px;
+    height: 22px;
+    color: #e5e5e5;
+    flex-shrink: 0;
+  }
+  .logo-text {
+    font-size: 14px;
+    font-weight: 600;
+    color: #e5e5e5;
+  }
+
+  /* Nav sections */
+  .sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+
+  .nav-section {
+    padding: 0 8px;
+    margin-bottom: 2px;
+  }
+  .nav-section-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #444;
+    padding: 12px 8px 4px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 8px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #888;
+    cursor: pointer;
+    transition: all 0.12s;
+    text-decoration: none;
+  }
+  .nav-item:hover {
+    color: #ccc;
+    background: rgba(255,255,255,0.03);
+  }
+  .nav-item.active {
+    color: #6366f1;
+    background: rgba(99,102,241,0.08);
+  }
+  .nav-item svg, .nav-item .nav-icon {
+    width: 16px;
+    height: 16px;
+    opacity: 0.7;
+    flex-shrink: 0;
+  }
+  .nav-item.active svg, .nav-item.active .nav-icon {
+    opacity: 1;
+  }
+  .nav-badge {
+    margin-left: auto;
+    font-size: 9px;
+    font-weight: 600;
+    background: rgba(255,255,255,0.06);
+    color: #666;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  /* Sidebar footer */
+  .sidebar-footer {
+    padding: 8px 12px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .user-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .user-card:hover { background: rgba(255,255,255,0.04); }
+
+  .user-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #6366f1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .user-name { font-size: 12px; font-weight: 500; color: #ccc; }
+  .user-email { font-size: 10px; color: #555; }
+
+  .collapse-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #555;
+    cursor: pointer;
+    border: none;
+    background: none;
+    width: 100%;
+    transition: color 0.12s;
+  }
+  .collapse-btn:hover { color: #999; }
+
+  /* ---- Toolbar ---- */
+  .toolbar {
+    height: 48px;
+    background: #0f0f0f;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    flex-shrink: 0;
+  }
+
+  .toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .breadcrumb-sep {
+    color: #333;
+    font-size: 13px;
+  }
+  .breadcrumb-page {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e5e5e5;
+  }
+
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 100px;
+    font-size: 10px;
+    font-weight: 500;
+    border: 1px solid;
+  }
+  .status-pill.online {
+    background: rgba(16,185,129,0.08);
+    border-color: rgba(16,185,129,0.25);
+    color: #34d399;
+  }
+  .status-pill .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+  }
+  .status-pill.online .dot { background: #10b981; }
+
+  .toolbar-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+    cursor: pointer;
+    transition: all 0.12s;
+    border: none;
+    background: none;
+  }
+  .toolbar-btn:hover { color: #ccc; background: rgba(255,255,255,0.04); }
+
+  .search-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    height: 32px;
+    border-radius: 100px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: transparent;
+    color: #666;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .search-btn:hover { color: #999; border-color: rgba(255,255,255,0.15); }
+  .search-btn kbd {
+    font-family: 'Menlo', monospace;
+    font-size: 9px;
+    background: rgba(255,255,255,0.06);
+    padding: 2px 5px;
+    border-radius: 3px;
+    border: 1px solid rgba(255,255,255,0.08);
+    color: #555;
+  }
+
+  /* ---- Content ---- */
+  .content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .content-body {
+    flex: 1;
+    padding: 32px;
+    color: #444;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .content-placeholder {
+    text-align: center;
+    color: #333;
+  }
+  .content-placeholder .icon {
+    font-size: 40px;
+    margin-bottom: 12px;
+    opacity: 0.3;
+  }
+
+  /* ---- Comparison ---- */
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 48px;
+  }
+  .compare-grid .variant-section { margin-bottom: 0; }
+
+  @media (max-width: 1200px) {
+    .compare-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ---- Diff highlight ---- */
+  .diff-highlight {
+    position: relative;
+  }
+  .diff-highlight::before {
+    content: 'CHANGED';
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    background: #f59e0b;
+    color: #000;
+    padding: 2px 6px;
+    border-radius: 4px;
+    z-index: 10;
+  }
+
+  /* SVG icons inline */
+  .icon-svg {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    margin: 64px 0 48px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Navigation <span>Variants</span></h1>
+<p class="subtitle">Porovnani aktualni navigace a tri moznych redesignu sidebaru + toolbaru pro Crewship.</p>
+
+<!-- ================================================================== -->
+<!-- CURRENT STATE -->
+<!-- ================================================================== -->
+<div class="variant-section">
+  <div class="variant-label">Current</div>
+  <div class="variant-title">Aktualni stav</div>
+  <div class="variant-desc">
+    Sidebar header = Crewship logo. Top toolbar = Workspace switcher "Unify Technology" + breadcrumb.
+    Logo zabira misto v sidebaru a neni funkcni. Workspace switcher je v toolbaru, coz ho dela sirsim.
+  </div>
+
+  <div class="shell">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-item">
+          <svg class="logo-icon" viewBox="190 190 710 470" fill="currentColor"><path d="M415.978 643.199C394.751 639.37 373.822 636.562 352.809 634.248C326.436 631.343 300.012 630.21 273.515 631.406C263.713 631.849 253.913 632.739 244.168 633.893C239.955 634.391 237.319 633.559 235.22 629.676C224.052 609.02 212.738 588.443 201.35 567.907C199.583 564.721 200.982 563.48 203.587 562.185C226.108 550.996 248.47 539.478 271.138 528.598C298.76 515.341 326.551 502.431 354.416 489.692C394.25 471.482 434.623 454.51 475.028 437.605C507.907 423.849 540.95 410.503 574.136 397.523C616.157 381.088 658.373 365.15 700.791 349.753C744.302 333.958 788.135 319.103 832.028 304.417C833.744 303.843 835.42 302.991 837.634 303.468C839.113 307.377 837.499 311.253 836.777 315.001C828.73 356.781 816.766 397.458 801.3 437.066C777.028 499.226 745.989 557.845 707.705 612.526C686.991 642.111 657.919 658.481 622.564 664.132C594.192 668.667 565.861 667.057 537.461 663.855C497.035 659.297 457.441 650.052 417.401 643.34C417.073 643.285 416.738 643.277 415.978 643.199Z"/></svg>
+          <span class="logo-text">Crewship</span>
+        </div>
+      </div>
+
+      <div class="sidebar-content">
+        <div class="nav-section">
+          <div class="nav-section-label">Work</div>
+          <div class="nav-item active">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            Dashboard
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h6v6H3zM15 3h6v6h-6zM9 15h6v6H9z"/><path d="M6 9v3H9M15 9v3h3M12 15v-3"/></svg>
+            Orchestration
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="4" cy="18" r="2"/><circle cx="20" cy="18" r="2"/><path d="M6 7.5L9.5 10.5M14.5 10.5L18 7.5M6 16.5l3.5-3M14.5 13.5L18 16.5"/></svg>
+            Crews
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="3"/></svg>
+            Agents
+          </div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">Configure</div>
+          <div class="nav-item">⚡ Skills</div>
+          <div class="nav-item" style="opacity:0.4">🏪 Marketplace <span class="nav-badge">FUTURE</span></div>
+          <div class="nav-item">🔑 Credentials</div>
+          <div class="nav-item">🔌 Integrations</div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">Monitor</div>
+          <div class="nav-item">📊 Runs</div>
+          <div class="nav-item">🛡 Audit Log</div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">System</div>
+          <div class="nav-item">⚙️ Settings</div>
+          <div class="nav-item">🔒 Admin</div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="collapse-btn">
+          <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M14 9l-3 3 3 3"/></svg>
+          Collapse
+        </div>
+      </div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <div class="sidebar-header-item" style="padding:4px 8px; margin:0">
+            <div class="ws-badge small">U</div>
+            <span style="font-size:13px; font-weight:500; color:#ccc">Unify Technology</span>
+            <span class="chevron">▾</span>
+          </div>
+          <span class="breadcrumb-sep">/</span>
+          <span class="breadcrumb-page">Dashboard</span>
+        </div>
+        <div class="toolbar-right">
+          <div class="status-pill online"><span class="dot"></span> Online</div>
+          <div class="search-btn">🔍 Search... <kbd>⌘K</kbd></div>
+          <div class="toolbar-btn">📖</div>
+          <div class="toolbar-btn">🔔</div>
+          <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:6px;cursor:pointer">
+            <div class="user-avatar" style="width:24px;height:24px;font-size:9px">PS</div>
+            <span style="font-size:12px;color:#999">Pavel</span>
+            <span class="chevron">▾</span>
+          </div>
+        </div>
+      </div>
+      <div class="content-body">
+        <div class="content-placeholder">
+          <div class="icon">📊</div>
+          Dashboard content
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ================================================================== -->
+<!-- VARIANT A: Workspace in sidebar header, user in footer -->
+<!-- ================================================================== -->
+<div class="variant-section">
+  <div class="variant-label">Variant A</div>
+  <div class="variant-title">Workspace nahore, User dole (Linear styl)</div>
+  <div class="variant-desc">
+    Workspace switcher nahrazuje Crewship logo v sidebar header. User menu se presouva do sidebar footer (jako Linear, Notion).
+    Toolbar se zjednodusi — jen breadcrumb vlevo, akce vpravo. Zadne logo, zadny workspace v toolbaru.
+  </div>
+
+  <div class="shell">
+    <div class="sidebar">
+      <!-- CHANGED: Workspace switcher instead of logo -->
+      <div class="sidebar-header diff-highlight">
+        <div class="sidebar-header-item">
+          <div class="ws-badge">U</div>
+          <div class="ws-info">
+            <div class="ws-name">Unify Technology</div>
+            <div class="ws-meta">3 members · Owner</div>
+          </div>
+          <span class="chevron">▾</span>
+        </div>
+      </div>
+
+      <div class="sidebar-content">
+        <div class="nav-section">
+          <div class="nav-section-label">Work</div>
+          <div class="nav-item active">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            Dashboard
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h6v6H3zM15 3h6v6h-6zM9 15h6v6H9z"/><path d="M6 9v3H9M15 9v3h3M12 15v-3"/></svg>
+            Orchestration
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="4" cy="18" r="2"/><circle cx="20" cy="18" r="2"/></svg>
+            Crews
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="3"/></svg>
+            Agents
+          </div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">Configure</div>
+          <div class="nav-item">⚡ Skills</div>
+          <div class="nav-item" style="opacity:0.4">🏪 Marketplace <span class="nav-badge">FUTURE</span></div>
+          <div class="nav-item">🔑 Credentials</div>
+          <div class="nav-item">🔌 Integrations</div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">Monitor</div>
+          <div class="nav-item">📊 Runs</div>
+          <div class="nav-item">🛡 Audit Log</div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">System</div>
+          <div class="nav-item">⚙️ Settings</div>
+          <div class="nav-item">🔒 Admin</div>
+        </div>
+      </div>
+
+      <!-- CHANGED: User in footer -->
+      <div class="sidebar-footer diff-highlight">
+        <div class="user-card">
+          <div class="user-avatar">PS</div>
+          <div class="ws-info">
+            <div class="user-name">Pavel Srba</div>
+            <div class="user-email">pavel@unify.tech</div>
+          </div>
+          <span class="chevron">▾</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="content">
+      <!-- CHANGED: Simplified toolbar -->
+      <div class="toolbar diff-highlight">
+        <div class="toolbar-left">
+          <span class="breadcrumb-page">Dashboard</span>
+        </div>
+        <div class="toolbar-right">
+          <div class="status-pill online"><span class="dot"></span> Online</div>
+          <div class="search-btn">🔍 Search... <kbd>⌘K</kbd></div>
+          <div class="toolbar-btn">📖</div>
+          <div class="toolbar-btn">🔔</div>
+        </div>
+      </div>
+      <div class="content-body">
+        <div class="content-placeholder">
+          <div class="icon">📊</div>
+          Dashboard content
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ================================================================== -->
+<!-- VARIANT B: Workspace + mini logo -->
+<!-- ================================================================== -->
+<div class="variant-section">
+  <div class="variant-label">Variant B</div>
+  <div class="variant-title">Workspace v sidebaru + Crewship mini-logo v toolbaru</div>
+  <div class="variant-desc">
+    Workspace switcher v sidebar header (jako Var A). Ale Crewship branding zustava jako mala ikona uplne vlevo v toolbaru, pred breadcrumbem.
+    User menu zustava v toolbaru vpravo (ne v sidebar footer). Kompromis mezi brandingem a cistotou.
+  </div>
+
+  <div class="shell">
+    <div class="sidebar">
+      <div class="sidebar-header diff-highlight">
+        <div class="sidebar-header-item">
+          <div class="ws-badge">U</div>
+          <div class="ws-info">
+            <div class="ws-name">Unify Technology</div>
+            <div class="ws-meta">3 members · Owner</div>
+          </div>
+          <span class="chevron">▾</span>
+        </div>
+      </div>
+
+      <div class="sidebar-content">
+        <div class="nav-section">
+          <div class="nav-section-label">Work</div>
+          <div class="nav-item active">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            Dashboard
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h6v6H3zM15 3h6v6h-6zM9 15h6v6H9z"/><path d="M6 9v3H9M15 9v3h3M12 15v-3"/></svg>
+            Orchestration
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="4" cy="18" r="2"/><circle cx="20" cy="18" r="2"/></svg>
+            Crews
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="3"/></svg>
+            Agents
+          </div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">Configure</div>
+          <div class="nav-item">⚡ Skills</div>
+          <div class="nav-item" style="opacity:0.4">🏪 Marketplace <span class="nav-badge">FUTURE</span></div>
+          <div class="nav-item">🔑 Credentials</div>
+          <div class="nav-item">🔌 Integrations</div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">Monitor</div>
+          <div class="nav-item">📊 Runs</div>
+          <div class="nav-item">🛡 Audit Log</div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">System</div>
+          <div class="nav-item">⚙️ Settings</div>
+          <div class="nav-item">🔒 Admin</div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="collapse-btn">
+          <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M14 9l-3 3 3 3"/></svg>
+          Collapse
+        </div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="toolbar diff-highlight">
+        <div class="toolbar-left">
+          <!-- CHANGED: Mini logo -->
+          <svg style="width:18px; height:18px; color:#6366f1; flex-shrink:0" viewBox="190 190 710 470" fill="currentColor"><path d="M415.978 643.199C394.751 639.37 373.822 636.562 352.809 634.248C326.436 631.343 300.012 630.21 273.515 631.406C263.713 631.849 253.913 632.739 244.168 633.893C239.955 634.391 237.319 633.559 235.22 629.676C224.052 609.02 212.738 588.443 201.35 567.907C199.583 564.721 200.982 563.48 203.587 562.185C226.108 550.996 248.47 539.478 271.138 528.598C298.76 515.341 326.551 502.431 354.416 489.692C394.25 471.482 434.623 454.51 475.028 437.605C507.907 423.849 540.95 410.503 574.136 397.523C616.157 381.088 658.373 365.15 700.791 349.753C744.302 333.958 788.135 319.103 832.028 304.417C833.744 303.843 835.42 302.991 837.634 303.468C839.113 307.377 837.499 311.253 836.777 315.001C828.73 356.781 816.766 397.458 801.3 437.066C777.028 499.226 745.989 557.845 707.705 612.526C686.991 642.111 657.919 658.481 622.564 664.132C594.192 668.667 565.861 667.057 537.461 663.855C497.035 659.297 457.441 650.052 417.401 643.34Z"/></svg>
+          <span class="breadcrumb-sep">/</span>
+          <span class="breadcrumb-page">Dashboard</span>
+        </div>
+        <div class="toolbar-right">
+          <div class="status-pill online"><span class="dot"></span> Online</div>
+          <div class="search-btn">🔍 Search... <kbd>⌘K</kbd></div>
+          <div class="toolbar-btn">📖</div>
+          <div class="toolbar-btn">🔔</div>
+          <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:6px;cursor:pointer">
+            <div class="user-avatar" style="width:24px;height:24px;font-size:9px">PS</div>
+            <span style="font-size:12px;color:#999">Pavel</span>
+            <span class="chevron">▾</span>
+          </div>
+        </div>
+      </div>
+      <div class="content-body">
+        <div class="content-placeholder">
+          <div class="icon">📊</div>
+          Dashboard content
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ================================================================== -->
+<!-- VARIANT C: Full minimal — no logo anywhere, user in sidebar footer -->
+<!-- ================================================================== -->
+<div class="variant-section">
+  <div class="variant-label">Variant C — Recommended</div>
+  <div class="variant-title">Uplne cistý — zadne logo, max prostor</div>
+  <div class="variant-desc">
+    Zadne Crewship logo nikde v UI (jen favicon a login page). Workspace switcher v sidebar header, User v sidebar footer.
+    Toolbar je ultra-cisty — jen page title + status + search + notifications. Maximalni vyuziti prostoru.
+    Toto je pristup ktery pouziva Linear, Notion, Figma — produkt je znamy svym UI, ne logem v rohu.
+  </div>
+
+  <div class="shell">
+    <div class="sidebar">
+      <div class="sidebar-header diff-highlight">
+        <div class="sidebar-header-item">
+          <div class="ws-badge">U</div>
+          <div class="ws-info">
+            <div class="ws-name">Unify Technology</div>
+            <div class="ws-meta">3 members · Owner</div>
+          </div>
+          <span class="chevron">▾</span>
+        </div>
+      </div>
+
+      <div class="sidebar-content">
+        <div class="nav-section">
+          <div class="nav-section-label">Work</div>
+          <div class="nav-item active">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            Dashboard
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h6v6H3zM15 3h6v6h-6zM9 15h6v6H9z"/><path d="M6 9v3H9M15 9v3h3M12 15v-3"/></svg>
+            Orchestration
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="4" cy="18" r="2"/><circle cx="20" cy="18" r="2"/></svg>
+            Crews
+          </div>
+          <div class="nav-item">
+            <svg class="icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="3"/></svg>
+            Agents
+          </div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">Configure</div>
+          <div class="nav-item">⚡ Skills</div>
+          <div class="nav-item" style="opacity:0.4">🏪 Marketplace <span class="nav-badge">FUTURE</span></div>
+          <div class="nav-item">🔑 Credentials</div>
+          <div class="nav-item">🔌 Integrations</div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">Monitor</div>
+          <div class="nav-item">📊 Runs</div>
+          <div class="nav-item">🛡 Audit Log</div>
+        </div>
+        <div class="nav-section">
+          <div class="nav-section-label">System</div>
+          <div class="nav-item">⚙️ Settings</div>
+          <div class="nav-item">🔒 Admin</div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer diff-highlight">
+        <div class="user-card">
+          <div class="user-avatar">PS</div>
+          <div class="ws-info">
+            <div class="user-name">Pavel Srba</div>
+            <div class="user-email">pavel@unify.tech</div>
+          </div>
+          <span class="chevron">▾</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="toolbar diff-highlight">
+        <div class="toolbar-left">
+          <span class="breadcrumb-page">Dashboard</span>
+        </div>
+        <div class="toolbar-right">
+          <div class="status-pill online"><span class="dot"></span> Online</div>
+          <div class="search-btn">🔍 Search... <kbd>⌘K</kbd></div>
+          <div class="toolbar-btn">🔔</div>
+        </div>
+      </div>
+      <div class="content-body">
+        <div class="content-placeholder">
+          <div class="icon">📊</div>
+          Dashboard content
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- ================================================================== -->
+<!-- SIDE-BY-SIDE: Collapsed state comparison -->
+<!-- ================================================================== -->
+<div class="variant-section">
+  <div class="variant-label">Collapsed sidebar porovnani</div>
+  <div class="variant-title">Jak vypada kazda varianta v collapsed stavu</div>
+  <div class="variant-desc">
+    Dulezite je jak se sidebar chova pri kolapsu na ikony. Var A/C: workspace badge nahore, user avatar dole. Var B: jen nav ikony.
+  </div>
+
+  <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:20px;">
+    <!-- Collapsed A -->
+    <div>
+      <div style="font-size:11px; color:#6366f1; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px">Variant A / C — collapsed</div>
+      <div style="display:flex; height:400px; border:1px solid rgba(255,255,255,0.08); border-radius:10px; overflow:hidden; background:#000">
+        <div style="width:48px; background:#0f0f0f; border-right:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; align-items:center; padding-top:8px; gap:2px;">
+          <!-- WS badge -->
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;margin-bottom:8px;cursor:pointer" title="Unify Technology">
+            <div class="ws-badge small">U</div>
+          </div>
+          <div style="width:28px;border-top:1px solid rgba(255,255,255,0.06);margin-bottom:4px"></div>
+          <!-- Nav icons -->
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(99,102,241,0.1);color:#6366f1">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </div>
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#666">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h6v6H3zM15 3h6v6h-6zM9 15h6v6H9z"/></svg>
+          </div>
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#666">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#666">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="3"/></svg>
+          </div>
+          <!-- ... more icons ... -->
+          <div style="flex:1"></div>
+          <!-- User avatar at bottom -->
+          <div style="padding-bottom:12px">
+            <div class="user-avatar" style="width:26px;height:26px;font-size:9px;cursor:pointer" title="Pavel Srba">PS</div>
+          </div>
+        </div>
+        <div style="flex:1; display:flex; flex-direction:column">
+          <div class="toolbar">
+            <div class="toolbar-left"><span class="breadcrumb-page">Dashboard</span></div>
+            <div class="toolbar-right">
+              <div class="status-pill online" style="font-size:9px;padding:3px 8px"><span class="dot"></span> Online</div>
+              <div class="toolbar-btn" style="width:28px;height:28px">🔍</div>
+              <div class="toolbar-btn" style="width:28px;height:28px">🔔</div>
+            </div>
+          </div>
+          <div class="content-body" style="padding:20px">
+            <div class="content-placeholder"><div class="icon">📊</div>Content area</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Collapsed B -->
+    <div>
+      <div style="font-size:11px; color:#6366f1; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px">Variant B — collapsed</div>
+      <div style="display:flex; height:400px; border:1px solid rgba(255,255,255,0.08); border-radius:10px; overflow:hidden; background:#000">
+        <div style="width:48px; background:#0f0f0f; border-right:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; align-items:center; padding-top:8px; gap:2px;">
+          <!-- WS badge only -->
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;margin-bottom:8px;cursor:pointer">
+            <div class="ws-badge small">U</div>
+          </div>
+          <div style="width:28px;border-top:1px solid rgba(255,255,255,0.06);margin-bottom:4px"></div>
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(99,102,241,0.1);color:#6366f1">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </div>
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#666">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h6v6H3zM15 3h6v6h-6zM9 15h6v6H9z"/></svg>
+          </div>
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#666">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <div style="flex:1"></div>
+          <div style="padding-bottom:12px">
+            <svg style="width:16px;height:16px;color:#555" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+          </div>
+        </div>
+        <div style="flex:1; display:flex; flex-direction:column">
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <svg style="width:16px;height:16px;color:#6366f1" viewBox="190 190 710 470" fill="currentColor"><path d="M415.978 643.199C394.751 639.37 373.822 636.562 352.809 634.248C326.436 631.343 300.012 630.21 273.515 631.406C263.713 631.849 253.913 632.739 244.168 633.893C239.955 634.391 237.319 633.559 235.22 629.676C224.052 609.02 212.738 588.443 201.35 567.907C199.583 564.721 200.982 563.48 203.587 562.185C226.108 550.996 248.47 539.478 271.138 528.598C298.76 515.341 326.551 502.431 354.416 489.692C394.25 471.482 434.623 454.51 475.028 437.605Z"/></svg>
+              <span class="breadcrumb-sep">/</span>
+              <span class="breadcrumb-page">Dashboard</span>
+            </div>
+            <div class="toolbar-right">
+              <div class="status-pill online" style="font-size:9px;padding:3px 8px"><span class="dot"></span> Online</div>
+              <div class="toolbar-btn" style="width:28px;height:28px">🔍</div>
+              <div class="toolbar-btn" style="width:28px;height:28px">🔔</div>
+              <div class="user-avatar" style="width:24px;height:24px;font-size:9px;cursor:pointer">PS</div>
+            </div>
+          </div>
+          <div class="content-body" style="padding:20px">
+            <div class="content-placeholder"><div class="icon">📊</div>Content area</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Collapsed Current -->
+    <div>
+      <div style="font-size:11px; color:#6366f1; font-weight:600; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px">Current — collapsed</div>
+      <div style="display:flex; height:400px; border:1px solid rgba(255,255,255,0.08); border-radius:10px; overflow:hidden; background:#000">
+        <div style="width:48px; background:#0f0f0f; border-right:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; align-items:center; padding-top:8px; gap:2px;">
+          <!-- Crewship logo -->
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;margin-bottom:8px">
+            <svg style="width:18px;height:18px;color:#e5e5e5" viewBox="190 190 710 470" fill="currentColor"><path d="M415.978 643.199C394.751 639.37 373.822 636.562 352.809 634.248C326.436 631.343 300.012 630.21 273.515 631.406C263.713 631.849 253.913 632.739 244.168 633.893C239.955 634.391 237.319 633.559 235.22 629.676C224.052 609.02 212.738 588.443 201.35 567.907C199.583 564.721 200.982 563.48 203.587 562.185C226.108 550.996 248.47 539.478 271.138 528.598C298.76 515.341 326.551 502.431 354.416 489.692C394.25 471.482 434.623 454.51 475.028 437.605Z"/></svg>
+          </div>
+          <div style="width:28px;border-top:1px solid rgba(255,255,255,0.06);margin-bottom:4px"></div>
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:rgba(99,102,241,0.1);color:#6366f1">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </div>
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#666">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h6v6H3zM15 3h6v6h-6zM9 15h6v6H9z"/></svg>
+          </div>
+          <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#666">
+            <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+          </div>
+          <div style="flex:1"></div>
+          <div style="padding-bottom:12px">
+            <svg style="width:16px;height:16px;color:#555" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+          </div>
+        </div>
+        <div style="flex:1; display:flex; flex-direction:column">
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <div style="display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:6px;cursor:pointer">
+                <div class="ws-badge small">U</div>
+                <span style="font-size:12px;color:#999">Unify Technology</span>
+                <span class="chevron">▾</span>
+              </div>
+              <span class="breadcrumb-sep">/</span>
+              <span class="breadcrumb-page">Dashboard</span>
+            </div>
+            <div class="toolbar-right">
+              <div class="status-pill online" style="font-size:9px;padding:3px 8px"><span class="dot"></span> Online</div>
+              <div class="toolbar-btn" style="width:28px;height:28px">🔍</div>
+              <div class="toolbar-btn" style="width:28px;height:28px">🔔</div>
+              <div class="user-avatar" style="width:24px;height:24px;font-size:9px;cursor:pointer">PS</div>
+            </div>
+          </div>
+          <div class="content-body" style="padding:20px">
+            <div class="content-placeholder"><div class="icon">📊</div>Content area</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="divider">
+
+<!-- Summary -->
+<div style="max-width:700px; margin-bottom:64px">
+  <div class="variant-label">Shrnutí</div>
+  <div class="variant-title" style="margin-bottom:16px">Porovnani variant</div>
+  <table style="width:100%; border-collapse:collapse; font-size:12px;">
+    <thead>
+      <tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+        <th style="text-align:left; padding:8px; color:#666; font-weight:600">Vlastnost</th>
+        <th style="text-align:center; padding:8px; color:#666; font-weight:600">Current</th>
+        <th style="text-align:center; padding:8px; color:#666; font-weight:600">A</th>
+        <th style="text-align:center; padding:8px; color:#666; font-weight:600">B</th>
+        <th style="text-align:center; padding:8px; color:#f59e0b; font-weight:600">C ★</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
+        <td style="padding:8px; color:#999">Logo v sidebar</td>
+        <td style="padding:8px; text-align:center; color:#34d399">✓</td>
+        <td style="padding:8px; text-align:center; color:#666">✗</td>
+        <td style="padding:8px; text-align:center; color:#666">✗</td>
+        <td style="padding:8px; text-align:center; color:#666">✗</td>
+      </tr>
+      <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
+        <td style="padding:8px; color:#999">Logo v toolbar</td>
+        <td style="padding:8px; text-align:center; color:#666">✗</td>
+        <td style="padding:8px; text-align:center; color:#666">✗</td>
+        <td style="padding:8px; text-align:center; color:#34d399">✓ mini</td>
+        <td style="padding:8px; text-align:center; color:#666">✗</td>
+      </tr>
+      <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
+        <td style="padding:8px; color:#999">WS switcher</td>
+        <td style="padding:8px; text-align:center; color:#999">toolbar</td>
+        <td style="padding:8px; text-align:center; color:#34d399">sidebar ↑</td>
+        <td style="padding:8px; text-align:center; color:#34d399">sidebar ↑</td>
+        <td style="padding:8px; text-align:center; color:#34d399">sidebar ↑</td>
+      </tr>
+      <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
+        <td style="padding:8px; color:#999">User menu</td>
+        <td style="padding:8px; text-align:center; color:#999">toolbar</td>
+        <td style="padding:8px; text-align:center; color:#34d399">sidebar ↓</td>
+        <td style="padding:8px; text-align:center; color:#999">toolbar</td>
+        <td style="padding:8px; text-align:center; color:#34d399">sidebar ↓</td>
+      </tr>
+      <tr style="border-bottom:1px solid rgba(255,255,255,0.04)">
+        <td style="padding:8px; color:#999">Toolbar cistota</td>
+        <td style="padding:8px; text-align:center; color:#f59e0b">★★</td>
+        <td style="padding:8px; text-align:center; color:#34d399">★★★★</td>
+        <td style="padding:8px; text-align:center; color:#34d399">★★★</td>
+        <td style="padding:8px; text-align:center; color:#34d399">★★★★★</td>
+      </tr>
+      <tr>
+        <td style="padding:8px; color:#999">Vzor</td>
+        <td style="padding:8px; text-align:center; color:#666; font-size:10px">GitHub</td>
+        <td style="padding:8px; text-align:center; color:#666; font-size:10px">Linear</td>
+        <td style="padding:8px; text-align:center; color:#666; font-size:10px">Jira</td>
+        <td style="padding:8px; text-align:center; color:#f59e0b; font-size:10px">Linear/Notion</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+</body>
+</html>
