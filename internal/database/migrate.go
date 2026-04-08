@@ -95,6 +95,7 @@ var migrations = []migration{
 	{34, "add_approval_gates", migrationAddApprovalGates},
 	{35, "add_pkce_code_verifier", migrationAddPKCECodeVerifier},
 	{36, "add_mcp_registry_cache", migrationAddMCPRegistryCache},
+	{37, "add_issue_tracker", migrationAddIssueTracker},
 }
 
 const migrationAddKeeperObservability = `
@@ -1110,4 +1111,63 @@ CREATE TABLE IF NOT EXISTS mcp_registry_servers (
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_registry_name ON mcp_registry_servers(name);
 CREATE INDEX IF NOT EXISTS idx_mcp_registry_category ON mcp_registry_servers(category);
+`
+
+const migrationAddIssueTracker = `
+-- Extend missions with issue-tracker fields (Linear-like).
+ALTER TABLE missions ADD COLUMN number INTEGER;
+ALTER TABLE missions ADD COLUMN identifier TEXT;
+ALTER TABLE missions ADD COLUMN priority TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE missions ADD COLUMN assignee_type TEXT;
+ALTER TABLE missions ADD COLUMN assignee_id TEXT;
+ALTER TABLE missions ADD COLUMN due_date TEXT;
+ALTER TABLE missions ADD COLUMN sort_order REAL NOT NULL DEFAULT 0;
+ALTER TABLE missions ADD COLUMN mission_type TEXT NOT NULL DEFAULT 'orchestration';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_identifier ON missions(identifier) WHERE identifier IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mission_priority ON missions(priority);
+CREATE INDEX IF NOT EXISTS idx_mission_type ON missions(mission_type);
+CREATE INDEX IF NOT EXISTS idx_mission_sort_order ON missions(sort_order);
+
+-- Crew issue prefix for identifiers (e.g. "ENG" -> ENG-42).
+ALTER TABLE crews ADD COLUMN issue_prefix TEXT;
+
+-- Atomic sequential counter per crew for issue numbering.
+CREATE TABLE IF NOT EXISTS issue_counters (
+    crew_id TEXT PRIMARY KEY REFERENCES crews(id) ON DELETE CASCADE,
+    next_number INTEGER NOT NULL DEFAULT 1
+);
+
+-- Workspace-scoped labels.
+CREATE TABLE IF NOT EXISTS labels (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#6B7280',
+    label_group TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(workspace_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_labels_workspace ON labels(workspace_id);
+
+-- Many-to-many: missions <-> labels.
+CREATE TABLE IF NOT EXISTS mission_labels (
+    mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    PRIMARY KEY (mission_id, label_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_labels_mission ON mission_labels(mission_id);
+CREATE INDEX IF NOT EXISTS idx_mission_labels_label ON mission_labels(label_id);
+
+-- Comments on missions/issues.
+CREATE TABLE IF NOT EXISTS mission_comments (
+    id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    author_type TEXT NOT NULL CHECK(author_type IN ('user','agent')),
+    author_id TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mission_comments_mission ON mission_comments(mission_id);
 `

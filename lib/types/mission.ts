@@ -1,10 +1,16 @@
 export type MissionStatus =
+  | "BACKLOG"
+  | "TODO"
   | "PLANNING"
   | "IN_PROGRESS"
   | "REVIEW"
   | "COMPLETED"
   | "FAILED"
   | "CANCELLED"
+  | "DUPLICATE"
+
+export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none"
+export type MissionType = "issue" | "orchestration" | "scheduled" | "hired"
 
 export type MissionTaskStatus =
   | "PENDING"
@@ -99,4 +105,36 @@ export interface Mission {
   total_token_budget: number | null
   complexity: TaskComplexity | null
   pattern: MissionPattern | null
+  // Issue tracker fields (migration 37)
+  number?: number | null
+  identifier?: string | null
+  priority?: IssuePriority
+  assignee_type?: "user" | "agent" | null
+  assignee_id?: string | null
+  assignee_name?: string | null
+  due_date?: string | null
+  sort_order?: number
+  mission_type?: MissionType
+  labels?: IssueLabel[]
+  crew_name?: string
+  crew_slug?: string
+  comment_count?: number
+}
+
+export interface IssueLabel {
+  id: string
+  name: string
+  color: string
+  label_group: string | null
+}
+
+export interface IssueComment {
+  id: string
+  mission_id: string
+  author_type: "user" | "agent"
+  author_id: string
+  author_name?: string
+  body: string
+  created_at: string
+  updated_at: string
 }

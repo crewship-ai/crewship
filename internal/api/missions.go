@@ -93,6 +93,11 @@ var validMissionTransitions = map[string][]string{
 	"PLANNING":    {"IN_PROGRESS", "CANCELLED"},
 	"IN_PROGRESS": {"REVIEW", "FAILED", "CANCELLED"},
 	"REVIEW":      {"COMPLETED", "IN_PROGRESS", "FAILED", "CANCELLED"},
+	// Issue tracker statuses (invisible to MissionEngine).
+	"BACKLOG":   {"TODO", "IN_PROGRESS", "CANCELLED"},
+	"TODO":      {"BACKLOG", "IN_PROGRESS", "CANCELLED"},
+	"DONE":      {"BACKLOG"},
+	"FAILED":    {"BACKLOG", "TODO", "IN_PROGRESS"},
 }
 
 var validTaskTransitions = map[string][]string{

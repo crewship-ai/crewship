@@ -125,6 +125,7 @@ type crewResponse struct {
 	AllowedDomains    []string         `json:"allowed_domains"`
 	MCPConfigJSON     *string          `json:"mcp_config_json,omitempty"`
 	EscalationConfig  *string          `json:"escalation_config,omitempty"`
+	IssuePrefix       *string          `json:"issue_prefix"`
 	CreatedAt         string           `json:"created_at"`
 	UpdatedAt         string           `json:"updated_at"`
 	Count             crewCountResponse `json:"_count"`
@@ -335,7 +336,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.network_mode, c.allowed_domains,
-			c.mcp_config_json, c.escalation_config,
+			c.mcp_config_json, c.escalation_config, c.issue_prefix,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -344,7 +345,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 		&c.NetworkMode, &allowedDomainsJSON,
-		&c.MCPConfigJSON, &c.EscalationConfig,
+		&c.MCPConfigJSON, &c.EscalationConfig, &c.IssuePrefix,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -373,6 +374,7 @@ type updateCrewRequest struct {
 	AllowedDomains    *[]string `json:"allowed_domains"`
 	MCPConfigJSON     *string   `json:"mcp_config_json"`
 	EscalationConfig  *string   `json:"escalation_config"`
+	IssuePrefix       *string   `json:"issue_prefix"`
 }
 
 func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -490,6 +492,14 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		query += ", mcp_config_json = ?"
 		args = append(args, *req.MCPConfigJSON)
+	}
+	if req.IssuePrefix != nil {
+		query += ", issue_prefix = ?"
+		if *req.IssuePrefix == "" {
+			args = append(args, nil)
+		} else {
+			args = append(args, *req.IssuePrefix)
+		}
 	}
 	if req.EscalationConfig != nil {
 		if *req.EscalationConfig != "" {
