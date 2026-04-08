@@ -27,7 +27,9 @@ func (s *Server) handleConnectionsList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build connections from crew_connections via crewshipd (live query).
-	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/crew-connections?workspace_id="+s.ipc.WorkspaceID)
+	// Filter to only connections involving this crew (not the entire workspace graph).
+	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/crew-connections?workspace_id="+
+		url.QueryEscape(s.ipc.WorkspaceID)+"&crew_id="+url.QueryEscape(s.ipc.CrewID))
 }
 
 // handleConnectionSendMessage handles POST /connections/{crew-slug}/message
@@ -45,12 +47,12 @@ func (s *Server) handleConnectionSendMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Parse the agent's request body.
+	// Parse the agent's request body (capped at 1MB).
 	var agentReq struct {
 		Content  json.RawMessage `json:"content"`
 		Metadata json.RawMessage `json:"metadata,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&agentReq); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&agentReq); err != nil {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
@@ -262,8 +264,8 @@ func (s *Server) handleConnectionWriteFiles(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("%s/api/v1/internal/crew-files/%s", s.ipc.BaseURL, targetCrewID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
+	writeURL := fmt.Sprintf("%s/api/v1/internal/crew-files/%s", s.ipc.BaseURL, url.PathEscape(targetCrewID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, writeURL, &buf)
 	if err != nil {
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
 		return
@@ -299,8 +301,8 @@ func (s *Server) resolveCrewIDBySlug(ctx context.Context, slug string) (string, 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	url := s.ipc.BaseURL + "/api/v1/internal/crews?workspace_id=" + s.ipc.WorkspaceID
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	reqURL := s.ipc.BaseURL + "/api/v1/internal/crews?workspace_id=" + url.QueryEscape(s.ipc.WorkspaceID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
 		return "", err
 	}

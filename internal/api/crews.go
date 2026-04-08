@@ -494,7 +494,11 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		args = append(args, *req.ContainerCPUs)
 	}
 	if req.ContainerTTLHours != nil {
-		if *req.ContainerTTLHours <= 0 {
+		if *req.ContainerTTLHours < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "container_ttl_hours cannot be negative"})
+			return
+		}
+		if *req.ContainerTTLHours == 0 {
 			query += ", container_ttl_hours = NULL"
 		} else {
 			query += ", container_ttl_hours = ?"

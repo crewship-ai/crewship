@@ -91,12 +91,20 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var assignerCrewID string
 	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT a.crew_id FROM agents a JOIN chats ch ON ch.agent_id = a.id WHERE ch.id = ?`,
-		body.ChatID).Scan(&assignerCrewID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		body.ChatID).Scan(&assignerCrewID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Cannot determine the assigner's crew; deny cross-crew assignments.
+			h.logger.Warn("could not resolve assigner crew from chat", "chat_id", body.ChatID)
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error": "cannot verify crew connection — assigner crew not found",
+			})
+			return
+		}
 		h.logger.Error("lookup assigner crew for connection check", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
-	if assignerCrewID != "" && assignerCrewID != body.CrewID {
+	if assignerCrewID != body.CrewID {
 		connected, connErr := AreCrewsConnected(r.Context(), h.db, assignerCrewID, body.CrewID)
 		if connErr != nil {
 			h.logger.Error("check crew connection for assignment", "error", connErr)
