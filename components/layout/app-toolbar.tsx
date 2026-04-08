@@ -6,7 +6,7 @@ import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
 import {
   Search, BookOpen, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
-  LayoutDashboard, Bot, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck, Ship,
+  LayoutDashboard, Bot, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck,
 } from "lucide-react"
 import { BellIcon as AnimatedBell } from "@/components/ui/bell"
 import { WifiIcon as AnimatedWifi, type WifiIconHandle } from "@/components/ui/wifi"
@@ -251,7 +251,8 @@ export function AppToolbar() {
       const errors = fleetStatus?.error ?? 0
       return (
         <>
-          <Ship className="h-4 w-4 text-muted-foreground shrink-0" />
+          <span className="text-sm text-muted-foreground">Fleet</span>
+          <span className="text-muted-foreground/40 text-sm shrink-0">/</span>
           <span className="text-sm font-semibold">Crews & Agents</span>
           <div className="hidden md:flex items-center gap-3 font-mono text-[11px] text-muted-foreground ml-3">
             {[
