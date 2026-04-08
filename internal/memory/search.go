@@ -71,29 +71,75 @@ func (e *Engine) Search(ctx context.Context, query string, limit int) ([]SearchR
 }
 
 // sanitizeFTSQuery makes a user query safe for FTS5.
-// It wraps bare words in double quotes to prevent syntax errors from
-// special characters, while preserving AND/OR/NOT operators.
+// It preserves quoted phrases and trailing wildcards while stripping
+// dangerous FTS5 operators like column filters ({col}:), NEAR, etc.
 func sanitizeFTSQuery(q string) string {
 	q = strings.TrimSpace(q)
 	if q == "" {
 		return ""
 	}
 
-	// If the query already contains FTS5 operators, pass through as-is
-	// but still escape any unbalanced quotes.
-	operators := []string{" AND ", " OR ", " NOT ", "\"", "*"}
-	for _, op := range operators {
-		if strings.Contains(q, op) {
-			return q
+	// Strip dangerous FTS5 injection patterns: column filters, NEAR
+	// These are the constructs that allow information disclosure.
+	dangerousPatterns := []string{"{", "}", ":", "^", "~", "(", ")", "+"}
+	hasDangerous := false
+	for _, p := range dangerousPatterns {
+		if strings.Contains(q, p) {
+			hasDangerous = true
+			break
 		}
 	}
 
-	// Simple query: wrap each word in quotes for safety
-	words := strings.Fields(q)
-	quoted := make([]string, len(words))
-	for i, w := range words {
-		w = strings.ReplaceAll(w, "\"", "")
-		quoted[i] = "\"" + w + "\""
+	if !hasDangerous {
+		// No dangerous characters. Check if the query uses explicit FTS5 syntax
+		// (quoted phrases, operators, wildcards) — if so, pass through as-is.
+		hasOperators := strings.Contains(q, " AND ") || strings.Contains(q, " OR ") ||
+			strings.Contains(q, " NOT ") || strings.Contains(q, "\"") || strings.Contains(q, "*")
+		if hasOperators {
+			return q
+		}
+		// Simple query: wrap each word in quotes for safety
+		words := strings.Fields(q)
+		quoted := make([]string, len(words))
+		for i, w := range words {
+			quoted[i] = "\"" + w + "\""
+		}
+		return strings.Join(quoted, " ")
 	}
-	return strings.Join(quoted, " ")
+
+	// Dangerous characters found — strip them and rebuild safely.
+	// Extract quoted phrases first, then process remaining words.
+	cleaned := strings.Map(func(r rune) rune {
+		switch r {
+		case '{', '}', ':', '^', '~', '(', ')', '+':
+			return ' '
+		default:
+			return r
+		}
+	}, q)
+
+	words := strings.Fields(cleaned)
+	var parts []string
+	for _, w := range words {
+		upper := strings.ToUpper(w)
+		if upper == "AND" || upper == "OR" || upper == "NOT" {
+			parts = append(parts, upper)
+			continue
+		}
+		// Remove any internal quotes, re-wrap for safety
+		w = strings.ReplaceAll(w, "\"", "")
+		if w == "" {
+			continue
+		}
+		// Preserve trailing wildcard
+		if strings.HasSuffix(w, "*") {
+			base := strings.TrimRight(w, "*")
+			if base != "" {
+				parts = append(parts, "\""+base+"\"*")
+			}
+		} else {
+			parts = append(parts, "\""+w+"\"")
+		}
+	}
+	return strings.Join(parts, " ")
 }

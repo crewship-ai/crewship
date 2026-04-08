@@ -340,7 +340,7 @@ func containsDangerousShellChars(cmd string) bool {
 		if strings.ContainsAny(part, ";|>`") {
 			return true
 		}
-		if strings.Contains(part, "&&") || strings.Contains(part, "||") || strings.Contains(part, "$(") {
+		if strings.Contains(part, "&&") || strings.Contains(part, "||") || strings.Contains(part, "$(") || strings.Contains(part, "${") {
 			return true
 		}
 	}

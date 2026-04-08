@@ -4,9 +4,18 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// validSlugRe matches safe slug values: lowercase alphanumeric, starting with a letter or digit.
+var validSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// validSlugFormat validates that a slug contains only safe characters.
+func validSlugFormat(slug string) bool {
+	return validSlugRe.MatchString(slug)
+}
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")

@@ -31,6 +31,18 @@ func (p *Provider) resolve(path string) (string, error) {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", fmt.Errorf("path traversal detected: %s", path)
 	}
+	// V-09: Resolve symlinks and re-check containment to prevent symlink escape
+	realBase, baseErr := filepath.EvalSymlinks(p.basePath)
+	if baseErr != nil {
+		return "", fmt.Errorf("resolve base path: %w", baseErr)
+	}
+	// Only check symlinks if the path exists (new files won't resolve)
+	if realFull, evalErr := filepath.EvalSymlinks(full); evalErr == nil {
+		if !strings.HasPrefix(realFull, realBase+string(os.PathSeparator)) && realFull != realBase {
+			return "", fmt.Errorf("path traversal detected (symlink): %s", path)
+		}
+		return realFull, nil
+	}
 	return full, nil
 }
 

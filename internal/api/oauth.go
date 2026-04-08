@@ -212,10 +212,18 @@ func (h *OAuthHandler) storeOAuthTokens(ctx context.Context, credID string, resp
 }
 
 // storeStateWithPKCE persists the OAuth state, credential context, and PKCE verifier.
+// V-14: The code_verifier is encrypted before storage for defense-in-depth.
 func (h *OAuthHandler) storeStateWithPKCE(ctx context.Context, state, credID, wsID, redirectURI, codeVerifier string) error {
-	_, err := h.db.ExecContext(ctx,
+	encVerifier, err := encryption.Encrypt(codeVerifier)
+	if err != nil {
+		return fmt.Errorf("encrypt code_verifier: %w", err)
+	}
+	// V-13: Clean up expired states (older than 15 minutes)
+	h.db.ExecContext(ctx, "DELETE FROM oauth_states WHERE created_at < datetime('now', '-15 minutes')")
+
+	_, err = h.db.ExecContext(ctx,
 		"INSERT INTO oauth_states (state, credential_id, workspace_id, redirect_uri, code_verifier) VALUES (?, ?, ?, ?, ?)",
-		state, credID, wsID, redirectURI, codeVerifier)
+		state, credID, wsID, redirectURI, encVerifier)
 	return err
 }
 
@@ -325,11 +333,11 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate state token and retrieve PKCE verifier
-	var credentialID, workspaceID, redirectURI, codeVerifier string
+	// Atomically consume the state token (SELECT + DELETE in one operation to prevent race conditions).
+	var credentialID, workspaceID, redirectURI, codeVerifier, createdAt string
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT credential_id, workspace_id, redirect_uri, code_verifier FROM oauth_states WHERE state = ?", state).
-		Scan(&credentialID, &workspaceID, &redirectURI, &codeVerifier)
+		"DELETE FROM oauth_states WHERE state = ? RETURNING credential_id, workspace_id, redirect_uri, code_verifier, created_at", state).
+		Scan(&credentialID, &workspaceID, &redirectURI, &codeVerifier, &createdAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			http.Error(w, "Invalid or expired state token", http.StatusBadRequest)
@@ -339,10 +347,23 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// V-13: Reject states older than 15 minutes
+	if t, parseErr := time.Parse(time.RFC3339, createdAt); parseErr == nil {
+		if time.Since(t) > 15*time.Minute {
+			http.Error(w, "OAuth state expired", http.StatusBadRequest)
+			return
+		}
+	}
 
-	// Delete used state to prevent replay
-	if _, err := h.db.ExecContext(r.Context(), "DELETE FROM oauth_states WHERE state = ?", state); err != nil {
-		h.logger.Error("delete used OAuth state", "error", err)
+	// V-14: Decrypt PKCE code_verifier
+	if codeVerifier != "" {
+		decrypted, decErr := encryption.Decrypt(codeVerifier)
+		if decErr != nil {
+			h.logger.Error("decrypt code_verifier", "error", decErr)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		codeVerifier = decrypted
 	}
 
 	// Load credential OAuth config for token exchange
@@ -424,6 +445,15 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 		if storedCredentialID != req.CredentialID {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OAuth state does not match credential"})
 			return
+		}
+		// V-14: Decrypt stored PKCE verifier
+		if storedVerifier != "" {
+			decrypted, decErr := encryption.Decrypt(storedVerifier)
+			if decErr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to decrypt state"})
+				return
+			}
+			storedVerifier = decrypted
 		}
 		codeVerifier = storedVerifier
 		if redirectURI == "" {

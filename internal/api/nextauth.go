@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -213,6 +214,10 @@ func (h *NextAuthHandler) CallbackCredentials(w http.ResponseWriter, r *http.Req
 	if callbackUrl == "" {
 		callbackUrl = "/"
 	}
+	// V-06: Prevent open redirect — only allow relative paths
+	if !strings.HasPrefix(callbackUrl, "/") || strings.HasPrefix(callbackUrl, "//") {
+		callbackUrl = "/"
+	}
 
 	if wantJSON {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -257,7 +262,11 @@ func (h *NextAuthHandler) SignIn(w http.ResponseWriter, r *http.Request) {
 	if callbackUrl == "" {
 		callbackUrl = "/"
 	}
-	http.Redirect(w, r, "/login?callbackUrl="+callbackUrl, http.StatusFound)
+	// V-06: Prevent open redirect — only allow relative paths
+	if !strings.HasPrefix(callbackUrl, "/") || strings.HasPrefix(callbackUrl, "//") {
+		callbackUrl = "/"
+	}
+	http.Redirect(w, r, "/login?callbackUrl="+url.QueryEscape(callbackUrl), http.StatusFound)
 }
 
 // Error shows auth error (GET /api/auth/error)

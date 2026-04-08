@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net"
+	"os"
 	"net/http"
 	"strings"
 	"sync"
@@ -302,6 +303,8 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	if s.spaHandler != nil {
 		mainHandler = s.combinedHandler()
 	}
+	// V-10: Wrap with security headers middleware
+	mainHandler = securityHeadersMiddleware(mainHandler)
 
 	s.httpServer = &http.Server{
 		Addr:        fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
@@ -324,6 +327,17 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	return s
 }
 
+// securityHeadersMiddleware adds standard security headers to all HTTP responses.
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // combinedHandler routes /api/, /healthz, /readyz, /metrics, /ws to the mux,
 // and everything else to the SPA static file handler.
 func (s *Server) combinedHandler() http.Handler {
@@ -342,6 +356,10 @@ func (s *Server) combinedHandler() http.Handler {
 
 func (s *Server) SetChatHandler(handler ws.ChatHandler) {
 	s.wsHub.SetChatHandler(handler)
+}
+
+func (s *Server) SetChannelAuthorizer(auth ws.ChannelAuthorizer) {
+	s.wsHub.SetChannelAuthorizer(auth)
 }
 
 func (s *Server) Orchestrator() *orchestrator.Orchestrator {
@@ -472,6 +490,10 @@ func (s *Server) startIPC() error {
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("listen unix %s: %w", socketPath, err)
+	}
+	// V-12: Restrict socket permissions to owner only
+	if err := os.Chmod(socketPath, 0600); err != nil {
+		s.logger.Warn("failed to set socket permissions", "error", err)
 	}
 
 	s.logger.Info("starting IPC server", "socket", socketPath)

@@ -233,6 +233,11 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
 		return
 	}
+	// V-17: Validate slug format to prevent injection via container names / file paths
+	if !validSlugFormat(req.Slug) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must contain only lowercase letters, numbers, and hyphens"})
+		return
+	}
 
 	var existingID string
 	err := h.db.QueryRowContext(r.Context(),
