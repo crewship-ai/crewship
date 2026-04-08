@@ -222,11 +222,11 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         </div>
       </div>
 
-      {/* Error */}
-      {error && (
+      {/* Error with stale data */}
+      {error && logs.length > 0 && (
         <Card className="border-red-500/20">
           <CardContent className="p-4">
-            <p className="text-[12px] text-red-400">{error}</p>
+            <p role="alert" className="text-[12px] text-red-400">{error}</p>
           </CardContent>
         </Card>
       )}
@@ -240,6 +240,15 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                 <Skeleton className="h-4 w-full" />
               </div>
             ))}
+          </CardContent>
+        </Card>
+      ) : error ? (
+        <Card className="border-red-500/20">
+          <CardContent className="p-6 text-center">
+            <p role="alert" className="text-[13px] text-red-400 mb-3">{error}</p>
+            <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={fetchLogs}>
+              Retry
+            </Button>
           </CardContent>
         </Card>
       ) : filteredLogs.length === 0 ? (
