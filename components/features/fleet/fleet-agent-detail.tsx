@@ -124,7 +124,7 @@ export function FleetAgentDetail({ agent, workspaceId, onClose }: FleetAgentDeta
             {status.label}
           </Badge>
         </div>
-        <Button variant="ghost" size="icon-xs" className="text-muted-foreground" onClick={onClose}>
+        <Button variant="ghost" size="icon-xs" className="text-muted-foreground" onClick={onClose} aria-label="Close agent detail">
           <X className="h-4 w-4" />
         </Button>
       </div>

@@ -205,6 +205,7 @@ export function FleetExplorer({
                 <div key={crew.id} className="mb-0.5">
                   {/* Crew row */}
                   <button
+                    aria-expanded={expanded}
                     className={cn(
                       "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors group",
                       isSelected
@@ -260,6 +261,7 @@ export function FleetExplorer({
                     return (
                       <button
                         key={agent.id}
+                        aria-current={isAgentSelected ? "true" : undefined}
                         className={cn(
                           "w-full flex items-center gap-2 pl-9 pr-2 py-1 rounded-md text-left transition-colors",
                           isAgentSelected
