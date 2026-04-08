@@ -128,17 +128,16 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
-      {/* Row 1: Context bar */}
-      <div className="shrink-0 z-20 flex items-center justify-between h-9 bg-card border-b border-white/[0.1] px-3">
-        <div className="flex items-center gap-2 min-w-0">
+      {/* Unified toolbar: title + stats | tabs | actions */}
+      <div className="shrink-0 z-20 flex items-stretch h-9 bg-card border-b border-white/[0.1] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        {/* Left: title + stats */}
+        <div className="flex items-center gap-2 shrink-0">
           <div className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
             <Network className="h-4 w-4 text-muted-foreground" />
             Crews & Agents
           </div>
-
-          {/* Stats pills */}
           {!isMobile && (
-            <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground ml-4">
+            <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground ml-2">
               {[
                 { label: "crews", value: stats.crews, color: "bg-violet-500", tc: "text-violet-400" },
                 { label: "agents", value: stats.agents, color: "bg-blue-500", tc: "text-blue-400" },
@@ -155,7 +154,32 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        {/* Center: tabs */}
+        <div className="flex items-stretch ml-6">
+          {([
+            { id: "overview" as const, label: "Overview", icon: LayoutGrid },
+            { id: "activity" as const, label: "Activity", icon: Activity },
+            { id: "connections" as const, label: "Connections", icon: Share2 },
+            { id: "health" as const, label: "Health", icon: HeartPulse },
+          ]).map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 text-[12px] font-medium border-b-2 transition-all duration-100 relative top-px",
+                activeTab === id
+                  ? "border-blue-400 text-blue-400"
+                  : "border-transparent text-muted-foreground hover:text-foreground/80",
+              )}
+            >
+              <Icon className="h-3 w-3 opacity-75" />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Right: actions */}
+        <div className="flex items-center gap-1.5 ml-auto shrink-0">
           <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground/80" onClick={onRefresh}>
             <RefreshCw className="h-3 w-3" />
           </Button>
@@ -172,30 +196,6 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
             </Link>
           </Button>
         </div>
-      </div>
-
-      {/* Row 2: Tab navigation */}
-      <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {([
-          { id: "overview" as const, label: "Overview", icon: LayoutGrid },
-          { id: "activity" as const, label: "Activity", icon: Activity },
-          { id: "connections" as const, label: "Connections", icon: Share2 },
-          { id: "health" as const, label: "Health", icon: HeartPulse },
-        ]).map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setActiveTab(id)}
-            className={cn(
-              "flex items-center gap-1.5 px-3 text-[12px] font-medium border-b-2 transition-all duration-100 relative top-px",
-              activeTab === id
-                ? "border-blue-400 text-blue-400"
-                : "border-transparent text-muted-foreground hover:text-foreground/80",
-            )}
-          >
-            <Icon className="h-3 w-3 opacity-75" />
-            {label}
-          </button>
-        ))}
       </div>
 
       {/* Main 3-column layout */}
