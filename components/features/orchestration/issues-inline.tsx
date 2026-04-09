@@ -307,14 +307,14 @@ function PropertyRow({
   return (
     <div
       className={cn(
-        "flex items-center px-2 py-1 mx-1 rounded hover:bg-white/[0.03] transition-colors cursor-pointer",
+        "flex items-center px-2 py-1 mx-1 rounded hover:bg-white/[0.03] transition-colors cursor-pointer overflow-hidden",
         className,
       )}
     >
       {label && (
         <span className="text-[11px] text-muted-foreground/60 w-[72px] shrink-0">{label}</span>
       )}
-      <span className="flex-1 flex items-center gap-[5px] justify-end text-[11.5px] text-foreground/80 min-w-0">
+      <span className="flex-1 flex items-center gap-[5px] justify-end text-[11.5px] text-foreground/80 min-w-0 truncate">
         {children}
       </span>
     </div>
@@ -565,7 +565,7 @@ export function IssueDetailInline({
   const issueLabels = issue.labels ?? []
 
   return (
-    <div className="flex flex-col h-full bg-card">
+    <div className="flex flex-col h-full bg-card overflow-hidden">
       {/* ── Header: identifier badge + close ─────────────────────────────── */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06] shrink-0">
         <span className="text-[11px] font-mono text-muted-foreground/70 bg-white/[0.06] px-1.5 py-0.5 rounded">
@@ -1681,7 +1681,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
   }, [donutSegments])
 
   return (
-    <div className="h-full flex flex-col border-l border-white/[0.06] bg-card">
+    <div className="h-full flex flex-col border-l border-white/[0.06] bg-card overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] shrink-0">
         <div className="flex items-center gap-2">
