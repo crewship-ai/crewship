@@ -19,22 +19,22 @@ import (
 
 // ProxyHandler proxies requests from the UI to the crewshipd sidecar over the Unix socket.
 type ProxyHandler struct {
-	db         *sql.DB
-	logger     *slog.Logger
-	socketPath string
+	db     *sql.DB
+	logger *slog.Logger
+	client *http.Client
 }
 
 // NewProxyHandler creates a ProxyHandler that communicates with the sidecar via the given Unix socket path.
 func NewProxyHandler(db *sql.DB, logger *slog.Logger, socketPath string) *ProxyHandler {
-	return &ProxyHandler{db: db, logger: logger, socketPath: socketPath}
-}
-
-func (h *ProxyHandler) ipcClient() *http.Client {
-	return &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", h.socketPath)
+	return &ProxyHandler{
+		db:     db,
+		logger: logger,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return net.Dial("unix", socketPath)
+				},
 			},
 		},
 	}
@@ -45,7 +45,7 @@ func (h *ProxyHandler) ipcGet(ctx context.Context, path string) (*http.Response,
 	if err != nil {
 		return nil, err
 	}
-	return h.ipcClient().Do(req)
+	return h.client.Do(req)
 }
 
 func (h *ProxyHandler) ipcPost(ctx context.Context, path string, body io.Reader) (*http.Response, error) {
@@ -54,7 +54,7 @@ func (h *ProxyHandler) ipcPost(ctx context.Context, path string, body io.Reader)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return h.ipcClient().Do(req)
+	return h.client.Do(req)
 }
 
 func (h *ProxyHandler) ipcPut(ctx context.Context, path string, body io.Reader) (*http.Response, error) {
@@ -62,7 +62,7 @@ func (h *ProxyHandler) ipcPut(ctx context.Context, path string, body io.Reader) 
 	if err != nil {
 		return nil, err
 	}
-	return h.ipcClient().Do(req)
+	return h.client.Do(req)
 }
 
 func (h *ProxyHandler) proxyJSON(w http.ResponseWriter, resp *http.Response) {
