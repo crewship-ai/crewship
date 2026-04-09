@@ -26,18 +26,19 @@ interface UnifiedExplorerProps {
   onApproveGate?: (taskId: string, missionId: string) => void
   filterCrewId: string | null
   onCrewFilter: (crewId: string | null) => void
+  filterAgentId: string | null
+  onAgentFilter: (agentId: string | null) => void
 }
 
 export function UnifiedExplorer({
   issues, projects, search, onSearchChange,
   selectedIssue, selectedProjectId, onProjectSelect, onIssueSelect,
   crews, missions, onTaskSelect, onApproveGate,
-  filterCrewId, onCrewFilter,
+  filterCrewId, onCrewFilter, filterAgentId, onAgentFilter,
 }: UnifiedExplorerProps) {
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [inboxOpen, setInboxOpen] = useState(true)
   const [filterDropdownOpen, setFilterDropdownOpen] = useState(false)
-  const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
 
   const inboxCount = useMemo(() => {
     let count = 0
@@ -83,7 +84,7 @@ export function UnifiedExplorer({
     return filtered
   }, [issues, search, selectedProjectId, filterCrewId, filterAgentId])
 
-  const clearFilters = () => { onCrewFilter(null); setFilterAgentId(null) }
+  const clearFilters = () => { onCrewFilter(null); onAgentFilter(null) }
 
   return (
     <div className="flex flex-col h-full">
@@ -127,7 +128,7 @@ export function UnifiedExplorer({
               <div className="absolute right-0 top-9 z-50 bg-card border border-white/[0.1] rounded-lg shadow-xl py-1 min-w-[180px] max-h-[320px] overflow-y-auto">
                 <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground/40 uppercase tracking-wider">Crews</div>
                 <button
-                  onClick={() => { onCrewFilter(null); setFilterAgentId(null); setFilterDropdownOpen(false) }}
+                  onClick={() => { onCrewFilter(null); onAgentFilter(null); setFilterDropdownOpen(false) }}
                   className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06]", !filterCrewId && !filterAgentId ? "text-blue-400" : "text-muted-foreground/80")}
                 >All crews</button>
                 {crews.map((c) => {
@@ -136,7 +137,7 @@ export function UnifiedExplorer({
                   return (
                     <button
                       key={c.id}
-                      onClick={() => { onCrewFilter(c.id); setFilterAgentId(null); setFilterDropdownOpen(false) }}
+                      onClick={() => { onCrewFilter(c.id); onAgentFilter(null); setFilterDropdownOpen(false) }}
                       className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterCrewId === c.id ? "text-blue-400" : "text-muted-foreground/80")}
                     >
                       <CrewIconComp className="h-3.5 w-3.5 shrink-0" style={{ color: c.color || "#666" }} />
@@ -151,7 +152,7 @@ export function UnifiedExplorer({
                     {agents.map((a) => (
                       <button
                         key={a.id}
-                        onClick={() => { setFilterAgentId(a.id); onCrewFilter(null); setFilterDropdownOpen(false) }}
+                        onClick={() => { onAgentFilter(a.id); onCrewFilter(null); setFilterDropdownOpen(false) }}
                         className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterAgentId === a.id ? "text-blue-400" : "text-muted-foreground/80")}
                       >
                         <img src={getAgentAvatarUrl(a.id)} alt="" className="h-4 w-4 rounded-full shrink-0" />

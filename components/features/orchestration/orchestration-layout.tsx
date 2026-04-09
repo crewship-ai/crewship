@@ -291,6 +291,7 @@ export function OrchestrationLayout({
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
+  const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
 
   const graphRef = useRef<WorkflowGraphRef>(null)
 
@@ -403,15 +404,23 @@ export function OrchestrationLayout({
     if (selectedProjectId) {
       filtered = filtered.filter((i) => i.project_id === selectedProjectId)
     }
+    if (filterCrewId) {
+      filtered = filtered.filter((i) => i.crew_id === filterCrewId)
+    }
+    if (filterAgentId) {
+      filtered = filtered.filter((i) => i.assignee_id === filterAgentId)
+    }
     if (issueSearch) {
       const q = issueSearch.toLowerCase()
       filtered = filtered.filter((i) =>
         i.title.toLowerCase().includes(q) ||
-        (i.identifier && i.identifier.toLowerCase().includes(q))
+        (i.identifier && i.identifier.toLowerCase().includes(q)) ||
+        (i.assignee_name && i.assignee_name.toLowerCase().includes(q)) ||
+        (i.crew_name && i.crew_name.toLowerCase().includes(q))
       )
     }
     return filtered
-  }, [issues, issueSearch, selectedProjectId])
+  }, [issues, issueSearch, selectedProjectId, filterCrewId, filterAgentId])
 
   // Handlers
   const handleNodeClick = useCallback((task: MissionTask) => {
@@ -632,6 +641,8 @@ export function OrchestrationLayout({
                         onTaskSelect={handleInboxTaskSelect}
                         filterCrewId={filterCrewId}
                         onCrewFilter={setFilterCrewId}
+                        filterAgentId={filterAgentId}
+                        onAgentFilter={setFilterAgentId}
                       />
                     </div>
                   </motion.div>
@@ -689,6 +700,8 @@ export function OrchestrationLayout({
                     onTaskSelect={handleInboxTaskSelect}
                     filterCrewId={filterCrewId}
                     onCrewFilter={setFilterCrewId}
+                    filterAgentId={filterAgentId}
+                    onAgentFilter={setFilterAgentId}
                   />
                 </motion.div>
               )}
