@@ -1065,26 +1065,17 @@ export function IssueDetailClient() {
               <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
                 Project
               </span>
-              <Popover open={projectOpen} onOpenChange={setProjectOpen}>
-                <PopoverTrigger asChild>
-                  <button className="flex items-center gap-1.5 text-sm hover:bg-accent rounded px-1.5 py-0.5 transition-colors w-full">
-                    <FolderKanban className="h-3.5 w-3.5 text-muted-foreground/60" />
-                    <span className="text-xs truncate">
-                      {currentProject ? currentProject.name : "No project"}
-                    </span>
-                    <ChevronsUpDown className="ml-auto h-3 w-3 text-muted-foreground/40" />
-                  </button>
-                  {currentProject && (
-                    <a
-                      href={`/orchestration/projects/${currentProject.id}`}
-                      className="absolute right-1 top-1 p-1 rounded hover:bg-accent text-muted-foreground/30 hover:text-muted-foreground/70 transition-colors"
-                      title="Open project"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-3"/><path d="M10 2h4v4"/><path d="M14 2L7 9"/></svg>
-                    </a>
-                  )}
-                </PopoverTrigger>
+              <div className="flex items-center gap-1 group">
+                <Popover open={projectOpen} onOpenChange={setProjectOpen}>
+                  <PopoverTrigger asChild>
+                    <button className="flex items-center gap-1.5 text-sm hover:bg-accent rounded px-1.5 py-0.5 transition-colors flex-1">
+                      <FolderKanban className="h-3.5 w-3.5 text-muted-foreground/60" />
+                      <span className="text-xs truncate">
+                        {currentProject ? currentProject.name : "No project"}
+                      </span>
+                      <ChevronsUpDown className="ml-auto h-3 w-3 text-muted-foreground/40" />
+                    </button>
+                  </PopoverTrigger>
                 <PopoverContent className="w-[220px] p-0" align="end">
                   <Command>
                     <CommandInput placeholder="Search projects..." className="h-8 text-xs" />
@@ -1124,7 +1115,17 @@ export function IssueDetailClient() {
                     </CommandList>
                   </Command>
                 </PopoverContent>
-              </Popover>
+                </Popover>
+                {currentProject && (
+                  <a
+                    href={`/orchestration/projects/${currentProject.id}`}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent text-muted-foreground/30 hover:text-blue-400 transition-all shrink-0"
+                    title="Open project"
+                  >
+                    <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-3"/><path d="M10 2h4v4"/><path d="M14 2L7 9"/></svg>
+                  </a>
+                )}
+              </div>
             </div>
 
             <Separator className="bg-border/60" />
