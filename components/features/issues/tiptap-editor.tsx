@@ -152,6 +152,7 @@ function ToolbarButton({ active, onClick, children, title }: { active?: boolean;
 
 export function TiptapEditor({ content, onChange, onBlur, placeholder, editable = true, compact, className, autoFocus }: TiptapEditorProps) {
   const editor = useEditor({
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({
         codeBlock: false, // use lowlight version instead
