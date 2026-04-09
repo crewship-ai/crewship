@@ -5,7 +5,6 @@ import { useParams, useRouter } from "next/navigation"
 import {
   ArrowLeft,
   CalendarIcon,
-  ChevronDown,
   ChevronRight,
   Clock,
   FolderKanban,
@@ -24,6 +23,9 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
+import { SectionHeader, PropertyRow } from "@/components/features/issues/property-row"
+import { ProjectStatusIcon } from "@/components/features/issues/project-status-icon"
+import { PROJECT_STATUSES, PRIORITY_OPTIONS } from "@/components/features/issues/issue-constants"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -45,43 +47,13 @@ import type {
   Milestone,
   Mission,
   Project,
+  ProjectStats,
   ProjectStatus,
 } from "@/lib/types/mission"
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants & Types — shared from @/components/features/issues
 // ---------------------------------------------------------------------------
-
-const PROJECT_STATUSES: { value: ProjectStatus; label: string }[] = [
-  { value: "backlog", label: "Backlog" },
-  { value: "planned", label: "Planned" },
-  { value: "in_progress", label: "In Progress" },
-  { value: "paused", label: "Paused" },
-  { value: "completed", label: "Completed" },
-  { value: "cancelled", label: "Cancelled" },
-]
-
-const ALL_PRIORITIES: { value: IssuePriority; label: string }[] = [
-  { value: "urgent", label: "Urgent" },
-  { value: "high", label: "High" },
-  { value: "medium", label: "Medium" },
-  { value: "low", label: "Low" },
-  { value: "none", label: "No priority" },
-]
-
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface ProjectStats {
-  total_issues: number
-  completed_issues: number
-  by_status: Record<string, number>
-  by_assignee: { agent_id: string; agent_name: string; total: number; completed: number }[]
-  by_label: { label_name: string; color: string; count: number }[]
-  crews: string[]
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -106,94 +78,7 @@ function formatShortDate(dateStr: string): string {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-function ProjectStatusIcon({ status, className }: { status: ProjectStatus; className?: string }) {
-  const cls = cn("h-4 w-4 shrink-0", className)
-  switch (status) {
-    case "backlog":
-      return (
-        <svg className={cls} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 3" opacity="0.5" />
-        </svg>
-      )
-    case "planned":
-      return (
-        <svg className={cls} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.6" />
-        </svg>
-      )
-    case "in_progress":
-      return (
-        <svg className={cls} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
-          <path d="M8 2a6 6 0 0 1 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      )
-    case "paused":
-      return (
-        <svg className={cls} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
-          <rect x="6" y="5" width="1.5" height="6" rx="0.5" fill="currentColor" opacity="0.6" />
-          <rect x="8.5" y="5" width="1.5" height="6" rx="0.5" fill="currentColor" opacity="0.6" />
-        </svg>
-      )
-    case "completed":
-      return (
-        <svg className={cls} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" fill="currentColor" opacity="0.15" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M5.5 8l2 2 3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )
-    case "cancelled":
-      return (
-        <svg className={cls} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
-          <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      )
-    default:
-      return null
-  }
-}
-
-function SectionHeader({
-  title,
-  open,
-  onToggle,
-  action,
-}: {
-  title: string
-  open: boolean
-  onToggle: () => void
-  action?: React.ReactNode
-}) {
-  return (
-    <div className="flex items-center justify-between px-3 py-2">
-      <button
-        onClick={onToggle}
-        className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground/70 hover:text-muted-foreground/90 transition-colors"
-      >
-        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        {title}
-      </button>
-      {action}
-    </div>
-  )
-}
-
-function SidebarPropertyRow({
-  label,
-  children,
-}: {
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-1.5 min-h-[32px]">
-      <span className="text-xs text-muted-foreground shrink-0 w-[80px]">{label}</span>
-      <div className="flex-1 flex items-center justify-end min-w-0">{children}</div>
-    </div>
-  )
-}
+// ProjectStatusIcon, SectionHeader, PropertyRow — imported from shared modules
 
 // ---------------------------------------------------------------------------
 // Main component
@@ -733,7 +618,7 @@ function OverviewTab({
   milestones: Milestone[]
 }) {
   const statusInfo = PROJECT_STATUSES.find((s) => s.value === project.status)
-  const priorityInfo = ALL_PRIORITIES.find((p) => p.value === project.priority)
+  const priorityInfo = PRIORITY_OPTIONS.find((p) => p.value === project.priority)
 
   return (
     <div className="max-w-3xl mx-auto px-8 py-8 space-y-8">
@@ -1109,14 +994,14 @@ function ProjectSidebar({
           <Popover open={statusOpen} onOpenChange={setStatusOpen}>
             <PopoverTrigger asChild>
               <div>
-                <SidebarPropertyRow label="Status">
+                <PropertyRow label="Status">
                   <button className="flex items-center gap-1.5 px-2 py-0.5 rounded hover:bg-white/[0.06] transition-colors">
                     <ProjectStatusIcon status={project.status} className="h-3.5 w-3.5 text-muted-foreground/70" />
                     <span className="text-xs text-foreground/80">
                       {PROJECT_STATUSES.find((s) => s.value === project.status)?.label || project.status}
                     </span>
                   </button>
-                </SidebarPropertyRow>
+                </PropertyRow>
               </div>
             </PopoverTrigger>
             <PopoverContent className="w-48 p-1" align="end">
@@ -1140,18 +1025,18 @@ function ProjectSidebar({
           <Popover open={priorityOpen} onOpenChange={setPriorityOpen}>
             <PopoverTrigger asChild>
               <div>
-                <SidebarPropertyRow label="Priority">
+                <PropertyRow label="Priority">
                   <button className="flex items-center gap-1.5 px-2 py-0.5 rounded hover:bg-white/[0.06] transition-colors">
                     <PriorityIcon priority={project.priority || "none"} className="h-3.5 w-3.5" />
                     <span className="text-xs text-foreground/80">
                       {priorityLabel[project.priority || "none"]}
                     </span>
                   </button>
-                </SidebarPropertyRow>
+                </PropertyRow>
               </div>
             </PopoverTrigger>
             <PopoverContent className="w-48 p-1" align="end">
-              {ALL_PRIORITIES.map((p) => (
+              {PRIORITY_OPTIONS.map((p) => (
                 <button
                   key={p.value}
                   onClick={() => { patchProject({ priority: p.value }); setPriorityOpen(false) }}
@@ -1160,7 +1045,7 @@ function ProjectSidebar({
                     p.value === project.priority && "bg-white/[0.04]",
                   )}
                 >
-                  <PriorityIcon priority={p.value} className="h-3.5 w-3.5" />
+                  <PriorityIcon priority={p.value as IssuePriority} className="h-3.5 w-3.5" />
                   {p.label}
                 </button>
               ))}
@@ -1171,7 +1056,7 @@ function ProjectSidebar({
           <Popover open={leadOpen} onOpenChange={setLeadOpen}>
             <PopoverTrigger asChild>
               <div>
-                <SidebarPropertyRow label="Lead">
+                <PropertyRow label="Lead">
                   <button className="flex items-center gap-1.5 px-2 py-0.5 rounded hover:bg-white/[0.06] transition-colors">
                     {project.lead_id ? (
                       <>
@@ -1182,7 +1067,7 @@ function ProjectSidebar({
                       <span className="text-xs text-muted-foreground/40">Add lead</span>
                     )}
                   </button>
-                </SidebarPropertyRow>
+                </PropertyRow>
               </div>
             </PopoverTrigger>
             <PopoverContent className="w-52 p-0" align="end">
@@ -1211,7 +1096,7 @@ function ProjectSidebar({
           </Popover>
 
           {/* Members */}
-          <SidebarPropertyRow label="Members">
+          <PropertyRow label="Members">
             {stats?.by_assignee && stats.by_assignee.length > 0 ? (
               <div className="flex -space-x-1">
                 {stats.by_assignee.slice(0, 5).map((a) => (
@@ -1232,10 +1117,10 @@ function ProjectSidebar({
             ) : (
               <span className="text-xs text-muted-foreground/40">Add members</span>
             )}
-          </SidebarPropertyRow>
+          </PropertyRow>
 
           {/* Start date */}
-          <SidebarPropertyRow label="Start">
+          <PropertyRow label="Start">
             <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
               <PopoverTrigger asChild>
                 <button className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-white/[0.06] transition-colors text-xs text-foreground/70">
@@ -1267,10 +1152,10 @@ function ProjectSidebar({
                 )}
               </PopoverContent>
             </Popover>
-          </SidebarPropertyRow>
+          </PropertyRow>
 
           {/* Target date */}
-          <SidebarPropertyRow label="Target">
+          <PropertyRow label="Target">
             <Popover open={targetDateOpen} onOpenChange={setTargetDateOpen}>
               <PopoverTrigger asChild>
                 <button className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-white/[0.06] transition-colors text-xs text-foreground/70">
@@ -1302,10 +1187,10 @@ function ProjectSidebar({
                 )}
               </PopoverContent>
             </Popover>
-          </SidebarPropertyRow>
+          </PropertyRow>
 
           {/* Teams */}
-          <SidebarPropertyRow label="Teams">
+          <PropertyRow label="Teams">
             {stats?.crews && stats.crews.length > 0 ? (
               <div className="flex items-center gap-1 flex-wrap justify-end">
                 {stats.crews.map((crew) => (
@@ -1320,7 +1205,7 @@ function ProjectSidebar({
             ) : (
               <span className="text-xs text-muted-foreground/40">No teams</span>
             )}
-          </SidebarPropertyRow>
+          </PropertyRow>
 
           </div>
         )}
