@@ -49,6 +49,15 @@ interface RealtimeContextValue {
   subscribeChannel: (channel: string) => () => void
 }
 
+const VALID_REALTIME_TYPES: Set<string> = new Set([
+  "run.started", "run.completed", "run.failed",
+  "agent.status", "agent.created", "agent.updated", "agent.deleted",
+  "assignment.updated", "escalation.created",
+  "escalation.resolved", "mission.updated", "task.updated",
+  "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
+  "agent.log", "file.event", "container.stats",
+])
+
 const RealtimeContext = createContext<RealtimeContextValue | null>(null)
 
 function getWsUrl(): string {
@@ -87,15 +96,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
 
   const handleMessage = useCallback(
     (msg: WSMessage) => {
-      const validTypes: Set<string> = new Set([
-        "run.started", "run.completed", "run.failed",
-        "agent.status", "agent.created", "agent.updated", "agent.deleted",
-        "assignment.updated", "escalation.created",
-        "escalation.resolved", "mission.updated", "task.updated",
-        "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
-        "agent.log", "file.event", "container.stats",
-      ])
-      if (!validTypes.has(msg.type)) return
+      if (!VALID_REALTIME_TYPES.has(msg.type)) return
 
       const event: RealtimeEvent = {
         type: msg.type as RealtimeEventType,

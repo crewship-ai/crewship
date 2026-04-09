@@ -40,6 +40,20 @@ func captainCheckRateLimit(userID string) bool {
 	captainRateLimiter.mu.Lock()
 	defer captainRateLimiter.mu.Unlock()
 
+	// Opportunistic sweep: remove stale entries from other users to bound map growth.
+	// Only sweep when map is large enough to warrant it (amortised O(1) per call).
+	if len(captainRateLimiter.windows) > 100 {
+		cutoff := now.Add(-captainRateWindow)
+		for uid, w := range captainRateLimiter.windows {
+			if uid == userID {
+				continue
+			}
+			if len(w) > 0 && w[len(w)-1].Before(cutoff) {
+				delete(captainRateLimiter.windows, uid)
+			}
+		}
+	}
+
 	ts := captainRateLimiter.windows[userID]
 	cutoff := now.Add(-captainRateWindow)
 	valid := make([]time.Time, 0, len(ts))
@@ -51,9 +65,6 @@ func captainCheckRateLimit(userID string) bool {
 	if len(valid) >= captainRateLimit {
 		captainRateLimiter.windows[userID] = valid
 		return false
-	}
-	if len(valid) == 0 {
-		delete(captainRateLimiter.windows, userID)
 	}
 	captainRateLimiter.windows[userID] = append(valid, now)
 	return true
