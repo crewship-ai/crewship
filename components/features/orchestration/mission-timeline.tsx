@@ -67,6 +67,25 @@ function formatDuration(ms: number): string {
   return `${m}m ${s % 60}s`
 }
 
+const TASK_BAR_STYLES: Record<string, React.CSSProperties> = {
+  COMPLETED: { background: "rgba(16,185,129,0.18)", border: "1px solid rgba(16,185,129,0.4)", color: "#6ee7b7" },
+  IN_PROGRESS: {
+    background: "linear-gradient(90deg, #1d4ed8 0%, #3b82f6 40%, #60a5fa 60%, #3b82f6 100%)",
+    backgroundSize: "300% 100%",
+    border: "1px solid rgba(59,130,246,0.5)",
+    color: "#fff",
+    animation: "shimmer 2.5s linear infinite",
+  },
+  BLOCKED: {
+    background: "repeating-linear-gradient(-45deg, rgba(245,158,11,0.15) 0px 4px, rgba(245,158,11,0.05) 4px 8px)",
+    border: "1px solid rgba(245,158,11,0.4)",
+    color: "#fcd34d",
+  },
+  PENDING: { background: "rgba(72,79,88,0.2)", border: "1.5px dashed rgba(72,79,88,0.5)", color: "rgb(72,79,88)" },
+  FAILED: { background: "rgba(244,63,94,0.15)", border: "1px solid rgba(244,63,94,0.4)", color: "#fda4af" },
+  SKIPPED: { background: "rgba(72,79,88,0.2)", border: "1px solid rgba(72,79,88,0.3)", color: "rgb(107,114,128)" },
+}
+
 function TaskBar({ task, timeRange }: { task: MissionTask; timeRange: { start: number; end: number } }) {
   const range = timeRange.end - timeRange.start
   const taskStart = task.started_at ? new Date(task.started_at).getTime() : new Date(task.created_at).getTime()
@@ -78,25 +97,6 @@ function TaskBar({ task, timeRange }: { task: MissionTask; timeRange: { start: n
   const width = Math.max(0.5, ((taskEnd - taskStart) / range) * 100)
   const duration = task.duration_ms ?? (task.completed_at ? new Date(task.completed_at).getTime() - taskStart : null)
 
-  const barStyles: Record<string, React.CSSProperties> = {
-    COMPLETED: { background: "rgba(16,185,129,0.18)", border: "1px solid rgba(16,185,129,0.4)", color: "#6ee7b7" },
-    IN_PROGRESS: {
-      background: "linear-gradient(90deg, #1d4ed8 0%, #3b82f6 40%, #60a5fa 60%, #3b82f6 100%)",
-      backgroundSize: "300% 100%",
-      border: "1px solid rgba(59,130,246,0.5)",
-      color: "#fff",
-      animation: "shimmer 2.5s linear infinite",
-    },
-    BLOCKED: {
-      background: "repeating-linear-gradient(-45deg, rgba(245,158,11,0.15) 0px 4px, rgba(245,158,11,0.05) 4px 8px)",
-      border: "1px solid rgba(245,158,11,0.4)",
-      color: "#fcd34d",
-    },
-    PENDING: { background: "rgba(72,79,88,0.2)", border: "1.5px dashed rgba(72,79,88,0.5)", color: "rgb(72,79,88)" },
-    FAILED: { background: "rgba(244,63,94,0.15)", border: "1px solid rgba(244,63,94,0.4)", color: "#fda4af" },
-    SKIPPED: { background: "rgba(72,79,88,0.2)", border: "1px solid rgba(72,79,88,0.3)", color: "rgb(107,114,128)" },
-  }
-
   return (
     <TooltipProvider delayDuration={80}>
       <Tooltip>
@@ -107,7 +107,7 @@ function TaskBar({ task, timeRange }: { task: MissionTask; timeRange: { start: n
               left: `${left}%`,
               width: `${width}%`,
               minWidth: "4px",
-              ...(barStyles[task.status] ?? barStyles.PENDING),
+              ...(TASK_BAR_STYLES[task.status] ?? TASK_BAR_STYLES.PENDING),
             }}
           >
             {width > 5 && (

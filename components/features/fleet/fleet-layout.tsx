@@ -69,6 +69,10 @@ export interface FleetLayoutProps {
   onRefresh: () => void
 }
 
+const ACTIVITY_TYPE_COLORS: Record<string, string> = {
+  status: "text-blue-400", run: "text-emerald-400", mission: "text-purple-400",
+}
+
 const HEALTH_STATUS_COLORS: Record<string, string> = {
   RUNNING: "text-emerald-400",
   IDLE: "text-muted-foreground",
@@ -669,29 +673,33 @@ function FleetActivityFeed({ agents }: { agents: AgentData[] }) {
   const [entries, setEntries] = useState<ActivityEntry[]>([])
   const endRef = useRef<HTMLDivElement>(null)
 
+  // Use ref to avoid re-creating callbacks when agents array changes
+  const agentsRef = useRef(agents)
+  useEffect(() => { agentsRef.current = agents }, [agents])
+
   const handleAgentStatus = useCallback((ev: RealtimeEvent) => {
     const slug = (ev.payload.agent_slug ?? ev.payload.slug ?? "") as string
     const status = (ev.payload.status ?? "") as string
     if (!slug || !status) return
-    const agent = agents.find((a) => a.slug === slug)
+    const agent = agentsRef.current.find((a) => a.slug === slug)
     setEntries((prev) => [...prev.slice(-100), {
       ts: new Date().toISOString(), agent: slug,
       avatarSeed: agent?.avatar_seed || slug, avatarStyle: agent?.avatar_style,
       content: `Status → ${status}`, type: "status",
     }])
-  }, [agents])
+  }, [])
 
   const handleRunEvent = useCallback((ev: RealtimeEvent) => {
     const slug = (ev.payload.agent_slug ?? "") as string
     const status = (ev.payload.status ?? ev.type?.split(".")[1] ?? "") as string
     if (!slug) return
-    const agent = agents.find((a) => a.slug === slug)
+    const agent = agentsRef.current.find((a) => a.slug === slug)
     setEntries((prev) => [...prev.slice(-100), {
       ts: new Date().toISOString(), agent: slug,
       avatarSeed: agent?.avatar_seed || slug, avatarStyle: agent?.avatar_style,
       content: `Run ${status}`, type: "run",
     }])
-  }, [agents])
+  }, [])
 
   const handleMissionUpdate = useCallback((ev: RealtimeEvent) => {
     const title = (ev.payload.title ?? "") as string
@@ -714,9 +722,7 @@ function FleetActivityFeed({ agents }: { agents: AgentData[] }) {
     endRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [entries])
 
-  const typeColors: Record<string, string> = {
-    status: "text-blue-400", run: "text-emerald-400", mission: "text-purple-400",
-  }
+  // typeColors hoisted to ACTIVITY_TYPE_COLORS at module level
 
   if (entries.length === 0) {
     return (
@@ -733,7 +739,7 @@ function FleetActivityFeed({ agents }: { agents: AgentData[] }) {
       {entries.map((entry, i) => (
         <div key={i} className="flex items-center gap-2 py-0.5 hover:bg-white/[0.02]">
           <span className="text-muted-foreground/40 tabular-nums shrink-0 w-[52px]">{entry.ts.slice(11, 19)}</span>
-          <span className={cn("text-[10px] px-1 rounded bg-white/[0.03] shrink-0", typeColors[entry.type] || "text-muted-foreground")}>
+          <span className={cn("text-[10px] px-1 rounded bg-white/[0.03] shrink-0", ACTIVITY_TYPE_COLORS[entry.type] || "text-muted-foreground")}>
             {entry.type}
           </span>
           <img src={getAgentAvatarUrl(entry.avatarSeed, entry.avatarStyle)} alt="" className="w-3.5 h-3.5 rounded-full shrink-0" />

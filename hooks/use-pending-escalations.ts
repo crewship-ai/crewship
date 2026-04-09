@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 
 /**
@@ -23,9 +23,15 @@ export function usePendingEscalations(workspaceId: string | null): number {
 
   useEffect(() => { refresh() }, [refresh])
 
-  // Real-time: refresh when escalations change
-  useRealtimeEvent("escalation.created", useCallback(() => { refresh() }, [refresh]))
-  useRealtimeEvent("escalation.resolved", useCallback(() => { refresh() }, [refresh]))
+  // Real-time: debounced refresh when escalations change
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const debouncedRefresh = useCallback(() => {
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => refresh(), 150)
+  }, [refresh])
+
+  useRealtimeEvent("escalation.created", debouncedRefresh)
+  useRealtimeEvent("escalation.resolved", debouncedRefresh)
 
   return count
 }
