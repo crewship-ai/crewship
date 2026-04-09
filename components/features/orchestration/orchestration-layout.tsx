@@ -386,7 +386,7 @@ export function OrchestrationLayout({
   const fetchIssues = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/issues?workspace_id=${workspaceId}&limit=100`)
+      const res = await fetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=100`)
       if (res.ok) setIssues(await res.json())
     } catch { /* ignore */ }
   }, [workspaceId])
@@ -394,7 +394,7 @@ export function OrchestrationLayout({
   const fetchIssueLabels = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/labels?workspace_id=${workspaceId}`)
+      const res = await fetch(`/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (res.ok) setIssueLabels(await res.json())
     } catch { /* ignore */ }
   }, [workspaceId])
@@ -402,7 +402,7 @@ export function OrchestrationLayout({
   const fetchProjects = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/projects?workspace_id=${workspaceId}`)
+      const res = await fetch(`/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (res.ok) setProjects(await res.json())
     } catch { /* ignore */ }
   }, [workspaceId])
@@ -410,7 +410,7 @@ export function OrchestrationLayout({
   const fetchSavedViews = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/saved-views?workspace_id=${workspaceId}`)
+      const res = await fetch(`/api/v1/saved-views?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (res.ok) {
         const data = await res.json()
         setSavedViews(Array.isArray(data) ? data : data.views ?? [])
@@ -436,7 +436,7 @@ export function OrchestrationLayout({
     setDetailContext({ type: "none" })
     if (issue.crew_id && issue.identifier) {
       try {
-        const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/comments?workspace_id=${workspaceId}`)
+        const res = await fetch(`/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`)
         if (res.ok) setIssueComments(await res.json())
         else setIssueComments([])
       } catch { setIssueComments([]) }
@@ -921,11 +921,11 @@ export function OrchestrationLayout({
                         await fetchIssues()
                         if (selectedIssue?.crew_id && selectedIssue?.identifier) {
                           try {
-                            const res = await fetch(`/api/v1/issues/${selectedIssue.identifier}?workspace_id=${workspaceId}`)
+                            const res = await fetch(`/api/v1/issues/${encodeURIComponent(selectedIssue.identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`)
                             if (res.ok) {
                               const fresh = await res.json()
                               setSelectedIssue(fresh)
-                              const commRes = await fetch(`/api/v1/crews/${fresh.crew_id}/issues/${fresh.identifier}/comments?workspace_id=${workspaceId}`)
+                              const commRes = await fetch(`/api/v1/crews/${encodeURIComponent(fresh.crew_id)}/issues/${encodeURIComponent(fresh.identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`)
                               if (commRes.ok) setIssueComments(await commRes.json())
                             }
                           } catch {}
@@ -950,7 +950,7 @@ export function OrchestrationLayout({
         ) : (
           <div className={cn(
             "row-span-1 transition-all duration-200 overflow-hidden min-h-0",
-            showRightPanel ? "w-[380px]" : "w-0",
+            showRightPanel ? "w-full" : "w-0",
           )}>
             <AnimatePresence mode="wait">
               {showRightPanel && (
@@ -974,11 +974,11 @@ export function OrchestrationLayout({
                         await fetchIssues()
                         if (selectedIssue?.crew_id && selectedIssue?.identifier) {
                           try {
-                            const res = await fetch(`/api/v1/issues/${selectedIssue.identifier}?workspace_id=${workspaceId}`)
+                            const res = await fetch(`/api/v1/issues/${encodeURIComponent(selectedIssue.identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`)
                             if (res.ok) {
                               const fresh = await res.json()
                               setSelectedIssue(fresh)
-                              const commRes = await fetch(`/api/v1/crews/${fresh.crew_id}/issues/${fresh.identifier}/comments?workspace_id=${workspaceId}`)
+                              const commRes = await fetch(`/api/v1/crews/${encodeURIComponent(fresh.crew_id)}/issues/${encodeURIComponent(fresh.identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`)
                               if (commRes.ok) setIssueComments(await commRes.json())
                             }
                           } catch {}
