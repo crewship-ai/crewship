@@ -10,7 +10,6 @@ import { StatusIcon, statusLabel } from "@/components/features/issues/status-ico
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { LabelBadge } from "@/components/features/issues/label-badge"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
-import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
 import { IssuesListView } from "@/components/features/issues/issues-list-view"

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/layout/empty-state"
 import {
@@ -185,6 +185,12 @@ export function MissionTimeline({ missions, highlightSlugs }: MissionTimelinePro
     return pct >= 0 && pct <= 100 ? pct : null
   }, [timeRange])
 
+  const toggle = useCallback((id: string) => setCollapsed((prev) => {
+    const next = new Set(prev)
+    next.has(id) ? next.delete(id) : next.add(id)
+    return next
+  }), [])
+
   if (activeMissions.length === 0) {
     return (
       <div className="rounded-lg border border-border bg-card p-12">
@@ -193,25 +199,23 @@ export function MissionTimeline({ missions, highlightSlugs }: MissionTimelinePro
     )
   }
 
-  const toggle = (id: string) => setCollapsed((prev) => {
-    const next = new Set(prev)
-    next.has(id) ? next.delete(id) : next.add(id)
-    return next
-  })
-
   return (
     <>
       <style>{`@keyframes shimmer{0%{background-position:100% 0}100%{background-position:-200% 0}}`}</style>
       <div className="flex flex-col gap-3">
         {activeMissions.map((mission) => {
           const isOpen = !collapsed.has(mission.id)
-          const agentTasks = new Map<string, MissionTask[]>()
-          for (const task of mission.tasks || []) {
-            const key = task.agent_slug || "unassigned"
-            if (!agentTasks.has(key)) agentTasks.set(key, [])
-            agentTasks.get(key)!.push(task)
+          // Only compute agent grouping when section is expanded
+          let agents: string[] = []
+          let agentTasks = new Map<string, MissionTask[]>()
+          if (isOpen) {
+            for (const task of mission.tasks || []) {
+              const key = task.agent_slug || "unassigned"
+              if (!agentTasks.has(key)) agentTasks.set(key, [])
+              agentTasks.get(key)!.push(task)
+            }
+            agents = Array.from(agentTasks.keys()).sort()
           }
-          const agents = Array.from(agentTasks.keys()).sort()
 
           return (
             <div key={mission.id} className="rounded-lg border border-border bg-card overflow-hidden">

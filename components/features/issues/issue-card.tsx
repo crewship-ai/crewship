@@ -10,8 +10,9 @@ import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { Mission } from "@/lib/types/mission"
 
+const TERMINAL_STATUSES = new Set(["COMPLETED", "DONE", "CANCELLED", "FAILED", "DUPLICATE"])
+
 function isOverdue(dueDate: string | null | undefined, status: string): boolean {
-  const TERMINAL_STATUSES = new Set(["COMPLETED", "DONE", "CANCELLED", "FAILED", "DUPLICATE"])
   if (!dueDate || TERMINAL_STATUSES.has(status)) return false
   return new Date(dueDate) < new Date()
 }

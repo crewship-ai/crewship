@@ -27,7 +27,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { WorkflowGraph, type WorkflowGraphRef } from "@/components/features/orchestration/workflow-graph"
+import dynamic from "next/dynamic"
+import { WorkflowGraph } from "@/components/features/orchestration/workflow-graph"
 import { MissionTimeline } from "@/components/features/orchestration/mission-timeline"
 import { OrchestrationActivity } from "@/components/features/orchestration/orchestration-activity"
 // TemplateGallery removed — workflow templates not needed in orchestration UI yet
@@ -40,7 +41,7 @@ import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"
 import { ConnectionMap } from "@/components/features/orchestration/connection-map"
 import { ContextDetailPanel, type DetailContext } from "@/components/features/orchestration/context-detail-panel"
 import { A2AMessageStream } from "@/components/features/orchestration/a2a-message-stream"
-import { MissionYamlEditor } from "@/components/features/orchestration/mission-yaml-editor"
+const MissionYamlEditor = dynamic(() => import("@/components/features/orchestration/mission-yaml-editor").then(m => m.MissionYamlEditor), { ssr: false })
 import { DockerOverview } from "@/components/features/orchestration/docker-overview"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import type { Mission, MissionTask, IssueLabel, IssueComment, Project, SavedView } from "@/lib/types/mission"
@@ -319,7 +320,7 @@ export function OrchestrationLayout({
   const [activeViewId, setActiveViewId] = useState<string | null>(null)
   const [savedViewsOpen, setSavedViewsOpen] = useState(false)
 
-  const graphRef = useRef<WorkflowGraphRef>(null)
+  // graphRef removed — was unused
 
   // Auto-collapse left panel on mobile
   useEffect(() => {
@@ -854,7 +855,6 @@ export function OrchestrationLayout({
           {activeTab === "graph" && (
             <>
               <WorkflowGraph
-                ref={graphRef}
                 missions={filteredMissions}
                 crews={crews}
                 agents={agents}

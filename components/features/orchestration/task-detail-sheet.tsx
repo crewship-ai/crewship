@@ -153,16 +153,19 @@ export function TaskDetailSheet({ task, mission, allTasks, workspaceId, onClose,
     }
   }, [task, mission, workspaceId, editTitle, editDesc, editAgentId, editDeps, onTaskChanged])
 
-  const deps = (() => {
-    if (!task) return []
-    try { return JSON.parse(task.depends_on || "[]") as string[] }
-    catch { return [] }
-  })()
-  const depTasks = allTasks.filter((t) => deps.includes(t.id))
-  const dependents = allTasks.filter((t) => {
-    try { return (JSON.parse(t.depends_on || "[]") as string[]).includes(task?.id || "") }
-    catch { return false }
-  })
+  const { deps, depTasks, dependents } = useMemo(() => {
+    if (!task) return { deps: [] as string[], depTasks: [] as typeof allTasks, dependents: [] as typeof allTasks }
+    let parsed: string[] = []
+    try { parsed = JSON.parse(task.depends_on || "[]") as string[] } catch { /* ignore */ }
+    return {
+      deps: parsed,
+      depTasks: allTasks.filter((t) => parsed.includes(t.id)),
+      dependents: allTasks.filter((t) => {
+        try { return (JSON.parse(t.depends_on || "[]") as string[]).includes(task.id) }
+        catch { return false }
+      }),
+    }
+  }, [task?.id, task?.depends_on, allTasks])
 
   const otherTasks = useMemo(
     () => allTasks.filter((t) => t.id !== task?.id),
