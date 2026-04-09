@@ -742,7 +742,7 @@ export function IssueDetailInline({
           </AnimatePresence>
 
           {/* ── Properties section ───────────────────────────────────────── */}
-          <div className="mt-2 mx-2 rounded-lg border border-white/[0.04]">
+          <div className="mt-2 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
             <SectionHeader
               title="Properties"
               open={propertiesOpen}
@@ -1001,7 +1001,7 @@ export function IssueDetailInline({
           </div>
 
           {/* ── Labels section ───────────────────────────────────────────── */}
-          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04]">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
             <SectionHeader
               title="Labels"
               open={labelsOpen}
@@ -1113,7 +1113,7 @@ export function IssueDetailInline({
           </div>
 
           {/* ── Project section ────────────────────────────────────────── */}
-          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04]">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
             <SectionHeader
               title="Project"
               open={projectOpen}
@@ -1185,7 +1185,7 @@ export function IssueDetailInline({
           </div>
 
           {/* ── Relations section ────────────────────────────────────────── */}
-          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04]">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
             <SectionHeader
               title="Relations"
               open={relationsOpen}
@@ -1296,7 +1296,7 @@ export function IssueDetailInline({
 
           {/* ── Sub-issues section ──────────────────────────────────────── */}
           {issue.sub_issues_count != null && issue.sub_issues_count > 0 && (
-            <div className="mt-1 mx-2 rounded-lg border border-white/[0.04]">
+            <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
               <SectionHeader
                 title={`Sub-issues (${issue.sub_issues_count})`}
                 open={subIssuesOpen}
