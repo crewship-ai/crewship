@@ -35,7 +35,8 @@
               "guides/templates",
               "guides/agent-memory",
               "guides/coordinator",
-              "guides/scheduling"
+              "guides/scheduling",
+              "guides/files-and-output"
             ]
           },
           {
@@ -43,7 +44,8 @@
             "pages": [
               "security/rbac",
               "security/encryption",
-              "security/container-isolation"
+              "security/container-isolation",
+              "security/audit"
             ]
           },
           {
@@ -91,7 +93,8 @@
               "api-reference/skills",
               "api-reference/integrations",
               "api-reference/webhooks",
-              "api-reference/websocket"
+              "api-reference/websocket",
+              "api-reference/admin"
             ]
           }
         ]

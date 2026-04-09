@@ -94,9 +94,24 @@ var _ provider.VolumeManager = (*Provider)(nil)
 
 | Interface | Methods |
 |-----------|---------|
-| `ContainerProvider` | EnsureCrewRuntime, Exec, Stop, Remove, ListContainers |
-| `InteractiveExecProvider` | InteractiveExec (for terminal sessions) |
-| `VolumeManager` | CreateVolume, RemoveVolume, ListVolumes |
+| `ContainerProvider` | `EnsureCrewRuntime`, `Exec`, `ExecInspect`, `StopCrewRuntime`, `RemoveCrewRuntime`, `ContainerStatus`, `ContainerStats`, `CrewContainerName` |
+| `InteractiveExecProvider` | `ExecInteractive` (bidirectional TTY sessions), `ExecResize` (change terminal dimensions) |
+| `VolumeManager` | `RemoveCrewVolumes` (remove persistent home/tools volumes for a crew) |
+
+#### CrewConfig Fields
+
+The `CrewConfig` struct is passed to `EnsureCrewRuntime` when creating or ensuring a crew container:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ID` | `string` | Crew UUID |
+| `Slug` | `string` | Crew slug (used in container naming) |
+| `MemoryMB` | `int` | Memory limit in megabytes |
+| `CPUs` | `float64` | CPU limit (fractional for Docker, integer-only for Apple) |
+| `NetworkMode` | `string` | `"free"` (default) or `"restricted"` |
+| `AllowedDomains` | `[]string` | Domains allowed when NetworkMode is `"restricted"` |
+| `TTLHours` | `int` | Auto-stop after idle period; 0 = no TTL |
+| `Image` | `string` | Custom runtime image; empty = provider default |
 
 ### Apple Container Provider
 
@@ -135,6 +150,15 @@ type containerJSON struct {
     }
 }
 ```
+
+#### Apple Containers Limitations
+
+| Feature | Docker | Apple Containers |
+|---------|--------|-----------------|
+| `ContainerStats` | Full CPU/memory/network metrics | Not supported (returns error) |
+| `ExecResize` | Resizes running exec TTY | No-op (CLI does not support resize) |
+| CPU allocation | Fractional (e.g., 1.5 CPUs) | Integer only (rounded) |
+| Stop timeout | 30 seconds | 10 seconds |
 
 ### Auto Provider
 

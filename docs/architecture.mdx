@@ -217,3 +217,64 @@ Crewship uses SQLite in single-binary mode. Key design decisions:
 - **Migrations:** Go-only in `internal/database/migrate.go` (never Prisma migrate)
 - **Prisma:** Used only for TypeScript type generation (`pnpm db:generate`)
 - **State:** Agent run states stored in BoltDB (`bbolt`) or PostgreSQL for high-throughput deployments
+
+## Manifest System
+
+Each crew container maintains a manifest file at `/crew/manifest.json` that tracks installed packages, credentials used, and setup commands. The manifest enables container reproducibility -- when a container is recreated, the manifest records what was installed.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/manifest` | `GET` | Retrieve the current manifest |
+| `/manifest` | `PATCH` | Update the manifest (merge fields) |
+
+The manifest tracks:
+- **Installed packages:** apt, npm, and pip packages installed during agent sessions
+- **Credentials used:** Which credentials were active during setup
+- **Setup commands:** Commands run to configure the container environment
+
+## Output Processing
+
+Agent CLI output uses the **stream-JSON format** (Claude Code `--output-format stream-json`). Each line is a JSON object with a `type` field indicating the content block type:
+
+| Block Type | Description |
+|------------|-------------|
+| `text` | Text content from the agent |
+| `tool_use` | Agent invoking a tool (with name and input) |
+| `tool_result` | Result returned from a tool invocation |
+| `thinking` | Internal reasoning (when extended thinking is enabled) |
+
+The final result message includes metadata:
+- `duration_ms` -- total execution time in milliseconds
+- `total_cost_usd` -- API cost for the run
+- `num_turns` -- number of conversation turns
+
+**Credential scrubbing:** All agent output passes through a `Scrubber` that detects and redacts credential values (API keys, tokens) before they reach WebSocket clients or logs.
+
+## Execution Wrapping
+
+Agent CLI commands are wrapped for reliable streaming and process management:
+
+1. **Line-buffered stdout:** `stdbuf -oL` forces line-buffered output so JSON lines are flushed immediately for real-time streaming in the UI.
+
+2. **tmux session wrapping:** When tmux is available, agent commands run inside a named tmux session (`agent-{slug}`). This provides:
+   - Resilience against SSH disconnects
+   - Named sessions for debugging (`tmux attach -t agent-{slug}`)
+   - FIFO-based output streaming to the orchestrator
+
+3. **FIFO for output streaming:** A named pipe is created for stdout, allowing the orchestrator to read output asynchronously while the agent runs in a tmux session.
+
+4. **Exit code tracking:** The exit code is written to a file so the orchestrator can determine success/failure even when the process runs inside tmux.
+
+If tmux setup fails, the orchestrator falls back to direct `sh -c` execution with `stdbuf`.
+
+## Background Services
+
+Three background services run alongside the main HTTP server:
+
+| Service | Interval | Purpose |
+|---------|----------|---------|
+| **StatsCollector** | 5 seconds | Polls container metrics (CPU, memory, network, PIDs) via the container provider and broadcasts `container.stats` events over WebSocket |
+| **TokenSyncer** | Configurable | Periodically fetches OAuth tokens from the token pool and syncs them to the credential store |
+| **CredentialMonitor** | Configurable | Validates provider credentials (e.g., Anthropic API key status) and detects status changes (active, expired, rate-limited) |
+
+The StatsCollector uses up to 10 concurrent workers with a 3-second timeout per container to avoid blocking the polling loop on unresponsive containers.
