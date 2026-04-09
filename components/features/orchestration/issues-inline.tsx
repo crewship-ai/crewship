@@ -283,7 +283,7 @@ function SectionHeader({
     <div className="group/sh flex items-center px-2 py-1.5">
       <button
         onClick={onToggle}
-        className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/55 hover:text-muted-foreground/80 transition-colors"
+        className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/80 hover:text-muted-foreground transition-colors"
       >
         <ChevronDown className={cn("h-2.5 w-2.5 transition-transform duration-200", !open && "-rotate-90")} />
         {title}
@@ -315,7 +315,7 @@ function PropertyRow({
       )}
     >
       {label && (
-        <span className="text-[11px] text-muted-foreground/60 w-[72px] shrink-0">{label}</span>
+        <span className="text-[11px] text-muted-foreground w-[72px] shrink-0">{label}</span>
       )}
       <span className="flex-1 flex items-center gap-[5px] justify-end text-[11.5px] text-foreground/80 min-w-0 truncate">
         {children}
