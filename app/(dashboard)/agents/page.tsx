@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Bot, Plus, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageHeader } from "@/components/layout/page-header"
@@ -71,11 +71,17 @@ export default function AgentsPage() {
     fetchAgents()
   }, [workspaceId, wsLoading, fetchAgents])
 
-  // Real-time: refetch agents when status changes or CRUD operations occur
-  useRealtimeEvent("agent.status", useCallback(() => { fetchAgents(true) }, [fetchAgents]))
-  useRealtimeEvent("agent.created", useCallback(() => { fetchAgents(true) }, [fetchAgents]))
-  useRealtimeEvent("agent.updated", useCallback(() => { fetchAgents(true) }, [fetchAgents]))
-  useRealtimeEvent("agent.deleted", useCallback(() => { fetchAgents(true) }, [fetchAgents]))
+  // Real-time: debounced refetch on agent events (prevents burst of 4 concurrent fetches)
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const debouncedRefetch = useCallback(() => {
+    clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => fetchAgents(true), 150)
+  }, [fetchAgents])
+
+  useRealtimeEvent("agent.status", debouncedRefetch)
+  useRealtimeEvent("agent.created", debouncedRefetch)
+  useRealtimeEvent("agent.updated", debouncedRefetch)
+  useRealtimeEvent("agent.deleted", debouncedRefetch)
 
   const isLoading = wsLoading || loading
 

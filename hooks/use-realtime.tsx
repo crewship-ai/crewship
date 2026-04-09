@@ -47,7 +47,6 @@ interface RealtimeContextValue {
   status: WSStatus
   subscribe: (eventType: RealtimeEventType, callback: EventCallback) => () => void
   subscribeChannel: (channel: string) => () => void
-  lastEvent: RealtimeEvent | null
 }
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null)
@@ -71,7 +70,6 @@ function getWsUrl(): string {
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const { workspaceId } = useWorkspace()
   const [token, setToken] = useState<string | null>(null)
-  const [lastEvent, setLastEvent] = useState<RealtimeEvent | null>(null)
   const listenersRef = useRef<Map<string, Set<EventCallback>>>(new Map())
   const activeChannelsRef = useRef<Set<string>>(new Set())
   const statusRef = useRef<string>("disconnected")
@@ -106,12 +104,6 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           : {}),
         timestamp: new Date(),
       }
-      // Skip updating lastEvent for high-frequency log events to avoid
-      // re-rendering all useRealtime() consumers on every log frame.
-      if (msg.type !== "agent.log" && msg.type !== "file.event" && msg.type !== "container.stats") {
-        setLastEvent(event)
-      }
-
       const callbacks = listenersRef.current.get(msg.type)
       if (callbacks) {
         for (const cb of callbacks) {
@@ -173,8 +165,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   )
 
   const contextValue = useMemo(
-    () => ({ status, subscribe, subscribeChannel, lastEvent }),
-    [status, subscribe, subscribeChannel, lastEvent],
+    () => ({ status, subscribe, subscribeChannel }),
+    [status, subscribe, subscribeChannel],
   )
 
   return (
@@ -184,7 +176,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** Access the real-time event system (status, subscribe, subscribeChannel, lastEvent). Must be used within RealtimeProvider. */
+/** Access the real-time event system (status, subscribe, subscribeChannel). Must be used within RealtimeProvider. */
 export function useRealtime(): RealtimeContextValue {
   const ctx = useContext(RealtimeContext)
   if (!ctx) {
