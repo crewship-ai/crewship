@@ -4,8 +4,10 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
   Bot, Network, Zap, Key, Activity, Shield, Settings,
-  LayoutDashboard, Plus, ShieldCheck, Store,
+  LayoutDashboard, Plus, ShieldCheck, Store, CircleDot, FolderKanban,
 } from "lucide-react"
+import { StatusIcon } from "@/components/features/issues/status-icon"
+import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import {
   CommandDialog,
   CommandInput,
@@ -16,7 +18,8 @@ import {
   CommandSeparator,
 } from "@/components/ui/command"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { getCrewDotColor } from "@/lib/crew-icon"
+import { getCrewDotColor, getGradientPalette } from "@/lib/crew-icon"
+import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 
@@ -55,6 +58,26 @@ interface CredentialResult {
   type: string
 }
 
+interface IssueResult {
+  id: string
+  identifier: string | null
+  title: string
+  status: string
+  priority: string
+  assignee_name: string | null
+  crew_name: string | null
+  crew_slug: string | null
+}
+
+interface ProjectResult {
+  id: string
+  name: string
+  slug: string
+  color: string
+  status: string
+  issue_count: number
+}
+
 const PROVIDER_LABELS: Record<string, string> = {
   ANTHROPIC: "Anthropic",
   OPENAI: "OpenAI",
@@ -64,6 +87,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 
 const NAV_ITEMS = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
+  { title: "Orchestration", href: "/orchestration", icon: CircleDot },
   { title: "Crews", href: "/crews", icon: Network },
   { title: "Agents", href: "/agents", icon: Bot },
   { title: "Skills", href: "/skills", icon: Zap },
@@ -93,6 +117,9 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [crews, setCrews] = useState<CrewResult[]>([])
   const [skills, setSkills] = useState<SkillResult[]>([])
   const [credentials, setCredentials] = useState<CredentialResult[]>([])
+  const [issues, setIssues] = useState<IssueResult[]>([])
+  const [projects, setProjects] = useState<ProjectResult[]>([])
+  const filteredIssues = issues.filter((issue) => issue.identifier)
 
   useEffect(() => {
     if (!open || !workspaceId) return
@@ -103,6 +130,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     setCrews([])
     setSkills([])
     setCredentials([])
+    setIssues([])
+    setProjects([])
 
     const opts = { signal: ac.signal }
     Promise.allSettled([
@@ -110,16 +139,21 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       fetch(`/api/v1/crews?${qs}`, opts),
       fetch(`/api/v1/skills?${qs}`, opts),
       fetch(`/api/v1/credentials?${qs}`, opts),
-    ]).then(async ([agentsRes, crewsRes, skillsRes, credsRes]) => {
+      fetch(`/api/v1/issues?${qs}&limit=50`, opts),
+      fetch(`/api/v1/projects?${qs}`, opts),
+    ]).then(async ([agentsRes, crewsRes, skillsRes, credsRes, issuesRes, projectsRes]) => {
       if (ac.signal.aborted) return
-      if (agentsRes.status === "fulfilled" && agentsRes.value.ok)
-        setAgents(await agentsRes.value.json())
-      if (crewsRes.status === "fulfilled" && crewsRes.value.ok)
-        setCrews(await crewsRes.value.json())
-      if (skillsRes.status === "fulfilled" && skillsRes.value.ok)
-        setSkills(await skillsRes.value.json())
-      if (credsRes.status === "fulfilled" && credsRes.value.ok)
-        setCredentials(await credsRes.value.json())
+      const safeJson = async (r: PromiseSettledResult<Response>) =>
+        r.status === "fulfilled" && r.value.ok ? r.value.json() : null
+      const [agentsData, crewsData, skillsData, credsData, issuesData, projectsData] =
+        await Promise.all([safeJson(agentsRes), safeJson(crewsRes), safeJson(skillsRes), safeJson(credsRes), safeJson(issuesRes), safeJson(projectsRes)])
+      if (ac.signal.aborted) return
+      if (agentsData) setAgents(agentsData)
+      if (crewsData) setCrews(crewsData)
+      if (skillsData) setSkills(skillsData)
+      if (credsData) setCredentials(credsData)
+      if (issuesData) setIssues(issuesData)
+      if (projectsData) setProjects(projectsData)
     })
 
     return () => ac.abort()
@@ -137,7 +171,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       title="Command Palette"
       description="Search agents, crews, skills, and more..."
     >
-      <CommandInput placeholder="Search agents, crews, skills..." />
+      <CommandInput placeholder="Search issues, projects, agents..." />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
 
@@ -154,6 +188,49 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             </CommandItem>
           ))}
         </CommandGroup>
+
+        {filteredIssues.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Issues">
+              {filteredIssues.map((issue) => (
+                <CommandItem
+                  key={issue.id}
+                  value={`issue ${issue.identifier} ${issue.title}`}
+                  keywords={[issue.status, issue.priority, issue.assignee_name ?? "", issue.crew_name ?? ""]}
+                  onSelect={() => runCommand(() => router.push(`/orchestration/issues/${issue.identifier}`))}
+                >
+                  <StatusIcon status={issue.status} className="h-4 w-4 shrink-0" />
+                  <span className="text-xs font-mono text-muted-foreground shrink-0">{issue.identifier}</span>
+                  <span className="flex-1 truncate">{issue.title}</span>
+                  <PriorityIcon priority={issue.priority as "urgent" | "high" | "medium" | "low" | "none"} className="h-3.5 w-3.5 shrink-0" />
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+
+        {projects.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Projects">
+              {projects.map((project) => (
+                <CommandItem
+                  key={project.id}
+                  value={`project ${project.name} ${project.slug}`}
+                  keywords={[project.status]}
+                  onSelect={() => runCommand(() => router.push(`/orchestration/projects/${project.id}`))}
+                >
+                  <div className={cn("h-4 w-4 rounded shrink-0 flex items-center justify-center bg-gradient-to-br", getGradientPalette(project.color).from, getGradientPalette(project.color).to)}>
+                    <FolderKanban className={cn("h-2.5 w-2.5", getGradientPalette(project.color).text)} />
+                  </div>
+                  <span className="flex-1 truncate">{project.name}</span>
+                  <span className="text-xs text-muted-foreground">{project.issue_count} issues</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
 
         {agents.length > 0 && (
           <>

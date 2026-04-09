@@ -1,0 +1,87 @@
+---
+title: "Skill Commands"
+description: "Import, manage, and assign MCP skills to agents."
+icon: "wand-magic-sparkles"
+---
+
+# crewship skill
+
+Manage skills -- reusable tool bundles that can be assigned to agents.
+
+```bash
+crewship skill <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List all skills in the workspace |
+| `get` | Show skill details |
+| `import` | Import a skill from URL or local file |
+| `assign` | Assign a skill to an agent |
+| `unassign` | Remove a skill from an agent |
+
+---
+
+## `crewship skill list`
+
+List all skills in the workspace.
+
+```bash
+crewship skill list
+```
+
+**Output columns:** SLUG, NAME, CATEGORY, VERSION, SOURCE
+
+---
+
+## `crewship skill get`
+
+Show detailed information about a skill.
+
+```bash
+crewship skill get <slug-or-id>
+```
+
+**Output fields:** Name, Slug, ID, Category, Version, Source, Author, Description, Tools count, Created.
+
+---
+
+## `crewship skill import`
+
+Import a skill from a URL or local SKILL.md file.
+
+```bash
+# Import from URL
+crewship skill import https://example.com/skill.md
+
+# Import from local file
+crewship skill import --file ./skills/my-skill.md
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--file` | `string` | | Path to local SKILL.md file. |
+
+Provide either a URL as a positional argument or `--file` for a local file. One of the two is required.
+
+---
+
+## `crewship skill assign`
+
+Assign a skill to an agent.
+
+```bash
+crewship skill assign <skill-slug> <agent-slug>
+```
+
+---
+
+## `crewship skill unassign`
+
+Remove a skill from an agent.
+
+```bash
+crewship skill unassign <skill-slug> <agent-slug>
+```

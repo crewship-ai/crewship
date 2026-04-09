@@ -1,0 +1,198 @@
+---
+title: "Issue Commands"
+description: "Linear-style issue tracking with labels, comments, and agent dispatch."
+icon: "circle-dot"
+---
+
+# crewship issue
+
+Manage issues -- Linear-style issue tracking integrated with agent dispatch.
+
+```bash
+crewship issue <subcommand> [flags]
+```
+
+**Alias:** `crewship issues`
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List issues in the workspace |
+| `get` | Show issue details |
+| `create` | Create a new issue |
+| `update` | Update an issue |
+| `delete` | Delete an issue |
+| `comment` | Add a comment to an issue |
+| `labels` | List workspace labels |
+| `start` | Start an issue (dispatch to assigned agent) |
+| `stop` | Stop an issue (cancel running tasks) |
+| `review` | Review an issue (approve or request changes) |
+
+---
+
+## `crewship issue list`
+
+List issues in the workspace with optional filters.
+
+```bash
+crewship issue list
+crewship issue list --status IN_PROGRESS --crew backend-team
+crewship issue list --priority high --label bug
+crewship issue list --search "auth flow"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--status` | `string` | | Filter by status: `BACKLOG`, `TODO`, `IN_PROGRESS`, `REVIEW`, `DONE`, `FAILED`, `CANCELLED`. |
+| `--priority` | `string` | | Filter by priority: `none`, `low`, `medium`, `high`, `urgent`. |
+| `--crew` | `string` | | Filter by crew slug or ID. |
+| `--assignee` | `string` | | Filter by assignee ID. |
+| `--label` | `string` | | Filter by label name. |
+| `--search` | `string` | | Search issues by title or description. |
+| `--limit` | `int` | `50` | Maximum number of issues to return. |
+
+**Output columns:** ID, TITLE, STATUS, PRIORITY, ASSIGNEE, CREW, LABELS, UPDATED
+
+---
+
+## `crewship issue get`
+
+Show issue details including comments.
+
+```bash
+crewship issue get <identifier>
+crewship issue get BE-42
+```
+
+The identifier can be the issue identifier (e.g., `BE-42`) or the full ID.
+
+**Output fields:** Identifier, Title, Status, Priority, Crew, Assignee, Assignee Type, Description, Due Date, Mission Type, Labels, Comments count, Created, Updated, ID.
+
+Comments are displayed below the detail section.
+
+---
+
+## `crewship issue create`
+
+Create a new issue.
+
+```bash
+crewship issue create --crew backend-team --title "Fix login bug" --priority high
+crewship issue create --crew backend-team --title "Add caching" --assignee viktor --labels <label-id>
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--crew` | `string` | _(required)_ | Crew slug or ID. |
+| `--title` | `string` | _(required)_ | Issue title. |
+| `--description` | `string` | | Issue description. |
+| `--priority` | `string` | `none` | Priority: `none`, `low`, `medium`, `high`, `urgent`. |
+| `--assignee` | `string` | | Assignee agent slug or user email. |
+| `--assignee-type` | `string` | `agent` | Assignee type: `agent` or `user`. |
+| `--labels` | `string` | | Comma-separated label IDs. |
+| `--due-date` | `string` | | Due date in ISO 8601 format. |
+
+---
+
+## `crewship issue update`
+
+Update an issue. Only changed flags are sent.
+
+```bash
+crewship issue update <identifier> --status IN_PROGRESS
+crewship issue update BE-42 --priority urgent --assignee franta
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--title` | `string` | | New title. |
+| `--description` | `string` | | New description. |
+| `--status` | `string` | | New status: `BACKLOG`, `TODO`, `IN_PROGRESS`, `REVIEW`, `DONE`, `FAILED`, `CANCELLED`. |
+| `--priority` | `string` | | New priority: `none`, `low`, `medium`, `high`, `urgent`. |
+| `--assignee` | `string` | | New assignee (agent slug). |
+| `--assignee-type` | `string` | | Assignee type: `agent` or `user`. |
+| `--due-date` | `string` | | Due date (ISO 8601). |
+
+---
+
+## `crewship issue delete`
+
+Delete an issue. Prompts for confirmation.
+
+```bash
+crewship issue delete <identifier>
+crewship issue delete BE-42 --yes
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |
+
+---
+
+## `crewship issue comment`
+
+Add a comment to an issue.
+
+```bash
+crewship issue comment <identifier> This is a comment
+crewship issue comment BE-42 --body "Detailed comment here"
+```
+
+The comment body can be passed as positional arguments after the identifier, or via the `--body` flag (which takes precedence).
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--body` | `string` | | Comment body (alternative to positional args). |
+
+---
+
+## `crewship issue labels`
+
+List all workspace labels.
+
+```bash
+crewship issue labels
+```
+
+**Output columns:** NAME, COLOR, GROUP
+
+---
+
+## `crewship issue start`
+
+Start an issue -- dispatches work to the assigned agent.
+
+```bash
+crewship issue start <identifier>
+crewship issue start BE-42
+```
+
+---
+
+## `crewship issue stop`
+
+Stop an issue -- cancels running tasks.
+
+```bash
+crewship issue stop <identifier>
+crewship issue stop BE-42
+```
+
+---
+
+## `crewship issue review`
+
+Review an issue -- approve or request changes.
+
+```bash
+crewship issue review BE-42 --action approve
+crewship issue review BE-42 --action request_changes --comment "Needs more tests" --reassign franta
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--action` | `string` | _(required)_ | Review action: `approve` or `request_changes`. |
+| `--comment` | `string` | | Review comment. |
+| `--reassign` | `string` | | Agent slug to reassign to (for `request_changes`). |

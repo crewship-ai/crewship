@@ -1,0 +1,194 @@
+---
+title: "Templates"
+description: "Deploy pre-configured crews with agents from blueprints, and use workflow templates for mission patterns."
+icon: "copy"
+---
+
+# Templates
+
+Crewship provides two types of templates: **crew templates** (pre-configured teams with agents) and **workflow templates** (reusable mission execution patterns).
+
+## Crew Templates
+
+Crew templates create a complete team in one step -- a crew with pre-configured agents, roles, system prompts, and skill assignments. Captain can deploy them with the `apply_crew_template` tool.
+
+### Seed Data Crews
+
+The built-in seed data (`cmd/crewship/seeddata/`) provides four crew templates:
+
+<Tabs>
+  <Tab title="Engineering">
+    **Slug:** `engineering` | **Icon:** `terminal` | **Color:** Blue
+
+    | Agent | Role | Agent Role | Profile | Adapter |
+    |-------|------|-----------|---------|---------|
+    | Tomas | Technical Architect | LEAD | FULL | CLAUDE_CODE |
+    | Viktor | Backend Engineer | AGENT | CODING | CLAUDE_CODE |
+    | Nela | Frontend Engineer | AGENT | CODING | CLAUDE_CODE |
+    | Martin | Infrastructure Engineer | AGENT | CODING | CLAUDE_CODE |
+
+    **Skills:** network-probe, script-runner, file-crafter, web-scraper, system-inspector
+  </Tab>
+
+  <Tab title="Quality">
+    **Slug:** `quality` | **Icon:** `shield-check` | **Color:** Green
+
+    | Agent | Role | Agent Role | Profile | Adapter |
+    |-------|------|-----------|---------|---------|
+    | Eva | Quality Director | LEAD | FULL | CLAUDE_CODE |
+    | Daniel | Code Reviewer | AGENT | MINIMAL | CLAUDE_CODE |
+    | Petra | Test Engineer | AGENT | CODING | CLAUDE_CODE |
+    | Jakub | Security Analyst | AGENT | MINIMAL | CLAUDE_CODE |
+
+    **Skills:** script-runner, file-crafter, system-inspector
+  </Tab>
+
+  <Tab title="DevOps">
+    **Slug:** `devops` | **Icon:** `server` | **Color:** Red
+
+    | Agent | Role | Agent Role | Profile | Adapter |
+    |-------|------|-----------|---------|---------|
+    | Ondrej | SRE Lead | LEAD | FULL | CLAUDE_CODE |
+    | Radek | Platform Engineer | AGENT | CODING | CLAUDE_CODE |
+
+    **Skills:** network-probe, system-inspector
+  </Tab>
+
+  <Tab title="Research">
+    **Slug:** `research` | **Icon:** `telescope` | **Color:** Cyan
+
+    | Agent | Role | Agent Role | Profile | Adapter |
+    |-------|------|-----------|---------|---------|
+    | Lucie | Research Director | LEAD | FULL | CLAUDE_CODE |
+    | Filip | Data Analyst | AGENT | CODING | CLAUDE_CODE |
+
+    **Skills:** web-scraper, script-runner
+  </Tab>
+</Tabs>
+
+### Agent Configuration
+
+Each seed agent has these settings:
+
+| Setting | Default Value |
+|---------|--------------|
+| LLM Provider | ANTHROPIC |
+| LLM Model | claude-haiku-4-5 |
+| Memory Enabled | true |
+| CLI Adapter | CLAUDE_CODE |
+| Timeout (LEAD) | 3600 seconds (1 hour) |
+| Timeout (AGENT) | 1800-2400 seconds (30-40 min) |
+
+### System Prompts
+
+Each agent has a dedicated system prompt file in `cmd/crewship/seeddata/prompts/{slug}.md`. These prompts define the agent's persona, expertise areas, communication style, and behavioral guidelines.
+
+## Workflow Templates
+
+Workflow templates define reusable execution patterns for missions. They are defined in `internal/orchestrator/workflow.go` and available via the sidecar at `GET /mission/templates`.
+
+### Built-in Templates
+
+<CardGroup cols={2}>
+  <Card title="Sequential" icon="arrow-right">
+    Tasks execute one after another in order. Each step depends on the previous one.
+    ```
+    step-1 --> step-2 --> step-3
+    ```
+  </Card>
+
+  <Card title="Parallel" icon="arrows-split-up-and-left">
+    All tasks run simultaneously, then results are aggregated by a lead agent.
+    ```
+    task-a --|
+    task-b --|-> aggregate
+    task-c --|
+    ```
+  </Card>
+
+  <Card title="Dev-Test Loop" icon="rotate">
+    Developer implements, tester reviews. On failure, loops back (max 3 iterations). This is the **Ralph Loop pattern**.
+    ```
+    develop <--(fail)-- test
+    (max 3 iterations)
+    ```
+  </Card>
+
+  <Card title="Pipeline" icon="git-branch">
+    Sequential preparation, parallel work streams, final aggregation by lead.
+    ```
+    prepare -> work-a --|
+            -> work-b --|-> finalize
+    ```
+  </Card>
+</CardGroup>
+
+### Template Step Structure
+
+Each template step defines:
+
+```go
+type TemplateStep struct {
+    ID            string   // Unique step identifier
+    Title         string   // Human-readable step title
+    AgentRole     string   // Role-based assignment ("developer", "tester", "lead")
+    AgentSlug     string   // Or specific agent slug
+    DependsOn     []string // Step IDs this depends on
+    MaxIterations int      // Max retry attempts (0 = no retry)
+    LoopBackTo    string   // On failure, restart from this step ID
+}
+```
+
+### Using Templates
+
+Lead agents can reference templates when creating missions via the sidecar:
+
+```bash
+# List available templates
+curl -s http://localhost:9119/mission/templates
+
+# Create a mission with the dev-test-loop template
+curl -s -X POST http://localhost:9119/mission/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Implement auth module",
+    "template": "dev-test-loop",
+    "tasks": [
+      {"title": "Write auth handlers", "assigned_to": "viktor"},
+      {"title": "Test auth flow", "assigned_to": "petra"}
+    ]
+  }'
+```
+
+## Credential Templates
+
+The seed data also includes credential templates in `cmd/crewship/seeddata/credentials.go`:
+
+### Anthropic Credential
+
+The `ResolveAnthropicCredential` function auto-detects the credential type:
+
+| Prefix | Type | Env Var Name |
+|--------|------|-------------|
+| `sk-ant-oat` | `AI_CLI_TOKEN` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| Other | `API_KEY` | `ANTHROPIC_API_KEY` |
+
+### Google Credential
+
+Optional Google credentials from `SEED_GOOGLE_EMAIL` and `SEED_GOOGLE_PASSWORD` environment variables, stored as a JSON object under the `SECRET` type.
+
+## Deploying Templates via Captain
+
+Captain can deploy crew templates interactively:
+
+```
+User: "I need a team to build a web application"
+Captain: I'll create an Engineering crew for you using our template.
+         [calls apply_crew_template with template_slug="engineering"]
+```
+
+This creates the crew, all agents, assigns skills, and auto-assigns available credentials in a single operation.
+
+<Tip>
+  If you don't know which template to use, ask Captain. It will recommend a template based on your described needs and workspace phase.
+</Tip>

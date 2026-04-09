@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText, AlertCircle, Pause, Target, Coins, Loader2, Square, ChevronRight, CheckCircle2 } from "lucide-react"
+import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText, AlertCircle, Pause, Target, Coins, Loader2, Square, ChevronRight, CheckCircle2, CircleDot } from "lucide-react"
 import { BotIcon as AnimatedBot } from "@/components/ui/bot"
 import { ActivityIcon as AnimatedActivity } from "@/components/ui/activity"
 import { KeyIcon as AnimatedKey } from "@/components/ui/key"
@@ -125,6 +125,7 @@ export default function DashboardPage() {
   const [crewCount, setCrewCount] = useState(0)
   const [missions, setMissions] = useState<Mission[]>([])
   const [metrics, setMetrics] = useState<{ active_missions: number; total_cost_24h: number; total_missions: number } | null>(null)
+  const [openIssueCount, setOpenIssueCount] = useState(0)
   const [runsData, setRunsData] = useState<RunsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -158,13 +159,14 @@ export default function DashboardPage() {
       setError(null)
     }
     try {
-      const [agentsRes, credsRes, crewsRes, runsRes, missionsRes, metricsRes] = await Promise.all([
+      const [agentsRes, credsRes, crewsRes, runsRes, missionsRes, metricsRes, issuesRes] = await Promise.all([
         fetch(`/api/v1/agents?workspace_id=${workspaceId}`),
         fetch(`/api/v1/credentials?workspace_id=${workspaceId}`),
         fetch(`/api/v1/crews?workspace_id=${workspaceId}`),
         fetch(`/api/v1/runs?workspace_id=${workspaceId}&limit=50`),
         fetch(`/api/v1/missions?workspace_id=${workspaceId}&limit=50&include_tasks=true`),
         fetch(`/api/v1/mission-metrics?workspace_id=${workspaceId}`),
+        fetch(`/api/v1/issues?workspace_id=${workspaceId}&status=BACKLOG,TODO,IN_PROGRESS,REVIEW&limit=100`),
       ])
 
       if (!agentsRes.ok || !credsRes.ok) {
@@ -181,6 +183,7 @@ export default function DashboardPage() {
       const runsResult = runsRes.ok ? ((await runsRes.json()) as RunsResponse) : null
       const missionsData = missionsRes.ok ? ((await missionsRes.json()) as Mission[]) : []
       const metricsData = metricsRes.ok ? await metricsRes.json() : null
+      const issuesData = issuesRes.ok ? ((await issuesRes.json()) as unknown[]) : []
 
       setAgents(agentsData)
       setCredentials(credsData)
@@ -188,6 +191,7 @@ export default function DashboardPage() {
       setRunsData(runsResult)
       setMissions(missionsData)
       setMetrics(metricsData)
+      setOpenIssueCount(issuesData.length)
     } catch {
       if (showLoading) setError("Failed to load dashboard data")
     } finally {
@@ -306,7 +310,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
         {isLoading ? (
           <>
-            {Array.from({ length: 6 }).map((_, i) => (
+            {Array.from({ length: 7 }).map((_, i) => (
               <Skeleton key={i} className="h-[104px] rounded-xl" />
             ))}
           </>
@@ -338,6 +342,13 @@ export default function DashboardPage() {
               }
               icon={Target}
               iconClassName="bg-purple-500/10 text-purple-600"
+            />
+            <StatCard
+              title="Open Issues"
+              value={openIssueCount}
+              subtitle={openIssueCount === 0 ? "No open issues" : `${openIssueCount} issue${openIssueCount === 1 ? "" : "s"} open`}
+              icon={CircleDot}
+              iconClassName="bg-blue-500/10 text-blue-600"
             />
             <StatCard
               title="Today's Runs"

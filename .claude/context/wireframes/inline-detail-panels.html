@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inline Detail Panels — Wireframe</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0a0a0b;
+    color: #e5e5e5;
+    display: flex;
+    gap: 32px;
+    padding: 32px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .panel {
+    width: 360px;
+    height: 90vh;
+    background: #111113;
+    border-left: 1px solid rgba(255,255,255,0.06);
+    display: flex;
+    flex-direction: column;
+    border-radius: 0;
+    overflow: hidden;
+  }
+  .panel-label {
+    text-align: center;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #666;
+    margin-bottom: 8px;
+  }
+
+  /* ── Header ── */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+  }
+  .badge {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 10px;
+    color: rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.06);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .header .spacer { flex: 1; }
+  .icon-btn {
+    width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px;
+    color: rgba(255,255,255,0.3);
+    cursor: pointer;
+    border: none; background: none;
+    font-size: 12px;
+  }
+  .icon-btn:hover { background: rgba(255,255,255,0.06); color: #e5e5e5; }
+
+  /* ── Scrollable body ── */
+  .body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+  }
+
+  /* ── Title + Desc ── */
+  .title-area { padding: 10px 12px 4px; }
+  .title {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: #f0f0f0;
+    cursor: pointer;
+  }
+  .title:hover { color: #60a5fa; }
+  .desc {
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: rgba(255,255,255,0.5);
+    margin-top: 4px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* ── Actions (issue only) ── */
+  .actions {
+    display: flex;
+    gap: 6px;
+    padding: 6px 12px 2px;
+  }
+  .act-btn {
+    flex: 1;
+    height: 28px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+  }
+  .act-approve { background: #16a34a; color: white; }
+  .act-approve:hover { background: #15803d; }
+  .act-changes { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: #fbbf24; }
+  .act-start { background: #2563eb; color: white; }
+  .act-stop { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #f87171; }
+
+  /* ── Section ── */
+  .section {
+    margin: 4px 8px;
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.5);
+    cursor: pointer;
+    user-select: none;
+    gap: 4px;
+  }
+  .section-header:hover { color: rgba(255,255,255,0.7); }
+  .section-header .chevron { font-size: 9px; opacity: 0.5; width: 12px; }
+  .section-header .spacer { flex: 1; }
+  .section-header .plus {
+    font-size: 13px;
+    opacity: 0.3;
+    cursor: pointer;
+    width: 18px; height: 18px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 4px;
+  }
+  .section-header .plus:hover { opacity: 0.7; background: rgba(255,255,255,0.06); }
+
+  /* ── Property Row (two-column) ── */
+  .prop-row {
+    display: flex;
+    align-items: center;
+    padding: 5px 10px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.1s;
+  }
+  .prop-row:hover { background: rgba(255,255,255,0.03); }
+  .prop-label {
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    width: 80px;
+    flex-shrink: 0;
+  }
+  .prop-value {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(255,255,255,0.75);
+    justify-content: flex-end;
+  }
+  .prop-value .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .prop-value .avatar {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* Status/Priority icons (simplified) */
+  .status-circle {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    border: 1.5px solid;
+    flex-shrink: 0;
+  }
+  .priority-bars {
+    display: flex; gap: 1px; align-items: flex-end; height: 12px;
+  }
+  .priority-bars span {
+    width: 3px; border-radius: 1px;
+  }
+
+  /* ── Labels ── */
+  .label-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 10px 8px;
+  }
+  .label-badge {
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* ── Divider ── */
+  .divider {
+    height: 1px;
+    background: rgba(255,255,255,0.05);
+    margin: 4px 12px;
+  }
+
+  /* ── Comments ── */
+  .section-title-flat {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.35);
+    padding: 8px 12px 4px;
+  }
+  .comment {
+    display: flex;
+    gap: 8px;
+    padding: 6px 12px;
+  }
+  .comment-avatar {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #333;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 600; color: #888;
+  }
+  .comment-body { flex: 1; min-width: 0; }
+  .comment-meta {
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+    display: flex;
+    gap: 6px;
+    margin-bottom: 2px;
+  }
+  .comment-meta .name { font-weight: 500; color: rgba(255,255,255,0.6); }
+  .comment-text {
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: rgba(255,255,255,0.6);
+  }
+  .comment-input-area {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 4px 12px 8px;
+  }
+  .comment-input {
+    flex: 1;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 11px;
+    color: #e5e5e5;
+    resize: none;
+    outline: none;
+    min-height: 28px;
+  }
+  .comment-send {
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.3);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 11px;
+  }
+
+  /* ── Activity ── */
+  .activity-item {
+    display: flex;
+    gap: 8px;
+    padding: 4px 12px;
+    position: relative;
+  }
+  .activity-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 4px;
+  }
+  .activity-line {
+    position: absolute;
+    left: 14.5px;
+    top: 14px;
+    bottom: -4px;
+    width: 1px;
+    background: rgba(255,255,255,0.06);
+  }
+  .activity-text {
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    line-height: 1.35;
+  }
+  .activity-text .actor { color: rgba(255,255,255,0.6); font-weight: 500; }
+  .activity-text .time { color: rgba(255,255,255,0.25); margin-left: 4px; }
+
+  /* ── Project: Progress bar (compact) ── */
+  .progress-compact {
+    padding: 8px 10px;
+  }
+  .progress-stats {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .stat-box {
+    flex: 1;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 6px;
+    padding: 6px 8px;
+    text-align: center;
+  }
+  .stat-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: rgba(255,255,255,0.35); }
+  .stat-value { font-size: 16px; font-weight: 600; color: #e5e5e5; font-variant-numeric: tabular-nums; }
+  .stat-value.green { color: #4ade80; }
+
+  .progress-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+  }
+  .progress-bar-track {
+    flex: 1;
+    height: 4px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+  }
+  .progress-label {
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+    width: 70px;
+    flex-shrink: 0;
+  }
+  .progress-count {
+    font-size: 10px;
+    color: rgba(255,255,255,0.35);
+    width: 30px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  /* ── Project: Mini donut ── */
+  .donut-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+  }
+  .mini-donut {
+    width: 56px; height: 56px;
+    flex-shrink: 0;
+  }
+  .donut-legend {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10px;
+    color: rgba(255,255,255,0.5);
+  }
+  .legend-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .legend-count {
+    margin-left: auto;
+    color: rgba(255,255,255,0.35);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Relation row ── */
+  .relation-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+  }
+  .relation-type {
+    font-size: 10px;
+    color: rgba(255,255,255,0.3);
+    width: 55px;
+    flex-shrink: 0;
+  }
+  .relation-id {
+    font-family: monospace;
+    font-size: 10px;
+    color: rgba(255,255,255,0.45);
+  }
+  .relation-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Project header icon ── */
+  .project-icon-trigger {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- ISSUE DETAIL PANEL                                                      -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div>
+  <div class="panel-label">Issue Detail Panel</div>
+  <div class="panel">
+    <!-- Header -->
+    <div class="header">
+      <span class="badge">RES-4</span>
+      <span class="spacer"></span>
+      <button class="icon-btn" title="Open full page">&#x2197;</button>
+      <button class="icon-btn" title="Close">&times;</button>
+    </div>
+
+    <div class="body">
+      <!-- Title + Description -->
+      <div class="title-area">
+        <div class="title">Evaluate local LLM models for Keeper engine</div>
+        <div class="desc">Test Llama 3.2, Mistral 7B, and Phi-3 for keeper confidence scoring. Compare accuracy vs latency on real decisions.</div>
+      </div>
+
+      <!-- Actions (Review state) -->
+      <div class="actions">
+        <button class="act-btn act-approve">&#10003; Approve</button>
+        <button class="act-btn act-changes">&#9998; Request Changes</button>
+      </div>
+
+      <!-- Properties -->
+      <div class="section" style="margin-top: 8px;">
+        <div class="section-header">
+          <span class="chevron">&#9662;</span>
+          Properties
+          <span class="spacer"></span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Status</span>
+          <span class="prop-value">
+            <span class="status-circle" style="border-color: #f97316;"></span>
+            In Review
+          </span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Priority</span>
+          <span class="prop-value">
+            <span style="color: #eab308; font-size: 13px;">&#9632;&#9632;</span>
+            Medium
+          </span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Assignee</span>
+          <span class="prop-value">
+            <img class="avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23a78bfa'/%3E%3C/svg%3E" alt="">
+            Lucie
+          </span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Due date</span>
+          <span class="prop-value" style="color: rgba(255,255,255,0.35);">No due date</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Estimate</span>
+          <span class="prop-value" style="color: rgba(255,255,255,0.35);">&#8212;</span>
+        </div>
+        <div style="height: 4px;"></div>
+      </div>
+
+      <!-- Labels -->
+      <div class="section">
+        <div class="section-header">
+          <span class="chevron">&#9662;</span>
+          Labels
+          <span class="spacer"></span>
+          <span class="plus">+</span>
+        </div>
+        <div class="label-list">
+          <span class="label-badge" style="background: rgba(59,130,246,0.15); color: #60a5fa;">&#9679; Feature</span>
+        </div>
+      </div>
+
+      <!-- Project -->
+      <div class="section">
+        <div class="section-header">
+          <span class="chevron">&#9662;</span>
+          Project
+          <span class="spacer"></span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label" style="width: auto;"></span>
+          <span class="prop-value" style="justify-content: flex-start;">
+            <span class="dot" style="background: #f59e0b;"></span>
+            Orchestration Engine
+          </span>
+        </div>
+        <div style="height: 4px;"></div>
+      </div>
+
+      <!-- Relations -->
+      <div class="section">
+        <div class="section-header">
+          <span class="chevron">&#9662;</span>
+          Relations
+          <span class="spacer"></span>
+          <span class="plus">+</span>
+        </div>
+        <div class="relation-row">
+          <span class="relation-type">blocks</span>
+          <span class="relation-id">ENG-5</span>
+          <span class="relation-title">Implement WebSocket channel auth</span>
+        </div>
+        <div style="height: 4px;"></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Comments -->
+      <div class="section-title-flat">Comments (1)</div>
+      <div class="comment">
+        <div class="comment-avatar">D</div>
+        <div class="comment-body">
+          <div class="comment-meta">
+            <span class="name">Demo User</span>
+            <span>2h ago</span>
+          </div>
+          <div class="comment-text">Llama 3.2 8B: 87% accuracy, 340ms avg. Mistral 7B: 82%, 280ms. Recommending Llama 3.2 for production.</div>
+        </div>
+      </div>
+      <div class="comment-input-area">
+        <input class="comment-input" placeholder="Write a comment...">
+        <button class="comment-send">&#8593;</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Activity -->
+      <div class="section-title-flat">Activity</div>
+      <div class="activity-item">
+        <span class="activity-dot" style="background: #60a5fa;"></span>
+        <span class="activity-line"></span>
+        <span class="activity-text"><span class="actor">Demo User</span> changed status BACKLOG &rarr; IN_PROGRESS<span class="time">2h ago</span></span>
+      </div>
+      <div class="activity-item">
+        <span class="activity-dot" style="background: #a78bfa;"></span>
+        <span class="activity-text"><span class="actor">Demo User</span> changed status IN_PROGRESS &rarr; REVIEW<span class="time">2h ago</span></span>
+      </div>
+      <div style="height: 16px;"></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- PROJECT DETAIL PANEL                                                    -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<div>
+  <div class="panel-label">Project Detail Panel</div>
+  <div class="panel">
+    <!-- Header -->
+    <div class="header">
+      <div class="project-icon-trigger" style="background: rgba(59,130,246,0.15);">
+        <span style="color: #60a5fa; font-size: 13px;">&#9881;</span>
+      </div>
+      <span style="font-size: 11px; color: rgba(255,255,255,0.4); font-family: monospace;">Project</span>
+      <span class="spacer"></span>
+      <button class="icon-btn" title="Open full page">&#x2197;</button>
+      <button class="icon-btn" title="Close">&times;</button>
+    </div>
+
+    <div class="body">
+      <!-- Title -->
+      <div class="title-area">
+        <div class="title">Core Platform</div>
+        <div class="desc" style="-webkit-line-clamp: 2;">Core infrastructure, API layer, and database foundations for the platform.</div>
+      </div>
+
+      <!-- Properties -->
+      <div class="section" style="margin-top: 8px;">
+        <div class="section-header">
+          <span class="chevron">&#9662;</span>
+          Properties
+          <span class="spacer"></span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Status</span>
+          <span class="prop-value">
+            <span class="dot" style="background: #3b82f6;"></span>
+            In Progress
+          </span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Priority</span>
+          <span class="prop-value">
+            <span style="color: #f97316; font-size: 13px;">&#9632;&#9632;&#9632;</span>
+            High
+          </span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Health</span>
+          <span class="prop-value">
+            <span style="color: #4ade80; font-size: 11px; font-weight: 500;">On Track</span>
+          </span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Lead</span>
+          <span class="prop-value">
+            <img class="avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23f87171'/%3E%3C/svg%3E" alt="">
+            Tomas
+          </span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Members</span>
+          <span class="prop-value">
+            <span style="display: flex; gap: -4px;">
+              <img class="avatar" style="margin-left: -4px;" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23f87171'/%3E%3C/svg%3E" alt="">
+              <img class="avatar" style="margin-left: -4px;" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%2360a5fa'/%3E%3C/svg%3E" alt="">
+              <img class="avatar" style="margin-left: -4px;" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%234ade80'/%3E%3C/svg%3E" alt="">
+              <img class="avatar" style="margin-left: -4px;" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23fbbf24'/%3E%3C/svg%3E" alt="">
+            </span>
+          </span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Dates</span>
+          <span class="prop-value" style="color: rgba(255,255,255,0.35);">Set dates</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Teams</span>
+          <span class="prop-value">
+            <span style="font-size: 10px; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 4px;">engineering</span>
+          </span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Labels</span>
+          <span class="prop-value" style="flex-wrap: wrap; gap: 3px;">
+            <span class="label-badge" style="background: rgba(59,130,246,0.15); color: #60a5fa; font-size: 9px; padding: 1px 6px;">Feature</span>
+            <span class="label-badge" style="background: rgba(168,85,247,0.15); color: #c084fc; font-size: 9px; padding: 1px 6px;">Performance</span>
+          </span>
+        </div>
+        <div style="height: 4px;"></div>
+      </div>
+
+      <!-- Milestones -->
+      <div class="section">
+        <div class="section-header">
+          <span class="chevron">&#9656;</span>
+          Milestones
+          <span class="spacer"></span>
+          <span class="plus">+</span>
+        </div>
+      </div>
+
+      <!-- Progress (compact) -->
+      <div class="section">
+        <div class="section-header">
+          <span class="chevron">&#9662;</span>
+          Progress
+          <span class="spacer"></span>
+        </div>
+
+        <!-- Stats -->
+        <div class="progress-compact">
+          <div class="progress-stats">
+            <div class="stat-box">
+              <div class="stat-label">Scope</div>
+              <div class="stat-value">8</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Completed</div>
+              <div class="stat-value green">2</div>
+            </div>
+          </div>
+
+          <!-- Mini donut + legend -->
+          <div class="donut-row">
+            <svg class="mini-donut" viewBox="0 0 40 40">
+              <circle cx="20" cy="20" r="15" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="5"/>
+              <circle cx="20" cy="20" r="15" fill="none" stroke="#3b82f6" stroke-width="5"
+                      stroke-dasharray="23.6 70.7" stroke-dashoffset="23.6" transform="rotate(-90 20 20)"/>
+              <circle cx="20" cy="20" r="15" fill="none" stroke="#a855f7" stroke-width="5"
+                      stroke-dasharray="11.8 82.5" stroke-dashoffset="47.1" transform="rotate(-90 20 20)"/>
+              <circle cx="20" cy="20" r="15" fill="none" stroke="#22c55e" stroke-width="5"
+                      stroke-dasharray="23.6 70.7" stroke-dashoffset="0" transform="rotate(-90 20 20)"/>
+              <circle cx="20" cy="20" r="15" fill="none" stroke="#6b7280" stroke-width="5"
+                      stroke-dasharray="35.3 58.9" stroke-dashoffset="58.9" transform="rotate(-90 20 20)"/>
+            </svg>
+            <div class="donut-legend">
+              <div class="legend-item"><span class="legend-dot" style="background: #6b7280;"></span> Backlog <span class="legend-count">3</span></div>
+              <div class="legend-item"><span class="legend-dot" style="background: #3b82f6;"></span> In Progress <span class="legend-count">2</span></div>
+              <div class="legend-item"><span class="legend-dot" style="background: #a855f7;"></span> Review <span class="legend-count">1</span></div>
+              <div class="legend-item"><span class="legend-dot" style="background: #22c55e;"></span> Done <span class="legend-count">2</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Assignees breakdown -->
+        <div style="padding: 4px 10px 8px;">
+          <div style="display: flex; gap: 8px; margin-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 4px;">
+            <span style="font-size: 10px; font-weight: 500; color: rgba(255,255,255,0.6); border-bottom: 1.5px solid #60a5fa; padding-bottom: 2px;">Assignees</span>
+            <span style="font-size: 10px; color: rgba(255,255,255,0.3);">Labels</span>
+          </div>
+          <div class="progress-bar-row">
+            <img class="avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23f87171'/%3E%3C/svg%3E" alt="" style="width: 14px; height: 14px;">
+            <span class="progress-label">Tomas</span>
+            <div class="progress-bar-track"><div class="progress-bar-fill" style="width: 50%; background: #3b82f6;"></div></div>
+            <span class="progress-count">1/2</span>
+          </div>
+          <div class="progress-bar-row">
+            <img class="avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%234ade80'/%3E%3C/svg%3E" alt="" style="width: 14px; height: 14px;">
+            <span class="progress-label">Viktor</span>
+            <div class="progress-bar-track"><div class="progress-bar-fill" style="width: 33%; background: #3b82f6;"></div></div>
+            <span class="progress-count">1/3</span>
+          </div>
+          <div class="progress-bar-row">
+            <img class="avatar" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='8' fill='%2360a5fa'/%3E%3C/svg%3E" alt="" style="width: 14px; height: 14px;">
+            <span class="progress-label">Nela</span>
+            <div class="progress-bar-track"><div class="progress-bar-fill" style="width: 0%; background: #3b82f6;"></div></div>
+            <span class="progress-count">0/2</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Activity -->
+      <div class="section-title-flat">Activity</div>
+      <div class="activity-item">
+        <span class="activity-dot" style="background: #60a5fa;"></span>
+        <span class="activity-line"></span>
+        <span class="activity-text"><span class="actor">System</span> created project<span class="time">Apr 9</span></span>
+      </div>
+      <div class="activity-item">
+        <span class="activity-dot" style="background: #4ade80;"></span>
+        <span class="activity-text"><span class="actor">Tomas</span> completed ENG-8<span class="time">Apr 9</span></span>
+      </div>
+      <div style="height: 16px;"></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

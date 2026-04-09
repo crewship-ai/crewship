@@ -1,0 +1,169 @@
+---
+title: "Your First Crew"
+description: "Create a team of AI agents, assign roles and credentials, and run your first mission."
+icon: "users"
+---
+
+# Your First Crew
+
+A **crew** is a team of AI agents that work together on tasks. Each crew runs inside a shared Docker container, and agents communicate through the sidecar proxy.
+
+## Core Concepts
+
+<CardGroup cols={3}>
+  <Card title="Crew" icon="ship">
+    A named team with a shared container, identity, and purpose. One container per crew (not per agent).
+  </Card>
+  <Card title="Agent" icon="robot">
+    An AI-powered worker with a persona, role, and tool profile. Runs as `Exec` inside the crew container.
+  </Card>
+  <Card title="Mission" icon="flag">
+    A multi-task objective orchestrated by a Lead agent. Tasks can have dependencies and retry logic.
+  </Card>
+</CardGroup>
+
+## Agent Roles
+
+Every agent has one of three roles that determines their capabilities:
+
+| Role | Purpose | Capabilities |
+|------|---------|-------------|
+| **AGENT** | Individual contributor | Executes assigned tasks, writes code, runs tools |
+| **LEAD** | Team orchestrator | Assigns tasks to agents, creates missions, monitors progress |
+| **COORDINATOR** | Workspace-level strategist | Sees all crews, creates cross-crew missions, submits proposals |
+
+<Note>
+  Roles are functional, not hierarchical. A Lead is an equal colleague with orchestration responsibility -- not a boss. This is a core Crewship philosophy (the "Crewship Adventure" ethos).
+</Note>
+
+## Creating a Crew
+
+<Steps>
+  <Step title="Navigate to the Crews page">
+    Open the Crewship dashboard and click **Crews** in the sidebar.
+  </Step>
+
+  <Step title="Create a new crew">
+    Click **New Crew** and fill in the details:
+    - **Name:** A human-readable name (e.g., "Engineering")
+    - **Slug:** URL-friendly identifier (e.g., `engineering`)
+    - **Icon:** A lucide icon name (`terminal`, `rocket`, `clipboard`, etc.) -- not emoji
+    - **Color:** A palette ID (`blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime`, `fuchsia`) -- not hex
+  </Step>
+
+  <Step title="Add agents to the crew">
+    Each agent needs:
+    - **Name and slug:** Identity (e.g., "Viktor" / `viktor`)
+    - **Role title:** Human-readable role (e.g., "Backend Engineer")
+    - **Agent role:** `AGENT`, `LEAD`, or `COORDINATOR`
+    - **CLI adapter:** Which coding CLI to use (`CLAUDE_CODE`, `OPENCODE`, `CODEX_CLI`, `GEMINI_CLI`)
+    - **Tool profile:** Controls available tools:
+      - `MINIMAL` -- Read, Search, Grep only
+      - `CODING` -- Full coding tools
+      - `MESSAGING` -- Communication-focused
+      - `FULL` -- All tools available
+    - **System prompt:** The agent's persona and instructions
+    - **Memory enabled:** Toggle persistent memory across sessions
+  </Step>
+
+  <Step title="Assign credentials">
+    Add API keys for the LLM provider your agents will use. Credentials are encrypted with AES-256-GCM and injected via the sidecar proxy -- never as environment variables.
+
+    ```
+    Settings -> Credentials -> Add Credential
+    ```
+
+    Agents created from templates or by Captain get credentials auto-assigned. Agents created via CLI/UI assign credentials manually.
+  </Step>
+</Steps>
+
+## Using Captain to Create a Crew
+
+The fastest way to create a crew is through **Captain**, the workspace AI assistant:
+
+```
+"Create an engineering crew with a lead architect and two developers"
+```
+
+Captain uses the `create_crew` and `create_agent` tools, or can apply a pre-built template with `apply_crew_template`.
+
+## Running Your First Mission
+
+<Steps>
+  <Step title="Send a message to a Lead agent">
+    Navigate to the crew chat and send a task to the Lead:
+    ```
+    "Analyze the current directory structure and create a summary report"
+    ```
+  </Step>
+
+  <Step title="Lead orchestrates the work">
+    The Lead agent can:
+    - Execute the task directly
+    - Assign subtasks to other agents via `/assign`
+    - Create a multi-task mission via `/mission/create`
+  </Step>
+
+  <Step title="Monitor progress">
+    Watch real-time progress in the chat panel. Assignments appear with status indicators:
+    - **PENDING** -- Waiting to start
+    - **RUNNING** -- Agent is working
+    - **COMPLETED** -- Task finished successfully
+    - **FAILED** -- Task encountered an error
+  </Step>
+</Steps>
+
+## Crew Container Architecture
+
+When a crew starts, Crewship creates a shared container with this filesystem layout:
+
+```
+/crew/
+  agents/
+    {agent-slug}/           # Each agent's home directory
+      .memory/              # Persistent memory (AGENT.md, daily/*.md)
+      .mcp.json             # MCP server configuration
+  shared/                   # All crew members can read/write
+/output/
+  {agent-slug}/             # Output files visible in Files panel
+/secrets/
+  {agent-slug}/             # Read-only credential files
+    .env                    # Maps env var names to file paths
+    GH_TOKEN                # One file per credential
+/workspace/                 # Temporary scratch space
+```
+
+<Tip>
+  Files agents create in `/output/{slug}/` are immediately visible in the Files panel of the UI. Use the shared crew space at `/crew/shared/` for cross-agent collaboration.
+</Tip>
+
+## System Prompt Assembly Order
+
+For the full 2-stage breakdown, see [Architecture > System Prompt Assembly](/architecture#system-prompt-assembly-order). When an agent starts, its system prompt is assembled in this order:
+
+```
+1. Crewship system preamble (filesystem layout, credentials docs)
+2. [CREWSHIP ETHOS] block (role-specific adventure context)
+3. [AGENT IDENTITY] (name, role, crew)
+4. User-defined system prompt (persona)
+5. [SKILLS AVAILABLE] (injected skill playbooks)
+6. [CREW CONTEXT] (Lead only: crew member list + API docs)
+7. [COORDINATOR CONTEXT] (Coordinator only: all crews + proposal workflow)
+8. [PEER CONTEXT] (non-Lead agents: peer communication)
+9. [CONVERSATION HISTORY] (recent messages, 60% of remaining token budget)
+10. [AGENT MEMORY] (persistent memory, 40% of remaining token budget)
+11. [MEMORY INSTRUCTIONS] (how to write/read memory files)
+```
+
+The token budget is managed with a 60/40 split: 60% for conversation history, 40% for memory context. The maximum system prompt token budget is defined in `internal/tokenutil/`.
+
+## Example: Seed Data Crew
+
+The built-in seed data creates this Engineering crew:
+
+| Agent | Role | Profile | Adapter |
+|-------|------|---------|---------|
+| Tomas | Technical Architect (LEAD) | FULL | CLAUDE_CODE |
+| Viktor | Backend Engineer (AGENT) | CODING | CLAUDE_CODE |
+| Nela | Frontend Engineer (AGENT) | CODING | CLAUDE_CODE |
+| Martin | Infrastructure Engineer (AGENT) | CODING | CLAUDE_CODE |

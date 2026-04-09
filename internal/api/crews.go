@@ -126,6 +126,7 @@ type crewResponse struct {
 	AllowedDomains    []string         `json:"allowed_domains"`
 	MCPConfigJSON     *string          `json:"mcp_config_json,omitempty"`
 	EscalationConfig  *string          `json:"escalation_config,omitempty"`
+	IssuePrefix       *string          `json:"issue_prefix"`
 	CreatedAt         string           `json:"created_at"`
 	UpdatedAt         string           `json:"updated_at"`
 	Count             crewCountResponse `json:"_count"`
@@ -252,6 +253,24 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Clean up soft-deleted crews: cascade-delete their missions to free global
+	// UNIQUE identifier space (e.g. "ENG-5" from deleted crew blocks new "ENG-5").
+	// Match by exact slug OR already-renamed "{slug}_deleted_*" pattern.
+	if _, err := h.db.ExecContext(r.Context(),
+		`DELETE FROM mission_tasks WHERE mission_id IN
+			(SELECT id FROM missions WHERE crew_id IN
+				(SELECT id FROM crews WHERE workspace_id = ? AND deleted_at IS NOT NULL
+				 AND (slug = ? OR slug LIKE ? || '_deleted_%')))`,
+		workspaceID, req.Slug, req.Slug); err != nil {
+		h.logger.Warn("cascade delete mission_tasks for old crew", "slug", req.Slug, "error", err)
+	}
+	if _, err := h.db.ExecContext(r.Context(),
+		`DELETE FROM missions WHERE crew_id IN
+			(SELECT id FROM crews WHERE workspace_id = ? AND deleted_at IS NOT NULL
+			 AND (slug = ? OR slug LIKE ? || '_deleted_%'))`,
+		workspaceID, req.Slug, req.Slug); err != nil {
+		h.logger.Warn("cascade delete missions for old crew", "slug", req.Slug, "error", err)
+	}
 	// Free slug from soft-deleted crews so the UNIQUE constraint doesn't block re-creation.
 	if _, err := h.db.ExecContext(r.Context(),
 		"UPDATE crews SET slug = slug || '_deleted_' || id WHERE workspace_id = ? AND slug = ? AND deleted_at IS NOT NULL",
@@ -358,7 +377,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
-			c.mcp_config_json, c.escalation_config,
+			c.mcp_config_json, c.escalation_config, c.issue_prefix,
 			c.created_at, c.updated_at,
 			(SELECT COUNT(*) FROM agents WHERE crew_id = c.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
@@ -367,7 +386,7 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	`, crewID, workspaceID).Scan(&c.ID, &c.WorkspaceID, &c.Name, &c.Slug, &c.Description,
 		&c.Color, &c.Icon, &c.AvatarStyle, &c.ContainerMemoryMB, &c.ContainerCPUs,
 		&c.ContainerTTLHours, &c.NetworkMode, &allowedDomainsJSON,
-		&c.MCPConfigJSON, &c.EscalationConfig,
+		&c.MCPConfigJSON, &c.EscalationConfig, &c.IssuePrefix,
 		&c.CreatedAt, &c.UpdatedAt, &c.Count.Agents, &c.Count.Members)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -397,6 +416,7 @@ type updateCrewRequest struct {
 	AllowedDomains    *[]string `json:"allowed_domains"`
 	MCPConfigJSON     *string   `json:"mcp_config_json"`
 	EscalationConfig  *string   `json:"escalation_config"`
+	IssuePrefix       *string   `json:"issue_prefix"`
 }
 
 func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -530,6 +550,14 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		query += ", mcp_config_json = ?"
 		args = append(args, *req.MCPConfigJSON)
+	}
+	if req.IssuePrefix != nil {
+		query += ", issue_prefix = ?"
+		if *req.IssuePrefix == "" {
+			args = append(args, nil)
+		} else {
+			args = append(args, *req.IssuePrefix)
+		}
 	}
 	if req.EscalationConfig != nil {
 		if *req.EscalationConfig != "" {
@@ -682,6 +710,24 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Cascade: hard-delete orphan-prone children before soft-deleting the crew.
+	// Missions have a UNIQUE(identifier) constraint that is NOT workspace-scoped,
+	// so leaving them behind blocks future crews from reusing identifier prefixes.
+	if _, err := h.db.ExecContext(r.Context(),
+		"DELETE FROM mission_tasks WHERE mission_id IN (SELECT id FROM missions WHERE crew_id = ?)", crewID); err != nil {
+		h.logger.Warn("cascade delete mission_tasks", "crew_id", crewID, "error", err)
+	}
+	if _, err := h.db.ExecContext(r.Context(),
+		"DELETE FROM missions WHERE crew_id = ?", crewID); err != nil {
+		h.logger.Warn("cascade delete missions", "crew_id", crewID, "error", err)
+	}
+	// Also remove crew members — they reference this crew
+	if _, err := h.db.ExecContext(r.Context(),
+		"DELETE FROM crew_members WHERE crew_id = ?", crewID); err != nil {
+		h.logger.Warn("cascade delete crew_members", "crew_id", crewID, "error", err)
+	}
+
 	_, err = h.db.ExecContext(r.Context(),
 		"UPDATE crews SET deleted_at = ? WHERE id = ?",
 		now, crewID)

@@ -1,15 +1,24 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, RefreshCw, Focus,
   FileText, PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
   ChevronUp, ChevronDown, ChevronLeft, X, Play, Square, Loader2,
+  CircleDot, LayoutGrid, List, Plus, FolderKanban, Bookmark, Save,
 } from "lucide-react"
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Select,
   SelectContent,
@@ -34,12 +43,18 @@ import { A2AMessageStream } from "@/components/features/orchestration/a2a-messag
 import { MissionYamlEditor } from "@/components/features/orchestration/mission-yaml-editor"
 import { DockerOverview } from "@/components/features/orchestration/docker-overview"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
-import type { Mission, MissionTask } from "@/lib/types/mission"
+import type { Mission, MissionTask, IssueLabel, IssueComment, Project, SavedView } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { IssuesExplorerPanel, IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectDetailInline } from "@/components/features/orchestration/issues-inline"
+import { UnifiedExplorer } from "@/components/features/orchestration/unified-explorer"
+import { CreateIssueModal } from "@/components/features/orchestration/create-issue-modal"
+import { CreateProjectModal } from "@/components/features/orchestration/create-project-modal"
 
 import { toast } from "sonner"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { useAppStore } from "@/lib/store"
+import type { BreadcrumbItem } from "@/lib/store"
 
 const MSG_TYPE_COLORS: Record<string, string> = {
   "task.updated": "text-blue-400",
@@ -253,6 +268,14 @@ export function OrchestrationLayout({
   onMissionCreated,
 }: OrchestrationLayoutProps) {
   const isMobile = useIsMobile()
+  const router = useRouter()
+
+  // Navigate to full-page issue view (from board/list click)
+  const handleIssueNavigate = useCallback((issue: Mission) => {
+    if (issue.identifier) {
+      router.push(`/orchestration/issues/${issue.identifier}`)
+    }
+  }, [router])
 
   // Panel state
   const [leftCollapsed, setLeftCollapsed] = useState(false)
@@ -260,7 +283,7 @@ export function OrchestrationLayout({
   const [drawerTab, setDrawerTab] = useState<DrawerTab>("messages")
 
   // Content state
-  const [activeTab, setActiveTab] = useState("graph")
+  const [activeTab, setActiveTab] = useState("issues")
   const [_selectedTask, setSelectedTask] = useState<MissionTask | null>(null)
   const [selectedCrewId, setSelectedCrewId] = useState<string | null>(null)
   const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null)
@@ -268,6 +291,25 @@ export function OrchestrationLayout({
 
   // A2A message filter
   const [a2aCrewFilter, setA2aCrewFilter] = useState<string | null>(null)
+
+  // Issues state
+  const [issues, setIssues] = useState<Mission[]>([])
+  const [issueLabels, setIssueLabels] = useState<IssueLabel[]>([])
+  const [issueViewMode, setIssueViewMode] = useState<"board" | "list">("board")
+  const [issueSearch, setIssueSearch] = useState("")
+  const [selectedIssue, setSelectedIssue] = useState<Mission | null>(null)
+  const [issueComments, setIssueComments] = useState<IssueComment[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
+  const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
+  const [showCreateIssue, setShowCreateIssue] = useState(false)
+  const [showCreateProject, setShowCreateProject] = useState(false)
+
+  // Saved views
+  const [savedViews, setSavedViews] = useState<SavedView[]>([])
+  const [activeViewId, setActiveViewId] = useState<string | null>(null)
+  const [savedViewsOpen, setSavedViewsOpen] = useState(false)
 
   const graphRef = useRef<WorkflowGraphRef>(null)
 
@@ -277,15 +319,23 @@ export function OrchestrationLayout({
   }, [isMobile])
 
   // Derived data
+  // When an issue is selected, filter to just that mission so Graph/Timeline/Activity focus on it
   const filteredMissions = useMemo(() => {
+    if (selectedIssue) {
+      const match = missions.find((m) => m.id === selectedIssue.id)
+      return match ? [match] : missions
+    }
     if (selectedMissionId === "all") return missions
     return missions.filter((m) => m.id === selectedMissionId)
-  }, [missions, selectedMissionId])
+  }, [missions, selectedMissionId, selectedIssue])
 
   const selectedMission = useMemo(() => {
+    if (selectedIssue) {
+      return missions.find((m) => m.id === selectedIssue.id) || null
+    }
     if (selectedMissionId === "all") return null
     return missions.find((m) => m.id === selectedMissionId) || null
-  }, [missions, selectedMissionId])
+  }, [missions, selectedMissionId, selectedIssue])
 
   const stats = useMemo(() => ({
     active: missions.filter((m) => m.status === "IN_PROGRESS").length,
@@ -331,6 +381,90 @@ export function OrchestrationLayout({
     if (selectedMissionId === "all") return missions
     return missions.filter((m) => m.id === selectedMissionId)
   }, [selectedMissionId, missions])
+
+  // Issue data fetching
+  const fetchIssues = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(`/api/v1/issues?workspace_id=${encodeURIComponent(workspaceId)}&limit=100`)
+      if (res.ok) setIssues(await res.json())
+    } catch { /* ignore */ }
+  }, [workspaceId])
+
+  const fetchIssueLabels = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(`/api/v1/labels?workspace_id=${encodeURIComponent(workspaceId)}`)
+      if (res.ok) setIssueLabels(await res.json())
+    } catch { /* ignore */ }
+  }, [workspaceId])
+
+  const fetchProjects = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(`/api/v1/projects?workspace_id=${encodeURIComponent(workspaceId)}`)
+      if (res.ok) setProjects(await res.json())
+    } catch { /* ignore */ }
+  }, [workspaceId])
+
+  const fetchSavedViews = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(`/api/v1/saved-views?workspace_id=${encodeURIComponent(workspaceId)}`)
+      if (res.ok) {
+        const data = await res.json()
+        setSavedViews(Array.isArray(data) ? data : data.views ?? [])
+      }
+    } catch { /* ignore */ }
+  }, [workspaceId])
+
+  useEffect(() => {
+    fetchIssues()
+    fetchIssueLabels()
+    fetchProjects()
+    fetchSavedViews()
+  }, [fetchIssues, fetchIssueLabels, fetchProjects, fetchSavedViews])
+
+  const handleIssueSelect = useCallback(async (issue: Mission) => {
+    // Toggle: clicking the same issue again deselects it
+    if (selectedIssue?.id === issue.id) {
+      setSelectedIssue(null)
+      setIssueComments([])
+      return
+    }
+    setSelectedIssue(issue)
+    setDetailContext({ type: "none" })
+    if (issue.crew_id && issue.identifier) {
+      try {
+        const res = await fetch(`/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`)
+        if (res.ok) setIssueComments(await res.json())
+        else setIssueComments([])
+      } catch { setIssueComments([]) }
+    }
+  }, [workspaceId, selectedIssue?.id])
+
+  const filteredIssues = useMemo(() => {
+    let filtered = issues
+    if (selectedProjectId) {
+      filtered = filtered.filter((i) => i.project_id === selectedProjectId)
+    }
+    if (filterCrewId) {
+      filtered = filtered.filter((i) => i.crew_id === filterCrewId)
+    }
+    if (filterAgentId) {
+      filtered = filtered.filter((i) => i.assignee_id === filterAgentId)
+    }
+    if (issueSearch) {
+      const q = issueSearch.toLowerCase()
+      filtered = filtered.filter((i) =>
+        i.title.toLowerCase().includes(q) ||
+        (i.identifier && i.identifier.toLowerCase().includes(q)) ||
+        (i.assignee_name && i.assignee_name.toLowerCase().includes(q)) ||
+        (i.crew_name && i.crew_name.toLowerCase().includes(q))
+      )
+    }
+    return filtered
+  }, [issues, issueSearch, selectedProjectId, filterCrewId, filterAgentId])
 
   // Handlers
   const handleNodeClick = useCallback((task: MissionTask) => {
@@ -426,93 +560,30 @@ export function OrchestrationLayout({
     }
   }, [drawerOpen, drawerTab])
 
-  const showRightPanel = detailContext.type !== "none"
+  const selectedProject = selectedProjectId ? projects.find((p) => p.id === selectedProjectId) || null : null
+  const showRightPanel = detailContext.type !== "none" || selectedIssue !== null || (selectedProjectId !== null && !selectedIssue)
+
+  // Sync breadcrumbs to global store (rendered in app-toolbar)
+  const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
+  useEffect(() => {
+    const items: BreadcrumbItem[] = []
+    if (selectedProject) {
+      items.push({ label: selectedProject.name, onClick: () => { setSelectedIssue(null); setIssueComments([]) } })
+    }
+    if (selectedIssue) {
+      items.push({ label: selectedIssue.identifier || selectedIssue.title })
+    }
+    setBreadcrumbs(items)
+    return () => setBreadcrumbs([])
+  }, [selectedProject?.id, selectedProject?.name, selectedIssue?.id, selectedIssue?.identifier, setBreadcrumbs])
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
-      {/* ---- Row 1: Mission context bar ---- */}
-      <div className="shrink-0 z-20 flex items-center justify-between h-9 bg-card border-b border-white/[0.1] px-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <Select value={selectedMissionId} onValueChange={onMissionChange}>
-            <SelectTrigger className="h-7 w-auto max-w-[300px] text-[13px] font-semibold bg-white/[0.04] border-white/[0.1] rounded-md text-foreground px-2.5 gap-2 shrink-0">
-              <SelectValue placeholder="All missions" />
-            </SelectTrigger>
-            <SelectContent className="min-w-[300px]">
-              <SelectItem value="all" className="font-medium">All missions</SelectItem>
-              {(["IN_PROGRESS", "PLANNING", "REVIEW", "COMPLETED", "FAILED", "CANCELLED"] as const)
-                .filter((s) => missions.some((m) => m.status === s))
-                .map((status) => {
-                  const sl: Record<string, string> = { IN_PROGRESS: "Running", PLANNING: "Planning", REVIEW: "In Review", COMPLETED: "Completed", FAILED: "Failed", CANCELLED: "Cancelled" }
-                  const sc: Record<string, string> = { IN_PROGRESS: "bg-blue-500", PLANNING: "bg-purple-500", REVIEW: "bg-amber-500", COMPLETED: "bg-green-500", FAILED: "bg-red-500", CANCELLED: "bg-gray-500" }
-                  const st: Record<string, string> = { IN_PROGRESS: "text-blue-400", PLANNING: "text-purple-400", REVIEW: "text-amber-400", COMPLETED: "text-green-400", FAILED: "text-red-400", CANCELLED: "text-gray-400" }
-                  return (
-                    <div key={status}>
-                      <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">{sl[status]}</div>
-                      {missions.filter((m) => m.status === status).map((m) => (
-                        <SelectItem key={m.id} value={m.id}>
-                          <div className="flex items-center gap-2 w-full">
-                            <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", sc[m.status], m.status === "IN_PROGRESS" && "animate-pulse")} />
-                            <span className="truncate flex-1">{m.title}</span>
-                            <span className={cn("text-[10px] font-mono shrink-0", st[m.status])}>{m.tasks?.length || 0}t</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </div>
-                  )
-                })}
-            </SelectContent>
-          </Select>
-
-          {/* Inline stats / mission info — hidden on mobile */}
-          {!isMobile && (
-            <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground">
-              {!selectedMission ? (
-                <>
-                  {[
-                    { label: "Active", value: stats.active, color: "bg-blue-500", tc: stats.active > 0 ? "text-blue-400" : "" },
-                    { label: "Planning", value: stats.planning, color: "bg-purple-500", tc: stats.planning > 0 ? "text-purple-400" : "" },
-                    { label: "Done", value: stats.completed, color: "bg-green-500", tc: stats.completed > 0 ? "text-green-400" : "" },
-                    { label: "Failed", value: stats.failed, color: "bg-red-500", tc: stats.failed > 0 ? "text-red-400" : "" },
-                  ].map(({ label, value, color, tc }) => (
-                    <div key={label} className="flex items-center gap-1">
-                      <div className={cn("w-1.5 h-1.5 rounded-full", color, value === 0 && "opacity-30")} />
-                      <span className={cn("tabular-nums", tc)}>{value}</span>
-                      <span className="text-muted-foreground/40 font-sans text-[10px]">{label}</span>
-                    </div>
-                  ))}
-                </>
-              ) : (
-                <>
-                  <span className="text-muted-foreground/50 font-sans">@{selectedMission.lead_agent_slug}</span>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-12 h-1 bg-white/[0.08] overflow-hidden rounded-full">
-                      <div className="h-full bg-blue-400 transition-all rounded-full" style={{ width: `${selectedMission.tasks?.length ? ((selectedMission.tasks.filter(t => t.status === "COMPLETED").length / selectedMission.tasks.length) * 100) : 0}%` }} />
-                    </div>
-                    <span className="tabular-nums">{selectedMission.tasks?.filter(t => t.status === "COMPLETED").length || 0}/{selectedMission.tasks?.length || 0}</span>
-                  </div>
-                  {(() => { const t = selectedMission.tasks || []; const tok = t.reduce((s, x) => s + (x.token_count || 0), 0); return tok > 0 ? <span className="tabular-nums">{(tok / 1000).toFixed(1)}k</span> : null })()}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          {selectedMission?.status === "PLANNING" && <MissionActionButton mission={selectedMission} action="start" workspaceId={workspaceId} onDone={onRefresh} />}
-          {selectedMission && (selectedMission.status === "PLANNING" || selectedMission.status === "IN_PROGRESS") && <MissionActionButton mission={selectedMission} action="cancel" workspaceId={workspaceId} onDone={onRefresh} />}
-          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground/80" onClick={() => graphRef.current?.focusActive()}>
-            <Focus className="h-3 w-3" />
-          </Button>
-          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground/80" onClick={onRefresh}>
-            <RefreshCw className="h-3 w-3" />
-          </Button>
-          <CreateMissionWizard workspaceId={workspaceId} onCreated={onMissionCreated} />
-        </div>
-      </div>
-
-      {/* ---- Row 2: Tab navigation ---- */}
-      <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
+      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        {/* Tabs */}
         {([
+          { id: "issues", label: "Issues", icon: CircleDot },
           { id: "graph", label: "Graph", icon: Workflow },
           { id: "timeline", label: "Timeline", icon: Clock },
           { id: "activity", label: "Activity", icon: Activity },
@@ -522,7 +593,7 @@ export function OrchestrationLayout({
             key={id}
             onClick={() => setActiveTab(id)}
             className={cn(
-              "flex items-center gap-1.5 px-3 text-[12px] font-medium border-b-2 transition-all duration-100 relative top-px",
+              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
               activeTab === id
                 ? "border-blue-400 text-blue-400"
                 : "border-transparent text-muted-foreground hover:text-foreground/80",
@@ -532,6 +603,29 @@ export function OrchestrationLayout({
             {label}
           </button>
         ))}
+
+        {/* spacer between tabs and actions */}
+
+        <div className="flex-1" />
+
+        {/* Create dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex items-center gap-1 h-7 px-2.5 rounded-md text-xs text-muted-foreground hover:text-foreground bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] hover:border-white/[0.12] transition-colors shrink-0">
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem onClick={() => setShowCreateIssue(true)}>
+              <CircleDot className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
+              New Issue
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setShowCreateProject(true)}>
+              <FolderKanban className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
+              New Project
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* ---- Main 3-column layout ---- */}
@@ -540,7 +634,7 @@ export function OrchestrationLayout({
         style={{
           gridTemplateColumns: isMobile
             ? "1fr"
-            : `${leftCollapsed ? "48px" : "260px"} 1fr ${showRightPanel ? "380px" : "0px"}`,
+            : `${leftCollapsed ? "48px" : "240px"} 1fr ${showRightPanel ? "360px" : "0px"}`,
           gridTemplateRows: "1fr auto",
         }}
       >
@@ -584,31 +678,27 @@ export function OrchestrationLayout({
                       </button>
                     </div>
                     <div className="flex-1 min-h-0 flex flex-col">
-                      <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
-                        <HierarchyTree
-                          crews={panelCrews}
-                          agents={panelAgents}
-                          selectedCrewId={selectedCrewId}
-                          selectedAgentSlug={selectedAgentSlug}
-                          onCrewSelect={handleCrewSelect}
-                          onAgentSelect={handleAgentSelect}
-                        />
-                      </div>
-                      <div className="border-b border-border flex-1 min-h-0 flex flex-col">
-                        <UnifiedInbox
-                          missions={panelMissions}
-                          onTaskSelect={handleInboxTaskSelect}
-                        />
-                      </div>
-                      <div className="p-2 shrink-0">
-                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
-                          Connections
-                        </div>
-                        <ConnectionMap
-                          crews={panelCrews}
-                          connections={panelConnections}
-                        />
-                      </div>
+                      <UnifiedExplorer
+                        issues={issues}
+                        projects={projects}
+                        search={issueSearch}
+                        onSearchChange={setIssueSearch}
+                        selectedIssue={selectedIssue}
+                        selectedProjectId={selectedProjectId}
+                        onProjectSelect={(id) => {
+                          const newId = id === selectedProjectId ? null : id
+                          setSelectedProjectId(newId)
+                          if (newId) { setSelectedIssue(null); setIssueComments([]) }
+                        }}
+                        onIssueSelect={handleIssueSelect}
+                        crews={panelCrews}
+                        missions={panelMissions}
+                        onTaskSelect={handleInboxTaskSelect}
+                        filterCrewId={filterCrewId}
+                        onCrewFilter={setFilterCrewId}
+                        filterAgentId={filterAgentId}
+                        onAgentFilter={setFilterAgentId}
+                      />
                     </div>
                   </motion.div>
                 </>
@@ -647,36 +737,27 @@ export function OrchestrationLayout({
                   transition={{ duration: 0.2, ease: "easeOut" }}
                   className="flex-1 min-h-0 flex flex-col"
                 >
-                  {/* Hierarchy tree */}
-                  <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
-                    <HierarchyTree
-                      crews={panelCrews}
-                      agents={panelAgents}
-                      selectedCrewId={selectedCrewId}
-                      selectedAgentSlug={selectedAgentSlug}
-                      onCrewSelect={handleCrewSelect}
-                      onAgentSelect={handleAgentSelect}
-                    />
-                  </div>
-
-                  {/* Unified Inbox */}
-                  <div className="border-b border-border flex-1 min-h-0 flex flex-col">
-                    <UnifiedInbox
-                      missions={panelMissions}
-                      onTaskSelect={handleInboxTaskSelect}
-                    />
-                  </div>
-
-                  {/* Connection Map */}
-                  <div className="p-2 shrink-0">
-                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
-                      Connections
-                    </div>
-                    <ConnectionMap
-                      crews={panelCrews}
-                      connections={panelConnections}
-                    />
-                  </div>
+                  <UnifiedExplorer
+                    issues={issues}
+                    projects={projects}
+                    search={issueSearch}
+                    onSearchChange={setIssueSearch}
+                    selectedIssue={selectedIssue}
+                    selectedProjectId={selectedProjectId}
+                    onProjectSelect={(id) => {
+                      const newId = id === selectedProjectId ? null : id
+                      setSelectedProjectId(newId)
+                      setSelectedIssue(null); setIssueComments([])
+                    }}
+                    onIssueSelect={handleIssueSelect}
+                    crews={panelCrews}
+                    missions={panelMissions}
+                    onTaskSelect={handleInboxTaskSelect}
+                    filterCrewId={filterCrewId}
+                    onCrewFilter={setFilterCrewId}
+                    filterAgentId={filterAgentId}
+                    onAgentFilter={setFilterAgentId}
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -685,6 +766,89 @@ export function OrchestrationLayout({
 
         {/* ---- Center content area ---- */}
         <div className="row-span-1 relative overflow-hidden min-h-0">
+          {activeTab === "issues" && (
+            <div className="h-full overflow-auto">
+              {/* Toolbar strip */}
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.06] shrink-0">
+                <div className="flex gap-1 bg-white/[0.04] rounded-md p-0.5">
+                  <button
+                    onClick={() => setIssueViewMode("board")}
+                    className={cn("p-1.5 rounded", issueViewMode === "board" ? "bg-white/[0.1] text-foreground" : "text-muted-foreground")}
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setIssueViewMode("list")}
+                    className={cn("p-1.5 rounded", issueViewMode === "list" ? "bg-white/[0.1] text-foreground" : "text-muted-foreground")}
+                  >
+                    <List className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {/* Saved views dropdown */}
+                {savedViews.length > 0 && (
+                  <DropdownMenu open={savedViewsOpen} onOpenChange={setSavedViewsOpen}>
+                    <DropdownMenuTrigger asChild>
+                      <button className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs hover:bg-white/[0.06] text-muted-foreground transition-colors">
+                        <Bookmark className="h-3 w-3" />
+                        <span>{activeViewId ? savedViews.find((v) => v.id === activeViewId)?.name || "Saved Views" : "Saved Views"}</span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-52">
+                      <DropdownMenuItem
+                        onClick={() => { setActiveViewId(null); setSavedViewsOpen(false) }}
+                        className={cn("text-xs", !activeViewId && "bg-white/[0.04]")}
+                      >
+                        All Issues
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      {savedViews.map((view) => (
+                        <DropdownMenuItem
+                          key={view.id}
+                          onClick={() => {
+                            setActiveViewId(view.id)
+                            if (view.view_type === "board" || view.view_type === "list") {
+                              setIssueViewMode(view.view_type)
+                            }
+                            setSavedViewsOpen(false)
+                          }}
+                          className={cn("text-xs", activeViewId === view.id && "bg-white/[0.04]")}
+                        >
+                          <Save className="h-3 w-3 mr-1.5 text-muted-foreground/50" />
+                          {view.name}
+                          {view.shared && (
+                            <span className="ml-auto text-[9px] text-muted-foreground/40 uppercase">shared</span>
+                          )}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+
+                <div className="flex-1" />
+              </div>
+              {/* Board or List view */}
+              <div className="p-4 h-[calc(100%-45px)]">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || "all"}`}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className="h-full"
+                  >
+                    {issueViewMode === "board" ? (
+                      <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} />
+                    ) : (
+                      <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} />
+                    )}
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+            </div>
+          )}
+
           {activeTab === "graph" && (
             <>
               <WorkflowGraph
@@ -720,6 +884,7 @@ export function OrchestrationLayout({
               </motion.div>
             )}
 
+
           </AnimatePresence>
         </div>
 
@@ -744,7 +909,40 @@ export function OrchestrationLayout({
                   <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Detail</span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  <ContextDetailPanel context={detailContext} onClose={handleDetailClose} onTaskAction={handleTaskAction} />
+                  {selectedIssue ? (
+                    <IssueDetailInline
+                      issue={selectedIssue}
+                      comments={issueComments}
+                      labels={issueLabels}
+                      projects={projects}
+                      workspaceId={workspaceId}
+                      onClose={() => { setSelectedIssue(null); setIssueComments([]) }}
+                      onUpdated={async () => {
+                        await fetchIssues()
+                        if (selectedIssue?.crew_id && selectedIssue?.identifier) {
+                          try {
+                            const res = await fetch(`/api/v1/issues/${encodeURIComponent(selectedIssue.identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`)
+                            if (res.ok) {
+                              const fresh = await res.json()
+                              setSelectedIssue(fresh)
+                              const commRes = await fetch(`/api/v1/crews/${encodeURIComponent(fresh.crew_id)}/issues/${encodeURIComponent(fresh.identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`)
+                              if (commRes.ok) setIssueComments(await commRes.json())
+                            }
+                          } catch {}
+                        }
+                        fetchProjects()
+                      }}
+                    />
+                  ) : selectedProject ? (
+                    <ProjectDetailInline
+                      project={selectedProject}
+                      workspaceId={workspaceId}
+                      onClose={() => setSelectedProjectId(null)}
+                      onUpdated={fetchProjects}
+                    />
+                  ) : (
+                    <ContextDetailPanel context={detailContext} onClose={handleDetailClose} onTaskAction={handleTaskAction} />
+                  )}
                 </div>
               </motion.div>
             )}
@@ -752,7 +950,7 @@ export function OrchestrationLayout({
         ) : (
           <div className={cn(
             "row-span-1 transition-all duration-200 overflow-hidden min-h-0",
-            showRightPanel ? "w-[380px]" : "w-0",
+            showRightPanel ? "w-full" : "w-0",
           )}>
             <AnimatePresence mode="wait">
               {showRightPanel && (
@@ -764,11 +962,44 @@ export function OrchestrationLayout({
                   transition={{ duration: 0.15, ease: "easeOut" }}
                   className="h-full"
                 >
-                  <ContextDetailPanel
-                    context={detailContext}
-                    onClose={handleDetailClose}
-                    onTaskAction={handleTaskAction}
-                  />
+                  {selectedIssue ? (
+                    <IssueDetailInline
+                      issue={selectedIssue}
+                      comments={issueComments}
+                      labels={issueLabels}
+                      projects={projects}
+                      workspaceId={workspaceId}
+                      onClose={() => { setSelectedIssue(null); setIssueComments([]) }}
+                      onUpdated={async () => {
+                        await fetchIssues()
+                        if (selectedIssue?.crew_id && selectedIssue?.identifier) {
+                          try {
+                            const res = await fetch(`/api/v1/issues/${encodeURIComponent(selectedIssue.identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`)
+                            if (res.ok) {
+                              const fresh = await res.json()
+                              setSelectedIssue(fresh)
+                              const commRes = await fetch(`/api/v1/crews/${encodeURIComponent(fresh.crew_id)}/issues/${encodeURIComponent(fresh.identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`)
+                              if (commRes.ok) setIssueComments(await commRes.json())
+                            }
+                          } catch {}
+                        }
+                        fetchProjects()
+                      }}
+                    />
+                  ) : selectedProject ? (
+                    <ProjectDetailInline
+                      project={selectedProject}
+                      workspaceId={workspaceId}
+                      onClose={() => setSelectedProjectId(null)}
+                      onUpdated={fetchProjects}
+                    />
+                  ) : (
+                    <ContextDetailPanel
+                      context={detailContext}
+                      onClose={handleDetailClose}
+                      onTaskAction={handleTaskAction}
+                    />
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -861,6 +1092,25 @@ export function OrchestrationLayout({
           </AnimatePresence>
         </motion.div>
       </div>
+
+      {/* Create modals */}
+      <CreateIssueModal
+        open={showCreateIssue}
+        onOpenChange={setShowCreateIssue}
+        crews={crews}
+        labels={issueLabels}
+        projects={projects}
+        workspaceId={workspaceId}
+        onCreated={() => { fetchIssues(); fetchProjects() }}
+      />
+      <CreateProjectModal
+        open={showCreateProject}
+        onOpenChange={setShowCreateProject}
+        crews={crews}
+        labels={issueLabels}
+        workspaceId={workspaceId}
+        onCreated={fetchProjects}
+      />
     </div>
   )
 }

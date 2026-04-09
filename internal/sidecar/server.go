@@ -264,6 +264,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			case r.Method == http.MethodPost && r.URL.Path == "/crew-connections":
 				s.handleCreateCrewConnection(w, r)
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/issue/create":
+				s.handleIssueCreate(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/proposal":
 				s.handleCreateProposal(w, r)
 				return
