@@ -69,11 +69,17 @@ container:
 Containers are created with these security measures (`internal/provider/docker/docker.go`):
 
 - **Cap-drop ALL:** All Linux capabilities are dropped
+- **Cap-add NET_RAW:** Re-added after dropping ALL (allows ICMP/ping for network diagnostics)
+- **SecurityOpt no-new-privileges:** Blocks execution of setuid binaries inside the container
 - **Non-root execution:** Agent processes run as UID 1001
-- **Read-only filesystem:** System directories are read-only
+- **Read-only filesystem:** System directories are read-only (`ReadonlyRootfs: true`)
+- **tmpfs /tmp (500M):** Writable temp directory, not persistent across restarts
+- **PID limit: 200:** Prevents fork bomb attacks (`PidsLimit: 200`)
 - **Memory limits:** Configurable per-crew (`default_memory_mb`, default 512 MB)
 - **CPU limits:** Configurable per-crew (`default_cpus`, default 1.0)
 - **Network isolation:** Containers connect to a dedicated Docker bridge network
+- **ExtraHosts:** `host.docker.internal:host-gateway` enables container-to-host communication
+- **Named volumes:** `crewship-home-{slug}` and `crewship-tools-{slug}` for persistent home and tools directories
 
 ## Network Policy
 

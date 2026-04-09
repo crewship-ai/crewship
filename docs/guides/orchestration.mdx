@@ -11,18 +11,23 @@ Crewship's orchestration system manages multi-agent missions through the `Missio
 ## Mission Lifecycle
 
 ```
-PLANNING --> IN_PROGRESS --> COMPLETED
-                |                |
-                v                v
-             FAILED         CANCELLED
+PLANNING --> IN_PROGRESS --> REVIEW --> COMPLETED
+                |              |
+                v              v
+             FAILED        CANCELLED
 ```
 
 A mission progresses through these states:
 1. **PLANNING** -- Mission created, tasks defined (or waiting for Lead to plan)
 2. **IN_PROGRESS** -- Tasks being scheduled and executed
-3. **COMPLETED** -- All tasks finished successfully
-4. **FAILED** -- A task failed and could not recover, or deadlock/timeout detected
-5. **CANCELLED** -- Manually stopped by user or system
+3. **REVIEW** -- All tasks finished (none failed). The mission enters review before final completion, allowing humans to inspect results
+4. **COMPLETED** -- Mission accepted after review
+5. **FAILED** -- A task failed and could not recover, or deadlock/timeout detected
+6. **CANCELLED** -- Manually stopped by user or system
+
+<Note>
+  The REVIEW state is inserted between IN_PROGRESS and COMPLETED. When all tasks reach a terminal state (COMPLETED, FAILED, or SKIPPED) and none have failed, the mission transitions to REVIEW rather than directly to COMPLETED. If any task failed, the mission transitions to FAILED instead.
+</Note>
 
 ## The Mission Engine
 
@@ -53,12 +58,13 @@ The `runMissionLoop` function runs as a goroutine for each active mission. Every
 
 ```
 PENDING --> RUNNING --> COMPLETED
-   ^          |
-   |          v
-   +------ FAILED ---> (retry via LoopController)
-              |
-              v
-           BLOCKED  (waiting for dependencies)
+   ^          |             |
+   |          v             v
+   +------ FAILED    AWAITING_APPROVAL ---> COMPLETED
+              |                         |
+              v                         v
+           BLOCKED                    FAILED (rejected)
+           SKIPPED
 ```
 
 | State | Description |
@@ -68,7 +74,72 @@ PENDING --> RUNNING --> COMPLETED
 | `COMPLETED` | Finished successfully |
 | `FAILED` | Execution failed |
 | `BLOCKED` | Waiting for dependent tasks to complete |
-| `AWAITING_APPROVAL` | Requires human approval to proceed |
+| `AWAITING_APPROVAL` | Task completed but held for human review before proceeding |
+| `SKIPPED` | Task was intentionally skipped (counts as terminal, does not cause mission failure) |
+
+<Note>
+  SKIPPED tasks are treated as terminal alongside COMPLETED and FAILED when checking mission completion. A skipped task does not block downstream dependencies and does not cause mission failure.
+</Note>
+
+## Token Budget Calculation
+
+The orchestrator allocates system prompt space using a token budget system defined in `internal/tokenutil`:
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `MaxSystemPromptTokens` | 32,000 | Total conservative budget for the system prompt |
+| `ConversationBudgetPct` | 60% | Percentage of remaining budget for conversation history |
+| `MemoryBudgetPct` | 40% | Percentage of remaining budget for agent memory |
+
+The allocation works as follows:
+
+```
+1. Estimate base system prompt tokens
+2. remaining = MaxSystemPromptTokens - baseTokens (min 2,000)
+3. convTokenBudget  = remaining * 60 / 100
+4. memTokenBudget   = remaining * 40 / 100
+5. Inject conversation history (up to convTokenBudget)
+6. Inject memory context (up to memTokenBudget)
+```
+
+After conversation and memory injection, the orchestrator appends additional context blocks in order: lead crew context (for LEAD agents), coordinator context (for COORDINATOR agents), peer communication context (for crew AGENT members).
+
+## Mission Brief Construction
+
+When an agent is dispatched for a mission task, the `buildMissionBrief` function constructs a rich context prompt with five sections:
+
+### 1. IMPORTANT Preamble
+
+Only included when dependency outputs exist. Instructs the agent not to ask clarifying questions:
+
+```
+IMPORTANT: You are part of a multi-agent mission pipeline.
+Previous tasks have already been completed and their outputs are provided below.
+DO NOT ask for additional information or clarification -- everything you need is in this prompt.
+Use the dependency outputs below as your input and execute your task immediately.
+```
+
+### 2. [MISSION]
+
+Mission title, goal, and a DAG overview listing all tasks with their status markers:
+- `+` COMPLETED
+- `>` IN_PROGRESS
+- `x` FAILED
+- ` ` PENDING/BLOCKED
+
+### 3. [INPUT FROM PREVIOUS TASKS]
+
+Outputs from completed dependency tasks, injected **before** the assignment so agents read context first. When a task produced a structured handoff block, only the handoff summary, artifacts, and confidence are included (more concise). Otherwise the full result summary is included, truncated to 4,000 characters per dependency.
+
+### 4. [YOUR ASSIGNMENT]
+
+The specific task title, description, and iteration number (if this is a retry).
+
+### 5. [OUTPUT FORMAT]
+
+Structured handoff instructions requiring the agent to produce a `---HANDOFF---` block with summary, confidence, and artifacts.
+
+The total brief is capped at 32KB (`maxBriefTotalLen`). If exceeded, the brief is truncated with a note.
 
 ## Lead Planning Phase
 
@@ -87,9 +158,23 @@ Lead creates tasks via curl to localhost:9119/mission/create
 Mission engine detects new tasks -> begins scheduling
 ```
 
-<Note>
-  The Lead planning dispatch is idempotent -- the `planningDispatched` flag prevents re-dispatch if the Lead is still working. A TOCTOU (time-of-check-to-time-of-use) race is prevented by inserting a sentinel into the `active` map before loading the mission.
-</Note>
+### LeadPlanning Flag
+
+The `DispatchRequest` includes a `LeadPlanning` flag that tells the API layer to dispatch the agent as a LEAD with sidecar access. This is essential because Lead agents need access to the mission management API (`/mission/create`, `/mission/{id}`) to define tasks, while regular AGENT tasks skip the sidecar for security.
+
+### TOCTOU Prevention
+
+A time-of-check-to-time-of-use race is prevented by inserting a sentinel `missionState` into the `active` map before loading the mission from the database. The `planningDispatched` flag on the mission state prevents re-dispatching the Lead if it is still working. This flag is only set to `true` after `dispatchLeadPlanning` succeeds.
+
+### Scaling Rules
+
+The Lead agent follows complexity-based scaling rules injected via the system prompt:
+
+| Complexity | Agents | Tool Calls | Duration | Tokens |
+|-----------|--------|-----------|----------|--------|
+| SIMPLE | 1 | 3-10 | ~5 min | ~10K |
+| MEDIUM | 1-2 | 10-15 | ~15 min | ~50K |
+| COMPLEX | 2-4 | 15+ | ~30 min | ~100K |
 
 ## Workflow Templates
 
@@ -139,19 +224,94 @@ The `LoopController` (`internal/orchestrator/loop.go`) manages task retry logic:
 2. For loop-back patterns (dev-test-loop), when a downstream task fails, the upstream task is reset to restart the cycle
 3. Previous failure context from the progress log is injected so the agent learns from mistakes
 
-```go
-// LoopController.ShouldRetry checks if a failed task should be retried
-// Returns true if a retry was initiated, false if the task is terminal
-```
+The `ShouldRetry` method checks if a failed task has remaining iterations. If yes, it resets the task:
+- Status back to `PENDING`
+- Iteration counter incremented
+- All execution fields cleared (`assignment_id`, `result_summary`, `error_message`, `started_at`, `completed_at`, `duration_ms`)
+
+The `RetryLoopBack` method handles the upstream reset pattern: when a downstream task (e.g., "test") fails, it checks the dependency chain. If an upstream task (e.g., "develop") has remaining iterations, that task is reset to PENDING and the failed downstream task is set to BLOCKED -- ready to run again once the upstream completes.
 
 <Warning>
   Tasks without `max_iterations` set (or `max_iterations <= 1`) are never retried. A failed task without retry configuration causes the mission to fail.
 </Warning>
 
+## Task Approval Gate
+
+The `checkApprovalGate` function determines whether a completed task should be held for human review. The gate evaluates three inputs:
+
+1. **Explicit flag** -- if `approval_required = 1` on the task, it is always held
+2. **Confidence threshold** -- the agent's self-reported confidence from the handoff block
+3. **Escalation config** -- per-crew configuration with tiered thresholds
+
+### Escalation Config
+
+Each crew can define an `escalation_config` JSON object with three thresholds:
+
+```json
+{
+  "auto_approve_threshold": 0.9,
+  "notify_threshold": 0.7,
+  "require_approval_below": 0.5
+}
+```
+
+| Threshold | Behavior |
+|-----------|----------|
+| `auto_approve_threshold` | Confidence at or above this value: auto-approve (task goes to COMPLETED) |
+| `notify_threshold` | Confidence below this value: send a `confidence.low` WebSocket notification |
+| `require_approval_below` | Confidence below this value: hold the task in AWAITING_APPROVAL |
+
+The evaluation order is:
+1. If confidence >= `auto_approve_threshold`, return COMPLETED
+2. If `approval_required` is explicitly set, return AWAITING_APPROVAL
+3. If no config or no confidence data, return COMPLETED
+4. If confidence < `require_approval_below`, return AWAITING_APPROVAL
+5. If confidence < `notify_threshold`, send notification but return COMPLETED
+
+### Approving or Rejecting Tasks
+
+The `ApproveTask` method transitions a task from AWAITING_APPROVAL:
+
+- **Approved**: task moves to COMPLETED, dependent BLOCKED tasks are unblocked
+- **Rejected**: task moves to FAILED, all downstream dependent tasks are recursively failed with reason "upstream task rejected"
+
+Approval requires a `userID` for the audit trail. The approval status (`APPROVED` or `REJECTED`), approver, timestamp, and evaluation notes are persisted on the task.
+
+<Note>
+  When a task is held in AWAITING_APPROVAL, the mission engine sends an `approval.required` WebSocket message to the workspace so dashboards can display a badge or notification.
+</Note>
+
+## Circular Dependency Detection
+
+The `ValidateDAG` method checks all mission tasks for:
+1. **References to nonexistent task IDs** -- any `depends_on` entry that does not match an existing task ID causes validation to fail
+2. **Circular dependencies** -- detected using Kahn's algorithm (topological sort)
+
+### Kahn's Algorithm
+
+The implementation builds an adjacency list and computes in-degrees for each task:
+
+```
+1. Initialize in-degree for each task based on depends_on count
+2. Enqueue all tasks with in-degree 0 (no dependencies)
+3. For each dequeued task, decrement in-degree of tasks that depend on it
+4. If a task's in-degree reaches 0, enqueue it
+5. If visited count != total tasks, a cycle exists
+```
+
+The error message reports the number of tasks involved in the cycle: `"circular dependency detected: N tasks involved in cycle"`.
+
+DAG validation runs before the mission loop begins scheduling, preventing tasks from being dispatched into an unresolvable dependency graph.
+
 ## Deadlock Detection
 
-The mission engine detects deadlocks when all remaining tasks are `BLOCKED` with no task currently `RUNNING` or `PENDING`. When a deadlock is detected:
+The mission engine detects deadlocks when all remaining tasks are `BLOCKED` with no task currently `RUNNING`, `PENDING`, or `AWAITING_APPROVAL`. The detection logic:
 
+1. If any task is PENDING, IN_PROGRESS, or AWAITING_APPROVAL -- not deadlocked (progress is still possible)
+2. COMPLETED, SKIPPED, and FAILED tasks are terminal -- they cannot contribute to progress
+3. If all non-terminal tasks are BLOCKED -- deadlock confirmed
+
+When a deadlock is detected:
 1. The mission is marked as `FAILED`
 2. A `mission_deadlock` progress event is emitted
 3. All `AWAITING_APPROVAL` tasks are failed with "mission timed out"
@@ -159,6 +319,56 @@ The mission engine detects deadlocks when all remaining tasks are `BLOCKED` with
 ## Circuit Breaker
 
 The circuit breaker tracks consecutive failures per agent. After 3 consecutive failures (`circuitBreakerThreshold`), the agent is considered unhealthy and tasks are not dispatched to it.
+
+## CooldownManager
+
+The `CooldownManager` (`internal/orchestrator/failover.go`) handles rate limit detection and credential cooldown. When an agent run fails due to a rate limit, the associated credential is placed in a cooldown period to avoid hammering the provider.
+
+### Rate Limit Detection
+
+The `IsRateLimitError` function checks stderr output against known patterns:
+
+| Pattern | Example |
+|---------|---------|
+| `rate limit` | "Rate limit exceeded" |
+| `rate_limit` | "rate_limit_error" |
+| `429` | "HTTP 429" |
+| `too many requests` | "Too many requests" |
+| `quota exceeded` | "Quota exceeded for model" |
+| `insufficient_quota` | "insufficient_quota" |
+| `billing_hard_limit` | "billing_hard_limit_reached" |
+
+Detection requires exit code 1 and a case-insensitive match against any of these patterns.
+
+### Cooldown Behavior
+
+When a rate limit is detected:
+1. `MarkCooldown(credentialID, 5*time.Minute)` places the credential in a 5-minute cooldown
+2. `IsInCooldown(credentialID)` returns true during this period, causing the orchestrator to skip that credential
+3. `ClearExpired()` removes stale entries
+
+The cooldown is per-credential, not per-agent. If an agent has multiple credentials assigned, only the rate-limited credential is paused -- the orchestrator can fall back to an alternate credential.
+
+## Progress Logging
+
+The `ProgressWriter` (`internal/orchestrator/progress.go`) appends structured JSONL events to a per-mission progress file at `data/crews/{crewSlug}/missions/{traceID}/progress.jsonl`.
+
+### Event Types
+
+| Event | Fields | When |
+|-------|--------|------|
+| `mission_started` | `mission_id` | Mission loop begins |
+| `task_started` | `task_id`, `agent`, `title` | Task dispatched to agent |
+| `task_COMPLETED` | `task_id`, `agent`, `summary` | Task finished successfully |
+| `task_FAILED` | `task_id`, `agent`, `error` | Task execution failed |
+| `task_retry` | `task_id`, `agent` | LoopController resets a task for retry |
+| `mission_deadlock` | `mission_id` | All tasks BLOCKED with no progress |
+| `mission_REVIEW` | `mission_id` | All tasks terminal, mission entering review |
+| `mission_timeout` | `mission_id` | Mission exceeded 2-hour timeout |
+
+Each event includes a UTC timestamp. The progress file is append-only and agents can read it during retry iterations to understand what happened in previous attempts (the Ralph Loop "external state" pattern).
+
+The `BuildProgressContext` method formats the JSONL into a human-readable text block suitable for injection into an agent's system prompt.
 
 ## Structured Handoff
 
@@ -174,15 +384,7 @@ artifacts: internal/api/users.go, internal/api/users_test.go
 
 The `parseHandoff` function extracts this structure from agent output. Both `summary` and `confidence` are required for a valid handoff -- partial blocks are treated as unparsed.
 
-## Task Scaling Rules
-
-The Lead agent follows complexity-based scaling rules injected via the system prompt:
-
-| Complexity | Agents | Tool Calls | Duration | Tokens |
-|-----------|--------|-----------|----------|--------|
-| SIMPLE | 1 | 3-10 | ~5 min | ~10K |
-| MEDIUM | 1-2 | 10-15 | ~15 min | ~50K |
-| COMPLEX | 2-4 | 15+ | ~30 min | ~100K |
+The confidence value (`low`, `medium`, `high`) feeds into the approval gate. When parsed as a float (via escalation config), it determines whether the task auto-approves or requires human review.
 
 ## Cross-Crew Missions
 
@@ -228,3 +430,9 @@ Lead agents interact with the orchestration system through the sidecar proxy at 
 | `/mission/templates` | GET | List available workflow templates |
 | `/missions/all` | GET | List all missions (Coordinator) |
 | `/proposal` | POST | Submit a proposal (Coordinator) |
+
+## What's Next
+
+- [Captain](/guides/captain) -- natural language crew and agent management
+- [Keeper](/guides/keeper) -- persistent agent memory across sessions
+- [Scheduling](/guides/scheduling) -- cron-based automated agent runs

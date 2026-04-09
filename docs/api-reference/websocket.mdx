@@ -197,14 +197,20 @@ Chat streaming events from the agent ChatHandler:
 | `status` | Status update |
 | `done` | Agent finished responding |
 | `error` | Error occurred |
-| `result` | Final result |
+| `result` | Final result (includes metadata: `total_cost_usd`, `num_turns`, `usage`) |
 | `system` | System message |
 
 ### Keeper Channel (`keeper:{workspaceId}`)
 
 | Event Type | Description | Payload |
 |---|---|---|
-| `keeper_event` | Credential access request/decision | `{ ... }` |
+| `keeper_event` | Credential access request/decision | `{ request_id, request_type, agent_name, credential_name, intent, decision, reason, risk_score, decided_at }` |
+
+### Providers Channel (`providers`)
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `provider_status` | Container/credential provider status update | `{ provider, status, details }` |
 
 ---
 

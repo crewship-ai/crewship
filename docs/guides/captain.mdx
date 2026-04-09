@@ -204,3 +204,20 @@ WriteAuditLog(ctx, h.db, "captain_tool_call", "CAPTAIN", tc.Name,
 - Chat IDs are derived server-side to prevent cross-user access
 - Rate limiting prevents abuse (20 req/min/user)
 - SSE write deadline is disabled to prevent timeout during long LLM calls (overall 10-minute cap)
+
+## What's Next
+
+<CardGroup cols={2}>
+  <Card title="Your First Crew" icon="users" href="/guides/first-crew">
+    Let Captain help you create and configure your first crew.
+  </Card>
+  <Card title="Orchestration" icon="sitemap" href="/guides/orchestration">
+    Create missions that Captain can monitor and manage.
+  </Card>
+  <Card title="Coordinator" icon="globe" href="/guides/coordinator">
+    Learn about the Coordinator role for cross-crew orchestration.
+  </Card>
+  <Card title="Keeper" icon="shield-check" href="/guides/keeper">
+    Captain works alongside Keeper for credential security.
+  </Card>
+</CardGroup>

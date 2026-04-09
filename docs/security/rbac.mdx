@@ -17,8 +17,8 @@ Users are assigned one of five roles within a workspace:
 | **OWNER** | Highest | Full control, billing, delete workspace |
 | **ADMIN** | High | Manage users, crews, credentials, integrations |
 | **MANAGER** | Medium | Create and manage crews, view credentials |
-| **MEMBER** | Standard | Use crews, send messages, view missions |
-| **VIEWER** | Lowest | Read-only access to workspace data |
+| **MEMBER** | Standard | Read access to all workspace data |
+| **VIEWER** | Lowest | Read access to all workspace data |
 
 Roles are defined as the `OrgRole` enum in the Prisma schema:
 
@@ -31,6 +31,20 @@ enum OrgRole {
   VIEWER
 }
 ```
+
+### Permission Mapping (Code Implementation)
+
+The `canRole()` function in Go maps roles to three internal actions:
+
+| Action | Allowed Roles | Used For |
+|--------|---------------|----------|
+| `read` | All authenticated members | View crews, agents, missions, logs |
+| `create` | OWNER, ADMIN, MANAGER | Create crews, agents, credentials, missions |
+| `manage` | OWNER, ADMIN | Delete resources, manage members, update settings |
+
+<Note>
+  In the current implementation, MEMBER and VIEWER have identical permissions (both map to `read` only). The distinction exists in the schema for future granularity (e.g., MEMBER may gain `send_message` or `run_agent` permissions).
+</Note>
 
 ### Signup Control
 
