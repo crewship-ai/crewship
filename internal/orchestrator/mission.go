@@ -888,18 +888,22 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		}
 		if commentBody != "" {
 			commentID := generateID()
-			_, _ = e.db.ExecContext(ctx,
+			if _, err := e.db.ExecContext(ctx,
 				`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-				commentID, missionID, assignedAgentID.String, commentBody, now, now)
+				commentID, missionID, assignedAgentID.String, commentBody, now, now); err != nil {
+				e.logger.Error("insert task comment", "mission_id", missionID, "error", err)
+			}
 			// Activity log
 			activityID := generateID()
 			action := "task_completed"
 			if taskStatus == "FAILED" {
 				action = "task_failed"
 			}
-			_, _ = e.db.ExecContext(ctx,
+			if _, err := e.db.ExecContext(ctx,
 				`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-				activityID, missionID, assignedAgentID.String, action, commentBody, now)
+				activityID, missionID, assignedAgentID.String, action, commentBody, now); err != nil {
+				e.logger.Error("insert task activity", "mission_id", missionID, "error", err)
+			}
 		}
 	}
 
