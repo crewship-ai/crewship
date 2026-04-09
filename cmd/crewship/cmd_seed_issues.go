@@ -227,8 +227,77 @@ Requires crews with LEAD agents to already exist.`,
 
 		issueDefs := []issueDef{
 			// Core Platform — engineering crew
-			{crew: "engineering", project: "Core Platform", assignee: "tomas", labels: []string{"Feature", "Security"}, title: "Implement WebSocket channel authentication", desc: "Clients can subscribe to any WS channel without auth. Add JWT-based channel validation to prevent cross-workspace data leaks.", priority: "urgent", targetState: "IN_PROGRESS", comment: "Started channel_auth.go — using JWT claims for channel subscription validation. Hub already has broadcast isolation."},
-			{crew: "engineering", project: "Core Platform", assignee: "martin", labels: []string{"Feature", "Performance"}, title: "Add rate limiting to public API endpoints", desc: "No rate limiting exists. Implement per-user token bucket with configurable limits per endpoint category.", priority: "high", targetState: "TODO"},
+			{crew: "engineering", project: "Core Platform", assignee: "tomas", labels: []string{"Feature", "Security"}, title: "Implement WebSocket channel authentication", desc: `## Problem
+
+Clients can currently subscribe to **any** WebSocket channel without authorization. This means workspace data can leak across tenants.
+
+### Current Flow
+
+` + "```" + `
+Client → WS Connect → Subscribe("workspace:abc") → Receives ALL events
+` + "```" + `
+
+> **Security risk:** Any authenticated user can listen to any workspace's real-time events.
+
+### Proposed Solution
+
+| Component | Change | Effort |
+|-----------|--------|--------|
+| ` + "`" + `ws/hub.go` + "`" + ` | Add channel auth middleware | Medium |
+| ` + "`" + `ws/channel_auth.go` + "`" + ` | JWT claim validation | Small |
+| ` + "`" + `middleware.go` + "`" + ` | Extract workspace from token | Small |
+
+### Implementation Steps
+
+1. Parse JWT claims on WS connection
+2. Validate ` + "`" + `workspace_id` + "`" + ` in channel name matches token
+3. Reject unauthorized subscriptions with ` + "`" + `4403 Forbidden` + "`" + `
+4. Add rate limiting per connection (max 10 channels)
+
+### References
+
+- [OWASP WebSocket Security](https://owasp.org/www-project-web-security-testing-guide/)
+- Internal doc: ` + "`" + `/docs/security/ws-auth.md` + "`" + `
+- Related: **ENG-4** (rate limiting)`, priority: "urgent", targetState: "IN_PROGRESS", comment: "Started `channel_auth.go` — using JWT claims for channel subscription validation.\n\n**Progress:**\n- [x] Parse JWT on WS connect\n- [x] Extract workspace_id from claims\n- [ ] Channel name validation\n- [ ] Rate limiting per connection\n\nHub already has broadcast isolation, just need the auth middleware layer."},
+			{crew: "engineering", project: "Core Platform", assignee: "martin", labels: []string{"Feature", "Performance"}, title: "Add rate limiting to public API endpoints", desc: `## Overview
+
+No rate limiting exists on any public API endpoint. A single client can overwhelm the server with unlimited requests.
+
+### Requirements
+
+- Per-user **token bucket** algorithm
+- Configurable limits per endpoint category:
+  - **Read** endpoints: 100 req/min
+  - **Write** endpoints: 30 req/min
+  - **Auth** endpoints: 10 req/min
+- Return ` + "`" + `429 Too Many Requests` + "`" + ` with ` + "`" + `Retry-After` + "`" + ` header
+
+### Example Response
+
+` + "```json" + `
+{
+  "error": "Rate limit exceeded",
+  "retry_after": 32,
+  "limit": "30/min",
+  "remaining": 0
+}
+` + "```" + `
+
+### Middleware Design
+
+` + "```go" + `
+func RateLimitMiddleware(limit int, window time.Duration) func(http.Handler) http.Handler {
+    buckets := sync.Map{}
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            key := extractUserKey(r)
+            // Token bucket logic...
+        })
+    }
+}
+` + "```" + `
+
+> **Note:** Consider using Redis for distributed rate limiting in multi-instance deployments.`, priority: "high", targetState: "TODO"},
 			{crew: "engineering", project: "Core Platform", assignee: "nela", labels: []string{"Feature"}, title: "Implement real-time notification system", desc: "Add notification inbox with desktop push, email digest, and in-app badge counts. Support subscribe/unsubscribe per issue.", priority: "medium"},
 			{crew: "engineering", project: "Core Platform", assignee: "viktor", labels: []string{"Performance", "Improvement"}, title: "Add database connection pooling for WAL mode", desc: "SQLite single-writer bottleneck under concurrent load. Evaluate WAL mode with busy_timeout and connection pool.", priority: "high", targetState: "TODO"},
 
