@@ -6,6 +6,7 @@ import { Search, X, ChevronDown, ChevronRight, Filter } from "lucide-react"
 import { StatusIcon } from "@/components/features/issues/status-icon"
 import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { getCrewIconDef, getCrewDotColor } from "@/lib/crew-icon"
@@ -252,32 +253,40 @@ export function UnifiedExplorer({
           </motion.span>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-1 pb-1">
-          <AnimatePresence mode="popLayout">
-            {displayed.map((issue, idx) => {
-              const isSelected = selectedIssue?.id === issue.id
-              return (
-                <motion.button
-                  key={issue.id}
-                  layout
-                  {...listItemAnim}
-                  transition={{ duration: 0.15, delay: idx * 0.02 }}
-                  onClick={() => onIssueSelect(issue)}
-                  className={cn(
-                    "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors hover:bg-white/[0.04]",
-                    isSelected ? "bg-blue-500/10 border-l-2 border-l-blue-400" : "border-l-2 border-l-transparent",
-                  )}
-                >
-                  <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
-                  <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0 w-[44px] truncate">{issue.identifier || "--"}</span>
-                  <span className="text-xs text-foreground/80 truncate flex-1" title={issue.title}>{issue.title}</span>
-                  {issue.assignee_id && (
-                    <img src={getAgentAvatarUrl(issue.assignee_id)} alt={issue.assignee_name || ""} title={issue.assignee_name || ""} className="h-4 w-4 rounded-full shrink-0" />
-                  )}
-                  <PriorityIcon priority={issue.priority || "none"} className="h-3 w-3 shrink-0" />
-                </motion.button>
-              )
-            })}
-          </AnimatePresence>
+          <TooltipProvider delayDuration={400}>
+            <AnimatePresence mode="popLayout">
+              {displayed.map((issue, idx) => {
+                const isSelected = selectedIssue?.id === issue.id
+                return (
+                  <Tooltip key={issue.id}>
+                    <TooltipTrigger asChild>
+                      <motion.button
+                        layout
+                        {...listItemAnim}
+                        transition={{ duration: 0.15, delay: idx * 0.02 }}
+                        onClick={() => onIssueSelect(issue)}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left transition-colors hover:bg-white/[0.04]",
+                          isSelected ? "bg-blue-500/10 border-l-2 border-l-blue-400" : "border-l-2 border-l-transparent",
+                        )}
+                      >
+                        <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+                        <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0 w-[44px] truncate">{issue.identifier || "--"}</span>
+                        <span className="text-xs text-foreground/80 truncate flex-1">{issue.title}</span>
+                        {issue.assignee_id && (
+                          <img src={getAgentAvatarUrl(issue.assignee_id)} alt={issue.assignee_name || ""} className="h-4 w-4 rounded-full shrink-0" />
+                        )}
+                        <PriorityIcon priority={issue.priority || "none"} className="h-3 w-3 shrink-0" />
+                      </motion.button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={8}>
+                      <span className="font-medium">{issue.identifier}</span>{" "}{issue.title}
+                    </TooltipContent>
+                  </Tooltip>
+                )
+              })}
+            </AnimatePresence>
+          </TooltipProvider>
           {displayed.length === 0 && (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}
