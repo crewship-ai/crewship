@@ -11,6 +11,7 @@ import {
   Wrench,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { CREW_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 import type { WorkflowTemplate, TemplateDefinition } from "@/lib/types/template"
 
 interface TemplateGalleryProps {
@@ -25,9 +26,9 @@ const iconMap: Record<string, React.ElementType> = {
 }
 
 const stepColors = {
-  default: { fill: "#3b82f6", border: "#2563eb", text: "#93c5fd" },
-  loop: { fill: "#10b981", border: "#059669", text: "#6ee7b7" },
-  lead: { fill: "#8b5cf6", border: "#7c3aed", text: "#c4b5fd" },
+  default: { fill: CREW_COLORS.blue, border: "#2563eb", text: "#93c5fd" },
+  loop: { fill: CREW_COLORS.emerald, border: "#059669", text: "#6ee7b7" },
+  lead: { fill: CREW_COLORS.violet, border: "#7c3aed", text: "#c4b5fd" },
 }
 
 function TemplateMiniGraph({ steps }: { steps: TemplateDefinition["steps"] }) {
@@ -76,7 +77,7 @@ function TemplateMiniGraph({ steps }: { steps: TemplateDefinition["steps"] }) {
     <svg width="100%" height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="overflow-visible">
       <defs>
         <marker id="tmpl-arrow" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto">
-          <path d="M0,0 L6,2 L0,4" fill="#3b82f6" opacity="0.6" />
+          <path d="M0,0 L6,2 L0,4" fill={CREW_COLORS.blue} opacity="0.6" />
         </marker>
       </defs>
 
@@ -96,7 +97,7 @@ function TemplateMiniGraph({ steps }: { steps: TemplateDefinition["steps"] }) {
               key={`e-${depId}-${step.id}`}
               d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
               fill="none"
-              stroke="#3b82f6"
+              stroke={CREW_COLORS.blue}
               strokeWidth={1.5}
               strokeDasharray="4 3"
               strokeOpacity={0.4}
@@ -241,9 +242,9 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
                 <div className="flex items-center gap-2.5 mb-3">
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                    style={{ backgroundColor: (tmpl.color || "#6b7280") + "18" }}
+                    style={{ backgroundColor: (tmpl.color || CREW_COLOR_DEFAULT) + "18" }}
                   >
-                    <Icon className="h-4 w-4" style={{ color: tmpl.color || "#6b7280" }} />
+                    <Icon className="h-4 w-4" style={{ color: tmpl.color || CREW_COLOR_DEFAULT }} />
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">

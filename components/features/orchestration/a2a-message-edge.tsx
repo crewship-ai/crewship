@@ -6,6 +6,7 @@ import {
   EdgeLabelRenderer,
   type EdgeProps,
 } from "@xyflow/react"
+import { MESSAGE_TYPE_COLORS, DIRECTION_COLORS, GRAPH_CHROME } from "@/lib/colors"
 
 interface A2AMessageEdgeData {
   messageCount: number
@@ -19,12 +20,6 @@ interface A2AMessageEdgeData {
   [key: string]: unknown
 }
 
-const messageTypeColors: Record<string, string> = {
-  "@assign": "#3b82f6",
-  "@ask": "#a855f7",
-  "@broadcast": "#06b6d4",
-  "@result": "#22c55e",
-}
 
 function A2AMessageEdgeInner({
   id,
@@ -49,8 +44,8 @@ function A2AMessageEdgeInner({
   const dimmed = d?.dimmed ?? false
 
   const isBidirectional = direction === "bidirectional"
-  const color = isBidirectional ? "#06b6d4" : "#f59e0b"
-  const typeColor = messageTypeColors[lastMessageType] ?? "#64748b"
+  const color = isBidirectional ? DIRECTION_COLORS.bidirectional : DIRECTION_COLORS.unidirectional
+  const typeColor = MESSAGE_TYPE_COLORS[lastMessageType] ?? GRAPH_CHROME.dimmedEdge
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -77,7 +72,7 @@ function A2AMessageEdgeInner({
       <path
         d={edgePath}
         fill="none"
-        stroke="#334155"
+        stroke={GRAPH_CHROME.dimmedEdge}
         strokeWidth={1}
         strokeOpacity={0.1}
       />

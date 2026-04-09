@@ -1025,8 +1025,7 @@ export function IssueDetailInline({
                               onClick={async () => {
                                 setCreatingLabel(true)
                                 try {
-                                  const colors = ["#3b82f6", "#8b5cf6", "#ec4899", "#f97316", "#22c55e", "#06b6d4", "#eab308", "#ef4444"]
-                                  const color = colors[Math.floor(Math.random() * colors.length)]
+                                  const color = LABEL_PRESET_COLORS[Math.floor(Math.random() * LABEL_PRESET_COLORS.length)].value
                                   const res = await fetch(`/api/v1/labels?workspace_id=${workspaceId}`, {
                                     method: "POST",
                                     headers: { "Content-Type": "application/json" },

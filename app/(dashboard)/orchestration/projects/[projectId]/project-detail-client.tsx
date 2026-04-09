@@ -38,6 +38,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
+import { ISSUE_STATUS_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 import { toast } from "sonner"
 import type {
   IssuePriority,
@@ -68,16 +69,6 @@ const ALL_PRIORITIES: { value: IssuePriority; label: string }[] = [
   { value: "none", label: "No priority" },
 ]
 
-const STATUS_COLORS: Record<string, string> = {
-  BACKLOG: "#6b7280",
-  TODO: "#a3a3a3",
-  IN_PROGRESS: "#3b82f6",
-  REVIEW: "#a855f7",
-  DONE: "#22c55e",
-  COMPLETED: "#22c55e",
-  CANCELLED: "#ef4444",
-  FAILED: "#ef4444",
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -482,7 +473,7 @@ export function ProjectDetailClient() {
       status,
       value,
       pct: (value / total) * 100,
-      color: STATUS_COLORS[status] || "#6b7280",
+      color: ISSUE_STATUS_COLORS[status] || CREW_COLOR_DEFAULT,
     }))
   }, [stats?.by_status])
 
@@ -1592,7 +1583,7 @@ function ProjectSidebar({
                           cy="10"
                           r="8"
                           fill="none"
-                          stroke="#3b82f6"
+                          stroke={ISSUE_STATUS_COLORS.IN_PROGRESS}
                           strokeWidth="2"
                           strokeDasharray={`${(pct / 100) * 2 * Math.PI * 8} ${2 * Math.PI * 8}`}
                           strokeDashoffset={0}

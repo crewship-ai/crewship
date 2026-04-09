@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { LABEL_PRESET_COLORS } from "@/lib/colors"
 import { toast } from "sonner"
 import type { IssueLabel } from "@/lib/types/mission"
 
@@ -25,16 +26,7 @@ interface LabelsDialogProps {
 // Inline styles are used for color swatches and label dots because label colors
 // are stored as hex values in the database. Arbitrary hex colors from user-defined
 // labels cannot be reliably mapped to Tailwind utility classes.
-const PRESET_COLORS = [
-  { name: "Red", value: "#EF4444" },
-  { name: "Orange", value: "#F97316" },
-  { name: "Yellow", value: "#EAB308" },
-  { name: "Green", value: "#22C55E" },
-  { name: "Blue", value: "#3B82F6" },
-  { name: "Purple", value: "#A855F7" },
-  { name: "Pink", value: "#EC4899" },
-  { name: "Gray", value: "#6B7280" },
-]
+const PRESET_COLORS = LABEL_PRESET_COLORS
 
 export function LabelsDialog({
   open,
