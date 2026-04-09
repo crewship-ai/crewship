@@ -11,11 +11,13 @@ import (
 	"time"
 )
 
+// CrewConnectionHandler manages connections between crews that enable cross-crew communication.
 type CrewConnectionHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewCrewConnectionHandler creates a CrewConnectionHandler with the given database and logger.
 func NewCrewConnectionHandler(db *sql.DB, logger *slog.Logger) *CrewConnectionHandler {
 	return &CrewConnectionHandler{db: db, logger: logger}
 }

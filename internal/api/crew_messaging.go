@@ -23,6 +23,7 @@ type CrewMessagingHandler struct {
 	logger      *slog.Logger
 }
 
+// NewCrewMessagingHandler creates a CrewMessagingHandler with the given database, storage path, and logger.
 func NewCrewMessagingHandler(db *sql.DB, storagePath string, logger *slog.Logger) *CrewMessagingHandler {
 	return &CrewMessagingHandler{db: db, storagePath: storagePath, logger: logger}
 }

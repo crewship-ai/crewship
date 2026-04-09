@@ -146,11 +146,13 @@ func autoAssignCredentials(ctx context.Context, db *sql.DB, wsID, agentID, now s
 	}
 }
 
+// CrewTemplateHandler provides endpoints for listing and applying crew templates.
 type CrewTemplateHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewCrewTemplateHandler creates a CrewTemplateHandler with the given database and logger.
 func NewCrewTemplateHandler(db *sql.DB, logger *slog.Logger) *CrewTemplateHandler {
 	return &CrewTemplateHandler{db: db, logger: logger}
 }

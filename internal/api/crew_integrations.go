@@ -58,6 +58,8 @@ type createCrewIntegrationRequest struct {
 // All crew integrations (cross-crew view for Integrations page)
 // ==========================================
 
+// ListAllCrewIntegrations returns all MCP server integrations across all crews in the workspace.
+// GET /api/v1/integrations/crews — used by the cross-crew integrations overview page.
 func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
@@ -173,6 +175,8 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 // Crew MCP Servers
 // ==========================================
 
+// ListCrewIntegrations returns all MCP server integrations for a specific crew.
+// GET /api/v1/crews/{crewId}/integrations
 func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	crewID := r.PathValue("crewId")
@@ -303,6 +307,8 @@ func (h *IntegrationHandler) populateAuthStatus(ctx context.Context, results []c
 	return nil
 }
 
+// CreateCrewIntegration adds a new MCP server integration to a crew.
+// POST /api/v1/crews/{crewId}/integrations
 func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -392,6 +398,8 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 	})
 }
 
+// UpdateCrewIntegration modifies an existing MCP server integration on a crew.
+// PATCH /api/v1/crews/{crewId}/integrations/{integrationId}
 func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -514,6 +522,8 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, s)
 }
 
+// DeleteCrewIntegration removes an MCP server integration from a crew and its agent bindings.
+// DELETE /api/v1/crews/{crewId}/integrations/{integrationId}
 func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
