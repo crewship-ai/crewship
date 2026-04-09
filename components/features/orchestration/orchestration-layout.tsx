@@ -526,14 +526,14 @@ export function OrchestrationLayout({
             key={id}
             onClick={() => setActiveTab(id)}
             className={cn(
-              "flex items-center gap-1 px-2 sm:px-3 h-full text-[11px] sm:text-[12px] font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
+              "flex items-center gap-1.5 px-2.5 h-full text-xs font-medium border-b-2 transition-all duration-100 relative top-px whitespace-nowrap shrink-0",
               activeTab === id
                 ? "border-blue-400 text-blue-400"
                 : "border-transparent text-muted-foreground hover:text-foreground/80",
             )}
           >
             <Icon className="h-3 w-3 opacity-75" />
-            <span className="hidden sm:inline">{label}</span>
+            {label}
           </button>
         ))}
 
