@@ -227,7 +227,7 @@ export function UnifiedExplorer({
                       )}
                     >
                       <IconComp className="h-3.5 w-3.5 shrink-0" style={{ color: getCrewDotColor(p.color) }} />
-                      <span className="text-xs text-foreground/80 truncate flex-1">{p.name}</span>
+                      <span className="text-xs text-foreground/80 truncate flex-1" title={p.name}>{p.name}</span>
                       <span className="text-[10px] text-muted-foreground/40 tabular-nums">{p.issue_count}</span>
                     </button>
                   )
@@ -269,7 +269,7 @@ export function UnifiedExplorer({
                 >
                   <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
                   <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0 w-[44px] truncate">{issue.identifier || "--"}</span>
-                  <span className="text-xs text-foreground/80 truncate flex-1">{issue.title}</span>
+                  <span className="text-xs text-foreground/80 truncate flex-1" title={issue.title}>{issue.title}</span>
                   {issue.assignee_id && (
                     <img src={getAgentAvatarUrl(issue.assignee_id)} alt={issue.assignee_name || ""} title={issue.assignee_name || ""} className="h-4 w-4 rounded-full shrink-0" />
                   )}
