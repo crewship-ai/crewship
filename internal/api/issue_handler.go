@@ -122,7 +122,8 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
 		       END,
 		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at
+		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
+		       m.project_id
 		FROM missions m
 		LEFT JOIN crews c ON m.crew_id = c.id
 		WHERE m.workspace_id = ?`
@@ -156,6 +157,12 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 			args = append(args, strings.TrimSpace(p))
 		}
 		query += " AND m.priority IN (" + strings.Join(placeholders, ",") + ")"
+	}
+
+	// Project filter
+	if projectID := r.URL.Query().Get("project_id"); projectID != "" {
+		query += " AND m.project_id = ?"
+		args = append(args, projectID)
 	}
 
 	// Crew filter
@@ -213,6 +220,7 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 			&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
 			&issue.DueDate, &issue.SortOrder, &issue.MissionType,
 			&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
+			&issue.ProjectID,
 		); err != nil {
 			h.logger.Error("scan issue", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
@@ -486,7 +494,8 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
 		       END,
 		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at
+		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
+		       m.project_id
 		FROM missions m
 		LEFT JOIN crews c ON m.crew_id = c.id
 		WHERE m.identifier = ? AND m.crew_id = ? AND m.workspace_id = ?`,
@@ -496,6 +505,7 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
 		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
 		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
+		&issue.ProjectID,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -552,7 +562,8 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
 		       END,
 		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at
+		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
+		       m.project_id
 		FROM missions m
 		LEFT JOIN crews c ON m.crew_id = c.id
 		WHERE m.identifier = ? AND m.workspace_id = ?`,
@@ -562,6 +573,7 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
 		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
 		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
+		&issue.ProjectID,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -616,9 +628,10 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Priority     *string  `json:"priority"`
 		AssigneeType *string  `json:"assignee_type"`
 		AssigneeID   *string  `json:"assignee_id"`
-		DueDate      *string  `json:"due_date"`
-		ProjectID    *string  `json:"project_id"`
-		SortOrder    *float64 `json:"sort_order"`
+		DueDate      *string   `json:"due_date"`
+		ProjectID    *string   `json:"project_id"`
+		SortOrder    *float64  `json:"sort_order"`
+		Labels       *[]string `json:"labels"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -705,6 +718,19 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("update issue", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
+	}
+
+	// Update labels if provided
+	if req.Labels != nil {
+		// Replace all labels: delete existing, insert new
+		if _, err := h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, missionID); err != nil {
+			h.logger.Error("delete issue labels", "error", err)
+		}
+		for _, labelID := range *req.Labels {
+			_, _ = h.db.ExecContext(r.Context(),
+				`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
+				missionID, labelID)
+		}
 	}
 
 	if h.hub != nil {

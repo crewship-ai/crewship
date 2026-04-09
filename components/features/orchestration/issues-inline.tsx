@@ -175,8 +175,8 @@ export function IssuesListInline({ issues, onIssueClick }: IssuesListInlineProps
 /*  IssueDetailInline — right panel (Linear-style)                            */
 /* -------------------------------------------------------------------------- */
 
-const ALL_STATUSES: MissionStatus[] = [
-  "BACKLOG", "TODO", "PLANNING", "IN_PROGRESS", "REVIEW", "COMPLETED", "FAILED", "CANCELLED", "DUPLICATE",
+const ISSUE_STATUSES: MissionStatus[] = [
+  "BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "DONE", "CANCELLED",
 ]
 
 const ALL_PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
@@ -296,6 +296,8 @@ export function IssueDetailInline({
   const [priorityOpen, setPriorityOpen] = useState(false)
   const [labelsPopoverOpen, setLabelsPopoverOpen] = useState(false)
   const [projectPopoverOpen, setProjectPopoverOpen] = useState(false)
+  const [assigneeOpen, setAssigneeOpen] = useState(false)
+  const [crewAgents, setCrewAgents] = useState<{id: string, name: string, slug: string}[]>([])
 
   const matchingProject = projects.find((p) => p.id === issue.project_id)
 
@@ -330,6 +332,14 @@ export function IssueDetailInline({
     fetchRelations()
   }, [fetchRelations])
 
+  useEffect(() => {
+    if (!issue.crew_id || !workspaceId) return
+    fetch(`/api/v1/agents?workspace_id=${workspaceId}&crew_id=${issue.crew_id}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(agents => setCrewAgents(agents.map((a: any) => ({ id: a.id, name: a.name, slug: a.slug }))))
+      .catch(() => {})
+  }, [issue.crew_id, workspaceId])
+
   const patchIssue = useCallback(
     async (patch: Record<string, unknown>) => {
       if (!issue.crew_id || !issue.identifier) return
@@ -347,6 +357,7 @@ export function IssueDetailInline({
           toast.error(b?.detail ?? "Failed to update issue")
           return
         }
+        toast.success("Updated")
         onUpdated()
       } catch {
         toast.error("Failed to update issue")
@@ -526,7 +537,7 @@ export function IssueDetailInline({
                       <CommandList>
                         <CommandEmpty>No status found.</CommandEmpty>
                         <CommandGroup>
-                          {ALL_STATUSES.map((s) => (
+                          {ISSUE_STATUSES.map((s) => (
                             <CommandItem
                               key={s}
                               value={s}
@@ -592,22 +603,83 @@ export function IssueDetailInline({
                 </Popover>
 
                 {/* Assignee */}
-                <PropertyRow>
-                  <User className="h-3.5 w-3.5 text-muted-foreground/50" />
-                  <span className="text-[12px] text-foreground/70">
-                    {issue.assignee_name || "Unassigned"}
-                  </span>
-                </PropertyRow>
+                <Popover open={assigneeOpen} onOpenChange={setAssigneeOpen}>
+                  <PopoverTrigger asChild>
+                    <div>
+                      <PropertyRow>
+                        <User className="h-3.5 w-3.5 text-muted-foreground/50" />
+                        <span className="text-[12px] text-foreground/70 hover:text-foreground transition-colors">
+                          {issue.assignee_name || "Unassigned"}
+                        </span>
+                      </PropertyRow>
+                    </div>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-1" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search agents..." className="h-7 text-xs" />
+                      <CommandList>
+                        <CommandEmpty className="text-xs text-center py-2">No agents found</CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem
+                            value="unassigned"
+                            className="text-xs"
+                            onSelect={() => {
+                              patchIssue({ assignee_type: null, assignee_id: null })
+                              setAssigneeOpen(false)
+                            }}
+                          >
+                            Unassigned
+                          </CommandItem>
+                          {crewAgents.map(agent => (
+                            <CommandItem
+                              key={agent.id}
+                              value={agent.name}
+                              className="text-xs"
+                              onSelect={() => {
+                                patchIssue({ assignee_type: "agent", assignee_id: agent.id })
+                                setAssigneeOpen(false)
+                              }}
+                            >
+                              {agent.name} <span className="text-muted-foreground/50 ml-1">@{agent.slug}</span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
 
                 {/* Due date */}
-                <PropertyRow>
-                  <Clock className="h-3.5 w-3.5 text-muted-foreground/50" />
-                  <span className="text-[12px] text-foreground/70">
-                    {issue.due_date
-                      ? new Date(issue.due_date).toLocaleDateString()
-                      : "No due date"}
-                  </span>
-                </PropertyRow>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <div>
+                      <PropertyRow>
+                        <Clock className="h-3.5 w-3.5 text-muted-foreground/50" />
+                        <span className="text-[12px] text-foreground/70 hover:text-foreground transition-colors">
+                          {issue.due_date ? new Date(issue.due_date).toLocaleDateString() : "No due date"}
+                        </span>
+                      </PropertyRow>
+                    </div>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-2" align="start">
+                    <input
+                      type="date"
+                      className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none"
+                      defaultValue={issue.due_date || ""}
+                      onChange={(e) => {
+                        patchIssue(e.target.value ? { due_date: e.target.value } : { due_date: null })
+                      }}
+                    />
+                    {issue.due_date && (
+                      <button
+                        className="text-[11px] text-red-400 mt-1 hover:underline"
+                        onClick={() => patchIssue({ due_date: null })}
+                      >
+                        Remove date
+                      </button>
+                    )}
+                  </PopoverContent>
+                </Popover>
               </div>
             )}
           </div>
@@ -638,7 +710,16 @@ export function IssueDetailInline({
                                 key={label.id}
                                 value={label.name}
                                 className="flex items-center gap-2 text-xs"
-                                disabled={isAssigned}
+                                onSelect={() => {
+                                  if (isAssigned) {
+                                    const remaining = (issue.labels || []).filter(l => l.id !== label.id).map(l => l.id)
+                                    patchIssue({ labels: remaining })
+                                  } else {
+                                    const updated = [...(issue.labels || []).map(l => l.id), label.id]
+                                    patchIssue({ labels: updated })
+                                  }
+                                  setLabelsPopoverOpen(false)
+                                }}
                               >
                                 <span
                                   className="h-2.5 w-2.5 rounded-full shrink-0"

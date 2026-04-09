@@ -905,7 +905,21 @@ export function OrchestrationLayout({
                       projects={projects}
                       workspaceId={workspaceId}
                       onClose={() => { setSelectedIssue(null); setIssueComments([]) }}
-                      onUpdated={() => { fetchIssues(); if (selectedIssue) handleIssueSelect(selectedIssue); fetchProjects() }}
+                      onUpdated={async () => {
+                        await fetchIssues()
+                        if (selectedIssue?.crew_id && selectedIssue?.identifier) {
+                          try {
+                            const res = await fetch(`/api/v1/issues/${selectedIssue.identifier}?workspace_id=${workspaceId}`)
+                            if (res.ok) {
+                              const fresh = await res.json()
+                              setSelectedIssue(fresh)
+                              const commRes = await fetch(`/api/v1/crews/${fresh.crew_id}/issues/${fresh.identifier}/comments?workspace_id=${workspaceId}`)
+                              if (commRes.ok) setIssueComments(await commRes.json())
+                            }
+                          } catch {}
+                        }
+                        fetchProjects()
+                      }}
                     />
                   ) : (
                     <ContextDetailPanel context={detailContext} onClose={handleDetailClose} onTaskAction={handleTaskAction} />
@@ -937,7 +951,21 @@ export function OrchestrationLayout({
                       projects={projects}
                       workspaceId={workspaceId}
                       onClose={() => { setSelectedIssue(null); setIssueComments([]) }}
-                      onUpdated={() => { fetchIssues(); if (selectedIssue) handleIssueSelect(selectedIssue); fetchProjects() }}
+                      onUpdated={async () => {
+                        await fetchIssues()
+                        if (selectedIssue?.crew_id && selectedIssue?.identifier) {
+                          try {
+                            const res = await fetch(`/api/v1/issues/${selectedIssue.identifier}?workspace_id=${workspaceId}`)
+                            if (res.ok) {
+                              const fresh = await res.json()
+                              setSelectedIssue(fresh)
+                              const commRes = await fetch(`/api/v1/crews/${fresh.crew_id}/issues/${fresh.identifier}/comments?workspace_id=${workspaceId}`)
+                              if (commRes.ok) setIssueComments(await commRes.json())
+                            }
+                          } catch {}
+                        }
+                        fetchProjects()
+                      }}
                     />
                   ) : (
                     <ContextDetailPanel

@@ -5,6 +5,7 @@ export type MissionStatus =
   | "IN_PROGRESS"
   | "REVIEW"
   | "COMPLETED"
+  | "DONE"
   | "FAILED"
   | "CANCELLED"
   | "DUPLICATE"
