@@ -85,6 +85,13 @@ const ALL_PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "non
 // Helpers
 // ---------------------------------------------------------------------------
 
+function isMac(): boolean {
+  if (typeof navigator === "undefined") return false
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } }
+  const platform = nav.userAgentData?.platform ?? navigator.platform ?? ""
+  return platform.includes("Mac")
+}
+
 function relativeTime(dateStr: string): string {
   const now = Date.now()
   const date = new Date(dateStr).getTime()
@@ -325,10 +332,12 @@ export function IssueDetailClient() {
   // Realtime updates
   useRealtimeEvent(
     "mission.updated",
-    useCallback(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    useCallback((payload: any) => {
+      if (payload?.id && payload.id !== issue?.id) return
       fetchIssue()
       fetchActivity()
-    }, [fetchIssue, fetchActivity]),
+    }, [fetchIssue, fetchActivity, issue?.id]),
   )
 
   // -----------------------------------------------------------------------
@@ -715,7 +724,7 @@ export function IssueDetailClient() {
                   />
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-muted-foreground/40">
-                      {(typeof navigator !== "undefined" ? ((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform ?? "") : "").includes("Mac") ? "Cmd" : "Ctrl"}+Enter to send
+                      {isMac() ? "Cmd" : "Ctrl"}+Enter to send
                     </span>
                     <Button
                       size="sm"

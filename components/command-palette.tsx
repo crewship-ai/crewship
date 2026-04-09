@@ -143,18 +143,17 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       fetch(`/api/v1/projects?${qs}`, opts),
     ]).then(async ([agentsRes, crewsRes, skillsRes, credsRes, issuesRes, projectsRes]) => {
       if (ac.signal.aborted) return
-      if (agentsRes.status === "fulfilled" && agentsRes.value.ok)
-        setAgents(await agentsRes.value.json())
-      if (crewsRes.status === "fulfilled" && crewsRes.value.ok)
-        setCrews(await crewsRes.value.json())
-      if (skillsRes.status === "fulfilled" && skillsRes.value.ok)
-        setSkills(await skillsRes.value.json())
-      if (credsRes.status === "fulfilled" && credsRes.value.ok)
-        setCredentials(await credsRes.value.json())
-      if (issuesRes.status === "fulfilled" && issuesRes.value.ok)
-        setIssues(await issuesRes.value.json())
-      if (projectsRes.status === "fulfilled" && projectsRes.value.ok)
-        setProjects(await projectsRes.value.json())
+      const safeJson = async (r: PromiseSettledResult<Response>) =>
+        r.status === "fulfilled" && r.value.ok ? r.value.json() : null
+      const [agentsData, crewsData, skillsData, credsData, issuesData, projectsData] =
+        await Promise.all([safeJson(agentsRes), safeJson(crewsRes), safeJson(skillsRes), safeJson(credsRes), safeJson(issuesRes), safeJson(projectsRes)])
+      if (ac.signal.aborted) return
+      if (agentsData) setAgents(agentsData)
+      if (crewsData) setCrews(crewsData)
+      if (skillsData) setSkills(skillsData)
+      if (credsData) setCredentials(credsData)
+      if (issuesData) setIssues(issuesData)
+      if (projectsData) setProjects(projectsData)
     })
 
     return () => ac.abort()

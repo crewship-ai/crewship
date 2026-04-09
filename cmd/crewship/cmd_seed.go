@@ -203,6 +203,8 @@ func seedNuke(client *cli.Client) error {
 						}
 						if r.StatusCode >= 400 {
 							fmt.Fprintf(os.Stderr, "  ! nuke transition %s→%s: HTTP %d\n", *iss.Identifier, status, r.StatusCode)
+							r.Body.Close()
+							break
 						}
 						r.Body.Close()
 					}
