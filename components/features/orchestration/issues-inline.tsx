@@ -12,6 +12,7 @@ import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
 import { IssuesListView } from "@/components/features/issues/issues-list-view"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { Mission, MissionStatus, IssueLabel, IssueComment, IssuePriority, IssueRelation, RelationType, Project, ProjectStatus, IssueActivity } from "@/lib/types/mission"
 
 /* -------------------------------------------------------------------------- */
@@ -130,6 +131,13 @@ export function IssuesExplorerPanel({
                   {issue.identifier || "--"}
                 </span>
                 <span className="text-[11px] text-foreground/80 truncate flex-1">{issue.title}</span>
+                {issue.assignee_id && (
+                  <img
+                    src={getAgentAvatarUrl(issue.assignee_id)}
+                    alt=""
+                    className="h-4 w-4 rounded-full shrink-0"
+                  />
+                )}
                 <PriorityIcon priority={issue.priority || "none"} className="h-3 w-3 shrink-0" />
               </button>
             )
@@ -1387,25 +1395,108 @@ const PRIORITY_OPTIONS: { value: string; label: string }[] = [
   { value: "none", label: "No priority" },
 ]
 
+interface ProjectStats {
+  total_issues: number
+  completed_issues: number
+  by_status: Record<string, number>
+  by_assignee: { agent_id: string; agent_name: string; total: number; completed: number }[]
+  by_label: { label_name: string; color: string; count: number }[]
+  crews: string[]
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  BACKLOG: "#6b7280",
+  TODO: "#a3a3a3",
+  IN_PROGRESS: "#3b82f6",
+  REVIEW: "#a855f7",
+  DONE: "#22c55e",
+  CANCELLED: "#ef4444",
+}
+
 export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }: ProjectDetailInlineProps) {
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(project.name)
+  const [stats, setStats] = useState<ProjectStats | null>(null)
+  const [allAgents, setAllAgents] = useState<{ id: string; name: string; slug: string }[]>([])
 
-  const patchProject = useCallback(async (fields: Record<string, unknown>) => {
-    const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-    const res = await fetch(`/api/v1/projects/${project.id}${qs}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fields),
+  // Section collapse state
+  const [propertiesOpen, setPropertiesOpen] = useState(true)
+  const [milestonesOpen, setMilestonesOpen] = useState(false)
+  const [progressOpen, setProgressOpen] = useState(true)
+
+  // Popover state
+  const [leadOpen, setLeadOpen] = useState(false)
+
+  // Progress breakdown tab
+  const [progressTab, setProgressTab] = useState<"assignees" | "labels">("assignees")
+
+  // Fetch stats + agents
+  useEffect(() => {
+    fetch(`/api/v1/projects/${project.id}/stats?workspace_id=${workspaceId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setStats)
+      .catch(() => {})
+    fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((agents: { id: string; name: string; slug: string }[]) =>
+        setAllAgents(agents.map((a) => ({ id: a.id, name: a.name, slug: a.slug }))),
+      )
+      .catch(() => {})
+  }, [project.id, workspaceId])
+
+  const patchProject = useCallback(
+    async (fields: Record<string, unknown>) => {
+      const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+      const res = await fetch(`/api/v1/projects/${project.id}${qs}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      })
+      if (res.ok) {
+        toast.success("Project updated")
+        onUpdated()
+      } else {
+        const err = await res.json().catch(() => null)
+        toast.error(err?.detail || "Failed to update project")
+      }
+    },
+    [project.id, workspaceId, onUpdated],
+  )
+
+  // Donut chart for status breakdown
+  const donutSegments = useMemo(() => {
+    if (!stats?.by_status) return []
+    const entries = Object.entries(stats.by_status).filter(([, v]) => v > 0)
+    const total = entries.reduce((sum, [, v]) => sum + v, 0)
+    if (total === 0) return []
+    const segments: { status: string; value: number; pct: number; color: string }[] = []
+    entries.forEach(([status, value]) => {
+      segments.push({
+        status,
+        value,
+        pct: (value / total) * 100,
+        color: STATUS_COLORS[status] || "#6b7280",
+      })
     })
-    if (res.ok) {
-      toast.success("Project updated")
-      onUpdated()
-    } else {
-      const err = await res.json().catch(() => null)
-      toast.error(err?.detail || "Failed to update project")
-    }
-  }, [project.id, workspaceId, onUpdated])
+    return segments
+  }, [stats?.by_status])
+
+  const donutPaths = useMemo(() => {
+    if (donutSegments.length === 0) return []
+    const radius = 16
+    const circumference = 2 * Math.PI * radius
+    let offset = 0
+    return donutSegments.map((seg) => {
+      const dashLen = (seg.pct / 100) * circumference
+      const path = {
+        ...seg,
+        dasharray: `${dashLen} ${circumference - dashLen}`,
+        dashoffset: -offset,
+      }
+      offset += dashLen
+      return path
+    })
+  }, [donutSegments])
 
   return (
     <div className="h-full flex flex-col border-l border-white/[0.06] bg-card">
@@ -1415,7 +1506,10 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
           <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: project.color }} />
           <span className="text-[11px] font-mono text-muted-foreground/60">Project</span>
         </div>
-        <button onClick={onClose} className="p-1 rounded hover:bg-white/[0.06] text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+        <button
+          onClick={onClose}
+          className="p-1 rounded hover:bg-white/[0.06] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+        >
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -1432,13 +1526,22 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                 if (titleDraft.trim() && titleDraft !== project.name) patchProject({ name: titleDraft.trim() })
                 setEditingTitle(false)
               }}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setTitleDraft(project.name); setEditingTitle(false) } }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur()
+                if (e.key === "Escape") {
+                  setTitleDraft(project.name)
+                  setEditingTitle(false)
+                }
+              }}
               autoFocus
             />
           ) : (
             <h2
               className="text-[15px] font-semibold text-foreground cursor-pointer hover:text-blue-400 transition-colors"
-              onClick={() => { setTitleDraft(project.name); setEditingTitle(true) }}
+              onClick={() => {
+                setTitleDraft(project.name)
+                setEditingTitle(true)
+              }}
             >
               {project.name}
             </h2>
@@ -1448,112 +1551,393 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
             <p className="text-[12px] text-muted-foreground/70 leading-relaxed">{project.description}</p>
           )}
 
-          {/* Properties */}
-          <div className="space-y-1">
-            <div className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider pb-1">Properties</div>
+          {/* ── Properties ─────────────────────────────────────────── */}
+          <SectionHeader title="Properties" open={propertiesOpen} onToggle={() => setPropertiesOpen((v) => !v)} />
+          {propertiesOpen && (
+            <div className="space-y-0.5">
+              {/* Status */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <div>
+                    <PropertyRow>
+                      <ProjectStatusIcon status={project.status} />
+                      <span className="text-[12px] text-foreground/80">
+                        {PROJECT_STATUSES.find((s) => s.value === project.status)?.label || project.status}
+                      </span>
+                    </PropertyRow>
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent className="w-48 p-1" align="start">
+                  {PROJECT_STATUSES.map((s) => (
+                    <button
+                      key={s.value}
+                      onClick={() => patchProject({ status: s.value })}
+                      className={cn(
+                        "flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-white/[0.06]",
+                        s.value === project.status && "bg-white/[0.04]",
+                      )}
+                    >
+                      <ProjectStatusIcon status={s.value as ProjectStatus} />
+                      {s.label}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
 
-            {/* Status */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <PropertyRow>
-                  <ProjectStatusIcon status={project.status} />
-                  <span className="text-[12px] text-foreground/80">{PROJECT_STATUSES.find(s => s.value === project.status)?.label || project.status}</span>
+              {/* Priority */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <div>
+                    <PropertyRow>
+                      <PriorityIcon priority={project.priority || "none"} className="h-3.5 w-3.5" />
+                      <span className="text-[12px] text-foreground/80">{priorityLabel[project.priority || "none"]}</span>
+                    </PropertyRow>
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent className="w-48 p-1" align="start">
+                  {PRIORITY_OPTIONS.map((p) => (
+                    <button
+                      key={p.value}
+                      onClick={() => patchProject({ priority: p.value })}
+                      className={cn(
+                        "flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-white/[0.06]",
+                        p.value === project.priority && "bg-white/[0.04]",
+                      )}
+                    >
+                      <PriorityIcon priority={p.value as IssuePriority} className="h-3.5 w-3.5" />
+                      {p.label}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+
+              {/* Health */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <div>
+                    <PropertyRow>
+                      <span
+                        className={cn(
+                          "text-[12px] font-medium",
+                          HEALTH_OPTIONS.find((h) => h.value === project.health)?.color || "text-muted-foreground",
+                        )}
+                      >
+                        {HEALTH_OPTIONS.find((h) => h.value === project.health)?.label || project.health}
+                      </span>
+                    </PropertyRow>
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent className="w-48 p-1" align="start">
+                  {HEALTH_OPTIONS.map((h) => (
+                    <button
+                      key={h.value}
+                      onClick={() => patchProject({ health: h.value })}
+                      className={cn(
+                        "flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-white/[0.06]",
+                        h.value === project.health && "bg-white/[0.04]",
+                      )}
+                    >
+                      <span className={h.color}>{h.label}</span>
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+
+              {/* Lead */}
+              <Popover open={leadOpen} onOpenChange={setLeadOpen}>
+                <PopoverTrigger asChild>
+                  <div>
+                    <PropertyRow>
+                      <User className="h-3.5 w-3.5 text-muted-foreground/50" />
+                      <span className="text-[12px] text-foreground/70">{project.lead_name || "Add lead"}</span>
+                      {project.lead_id && (
+                        <img
+                          src={getAgentAvatarUrl(project.lead_id)}
+                          alt=""
+                          className="h-4 w-4 rounded-full ml-auto"
+                        />
+                      )}
+                    </PropertyRow>
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent className="w-52 p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search agents..." />
+                    <CommandList>
+                      <CommandEmpty>No agents found</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem
+                          onSelect={() => {
+                            patchProject({ lead_type: null, lead_id: null })
+                            setLeadOpen(false)
+                          }}
+                        >
+                          <User className="h-3.5 w-3.5 text-muted-foreground/50 mr-2" />
+                          No lead
+                        </CommandItem>
+                        {allAgents.map((a) => (
+                          <CommandItem
+                            key={a.id}
+                            onSelect={() => {
+                              patchProject({ lead_type: "agent", lead_id: a.id })
+                              setLeadOpen(false)
+                            }}
+                          >
+                            <img src={getAgentAvatarUrl(a.id)} alt="" className="h-4 w-4 rounded-full mr-2" />
+                            {a.name}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+
+              {/* Members */}
+              {stats?.by_assignee && stats.by_assignee.length > 0 && (
+                <PropertyRow className="cursor-default">
+                  <FolderKanban className="h-3.5 w-3.5 text-muted-foreground/50" />
+                  <div className="flex items-center gap-1 flex-1 min-w-0">
+                    <span className="text-[12px] text-foreground/70 shrink-0">Members</span>
+                    <div className="flex -space-x-1 ml-auto">
+                      {stats.by_assignee.slice(0, 5).map((a) => (
+                        <img
+                          key={a.agent_id}
+                          src={getAgentAvatarUrl(a.agent_id || a.agent_name)}
+                          alt={a.agent_name}
+                          title={a.agent_name}
+                          className="h-4 w-4 rounded-full ring-1 ring-card"
+                        />
+                      ))}
+                      {stats.by_assignee.length > 5 && (
+                        <span className="text-[10px] text-muted-foreground/50 pl-1">
+                          +{stats.by_assignee.length - 5}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </PropertyRow>
-              </PopoverTrigger>
-              <PopoverContent className="w-48 p-1" align="start">
-                {PROJECT_STATUSES.map(s => (
-                  <button key={s.value} onClick={() => patchProject({ status: s.value })} className={cn("flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-white/[0.06]", s.value === project.status && "bg-white/[0.04]")}>
-                    <ProjectStatusIcon status={s.value as ProjectStatus} />
-                    {s.label}
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
+              )}
 
-            {/* Priority */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <PropertyRow>
-                  <PriorityIcon priority={project.priority || "none"} className="h-3.5 w-3.5" />
-                  <span className="text-[12px] text-foreground/80">{priorityLabel[project.priority || "none"]}</span>
+              {/* Dates */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <div>
+                    <PropertyRow>
+                      <Clock className="h-3.5 w-3.5 text-muted-foreground/50" />
+                      <span className="text-[12px] text-foreground/70">
+                        {project.start_date || project.target_date
+                          ? `${project.start_date || "?"} → ${project.target_date || "?"}`
+                          : "No dates set"}
+                      </span>
+                    </PropertyRow>
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-3 space-y-2" align="start">
+                  <div>
+                    <label className="text-[10px] text-muted-foreground/60 block mb-1">Start date</label>
+                    <input
+                      type="date"
+                      className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full"
+                      defaultValue={project.start_date || ""}
+                      onChange={(e) => patchProject({ start_date: e.target.value || null })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-muted-foreground/60 block mb-1">Target date</label>
+                    <input
+                      type="date"
+                      className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full"
+                      defaultValue={project.target_date || ""}
+                      onChange={(e) => patchProject({ target_date: e.target.value || null })}
+                    />
+                  </div>
+                </PopoverContent>
+              </Popover>
+
+              {/* Teams */}
+              {stats?.crews && stats.crews.length > 0 && (
+                <PropertyRow className="cursor-default">
+                  <FolderKanban className="h-3.5 w-3.5 text-muted-foreground/50" />
+                  <span className="text-[12px] text-foreground/70 shrink-0">Teams</span>
+                  <div className="flex items-center gap-1 ml-auto flex-wrap justify-end">
+                    {stats.crews.map((crew) => (
+                      <span
+                        key={crew}
+                        className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-muted-foreground/70"
+                      >
+                        {crew}
+                      </span>
+                    ))}
+                  </div>
                 </PropertyRow>
-              </PopoverTrigger>
-              <PopoverContent className="w-48 p-1" align="start">
-                {PRIORITY_OPTIONS.map(p => (
-                  <button key={p.value} onClick={() => patchProject({ priority: p.value })} className={cn("flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-white/[0.06]", p.value === project.priority && "bg-white/[0.04]")}>
-                    <PriorityIcon priority={p.value as IssuePriority} className="h-3.5 w-3.5" />
-                    {p.label}
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
+              )}
 
-            {/* Health */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <PropertyRow>
-                  <span className={cn("text-[12px] font-medium", HEALTH_OPTIONS.find(h => h.value === project.health)?.color || "text-muted-foreground")}>
-                    {HEALTH_OPTIONS.find(h => h.value === project.health)?.label || project.health}
-                  </span>
+              {/* Labels */}
+              {stats?.by_label && stats.by_label.length > 0 && (
+                <PropertyRow className="cursor-default">
+                  <span className="text-[12px] text-foreground/70 shrink-0">Labels</span>
+                  <div className="flex items-center gap-1 ml-auto flex-wrap justify-end">
+                    {stats.by_label.map((l) => (
+                      <span
+                        key={l.label_name}
+                        className="text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+                        style={{ backgroundColor: `${l.color}20`, color: l.color }}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: l.color }} />
+                        {l.label_name}
+                      </span>
+                    ))}
+                  </div>
                 </PropertyRow>
-              </PopoverTrigger>
-              <PopoverContent className="w-48 p-1" align="start">
-                {HEALTH_OPTIONS.map(h => (
-                  <button key={h.value} onClick={() => patchProject({ health: h.value })} className={cn("flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-white/[0.06]", h.value === project.health && "bg-white/[0.04]")}>
-                    <span className={h.color}>{h.label}</span>
-                  </button>
-                ))}
-              </PopoverContent>
-            </Popover>
+              )}
+            </div>
+          )}
 
-            {/* Lead */}
-            <PropertyRow>
-              <User className="h-3.5 w-3.5 text-muted-foreground/50" />
-              <span className="text-[12px] text-foreground/70">{project.lead_name || "No lead"}</span>
-            </PropertyRow>
+          {/* ── Milestones ─────────────────────────────────────────── */}
+          <SectionHeader title="Milestones" open={milestonesOpen} onToggle={() => setMilestonesOpen((v) => !v)} />
+          {milestonesOpen && (
+            <div className="px-3 py-2">
+              <p className="text-[12px] text-muted-foreground/50">No milestones yet</p>
+              <p className="text-[11px] text-muted-foreground/30 mt-1">
+                Add milestones to organize work within your project
+              </p>
+            </div>
+          )}
 
-            {/* Dates */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <PropertyRow>
-                  <Clock className="h-3.5 w-3.5 text-muted-foreground/50" />
-                  <span className="text-[12px] text-foreground/70">
-                    {project.start_date || project.target_date
-                      ? `${project.start_date || "?"} → ${project.target_date || "?"}`
-                      : "No dates set"}
-                  </span>
-                </PropertyRow>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-3 space-y-2" align="start">
-                <div>
-                  <label className="text-[10px] text-muted-foreground/60 block mb-1">Start date</label>
-                  <input type="date" className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full" defaultValue={project.start_date || ""} onChange={(e) => patchProject({ start_date: e.target.value || null })} />
+          {/* ── Progress ─────────────────────────────────────────── */}
+          <SectionHeader title="Progress" open={progressOpen} onToggle={() => setProgressOpen((v) => !v)} />
+          {progressOpen && (
+            <div className="space-y-3 px-3">
+              {/* Stat boxes */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2">
+                  <div className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Scope</div>
+                  <div className="text-[18px] font-semibold text-foreground tabular-nums">
+                    {stats?.total_issues ?? project.issue_count}
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[10px] text-muted-foreground/60 block mb-1">Target date</label>
-                  <input type="date" className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full" defaultValue={project.target_date || ""} onChange={(e) => patchProject({ target_date: e.target.value || null })} />
+                <div className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2">
+                  <div className="text-[10px] text-muted-foreground/50 uppercase tracking-wider">Completed</div>
+                  <div className="text-[18px] font-semibold text-green-400 tabular-nums">
+                    {stats?.completed_issues ?? project.done_count}
+                  </div>
                 </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          {/* Progress */}
-          <div className="space-y-2">
-            <div className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">Progress</div>
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-2 bg-white/[0.06] rounded-full overflow-hidden">
-                <div className="h-full bg-blue-500/70 rounded-full transition-all" style={{ width: `${project.progress}%` }} />
               </div>
-              <span className="text-[12px] font-mono text-muted-foreground tabular-nums">{project.progress}%</span>
-            </div>
-            <div className="text-[11px] text-muted-foreground/50">
-              {project.done_count} of {project.issue_count} issues done
-            </div>
-          </div>
 
-          {/* Metadata */}
-          <div className="pt-2 border-t border-white/[0.06] space-y-1">
-            <div className="text-[10px] text-muted-foreground/40 font-mono">Created: {new Date(project.created_at).toLocaleDateString()}</div>
+              {/* Donut chart */}
+              {donutPaths.length > 0 && (
+                <div className="flex items-center gap-4">
+                  <svg viewBox="0 0 40 40" className="w-16 h-16 shrink-0">
+                    {donutPaths.map((seg) => (
+                      <circle
+                        key={seg.status}
+                        cx="20"
+                        cy="20"
+                        r="16"
+                        fill="none"
+                        stroke={seg.color}
+                        strokeWidth="5"
+                        strokeDasharray={seg.dasharray}
+                        strokeDashoffset={seg.dashoffset}
+                        transform="rotate(-90 20 20)"
+                        className="transition-all duration-300"
+                      />
+                    ))}
+                  </svg>
+                  <div className="space-y-0.5 flex-1 min-w-0">
+                    {donutSegments.map((seg) => (
+                      <div key={seg.status} className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: seg.color }} />
+                        <span className="text-[10px] text-muted-foreground/70 truncate flex-1">
+                          {seg.status.replace(/_/g, " ")}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground/50 tabular-nums">{seg.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Tabs */}
+              <div className="flex items-center gap-0 border-b border-white/[0.06]">
+                <button
+                  onClick={() => setProgressTab("assignees")}
+                  className={cn(
+                    "text-[11px] px-2 py-1.5 border-b-2 transition-colors",
+                    progressTab === "assignees"
+                      ? "border-blue-500 text-foreground"
+                      : "border-transparent text-muted-foreground/50 hover:text-muted-foreground/70",
+                  )}
+                >
+                  Assignees
+                </button>
+                <button
+                  onClick={() => setProgressTab("labels")}
+                  className={cn(
+                    "text-[11px] px-2 py-1.5 border-b-2 transition-colors",
+                    progressTab === "labels"
+                      ? "border-blue-500 text-foreground"
+                      : "border-transparent text-muted-foreground/50 hover:text-muted-foreground/70",
+                  )}
+                >
+                  Labels
+                </button>
+              </div>
+
+              {/* Assignees tab */}
+              {progressTab === "assignees" && (
+                <div className="space-y-2">
+                  {stats?.by_assignee && stats.by_assignee.length > 0 ? (
+                    stats.by_assignee.map((a) => (
+                      <div key={a.agent_id || a.agent_name} className="flex items-center gap-2">
+                        <img
+                          src={getAgentAvatarUrl(a.agent_id || a.agent_name)}
+                          alt=""
+                          className="h-5 w-5 rounded-full"
+                        />
+                        <span className="text-[12px] text-foreground/80 flex-1 truncate">{a.agent_name}</span>
+                        <span className="text-[11px] text-muted-foreground/50 tabular-nums">
+                          {a.completed} of {a.total}
+                        </span>
+                        <div className="w-8 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-blue-500/70 rounded-full"
+                            style={{ width: `${a.total > 0 ? (a.completed / a.total) * 100 : 0}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground/40">No assignees yet</p>
+                  )}
+                </div>
+              )}
+
+              {/* Labels tab */}
+              {progressTab === "labels" && (
+                <div className="space-y-2">
+                  {stats?.by_label && stats.by_label.length > 0 ? (
+                    stats.by_label.map((l) => (
+                      <div key={l.label_name} className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: l.color }} />
+                        <span className="text-[12px] text-foreground/80 flex-1 truncate">{l.label_name}</span>
+                        <span className="text-[11px] text-muted-foreground/50 tabular-nums">{l.count}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground/40">No labels yet</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Activity ─────────────────────────────────────────── */}
+          <div className="pt-2 border-t border-white/[0.06] space-y-1 px-3">
+            <div className="text-[10px] text-muted-foreground/40 font-mono">
+              Created: {new Date(project.created_at).toLocaleDateString()}
+            </div>
             <div className="text-[10px] text-muted-foreground/40 font-mono">ID: {project.id}</div>
           </div>
         </div>

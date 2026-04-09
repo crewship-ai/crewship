@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card"
 import { PriorityIcon } from "./priority-icon"
 import { Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { Mission } from "@/lib/types/mission"
 
 function isOverdue(dueDate: string | null | undefined, status: string): boolean {
@@ -74,9 +75,16 @@ export function IssueCard({ issue, onClick }: IssueCardProps) {
       {/* Bottom: assignee + labels */}
       <div className="flex items-center gap-2 mt-2">
         {issue.assignee_name && (
-          <span className="text-xs text-muted-foreground truncate">
-            {issue.assignee_name}
-          </span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <img
+              src={getAgentAvatarUrl(issue.assignee_id || issue.assignee_name)}
+              alt=""
+              className="h-[18px] w-[18px] rounded-full shrink-0"
+            />
+            <span className="text-xs text-muted-foreground truncate">
+              {issue.assignee_name}
+            </span>
+          </div>
         )}
         <div className="flex-1" />
         {issue.labels && issue.labels.length > 0 && (

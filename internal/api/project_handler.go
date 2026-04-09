@@ -464,3 +464,120 @@ func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// Stats returns project breakdown data for the detail panel.
+func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectId")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	// Verify project exists
+	var exists int
+	if err := h.db.QueryRowContext(r.Context(),
+		`SELECT 1 FROM projects WHERE id = ? AND workspace_id = ?`, projectID, wsID).Scan(&exists); err != nil {
+		writeProblem(w, r, http.StatusNotFound, "Project not found")
+		return
+	}
+
+	type assigneeStat struct {
+		AgentID   string `json:"agent_id"`
+		AgentName string `json:"agent_name"`
+		Total     int    `json:"total"`
+		Completed int    `json:"completed"`
+	}
+	type labelStat struct {
+		LabelName string `json:"label_name"`
+		Color     string `json:"color"`
+		Count     int    `json:"count"`
+	}
+	type statsResponse struct {
+		TotalIssues    int            `json:"total_issues"`
+		CompletedIssues int           `json:"completed_issues"`
+		ByStatus       map[string]int `json:"by_status"`
+		ByAssignee     []assigneeStat `json:"by_assignee"`
+		ByLabel        []labelStat    `json:"by_label"`
+		Crews          []string       `json:"crews"`
+	}
+
+	var resp statsResponse
+	resp.ByStatus = map[string]int{}
+	resp.ByAssignee = []assigneeStat{}
+	resp.ByLabel = []labelStat{}
+	resp.Crews = []string{}
+
+	// Total + completed
+	_ = h.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM missions WHERE project_id = ? AND mission_type = 'issue'`, projectID).Scan(&resp.TotalIssues)
+	_ = h.db.QueryRowContext(r.Context(),
+		`SELECT COUNT(*) FROM missions WHERE project_id = ? AND mission_type = 'issue' AND status IN ('DONE','COMPLETED')`, projectID).Scan(&resp.CompletedIssues)
+
+	// By status
+	statusRows, err := h.db.QueryContext(r.Context(),
+		`SELECT status, COUNT(*) FROM missions WHERE project_id = ? AND mission_type = 'issue' GROUP BY status`, projectID)
+	if err == nil {
+		defer statusRows.Close()
+		for statusRows.Next() {
+			var s string
+			var c int
+			if statusRows.Scan(&s, &c) == nil {
+				resp.ByStatus[s] = c
+			}
+		}
+	}
+
+	// By assignee
+	assigneeRows, err := h.db.QueryContext(r.Context(), `
+		SELECT m.assignee_id, COALESCE(a.name, 'Unassigned'),
+		       COUNT(*),
+		       SUM(CASE WHEN m.status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END)
+		FROM missions m
+		LEFT JOIN agents a ON m.assignee_id = a.id
+		WHERE m.project_id = ? AND m.mission_type = 'issue'
+		GROUP BY m.assignee_id`, projectID)
+	if err == nil {
+		defer assigneeRows.Close()
+		for assigneeRows.Next() {
+			var as assigneeStat
+			var aid sql.NullString
+			if assigneeRows.Scan(&aid, &as.AgentName, &as.Total, &as.Completed) == nil {
+				as.AgentID = aid.String
+				resp.ByAssignee = append(resp.ByAssignee, as)
+			}
+		}
+	}
+
+	// By label
+	labelRows, err := h.db.QueryContext(r.Context(), `
+		SELECT l.name, l.color, COUNT(DISTINCT m.id)
+		FROM missions m
+		JOIN mission_labels ml ON ml.mission_id = m.id
+		JOIN labels l ON l.id = ml.label_id
+		WHERE m.project_id = ? AND m.mission_type = 'issue'
+		GROUP BY l.name, l.color
+		ORDER BY COUNT(DISTINCT m.id) DESC`, projectID)
+	if err == nil {
+		defer labelRows.Close()
+		for labelRows.Next() {
+			var ls labelStat
+			if labelRows.Scan(&ls.LabelName, &ls.Color, &ls.Count) == nil {
+				resp.ByLabel = append(resp.ByLabel, ls)
+			}
+		}
+	}
+
+	// Crews
+	crewRows, err := h.db.QueryContext(r.Context(), `
+		SELECT DISTINCT c.slug FROM missions m
+		JOIN crews c ON m.crew_id = c.id
+		WHERE m.project_id = ? AND m.mission_type = 'issue'`, projectID)
+	if err == nil {
+		defer crewRows.Close()
+		for crewRows.Next() {
+			var slug string
+			if crewRows.Scan(&slug) == nil {
+				resp.Crews = append(resp.Crews, slug)
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}

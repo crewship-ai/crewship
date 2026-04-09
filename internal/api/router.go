@@ -411,6 +411,7 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/projects/{projectId}", authed(wsCtx(http.HandlerFunc(projects.Get))))
 	r.mux.Handle("PATCH /api/v1/projects/{projectId}", authed(wsCtx(http.HandlerFunc(projects.Update))))
 	r.mux.Handle("DELETE /api/v1/projects/{projectId}", authed(wsCtx(http.HandlerFunc(projects.Delete))))
+	r.mux.Handle("GET /api/v1/projects/{projectId}/stats", authed(wsCtx(http.HandlerFunc(projects.Stats))))
 
 	// Mission Proposals (workspace-scoped)
 	proposals := NewProposalHandler(r.db, r.hub, missionEngineForPublic, r.logger)
