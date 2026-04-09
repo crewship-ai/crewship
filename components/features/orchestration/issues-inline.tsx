@@ -964,10 +964,18 @@ export function IssueDetailInline({
                 <Popover open={projectPopoverOpen} onOpenChange={setProjectPopoverOpen}>
                   <PopoverTrigger asChild>
                     {issue.project_id ? (
-                      <button className="flex items-center gap-2 py-1 w-full text-left group">
-                        <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: matchingProject?.color || '#6B7280' }} />
-                        <span className="text-[12px] text-foreground/80 flex-1 hover:text-foreground transition-colors">{matchingProject?.name || "Unknown"}</span>
-                      </button>
+                      <div className="flex items-center gap-2 py-1 w-full group">
+                        <button className="flex items-center gap-2 flex-1 text-left">
+                          <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: matchingProject?.color || '#6B7280' }} />
+                          <span className="text-[12px] text-foreground/80 hover:text-foreground transition-colors">{matchingProject?.name || "Unknown"}</span>
+                        </button>
+                        <a href={`/orchestration/projects/${issue.project_id}`}
+                           className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/[0.06] text-muted-foreground/40 hover:text-blue-400 transition-all"
+                           title="Open project"
+                           onClick={(e) => e.stopPropagation()}>
+                          <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-3"/><path d="M10 2h4v4"/><path d="M14 2L7 9"/></svg>
+                        </a>
+                      </div>
                     ) : (
                       <button className="text-[12px] text-muted-foreground/50 hover:text-muted-foreground py-1 flex items-center gap-1.5">
                         <Plus className="h-3 w-3" /> Set project

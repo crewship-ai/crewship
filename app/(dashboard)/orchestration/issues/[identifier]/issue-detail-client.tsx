@@ -1061,7 +1061,7 @@ export function IssueDetailClient() {
             <Separator className="bg-border/60" />
 
             {/* Project */}
-            <div className="space-y-2">
+            <div className="space-y-2 relative">
               <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
                 Project
               </span>
@@ -1074,6 +1074,16 @@ export function IssueDetailClient() {
                     </span>
                     <ChevronsUpDown className="ml-auto h-3 w-3 text-muted-foreground/40" />
                   </button>
+                  {currentProject && (
+                    <a
+                      href={`/orchestration/projects/${currentProject.id}`}
+                      className="absolute right-1 top-1 p-1 rounded hover:bg-accent text-muted-foreground/30 hover:text-muted-foreground/70 transition-colors"
+                      title="Open project"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-3"/><path d="M10 2h4v4"/><path d="M14 2L7 9"/></svg>
+                    </a>
+                  )}
                 </PopoverTrigger>
                 <PopoverContent className="w-[220px] p-0" align="end">
                   <Command>
