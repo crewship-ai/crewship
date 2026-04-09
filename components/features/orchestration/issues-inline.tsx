@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Search, X, Send, Clock, Plus, ChevronDown, ChevronRight, User, Link2, FolderKanban } from "lucide-react"
+import { Search, X, Send, Clock, Plus, ChevronDown, ChevronRight, User, Link2, FolderKanban, Hash, Flag } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
@@ -15,7 +15,7 @@ import { IssuesListView } from "@/components/features/issues/issues-list-view"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import type { Mission, MissionStatus, IssueLabel, IssueComment, IssuePriority, IssueRelation, RelationType, Project, ProjectStatus, IssueActivity } from "@/lib/types/mission"
+import type { Mission, MissionStatus, IssueLabel, IssueComment, IssuePriority, IssueRelation, RelationType, Project, ProjectStatus, IssueActivity, Milestone } from "@/lib/types/mission"
 
 /* -------------------------------------------------------------------------- */
 /*  IssuesExplorerPanel — left panel                                          */
@@ -349,6 +349,7 @@ export function IssueDetailInline({
   const [labelsOpen, setLabelsOpen] = useState(true)
   const [projectOpen, setProjectOpen] = useState(true)
   const [relationsOpen, setRelationsOpen] = useState(true)
+  const [subIssuesOpen, setSubIssuesOpen] = useState(true)
 
   // Popover open state
   const [statusOpen, setStatusOpen] = useState(false)
@@ -357,6 +358,31 @@ export function IssueDetailInline({
   const [projectPopoverOpen, setProjectPopoverOpen] = useState(false)
   const [assigneeOpen, setAssigneeOpen] = useState(false)
   const [crewAgents, setCrewAgents] = useState<{id: string, name: string, slug: string, crew_slug?: string}[]>([])
+
+  // Sub-issues
+  const [subIssues, setSubIssues] = useState<Mission[]>([])
+
+  // Milestones
+  const [milestones, setMilestones] = useState<Milestone[]>([])
+  const currentMilestone = milestones.find((m) => m.id === issue.milestone_id)
+
+  // Fetch sub-issues
+  useEffect(() => {
+    if (!issue.crew_id || !issue.identifier || !issue.sub_issues_count) return
+    fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/subtasks?workspace_id=${workspaceId}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => setSubIssues(Array.isArray(data) ? data : data.subtasks ?? []))
+      .catch(() => {})
+  }, [issue.crew_id, issue.identifier, issue.sub_issues_count, workspaceId])
+
+  // Fetch milestones for the project
+  useEffect(() => {
+    if (!issue.project_id || !workspaceId) return
+    fetch(`/api/v1/projects/${issue.project_id}/milestones?workspace_id=${workspaceId}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => setMilestones(Array.isArray(data) ? data : data.milestones ?? []))
+      .catch(() => {})
+  }, [issue.project_id, workspaceId])
 
   // Fetch all agents for assignee picker
   useEffect(() => {
@@ -877,6 +903,90 @@ export function IssueDetailInline({
                     )}
                   </PopoverContent>
                 </Popover>
+
+                {/* Estimate */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <div>
+                      <PropertyRow>
+                        <Hash className="h-3.5 w-3.5 text-muted-foreground/50" />
+                        <span className="text-[12px] text-foreground/70 hover:text-foreground transition-colors">
+                          {issue.estimate ? `${issue.estimate} points` : "No estimate"}
+                        </span>
+                      </PropertyRow>
+                    </div>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-48 p-1" align="start">
+                    {[1, 2, 3, 5, 8, 13, 21].map((pts) => (
+                      <button
+                        key={pts}
+                        onClick={() => patchIssue({ estimate: pts })}
+                        className={cn(
+                          "w-full px-2 py-1.5 text-xs text-left rounded hover:bg-white/[0.06]",
+                          issue.estimate === pts && "bg-blue-500/10 text-blue-400",
+                        )}
+                      >
+                        {pts} points
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => patchIssue({ estimate: null })}
+                      className="w-full px-2 py-1.5 text-xs text-left rounded hover:bg-white/[0.06] text-muted-foreground/50"
+                    >
+                      Clear estimate
+                    </button>
+                  </PopoverContent>
+                </Popover>
+
+                {/* Milestone */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <div>
+                      <PropertyRow>
+                        <Flag className="h-3.5 w-3.5 text-muted-foreground/50" />
+                        <span className="text-[12px] text-foreground/70 hover:text-foreground transition-colors">
+                          {currentMilestone ? currentMilestone.name : "No milestone"}
+                        </span>
+                      </PropertyRow>
+                    </div>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-52 p-1" align="start">
+                    {milestones.length === 0 ? (
+                      <p className="text-[11px] text-muted-foreground/40 px-2 py-3 text-center">
+                        {issue.project_id ? "No milestones in project" : "Set a project first"}
+                      </p>
+                    ) : (
+                      <>
+                        {milestones.map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => patchIssue({ milestone_id: m.id })}
+                            className={cn(
+                              "w-full px-2 py-1.5 text-xs text-left rounded hover:bg-white/[0.06] flex items-center gap-2",
+                              issue.milestone_id === m.id && "bg-blue-500/10 text-blue-400",
+                            )}
+                          >
+                            <Flag className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{m.name}</span>
+                            {m.target_date && (
+                              <span className="ml-auto text-[10px] text-muted-foreground/40 shrink-0">
+                                {new Date(m.target_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                        {issue.milestone_id && (
+                          <button
+                            onClick={() => patchIssue({ milestone_id: null })}
+                            className="w-full px-2 py-1.5 text-xs text-left rounded hover:bg-white/[0.06] text-muted-foreground/50"
+                          >
+                            Clear milestone
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </PopoverContent>
+                </Popover>
               </div>
             )}
           </div>
@@ -1136,6 +1246,36 @@ export function IssueDetailInline({
               </div>
             )}
           </div>
+
+          {/* ── Sub-issues section ──────────────────────────────────────── */}
+          {issue.sub_issues_count != null && issue.sub_issues_count > 0 && (
+            <div className="mt-2 mx-2 rounded-lg border border-white/[0.06]">
+              <SectionHeader
+                title={`Sub-issues (${issue.sub_issues_count})`}
+                open={subIssuesOpen}
+                onToggle={() => setSubIssuesOpen((v) => !v)}
+              />
+              {subIssuesOpen && (
+                <div className="px-3 pb-2 space-y-1">
+                  {subIssues.length === 0 ? (
+                    <span className="text-[11px] text-muted-foreground/40 pl-0.5">Loading...</span>
+                  ) : (
+                    subIssues.map((sub) => (
+                      <a
+                        key={sub.id}
+                        href={`/orchestration/issues/${sub.identifier}`}
+                        className="flex items-center gap-2 py-1 text-xs hover:bg-white/[0.04] rounded px-1"
+                      >
+                        <StatusIcon status={sub.status} className="h-3.5 w-3.5" />
+                        <span className="font-mono text-muted-foreground/60">{sub.identifier}</span>
+                        <span className="truncate text-foreground/70">{sub.title}</span>
+                      </a>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── Comments section ─────────────────────────────────────────── */}
           <div className="border-t border-white/[0.06] mt-1">

@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import type {
   IssuePriority,
+  Milestone,
   Mission,
   Project,
   ProjectStatus,
@@ -255,6 +256,14 @@ export function ProjectDetailClient() {
   // Star state (local only)
   const [starred, setStarred] = useState(false)
 
+  // Milestones
+  const [milestones, setMilestones] = useState<Milestone[]>([])
+  const [addingMilestone, setAddingMilestone] = useState(false)
+  const [newMilestoneName, setNewMilestoneName] = useState("")
+  const [newMilestoneDate, setNewMilestoneDate] = useState("")
+  const [editingMilestoneId, setEditingMilestoneId] = useState<string | null>(null)
+  const [editMilestoneName, setEditMilestoneName] = useState("")
+
   // -----------------------------------------------------------------------
   // Fetchers
   // -----------------------------------------------------------------------
@@ -331,6 +340,21 @@ export function ProjectDetailClient() {
     }
   }, [workspaceId])
 
+  const fetchMilestones = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(
+        `/api/v1/projects/${encodeURIComponent(projectId)}/milestones?workspace_id=${encodeURIComponent(workspaceId)}`,
+      )
+      if (res.ok) {
+        const data = await res.json()
+        setMilestones(Array.isArray(data) ? data : data.milestones ?? [])
+      }
+    } catch {
+      // ignore
+    }
+  }, [workspaceId, projectId])
+
   // Initial load
   useEffect(() => {
     if (wsLoading) return
@@ -338,7 +362,8 @@ export function ProjectDetailClient() {
     fetchStats()
     fetchIssues()
     fetchAgents()
-  }, [wsLoading, fetchProject, fetchStats, fetchIssues, fetchAgents])
+    fetchMilestones()
+  }, [wsLoading, fetchProject, fetchStats, fetchIssues, fetchAgents, fetchMilestones])
 
   // Realtime refresh
   const handleRealtime = useCallback(() => {
@@ -374,6 +399,61 @@ export function ProjectDetailClient() {
       }
     },
     [project, workspaceId, fetchProject, fetchStats],
+  )
+
+  // -----------------------------------------------------------------------
+  // Milestone handlers
+  // -----------------------------------------------------------------------
+
+  const handleAddMilestone = useCallback(async () => {
+    if (!workspaceId || !newMilestoneName.trim()) return
+    try {
+      const res = await fetch(
+        `/api/v1/projects/${encodeURIComponent(projectId)}/milestones?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: newMilestoneName.trim(),
+            target_date: newMilestoneDate || null,
+          }),
+        },
+      )
+      if (res.ok) {
+        toast.success("Milestone created")
+        setNewMilestoneName("")
+        setNewMilestoneDate("")
+        setAddingMilestone(false)
+        fetchMilestones()
+      } else {
+        toast.error("Failed to create milestone")
+      }
+    } catch {
+      toast.error("Failed to create milestone")
+    }
+  }, [workspaceId, projectId, newMilestoneName, newMilestoneDate, fetchMilestones])
+
+  const handleRenameMilestone = useCallback(
+    async (milestoneId: string) => {
+      if (!workspaceId || !editMilestoneName.trim()) return
+      try {
+        const res = await fetch(
+          `/api/v1/projects/${encodeURIComponent(projectId)}/milestones/${milestoneId}?workspace_id=${encodeURIComponent(workspaceId)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: editMilestoneName.trim() }),
+          },
+        )
+        if (res.ok) {
+          setEditingMilestoneId(null)
+          fetchMilestones()
+        }
+      } catch {
+        // silent
+      }
+    },
+    [workspaceId, projectId, editMilestoneName, fetchMilestones],
   )
 
   // -----------------------------------------------------------------------
@@ -541,6 +621,7 @@ export function ProjectDetailClient() {
                 setEditingDesc(false)
               }}
               onDescCancel={() => { setDescDraft(project.description || ""); setEditingDesc(false) }}
+              milestones={milestones}
             />
           )}
 
@@ -588,6 +669,19 @@ export function ProjectDetailClient() {
             leadOpen={leadOpen}
             setLeadOpen={setLeadOpen}
             patchProject={patchProject}
+            milestones={milestones}
+            addingMilestone={addingMilestone}
+            setAddingMilestone={setAddingMilestone}
+            newMilestoneName={newMilestoneName}
+            setNewMilestoneName={setNewMilestoneName}
+            newMilestoneDate={newMilestoneDate}
+            setNewMilestoneDate={setNewMilestoneDate}
+            handleAddMilestone={handleAddMilestone}
+            editingMilestoneId={editingMilestoneId}
+            setEditingMilestoneId={setEditingMilestoneId}
+            editMilestoneName={editMilestoneName}
+            setEditMilestoneName={setEditMilestoneName}
+            handleRenameMilestone={handleRenameMilestone}
           />
         </div>
       </div>
@@ -615,6 +709,7 @@ function OverviewTab({
   onDescChange,
   onDescSave,
   onDescCancel,
+  milestones,
 }: {
   project: Project
   stats: ProjectStats | null
@@ -631,6 +726,7 @@ function OverviewTab({
   onDescChange: (v: string) => void
   onDescSave: () => void
   onDescCancel: () => void
+  milestones: Milestone[]
 }) {
   const statusInfo = PROJECT_STATUSES.find((s) => s.value === project.status)
   const priorityInfo = ALL_PRIORITIES.find((p) => p.value === project.priority)
@@ -774,13 +870,40 @@ function OverviewTab({
 
       <Separator className="bg-white/[0.06]" />
 
-      {/* Milestones placeholder */}
+      {/* Milestones overview */}
       <div>
-        <h3 className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-3">Milestones</h3>
-        <button className="flex items-center gap-2 text-[12px] text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors py-1.5">
-          <Plus className="h-3.5 w-3.5" />
-          Milestone
-        </button>
+        <h3 className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-3">
+          Milestones {milestones.length > 0 && `(${milestones.length})`}
+        </h3>
+        {milestones.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground/40">No milestones yet. Add one from the sidebar.</p>
+        ) : (
+          <div className="space-y-2">
+            {milestones.map((m) => {
+              const progress = m.issue_count && m.issue_count > 0
+                ? Math.round(((m.done_count ?? 0) / m.issue_count) * 100)
+                : 0
+              return (
+                <div key={m.id} className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[12px] text-foreground/80 font-medium">{m.name}</span>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {m.target_date && (
+                        <span className="text-[10px] text-muted-foreground/50">
+                          {new Date(m.target_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-muted-foreground/50">{m.done_count ?? 0}/{m.issue_count ?? 0} done</span>
+                    </div>
+                  </div>
+                  <div className="w-16 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+                    <div className="h-full bg-green-500/70 rounded-full transition-all" style={{ width: `${progress}%` }} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -906,6 +1029,19 @@ function ProjectSidebar({
   leadOpen,
   setLeadOpen,
   patchProject,
+  milestones,
+  addingMilestone,
+  setAddingMilestone,
+  newMilestoneName,
+  setNewMilestoneName,
+  newMilestoneDate,
+  setNewMilestoneDate,
+  handleAddMilestone,
+  editingMilestoneId,
+  setEditingMilestoneId,
+  editMilestoneName,
+  setEditMilestoneName,
+  handleRenameMilestone,
 }: {
   project: Project
   stats: ProjectStats | null
@@ -929,6 +1065,19 @@ function ProjectSidebar({
   leadOpen: boolean
   setLeadOpen: (v: boolean) => void
   patchProject: (fields: Record<string, unknown>) => Promise<void>
+  milestones: Milestone[]
+  addingMilestone: boolean
+  setAddingMilestone: (v: boolean) => void
+  newMilestoneName: string
+  setNewMilestoneName: (v: string) => void
+  newMilestoneDate: string
+  setNewMilestoneDate: (v: string) => void
+  handleAddMilestone: () => Promise<void>
+  editingMilestoneId: string | null
+  setEditingMilestoneId: (v: string | null) => void
+  editMilestoneName: string
+  setEditMilestoneName: (v: string) => void
+  handleRenameMilestone: (id: string) => Promise<void>
 }) {
   return (
     <div className="p-4 space-y-4">
@@ -1151,18 +1300,119 @@ function ProjectSidebar({
 
       {/* ── Milestones ─────────────────────────────────────────── */}
       <SectionHeader
-        title="Milestones"
+        title={`Milestones${milestones.length > 0 ? ` (${milestones.length})` : ""}`}
         open={milestonesOpen}
         onToggle={() => setMilestonesOpen(!milestonesOpen)}
         action={
-          <button className="p-0.5 rounded hover:bg-white/[0.06] text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors">
+          <button
+            onClick={() => { setMilestonesOpen(true); setAddingMilestone(true) }}
+            className="p-0.5 rounded hover:bg-white/[0.06] text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors"
+          >
             <Plus className="h-3 w-3" />
           </button>
         }
       />
       {milestonesOpen && (
-        <div className="py-2">
-          <p className="text-[12px] text-muted-foreground/40">No milestones yet</p>
+        <div className="py-2 space-y-2">
+          {milestones.length === 0 && !addingMilestone && (
+            <p className="text-[12px] text-muted-foreground/40">No milestones yet</p>
+          )}
+
+          {milestones.map((m) => {
+            const progress = m.issue_count && m.issue_count > 0
+              ? Math.round(((m.done_count ?? 0) / m.issue_count) * 100)
+              : 0
+            const isEditing = editingMilestoneId === m.id
+
+            return (
+              <div
+                key={m.id}
+                className="group bg-white/[0.02] border border-white/[0.06] rounded-md px-3 py-2"
+              >
+                {isEditing ? (
+                  <input
+                    autoFocus
+                    value={editMilestoneName}
+                    onChange={(e) => setEditMilestoneName(e.target.value)}
+                    onBlur={() => handleRenameMilestone(m.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRenameMilestone(m.id)
+                      if (e.key === "Escape") setEditingMilestoneId(null)
+                    }}
+                    className="bg-transparent text-[12px] text-foreground/80 font-medium outline-none w-full border-b border-blue-400/40 pb-0.5"
+                  />
+                ) : (
+                  <button
+                    onClick={() => {
+                      setEditingMilestoneId(m.id)
+                      setEditMilestoneName(m.name)
+                    }}
+                    className="text-[12px] text-foreground/80 font-medium hover:text-foreground transition-colors text-left w-full"
+                  >
+                    {m.name}
+                  </button>
+                )}
+                <div className="flex items-center justify-between mt-1.5">
+                  {m.target_date && (
+                    <span className="text-[10px] text-muted-foreground/50">
+                      <Clock className="h-2.5 w-2.5 inline mr-0.5" />
+                      {new Date(m.target_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-muted-foreground/50 ml-auto">
+                    {m.done_count ?? 0}/{m.issue_count ?? 0} done
+                  </span>
+                </div>
+                {(m.issue_count ?? 0) > 0 && (
+                  <div className="mt-1.5 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-green-500/70 rounded-full transition-all"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          {addingMilestone && (
+            <div className="bg-white/[0.02] border border-white/[0.08] rounded-md p-2.5 space-y-2">
+              <input
+                autoFocus
+                placeholder="Milestone name"
+                value={newMilestoneName}
+                onChange={(e) => setNewMilestoneName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleAddMilestone() }}
+                className="w-full bg-transparent border border-white/[0.1] rounded px-2 py-1 text-[11px] text-foreground placeholder:text-muted-foreground/30 outline-none focus:border-blue-400/40"
+              />
+              <input
+                type="date"
+                value={newMilestoneDate}
+                onChange={(e) => setNewMilestoneDate(e.target.value)}
+                className="w-full bg-transparent border border-white/[0.1] rounded px-2 py-1 text-[11px] text-foreground outline-none focus:border-blue-400/40"
+              />
+              <div className="flex gap-1.5">
+                <button
+                  onClick={handleAddMilestone}
+                  disabled={!newMilestoneName.trim()}
+                  className={cn(
+                    "flex-1 h-6 rounded text-[11px] font-medium transition-colors",
+                    newMilestoneName.trim()
+                      ? "bg-blue-600 text-white hover:bg-blue-500"
+                      : "bg-white/[0.04] text-muted-foreground/30 cursor-not-allowed",
+                  )}
+                >
+                  Add
+                </button>
+                <button
+                  onClick={() => { setAddingMilestone(false); setNewMilestoneName(""); setNewMilestoneDate("") }}
+                  className="flex-1 h-6 rounded text-[11px] bg-white/[0.04] text-muted-foreground/60 hover:bg-white/[0.08] transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -8,7 +8,7 @@ import {
   Search, BookOpen, ChevronDown, User, HelpCircle, GitBranch, LogOut, Menu, X,
   LayoutDashboard, Bot, Network, Zap, Key, Activity, Shield, Settings, Store, ShieldCheck,
 } from "lucide-react"
-import { BellIcon as AnimatedBell } from "@/components/ui/bell"
+
 import { WifiIcon as AnimatedWifi, type WifiIconHandle } from "@/components/ui/wifi"
 import { useRealtime } from "@/hooks/use-realtime"
 import { Button } from "@/components/ui/button"
@@ -16,7 +16,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
+
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
@@ -31,6 +31,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useAbilities } from "@/hooks/use-abilities"
 import { getCrewDotColor } from "@/lib/crew-icon"
 import { CommandPalette } from "@/components/command-palette"
+import { NotificationBell } from "@/components/features/notifications/notification-bell"
 import { useAppStore } from "@/lib/store"
 
 const mobileNavSections = [
@@ -420,37 +421,9 @@ export function AppToolbar() {
         </Button>
 
         {/* Desktop: notifications */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 relative hidden md:inline-flex" aria-label={pendingEscalations > 0 ? `Notifications, ${pendingEscalations} pending escalation${pendingEscalations !== 1 ? "s" : ""}` : "Notifications"}>
-              <AnimatedBell size={16} />
-              {pendingEscalations > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-micro font-bold text-destructive-foreground ring-2 ring-background" aria-hidden="true">
-                  {pendingEscalations > 9 ? "9+" : pendingEscalations}
-                </span>
-              )}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-80">
-            <DropdownMenuLabel className="flex items-center justify-between">
-              <span>Notifications</span>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="flex-col items-start gap-1 py-3">
-              {pendingEscalations > 0 ? (
-                <>
-                  <div className="text-xs font-medium">{pendingEscalations} pending escalation{pendingEscalations !== 1 ? "s" : ""}</div>
-                  <div className="text-micro text-muted-foreground">Agents need your input to proceed.</div>
-                </>
-              ) : (
-                <>
-                  <div className="text-xs font-medium">No new notifications</div>
-                  <div className="text-micro text-muted-foreground">You&apos;re all caught up.</div>
-                </>
-              )}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <div className="hidden md:flex">
+          <NotificationBell />
+        </div>
 
         <Button variant="ghost" size="icon" className="h-8 w-8 hidden sm:inline-flex" aria-label="Help">
           <BookOpen className="h-4 w-4" />
