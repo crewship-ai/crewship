@@ -31,6 +31,10 @@ import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { LabelBadge } from "@/components/features/issues/label-badge"
+import { PropertyRow } from "@/components/features/issues/property-row"
+import { ISSUE_STATUSES, ALL_PRIORITIES } from "@/components/features/issues/issue-constants"
+import { ActivityFeed } from "@/components/features/issues/activity-feed"
+import { timeAgo } from "@/lib/time"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -55,31 +59,10 @@ import type {
   IssueActivity,
   IssueComment,
   IssueLabel,
-  IssuePriority,
   IssueRelation,
   Mission,
-  MissionStatus,
   Project,
 } from "@/lib/types/mission"
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const ALL_STATUSES: { value: MissionStatus; label: string }[] = [
-  { value: "BACKLOG", label: "Backlog" },
-  { value: "TODO", label: "Todo" },
-  { value: "PLANNING", label: "Planning" },
-  { value: "IN_PROGRESS", label: "In Progress" },
-  { value: "REVIEW", label: "In Review" },
-  { value: "COMPLETED", label: "Done" },
-  { value: "DONE", label: "Done" },
-  { value: "FAILED", label: "Failed" },
-  { value: "CANCELLED", label: "Cancelled" },
-  { value: "DUPLICATE", label: "Duplicate" },
-]
-
-const ALL_PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,54 +75,12 @@ function isMac(): boolean {
   return platform.includes("Mac")
 }
 
-function relativeTime(dateStr: string): string {
-  const now = Date.now()
-  const date = new Date(dateStr).getTime()
-  const diffSec = Math.floor((now - date) / 1000)
-  if (diffSec < 60) return "just now"
-  const diffMin = Math.floor(diffSec / 60)
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHours = Math.floor(diffMin / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 30) return `${diffDays}d ago`
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })
-}
-
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
   })
-}
-
-
-// ---------------------------------------------------------------------------
-// Sidebar property row
-// ---------------------------------------------------------------------------
-
-function PropertyRow({
-  label,
-  children,
-}: {
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-1.5 min-h-[32px]">
-      <span className="text-xs text-muted-foreground shrink-0 w-[80px]">
-        {label}
-      </span>
-      <div className="flex-1 flex items-center justify-end min-w-0">
-        {children}
-      </div>
-    </div>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -690,7 +631,7 @@ export function IssueDetailClient() {
                             {comment.author_name ?? "Unknown"}
                           </span>
                           <span className="text-[11px] text-muted-foreground/50">
-                            {relativeTime(comment.created_at)}
+                            {timeAgo(comment.created_at)}
                           </span>
                         </div>
                         <div className="mt-1">
@@ -747,64 +688,13 @@ export function IssueDetailClient() {
             <Separator />
 
             {/* ---- Activity section ---- */}
-            <div className="space-y-3">
-              <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Activity
-              </h2>
-
-              {loadingActivity ? (
-                <div className="flex items-center justify-center py-4">
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                </div>
-              ) : activities.length === 0 ? (
-                <p className="text-xs text-muted-foreground/50 py-2">
-                  No activity recorded.
-                </p>
-              ) : (
-                <div className="space-y-0">
-                  {activities.map((activity, idx) => (
-                    <div key={activity.id} className="flex gap-3 relative">
-                      {/* Timeline line */}
-                      {idx < activities.length - 1 && (
-                        <div className="absolute left-[7px] top-[18px] bottom-0 w-px bg-border" />
-                      )}
-
-                      {/* Dot */}
-                      <div
-                        className={cn(
-                          "h-[15px] w-[15px] rounded-full border-2 shrink-0 mt-0.5 z-10",
-                          activity.action.includes("completed") || activity.action.includes("done")
-                            ? "border-green-500 bg-green-500/20"
-                            : activity.action.includes("failed")
-                              ? "border-red-500 bg-red-500/20"
-                              : activity.action.includes("started") || activity.action.includes("progress")
-                                ? "border-yellow-500 bg-yellow-500/20"
-                                : "border-border bg-muted",
-                        )}
-                      />
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0 pb-4">
-                        <p className="text-xs text-foreground/70 leading-relaxed">
-                          <span className="font-medium text-foreground/90">
-                            {activity.actor_name ?? "System"}
-                          </span>{" "}
-                          {activity.action}
-                          {activity.details && (
-                            <span className="text-muted-foreground/60">
-                              {" "}{activity.details}
-                            </span>
-                          )}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground/40 mt-0.5">
-                          {relativeTime(activity.created_at)}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            {loadingActivity ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              <ActivityFeed activities={activities} />
+            )}
 
             {/* Footer metadata */}
             <div className="text-[11px] text-muted-foreground/40 font-mono space-y-0.5 pt-4">
@@ -839,17 +729,17 @@ export function IssueDetailClient() {
                     <CommandList>
                       <CommandEmpty>No status found.</CommandEmpty>
                       <CommandGroup>
-                        {ALL_STATUSES.map((s) => (
+                        {ISSUE_STATUSES.map((s) => (
                           <CommandItem
-                            key={s.value}
+                            key={s}
                             onSelect={() => {
-                              patchIssue({ status: s.value })
+                              patchIssue({ status: s })
                               setStatusOpen(false)
                             }}
                           >
-                            <StatusIcon status={s.value} className="mr-2 h-3.5 w-3.5" />
-                            <span className="text-xs">{s.label}</span>
-                            {issue.status === s.value && (
+                            <StatusIcon status={s} className="mr-2 h-3.5 w-3.5" />
+                            <span className="text-xs">{statusLabel[s] ?? s}</span>
+                            {issue.status === s && (
                               <Check className="ml-auto h-3.5 w-3.5" />
                             )}
                           </CommandItem>

@@ -161,6 +161,15 @@ export interface Project {
   progress: number
 }
 
+export interface ProjectStats {
+  total_issues: number
+  completed_issues: number
+  by_status: Record<string, number>
+  by_assignee: { agent_id: string; agent_name: string; total: number; completed: number }[]
+  by_label: { label_name: string; color: string; count: number }[]
+  crews: string[]
+}
+
 export interface Milestone {
   id: string
   project_id: string
