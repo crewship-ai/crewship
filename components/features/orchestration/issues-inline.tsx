@@ -280,7 +280,7 @@ function SectionHeader({
     <div className="group/sh flex items-center px-2 py-1.5">
       <button
         onClick={onToggle}
-        className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/35 hover:text-muted-foreground/60 transition-colors"
+        className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/55 hover:text-muted-foreground/80 transition-colors"
       >
         <ChevronDown className={cn("h-2.5 w-2.5 transition-transform duration-200", !open && "-rotate-90")} />
         {title}
@@ -312,9 +312,9 @@ function PropertyRow({
       )}
     >
       {label && (
-        <span className="text-[11px] text-muted-foreground/30 w-[72px] shrink-0">{label}</span>
+        <span className="text-[11px] text-muted-foreground/60 w-[72px] shrink-0">{label}</span>
       )}
-      <span className="flex-1 flex items-center gap-[5px] justify-end text-[11.5px] text-foreground/65 min-w-0">
+      <span className="flex-1 flex items-center gap-[5px] justify-end text-[11.5px] text-foreground/80 min-w-0">
         {children}
       </span>
     </div>
@@ -652,7 +652,7 @@ export function IssueDetailInline({
                   if (res.ok) { toast.success("Issue started"); onUpdated() }
                   else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to start") }
                 }}
-                className="flex-1 flex items-center justify-center gap-1.5 h-[26px] rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-medium transition-colors"
+                className="flex items-center justify-center gap-1.5 h-[26px] px-4 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-medium transition-colors"
               >
                 <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg>
                 Start
@@ -668,7 +668,7 @@ export function IssueDetailInline({
                   if (res.ok) { toast.success("Issue stopped"); onUpdated() }
                   else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to stop") }
                 }}
-                className="flex-1 flex items-center justify-center gap-1.5 h-[26px] rounded-md bg-red-500/10 border border-red-500/25 text-red-400 text-[11px] font-medium hover:bg-red-500/20 transition-colors"
+                className="flex items-center justify-center gap-1.5 h-[26px] px-4 rounded-md bg-red-500/10 border border-red-500/25 text-red-400 text-[11px] font-medium hover:bg-red-500/20 transition-colors"
               >
                 <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
                 Stop
@@ -825,7 +825,7 @@ export function IssueDetailInline({
                         {issue.assignee_id && (
                           <img src={getAgentAvatarUrl(issue.assignee_id)} alt="" className="h-4 w-4 rounded-full" />
                         )}
-                        {issue.assignee_name || <span className="text-muted-foreground/25">Unassigned</span>}
+                        {issue.assignee_name || <span className="text-muted-foreground/40">Unassigned</span>}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -871,7 +871,7 @@ export function IssueDetailInline({
                   <PopoverTrigger asChild>
                     <div>
                       <PropertyRow label="Due date">
-                        {issue.due_date ? new Date(issue.due_date).toLocaleDateString() : <span className="text-muted-foreground/25">No due date</span>}
+                        {issue.due_date ? new Date(issue.due_date).toLocaleDateString() : <span className="text-muted-foreground/40">No due date</span>}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -900,7 +900,7 @@ export function IssueDetailInline({
                   <PopoverTrigger asChild>
                     <div>
                       <PropertyRow label="Estimate">
-                        {issue.estimate ? `${issue.estimate} pts` : <span className="text-muted-foreground/25">&mdash;</span>}
+                        {issue.estimate ? `${issue.estimate} pts` : <span className="text-muted-foreground/40">&mdash;</span>}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -931,7 +931,7 @@ export function IssueDetailInline({
                   <PopoverTrigger asChild>
                     <div>
                       <PropertyRow label="Milestone">
-                        {currentMilestone ? currentMilestone.name : <span className="text-muted-foreground/25">&mdash;</span>}
+                        {currentMilestone ? currentMilestone.name : <span className="text-muted-foreground/40">&mdash;</span>}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -1844,7 +1844,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                   <div>
                     <PropertyRow label="Lead">
                       {project.lead_id && <img src={getAgentAvatarUrl(project.lead_id)} alt="" className="h-4 w-4 rounded-full" />}
-                      {project.lead_name || <span className="text-muted-foreground/25">Add lead</span>}
+                      {project.lead_name || <span className="text-muted-foreground/40">Add lead</span>}
                     </PropertyRow>
                   </div>
                 </PopoverTrigger>
@@ -1902,7 +1902,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                     <PropertyRow label="Dates">
                       {project.start_date || project.target_date
                         ? `${project.start_date || "?"} → ${project.target_date || "?"}`
-                        : <span className="text-muted-foreground/25">Set dates</span>}
+                        : <span className="text-muted-foreground/40">Set dates</span>}
                     </PropertyRow>
                   </div>
                 </PopoverTrigger>
