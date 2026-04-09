@@ -7,6 +7,7 @@ import {
   FileText, PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
   ChevronUp, ChevronDown, ChevronLeft, X, Play, Square, Loader2,
+  CircleDot, LayoutGrid, List, Plus,
 } from "lucide-react"
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
@@ -34,9 +35,10 @@ import { A2AMessageStream } from "@/components/features/orchestration/a2a-messag
 import { MissionYamlEditor } from "@/components/features/orchestration/mission-yaml-editor"
 import { DockerOverview } from "@/components/features/orchestration/docker-overview"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
-import type { Mission, MissionTask } from "@/lib/types/mission"
+import type { Mission, MissionTask, IssueLabel, IssueComment } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { IssuesExplorerPanel, IssuesBoardInline, IssuesListInline, IssueDetailInline } from "@/components/features/orchestration/issues-inline"
 
 import { toast } from "sonner"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
@@ -260,7 +262,7 @@ export function OrchestrationLayout({
   const [drawerTab, setDrawerTab] = useState<DrawerTab>("messages")
 
   // Content state
-  const [activeTab, setActiveTab] = useState("graph")
+  const [activeTab, setActiveTab] = useState("issues")
   const [_selectedTask, setSelectedTask] = useState<MissionTask | null>(null)
   const [selectedCrewId, setSelectedCrewId] = useState<string | null>(null)
   const [selectedAgentSlug, setSelectedAgentSlug] = useState<string | null>(null)
@@ -268,6 +270,14 @@ export function OrchestrationLayout({
 
   // A2A message filter
   const [a2aCrewFilter, setA2aCrewFilter] = useState<string | null>(null)
+
+  // Issues state
+  const [issues, setIssues] = useState<Mission[]>([])
+  const [issueLabels, setIssueLabels] = useState<IssueLabel[]>([])
+  const [issueViewMode, setIssueViewMode] = useState<"board" | "list">("board")
+  const [issueSearch, setIssueSearch] = useState("")
+  const [selectedIssue, setSelectedIssue] = useState<Mission | null>(null)
+  const [issueComments, setIssueComments] = useState<IssueComment[]>([])
 
   const graphRef = useRef<WorkflowGraphRef>(null)
 
@@ -331,6 +341,49 @@ export function OrchestrationLayout({
     if (selectedMissionId === "all") return missions
     return missions.filter((m) => m.id === selectedMissionId)
   }, [selectedMissionId, missions])
+
+  // Issue data fetching
+  const fetchIssues = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(`/api/v1/issues?workspace_id=${workspaceId}&limit=100`)
+      if (res.ok) setIssues(await res.json())
+    } catch { /* ignore */ }
+  }, [workspaceId])
+
+  const fetchIssueLabels = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(`/api/v1/labels?workspace_id=${workspaceId}`)
+      if (res.ok) setIssueLabels(await res.json())
+    } catch { /* ignore */ }
+  }, [workspaceId])
+
+  useEffect(() => {
+    fetchIssues()
+    fetchIssueLabels()
+  }, [fetchIssues, fetchIssueLabels])
+
+  const handleIssueSelect = useCallback(async (issue: Mission) => {
+    setSelectedIssue(issue)
+    setDetailContext({ type: "none" })
+    if (issue.crew_id && issue.identifier) {
+      try {
+        const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/comments?workspace_id=${workspaceId}`)
+        if (res.ok) setIssueComments(await res.json())
+        else setIssueComments([])
+      } catch { setIssueComments([]) }
+    }
+  }, [workspaceId])
+
+  const filteredIssues = useMemo(() => {
+    if (!issueSearch) return issues
+    const q = issueSearch.toLowerCase()
+    return issues.filter((i) =>
+      i.title.toLowerCase().includes(q) ||
+      (i.identifier && i.identifier.toLowerCase().includes(q))
+    )
+  }, [issues, issueSearch])
 
   // Handlers
   const handleNodeClick = useCallback((task: MissionTask) => {
@@ -426,7 +479,7 @@ export function OrchestrationLayout({
     }
   }, [drawerOpen, drawerTab])
 
-  const showRightPanel = detailContext.type !== "none"
+  const showRightPanel = detailContext.type !== "none" || selectedIssue !== null
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
@@ -513,6 +566,7 @@ export function OrchestrationLayout({
       {/* ---- Row 2: Tab navigation ---- */}
       <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {([
+          { id: "issues", label: "Issues", icon: CircleDot },
           { id: "graph", label: "Graph", icon: Workflow },
           { id: "timeline", label: "Timeline", icon: Clock },
           { id: "activity", label: "Activity", icon: Activity },
@@ -520,7 +574,13 @@ export function OrchestrationLayout({
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => setActiveTab(id)}
+            onClick={() => {
+              setActiveTab(id)
+              if (id !== "issues") {
+                setSelectedIssue(null)
+                setIssueComments([])
+              }
+            }}
             className={cn(
               "flex items-center gap-1.5 px-3 text-[12px] font-medium border-b-2 transition-all duration-100 relative top-px",
               activeTab === id
@@ -584,31 +644,43 @@ export function OrchestrationLayout({
                       </button>
                     </div>
                     <div className="flex-1 min-h-0 flex flex-col">
-                      <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
-                        <HierarchyTree
-                          crews={panelCrews}
-                          agents={panelAgents}
-                          selectedCrewId={selectedCrewId}
-                          selectedAgentSlug={selectedAgentSlug}
-                          onCrewSelect={handleCrewSelect}
-                          onAgentSelect={handleAgentSelect}
+                      {activeTab === "issues" ? (
+                        <IssuesExplorerPanel
+                          issues={issues}
+                          search={issueSearch}
+                          onSearchChange={setIssueSearch}
+                          selectedIssue={selectedIssue}
+                          onIssueSelect={handleIssueSelect}
                         />
-                      </div>
-                      <div className="border-b border-border flex-1 min-h-0 flex flex-col">
-                        <UnifiedInbox
-                          missions={panelMissions}
-                          onTaskSelect={handleInboxTaskSelect}
-                        />
-                      </div>
-                      <div className="p-2 shrink-0">
-                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
-                          Connections
-                        </div>
-                        <ConnectionMap
-                          crews={panelCrews}
-                          connections={panelConnections}
-                        />
-                      </div>
+                      ) : (
+                        <>
+                          <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
+                            <HierarchyTree
+                              crews={panelCrews}
+                              agents={panelAgents}
+                              selectedCrewId={selectedCrewId}
+                              selectedAgentSlug={selectedAgentSlug}
+                              onCrewSelect={handleCrewSelect}
+                              onAgentSelect={handleAgentSelect}
+                            />
+                          </div>
+                          <div className="border-b border-border flex-1 min-h-0 flex flex-col">
+                            <UnifiedInbox
+                              missions={panelMissions}
+                              onTaskSelect={handleInboxTaskSelect}
+                            />
+                          </div>
+                          <div className="p-2 shrink-0">
+                            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
+                              Connections
+                            </div>
+                            <ConnectionMap
+                              crews={panelCrews}
+                              connections={panelConnections}
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
                   </motion.div>
                 </>
@@ -647,36 +719,48 @@ export function OrchestrationLayout({
                   transition={{ duration: 0.2, ease: "easeOut" }}
                   className="flex-1 min-h-0 flex flex-col"
                 >
-                  {/* Hierarchy tree */}
-                  <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
-                    <HierarchyTree
-                      crews={panelCrews}
-                      agents={panelAgents}
-                      selectedCrewId={selectedCrewId}
-                      selectedAgentSlug={selectedAgentSlug}
-                      onCrewSelect={handleCrewSelect}
-                      onAgentSelect={handleAgentSelect}
+                  {activeTab === "issues" ? (
+                    <IssuesExplorerPanel
+                      issues={issues}
+                      search={issueSearch}
+                      onSearchChange={setIssueSearch}
+                      selectedIssue={selectedIssue}
+                      onIssueSelect={handleIssueSelect}
                     />
-                  </div>
+                  ) : (
+                    <>
+                      {/* Hierarchy tree */}
+                      <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
+                        <HierarchyTree
+                          crews={panelCrews}
+                          agents={panelAgents}
+                          selectedCrewId={selectedCrewId}
+                          selectedAgentSlug={selectedAgentSlug}
+                          onCrewSelect={handleCrewSelect}
+                          onAgentSelect={handleAgentSelect}
+                        />
+                      </div>
 
-                  {/* Unified Inbox */}
-                  <div className="border-b border-border flex-1 min-h-0 flex flex-col">
-                    <UnifiedInbox
-                      missions={panelMissions}
-                      onTaskSelect={handleInboxTaskSelect}
-                    />
-                  </div>
+                      {/* Unified Inbox */}
+                      <div className="border-b border-border flex-1 min-h-0 flex flex-col">
+                        <UnifiedInbox
+                          missions={panelMissions}
+                          onTaskSelect={handleInboxTaskSelect}
+                        />
+                      </div>
 
-                  {/* Connection Map */}
-                  <div className="p-2 shrink-0">
-                    <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
-                      Connections
-                    </div>
-                    <ConnectionMap
-                      crews={panelCrews}
-                      connections={panelConnections}
-                    />
-                  </div>
+                      {/* Connection Map */}
+                      <div className="p-2 shrink-0">
+                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
+                          Connections
+                        </div>
+                        <ConnectionMap
+                          crews={panelCrews}
+                          connections={panelConnections}
+                        />
+                      </div>
+                    </>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -685,6 +769,44 @@ export function OrchestrationLayout({
 
         {/* ---- Center content area ---- */}
         <div className="row-span-1 relative overflow-hidden min-h-0">
+          {activeTab === "issues" && (
+            <div className="h-full overflow-auto">
+              {/* Toolbar strip */}
+              <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.06] shrink-0">
+                <div className="flex gap-1 bg-white/[0.04] rounded-md p-0.5">
+                  <button
+                    onClick={() => setIssueViewMode("board")}
+                    className={cn("p-1.5 rounded", issueViewMode === "board" ? "bg-white/[0.1] text-foreground" : "text-muted-foreground")}
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setIssueViewMode("list")}
+                    className={cn("p-1.5 rounded", issueViewMode === "list" ? "bg-white/[0.1] text-foreground" : "text-muted-foreground")}
+                  >
+                    <List className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="flex-1" />
+                <button
+                  onClick={() => { /* TODO: open create dialog */ }}
+                  className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md bg-blue-600 text-white text-xs font-medium hover:bg-blue-500"
+                >
+                  <Plus className="h-3 w-3" />
+                  New Issue
+                </button>
+              </div>
+              {/* Board or List view */}
+              <div className="p-4 h-[calc(100%-45px)]">
+                {issueViewMode === "board" ? (
+                  <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
+                ) : (
+                  <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === "graph" && (
             <>
               <WorkflowGraph
@@ -744,7 +866,18 @@ export function OrchestrationLayout({
                   <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Detail</span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  <ContextDetailPanel context={detailContext} onClose={handleDetailClose} onTaskAction={handleTaskAction} />
+                  {selectedIssue ? (
+                    <IssueDetailInline
+                      issue={selectedIssue}
+                      comments={issueComments}
+                      labels={issueLabels}
+                      workspaceId={workspaceId}
+                      onClose={() => { setSelectedIssue(null); setIssueComments([]) }}
+                      onUpdated={() => { fetchIssues(); handleIssueSelect(selectedIssue) }}
+                    />
+                  ) : (
+                    <ContextDetailPanel context={detailContext} onClose={handleDetailClose} onTaskAction={handleTaskAction} />
+                  )}
                 </div>
               </motion.div>
             )}
@@ -764,11 +897,22 @@ export function OrchestrationLayout({
                   transition={{ duration: 0.15, ease: "easeOut" }}
                   className="h-full"
                 >
-                  <ContextDetailPanel
-                    context={detailContext}
-                    onClose={handleDetailClose}
-                    onTaskAction={handleTaskAction}
-                  />
+                  {selectedIssue ? (
+                    <IssueDetailInline
+                      issue={selectedIssue}
+                      comments={issueComments}
+                      labels={issueLabels}
+                      workspaceId={workspaceId}
+                      onClose={() => { setSelectedIssue(null); setIssueComments([]) }}
+                      onUpdated={() => { fetchIssues(); handleIssueSelect(selectedIssue) }}
+                    />
+                  ) : (
+                    <ContextDetailPanel
+                      context={detailContext}
+                      onClose={handleDetailClose}
+                      onTaskAction={handleTaskAction}
+                    />
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>

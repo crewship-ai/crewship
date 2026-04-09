@@ -11,7 +11,6 @@ import {
   Settings,
   Network,
   Workflow,
-  CircleDot,
   Activity,
   Shield,
   Store,
@@ -53,7 +52,6 @@ const navSections = [
     label: "Work",
     items: [
       { title: "Dashboard", href: "/", icon: LayoutDashboard },
-      { title: "Issues", href: "/issues", icon: CircleDot },
       { title: "Orchestration", href: "/orchestration", icon: Workflow },
       { title: "Fleet", href: "/fleet", icon: Ship },
       { title: "Crews", href: "/crews", icon: Network },
