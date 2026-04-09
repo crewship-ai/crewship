@@ -13,11 +13,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
+// CredentialHandler provides CRUD endpoints for managing encrypted credentials (API keys, tokens, OAuth).
 type CredentialHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewCredentialHandler creates a CredentialHandler with the given database and logger.
 func NewCredentialHandler(db *sql.DB, logger *slog.Logger) *CredentialHandler {
 	return &CredentialHandler{db: db, logger: logger}
 }
@@ -176,6 +178,8 @@ func (h *CredentialHandler) setCrewIDs(ctx context.Context, tx *sql.Tx, credenti
 	return nil
 }
 
+// List returns all credentials in the workspace (without secret values).
+// GET /api/v1/credentials
 func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
@@ -266,6 +270,8 @@ type createCredentialRequest struct {
 	OAuthScopes       *string `json:"oauth_scopes"`
 }
 
+// Create stores a new encrypted credential in the workspace.
+// POST /api/v1/credentials
 func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -328,11 +334,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Validate all crew IDs
 	for _, cid := range crewIDs {
-		var crewExists string
-		err := h.db.QueryRowContext(r.Context(),
-			"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-			cid, workspaceID).Scan(&crewExists)
-		if err != nil {
+		if err := crewExists(r.Context(), h.db, cid, workspaceID); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
 			return
 		}
@@ -455,6 +457,8 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Get returns a single credential by ID (without the secret value).
+// GET /api/v1/credentials/{credentialId}
 func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -492,6 +496,8 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c)
 }
 
+// Update modifies credential metadata and optionally rotates the encrypted secret value.
+// PATCH /api/v1/credentials/{credentialId}
 func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -541,11 +547,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		// Validate all crew IDs
 		for _, cid := range crewIDs {
-			var crewExists string
-			err := h.db.QueryRowContext(r.Context(),
-				"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-				cid, workspaceID).Scan(&crewExists)
-			if err != nil {
+			if err := crewExists(r.Context(), h.db, cid, workspaceID); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
 				return
 			}
@@ -561,11 +563,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		delete(body, "crew_ids")
 	} else if crewIDVal, ok := body["crew_id"]; ok && crewIDVal != nil {
 		if crewIDStr, ok := crewIDVal.(string); ok && crewIDStr != "" {
-			var crewExists string
-			err := h.db.QueryRowContext(r.Context(),
-				"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-				crewIDStr, workspaceID).Scan(&crewExists)
-			if err != nil {
+			if err := crewExists(r.Context(), h.db, crewIDStr, workspaceID); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid crew_id"})
 				return
 			}
@@ -644,6 +642,8 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	h.Get(w, r)
 }
 
+// Delete removes a credential and all its agent assignments.
+// DELETE /api/v1/credentials/{credentialId}
 func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := WorkspaceIDFromContext(r.Context())

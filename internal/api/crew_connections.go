@@ -107,23 +107,16 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify both crews exist in this workspace
-	var fromExists, toExists bool
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		req.FromCrewID, wsID).Scan(&fromExists); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		h.logger.Error("check from_crew", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
+	fromErr := crewExists(r.Context(), h.db, req.FromCrewID, wsID)
+	toErr := crewExists(r.Context(), h.db, req.ToCrewID, wsID)
+	for _, err := range []error{fromErr, toErr} {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			h.logger.Error("check crew", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		req.ToCrewID, wsID).Scan(&toExists); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		h.logger.Error("check to_crew", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-
-	if !fromExists || !toExists {
+	if fromErr != nil || toErr != nil {
 		writeProblem(w, r, http.StatusNotFound, "One or both crews not found in this workspace")
 		return
 	}

@@ -297,11 +297,7 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	var exists int
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&exists)
-	if err != nil {
+	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
@@ -342,11 +338,7 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path parameter required"})
 		return
 	}
-	var exists int
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&exists)
-	if err != nil {
+	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
@@ -390,11 +382,7 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path parameter required"})
 		return
 	}
-	var exists int
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&exists)
-	if err != nil {
+	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}

@@ -157,10 +157,7 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	// When accessed via the public (authenticated) route, validate that the crew
 	// belongs to the caller's workspace to prevent cross-workspace data access.
 	if wsID := WorkspaceIDFromContext(r.Context()); wsID != "" {
-		var exists int
-		if err := h.db.QueryRowContext(r.Context(),
-			`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-			crewID, wsID).Scan(&exists); err != nil {
+		if err := crewExists(r.Context(), h.db, crewID, wsID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found in workspace"})
 				return

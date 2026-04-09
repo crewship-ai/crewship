@@ -182,10 +182,7 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 	crewID := r.PathValue("crewId")
 
 	// Verify crew belongs to workspace
-	var crewExists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&crewExists); err != nil {
+	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
@@ -319,10 +316,7 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 
 	crewID := r.PathValue("crewId")
 	// Verify crew
-	var crewExists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&crewExists); err != nil {
+	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}

@@ -186,11 +186,7 @@ func (h *ProposalHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusBadRequest, fmt.Sprintf("missions[%d].crew_id is required", i))
 			return
 		}
-		var exists int
-		err := h.db.QueryRowContext(r.Context(),
-			`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-			m.CrewID, wsID).Scan(&exists)
-		if err != nil {
+		if err := crewExists(r.Context(), h.db, m.CrewID, wsID); err != nil {
 			writeProblem(w, r, http.StatusBadRequest, fmt.Sprintf("missions[%d].crew_id %q not found", i, m.CrewID))
 			return
 		}
