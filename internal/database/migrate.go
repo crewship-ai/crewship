@@ -97,6 +97,7 @@ var migrations = []migration{
 	{36, "add_mcp_registry_cache", migrationAddMCPRegistryCache},
 	{37, "add_crew_messaging_and_audit", migrationAddCrewMessagingAndAudit},
 	{38, "add_issue_tracker", migrationAddIssueTracker},
+	{39, "add_issue_relations", migrationAddIssueRelations},
 }
 
 const migrationAddKeeperObservability = `
@@ -1200,4 +1201,18 @@ CREATE TABLE IF NOT EXISTS mission_comments (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_mission_comments_mission ON mission_comments(mission_id);
+`
+
+const migrationAddIssueRelations = `
+-- Relations between issues (blocks, blocked_by, relates_to, duplicate_of).
+CREATE TABLE IF NOT EXISTS mission_relations (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    relation_type TEXT NOT NULL CHECK(relation_type IN ('blocks','blocked_by','relates_to','duplicate_of')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(source_id, target_id, relation_type)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_rel_source ON mission_relations(source_id);
+CREATE INDEX IF NOT EXISTS idx_mission_rel_target ON mission_relations(target_id);
 `

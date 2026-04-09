@@ -392,6 +392,10 @@ func (r *Router) registerRoutes() {
 	// Issue Comments
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/comments", authed(wsCtx(http.HandlerFunc(issues.ListComments))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/issues/{identifier}/comments", authed(wsCtx(http.HandlerFunc(issues.CreateComment))))
+	// Issue Relations
+	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/relations", authed(wsCtx(http.HandlerFunc(issues.ListRelations))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/issues/{identifier}/relations", authed(wsCtx(http.HandlerFunc(issues.CreateRelation))))
+	r.mux.Handle("DELETE /api/v1/relations/{relationId}", authed(wsCtx(http.HandlerFunc(issues.DeleteRelation))))
 
 	// Mission Proposals (workspace-scoped)
 	proposals := NewProposalHandler(r.db, r.hub, missionEngineForPublic, r.logger)

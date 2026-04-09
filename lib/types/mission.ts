@@ -128,6 +128,19 @@ export interface IssueLabel {
   label_group: string | null
 }
 
+export type RelationType = "blocks" | "blocked_by" | "relates_to" | "duplicate_of"
+
+export interface IssueRelation {
+  id: string
+  source_id: string
+  target_id: string
+  relation_type: RelationType
+  target_identifier?: string
+  target_title?: string
+  target_status?: string
+  created_at: string
+}
+
 export interface IssueComment {
   id: string
   mission_id: string
