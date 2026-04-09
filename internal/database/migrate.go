@@ -98,6 +98,7 @@ var migrations = []migration{
 	{37, "add_crew_messaging_and_audit", migrationAddCrewMessagingAndAudit},
 	{38, "add_issue_tracker", migrationAddIssueTracker},
 	{39, "add_issue_relations", migrationAddIssueRelations},
+	{40, "add_projects", migrationAddProjects},
 }
 
 const migrationAddKeeperObservability = `
@@ -1215,4 +1216,33 @@ CREATE TABLE IF NOT EXISTS mission_relations (
 );
 CREATE INDEX IF NOT EXISTS idx_mission_rel_source ON mission_relations(source_id);
 CREATE INDEX IF NOT EXISTS idx_mission_rel_target ON mission_relations(target_id);
+`
+
+const migrationAddProjects = `
+-- Projects group issues toward a deliverable (like Linear Projects).
+CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    description TEXT,
+    icon TEXT,
+    color TEXT NOT NULL DEFAULT '#6B7280',
+    status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('backlog','planned','in_progress','paused','completed','cancelled')),
+    priority TEXT NOT NULL DEFAULT 'none' CHECK(priority IN ('none','low','medium','high','urgent')),
+    health TEXT NOT NULL DEFAULT 'on_track' CHECK(health IN ('on_track','at_risk','off_track')),
+    lead_type TEXT,
+    lead_id TEXT,
+    start_date TEXT,
+    target_date TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(workspace_id, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+
+-- Link missions (issues) to projects.
+ALTER TABLE missions ADD COLUMN project_id TEXT REFERENCES projects(id);
+CREATE INDEX IF NOT EXISTS idx_mission_project ON missions(project_id);
 `

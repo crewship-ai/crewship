@@ -45,6 +45,16 @@ Requires crews with LEAD agents to already exist.`,
 					}
 				}
 			}
+			// Delete projects
+			resp, err = client.Get("/api/v1/projects")
+			if err == nil {
+				var projects []struct{ ID string `json:"id"` }
+				if cli.ReadJSON(resp, &projects) == nil {
+					for _, p := range projects {
+						_, _ = client.Delete("/api/v1/projects/" + p.ID)
+					}
+				}
+			}
 			// Delete labels
 			resp, err = client.Get("/api/v1/labels")
 			if err == nil {
@@ -115,40 +125,90 @@ Requires crews with LEAD agents to already exist.`,
 			fmt.Fprintf(os.Stderr, "  + Label: %s\n", l.Name)
 		}
 
-		// ── Step 3: Create issues ──
+		// ── Step 3: Create projects ──
+		fmt.Fprintln(os.Stderr, "Creating projects...")
+		type projectDef struct {
+			name     string
+			color    string
+			icon     string
+			status   string
+			priority string
+		}
+		projectDefs := []projectDef{
+			{name: "Core Platform", color: "#3B82F6", icon: "anchor", status: "in_progress", priority: "high"},
+			{name: "Orchestration Engine", color: "#F97316", icon: "workflow", status: "planned", priority: "high"},
+			{name: "Infrastructure & Integrations", color: "#22C55E", icon: "server", status: "in_progress", priority: "high"},
+			{name: "Developer Experience", color: "#EAB308", icon: "sparkles", status: "planned", priority: "medium"},
+			{name: "Crewship CLI", color: "#A855F7", icon: "terminal", status: "in_progress", priority: "medium"},
+			{name: "Security & Compliance", color: "#EF4444", icon: "shield", status: "in_progress", priority: "urgent"},
+			{name: "Technical Debt", color: "#6B7280", icon: "wrench", status: "backlog", priority: "low"},
+		}
+		projectByName := map[string]string{} // name → id
+		for _, pd := range projectDefs {
+			resp, err := client.Post("/api/v1/projects", map[string]interface{}{
+				"name":     pd.name,
+				"color":    pd.color,
+				"icon":     pd.icon,
+				"status":   pd.status,
+				"priority": pd.priority,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ! Failed to create project %s: %v\n", pd.name, err)
+				continue
+			}
+			if resp.StatusCode >= 400 {
+				resp.Body.Close()
+				continue
+			}
+			var created struct {
+				ID string `json:"id"`
+			}
+			if cli.ReadJSON(resp, &created) == nil {
+				projectByName[pd.name] = created.ID
+				fmt.Fprintf(os.Stderr, "  + Project: %s\n", pd.name)
+			}
+		}
+
+		// ── Step 4: Create issues ──
 		fmt.Fprintln(os.Stderr, "Creating issues...")
 		type issueDef struct {
 			crew        string
 			title       string
 			desc        string
 			priority    string
+			project     string
 			targetState string // final status after creation (BACKLOG is default)
 			comment     string
 		}
 
 		issueDefs := []issueDef{
-			// Engineering — urgent/high, mixed states
-			{crew: "engineering", title: "Implement WebSocket channel authentication", desc: "Clients can subscribe to any WS channel without auth. Add JWT-based channel validation to prevent cross-workspace data leaks.", priority: "urgent", targetState: "IN_PROGRESS", comment: "Started channel_auth.go — using JWT claims for channel subscription validation. Hub already has broadcast isolation."},
-			{crew: "engineering", title: "Add rate limiting to public API endpoints", desc: "No rate limiting exists. Implement per-user token bucket with configurable limits per endpoint category.", priority: "high", targetState: "TODO"},
-			{crew: "engineering", title: "Refactor credential encryption to AES-256-GCM v2", desc: "Current v1 format works but key derivation is slow. Migrate to HKDF-based approach while maintaining backward compat.", priority: "medium", targetState: "DONE", comment: "Migration complete. All v1 credentials auto-upgraded on first decrypt. Backward compat verified with 847 test credentials."},
-			{crew: "engineering", title: "Add database connection pooling for WAL mode", desc: "SQLite single-writer bottleneck under concurrent load. Evaluate WAL mode with busy_timeout and connection pool.", priority: "high", targetState: "TODO"},
-			{crew: "engineering", title: "Implement real-time notification system", desc: "Add notification inbox with desktop push, email digest, and in-app badge counts. Support subscribe/unsubscribe per issue.", priority: "medium"},
-			{crew: "engineering", title: "Build project management module", desc: "Add projects table to group issues. Include milestones, progress tracking, lead assignment, and timeline view.", priority: "low"},
+			// Core Platform
+			{crew: "engineering", project: "Core Platform", title: "Implement WebSocket channel authentication", desc: "Clients can subscribe to any WS channel without auth. Add JWT-based channel validation to prevent cross-workspace data leaks.", priority: "urgent", targetState: "IN_PROGRESS", comment: "Started channel_auth.go — using JWT claims for channel subscription validation. Hub already has broadcast isolation."},
+			{crew: "engineering", project: "Core Platform", title: "Add rate limiting to public API endpoints", desc: "No rate limiting exists. Implement per-user token bucket with configurable limits per endpoint category.", priority: "high", targetState: "TODO"},
+			{crew: "engineering", project: "Core Platform", title: "Implement real-time notification system", desc: "Add notification inbox with desktop push, email digest, and in-app badge counts. Support subscribe/unsubscribe per issue.", priority: "medium"},
+			{crew: "engineering", project: "Core Platform", title: "Add database connection pooling for WAL mode", desc: "SQLite single-writer bottleneck under concurrent load. Evaluate WAL mode with busy_timeout and connection pool.", priority: "high", targetState: "TODO"},
 
-			// DevOps — infra focused
-			{crew: "devops", title: "Set up automated SQLite backup with Litestream", desc: "No backup strategy in place. Implement hourly Litestream replication to S3-compatible storage.", priority: "urgent", targetState: "IN_PROGRESS", comment: "Evaluating Litestream vs custom backup. Litestream supports continuous WAL replication to S3. Setting up MinIO locally for testing."},
-			{crew: "devops", title: "Configure Prometheus metrics endpoint", desc: "Expose /metrics for Go runtime stats, HTTP request latency, active WebSocket connections, mission execution metrics.", priority: "medium", targetState: "TODO"},
-			{crew: "devops", title: "Dockerize production deployment", desc: "Create multi-stage Dockerfile with embedded Next.js static export. Target: single container under 100MB.", priority: "low"},
-			{crew: "devops", title: "Monitor crew container resource usage", desc: "Track CPU, memory, and disk usage per crew container. Alert when approaching limits. Add dashboard widget.", priority: "medium"},
+			// Security & Compliance
+			{crew: "engineering", project: "Security & Compliance", title: "Refactor credential encryption to AES-256-GCM v2", desc: "Current v1 format works but key derivation is slow. Migrate to HKDF-based approach while maintaining backward compat.", priority: "medium", targetState: "DONE", comment: "Migration complete. All v1 credentials auto-upgraded on first decrypt. Backward compat verified with 847 test credentials."},
+			{crew: "quality", project: "Security & Compliance", title: "Security audit: validate all API input sanitization", desc: "Review all 47 API handlers for SQL injection, XSS in stored content, SSRF in OAuth flows, path traversal in file operations.", priority: "urgent", targetState: "IN_PROGRESS", comment: "Phase 1 complete: reviewed all 47 API handlers. Found 3 potential SSRF vectors in OAuth discovery and 1 path traversal in file server. Creating sub-tasks for each fix."},
 
-			// Research — evaluation
-			{crew: "research", title: "Evaluate local LLM models for Keeper engine", desc: "Test Llama 3.2, Mistral 7B, and Phi-3 for keeper confidence scoring. Compare accuracy vs latency on real decisions.", priority: "medium", targetState: "REVIEW", comment: "Llama 3.2 8B: 87% accuracy, 340ms avg. Mistral 7B: 82%, 280ms. Phi-3 mini: 71%, 180ms. Recommending Llama 3.2 for production."},
-			{crew: "research", title: "Benchmark A2A protocol message throughput", desc: "Measure agent-to-agent communication latency and throughput under load. Target: <50ms p99 for intra-crew messages.", priority: "low"},
+			// Infrastructure
+			{crew: "devops", project: "Infrastructure & Integrations", title: "Set up automated SQLite backup with Litestream", desc: "No backup strategy in place. Implement hourly Litestream replication to S3-compatible storage.", priority: "urgent", targetState: "IN_PROGRESS", comment: "Evaluating Litestream vs custom backup. Litestream supports continuous WAL replication to S3. Setting up MinIO locally for testing."},
+			{crew: "devops", project: "Infrastructure & Integrations", title: "Configure Prometheus metrics endpoint", desc: "Expose /metrics for Go runtime stats, HTTP request latency, active WebSocket connections, mission execution metrics.", priority: "medium", targetState: "TODO"},
+			{crew: "devops", project: "Infrastructure & Integrations", title: "Dockerize production deployment", desc: "Create multi-stage Dockerfile with embedded Next.js static export. Target: single container under 100MB.", priority: "low"},
+			{crew: "devops", project: "Infrastructure & Integrations", title: "Monitor crew container resource usage", desc: "Track CPU, memory, and disk usage per crew container. Alert when approaching limits. Add dashboard widget.", priority: "medium"},
 
-			// Quality — testing & security
-			{crew: "quality", title: "Write integration tests for mission orchestration engine", desc: "MissionEngine has no integration tests. Cover: DAG resolution, task dispatch, failure recovery, circuit breaker, approval gates.", priority: "high", targetState: "TODO"},
-			{crew: "quality", title: "Add E2E test suite for issue tracker API", desc: "Test full CRUD lifecycle: create issue, update status, add comments, label assignment, delete. Cover edge cases and error paths.", priority: "medium"},
-			{crew: "quality", title: "Security audit: validate all API input sanitization", desc: "Review all 47 API handlers for SQL injection, XSS in stored content, SSRF in OAuth flows, path traversal in file operations.", priority: "urgent", targetState: "IN_PROGRESS", comment: "Phase 1 complete: reviewed all 47 API handlers. Found 3 potential SSRF vectors in OAuth discovery and 1 path traversal in file server. Creating sub-tasks for each fix."},
+			// Orchestration Engine
+			{crew: "research", project: "Orchestration Engine", title: "Evaluate local LLM models for Keeper engine", desc: "Test Llama 3.2, Mistral 7B, and Phi-3 for keeper confidence scoring. Compare accuracy vs latency on real decisions.", priority: "medium", targetState: "REVIEW", comment: "Llama 3.2 8B: 87% accuracy, 340ms avg. Mistral 7B: 82%, 280ms. Phi-3 mini: 71%, 180ms. Recommending Llama 3.2 for production."},
+			{crew: "research", project: "Orchestration Engine", title: "Benchmark A2A protocol message throughput", desc: "Measure agent-to-agent communication latency and throughput under load. Target: <50ms p99 for intra-crew messages.", priority: "low"},
+			{crew: "quality", project: "Orchestration Engine", title: "Write integration tests for mission orchestration engine", desc: "MissionEngine has no integration tests. Cover: DAG resolution, task dispatch, failure recovery, circuit breaker, approval gates.", priority: "high", targetState: "TODO"},
+
+			// Crewship CLI / DX
+			{crew: "quality", project: "Crewship CLI", title: "Add E2E test suite for issue tracker API", desc: "Test full CRUD lifecycle: create issue, update status, add comments, label assignment, delete. Cover edge cases and error paths.", priority: "medium"},
+			{crew: "engineering", project: "Developer Experience", title: "Build project management module", desc: "Add projects table to group issues. Include milestones, progress tracking, lead assignment, and timeline view.", priority: "low"},
+
+			// Technical Debt
+			{crew: "engineering", project: "Technical Debt", title: "Clean up unused MCP template providers", desc: "Several MCP provider templates are unused or outdated. Remove dead code and consolidate.", priority: "low"},
 		}
 
 		for _, def := range issueDefs {
@@ -164,6 +224,11 @@ Requires crews with LEAD agents to already exist.`,
 			}
 			if def.desc != "" {
 				body["description"] = def.desc
+			}
+			if def.project != "" {
+				if pid, ok := projectByName[def.project]; ok {
+					body["project_id"] = pid
+				}
 			}
 
 			resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues", crewID), body)
@@ -225,7 +290,7 @@ Requires crews with LEAD agents to already exist.`,
 		}
 
 		fmt.Fprintln(os.Stderr, "")
-		cli.PrintSuccess(fmt.Sprintf("Seeded %d issues across %d crews", len(issueDefs), len(crewBySlug)))
+		cli.PrintSuccess(fmt.Sprintf("Seeded %d projects, %d issues across %d crews", len(projectByName), len(issueDefs), len(crewBySlug)))
 		return nil
 	},
 }

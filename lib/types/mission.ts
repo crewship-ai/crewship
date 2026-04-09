@@ -115,6 +115,8 @@ export interface Mission {
   due_date?: string | null
   sort_order?: number
   mission_type?: MissionType
+  project_id?: string | null
+  project_name?: string | null
   labels?: IssueLabel[]
   crew_name?: string
   crew_slug?: string
@@ -126,6 +128,32 @@ export interface IssueLabel {
   name: string
   color: string
   label_group: string | null
+}
+
+export type ProjectStatus = "backlog" | "planned" | "in_progress" | "paused" | "completed" | "cancelled"
+export type ProjectHealth = "on_track" | "at_risk" | "off_track"
+
+export interface Project {
+  id: string
+  workspace_id: string
+  name: string
+  slug: string
+  description: string | null
+  icon: string | null
+  color: string
+  status: ProjectStatus
+  priority: IssuePriority
+  health: ProjectHealth
+  lead_type: "user" | "agent" | null
+  lead_id: string | null
+  lead_name?: string | null
+  start_date: string | null
+  target_date: string | null
+  created_at: string
+  updated_at: string
+  issue_count: number
+  done_count: number
+  progress: number
 }
 
 export type RelationType = "blocks" | "blocked_by" | "relates_to" | "duplicate_of"

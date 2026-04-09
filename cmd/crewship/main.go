@@ -77,6 +77,7 @@ func init() {
 	rootCmd.AddCommand(templateCmd)
 	rootCmd.AddCommand(systemCmd)
 	rootCmd.AddCommand(issueCmd)
+	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(seedIssuesCmd)
 }
 

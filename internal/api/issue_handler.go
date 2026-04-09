@@ -50,6 +50,8 @@ type issueResponse struct {
 	UpdatedAt    string          `json:"updated_at"`
 	CompletedAt  *string         `json:"completed_at"`
 	Labels       []labelResponse `json:"labels"`
+	ProjectID    *string         `json:"project_id"`
+	ProjectName  *string         `json:"project_name,omitempty"`
 	CommentCount int             `json:"comment_count"`
 }
 
@@ -317,6 +319,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		AssigneeType *string  `json:"assignee_type"`
 		AssigneeID   *string  `json:"assignee_id"`
 		DueDate      *string  `json:"due_date"`
+		ProjectID    *string  `json:"project_id"`
 		Labels       []string `json:"labels"`
 	}
 	if err := readJSON(r, &req); err != nil {
@@ -403,12 +406,12 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,
 		    title, description, status, number, identifier, priority,
-		    assignee_type, assignee_id, due_date, sort_order, mission_type,
+		    assignee_type, assignee_id, due_date, project_id, sort_order, mission_type,
 		    created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, 0, 'issue', ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, ?)`,
 		id, wsID, crewID, leadAgentID, traceID,
 		req.Title, req.Description, issueNumber, identifier, req.Priority,
-		req.AssigneeType, req.AssigneeID, req.DueDate,
+		req.AssigneeType, req.AssigneeID, req.DueDate, req.ProjectID,
 		now, now)
 	if err != nil {
 		h.logger.Error("insert issue", "error", err)
@@ -614,6 +617,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		AssigneeType *string  `json:"assignee_type"`
 		AssigneeID   *string  `json:"assignee_id"`
 		DueDate      *string  `json:"due_date"`
+		ProjectID    *string  `json:"project_id"`
 		SortOrder    *float64 `json:"sort_order"`
 	}
 	if err := readJSON(r, &req); err != nil {
@@ -658,6 +662,13 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.SortOrder != nil {
 		ub.Set("sort_order", *req.SortOrder)
+	}
+	if req.ProjectID != nil {
+		if *req.ProjectID == "" {
+			ub.SetNull("project_id")
+		} else {
+			ub.Set("project_id", *req.ProjectID)
+		}
 	}
 
 	// Validate status transition
