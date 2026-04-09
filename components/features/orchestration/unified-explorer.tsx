@@ -166,7 +166,7 @@ export function UnifiedExplorer({
                   {...dropdownAnim}
                   className="absolute right-0 top-9 z-50 bg-card border border-white/[0.1] rounded-lg shadow-xl py-1 min-w-[180px] max-h-[320px] overflow-y-auto"
                 >
-                  <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground/40 uppercase tracking-wider">Crews</div>
+                  <div className="px-3 py-1 text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">Crews</div>
                   <button
                     onClick={() => { onCrewFilter(null); onAgentFilter(null); setFilterDropdownOpen(false) }}
                     className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06]", !filterCrewId && !filterAgentId ? "text-blue-400" : "text-muted-foreground/80")}
@@ -188,7 +188,7 @@ export function UnifiedExplorer({
                   {agents.length > 0 && (
                     <>
                       <div className="border-t border-white/[0.06] mt-1" />
-                      <div className="px-3 py-1 text-[9px] font-semibold text-muted-foreground/40 uppercase tracking-wider">Agents</div>
+                      <div className="px-3 py-1 text-[9px] font-semibold text-foreground/40 uppercase tracking-wider">Agents</div>
                       {agents.map((a) => (
                         <button
                           key={a.id}
@@ -215,7 +215,7 @@ export function UnifiedExplorer({
             <motion.div animate={{ rotate: projectsOpen ? 0 : -90 }} transition={{ duration: 0.15 }}>
               <ChevronDown className="h-3 w-3 text-muted-foreground/40" />
             </motion.div>
-            <span className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider flex-1 text-left">Projects</span>
+            <span className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider flex-1 text-left">Projects</span>
             <span className="text-[10px] text-muted-foreground/30">{projects.length}</span>
           </button>
           <AnimatePresence initial={false}>
@@ -247,7 +247,7 @@ export function UnifiedExplorer({
       {/* ── Issues ── */}
       <div className="flex-1 min-h-0 flex flex-col border-b border-white/[0.06]">
         <div className="px-3 py-1.5 shrink-0 flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">Issues</span>
+          <span className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider">Issues</span>
           <motion.span
             key={displayed.length}
             initial={{ opacity: 0, y: -4 }}
@@ -309,7 +309,7 @@ export function UnifiedExplorer({
           <motion.div animate={{ rotate: inboxOpen ? 0 : -90 }} transition={{ duration: 0.15 }}>
             <ChevronDown className="h-3 w-3 text-muted-foreground/40" />
           </motion.div>
-          <span className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider flex-1 text-left">Inbox</span>
+          <span className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider flex-1 text-left">Inbox</span>
           {inboxCount > 0 && (
             <motion.span
               initial={{ scale: 0.5 }} animate={{ scale: 1 }}
