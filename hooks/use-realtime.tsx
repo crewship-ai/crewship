@@ -5,12 +5,14 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react"
 import { useWebSocket, type WSMessage, type WSStatus } from "@/hooks/use-websocket"
 import { useWorkspace } from "@/hooks/use-workspace"
 
+/** All supported real-time event types broadcast over the workspace WebSocket channel. */
 export type RealtimeEventType =
   | "run.started"
   | "run.completed"
@@ -32,6 +34,7 @@ export type RealtimeEventType =
   | "file.event"
   | "container.stats"
 
+/** A real-time event received from the WebSocket, with typed payload and timestamp. */
 export interface RealtimeEvent {
   type: RealtimeEventType
   payload: Record<string, any>
@@ -61,6 +64,10 @@ function getWsUrl(): string {
   return `${proto}//${window.location.host}/ws`
 }
 
+/**
+ * Context provider that manages a single WebSocket connection for real-time events.
+ * Auto-subscribes to the workspace channel and re-subscribes component channels after reconnect.
+ */
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const { workspaceId } = useWorkspace()
   const [token, setToken] = useState<string | null>(null)
@@ -165,13 +172,19 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     [],
   )
 
+  const contextValue = useMemo(
+    () => ({ status, subscribe, subscribeChannel, lastEvent }),
+    [status, subscribe, subscribeChannel, lastEvent],
+  )
+
   return (
-    <RealtimeContext.Provider value={{ status, subscribe, subscribeChannel, lastEvent }}>
+    <RealtimeContext.Provider value={contextValue}>
       {children}
     </RealtimeContext.Provider>
   )
 }
 
+/** Access the real-time event system (status, subscribe, subscribeChannel, lastEvent). Must be used within RealtimeProvider. */
 export function useRealtime(): RealtimeContextValue {
   const ctx = useContext(RealtimeContext)
   if (!ctx) {
@@ -198,6 +211,7 @@ export function useRealtimeEvent(
   }, [eventType, subscribe])
 }
 
+/** Subscribe to a WebSocket channel (e.g. "agent:{id}") for the lifetime of the calling component. */
 export function useRealtimeChannel(channel: string | null): void {
   const { subscribeChannel } = useRealtime()
   useEffect(() => {

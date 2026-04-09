@@ -10,6 +10,7 @@ import * as lorelei from "@dicebear/lorelei"
 import * as bigSmile from "@dicebear/big-smile"
 import * as avataaars from "@dicebear/avataaars"
 
+/** Map of available DiceBear avatar styles, keyed by style slug. */
 export const AVATAR_STYLES: Record<string, { label: string; style: Style<object> }> = {
   "bottts-neutral": { label: "Robots", style: botttsNeutral as unknown as Style<object> },
   adventurer: { label: "Adventurer", style: adventurer as unknown as Style<object> },
@@ -23,10 +24,16 @@ export const AVATAR_STYLES: Record<string, { label: string; style: Style<object>
   avataaars: { label: "Avataaars", style: avataaars as unknown as Style<object> },
 }
 
+/** Default avatar style used when an agent has no explicit style set. */
 export const DEFAULT_AVATAR_STYLE = "bottts-neutral"
 
 const _avatarCache = new Map<string, string>()
 
+/**
+ * Generate a DiceBear avatar data URI for an agent. Results are cached in memory.
+ * @param seed - Deterministic seed for avatar generation (typically the agent slug).
+ * @param styleName - Avatar style key from AVATAR_STYLES; defaults to bottts-neutral.
+ */
 export function getAgentAvatarUrl(seed: string, styleName?: string | null): string {
   const key = `${styleName ?? DEFAULT_AVATAR_STYLE}:${seed}`
   const cached = _avatarCache.get(key)
@@ -37,6 +44,7 @@ export function getAgentAvatarUrl(seed: string, styleName?: string | null): stri
   return uri
 }
 
+/** Return all available avatar style keys (e.g. "bottts-neutral", "pixel-art"). */
 export function getAvatarStyleKeys(): string[] {
   return Object.keys(AVATAR_STYLES)
 }

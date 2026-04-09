@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 
+/** Aggregate agent counts by status for the fleet toolbar badge. */
 export interface FleetStatus {
   total: number
   running: number

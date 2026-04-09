@@ -3,6 +3,7 @@
 import { create } from "zustand"
 import { persist, createJSONStorage } from "zustand/middleware"
 
+/** A message in the Captain chat panel, with optional tool call/result metadata. */
 export interface CaptainMessage {
   id: string
   role: "user" | "assistant"
@@ -42,6 +43,10 @@ interface CaptainStore {
   setHistoryLoaded: (v: boolean) => void
 }
 
+/**
+ * Zustand store for Captain panel state: messages, streaming status, badge count, and panel visibility.
+ * Panel open/closed state is persisted to localStorage; messages are in-memory only.
+ */
 export const useCaptainStore = create<CaptainStore>()(
   persist(
     (set) => ({

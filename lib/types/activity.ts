@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+/** Zod schema for validating activity feed items (assignments, peer conversations, escalations). */
 export const activityItemSchema = z.object({
   id: z.string(),
   type: z.enum(["assignment", "peer_conversation", "escalation"]),
@@ -16,4 +17,5 @@ export const activityItemSchema = z.object({
   created_at: z.string(),
 })
 
+/** A single item in the activity feed, representing an assignment, peer conversation, or escalation. */
 export type ActivityItem = z.infer<typeof activityItemSchema>
