@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -69,23 +70,42 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	// Determine initial status based on dependencies
 	status := "PENDING"
 	if len(req.DependsOn) > 0 {
-		// Validate all dependency IDs exist and check if all are completed
-		allCompleted := true
-		for _, depID := range req.DependsOn {
-			var depStatus string
-			depErr := h.db.QueryRowContext(r.Context(),
-				`SELECT status FROM mission_tasks WHERE id = ? AND mission_id = ?`,
-				depID, missionID).Scan(&depStatus)
-			if depErr != nil {
-				if errors.Is(depErr, sql.ErrNoRows) {
-					writeProblem(w, r, http.StatusBadRequest, "dependency task not found: "+depID)
-					return
-				}
-				h.logger.Error("lookup dependency task", "error", depErr)
+		// Validate all dependency IDs exist in one batch query
+		placeholders := make([]string, len(req.DependsOn))
+		args := make([]interface{}, 0, len(req.DependsOn)+1)
+		args = append(args, missionID)
+		for i, depID := range req.DependsOn {
+			placeholders[i] = "?"
+			args = append(args, depID)
+		}
+		depRows, depErr := h.db.QueryContext(r.Context(),
+			`SELECT id, status FROM mission_tasks WHERE mission_id = ? AND id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+		if depErr != nil {
+			h.logger.Error("lookup dependency tasks", "error", depErr)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		depStatuses := make(map[string]string, len(req.DependsOn))
+		for depRows.Next() {
+			var id, st string
+			if err := depRows.Scan(&id, &st); err != nil {
+				depRows.Close()
+				h.logger.Error("scan dependency task", "error", err)
 				writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 				return
 			}
-			if depStatus != "COMPLETED" {
+			depStatuses[id] = st
+		}
+		depRows.Close()
+
+		allCompleted := true
+		for _, depID := range req.DependsOn {
+			st, ok := depStatuses[depID]
+			if !ok {
+				writeProblem(w, r, http.StatusBadRequest, "dependency task not found: "+depID)
+				return
+			}
+			if st != "COMPLETED" {
 				allCompleted = false
 			}
 		}
@@ -215,30 +235,49 @@ func (h *MissionHandler) applyTaskEditableFields(ctx context.Context, tx *sql.Tx
 			writeProblem(w, r, http.StatusBadRequest, "depends_on must be a JSON array of task IDs")
 			return fmt.Errorf("validation failed")
 		}
+		// Validate: no self-dependency and all deps exist in this mission (batch query)
 		for _, dep := range depIDs {
 			if dep == taskID {
 				writeProblem(w, r, http.StatusBadRequest, "Task cannot depend on itself")
 				return fmt.Errorf("validation failed")
 			}
-			var depExists bool
-			if qErr := tx.QueryRowContext(ctx,
-				`SELECT 1 FROM mission_tasks WHERE id = ? AND mission_id = ?`, dep, missionID).Scan(&depExists); qErr != nil {
-				writeProblem(w, r, http.StatusBadRequest, fmt.Sprintf("Dependency task %s not found in this mission", dep))
-				return fmt.Errorf("validation failed")
-			}
 		}
-		// Update status based on deps: BLOCKED if any dep is not COMPLETED
 		newStatus := "PENDING"
-		for _, dep := range depIDs {
-			var depStatus string
-			if err := tx.QueryRowContext(ctx, `SELECT status FROM mission_tasks WHERE id = ?`, dep).Scan(&depStatus); err != nil {
-				h.logger.Error("query dep status", "dep_id", dep, "error", err)
-				newStatus = "BLOCKED"
-				break
+		if len(depIDs) > 0 {
+			ph := make([]string, len(depIDs))
+			qa := make([]interface{}, 0, len(depIDs)+1)
+			qa = append(qa, missionID)
+			for i, dep := range depIDs {
+				ph[i] = "?"
+				qa = append(qa, dep)
 			}
-			if depStatus != "COMPLETED" {
-				newStatus = "BLOCKED"
-				break
+			dRows, dErr := tx.QueryContext(ctx,
+				`SELECT id, status FROM mission_tasks WHERE mission_id = ? AND id IN (`+strings.Join(ph, ",")+`)`, qa...)
+			if dErr != nil {
+				h.logger.Error("batch query dep tasks", "error", dErr)
+				writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+				return fmt.Errorf("batch query deps: %w", dErr)
+			}
+			depMap := make(map[string]string, len(depIDs))
+			for dRows.Next() {
+				var id, st string
+				if err := dRows.Scan(&id, &st); err != nil {
+					dRows.Close()
+					return fmt.Errorf("scan dep: %w", err)
+				}
+				depMap[id] = st
+			}
+			dRows.Close()
+
+			for _, dep := range depIDs {
+				st, ok := depMap[dep]
+				if !ok {
+					writeProblem(w, r, http.StatusBadRequest, fmt.Sprintf("Dependency task %s not found in this mission", dep))
+					return fmt.Errorf("validation failed")
+				}
+				if st != "COMPLETED" {
+					newStatus = "BLOCKED"
+				}
 			}
 		}
 		if len(depIDs) == 0 {
@@ -258,37 +297,43 @@ func (h *MissionHandler) applyTaskEditableFields(ctx context.Context, tx *sql.Tx
 // applyTaskMetadataFields handles result_summary, error_message, output_path,
 // assigned_agent_id, token_count, and estimated_cost updates within the transaction.
 func (h *MissionHandler) applyTaskMetadataFields(ctx context.Context, tx *sql.Tx, req *updateTaskRequest, taskID, now string) error {
+	var setClauses []string
+	var args []interface{}
+
 	if req.ResultSummary != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET result_summary = ?, updated_at = ? WHERE id = ?`, *req.ResultSummary, now, taskID); err != nil {
-			return err
-		}
+		setClauses = append(setClauses, "result_summary = ?")
+		args = append(args, *req.ResultSummary)
 	}
 	if req.ErrorMessage != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET error_message = ?, updated_at = ? WHERE id = ?`, *req.ErrorMessage, now, taskID); err != nil {
-			return err
-		}
+		setClauses = append(setClauses, "error_message = ?")
+		args = append(args, *req.ErrorMessage)
 	}
 	if req.OutputPath != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET output_path = ?, updated_at = ? WHERE id = ?`, *req.OutputPath, now, taskID); err != nil {
-			return err
-		}
+		setClauses = append(setClauses, "output_path = ?")
+		args = append(args, *req.OutputPath)
 	}
 	if req.AssignedAgentID != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET assigned_agent_id = ?, updated_at = ? WHERE id = ?`, *req.AssignedAgentID, now, taskID); err != nil {
-			return err
-		}
+		setClauses = append(setClauses, "assigned_agent_id = ?")
+		args = append(args, *req.AssignedAgentID)
 	}
 	if req.TokenCount != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET token_count = ?, updated_at = ? WHERE id = ?`, *req.TokenCount, now, taskID); err != nil {
-			return err
-		}
+		setClauses = append(setClauses, "token_count = ?")
+		args = append(args, *req.TokenCount)
 	}
 	if req.EstimatedCost != nil {
-		if _, err := tx.ExecContext(ctx, `UPDATE mission_tasks SET estimated_cost = ?, updated_at = ? WHERE id = ?`, *req.EstimatedCost, now, taskID); err != nil {
-			return err
-		}
+		setClauses = append(setClauses, "estimated_cost = ?")
+		args = append(args, *req.EstimatedCost)
 	}
-	return nil
+
+	if len(setClauses) == 0 {
+		return nil
+	}
+
+	setClauses = append(setClauses, "updated_at = ?")
+	args = append(args, now, taskID)
+	query := "UPDATE mission_tasks SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	_, err := tx.ExecContext(ctx, query, args...)
+	return err
 }
 
 // UpdateTask handles PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}
