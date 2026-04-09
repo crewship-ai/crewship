@@ -141,6 +141,8 @@ var validIssueTransitions = map[string][]string{
 
 // ── 1. List — GET /api/v1/issues ────────────────────────────────────────────
 
+// List returns a filtered, paginated list of issues in the workspace.
+// GET /api/v1/issues
 func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
@@ -331,6 +333,8 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // ── 2. Create — POST /api/v1/crews/{crewId}/issues ─────────────────────────
 
+// Create creates a new issue in the workspace with the given title, description, and metadata.
+// POST /api/v1/issues
 func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -508,6 +512,8 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // ── 3. Get — GET /api/v1/crews/{crewId}/issues/{identifier} ────────────────
 
+// Get returns a single issue by ID with full details including labels and sub-issue counts.
+// GET /api/v1/issues/{issueId}
 func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
@@ -556,6 +562,8 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // ── 3b. GetByIdentifier — GET /api/v1/issues/{identifier} (workspace-scoped) ─
 
+// GetByIdentifier resolves an issue by its human-readable identifier (e.g. "CRE-42").
+// GET /api/v1/issues/by-identifier/{identifier}
 func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
@@ -598,6 +606,8 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 
 // ── 4. Update — PATCH /api/v1/crews/{crewId}/issues/{identifier} ───────────
 
+// Update modifies issue fields such as title, status, priority, assignee, and labels.
+// PATCH /api/v1/issues/{issueId}
 func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -796,6 +806,8 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // ── 5. Delete — DELETE /api/v1/crews/{crewId}/issues/{identifier} ───────────
 
+// Delete removes an issue and its associated comments, relations, and label assignments.
+// DELETE /api/v1/issues/{issueId}
 func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -853,6 +865,8 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // ── 6. ListLabels — GET /api/v1/labels ──────────────────────────────────────
 
+// ListLabels returns all issue labels defined in the workspace.
+// GET /api/v1/issue-labels
 func (h *IssueHandler) ListLabels(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
@@ -887,6 +901,8 @@ func (h *IssueHandler) ListLabels(w http.ResponseWriter, r *http.Request) {
 
 // ── 7. CreateLabel — POST /api/v1/labels ────────────────────────────────────
 
+// CreateLabel creates a new issue label with a name and color.
+// POST /api/v1/issue-labels
 func (h *IssueHandler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -937,6 +953,8 @@ func (h *IssueHandler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 
 // ── 8. UpdateLabel — PATCH /api/v1/labels/{labelId} ─────────────────────────
 
+// UpdateLabel modifies an existing issue label's name or color.
+// PATCH /api/v1/issue-labels/{labelId}
 func (h *IssueHandler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1006,6 +1024,8 @@ func (h *IssueHandler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 
 // ── 9. DeleteLabel — DELETE /api/v1/labels/{labelId} ────────────────────────
 
+// DeleteLabel removes an issue label and all its assignments.
+// DELETE /api/v1/issue-labels/{labelId}
 func (h *IssueHandler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
@@ -1039,6 +1059,8 @@ func (h *IssueHandler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 
 // ── 10. ListComments — GET /api/v1/crews/{crewId}/issues/{identifier}/comments
 
+// ListComments returns all comments on an issue, ordered chronologically.
+// GET /api/v1/issues/{issueId}/comments
 func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
@@ -1099,6 +1121,8 @@ func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 // ── 11. CreateComment — POST /api/v1/crews/{crewId}/issues/{identifier}/comments
 
+// CreateComment adds a comment to an issue.
+// POST /api/v1/issues/{issueId}/comments
 func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1175,6 +1199,8 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 // ── 12. ListRelations — GET /api/v1/crews/{crewId}/issues/{identifier}/relations
 
+// ListRelations returns all relations (blocks, is-blocked-by, relates-to) for an issue.
+// GET /api/v1/issues/{issueId}/relations
 func (h *IssueHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
@@ -1229,6 +1255,8 @@ func (h *IssueHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 
 // ── 13. CreateRelation — POST /api/v1/crews/{crewId}/issues/{identifier}/relations
 
+// CreateRelation creates a relation between two issues (e.g. blocks, relates_to).
+// POST /api/v1/issues/{issueId}/relations
 func (h *IssueHandler) CreateRelation(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1309,6 +1337,8 @@ func (h *IssueHandler) CreateRelation(w http.ResponseWriter, r *http.Request) {
 
 // ── Review — POST /api/v1/crews/{crewId}/issues/{identifier}/review ────────
 
+// Review submits a review decision (approve/reject/request_changes) for an issue awaiting review.
+// POST /api/v1/issues/{issueId}/review
 func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1447,6 +1477,8 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 
 // ── ListActivity — GET /api/v1/crews/{crewId}/issues/{identifier}/activity
 
+// ListActivity returns the activity history (status changes, comments, assignments) for an issue.
+// GET /api/v1/issues/{issueId}/activity
 func (h *IssueHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
@@ -1505,6 +1537,8 @@ func (h *IssueHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 
 // ── 14. DeleteRelation — DELETE /api/v1/relations/{relationId}
 
+// DeleteRelation removes a relation between two issues.
+// DELETE /api/v1/issues/{issueId}/relations/{relationId}
 func (h *IssueHandler) DeleteRelation(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1529,6 +1563,8 @@ func (h *IssueHandler) DeleteRelation(w http.ResponseWriter, r *http.Request) {
 
 // ── 15. Start — POST /api/v1/crews/{crewId}/issues/{identifier}/start ──────
 
+// Start transitions an issue to in_progress and dispatches it to the assigned agent as a mission.
+// POST /api/v1/issues/{issueId}/start
 func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1660,6 +1696,8 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 // ── 16. Stop — POST /api/v1/crews/{crewId}/issues/{identifier}/stop ────────
 
+// Stop cancels the running mission for an issue and returns it to the previous status.
+// POST /api/v1/issues/{issueId}/stop
 func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1723,6 +1761,8 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 
 // ── 17. BulkUpdate — POST /api/v1/issues/bulk-update ──────────────────────
 
+// BulkUpdate applies the same field changes to multiple issues at once.
+// PATCH /api/v1/issues/bulk
 func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1857,6 +1897,8 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 
 // ── 18. ListSubIssues — GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks
 
+// ListSubIssues returns all child issues of a given parent issue.
+// GET /api/v1/issues/{issueId}/sub-issues
 func (h *IssueHandler) ListSubIssues(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
