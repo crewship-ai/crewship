@@ -14,11 +14,12 @@ import { cn } from "@/lib/utils"
 interface CrewIconPopoverProps {
   icon: string
   color: string
+  size?: "sm" | "md" | "lg" | "xl"
   onIconChange: (icon: string) => void
   onColorChange: (color: string) => void
 }
 
-export function CrewIconPopover({ icon, color, onIconChange, onColorChange }: CrewIconPopoverProps) {
+export function CrewIconPopover({ icon, color, size = "xl", onIconChange, onColorChange }: CrewIconPopoverProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
@@ -47,9 +48,15 @@ export function CrewIconPopover({ icon, color, onIconChange, onColorChange }: Cr
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button type="button" className="relative group cursor-pointer">
-          <CrewIcon icon={icon} color={color} size="xl" />
-          <div className="absolute inset-0 rounded-2xl bg-black/0 group-hover:bg-black/10 transition-all flex items-center justify-center">
-            <Pencil className="h-3.5 w-3.5 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md" />
+          <CrewIcon icon={icon} color={color} size={size} />
+          <div className={cn(
+            "absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all flex items-center justify-center",
+            size === "xl" ? "rounded-2xl" : size === "lg" ? "rounded-xl" : "rounded-lg",
+          )}>
+            <Pencil className={cn(
+              "text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md",
+              size === "sm" ? "h-2.5 w-2.5" : "h-3.5 w-3.5",
+            )} />
           </div>
         </button>
       </PopoverTrigger>

@@ -23,6 +23,8 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
+import { CrewIconPopover } from "@/components/crew-icon-popover"
+import { CrewIcon } from "@/components/ui/crew-icon"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Command,
@@ -524,6 +526,7 @@ export function ProjectDetailClient() {
               titleDraft={titleDraft}
               editingDesc={editingDesc}
               descDraft={descDraft}
+              patchProject={patchProject}
               onEditTitle={() => { setTitleDraft(project.name); setEditingTitle(true) }}
               onTitleChange={setTitleDraft}
               onTitleSave={() => {
@@ -603,6 +606,7 @@ function OverviewTab({
   titleDraft,
   editingDesc,
   descDraft,
+  patchProject,
   onEditTitle,
   onTitleChange,
   onTitleSave,
@@ -618,6 +622,7 @@ function OverviewTab({
   titleDraft: string
   editingDesc: boolean
   descDraft: string
+  patchProject: (fields: Record<string, unknown>) => Promise<void>
   onEditTitle: () => void
   onTitleChange: (v: string) => void
   onTitleSave: () => void
@@ -634,12 +639,12 @@ function OverviewTab({
     <div className="max-w-3xl mx-auto px-8 py-8 space-y-8">
       {/* Icon + Title */}
       <div className="flex items-start gap-4">
-        <div
-          className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
-          style={{ backgroundColor: `${project.color}20`, border: `1px solid ${project.color}40` }}
-        >
-          <FolderKanban className="h-5 w-5" style={{ color: project.color }} />
-        </div>
+        <CrewIconPopover
+          icon={project.icon || "folder"}
+          color={project.color || "blue"}
+          onIconChange={(icon) => patchProject({ icon })}
+          onColorChange={(color) => patchProject({ color })}
+        />
         <div className="flex-1 min-w-0">
           {editingTitle ? (
             <input

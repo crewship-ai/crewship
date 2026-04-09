@@ -9,6 +9,7 @@ import { StatusIcon, statusLabel } from "@/components/features/issues/status-ico
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { LabelBadge } from "@/components/features/issues/label-badge"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
+import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
 import { IssuesListView } from "@/components/features/issues/issues-list-view"
 import { cn } from "@/lib/utils"
@@ -1558,7 +1559,13 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] shrink-0">
         <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: project.color }} />
+          <CrewIconPopover
+            icon={project.icon || "folder"}
+            color={project.color || "blue"}
+            size="sm"
+            onIconChange={(icon) => patchProject({ icon })}
+            onColorChange={(color) => patchProject({ color })}
+          />
           <span className="text-[11px] font-mono text-muted-foreground/60">Project</span>
         </div>
         <div className="flex items-center gap-1">
