@@ -1,0 +1,302 @@
+---
+title: "WebSocket"
+description: "Real-time channels for log streaming, chat, events, and live updates."
+icon: "signal"
+---
+
+## Connection
+
+```
+ws://<host>:8080/ws?token=<jwt>
+```
+
+### Authentication Flow
+
+1. Obtain a short-lived JWT token: `GET /api/v1/ws-token` (requires session or CLI auth)
+2. Connect to the WebSocket endpoint with the token as a query parameter
+3. The token is validated during the handshake using the same JWT validator as the REST API
+4. After connection, the token is no longer needed -- the connection remains authenticated
+
+The WebSocket server uses `golang.org/x/net/websocket` (not gorilla/websocket). The handshake skips origin checks -- authentication is token-based only.
+
+---
+
+## Message Format
+
+All messages (client-to-server and server-to-client) are JSON.
+
+### Client Messages
+
+```typescript
+{
+  type: "subscribe" | "unsubscribe" | "ping" | "send_message" | "cancel_message",
+  channel?: string,
+  payload?: any
+}
+```
+
+### Server Messages
+
+```typescript
+{
+  type: string,
+  channel?: string,
+  payload: any
+}
+```
+
+---
+
+## Client Message Types
+
+### subscribe
+
+Subscribe to a channel for real-time events. Channel access is validated against workspace/crew membership in the database.
+
+```json
+{
+  "type": "subscribe",
+  "channel": "workspace:ws_abc123"
+}
+```
+
+If access is denied, the server responds with:
+
+```json
+{
+  "type": "error",
+  "channel": "workspace:ws_abc123",
+  "payload": { "error": "access denied" }
+}
+```
+
+### unsubscribe
+
+```json
+{
+  "type": "unsubscribe",
+  "channel": "workspace:ws_abc123"
+}
+```
+
+### ping
+
+Keep-alive ping. The server also sends periodic pings every 30 seconds.
+
+```json
+{
+  "type": "ping"
+}
+```
+
+Server responds with:
+
+```json
+{
+  "type": "pong",
+  "payload": null
+}
+```
+
+### send_message
+
+Send a chat message to an agent session.
+
+```json
+{
+  "type": "send_message",
+  "channel": "session:chat_abc123",
+  "payload": {
+    "session_id": "chat_abc123",
+    "content": "Review the latest PR and suggest improvements"
+  }
+}
+```
+
+The server processes the message through the ChatHandler, which streams responses back on the same session channel.
+
+### cancel_message
+
+Cancel an in-progress agent chat response.
+
+```json
+{
+  "type": "cancel_message",
+  "payload": {
+    "session_id": "chat_abc123"
+  }
+}
+```
+
+---
+
+## Channels
+
+Channels follow the format `type:id`. Access is validated against database membership when subscribing.
+
+### Channel Types
+
+| Channel | Format | Access Rule | Description |
+|---|---|---|---|
+| `workspace` | `workspace:{workspaceId}` | Workspace member | Workspace-wide events |
+| `crew` | `crew:{crewId}` | Member of crew's workspace | Crew-specific events |
+| `agent` | `agent:{agentId}` | Member of agent's workspace | Agent-specific events |
+| `session` | `session:{chatId}` | Member of chat's workspace | Interactive chat session |
+| `mission` | `mission:{missionId}` | Member of mission's workspace | Mission status updates |
+| `keeper` | `keeper:{workspaceId}` | Workspace member | Keeper credential access events |
+| `files` | `files:{crewId}` | Member of crew's workspace | File change events |
+| `providers` | `providers` | Any authenticated user | Provider status updates |
+
+---
+
+## Server Event Types
+
+Events are broadcast to channels when state changes occur. Below are the event types by channel.
+
+### Workspace Channel (`workspace:{id}`)
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `crew.created` | Crew was created | `{ id, name, slug }` |
+| `crew.updated` | Crew was updated | `{ id }` |
+| `crew.deleted` | Crew was deleted | `{ id }` |
+| `agent.log` | Agent log output | `{ ts, level, agent, agent_id, event, content, metadata }` |
+| `mission.updated` | Mission status changed | `{ id, crew_id, status }` |
+| `issue.created` | Issue was created | `{ id }` |
+| `issue.updated` | Issue was updated | `{ id }` |
+| `issue.deleted` | Issue was deleted | `{ identifier }` |
+| `issue.started` | Issue execution started | `{ id, identifier, status }` |
+| `project.created` | Project was created | `{ id }` |
+| `project.updated` | Project was updated | `{ id }` |
+| `project.deleted` | Project was deleted | `{ id }` |
+| `integration.updated` | Integration was changed | `{ id }` |
+
+### Crew Channel (`crew:{id}`)
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `mission.created` | Mission was created in crew | `{ id, title }` |
+
+### Mission Channel (`mission:{id}`)
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `mission.status` | Mission status changed | `{ id, status }` |
+| `mission.updated` | Mission was updated | `{ id, status }` |
+
+### Session Channel (`session:{chatId}`)
+
+Chat streaming events from the agent ChatHandler:
+
+| Event Type | Description |
+|---|---|
+| `text` | Text content from agent |
+| `tool_call` | Agent is calling a tool |
+| `tool_result` | Tool call result |
+| `thinking` | Agent thinking/reasoning |
+| `status` | Status update |
+| `done` | Agent finished responding |
+| `error` | Error occurred |
+| `result` | Final result |
+| `system` | System message |
+
+### Keeper Channel (`keeper:{workspaceId}`)
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `keeper_event` | Credential access request/decision | `{ ... }` |
+
+---
+
+## Connection Lifecycle
+
+1. **Connect** -- token-authenticated WebSocket upgrade
+2. **Subscribe** -- client subscribes to channels (access validated per-channel)
+3. **Receive events** -- server pushes events to subscribed channels
+4. **Send messages** -- client can send chat messages to session channels
+5. **Keepalive** -- server sends pings every 30 seconds; client can also send pings
+6. **Disconnect** -- client disconnects; all channel subscriptions are cleaned up
+
+The server maintains a send buffer of 64 messages per client. If the buffer is full, messages are dropped silently for that client.
+
+---
+
+## Example: Subscribing to Workspace Events
+
+```javascript
+// 1. Get WS token
+const response = await fetch('/api/v1/ws-token', {
+  headers: { 'Authorization': 'Bearer <session-token>' }
+});
+const { token } = await response.json();
+
+// 2. Connect
+const ws = new WebSocket(`ws://localhost:8080/ws?token=${token}`);
+
+ws.onopen = () => {
+  // 3. Subscribe to workspace events
+  ws.send(JSON.stringify({
+    type: 'subscribe',
+    channel: `workspace:${workspaceId}`
+  }));
+};
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  switch (msg.type) {
+    case 'agent.log':
+      console.log(`[${msg.payload.agent}] ${msg.payload.content}`);
+      break;
+    case 'mission.updated':
+      console.log(`Mission ${msg.payload.id} -> ${msg.payload.status}`);
+      break;
+    case 'issue.updated':
+      // Refresh issue list
+      break;
+  }
+};
+```
+
+## Example: Interactive Chat
+
+```javascript
+// Subscribe to session channel
+ws.send(JSON.stringify({
+  type: 'subscribe',
+  channel: `session:${chatId}`
+}));
+
+// Send a message
+ws.send(JSON.stringify({
+  type: 'send_message',
+  channel: `session:${chatId}`,
+  payload: {
+    session_id: chatId,
+    content: 'Explain the authentication flow'
+  }
+}));
+
+// Receive streamed response
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.channel === `session:${chatId}`) {
+    switch (msg.type) {
+      case 'text':
+        // Append text chunk to UI
+        break;
+      case 'tool_call':
+        // Show tool call indicator
+        break;
+      case 'done':
+        // Agent finished
+        break;
+    }
+  }
+};
+
+// Cancel if needed
+ws.send(JSON.stringify({
+  type: 'cancel_message',
+  payload: { session_id: chatId }
+}));
+```

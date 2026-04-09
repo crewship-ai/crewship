@@ -1,0 +1,230 @@
+---
+title: "Orchestration"
+description: "Multi-agent missions with task dependencies, retry loops, deadlock detection, and circuit breakers."
+icon: "sitemap"
+---
+
+# Orchestration
+
+Crewship's orchestration system manages multi-agent missions through the `MissionEngine` (`internal/orchestrator/mission.go`). It handles task scheduling, dependency resolution, failure recovery, and cross-crew coordination.
+
+## Mission Lifecycle
+
+```
+PLANNING --> IN_PROGRESS --> COMPLETED
+                |                |
+                v                v
+             FAILED         CANCELLED
+```
+
+A mission progresses through these states:
+1. **PLANNING** -- Mission created, tasks defined (or waiting for Lead to plan)
+2. **IN_PROGRESS** -- Tasks being scheduled and executed
+3. **COMPLETED** -- All tasks finished successfully
+4. **FAILED** -- A task failed and could not recover, or deadlock/timeout detected
+5. **CANCELLED** -- Manually stopped by user or system
+
+## The Mission Engine
+
+The `MissionEngine` is the central orchestrator. Key parameters:
+
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| Polling interval | 3 seconds | `time.NewTicker(3 * time.Second)` |
+| Circuit breaker threshold | 3 consecutive failures | `circuitBreakerThreshold = 3` |
+| Mission timeout | 2 hours | `missionTimeoutDefault = 2 * time.Hour` |
+| Max result summary | 8,000 chars | `maxResultSummaryLen = 8000` |
+| Max brief total | 32,000 bytes | `maxBriefTotalLen = 32000` |
+| Per-dependency output truncation | 4,000 chars | `maxDepOutputLen = 4000` |
+
+### Mission Loop
+
+The `runMissionLoop` function runs as a goroutine for each active mission. Every 3 seconds it:
+
+```
+1. Check mission status (still IN_PROGRESS?)
+2. Lead planning phase: if 0 tasks, dispatch Lead to create plan
+3. Schedule ready tasks (dependencies met, status PENDING)
+4. Check mission completion (all tasks done?)
+5. Detect deadlocks (all tasks BLOCKED with no progress)
+```
+
+## Task States
+
+```
+PENDING --> RUNNING --> COMPLETED
+   ^          |
+   |          v
+   +------ FAILED ---> (retry via LoopController)
+              |
+              v
+           BLOCKED  (waiting for dependencies)
+```
+
+| State | Description |
+|-------|-------------|
+| `PENDING` | Ready to be scheduled |
+| `RUNNING` | Currently being executed by an agent |
+| `COMPLETED` | Finished successfully |
+| `FAILED` | Execution failed |
+| `BLOCKED` | Waiting for dependent tasks to complete |
+| `AWAITING_APPROVAL` | Requires human approval to proceed |
+
+## Lead Planning Phase
+
+When a mission starts with 0 tasks, the engine dispatches the Lead agent to create a plan. The Lead uses its crew context to understand available agents and creates tasks via the sidecar `/mission/create` endpoint.
+
+```
+Mission (0 tasks)
+    |
+    v
+Lead agent dispatched (LEAD role, with sidecar)
+    |
+    v
+Lead creates tasks via curl to localhost:9119/mission/create
+    |
+    v
+Mission engine detects new tasks -> begins scheduling
+```
+
+<Note>
+  The Lead planning dispatch is idempotent -- the `planningDispatched` flag prevents re-dispatch if the Lead is still working. A TOCTOU (time-of-check-to-time-of-use) race is prevented by inserting a sentinel into the `active` map before loading the mission.
+</Note>
+
+## Workflow Templates
+
+Four built-in workflow templates are defined in `internal/orchestrator/workflow.go`:
+
+<Tabs>
+  <Tab title="Sequential">
+    Tasks execute one after another in order.
+    ```
+    step-1 --> step-2 --> step-3
+    ```
+  </Tab>
+
+  <Tab title="Parallel">
+    All tasks run simultaneously, then results are aggregated by the Lead.
+    ```
+    task-a --|
+    task-b --|---> aggregate (Lead)
+    task-c --|
+    ```
+  </Tab>
+
+  <Tab title="Dev-Test Loop">
+    Developer writes code, tester reviews. On failure, loops back to developer (max 3 iterations). This is the **Ralph Loop pattern**.
+    ```
+    develop <---(failure)--- test
+       |                      ^
+       +----(success)---------+
+    (max 3 iterations each)
+    ```
+  </Tab>
+
+  <Tab title="Pipeline">
+    Sequential preparation, parallel work streams, final aggregation.
+    ```
+    prepare --> work-a --|
+            --> work-b --|---> finalize (Lead)
+    ```
+  </Tab>
+</Tabs>
+
+## The Ralph Loop Pattern
+
+The `LoopController` (`internal/orchestrator/loop.go`) manages task retry logic:
+
+1. When a task fails and has `max_iterations > 1`, the controller increments the iteration counter and resets the task to `PENDING`
+2. For loop-back patterns (dev-test-loop), when a downstream task fails, the upstream task is reset to restart the cycle
+3. Previous failure context from the progress log is injected so the agent learns from mistakes
+
+```go
+// LoopController.ShouldRetry checks if a failed task should be retried
+// Returns true if a retry was initiated, false if the task is terminal
+```
+
+<Warning>
+  Tasks without `max_iterations` set (or `max_iterations <= 1`) are never retried. A failed task without retry configuration causes the mission to fail.
+</Warning>
+
+## Deadlock Detection
+
+The mission engine detects deadlocks when all remaining tasks are `BLOCKED` with no task currently `RUNNING` or `PENDING`. When a deadlock is detected:
+
+1. The mission is marked as `FAILED`
+2. A `mission_deadlock` progress event is emitted
+3. All `AWAITING_APPROVAL` tasks are failed with "mission timed out"
+
+## Circuit Breaker
+
+The circuit breaker tracks consecutive failures per agent. After 3 consecutive failures (`circuitBreakerThreshold`), the agent is considered unhealthy and tasks are not dispatched to it.
+
+## Structured Handoff
+
+Agents produce structured handoff data at the end of tasks:
+
+```
+---HANDOFF---
+summary: Created the REST API endpoints for user management
+confidence: high
+artifacts: internal/api/users.go, internal/api/users_test.go
+---END HANDOFF---
+```
+
+The `parseHandoff` function extracts this structure from agent output. Both `summary` and `confidence` are required for a valid handoff -- partial blocks are treated as unparsed.
+
+## Task Scaling Rules
+
+The Lead agent follows complexity-based scaling rules injected via the system prompt:
+
+| Complexity | Agents | Tool Calls | Duration | Tokens |
+|-----------|--------|-----------|----------|--------|
+| SIMPLE | 1 | 3-10 | ~5 min | ~10K |
+| MEDIUM | 1-2 | 10-15 | ~15 min | ~50K |
+| COMPLEX | 2-4 | 15+ | ~30 min | ~100K |
+
+## Cross-Crew Missions
+
+Mission tasks can reference agents from connected crews. The system auto-routes assignments to the correct crew container. Crew connections must be established by workspace admins before use.
+
+The Coordinator role can:
+- See all crews and their agents
+- Create cross-crew missions
+- Submit proposals for human approval
+- Monitor all workspace missions
+
+## Coordinator Proposal Workflow
+
+For multi-crew objectives, the recommended flow is:
+
+```
+Coordinator creates proposal
+    |
+    v
+Human reviews and approves/rejects
+    |
+    v (on approval)
+Missions auto-created from proposal plan
+    |
+    v
+Mission engine schedules tasks
+```
+
+## Sidecar API for Orchestration
+
+Lead agents interact with the orchestration system through the sidecar proxy at `localhost:9119`:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/assign` | POST | Assign a task to a crew member |
+| `/results/{id}` | GET | Poll for assignment result |
+| `/query` | POST | Ask a crew member a quick question |
+| `/standup` | GET | Get crew standup summary |
+| `/escalate` | POST | Escalate an issue to humans |
+| `/mission/create` | POST | Create a multi-task mission |
+| `/mission/{id}` | GET | Check mission status |
+| `/mission/{id}/start` | POST | Start a mission |
+| `/mission/templates` | GET | List available workflow templates |
+| `/missions/all` | GET | List all missions (Coordinator) |
+| `/proposal` | POST | Submit a proposal (Coordinator) |

@@ -1,0 +1,106 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Crewship",
+  "theme": "mint",
+  "colors": {
+    "primary": "#0F172A",
+    "light": "#38BDF8",
+    "dark": "#0F172A"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": ["index", "quickstart", "architecture"]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/installation",
+              "guides/first-crew",
+              "guides/credentials",
+              "guides/skills",
+              "guides/orchestration",
+              "guides/captain",
+              "guides/keeper",
+              "guides/integrations",
+              "guides/templates"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "security/rbac",
+              "security/encryption",
+              "security/container-isolation"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment",
+              "configuration/yaml-config",
+              "configuration/providers"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "CLI",
+            "pages": [
+              "cli/overview",
+              "cli/agent",
+              "cli/crew",
+              "cli/mission",
+              "cli/issue",
+              "cli/credential",
+              "cli/skill",
+              "cli/captain",
+              "cli/config",
+              "cli/system"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "API",
+            "pages": [
+              "api-reference/overview",
+              "api-reference/crews",
+              "api-reference/agents",
+              "api-reference/missions",
+              "api-reference/issues",
+              "api-reference/credentials",
+              "api-reference/skills",
+              "api-reference/integrations",
+              "api-reference/webhooks",
+              "api-reference/websocket"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "seo": {
+    "metatags": {
+      "canonical": "https://docs.crewship.ai"
+    }
+  },
+  "footerSocials": {
+    "github": "https://github.com/crewship-ai/crewship"
+  }
+}

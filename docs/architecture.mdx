@@ -1,0 +1,219 @@
+---
+title: "Architecture"
+description: "How Crewship orchestrates AI agents using containers, a sidecar proxy, Unix socket IPC, and a single-binary deployment model."
+icon: "building"
+---
+
+# Architecture
+
+Crewship is a single-binary application that orchestrates AI coding agents in Docker containers. It combines a Go backend with an embedded Next.js frontend, SQLite database, and a sidecar proxy for secure credential injection.
+
+## High-Level Architecture
+
+```
+                          +------------------+
+                          |   User Browser   |
+                          +--------+---------+
+                                   |
+                          HTTP / WebSocket
+                                   |
+                    +----------------------------------+
+                    |         crewship binary           |
+                    |  +----------------------------+   |
+                    |  | Go HTTP Server (port 8080) |   |
+                    |  +---+-----+-----+-----+-----+   |
+                    |      |     |     |     |          |
+                    |   REST  WS  SSE  IPC  Static     |
+                    |   API  Hub       (Unix) Files     |
+                    |      |     |     |     |          |
+                    |  +---v-----v-----v-----v-----+   |
+                    |  |       SQLite (embedded)    |   |
+                    |  +----------------------------+   |
+                    +--------+---------+----------------+
+                             |         |
+                    Docker API    Unix Socket IPC
+                             |    (/tmp/crewship.sock)
+                    +--------v---------v--------+
+                    |    Crew Container          |
+                    |  +---------+ +---------+   |
+                    |  | Sidecar | | Agent   |   |
+                    |  | (1002)  | | (1001)  |   |
+                    |  +---------+ +---------+   |
+                    +----------------------------+
+```
+
+## Single Binary Design
+
+The `make build` process creates a single self-contained binary:
+
+1. **Frontend:** `pnpm build` creates a Next.js static export
+2. **Embedding:** The `out/` directory is copied to `web/out/` and embedded via `//go:embed`
+3. **Compilation:** `go build` produces a statically linked binary with version metadata
+
+```
+crewship binary
+├── Go HTTP server (Gorilla mux, chi router)
+├── WebSocket hub (real-time updates)
+├── SQLite database (modernc.org/sqlite, driver: "sqlite")
+├── Container orchestrator (Docker/Apple provider)
+├── Sidecar proxy binary (embedded)
+├── Embedded static frontend (web/out/*)
+└── Seed data (crew/agent templates)
+```
+
+<Warning>
+  The SQLite driver registers as `"sqlite"` (not `"sqlite3"`). This is because Crewship uses `modernc.org/sqlite`, a pure-Go SQLite implementation.
+</Warning>
+
+## Container Model
+
+Crewship uses **one container per crew** (not per agent). All agents in a crew share a container and filesystem.
+
+```
+Crew Container (crewship-team-{slug})
+├── /crew/
+│   ├── agents/{slug}/          # Per-agent home directory
+│   │   ├── .memory/            # Persistent memory files
+│   │   └── .mcp.json           # MCP server config
+│   └── shared/                 # Cross-agent shared space
+├── /output/{slug}/             # Agent output (visible in UI)
+├── /secrets/{slug}/            # Read-only credentials
+├── /workspace/                 # Temporary scratch
+└── Processes:
+    ├── Sidecar proxy (UID 1002, port 9119)
+    └── Agent CLI exec (UID 1001, via docker exec)
+```
+
+### UID Security Boundary
+
+| UID | Process | Purpose |
+|-----|---------|---------|
+| **1001** | Agent process | Runs coding CLI (Claude Code, OpenCode, etc.) |
+| **1002** | Sidecar proxy | Handles credential injection, network policy |
+
+The sidecar runs as UID 1002 so agents (UID 1001) cannot directly access the credential store or manipulate the proxy.
+
+## IPC (Inter-Process Communication)
+
+Communication between crewshipd and containers uses HTTP-over-Unix-socket at `/tmp/crewship.sock`. Authentication uses the `X-Internal-Token` header.
+
+```
+Sidecar (in container)
+    |
+    | HTTP POST to crewshipd base URL
+    | Header: X-Internal-Token: {auto-generated-token}
+    v
+crewshipd (/api/v1/internal/*)
+    |
+    | Process request (assignment, keeper, query)
+    v
+Response back to sidecar
+```
+
+The internal token is auto-generated at startup if not configured:
+```go
+token, err := generateRandomToken(32) // 32 bytes -> 64 hex chars
+```
+
+## Orchestrator
+
+The `Orchestrator` (`internal/orchestrator/orchestrator.go`) manages agent lifecycle:
+
+1. **Container management:** Ensures crew containers exist via `GetOrCreateContainer`
+2. **Agent execution:** Runs agents as `docker exec` commands inside crew containers
+3. **System prompt assembly:** Builds the full prompt from preamble, persona, context, memory, and history
+4. **Credential selection:** Picks the best credential via priority and round-robin
+5. **Activity tracking:** Refreshes crew TTL on each agent run
+
+### System Prompt Assembly Order
+
+The system prompt is built in two stages:
+
+**Stage 1** — Static prompt (`internal/api/agent_config_resolver.go`):
+```
+1. [CREWSHIP ETHOS] — role-specific adventure context
+2. [LANGUAGE PREFERENCE] — workspace preferred language (optional)
+3. [AGENT IDENTITY] — name, role, crew
+4. [PERSONA] — user-defined system prompt
+5. [SKILLS AVAILABLE] — injected skill playbooks
+```
+
+**Stage 2** — Runtime context (`internal/orchestrator/orchestrator.go`):
+```
+6. Conversation history (60% of remaining token budget)
+7. [CREW CONTEXT] (Lead) OR [COORDINATOR CONTEXT] OR [PEER CONTEXT]
+8. [AGENT MEMORY] (40% of remaining token budget)
+9. [MEMORY INSTRUCTIONS] — how to read/write memory files
+```
+
+## Sidecar Proxy
+
+The sidecar (`internal/sidecar/`) is an HTTP proxy running inside each crew container. It provides:
+
+### Core Functions
+
+| Function | Description |
+|----------|-------------|
+| **Credential injection** | Intercepts HTTP requests and adds API keys |
+| **Domain allowlist** | Blocks requests to non-allowed domains |
+| **Reverse proxy** | Handles `ANTHROPIC_BASE_URL=http://127.0.0.1:9119` |
+| **Memory API** | Search, status, reindex operations |
+| **Assignment routing** | Forward `/assign`, `/results`, `/query` to crewshipd |
+| **Keeper bridge** | Forward `/keeper/request`, `/keeper/execute` |
+| **MCP gateway** | Connect to MCP servers, proxy tool calls |
+| **Network policy** | Enforce free/restricted network modes |
+
+### Network Modes
+
+| Mode | Behavior |
+|------|----------|
+| **free** (default) | Allow all outbound connections |
+| **restricted** | Only allow connections to allowlisted domains |
+
+Default allowed domains:
+- `api.anthropic.com`
+- `api.openai.com`
+- `generativelanguage.googleapis.com`
+- `api.factory.ai`
+
+Unknown network modes default to **restricted** (fail closed).
+
+### Sidecar Endpoints (~36 handlers)
+
+The sidecar exposes a comprehensive local API on port 9119:
+
+| Category | Endpoints |
+|----------|-----------|
+| **Memory** | `/memory/search`, `/memory/status`, `/memory/reindex` |
+| **Assignment** | `/assign`, `/results/{id}`, `/query`, `/standup`, `/escalate` |
+| **Missions** | `/mission/create`, `/mission/{id}`, `/mission/{id}/start`, `/mission/templates`, `/missions/all`, `/missions/all/summary` |
+| **Keeper** | `/keeper/request`, `/keeper/execute` |
+| **MCP** | `/mcp/tools`, `/mcp/call`, `/mcp/status` |
+| **Connections** | `/connections`, `/connections/{id}/message`, `/connections/{id}/messages`, `/connections/{id}/files` |
+| **Management** | `/crews`, `/crew/create`, `/agent/create`, `/credentials`, `/agent-credentials` |
+| **Other** | `/crew-connections`, `/proposal`, `/proposals`, `/manifest`, `/report-confidence` |
+| **Health** | `/health`, `/healthz` |
+
+## CLI Adapters
+
+Crewship supports multiple AI coding CLIs, configured per agent:
+
+| Adapter | CLI Command | System Prompt | Notes |
+|---------|------------|---------------|-------|
+| `CLAUDE_CODE` | `claude --print --output-format stream-json` | Via `--system-prompt` flag | Supports `--model`, `--tools`, `--mcp-config` |
+| `CODEX_CLI` | `codex --quiet` | N/A | Supports `--sandbox` for CODING profile |
+| `GEMINI_CLI` | `gemini` | Via `--system-instruction` | Uses `-p` for prompt |
+| `OPENCODE` | `opencode run` | Via `AGENTS.md` file in CWD | Reads system prompt from file |
+
+## WebSocket Hub
+
+Real-time updates (agent status, mission progress, chat messages) are delivered via WebSocket connections managed by the `ws.Hub`. The hub broadcasts events to connected clients based on workspace and crew subscriptions.
+
+## Database
+
+Crewship uses SQLite in single-binary mode. Key design decisions:
+
+- **Driver:** `modernc.org/sqlite` (pure Go, no CGo)
+- **Migrations:** Go-only in `internal/database/migrate.go` (never Prisma migrate)
+- **Prisma:** Used only for TypeScript type generation (`pnpm db:generate`)
+- **State:** Agent run states stored in BoltDB (`bbolt`) or PostgreSQL for high-throughput deployments

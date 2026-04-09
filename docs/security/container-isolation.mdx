@@ -1,0 +1,228 @@
+---
+title: "Container Isolation"
+description: "How Crewship isolates agents using UID boundaries, capability dropping, network policies, and the sidecar proxy."
+icon: "shield"
+---
+
+# Container Isolation
+
+Crewship uses multiple layers of isolation to prevent agents from accessing unauthorized resources, exfiltrating data, or interfering with other agents.
+
+## Isolation Layers
+
+```
++-----------------------------------------------------------+
+| Layer 5: Keeper (AI-powered credential gating)            |
++-----------------------------------------------------------+
+| Layer 4: Network Policy (free/restricted domain filtering)|
++-----------------------------------------------------------+
+| Layer 3: Sidecar Proxy (credential injection, scrubbing)  |
++-----------------------------------------------------------+
+| Layer 2: UID Boundary (agent=1001, sidecar=1002)          |
++-----------------------------------------------------------+
+| Layer 1: Container Runtime (Docker, gVisor, Kata, Sysbox) |
++-----------------------------------------------------------+
+```
+
+## UID Security Boundary
+
+Two fixed UIDs enforce a privilege boundary inside each container:
+
+| UID | Process | Access |
+|-----|---------|--------|
+| **1001** | Agent process (Claude Code, etc.) | Code execution, file I/O, HTTP via proxy |
+| **1002** | Sidecar proxy | Credential store, IPC token, network control |
+
+<Warning>
+  The UID assignments (1001 for agent, 1002 for sidecar) are a security boundary. Do not change these values -- they are referenced throughout the codebase for privilege separation.
+</Warning>
+
+### What Agents Cannot Do
+
+Because agents run as UID 1001 and the sidecar runs as UID 1002:
+
+- Agents cannot read the sidecar's in-memory credential store
+- Agents cannot access the IPC token (used for crewshipd authentication)
+- Agents cannot modify network policy configuration
+- Agents cannot tamper with outbound request headers (the sidecar handles this)
+- Agents cannot set their own container ID in Keeper execute requests
+
+## Container Runtime Security
+
+Crewship supports multiple container runtimes with different security profiles:
+
+| Runtime | Security Level | Description |
+|---------|---------------|-------------|
+| `runc` | Standard | Default Docker runtime |
+| `runsc` (gVisor) | High | Kernel-level syscall interception |
+| `kata-runtime` | Very High | Lightweight VM isolation |
+| `sysbox-runc` | High | Enhanced container isolation |
+
+Configure via:
+```yaml
+container:
+  default_runtime: "runsc"  # or "runc", "kata-runtime", "sysbox-runc"
+```
+
+### Container Creation Security
+
+Containers are created with these security measures (`internal/provider/docker/docker.go`):
+
+- **Cap-drop ALL:** All Linux capabilities are dropped
+- **Non-root execution:** Agent processes run as UID 1001
+- **Read-only filesystem:** System directories are read-only
+- **Memory limits:** Configurable per-crew (`default_memory_mb`, default 512 MB)
+- **CPU limits:** Configurable per-crew (`default_cpus`, default 1.0)
+- **Network isolation:** Containers connect to a dedicated Docker bridge network
+
+## Network Policy
+
+Each crew can have a network access policy:
+
+<Tabs>
+  <Tab title="Free Mode (Default)">
+    All outbound connections are allowed. The sidecar still intercepts and injects credentials for known LLM providers, but does not block unknown domains.
+
+    ```yaml
+    # No explicit network policy = free mode
+    ```
+  </Tab>
+
+  <Tab title="Restricted Mode">
+    Only connections to allowlisted domains are permitted. Unknown domains are blocked with HTTP 403.
+
+    Default allowed domains:
+    - `api.anthropic.com`
+    - `api.openai.com`
+    - `generativelanguage.googleapis.com`
+    - `api.factory.ai`
+
+    Additional domains can be added per-crew:
+    ```json
+    {
+      "mode": "restricted",
+      "allowed_domains": ["github.com", "registry.npmjs.org"]
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  Unknown network modes default to **restricted** (fail closed). This prevents a typo in the configuration from accidentally allowing unrestricted access.
+</Note>
+
+### Domain Allowlist Implementation
+
+The `DomainAllowlist` (`internal/sidecar/allowlist.go`) is a thread-safe set of allowed domain names:
+
+- Domains are stored lowercase for case-insensitive matching
+- Port numbers are stripped before comparison
+- IPv6 bracket notation is handled correctly
+- Domains can be added at runtime via `allowlist.Add(domain)`
+
+## Proxy Security
+
+The sidecar proxy (`internal/sidecar/proxy.go`) enforces several security measures:
+
+### Request Body Limits
+
+```go
+const maxRequestBodyBytes = 10 * 1024 * 1024 // 10 MB
+```
+
+All proxied requests have their body limited to 10 MB to prevent OOM attacks. LLM API requests are typically under 1 MB.
+
+### Hop-by-Hop Header Stripping
+
+Per RFC 2616 Section 13.5.1, the proxy strips these headers:
+
+| Header | Risk |
+|--------|------|
+| `Connection` | Connection control |
+| `Keep-Alive` | Connection control |
+| `Proxy-Authenticate` | Proxy auth |
+| `Proxy-Authorization` | **Data exfiltration vector** |
+| `TE` | Transfer encoding |
+| `Trailers` | Transfer encoding |
+| `Transfer-Encoding` | Transfer encoding |
+| `Upgrade` | Protocol upgrade |
+
+`Proxy-Authorization` is especially dangerous -- an agent could use it to exfiltrate credentials via a controlled proxy.
+
+### HTTPS CONNECT Tunnels
+
+For HTTPS requests, the sidecar:
+1. Checks the domain allowlist (in restricted mode)
+2. Establishes a TCP tunnel
+3. Does **not** inject credentials (the tunnel is opaque)
+
+Credential injection only works for:
+- Plain HTTP proxy requests (agent sets `HTTP_PROXY`)
+- Reverse proxy mode (`ANTHROPIC_BASE_URL=http://127.0.0.1:9119`)
+
+### Provider Detection
+
+The sidecar automatically detects which LLM provider a request is targeting:
+
+```go
+func providerForHost(host string) ProviderType {
+    switch host {
+    case "api.anthropic.com":    return ProviderAnthropic
+    case "api.openai.com":       return ProviderOpenAI
+    case "generativelanguage.googleapis.com": return ProviderGoogle
+    default:                     return ""  // no injection
+    }
+}
+```
+
+### Credential Injection by Provider
+
+| Provider | Auth Method |
+|----------|------------|
+| Anthropic (API key) | `x-api-key: {key}` + `anthropic-version: 2023-06-01` |
+| Anthropic (OAuth) | `Authorization: Bearer {token}` (detected by `sk-ant-oat` prefix) |
+| OpenAI | `Authorization: Bearer {key}` |
+| Google | `?key={key}` query parameter |
+
+## Keeper Execute Security
+
+The `/keeper/execute` flow has the most stringent security because it runs shell commands with credentials:
+
+1. **Sidecar validation:**
+   - Intent and command length limits (4096 chars)
+   - Null byte rejection
+   - Shell metacharacter blocking (`;`, `|`, `` ` ``, `>`, `&&`, `||`, `$(`)
+   - Content inside single quotes is exempt
+   - Container ID always from IPC config (agent cannot override)
+
+2. **crewshipd validation:**
+   - Same shell metacharacter checks (defense in depth)
+   - Keeper LLM evaluates the command
+
+3. **Execution:**
+   - Credential injected as environment variable for the command only
+   - Output scrubbed of credential values before returning to agent
+
+## Output Scrubbing
+
+The `scrubber` package (`internal/scrubber/`) removes credential values from agent output. This prevents:
+- Credentials appearing in chat messages
+- Credentials being logged to the progress stream
+- Credentials in Keeper execute output being returned to the agent
+
+## Container Auto-Detection
+
+The Docker provider (`internal/provider/docker/docker.go`) auto-detects the container runtime by probing socket paths:
+
+| Socket Path | Runtime |
+|-------------|---------|
+| `/var/run/docker.sock` | Docker |
+| `~/.colima/default/docker.sock` | Colima |
+| `~/.orbstack/run/docker.sock` | OrbStack |
+| `~/.rd/docker.sock` | Rancher Desktop |
+| `~/.docker/run/docker.sock` | Docker Desktop (macOS) |
+| `/run/user/{uid}/podman/podman.sock` | Podman (rootless) |
+| `/run/podman/podman.sock` | Podman (root) |
+| `/run/containerd/containerd.sock` | nerdctl |
+
+Each socket gets a 1.5-second ping timeout to avoid blocking on unresponsive daemons.

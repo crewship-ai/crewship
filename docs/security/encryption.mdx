@@ -1,0 +1,170 @@
+---
+title: "Credential Encryption"
+description: "AES-256-GCM encryption with 16-byte IV, versioned keys, and Go/TypeScript cross-compatibility."
+icon: "lock"
+---
+
+# Credential Encryption
+
+All credentials in Crewship are encrypted at rest using AES-256-GCM. The implementation in `internal/encryption/encryption.go` is designed for cross-compatibility between Go and TypeScript.
+
+## Encryption Scheme
+
+| Parameter | Value |
+|-----------|-------|
+| Algorithm | AES-256-GCM |
+| Key size | 256 bits (32 bytes, hex-encoded = 64 chars) |
+| IV (nonce) size | **16 bytes** (not the standard 12 bytes) |
+| Auth tag size | 16 bytes |
+| Key source | `ENCRYPTION_KEY` environment variable |
+| Key format | Hex-encoded string |
+
+<Warning>
+  The IV/nonce is 16 bytes, not the standard 12 bytes. This is set via `cipher.NewGCMWithNonceSize(block, 16)` for Go/TypeScript compatibility. Changing this breaks all stored credentials.
+</Warning>
+
+## Wire Format
+
+Encrypted values are stored as versioned base64 strings:
+
+```
+v1:base64(IV || AuthTag || Ciphertext)
+```
+
+### Byte Layout
+
+```
++--------+----------+------------+
+| IV     | AuthTag  | Ciphertext |
+| 16 B   | 16 B     | variable   |
++--------+----------+------------+
+  bytes    bytes      bytes
+  0-15     16-31      32+
+```
+
+This is a **custom byte order** (`IV || AuthTag || Ciphertext`), not the standard Go GCM output format (`Ciphertext || AuthTag`). The reordering is necessary for compatibility with the TypeScript implementation in `lib/encryption.ts`.
+
+<Warning>
+  The byte layout is `IV(16) || AuthTag(16) || Ciphertext`. This differs from Go's default GCM Seal output which produces `Ciphertext || AuthTag`. The encryption code explicitly splits and reorders these components. Changing this layout breaks all stored credentials and cross-language compatibility.
+</Warning>
+
+## Encryption Flow
+
+```go
+// internal/encryption/encryption.go - Encrypt function
+
+1. Load key from ENCRYPTION_KEY env var (hex-decoded to 32 bytes)
+2. Create AES cipher block
+3. Create GCM with 16-byte nonce: cipher.NewGCMWithNonceSize(block, 16)
+4. Generate 16 random IV bytes from crypto/rand
+5. Seal: sealed = gcm.Seal(nil, iv, plaintext, nil)
+   // Go GCM output: ciphertext + authTag (last 16 bytes)
+6. Split sealed into ciphertext and authTag
+7. Reorder: combined = IV + authTag + ciphertext
+8. Encode: "v1:" + base64.StdEncoding.EncodeToString(combined)
+```
+
+## Decryption Flow
+
+```go
+// internal/encryption/encryption.go - Decrypt function
+
+1. Parse version prefix: "v1:base64data" or legacy "base64data"
+2. Look up key for version (ENCRYPTION_KEY or ENCRYPTION_KEY_V2, etc.)
+3. Base64 decode (try standard first, fall back to raw/no-padding)
+4. Validate minimum length (32 bytes: 16 IV + 16 AuthTag)
+5. Extract: iv = data[0:16], authTag = data[16:32], ciphertext = data[32:]
+6. Reconstruct Go GCM format: sealed = ciphertext + authTag
+7. Decrypt: gcm.Open(nil, iv, sealed, nil)
+```
+
+## Key Versioning
+
+Credentials are prefixed with a version identifier (e.g., `v1:`) to support key rotation:
+
+```go
+const currentKeyVersion = "v1"
+var versionPattern = regexp.MustCompile(`^v\d+$`)
+```
+
+### Key Resolution
+
+| Version | Environment Variable |
+|---------|---------------------|
+| `v1` (default) | `ENCRYPTION_KEY` |
+| `v2` | `ENCRYPTION_KEY_V2` |
+| `vN` | `ENCRYPTION_KEY_VN` |
+
+If the version-specific env var is not set, it falls back to `ENCRYPTION_KEY`. This allows gradual key rotation without re-encrypting all existing credentials immediately.
+
+## Legacy Format Support
+
+The decryptor accepts both:
+- **Versioned:** `v1:base64data` (current format)
+- **Legacy:** `base64data` (no version prefix, treated as v1)
+
+Base64 decoding tries standard encoding first, then falls back to raw (no padding) for TypeScript compatibility.
+
+## Cross-Language Compatibility
+
+The encryption format is shared between:
+- **Go:** `internal/encryption/encryption.go`
+- **TypeScript:** `lib/encryption.ts`
+
+Both implementations must agree on:
+1. IV size: 16 bytes
+2. Byte order: IV || AuthTag || Ciphertext
+3. Base64 encoding: standard or raw
+4. Key derivation: direct hex decode (no KDF)
+
+## Security Properties
+
+| Property | Implementation |
+|----------|---------------|
+| Confidentiality | AES-256-GCM encryption |
+| Integrity | GCM authentication tag |
+| Freshness | Random 16-byte IV per encryption |
+| Key isolation | Key only in environment variable, never in DB |
+| Minimum ciphertext | 32 bytes (IV + AuthTag with empty plaintext) |
+
+## Generating an Encryption Key
+
+```bash
+# Generate a 256-bit key (32 bytes, 64 hex characters)
+openssl rand -hex 32
+
+# Example output:
+# a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
+```
+
+<Note>
+  The encryption key must be exactly 64 hex characters (32 bytes). A shorter or longer key will cause `hex.DecodeString` to fail or produce the wrong key length for AES-256.
+</Note>
+
+## Credential Lifecycle
+
+```
+User enters credential value
+    |
+    v
+API handler calls encryption.Encrypt(plaintext)
+    |
+    v
+"v1:base64(IV||AuthTag||Ciphertext)" stored in DB
+    |
+    v (on agent start)
+Orchestrator calls encryption.Decrypt(ciphertext)
+    |
+    v
+Plaintext piped to sidecar via stdin JSON
+    |
+    v
+CredStore (in-memory, never on disk)
+    |
+    v (on HTTP request)
+Sidecar injects into outbound request headers
+```
+
+<Warning>
+  Credentials are transmitted to the sidecar via stdin JSON -- not environment variables. This prevents credential leakage through `/proc/environ` or process listing tools.
+</Warning>

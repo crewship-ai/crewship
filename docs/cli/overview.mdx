@@ -1,0 +1,331 @@
+---
+title: "CLI Overview"
+description: "Global flags, authentication, output formats, and top-level commands for the Crewship CLI."
+icon: "terminal"
+---
+
+# Crewship CLI
+
+The `crewship` command-line interface lets you manage agents, crews, missions, skills, credentials, and more from the terminal.
+
+```bash
+crewship [command] [flags]
+```
+
+## Global Flags
+
+Every command inherits these persistent flags:
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--server` | `-s` | `string` | `http://localhost:8080` | Server URL. Also via `CREWSHIP_SERVER` env var. |
+| `--workspace` | `-w` | `string` | _(from config)_ | Workspace ID or slug. Also via `CREWSHIP_WORKSPACE` env var. |
+| `--format` | `-f` | `string` | `table` | Output format: `table`, `json`, `yaml`, or `quiet`. |
+| `--verbose` | `-v` | `bool` | `false` | Verbose output. |
+| `--no-color` | | `bool` | `false` | Disable ANSI colors. |
+
+## Authentication
+
+### `crewship init`
+
+Initialize Crewship with the first admin user on a fresh database.
+
+```bash
+crewship init --email admin@crewship.ai --name "Pavel Srba"
+```
+
+<Note>
+This command only works on an empty database (no existing users). It creates an admin user with OWNER role and returns a CLI token.
+</Note>
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--server` | `string` | `http://localhost:8081` | Crewship server URL. |
+| `--email` | `string` | _(required)_ | Admin email address. |
+| `--name` | `string` | _(required)_ | Admin full name. |
+| `--password` | `string` | _(prompted)_ | Admin password (min 8 chars). Prompted interactively if omitted. |
+
+### `crewship login`
+
+Authenticate the CLI with a Crewship server.
+
+```bash
+# Interactive mode (email + password)
+crewship login
+
+# Token mode
+crewship login --token <api-token>
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--token` | `string` | | API token for non-interactive login. |
+
+The token is saved to `~/.crewship/cli-config.yaml`.
+
+### `crewship logout`
+
+Remove the stored authentication token.
+
+```bash
+crewship logout
+```
+
+### `crewship whoami`
+
+Display the current user and workspace info.
+
+```bash
+crewship whoami
+```
+
+Outputs the user email, server URL, active workspace name, and user role.
+
+---
+
+## Server
+
+### `crewship start`
+
+Start the Crewship server.
+
+```bash
+crewship start
+crewship start --config config.yaml --no-docker
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--config` | `string` | | Path to config file (YAML). |
+| `--db` | `string` | `~/.crewship/crewship.db` | Database URL. |
+| `--no-docker` | `bool` | `false` | Start without Docker (dashboard only, no agents). |
+
+<Warning>
+A container runtime (Docker, Podman, Colima, OrbStack, Apple Containers) is required to run AI agents. Use `--no-docker` for dashboard-only mode.
+</Warning>
+
+---
+
+## Agent Execution
+
+### `crewship run`
+
+Run an agent with a prompt and stream output to the terminal.
+
+```bash
+crewship run <agent-slug> [prompt]
+crewship run viktor "Create a REST API"
+crewship run viktor --prompt @task.txt
+crewship run viktor --interactive
+crewship run viktor --chat <chatId> "follow-up question"
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--prompt` | `-p` | `string` | | Prompt text or `@file.txt` to read from file. |
+| `--interactive` | | `bool` | `false` | Interactive chat mode (REPL). |
+| `--chat` | | `string` | | Continue an existing chat by chat ID. |
+| `--no-stream` | | `bool` | `false` | Wait for completion, show only the final result. |
+| `--quiet` | `-q` | `bool` | `false` | Only output text, suppress meta info. |
+| `--timeout` | | `int` | `0` | Timeout in seconds (0 = no timeout). |
+
+<Tip>
+In interactive mode, press Ctrl+C to cancel the current run. Press Ctrl+D to exit the session.
+</Tip>
+
+#### `crewship run list`
+
+List recent runs across all agents.
+
+```bash
+crewship run list
+```
+
+**Output columns:** ID, AGENT, STATUS, TRIGGER, CREATED, FINISHED
+
+### `crewship logs`
+
+View agent logs.
+
+```bash
+crewship logs <agent-slug>
+crewship logs viktor --follow
+crewship logs viktor --lines 50
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--lines` | `-n` | `int` | `100` | Number of log lines to show. |
+| `--follow` | `-F` | `bool` | `false` | Stream logs in real-time via WebSocket. |
+
+---
+
+## Observability
+
+### `crewship activity`
+
+View the cross-crew activity feed including assignments, peer conversations, and escalations.
+
+```bash
+crewship activity
+crewship activity --crew backend-team
+crewship activity --lines 20
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--crew` | `string` | | Filter by crew slug or ID. |
+| `--lines` | `int` | `50` | Number of activity entries. |
+
+### `crewship audit`
+
+View audit logs for the workspace.
+
+```bash
+crewship audit
+crewship audit --action create
+crewship audit --lines 100
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--action` | `string` | | Filter by action: `create`, `update`, `delete`. |
+| `--lines` | `int` | `50` | Number of audit entries. |
+
+---
+
+## Token Management
+
+### `crewship token list`
+
+List all CLI tokens.
+
+```bash
+crewship token list
+```
+
+**Output columns:** ID, NAME, CREATED, LAST USED, STATUS
+
+### `crewship token create`
+
+Create a new CLI token.
+
+```bash
+crewship token create [name]
+```
+
+The `name` argument defaults to `"CLI token"` if omitted.
+
+<Warning>
+The token value is displayed only once at creation time. Store it securely.
+</Warning>
+
+### `crewship token revoke`
+
+Revoke a CLI token.
+
+```bash
+crewship token revoke <token-id>
+```
+
+### `crewship token validate`
+
+Validate the current CLI token.
+
+```bash
+crewship token validate
+```
+
+---
+
+## Diagnostics
+
+### `crewship version`
+
+Print version information including commit hash, build date, Go version, and OS/architecture.
+
+```bash
+crewship version
+```
+
+### `crewship doctor`
+
+Check system requirements and health: container runtime detection, data directory, and database status.
+
+```bash
+crewship doctor
+```
+
+### `crewship completion`
+
+Generate shell completion scripts.
+
+```bash
+crewship completion [bash|zsh|fish|powershell]
+```
+
+<Accordion title="Shell completion setup">
+
+**Bash:**
+```bash
+source <(crewship completion bash)
+# Persistent:
+crewship completion bash > /etc/bash_completion.d/crewship
+```
+
+**Zsh:**
+```bash
+source <(crewship completion zsh)
+# Persistent:
+crewship completion zsh > "${fpath[1]}/_crewship"
+```
+
+**Fish:**
+```bash
+crewship completion fish | source
+# Persistent:
+crewship completion fish > ~/.config/fish/completions/crewship.fish
+```
+
+</Accordion>
+
+---
+
+## Seed Data
+
+### `crewship seed`
+
+Seed demo data via the API. Creates a complete demo environment: admin user, workspace, crews, agents with system prompts, credentials, integrations, and sample issues.
+
+```bash
+crewship seed
+crewship seed --nuke
+crewship seed --skip-issues
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--nuke` | `bool` | `false` | Delete all workspace contents before seeding. |
+| `--skip-issues` | `bool` | `false` | Skip issue/project/label seeding. |
+| `--password` | `string` | `password123` | Admin password for bootstrap. |
+
+<Note>
+On a fresh database, `seed` automatically bootstraps the first admin user. On an existing database, it requires authentication via `crewship login`.
+</Note>
+
+---
+
+## Output Formats
+
+All list and detail commands support `--format` (`-f`):
+
+| Format | Description |
+|--------|-------------|
+| `table` | Human-readable table (default). |
+| `json` | JSON output, suitable for piping to `jq`. |
+| `yaml` | YAML output. |
+| `quiet` | Minimal output (IDs only). |
+
+```bash
+crewship agent list -f json | jq '.[].slug'
+```
