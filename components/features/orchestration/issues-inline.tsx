@@ -88,7 +88,7 @@ export function IssuesExplorerPanel({
       {projects.length > 0 && (
         <div className="border-b border-white/[0.06] pb-1">
           <div className="flex items-center justify-between px-3 py-1.5">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Projects</span>
+            <span className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider">Projects</span>
           </div>
           {projects.map((p) => (
             <button
@@ -114,7 +114,7 @@ export function IssuesExplorerPanel({
 
       {/* Issue count */}
       <div className="px-3 pb-1 pt-1 shrink-0">
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Issues <span className="font-normal text-muted-foreground/60 ml-1">{displayed.length}</span></span>
+        <span className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider">Issues <span className="font-normal text-foreground/30 ml-1">{displayed.length}</span></span>
       </div>
 
       {/* Issue list */}
