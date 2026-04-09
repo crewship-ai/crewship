@@ -373,6 +373,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
                   isDimmed && "opacity-40",
                   isHighlighted && "bg-blue-500/5",
                   selectedIds.has(issue.id) && "bg-blue-500/[0.06]",
+                  issue.status === "IN_PROGRESS" && "border-l-2 border-l-blue-400 agent-active-card",
                 )}
                 onClick={() => onIssueClick(issue)}
               >

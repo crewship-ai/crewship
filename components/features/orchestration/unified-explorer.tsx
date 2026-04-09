@@ -275,7 +275,12 @@ export function UnifiedExplorer({
                           isSelected ? "bg-blue-500/10 border-l-2 border-l-blue-400" : "border-l-2 border-l-transparent",
                         )}
                       >
-                        <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+                        <div className="relative shrink-0">
+                          <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
+                          {issue.status === "IN_PROGRESS" && (
+                            <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-green-500 agent-active-dot" />
+                          )}
+                        </div>
                         <span className="text-[10px] font-mono text-foreground/50 shrink-0 w-[44px] truncate">{issue.identifier || "--"}</span>
                         <span className="text-xs text-foreground/80 truncate flex-1">{issue.title}</span>
                         {issue.assignee_id && (
