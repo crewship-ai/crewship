@@ -18,37 +18,45 @@ const (
 	ctxRole        contextKey = "role"
 )
 
+// AuthUser represents an authenticated user extracted from a JWT or CLI token.
 type AuthUser struct {
 	ID    string
 	Email string
 	Name  string
 }
 
+// UserFromContext returns the authenticated user stored in the request context, or nil if not set.
 func UserFromContext(ctx context.Context) *AuthUser {
 	u, _ := ctx.Value(ctxUser).(*AuthUser)
 	return u
 }
 
+// WorkspaceIDFromContext returns the workspace ID stored in the request context, or empty string if not set.
 func WorkspaceIDFromContext(ctx context.Context) string {
 	s, _ := ctx.Value(ctxWorkspaceID).(string)
 	return s
 }
 
+// RoleFromContext returns the workspace membership role (e.g. OWNER, ADMIN, MEMBER) from the request context.
 func RoleFromContext(ctx context.Context) string {
 	s, _ := ctx.Value(ctxRole).(string)
 	return s
 }
 
+// AuthMiddleware provides HTTP middleware for JWT and CLI token authentication.
 type AuthMiddleware struct {
 	validator *auth.JWTValidator
 	db        *sql.DB
 	logger    *slog.Logger
 }
 
+// NewAuthMiddleware creates an AuthMiddleware with the given JWT validator and database connection.
 func NewAuthMiddleware(validator *auth.JWTValidator, db *sql.DB, logger *slog.Logger) *AuthMiddleware {
 	return &AuthMiddleware{validator: validator, db: db, logger: logger}
 }
 
+// RequireAuth returns middleware that validates the request's Bearer token or CLI token
+// and stores the authenticated user in the request context.
 func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := extractToken(r)
@@ -83,6 +91,8 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// RequireWorkspace returns middleware that verifies the authenticated user is a member
+// of the requested workspace and stores the workspace ID and role in the context.
 func (m *AuthMiddleware) RequireWorkspace(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user := UserFromContext(r.Context())

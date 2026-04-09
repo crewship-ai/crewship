@@ -11,6 +11,8 @@ import (
 	"strings"
 )
 
+// StaticFileHandler returns an HTTP handler that serves the Next.js static export from the given filesystem.
+// It handles .html extension resolution, directory indexes, and SPA client-side routing fallback.
 func StaticFileHandler(webFS fs.FS) http.Handler {
 	fileServer := http.FileServer(http.FS(webFS))
 
@@ -70,6 +72,7 @@ func StaticFileHandler(webFS fs.FS) http.Handler {
 	})
 }
 
+// StaticFileHandlerFromDir returns a StaticFileHandler backed by the given directory path.
 func StaticFileHandlerFromDir(dir string) http.Handler {
 	return StaticFileHandler(os.DirFS(dir))
 }
