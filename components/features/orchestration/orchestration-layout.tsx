@@ -634,7 +634,7 @@ export function OrchestrationLayout({
         style={{
           gridTemplateColumns: isMobile
             ? "1fr"
-            : `${leftCollapsed ? "48px" : "240px"} 1fr ${showRightPanel ? "360px" : "0px"}`,
+            : `${leftCollapsed ? "48px" : "300px"} 1fr ${showRightPanel ? "360px" : "0px"}`,
           gridTemplateRows: "1fr auto",
         }}
       >
