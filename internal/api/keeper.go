@@ -54,6 +54,8 @@ type KeeperBroadcaster interface {
 	BroadcastKeeperEvent(workspaceID string, event map[string]any)
 }
 
+// KeeperHandler handles credential access requests forwarded by the sidecar.
+// It evaluates gatekeeper policies and returns allow/deny decisions.
 type KeeperHandler struct {
 	db            *sql.DB
 	logger        *slog.Logger
@@ -65,6 +67,7 @@ type KeeperHandler struct {
 	conversations ConversationReader
 }
 
+// NewKeeperHandler creates a KeeperHandler with the given gatekeeper evaluator and internal token.
 func NewKeeperHandler(db *sql.DB, internalToken string, gk gatekeeper.Evaluator, logger *slog.Logger) *KeeperHandler {
 	return &KeeperHandler{
 		db:            db,

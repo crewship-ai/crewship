@@ -24,6 +24,7 @@ type InternalMissionHandler struct {
 	logger        *slog.Logger
 }
 
+// NewInternalMissionHandler creates an InternalMissionHandler for sidecar-facing mission endpoints.
 func NewInternalMissionHandler(db *sql.DB, hub *ws.Hub, me *orchestrator.MissionEngine, logger *slog.Logger) *InternalMissionHandler {
 	return &InternalMissionHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }

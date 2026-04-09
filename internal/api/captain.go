@@ -59,6 +59,7 @@ func captainCheckRateLimit(userID string) bool {
 	return true
 }
 
+// CaptainHandler powers the Captain AI assistant that helps users manage their workspace via natural language.
 type CaptainHandler struct {
 	db            *sql.DB
 	logger        *slog.Logger
@@ -66,14 +67,17 @@ type CaptainHandler struct {
 	missionEngine MissionStarter
 }
 
+// NewCaptainHandler creates a CaptainHandler with the given database and logger.
 func NewCaptainHandler(db *sql.DB, logger *slog.Logger) *CaptainHandler {
 	return &CaptainHandler{db: db, logger: logger}
 }
 
+// SetProvider attaches the LLM provider used for Captain conversations.
 func (h *CaptainHandler) SetProvider(p llm.Provider) {
 	h.provider = p
 }
 
+// SetMissionEngine attaches the mission engine for Captain to start missions on behalf of users.
 func (h *CaptainHandler) SetMissionEngine(ms MissionStarter) {
 	h.missionEngine = ms
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// MissionHandler provides endpoints for managing missions and their tasks.
 type MissionHandler struct {
 	db            *sql.DB
 	hub           *ws.Hub
@@ -18,6 +19,7 @@ type MissionHandler struct {
 	logger        *slog.Logger
 }
 
+// NewMissionHandler creates a MissionHandler with the given dependencies.
 func NewMissionHandler(db *sql.DB, hub *ws.Hub, me *orchestrator.MissionEngine, logger *slog.Logger) *MissionHandler {
 	return &MissionHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }
