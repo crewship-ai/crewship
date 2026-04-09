@@ -144,18 +144,22 @@ func (c *Client) resolveWorkspaceSlug(slug string) (string, error) {
 	return "", fmt.Errorf("workspace not found: %s", slug)
 }
 
+// Get sends an HTTP GET request to the given API path.
 func (c *Client) Get(path string) (*http.Response, error) {
 	return c.Do("GET", path, nil)
 }
 
+// Post sends an HTTP POST request to the given API path with a JSON body.
 func (c *Client) Post(path string, body interface{}) (*http.Response, error) {
 	return c.Do("POST", path, body)
 }
 
+// Patch sends an HTTP PATCH request to the given API path with a JSON body.
 func (c *Client) Patch(path string, body interface{}) (*http.Response, error) {
 	return c.Do("PATCH", path, body)
 }
 
+// Delete sends an HTTP DELETE request to the given API path.
 func (c *Client) Delete(path string) (*http.Response, error) {
 	return c.Do("DELETE", path, nil)
 }

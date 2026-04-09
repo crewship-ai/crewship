@@ -56,6 +56,7 @@ func eventLevel(event string) string {
 	}
 }
 
+// Append adds a log entry to the buffer, flushing non-streamed events immediately.
 func (ob *OutputBuffer) Append(entry LogEntry) error {
 	if !isStreamedEvent(entry.Event) {
 		ob.flush()

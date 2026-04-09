@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/scrubber"
 )
 
+// DefaultAddr is the default listen address for the sidecar HTTP server inside the container.
 const DefaultAddr = "127.0.0.1:9119"
 
 // MemoryConfig configures the sidecar memory engine.
