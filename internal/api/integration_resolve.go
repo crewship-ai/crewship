@@ -28,6 +28,9 @@ type ResolvedIntegration struct {
 	CredName     *string `json:"credential_name"`
 }
 
+// ResolveAgentIntegrations returns the effective MCP server configuration for an agent
+// by cascading workspace-level and crew-level integrations.
+// GET /api/v1/agents/{agentId}/resolved-integrations
 func (h *IntegrationHandler) ResolveAgentIntegrations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	agentID := r.PathValue("agentId")

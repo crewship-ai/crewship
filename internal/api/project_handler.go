@@ -49,8 +49,8 @@ type projectResponse struct {
 	Progress   int `json:"progress"`
 }
 
-// ── 1. List — GET /api/v1/projects ─────────────────────────────────────────
-
+// List returns all projects in the workspace with issue counts and milestone stats.
+// GET /api/v1/projects
 func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
@@ -134,8 +134,8 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// ── 2. Create — POST /api/v1/projects ──────────────────────────────────────
-
+// Create provisions a new project in the workspace with the given name, slug, and metadata.
+// POST /api/v1/projects
 func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -226,8 +226,8 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// ── 3. Get — GET /api/v1/projects/{projectId} ─────────────────────────────
-
+// Get returns a single project by ID with full details.
+// GET /api/v1/projects/{projectId}
 func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")
 	wsID := WorkspaceIDFromContext(r.Context())
@@ -270,8 +270,8 @@ func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
-// ── 4. Update — PATCH /api/v1/projects/{projectId} ────────────────────────
-
+// Update modifies project properties such as name, description, status, and priority.
+// PATCH /api/v1/projects/{projectId}
 func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -405,8 +405,8 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
-// ── 5. Delete — DELETE /api/v1/projects/{projectId} ────────────────────────
-
+// Delete removes a project and unlinks all its associated issues.
+// DELETE /api/v1/projects/{projectId}
 func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {

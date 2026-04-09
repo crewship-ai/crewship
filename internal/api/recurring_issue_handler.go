@@ -50,6 +50,8 @@ var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month 
 
 // ── 1. List — GET /api/v1/recurring-issues ─────────────────────────────────
 
+// List returns all recurring issue schedules in the workspace.
+// GET /api/v1/recurring-issues
 func (h *RecurringIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
@@ -109,6 +111,8 @@ func (h *RecurringIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // ── 2. Create — POST /api/v1/recurring-issues ──────────────────────────────
 
+// Create adds a new recurring issue schedule with a cron expression.
+// POST /api/v1/recurring-issues
 func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -216,6 +220,8 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // ── 3. Update — PATCH /api/v1/recurring-issues/{id} ────────────────────────
 
+// Update modifies a recurring issue schedule's properties.
+// PATCH /api/v1/recurring-issues/{recurringIssueId}
 func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -360,6 +366,8 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // ── 4. Delete — DELETE /api/v1/recurring-issues/{id} ───────────────────────
 
+// Delete removes a recurring issue schedule.
+// DELETE /api/v1/recurring-issues/{recurringIssueId}
 func (h *RecurringIssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {

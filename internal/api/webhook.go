@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// WebhookHandler receives incoming webhook events and triggers agent runs.
 type WebhookHandler struct {
 	handler   *webhook.Handler
 	logger    *slog.Logger
@@ -25,6 +26,7 @@ type WebhookHandler struct {
 	logWriter *logcollector.Writer
 }
 
+// NewWebhookHandler creates a WebhookHandler with the given dependencies for webhook verification and dispatch.
 func NewWebhookHandler(
 	logger *slog.Logger,
 	resolver chatbridge.ChatResolver,
@@ -46,6 +48,7 @@ func NewWebhookHandler(
 	return wh
 }
 
+// ServeHTTP dispatches incoming webhook requests to the underlying webhook handler.
 func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.handler.ServeHTTP(w, r)
 }

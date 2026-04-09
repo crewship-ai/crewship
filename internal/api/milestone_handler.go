@@ -40,6 +40,8 @@ type milestoneResponse struct {
 
 // ── 1. List — GET /api/v1/projects/{projectId}/milestones ─────────────────
 
+// List returns all milestones for a project.
+// GET /api/v1/projects/{projectId}/milestones
 func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	projectID := r.PathValue("projectId")
@@ -96,6 +98,8 @@ func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // ── 2. Create — POST /api/v1/projects/{projectId}/milestones ──────────────
 
+// Create adds a new milestone to a project.
+// POST /api/v1/projects/{projectId}/milestones
 func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -182,6 +186,8 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // ── 3. Update — PATCH /api/v1/milestones/{milestoneId} ────────────────────
 
+// Update modifies a milestone's name, description, target date, or status.
+// PATCH /api/v1/projects/{projectId}/milestones/{milestoneId}
 func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -283,6 +289,8 @@ func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // ── 4. Delete — DELETE /api/v1/milestones/{milestoneId} ───────────────────
 
+// Delete removes a milestone from a project.
+// DELETE /api/v1/projects/{projectId}/milestones/{milestoneId}
 func (h *MilestoneHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {

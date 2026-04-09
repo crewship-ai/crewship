@@ -45,6 +45,8 @@ type triageRuleResponse struct {
 
 // ── 1. ListRules — GET /api/v1/triage-rules ────────────────────────────────
 
+// ListRules returns all triage rules for the workspace.
+// GET /api/v1/triage/rules
 func (h *TriageHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
@@ -89,6 +91,8 @@ func (h *TriageHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 
 // ── 2. CreateRule — POST /api/v1/triage-rules ──────────────────────────────
 
+// CreateRule creates a new triage rule with pattern matching and action configuration.
+// POST /api/v1/triage/rules
 func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -188,6 +192,8 @@ func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 
 // ── 3. UpdateRule — PATCH /api/v1/triage-rules/{id} ────────────────────────
 
+// UpdateRule modifies an existing triage rule.
+// PATCH /api/v1/triage/rules/{ruleId}
 func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -331,6 +337,8 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 
 // ── 4. DeleteRule — DELETE /api/v1/triage-rules/{id} ───────────────────────
 
+// DeleteRule removes a triage rule.
+// DELETE /api/v1/triage/rules/{ruleId}
 func (h *TriageHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
@@ -372,6 +380,8 @@ func (h *TriageHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 
 // ── 5. Process — POST /api/v1/triage/process ───────────────────────────────
 
+// Process evaluates triage rules against an issue and applies the matching actions.
+// POST /api/v1/triage/process
 func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {

@@ -30,6 +30,7 @@ type QueryHandler struct {
 	escalationWaiters map[string]chan escalationResult
 }
 
+// NewQueryHandler creates a QueryHandler with the given orchestrator, hub, and internal token.
 func NewQueryHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, internalToken string, logger *slog.Logger) *QueryHandler {
 	return &QueryHandler{
 		db:                db,

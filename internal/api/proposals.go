@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// ProposalHandler manages Captain-generated mission proposals that users can approve or reject.
 type ProposalHandler struct {
 	db            *sql.DB
 	hub           *ws.Hub
@@ -22,6 +23,7 @@ type ProposalHandler struct {
 	logger        *slog.Logger
 }
 
+// NewProposalHandler creates a ProposalHandler with the given dependencies.
 func NewProposalHandler(db *sql.DB, hub *ws.Hub, me *orchestrator.MissionEngine, logger *slog.Logger) *ProposalHandler {
 	return &ProposalHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }

@@ -17,12 +17,14 @@ import (
 	"time"
 )
 
+// ProxyHandler proxies requests from the UI to the crewshipd sidecar over the Unix socket.
 type ProxyHandler struct {
 	db         *sql.DB
 	logger     *slog.Logger
 	socketPath string
 }
 
+// NewProxyHandler creates a ProxyHandler that communicates with the sidecar via the given Unix socket path.
 func NewProxyHandler(db *sql.DB, logger *slog.Logger, socketPath string) *ProxyHandler {
 	return &ProxyHandler{db: db, logger: logger, socketPath: socketPath}
 }
@@ -72,6 +74,7 @@ func (h *ProxyHandler) proxyJSON(w http.ResponseWriter, resp *http.Response) {
 	}
 }
 
+// CrewshipdHealth checks the health of the crewshipd sidecar process.
 func (h *ProxyHandler) CrewshipdHealth(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.ipcGet(r.Context(), "/health")
 	if err != nil {
@@ -81,6 +84,7 @@ func (h *ProxyHandler) CrewshipdHealth(w http.ResponseWriter, r *http.Request) {
 	h.proxyJSON(w, resp)
 }
 
+// AgentDebug returns debug information for a running agent (container state, process info).
 func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -158,6 +162,7 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, debug)
 }
 
+// AgentFiles lists files in an agent's working directory via the sidecar.
 func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -204,6 +209,7 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []interface{}{})
 }
 
+// AgentFileDownload streams a file from an agent's working directory.
 func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -253,6 +259,7 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// AgentFileSave uploads and saves a file to an agent's working directory.
 func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -294,6 +301,7 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 	h.proxyJSON(w, resp)
 }
 
+// CrewFiles lists files in a crew's shared directory via the sidecar.
 func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -330,6 +338,7 @@ func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []interface{}{})
 }
 
+// CrewFileDownload streams a file from a crew's shared directory.
 func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -368,6 +377,7 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// CrewFileSave uploads and saves a file to a crew's shared directory.
 func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -400,6 +410,7 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 	h.proxyJSON(w, resp)
 }
 
+// AgentLogs returns collected log entries for a running agent.
 func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -447,6 +458,7 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []interface{}{})
 }
 
+// AgentStop sends a stop signal to a running agent via the sidecar.
 func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -482,6 +494,7 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"id": agentID, "status": "STOPPED"})
 }
 
+// ChatMessages returns the conversation message history for a chat session.
 func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 	user := UserFromContext(r.Context())

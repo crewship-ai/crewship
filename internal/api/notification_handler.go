@@ -72,6 +72,8 @@ func CreateNotification(db *sql.DB, hub *ws.Hub, wsID, userID, actorType, actorI
 
 // ── 1. List — GET /api/v1/notifications ───────────────────────────────────
 
+// List returns paginated notifications for the authenticated user.
+// GET /api/v1/notifications
 func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -148,6 +150,8 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // ── 2. MarkRead — POST /api/v1/notifications/{id}/read ───────────────────
 
+// MarkRead marks a single notification as read.
+// POST /api/v1/notifications/{notificationId}/read
 func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -194,6 +198,8 @@ func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 
 // ── 3. MarkAllRead — POST /api/v1/notifications/read-all ─────────────────
 
+// MarkAllRead marks all notifications as read for the authenticated user.
+// POST /api/v1/notifications/read-all
 func (h *NotificationHandler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -218,6 +224,8 @@ func (h *NotificationHandler) MarkAllRead(w http.ResponseWriter, r *http.Request
 
 // ── 4. Delete — DELETE /api/v1/notifications/{id} ─────────────────────────
 
+// Delete removes a notification for the authenticated user.
+// DELETE /api/v1/notifications/{notificationId}
 func (h *NotificationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -251,6 +259,8 @@ func (h *NotificationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // ── 5. Count — GET /api/v1/notifications/count ────────────────────────────
 
+// Count returns the number of unread notifications for the authenticated user.
+// GET /api/v1/notifications/count
 func (h *NotificationHandler) Count(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {

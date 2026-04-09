@@ -13,11 +13,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 )
 
+// TemplateHandler provides CRUD endpoints for agent prompt templates.
 type TemplateHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewTemplateHandler creates a TemplateHandler with the given database and logger.
 func NewTemplateHandler(db *sql.DB, logger *slog.Logger) *TemplateHandler {
 	return &TemplateHandler{db: db, logger: logger}
 }
