@@ -733,9 +733,11 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			h.logger.Error("delete issue labels", "error", err)
 		}
 		for _, labelID := range *req.Labels {
-			_, _ = h.db.ExecContext(r.Context(),
+			if _, err := h.db.ExecContext(r.Context(),
 				`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
-				missionID, labelID)
+				missionID, labelID); err != nil {
+				h.logger.Error("insert issue label", "mission_id", missionID, "error", err)
+			}
 		}
 	}
 
@@ -747,21 +749,27 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	if req.Status != nil {
 		actID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
+		if _, err := h.db.ExecContext(r.Context(),
 			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'status_changed', ?, ?)`,
-			actID, missionID, actorType, actorID, fmt.Sprintf("%s → %s", currentStatus, *req.Status), now)
+			actID, missionID, actorType, actorID, fmt.Sprintf("%s → %s", currentStatus, *req.Status), now); err != nil {
+			h.logger.Error("insert status activity", "mission_id", missionID, "error", err)
+		}
 	}
 	if req.AssigneeID != nil {
 		actID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
+		if _, err := h.db.ExecContext(r.Context(),
 			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'assignee_changed', ?, ?)`,
-			actID, missionID, actorType, actorID, fmt.Sprintf("assignee_id: %s", *req.AssigneeID), now)
+			actID, missionID, actorType, actorID, fmt.Sprintf("assignee_id: %s", *req.AssigneeID), now); err != nil {
+			h.logger.Error("insert assignee activity", "mission_id", missionID, "error", err)
+		}
 	}
 	if req.Priority != nil {
 		actID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
+		if _, err := h.db.ExecContext(r.Context(),
 			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'priority_changed', ?, ?)`,
-			actID, missionID, actorType, actorID, *req.Priority, now)
+			actID, missionID, actorType, actorID, *req.Priority, now); err != nil {
+			h.logger.Error("insert priority activity", "mission_id", missionID, "error", err)
+		}
 	}
 
 	if h.hub != nil {
@@ -1364,18 +1372,22 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 			commentBody = "Approved: " + req.Comment
 		}
 		commentID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
+		if _, err := h.db.ExecContext(r.Context(),
 			`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'user', ?, ?, ?, ?)`,
-			commentID, missionID, user.ID, commentBody, now, now)
+			commentID, missionID, user.ID, commentBody, now, now); err != nil {
+			h.logger.Error("insert review comment", "mission_id", missionID, "error", err)
+		}
 
 		// Activity
 		actID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
+		if _, err := h.db.ExecContext(r.Context(),
 			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'review_approved', ?, ?)`,
-			actID, missionID, user.ID, commentBody, now)
+			actID, missionID, user.ID, commentBody, now); err != nil {
+			h.logger.Error("insert review activity", "mission_id", missionID, "error", err)
+		}
 
 	} else {
-		// request_changes → TODO
+		// request_changes → revert status to TODO so the assignee can rework
 		ub := newUpdate()
 		ub.Set("status", "TODO")
 
@@ -1405,15 +1417,19 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 			commentBody = "Changes requested: " + req.Comment
 		}
 		commentID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
+		if _, err := h.db.ExecContext(r.Context(),
 			`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'user', ?, ?, ?, ?)`,
-			commentID, missionID, user.ID, commentBody, now, now)
+			commentID, missionID, user.ID, commentBody, now, now); err != nil {
+			h.logger.Error("insert review comment", "mission_id", missionID, "error", err)
+		}
 
 		// Activity
 		actID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
+		if _, err := h.db.ExecContext(r.Context(),
 			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'review_changes_requested', ?, ?)`,
-			actID, missionID, user.ID, commentBody, now)
+			actID, missionID, user.ID, commentBody, now); err != nil {
+			h.logger.Error("insert review activity", "mission_id", missionID, "error", err)
+		}
 	}
 
 	if h.hub != nil {
