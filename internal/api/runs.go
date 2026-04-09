@@ -3,7 +3,6 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
@@ -120,7 +119,8 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 		countArgs = append(countArgs, tag)
 	}
 
-	query += fmt.Sprintf(" ORDER BY r.created_at DESC LIMIT %d OFFSET %d", limit, offset)
+	query += " ORDER BY r.created_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {

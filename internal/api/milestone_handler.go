@@ -58,9 +58,15 @@ func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT m.id, m.project_id, m.name, m.description, m.target_date,
 		       m.status, m.position, m.created_at, m.updated_at,
-		       (SELECT COUNT(*) FROM missions WHERE milestone_id = m.id AND mission_type = 'issue') AS issue_count,
-		       (SELECT COUNT(*) FROM missions WHERE milestone_id = m.id AND mission_type = 'issue' AND status IN ('DONE','COMPLETED')) AS done_count
+		       COALESCE(ic.issue_count, 0),
+		       COALESCE(ic.done_count, 0)
 		FROM milestones m
+		LEFT JOIN (
+		    SELECT milestone_id,
+		           COUNT(*) AS issue_count,
+		           SUM(CASE WHEN status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END) AS done_count
+		    FROM missions WHERE mission_type = 'issue' GROUP BY milestone_id
+		) ic ON ic.milestone_id = m.id
 		WHERE m.project_id = ?
 		ORDER BY m.position ASC, m.created_at ASC`, projectID)
 	if err != nil {

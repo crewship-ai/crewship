@@ -177,7 +177,8 @@ func (h *CrewMessagingHandler) ListMessages(w http.ResponseWriter, r *http.Reque
 		args = append(args, since)
 	}
 
-	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT %d", limit)
+	query += " ORDER BY created_at DESC LIMIT ?"
+	args = append(args, limit)
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {

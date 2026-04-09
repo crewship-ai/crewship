@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -88,7 +89,7 @@ func (v *JWTValidator) CreateToken(claims *Claims) (string, error) {
 		claims.Exp = time.Now().Add(30 * 24 * time.Hour).Unix()
 	}
 	if claims.Jti == "" {
-		claims.Jti = fmt.Sprintf("%d", time.Now().UnixNano())
+		claims.Jti = strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
 
 	payload, err := json.Marshal(claims)

@@ -2,7 +2,6 @@ package api
 
 import (
 	"database/sql"
-	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
@@ -116,7 +115,8 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 		countArgs = append(countArgs, dateTo)
 	}
 
-	query += fmt.Sprintf(" ORDER BY a.created_at DESC LIMIT %d OFFSET %d", limit, offset)
+	query += " ORDER BY a.created_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {

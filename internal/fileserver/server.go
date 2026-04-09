@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -144,7 +145,7 @@ func (s *Server) HandleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", detectMIME(filePath))
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 	// Sanitize filename to prevent Content-Disposition header injection via
 	// quotes or control characters in filenames.
 	safeName := sanitizeFilename(filepath.Base(filePath))
