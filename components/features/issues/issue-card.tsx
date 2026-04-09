@@ -10,7 +10,8 @@ import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { Mission } from "@/lib/types/mission"
 
 function isOverdue(dueDate: string | null | undefined, status: string): boolean {
-  if (!dueDate || status === "COMPLETED" || status === "DONE" || status === "CANCELLED") return false
+  const TERMINAL_STATUSES = new Set(["COMPLETED", "DONE", "CANCELLED", "FAILED", "DUPLICATE"])
+  if (!dueDate || TERMINAL_STATUSES.has(status)) return false
   return new Date(dueDate) < new Date()
 }
 
@@ -32,11 +33,15 @@ export function IssueCard({ issue, onClick }: IssueCardProps) {
 
   return (
     <Card
+      role="button"
+      tabIndex={0}
+      aria-label={`Issue ${issue.identifier || ""}: ${issue.title}`}
       className={cn(
         "px-2.5 py-2 cursor-pointer hover:bg-accent/50 transition-colors border-border/60 gap-0",
         overdue && "border-red-500/40"
       )}
       onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick() } }}
     >
       {/* Row 1: identifier + agent name + avatar */}
       <div className="flex items-center justify-between gap-2 mb-0.5">

@@ -51,7 +51,7 @@ func ResolveOAuthCredentials() []OAuthCredentialDef {
 
 	linearToken := os.Getenv("SEED_LINEAR_OAUTH_ACCESS_TOKEN")
 	linearClientID := os.Getenv("SEED_LINEAR_OAUTH_CLIENT_ID")
-	if linearToken != "" || linearClientID != "" {
+	if linearToken != "" || (linearClientID != "" && os.Getenv("SEED_LINEAR_OAUTH_CLIENT_SECRET") != "") {
 		creds = append(creds, OAuthCredentialDef{
 			IntegrationName:   "linear",
 			CredName:          "linear-oauth",

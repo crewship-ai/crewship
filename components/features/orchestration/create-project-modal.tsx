@@ -166,6 +166,7 @@ export function CreateProjectModal({
           body: JSON.stringify({
             name: name.trim(),
             description: description.trim() || undefined,
+            summary: summary?.trim() || undefined,
             icon,
             color,
             status,
@@ -174,6 +175,7 @@ export function CreateProjectModal({
             lead_id: leadId ?? undefined,
             start_date: startDate || undefined,
             target_date: targetDate || undefined,
+            labels: selectedLabels.length > 0 ? selectedLabels : undefined,
           }),
         },
       )
@@ -193,7 +195,7 @@ export function CreateProjectModal({
     } finally {
       setSaving(false)
     }
-  }, [name, description, icon, color, status, priority, leadType, leadId, startDate, targetDate, workspaceId, onCreated, onOpenChange])
+  }, [name, description, summary, icon, color, status, priority, leadType, leadId, startDate, targetDate, selectedLabels, workspaceId, onCreated, onOpenChange])
 
   // Cmd+Enter to submit
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {

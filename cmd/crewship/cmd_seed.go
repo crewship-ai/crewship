@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -941,17 +942,5 @@ func resolveByName(client *cli.Client, listPath, name string) (string, error) {
 
 func readBody(resp *http.Response) ([]byte, error) {
 	defer resp.Body.Close()
-	var buf []byte
-	buf = make([]byte, 0, 4096)
-	tmp := make([]byte, 4096)
-	for {
-		n, err := resp.Body.Read(tmp)
-		if n > 0 {
-			buf = append(buf, tmp[:n]...)
-		}
-		if err != nil {
-			break
-		}
-	}
-	return buf, nil
+	return io.ReadAll(resp.Body)
 }

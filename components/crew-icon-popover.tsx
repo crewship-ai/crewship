@@ -47,11 +47,11 @@ export function CrewIconPopover({ icon, color, size = "xl", onIconChange, onColo
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" className="relative group cursor-pointer">
+        <button type="button" className="relative group cursor-pointer" aria-label="Choose crew icon">
           <CrewIcon icon={icon} color={color} size={size} />
           <div className={cn(
             "absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all flex items-center justify-center",
-            size === "xl" ? "rounded-2xl" : size === "lg" ? "rounded-xl" : "rounded-lg",
+            size === "xl" ? "rounded-2xl" : size === "lg" ? "rounded-xl" : size === "md" ? "rounded-xl" : "rounded-lg",
           )}>
             <Pencil className={cn(
               "text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md",

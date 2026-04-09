@@ -353,7 +353,7 @@ var issueCreateCmd = &cobra.Command{
 			}
 		}
 		if v, _ := flags.GetString("labels"); v != "" {
-			body["label_ids"] = strings.Split(v, ",")
+			body["labels"] = strings.Split(v, ",")
 		}
 		if v, _ := flags.GetString("due-date"); v != "" {
 			body["due_date"] = v
@@ -419,15 +419,20 @@ var issueUpdateCmd = &cobra.Command{
 		}
 		if flags.Changed("assignee") {
 			v, _ := flags.GetString("assignee")
-			// Resolve agent slug to ID
-			agentID, err := resolveAgentID(client, v)
-			if err != nil {
-				return fmt.Errorf("cannot resolve assignee %q: %w", v, err)
-			}
-			body["assignee_id"] = agentID
-			// Auto-set type to agent if not explicitly set
-			if !flags.Changed("assignee-type") {
-				body["assignee_type"] = "agent"
+			if v == "" {
+				body["assignee_id"] = nil
+				body["assignee_type"] = nil
+			} else {
+				// Resolve agent slug to ID
+				agentID, err := resolveAgentID(client, v)
+				if err != nil {
+					return fmt.Errorf("cannot resolve assignee %q: %w", v, err)
+				}
+				body["assignee_id"] = agentID
+				// Auto-set type to agent if not explicitly set
+				if !flags.Changed("assignee-type") {
+					body["assignee_type"] = "agent"
+				}
 			}
 		}
 		if flags.Changed("assignee-type") {

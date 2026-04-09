@@ -197,7 +197,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   key={issue.id}
                   value={`issue ${issue.identifier ?? ""} ${issue.title}`}
                   keywords={[issue.status, issue.priority, issue.assignee_name ?? "", issue.crew_name ?? ""]}
-                  onSelect={() => runCommand(() => router.push(`/orchestration/issues/${issue.identifier}`))}
+                  onSelect={() => issue.identifier && runCommand(() => router.push(`/orchestration/issues/${issue.identifier}`))}
                 >
                   <StatusIcon status={issue.status} className="h-4 w-4 shrink-0" />
                   <span className="text-xs font-mono text-muted-foreground shrink-0">{issue.identifier}</span>

@@ -110,7 +110,9 @@ Requires crews with LEAD agents to already exist.`,
 			Crew   *struct{ Slug string `json:"slug"` } `json:"crew"`
 		}
 		var allAgents []agentInfo
-		_ = cli.ReadJSON(resp, &allAgents)
+		if err := cli.ReadJSON(resp, &allAgents); err != nil {
+			fmt.Fprintf(os.Stderr, "  ! Warning: failed to parse agents: %v\n", err)
+		}
 		agentBySlug := map[string]string{} // slug → id
 		for _, a := range allAgents {
 			agentBySlug[a.Slug] = a.ID
@@ -139,13 +141,13 @@ Requires crews with LEAD agents to already exist.`,
 				fmt.Fprintf(os.Stderr, "  ! Failed to create label %s: %v\n", l.Name, err)
 				continue
 			}
+			defer resp.Body.Close()
 			if resp.StatusCode >= 400 {
 				var errBody map[string]interface{}
 				_ = cli.ReadJSON(resp, &errBody)
 				fmt.Fprintf(os.Stderr, "  ! Label %s failed (%d): %v\n", l.Name, resp.StatusCode, errBody)
 				continue
 			}
-			resp.Body.Close()
 			fmt.Fprintf(os.Stderr, "  + Label: %s\n", l.Name)
 		}
 
@@ -306,10 +308,10 @@ func RateLimitMiddleware(limit int, window time.Duration) func(http.Handler) htt
 			{crew: "quality", project: "Security & Compliance", assignee: "eva", labels: []string{"Security", "Bug"}, title: "Security audit: validate all API input sanitization", desc: "Review all 47 API handlers for SQL injection, XSS in stored content, SSRF in OAuth flows, path traversal in file operations.", priority: "urgent", targetState: "IN_PROGRESS", comment: "Phase 1 complete: reviewed all 47 API handlers. Found 3 potential SSRF vectors in OAuth discovery and 1 path traversal in file server. Creating sub-tasks for each fix."},
 
 			// Infrastructure — devops crew
-			{crew: "devops", project: "Infrastructure & Integrations", assignee: "alex", labels: []string{"Infrastructure"}, title: "Set up automated SQLite backup with Litestream", desc: "No backup strategy in place. Implement hourly Litestream replication to S3-compatible storage.", priority: "urgent", targetState: "IN_PROGRESS", comment: "Evaluating Litestream vs custom backup. Litestream supports continuous WAL replication to S3. Setting up MinIO locally for testing."},
-			{crew: "devops", project: "Infrastructure & Integrations", assignee: "sara", labels: []string{"Infrastructure"}, title: "Configure Prometheus metrics endpoint", desc: "Expose /metrics for Go runtime stats, HTTP request latency, active WebSocket connections, mission execution metrics.", priority: "medium", targetState: "TODO"},
+			{crew: "devops", project: "Infrastructure & Integrations", assignee: "ondrej", labels: []string{"Infrastructure"}, title: "Set up automated SQLite backup with Litestream", desc: "No backup strategy in place. Implement hourly Litestream replication to S3-compatible storage.", priority: "urgent", targetState: "IN_PROGRESS", comment: "Evaluating Litestream vs custom backup. Litestream supports continuous WAL replication to S3. Setting up MinIO locally for testing."},
+			{crew: "devops", project: "Infrastructure & Integrations", assignee: "radek", labels: []string{"Infrastructure"}, title: "Configure Prometheus metrics endpoint", desc: "Expose /metrics for Go runtime stats, HTTP request latency, active WebSocket connections, mission execution metrics.", priority: "medium", targetState: "TODO"},
 			{crew: "devops", project: "Infrastructure & Integrations", assignee: "ondrej", labels: []string{"Infrastructure"}, title: "Dockerize production deployment", desc: "Create multi-stage Dockerfile with embedded Next.js static export. Target: single container under 100MB.", priority: "low"},
-			{crew: "devops", project: "Infrastructure & Integrations", assignee: "sara", labels: []string{"Infrastructure", "Performance"}, title: "Monitor crew container resource usage", desc: "Track CPU, memory, and disk usage per crew container. Alert when approaching limits. Add dashboard widget.", priority: "medium"},
+			{crew: "devops", project: "Infrastructure & Integrations", assignee: "radek", labels: []string{"Infrastructure", "Performance"}, title: "Monitor crew container resource usage", desc: "Track CPU, memory, and disk usage per crew container. Alert when approaching limits. Add dashboard widget.", priority: "medium"},
 
 			// Orchestration Engine — research + quality
 			{crew: "research", project: "Orchestration Engine", assignee: "lucie", labels: []string{"Feature"}, title: "Evaluate local LLM models for Keeper engine", desc: "Test Llama 3.2, Mistral 7B, and Phi-3 for keeper confidence scoring. Compare accuracy vs latency on real decisions.", priority: "medium", targetState: "REVIEW", comment: "Llama 3.2 8B: 87% accuracy, 340ms avg. Mistral 7B: 82%, 280ms. Phi-3 mini: 71%, 180ms. Recommending Llama 3.2 for production."},

@@ -528,6 +528,12 @@ cmd_nuke() {
 cmd_seed() {
   log "Seeding database via CLI..."
 
+  # Health check — ensure the server is running before attempting to seed
+  if ! curl -sf "http://localhost:${GO_PORT}/api/health" >/dev/null 2>&1; then
+    err "crewship is not running on :${GO_PORT} -- run ./dev.sh start first"
+    exit 1
+  fi
+
   # Verify .env.local exists (needed for SEED_* env vars)
   if [[ ! -f "$PROJECT_DIR/.env.local" ]]; then
     err ".env.local not found -- copy from .env.example and fill in values"

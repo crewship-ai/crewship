@@ -9,7 +9,7 @@ import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { getCrewIconDef, getCrewDotColor } from "@/lib/crew-icon"
+import { getCrewIconDef, getGradientPalette } from "@/lib/crew-icon"
 import type { Mission, MissionTask, Project } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
 
@@ -142,17 +142,22 @@ export function UnifiedExplorer({
           >
             <Filter className="h-3 w-3" />
             {filterLabel || "Filter"}
-            <AnimatePresence>
-              {filterLabel && (
-                <motion.button
-                  initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0 }}
-                  onClick={(e) => { e.stopPropagation(); clearFilters() }} className="ml-0.5 hover:text-white"
-                >
-                  <X className="h-3 w-3" />
-                </motion.button>
-              )}
-            </AnimatePresence>
+
           </motion.button>
+          <AnimatePresence>
+            {filterLabel && (
+              <motion.span
+                role="button"
+                tabIndex={0}
+                initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0 }}
+                onClick={(e) => { e.stopPropagation(); clearFilters() }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); clearFilters() } }}
+                className="ml-0.5 hover:text-white cursor-pointer"
+              >
+                <X className="h-3 w-3" />
+              </motion.span>
+            )}
+          </AnimatePresence>
           <AnimatePresence>
             {filterDropdownOpen && (
               <>
@@ -175,7 +180,7 @@ export function UnifiedExplorer({
                         onClick={() => { onCrewFilter(c.id); onAgentFilter(null); setFilterDropdownOpen(false) }}
                         className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterCrewId === c.id ? "text-blue-400" : "text-muted-foreground/80")}
                       >
-                        <CrewIconComp className="h-3.5 w-3.5 shrink-0" style={{ color: getCrewDotColor(c.color) }} />
+                        <CrewIconComp className={cn("h-3.5 w-3.5 shrink-0", getGradientPalette(c.color).text)} />
                         {c.name}
                       </button>
                     )
@@ -227,7 +232,7 @@ export function UnifiedExplorer({
                         selectedProjectId === p.id ? "bg-blue-500/10 border-l-2 border-blue-500" : "border-l-2 border-transparent",
                       )}
                     >
-                      <IconComp className="h-3.5 w-3.5 shrink-0" style={{ color: getCrewDotColor(p.color) }} />
+                      <IconComp className={cn("h-3.5 w-3.5 shrink-0", getGradientPalette(p.color).text)} />
                       <span className="text-xs text-foreground/80 truncate flex-1" title={p.name}>{p.name}</span>
                       <span className="text-[10px] text-muted-foreground/40 tabular-nums">{p.issue_count}</span>
                     </button>

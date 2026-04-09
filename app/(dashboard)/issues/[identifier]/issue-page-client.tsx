@@ -59,7 +59,7 @@ function timeAgo(iso: string) {
 export function IssuePageClient() {
   const params = useParams()
   const router = useRouter()
-  const { status: sessionStatus } = useSession()
+  const { data: session, status: sessionStatus } = useSession()
   const { workspaceId } = useWorkspace()
   const identifier = params.identifier as string
 
@@ -73,7 +73,7 @@ export function IssuePageClient() {
     if (!workspaceId || !identifier) return
     try {
       const res = await fetch(
-        `/api/v1/issues/${identifier}?workspace_id=${workspaceId}`
+        `/api/v1/issues/${encodeURIComponent(identifier)}?workspace_id=${encodeURIComponent(workspaceId)}`
       )
       if (!res.ok) return
       const found: Mission = await res.json()
@@ -81,7 +81,7 @@ export function IssuePageClient() {
         setIssue(found)
         if (found.crew_id && found.identifier) {
           const commentsRes = await fetch(
-            `/api/v1/crews/${found.crew_id}/issues/${found.identifier}/comments?workspace_id=${workspaceId}`
+            `/api/v1/crews/${encodeURIComponent(found.crew_id)}/issues/${encodeURIComponent(found.identifier)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`
           )
           if (commentsRes.ok) {
             setComments(await commentsRes.json())
@@ -107,9 +107,9 @@ export function IssuePageClient() {
   )
 
   const patchIssue = async (field: string, value: string | null) => {
-    if (!issue) return
+    if (!issue || !workspaceId) return
     const res = await fetch(
-      `/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}?workspace_id=${workspaceId}`,
+      `/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier!)}?workspace_id=${encodeURIComponent(workspaceId)}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -125,11 +125,11 @@ export function IssuePageClient() {
   }
 
   const submitComment = async () => {
-    if (!issue || !newComment.trim()) return
+    if (!issue || !workspaceId || !newComment.trim()) return
     setSendingComment(true)
     try {
       const res = await fetch(
-        `/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/comments?workspace_id=${workspaceId}`,
+        `/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier!)}/comments?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -228,7 +228,7 @@ export function IssuePageClient() {
               {/* New comment */}
               <div className="flex gap-3 pt-2">
                 <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium shrink-0">
-                  Y
+                  {(session?.user?.name || session?.user?.email || "U").charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 space-y-2">
                   <Textarea

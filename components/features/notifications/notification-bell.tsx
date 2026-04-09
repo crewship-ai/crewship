@@ -51,7 +51,7 @@ export function NotificationBell() {
       const res = await fetch(`/api/v1/notifications/count?workspace_id=${workspaceId}`)
       if (res.ok) {
         const data = await res.json()
-        setUnreadCount(data.count ?? 0)
+        setUnreadCount(data.unread ?? data.count ?? 0)
       }
     } catch {
       // silent
@@ -93,9 +93,10 @@ export function NotificationBell() {
     async (notificationId: string) => {
       if (!workspaceId) return
       try {
-        await fetch(`/api/v1/notifications/${notificationId}/read?workspace_id=${workspaceId}`, {
+        const res = await fetch(`/api/v1/notifications/${notificationId}/read?workspace_id=${workspaceId}`, {
           method: "POST",
         })
+        if (!res.ok) return
         setNotifications((prev) =>
           prev.map((n) => (n.id === notificationId ? { ...n, read_at: new Date().toISOString() } : n)),
         )
@@ -110,9 +111,10 @@ export function NotificationBell() {
   const markAllRead = useCallback(async () => {
     if (!workspaceId) return
     try {
-      await fetch(`/api/v1/notifications/read-all?workspace_id=${workspaceId}`, {
+      const res = await fetch(`/api/v1/notifications/read-all?workspace_id=${workspaceId}`, {
         method: "POST",
       })
+      if (!res.ok) return
       setNotifications((prev) =>
         prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })),
       )
@@ -167,12 +169,21 @@ export function NotificationBell() {
                 return (
                   <div
                     key={n.id}
+                    role={isUnread ? "button" : undefined}
+                    tabIndex={isUnread ? 0 : undefined}
+                    aria-label={isUnread ? `Mark notification as read: ${n.actor_name || n.actor_type} ${ACTION_LABELS[n.action] || n.action} ${n.entity_title || ""}` : undefined}
                     className={cn(
                       "flex items-start gap-2.5 px-3 py-2 hover:bg-white/[0.04] transition-colors cursor-pointer group",
                       isUnread && "bg-blue-500/[0.03]",
                     )}
                     onClick={() => {
                       if (isUnread) markAsRead(n.id)
+                    }}
+                    onKeyDown={(e) => {
+                      if (isUnread && (e.key === "Enter" || e.key === " ")) {
+                        e.preventDefault()
+                        markAsRead(n.id)
+                      }
                     }}
                   >
                     {/* Unread dot */}
@@ -205,6 +216,7 @@ export function NotificationBell() {
                           markAsRead(n.id)
                         }}
                         className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/[0.08] text-muted-foreground/40 hover:text-blue-400 transition-all shrink-0 mt-0.5"
+                        aria-label="Mark as read"
                         title="Mark as read"
                       >
                         <Check className="h-3 w-3" />

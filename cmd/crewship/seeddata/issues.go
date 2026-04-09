@@ -241,15 +241,17 @@ func StatusPath(target string) []string {
 	case "TODO":
 		return []string{"TODO"}
 	case "IN_PROGRESS":
-		return []string{"IN_PROGRESS"}
+		return []string{"TODO", "IN_PROGRESS"}
 	case "REVIEW":
-		return []string{"IN_PROGRESS", "REVIEW"}
+		return []string{"TODO", "IN_PROGRESS", "REVIEW"}
 	case "DONE":
-		return []string{"IN_PROGRESS", "DONE"}
+		return []string{"TODO", "IN_PROGRESS", "REVIEW", "DONE"}
 	case "FAILED":
-		return []string{"IN_PROGRESS", "FAILED"}
+		return []string{"TODO", "IN_PROGRESS", "FAILED"}
 	case "CANCELLED":
-		return []string{"CANCELLED"}
+		return []string{"TODO", "CANCELLED"}
+	case "DUPLICATE":
+		return []string{"TODO", "DUPLICATE"}
 	default:
 		return nil
 	}

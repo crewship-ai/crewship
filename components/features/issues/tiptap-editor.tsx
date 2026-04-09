@@ -8,7 +8,9 @@ import {
   forwardRef,
   useImperativeHandle,
 } from "react"
+import type { ComponentType, ReactNode } from "react"
 import { marked } from "marked"
+import DOMPurify from "dompurify"
 import TurndownService from "turndown"
 import {
   useEditor,
@@ -170,7 +172,9 @@ function htmlToMarkdown(html: string): string {
 // ---------------------------------------------------------------------------
 function markdownToHtml(md: string): string {
   if (!md) return ""
-  return marked.parse(md, { async: false, breaks: true, gfm: true }) as string
+  return DOMPurify.sanitize(
+    marked.parse(md, { async: false, breaks: true, gfm: true }) as string,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +221,7 @@ interface TiptapEditorProps {
 interface SlashCommandItem {
   title: string
   description: string
-  icon: React.ComponentType<{ className?: string }>
+  icon: ComponentType<{ className?: string }>
   command: (opts: { editor: Editor; range: Range }) => void
 }
 
@@ -577,7 +581,7 @@ function ToolbarButton({
   active?: boolean
   disabled?: boolean
   onClick: () => void
-  children: React.ReactNode
+  children: ReactNode
   title: string
 }) {
   return (
@@ -610,7 +614,7 @@ function BubbleButton({
 }: {
   active?: boolean
   onClick: () => void
-  children: React.ReactNode
+  children: ReactNode
   title?: string
 }) {
   return (

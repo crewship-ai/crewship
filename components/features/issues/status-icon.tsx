@@ -43,7 +43,7 @@ export function StatusIcon({ status, className }: StatusIconProps) {
     case "BACKLOG":
       // Dashed circle
       return (
-        <svg viewBox="0 0 16 16" className={cls}>
+        <svg viewBox="0 0 16 16" className={cls} aria-hidden="true">
           <circle
             cx="8"
             cy="8"
@@ -60,7 +60,7 @@ export function StatusIcon({ status, className }: StatusIconProps) {
     case "PLANNING":
       // Empty solid circle
       return (
-        <svg viewBox="0 0 16 16" className={cls}>
+        <svg viewBox="0 0 16 16" className={cls} aria-hidden="true">
           <circle
             cx="8"
             cy="8"
@@ -75,7 +75,7 @@ export function StatusIcon({ status, className }: StatusIconProps) {
     case "IN_PROGRESS":
       // Half-filled circle (left half filled)
       return (
-        <svg viewBox="0 0 16 16" className={cls}>
+        <svg viewBox="0 0 16 16" className={cls} aria-hidden="true">
           <circle
             cx="8"
             cy="8"
@@ -91,7 +91,7 @@ export function StatusIcon({ status, className }: StatusIconProps) {
     case "REVIEW":
       // Three-quarter filled circle
       return (
-        <svg viewBox="0 0 16 16" className={cls}>
+        <svg viewBox="0 0 16 16" className={cls} aria-hidden="true">
           <circle
             cx="8"
             cy="8"
@@ -115,7 +115,7 @@ export function StatusIcon({ status, className }: StatusIconProps) {
     case "DONE":
       // Filled circle with checkmark
       return (
-        <svg viewBox="0 0 16 16" className={cls}>
+        <svg viewBox="0 0 16 16" className={cls} aria-hidden="true">
           <circle cx="8" cy="8" r="6" fill={color} />
           <path
             d="M5 8.5l2 2 4-4.5"
@@ -131,7 +131,7 @@ export function StatusIcon({ status, className }: StatusIconProps) {
     case "FAILED":
       // Filled red circle with exclamation
       return (
-        <svg viewBox="0 0 16 16" className={cls}>
+        <svg viewBox="0 0 16 16" className={cls} aria-hidden="true">
           <circle cx="8" cy="8" r="6" fill={color} />
           <path
             d="M8 4.5v4M8 11v1"
@@ -146,7 +146,7 @@ export function StatusIcon({ status, className }: StatusIconProps) {
     case "DUPLICATE":
       // Filled gray circle with X
       return (
-        <svg viewBox="0 0 16 16" className={cls}>
+        <svg viewBox="0 0 16 16" className={cls} aria-hidden="true">
           <circle cx="8" cy="8" r="6" fill={color} />
           <path
             d="M5.5 5.5l5 5M10.5 5.5l-5 5"
@@ -159,7 +159,7 @@ export function StatusIcon({ status, className }: StatusIconProps) {
 
     default:
       return (
-        <svg viewBox="0 0 16 16" className={cls}>
+        <svg viewBox="0 0 16 16" className={cls} aria-hidden="true">
           <circle
             cx="8"
             cy="8"

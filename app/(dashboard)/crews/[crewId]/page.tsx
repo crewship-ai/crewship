@@ -288,7 +288,9 @@ export default function CrewDetailPage() {
                 onBlur={(e) => {
                   const val = e.target.value.trim().toUpperCase()
                   if (val !== (crew.issue_prefix || "")) {
-                    patchCrew({ issue_prefix: val || null })
+                    void patchCrew({ issue_prefix: val || null }).catch((err) => {
+                      toast.error(err instanceof Error ? err.message : "Failed to update issue prefix")
+                    })
                   }
                 }}
                 onKeyDown={(e) => {

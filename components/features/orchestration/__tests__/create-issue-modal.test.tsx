@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { CreateIssueModal } from "../create-issue-modal"
 
@@ -42,12 +42,18 @@ const defaultProps = {
 }
 
 describe("CreateIssueModal", () => {
+  const originalFetch = global.fetch
+
   beforeEach(() => {
     vi.restoreAllMocks()
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve([]),
     })
+  })
+
+  afterAll(() => {
+    global.fetch = originalFetch
   })
 
   it("renders when open", () => {

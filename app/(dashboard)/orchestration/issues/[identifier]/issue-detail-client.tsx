@@ -703,7 +703,7 @@ export function IssueDetailClient() {
                   />
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-muted-foreground/40">
-                      {navigator.platform?.includes("Mac") ? "Cmd" : "Ctrl"}+Enter to send
+                      {(typeof navigator !== "undefined" ? ((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform ?? "") : "").includes("Mac") ? "Cmd" : "Ctrl"}+Enter to send
                     </span>
                     <Button
                       size="sm"

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
   ArrowLeft,
@@ -24,7 +24,6 @@ import { StatusIcon, statusLabel } from "@/components/features/issues/status-ico
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
-import { CrewIcon } from "@/components/ui/crew-icon"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   Command,
@@ -269,7 +268,11 @@ export function ProjectDetailClient() {
   // -----------------------------------------------------------------------
 
   const fetchProject = useCallback(async () => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setError("No workspace selected")
+      setLoading(false)
+      return
+    }
     try {
       const res = await fetch(
         `/api/v1/projects/${encodeURIComponent(projectId)}?workspace_id=${encodeURIComponent(workspaceId)}`,
@@ -365,11 +368,16 @@ export function ProjectDetailClient() {
     fetchMilestones()
   }, [wsLoading, fetchProject, fetchStats, fetchIssues, fetchAgents, fetchMilestones])
 
-  // Realtime refresh
+  // Realtime refresh (debounced to avoid rapid-fire refetches)
+  const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleRealtime = useCallback(() => {
-    fetchProject()
-    fetchStats()
-    fetchIssues()
+    if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current)
+    realtimeTimerRef.current = setTimeout(() => {
+      fetchProject()
+      fetchStats()
+      fetchIssues()
+      realtimeTimerRef.current = null
+    }, 500)
   }, [fetchProject, fetchStats, fetchIssues])
 
   useRealtimeEvent("mission.updated", handleRealtime)
@@ -382,20 +390,24 @@ export function ProjectDetailClient() {
   const patchProject = useCallback(
     async (fields: Record<string, unknown>) => {
       if (!project || !workspaceId) return
-      const res = await fetch(
-        `/api/v1/projects/${project.id}?workspace_id=${encodeURIComponent(workspaceId)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(fields),
-        },
-      )
-      if (res.ok) {
-        toast.success("Updated")
-        fetchProject()
-        fetchStats()
-      } else {
-        toast.error("Failed to update")
+      try {
+        const res = await fetch(
+          `/api/v1/projects/${project.id}?workspace_id=${encodeURIComponent(workspaceId)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(fields),
+          },
+        )
+        if (res.ok) {
+          toast.success("Updated")
+          fetchProject()
+          fetchStats()
+        } else {
+          toast.error("Failed to update")
+        }
+      } catch {
+        toast.error("Network error — failed to update project")
       }
     },
     [project, workspaceId, fetchProject, fetchStats],
@@ -955,10 +967,18 @@ function IssuesTab({
           {issues.map((issue) => (
             <tr
               key={issue.id}
+              tabIndex={0}
+              role="link"
               onClick={() => {
                 if (issue.identifier) router.push(`/orchestration/issues/${issue.identifier}`)
               }}
-              className="border-b border-white/[0.03] hover:bg-white/[0.03] transition-colors cursor-pointer"
+              onKeyDown={(e) => {
+                if ((e.key === "Enter" || e.key === " ") && issue.identifier) {
+                  e.preventDefault()
+                  router.push(`/orchestration/issues/${issue.identifier}`)
+                }
+              }}
+              className="border-b border-white/[0.03] hover:bg-white/[0.03] transition-colors cursor-pointer focus:outline-none focus:bg-white/[0.04]"
             >
               <td className="py-2 px-3">
                 <span className="text-[11px] font-mono text-muted-foreground/60">{issue.identifier || "--"}</span>
@@ -1240,7 +1260,7 @@ function ProjectSidebar({
                     type="date"
                     className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full"
                     defaultValue={project.start_date || ""}
-                    onChange={(e) => patchProject({ start_date: e.target.value || null })}
+                    onBlur={(e) => patchProject({ start_date: e.target.value || null })}
                   />
                 </div>
                 <div>
@@ -1249,7 +1269,7 @@ function ProjectSidebar({
                     type="date"
                     className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full"
                     defaultValue={project.target_date || ""}
-                    onChange={(e) => patchProject({ target_date: e.target.value || null })}
+                    onBlur={(e) => patchProject({ target_date: e.target.value || null })}
                   />
                 </div>
               </PopoverContent>

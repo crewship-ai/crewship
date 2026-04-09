@@ -90,6 +90,8 @@ export function IssuesToolbar({
             viewMode === "board" && "bg-background shadow-sm",
           )}
           onClick={() => onViewModeChange("board")}
+          aria-label="Board view"
+          aria-pressed={viewMode === "board"}
         >
           <LayoutGrid className="h-3.5 w-3.5" />
         </Button>
@@ -101,6 +103,8 @@ export function IssuesToolbar({
             viewMode === "list" && "bg-background shadow-sm",
           )}
           onClick={() => onViewModeChange("list")}
+          aria-label="List view"
+          aria-pressed={viewMode === "list"}
         >
           <List className="h-3.5 w-3.5" />
         </Button>

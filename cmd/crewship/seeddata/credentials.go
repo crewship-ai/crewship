@@ -3,6 +3,7 @@ package seeddata
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"strings"
 )
@@ -62,6 +63,16 @@ func ResolveGoogleCredential() *CredentialDef {
 		Type:        "SECRET",
 		Provider:    "GOOGLE",
 		EnvVarName:  "GOOGLE_API_CREDENTIALS",
-		Value:       `{"email":"` + email + `","password":"` + password + `"}`,
+		Value:       marshalJSON(map[string]string{"email": email, "password": password}),
 	}
+}
+
+// marshalJSON marshals v to a JSON string. Panics on error (should never
+// happen for simple map types used in seed data).
+func marshalJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic("seeddata: failed to marshal JSON: " + err.Error())
+	}
+	return string(b)
 }

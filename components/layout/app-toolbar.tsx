@@ -299,6 +299,7 @@ export function AppToolbar() {
             <span className="text-muted-foreground/30 text-xs">/</span>
             {item.onClick ? (
               <button
+                type="button"
                 onClick={item.onClick}
                 className="text-xs text-muted-foreground/70 hover:text-foreground/90 transition-colors truncate max-w-[160px]"
               >

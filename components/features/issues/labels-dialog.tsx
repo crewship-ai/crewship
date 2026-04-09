@@ -192,6 +192,7 @@ export function LabelsDialog({
                   style={{ backgroundColor: color.value }}
                   onClick={() => setNewColor(color.value)}
                   title={color.name}
+                  aria-label={`Select ${color.name} color`}
                 />
               ))}
             </div>
@@ -240,6 +241,7 @@ export function LabelsDialog({
                           style={{ backgroundColor: color.value }}
                           onClick={() => setEditColor(color.value)}
                           title={color.name}
+                          aria-label={`Select ${color.name} color`}
                         />
                       ))}
                     </div>

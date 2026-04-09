@@ -92,6 +92,8 @@ export function CreateIssueModal({
 
   // Fetch agents when crew changes
   useEffect(() => {
+    setAssigneeType(null)
+    setAssigneeId(null)
     if (!crewId) { setAgents([]); return }
     let cancelled = false
     async function fetchAgents() {
