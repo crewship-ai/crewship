@@ -94,7 +94,7 @@ var validIssueTransitions = map[string][]string{
 	"BACKLOG":     {"TODO", "IN_PROGRESS", "CANCELLED"},
 	"TODO":        {"IN_PROGRESS", "BACKLOG", "CANCELLED"},
 	"IN_PROGRESS": {"REVIEW", "DONE", "FAILED", "CANCELLED", "TODO"},
-	"REVIEW":      {"DONE", "IN_PROGRESS", "FAILED", "CANCELLED"},
+	"REVIEW":      {"DONE", "TODO", "IN_PROGRESS", "FAILED", "CANCELLED"},
 	"DONE":        {"BACKLOG"},
 	"FAILED":      {"BACKLOG", "TODO", "IN_PROGRESS"},
 	"CANCELLED":   {"BACKLOG", "TODO"},
