@@ -32,6 +32,8 @@ CREDENTIALS:
 - API keys for LLM providers are injected automatically via the sidecar proxy
 `
 
+// BuildCLICommand constructs the CLI argument slice for the agent's coding CLI
+// (Claude Code, Codex, Gemini CLI, or OpenCode) based on the request's CLIAdapter.
 func BuildCLICommand(req AgentRunRequest) []string {
 	switch req.CLIAdapter {
 	case "CLAUDE_CODE":
@@ -85,6 +87,8 @@ func BuildCLICommand(req AgentRunRequest) []string {
 	}
 }
 
+// BuildEnvVars constructs the environment variable slice for a non-sidecar agent execution.
+// It sets HOME, Crewship identifiers, and injects all credential values directly as env vars.
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	env := []string{
 		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),

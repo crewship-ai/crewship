@@ -2,13 +2,20 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { toast } from "sonner"
 import {
   LayoutTemplate,
   ArrowRight,
   GitBranch,
   Repeat,
   GitMerge,
-  Wrench,
+  Plus,
+  X,
+  Loader2,
+  Trash2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { CREW_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
@@ -159,6 +166,7 @@ function TemplateMiniGraph({ steps }: { steps: TemplateDefinition["steps"] }) {
 export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [loading, setLoading] = useState(true)
+  const [editorOpen, setEditorOpen] = useState(false)
 
   const fetchTemplates = useCallback(async () => {
     try {
@@ -192,23 +200,23 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
 
   return (
     <div className="space-y-5">
-      {/* Phase 2 banner */}
-      <div className="flex items-center gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
-        <Wrench className="h-4 w-4 shrink-0 text-amber-500" />
-        <p className="text-sm text-amber-200/80">
-          Workflow templates are <span className="font-medium text-amber-200">read-only previews</span>. Custom template editor coming in Phase 2.
-        </p>
-      </div>
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           {templates.length} template{templates.length !== 1 ? "s" : ""} available
         </p>
-        <Badge variant="outline" className="text-xs text-muted-foreground">
-          Coming soon
-        </Badge>
+        <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={() => setEditorOpen(true)}>
+          <Plus className="h-3 w-3" /> New Template
+        </Button>
       </div>
+
+      {editorOpen && (
+        <TemplateEditor
+          workspaceId={workspaceId}
+          onClose={() => setEditorOpen(false)}
+          onCreated={() => { setEditorOpen(false); fetchTemplates() }}
+        />
+      )}
 
       {/* Grid */}
       {templates.length === 0 ? (
@@ -238,6 +246,20 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
                   "hover:scale-[1.01]"
                 )}
               >
+                {/* Delete button (custom templates only) */}
+                {!tmpl.is_builtin && (
+                  <button
+                    className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                    onClick={async () => {
+                      const res = await fetch(`/api/v1/templates/${tmpl.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+                      if (res.ok) { toast.success("Template deleted"); fetchTemplates() }
+                      else toast.error("Failed to delete template")
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+
                 {/* Header */}
                 <div className="flex items-center gap-2.5 mb-3">
                   <div
@@ -290,6 +312,144 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Template Editor ──
+
+interface TemplateEditorProps {
+  workspaceId: string
+  onClose: () => void
+  onCreated: () => void
+}
+
+interface StepDraft {
+  id: string
+  title: string
+  agent_role: string
+  depends_on: string[]
+}
+
+function TemplateEditor({ workspaceId, onClose, onCreated }: TemplateEditorProps) {
+  const [name, setName] = useState("")
+  const [description, setDescription] = useState("")
+  const [steps, setSteps] = useState<StepDraft[]>([
+    { id: "step-1", title: "", agent_role: "", depends_on: [] },
+  ])
+  const [saving, setSaving] = useState(false)
+
+  const addStep = () => {
+    const id = `step-${steps.length + 1}`
+    const prev = steps[steps.length - 1]
+    setSteps([...steps, { id, title: "", agent_role: "", depends_on: prev ? [prev.id] : [] }])
+  }
+
+  const removeStep = (idx: number) => {
+    const removed = steps[idx]
+    setSteps(steps.filter((_, i) => i !== idx).map((s) => ({
+      ...s,
+      depends_on: s.depends_on.filter((d) => d !== removed.id),
+    })))
+  }
+
+  const updateStep = (idx: number, field: keyof StepDraft, value: string | string[]) => {
+    setSteps(steps.map((s, i) => i === idx ? { ...s, [field]: value } : s))
+  }
+
+  const handleSave = async () => {
+    if (!name.trim()) { toast.error("Template name is required"); return }
+    if (steps.some((s) => !s.title.trim())) { toast.error("All steps need a title"); return }
+
+    setSaving(true)
+    try {
+      const body = {
+        name: name.trim(),
+        description: description.trim() || null,
+        template_json: {
+          name: name.trim(),
+          description: description.trim(),
+          steps: steps.map((s) => ({
+            id: s.id,
+            title: s.title,
+            agent_role: s.agent_role || "agent",
+            depends_on: s.depends_on,
+          })),
+        },
+      }
+      const res = await fetch(`/api/v1/templates?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        toast.success("Template created")
+        onCreated()
+      } else {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error || "Failed to create template")
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium">New Workflow Template</p>
+        <button onClick={onClose} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="h-4 w-4" /></button>
+      </div>
+
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Name</Label>
+          <Input className="h-8 text-sm" placeholder="e.g. Code Review Pipeline" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Description</Label>
+          <Input className="h-8 text-sm" placeholder="Optional description" value={description} onChange={(e) => setDescription(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">Steps</Label>
+          <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={addStep}>
+            <Plus className="h-3 w-3" /> Add Step
+          </Button>
+        </div>
+        {steps.map((step, idx) => (
+          <div key={step.id} className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 border border-border/50">
+            <span className="text-micro text-muted-foreground w-5 shrink-0 text-center">{idx + 1}</span>
+            <Input
+              className="h-7 text-xs flex-1"
+              placeholder="Step title"
+              value={step.title}
+              onChange={(e) => updateStep(idx, "title", e.target.value)}
+            />
+            <Input
+              className="h-7 text-xs w-24"
+              placeholder="Role"
+              value={step.agent_role}
+              onChange={(e) => updateStep(idx, "agent_role", e.target.value)}
+            />
+            {steps.length > 1 && (
+              <button className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive" onClick={() => removeStep(idx)}>
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onClose}>Cancel</Button>
+        <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handleSave} disabled={saving}>
+          {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+          Create Template
+        </Button>
+      </div>
     </div>
   )
 }

@@ -67,11 +67,13 @@ type LoggingConfig struct {
 }
 
 type AuthConfig struct {
-	JWTSecret     string        `yaml:"jwt_secret"`
-	WSTokenExpiry time.Duration `yaml:"ws_token_expiry"`
-	NextjsURL     string        `yaml:"nextjs_url"`
-	InternalToken string        `yaml:"internal_token"`
-	AllowSignup   bool          `yaml:"allow_signup"`
+	JWTSecret       string        `yaml:"jwt_secret"`
+	WSTokenExpiry   time.Duration `yaml:"ws_token_expiry"`
+	NextjsURL       string        `yaml:"nextjs_url"`
+	InternalToken   string        `yaml:"internal_token"`
+	AllowSignup     bool          `yaml:"allow_signup"`
+	GoogleClientID  string        `yaml:"google_client_id"`
+	GoogleSecret    string        `yaml:"google_client_secret"`
 }
 
 type LLMProxyConfig struct {
@@ -276,6 +278,12 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("CREWSHIP_ALLOW_SIGNUP"); v != "" {
 		cfg.Auth.AllowSignup = v == "true" || v == "1"
+	}
+	if v := os.Getenv("GOOGLE_CLIENT_ID"); v != "" {
+		cfg.Auth.GoogleClientID = v
+	}
+	if v := os.Getenv("GOOGLE_CLIENT_SECRET"); v != "" {
+		cfg.Auth.GoogleSecret = v
 	}
 	if v := os.Getenv("KEEPER_ENABLED"); v != "" {
 		cfg.Keeper.Enabled = v == "true" || v == "1"

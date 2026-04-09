@@ -1,10 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { motion } from "motion/react"
 import {
   Activity, Play, Square, FileJson, Layers, Download,
-  ChevronUp, ChevronDown, CheckSquare,
+  ChevronUp, ChevronDown, Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -94,21 +94,7 @@ export function FleetBottomDrawer({ crews, agents, isMobile }: FleetBottomDrawer
             <FleetActivityFeed agents={agents} />
           )}
           {drawerTab === "bulk" && (
-            <div className="p-4 space-y-3">
-              <p className="text-[12px] text-muted-foreground mb-3">Select agents from the explorer, then apply bulk operations.</p>
-              <div className="flex items-center gap-2 flex-wrap">
-                <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5" disabled>
-                  <Play className="h-3 w-3" /> Start All Idle
-                </Button>
-                <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5" disabled>
-                  <Square className="h-3 w-3" /> Stop All Running
-                </Button>
-                <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1.5" disabled>
-                  <CheckSquare className="h-3 w-3" /> Assign Crew
-                </Button>
-              </div>
-              <p className="text-[10px] text-muted-foreground/40">Multi-select coming in Phase 2</p>
-            </div>
+            <FleetBulkActions agents={agents} />
           )}
           {drawerTab === "export" && (
             <div className="p-4 space-y-3">
@@ -130,5 +116,64 @@ export function FleetBottomDrawer({ crews, agents, isMobile }: FleetBottomDrawer
         </div>
       )}
     </motion.div>
+  )
+}
+
+// ── Bulk Actions ──
+
+function FleetBulkActions({ agents }: { agents: AgentExport[] }) {
+  const [running, setRunning] = useState<string | null>(null)
+  const [result, setResult] = useState<string | null>(null)
+
+  const idleAgents = agents.filter((a) => a.status === "IDLE" && a.crew_id)
+  const runningAgents = agents.filter((a) => a.status === "RUNNING")
+
+  const bulkAction = useCallback(async (action: "start" | "stop", targets: AgentExport[]) => {
+    setRunning(action)
+    setResult(null)
+    let ok = 0
+    let fail = 0
+    for (const agent of targets) {
+      try {
+        const endpoint = action === "start"
+          ? `/api/v1/agents/${agent.id}/start`
+          : `/api/v1/agents/${agent.id}/stop`
+        const resp = await fetch(endpoint, { method: "POST" })
+        if (resp.ok) ok++; else fail++
+      } catch {
+        fail++
+      }
+    }
+    setResult(`${ok} succeeded, ${fail} failed`)
+    setRunning(null)
+  }, [])
+
+  return (
+    <div className="p-4 space-y-3">
+      <p className="text-[12px] text-muted-foreground mb-3">Apply bulk operations to all agents by status.</p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-[11px] gap-1.5"
+          disabled={idleAgents.length === 0 || running !== null}
+          onClick={() => bulkAction("start", idleAgents)}
+        >
+          {running === "start" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+          Start All Idle ({idleAgents.length})
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-[11px] gap-1.5"
+          disabled={runningAgents.length === 0 || running !== null}
+          onClick={() => bulkAction("stop", runningAgents)}
+        >
+          {running === "stop" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+          Stop All Running ({runningAgents.length})
+        </Button>
+      </div>
+      {result && <p className="text-[10px] text-muted-foreground">{result}</p>}
+    </div>
   )
 }

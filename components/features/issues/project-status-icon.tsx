@@ -2,6 +2,7 @@
 
 import type { ProjectStatus } from "@/lib/types/mission"
 
+/** SVG icon representing a project lifecycle status (backlog, in-progress, completed, etc.). */
 export function ProjectStatusIcon({ status, className }: { status: ProjectStatus; className?: string }) {
   switch (status) {
     case "backlog":
@@ -50,6 +51,7 @@ export function ProjectStatusIcon({ status, className }: { status: ProjectStatus
   }
 }
 
+/** Colored text badge displaying project health (at-risk, off-track, or no updates). */
 export function HealthBadge({ health }: { health: string }) {
   switch (health) {
     case "at_risk":

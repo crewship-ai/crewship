@@ -1,3 +1,4 @@
+/** Formats a date string as relative time (e.g., "5m ago", "2d ago"). */
 export function timeAgo(dateStr: string): string {
   const now = Date.now()
   const then = new Date(dateStr).getTime()
@@ -12,6 +13,7 @@ export function timeAgo(dateStr: string): string {
   return `${days}d ago`
 }
 
+/** Formats a millisecond duration as a human-readable string (e.g., "3m 12s"). */
 export function formatDuration(ms: number): string {
   const s = Math.round(ms / 1000)
   if (s < 60) return `${s}s`
@@ -20,11 +22,13 @@ export function formatDuration(ms: number): string {
   return remainder > 0 ? `${m}m ${remainder}s` : `${m}m`
 }
 
+/** Formats a timeout in seconds as a short label (e.g., "5 min", "2h"). */
 export function formatTimeout(seconds: number): string {
   if (seconds >= 3600) return `${Math.round(seconds / 3600)}h`
   return `${Math.round(seconds / 60)} min`
 }
 
+/** Formats a date string as "Mon D, YYYY" using the user's locale. */
 export function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString(undefined, {
     month: "short",
@@ -33,6 +37,7 @@ export function formatDate(dateStr: string): string {
   })
 }
 
+/** Formats a date string as "Mon D" without the year. */
 export function formatShortDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString(undefined, {
     month: "short",
@@ -40,6 +45,7 @@ export function formatShortDate(dateStr: string): string {
   })
 }
 
+/** Formats a date string as "Mon D, YYYY, H:MM AM/PM". */
 export function formatDateTime(dateStr: string): string {
   const d = new Date(dateStr)
   return d.toLocaleDateString(undefined, {
@@ -51,6 +57,7 @@ export function formatDateTime(dateStr: string): string {
   })
 }
 
+/** Formats a date as relative time with second-level precision (e.g., "45s ago"). */
 export function formatRelativeTime(dateStr: string): string {
   const now = Date.now()
   const date = new Date(dateStr).getTime()
@@ -66,6 +73,7 @@ export function formatRelativeTime(dateStr: string): string {
   return `${days}d ago`
 }
 
+/** Formats a comment timestamp: relative for recent, absolute date after 7 days. */
 export function formatCommentTime(dateStr: string): string {
   const now = Date.now()
   const date = new Date(dateStr).getTime()

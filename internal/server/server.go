@@ -257,6 +257,9 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 			opts = append(opts, goapi.WithMissionCallback(missionEngine))
 		}
 		opts = append(opts, goapi.WithAllowSignup(cfg.Auth.AllowSignup))
+		if cfg.Auth.GoogleClientID != "" {
+			opts = append(opts, goapi.WithGoogleOAuth(cfg.Auth.GoogleClientID, cfg.Auth.GoogleSecret, cfg.Auth.NextjsURL))
+		}
 		opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath))
 
 		// Wire Keeper gatekeeper (Ollama-based credential access control)

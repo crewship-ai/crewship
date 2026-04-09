@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils"
 import { timeAgo } from "@/lib/time"
 import type { IssueActivity } from "@/lib/types/mission"
 
+/** Renders an inline SVG icon representing the given activity action type. */
 export function ActivityIcon({ action }: { action: string }) {
   const size = "h-3.5 w-3.5 shrink-0 mt-0.5"
   switch (action) {
@@ -25,6 +26,7 @@ export function ActivityIcon({ action }: { action: string }) {
   }
 }
 
+/** Maps an activity action key to a human-readable label string. */
 export function actionLabel(action: string): string {
   switch (action) {
     case "task_completed": return "completed a task"
@@ -40,6 +42,7 @@ export function actionLabel(action: string): string {
   }
 }
 
+/** Chronological activity timeline with connector lines and actor labels. */
 export function ActivityFeed({ activities }: { activities: IssueActivity[] }) {
   return (
     <div className="border-t border-white/[0.06] pt-3 px-4 pb-4">

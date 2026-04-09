@@ -328,11 +328,13 @@ export function SettingsPageClient() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="passive" disabled>Passive (Phase 2)</SelectItem>
+                    <SelectItem value="passive">Passive</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-label text-muted-foreground">
-                  Active: Lead receives crew context and can orchestrate tasks.
+                  {leadMode === "passive"
+                    ? "Passive: Lead receives updates but does not autonomously plan tasks. You manage tasks manually."
+                    : "Active: Lead receives crew context and autonomously plans and assigns tasks."}
                 </p>
               </div>
             )}

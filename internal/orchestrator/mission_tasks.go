@@ -1092,14 +1092,21 @@ func (e *MissionEngine) dispatchLeadPlanning(ctx context.Context, ms *missionSta
 	e.db.QueryRowContext(ctx,
 		`SELECT title, description FROM missions WHERE id = ?`, ms.ID).Scan(&title, &desc)
 
-	// Resolve lead agent details
+	// Resolve lead agent details and check lead_mode
 	var agentSlug string
+	var leadMode sql.NullString
 	err := e.db.QueryRowContext(ctx,
-		`SELECT slug FROM agents WHERE id = ? AND deleted_at IS NULL`,
-		ms.LeadAgentID).Scan(&agentSlug)
+		`SELECT slug, lead_mode FROM agents WHERE id = ? AND deleted_at IS NULL`,
+		ms.LeadAgentID).Scan(&agentSlug, &leadMode)
 	if err != nil {
 		e.logger.Error("lead planning: resolve lead agent", "error", err, "mission_id", ms.ID)
 		return fmt.Errorf("resolve lead agent: %w", err)
+	}
+
+	// Passive lead mode: skip autonomous planning — human manages tasks manually.
+	if leadMode.Valid && leadMode.String == "passive" {
+		e.logger.Info("lead is passive, skipping autonomous planning", "mission_id", ms.ID, "agent", agentSlug)
+		return nil
 	}
 
 	// Build the planning prompt

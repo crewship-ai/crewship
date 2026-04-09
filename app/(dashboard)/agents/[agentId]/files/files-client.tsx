@@ -224,6 +224,11 @@ export function FilesPageClient() {
   const [loadingContent, setLoadingContent] = useState(false)
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set())
+  const [activeFileTab, setActiveFileTab] = useState<"home" | "container" | "git">("home")
+  const [containerFiles, setContainerFiles] = useState<FileEntry[]>([])
+  const [containerLoading, setContainerLoading] = useState(false)
+  const [gitCommits, setGitCommits] = useState<{ hash: string; message: string; author: string; date: string }[]>([])
+  const [gitLoading, setGitLoading] = useState(false)
   const [search, setSearch] = useState("")
   const [copied, setCopied] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -431,8 +436,24 @@ export function FilesPageClient() {
         </div>
 
         <div className="flex items-center gap-1 border-b shrink-0 px-3 py-1.5">
-          <button className="px-2.5 py-1 text-micro font-medium rounded-md bg-accent text-foreground">Agent Home</button>
-          <button className="px-2.5 py-1 text-micro text-muted-foreground/40 rounded-md cursor-not-allowed" title="Coming soon">Container</button>
+          <button
+            className={cn("px-2.5 py-1 text-micro font-medium rounded-md", activeFileTab === "home" ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent")}
+            onClick={() => setActiveFileTab("home")}
+          >Agent Home</button>
+          <button
+            className={cn("px-2.5 py-1 text-micro rounded-md", activeFileTab === "container" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent")}
+            onClick={() => {
+              setActiveFileTab("container")
+              if (containerFiles.length === 0 && !containerLoading && workspaceId) {
+                setContainerLoading(true)
+                fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`)
+                  .then((r) => r.json())
+                  .then((data) => setContainerFiles(Array.isArray(data) ? data : []))
+                  .catch(() => {})
+                  .finally(() => setContainerLoading(false))
+              }
+            }}
+          >Container</button>
           <button
             className={cn(
               "px-2.5 py-1 text-micro rounded-md",
@@ -441,45 +462,111 @@ export function FilesPageClient() {
             title={crewId ? "Browse all crew files" : "No crew assigned"}
             onClick={() => crewId && router.push(`/crews/${crewId}/files`)}
           >Crew</button>
-          <button className="px-2.5 py-1 text-micro text-muted-foreground/40 rounded-md cursor-not-allowed flex items-center gap-1" title="Coming soon">
-            <GitBranch className="h-3 w-3" /> Git
-          </button>
+          <button
+            className={cn("px-2.5 py-1 text-micro rounded-md flex items-center gap-1", activeFileTab === "git" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent")}
+            onClick={() => {
+              setActiveFileTab("git")
+              if (gitCommits.length === 0 && !gitLoading && workspaceId) {
+                setGitLoading(true)
+                fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`)
+                  .then((r) => r.json())
+                  .then((data) => setGitCommits(Array.isArray(data) ? data : []))
+                  .catch(() => {})
+                  .finally(() => setGitLoading(false))
+              }
+            }}
+          ><GitBranch className="h-3 w-3" /> Git</button>
         </div>
 
-        <div className="px-3 py-2 shrink-0">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <input
-              className="w-full h-7 rounded-md border bg-card pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
-              placeholder="Filter files..."
-              aria-label="Filter files"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-        </div>
+        {activeFileTab === "home" && (
+          <>
+            <div className="px-3 py-2 shrink-0">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <input
+                  className="w-full h-7 rounded-md border bg-card pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+                  placeholder="Filter files..."
+                  aria-label="Filter files"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+            </div>
 
-        {tree.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
-            <Inbox className="h-10 w-10 text-muted-foreground/40 mb-3" />
-            <p className="text-body font-medium text-muted-foreground">No files yet</p>
-            <p className="text-label text-muted-foreground mt-1">Files created by the agent will appear here.</p>
-          </div>
-        ) : (
+            {tree.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
+                <Inbox className="h-10 w-10 text-muted-foreground/40 mb-3" />
+                <p className="text-body font-medium text-muted-foreground">No files yet</p>
+                <p className="text-label text-muted-foreground mt-1">Files created by the agent will appear here.</p>
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto">
+                {filteredTree.map((node) => (
+                  <TreeNodeRow key={node.path} node={node} depth={0} selectedPath={selectedPath} expandedPaths={expandedPaths} loadingDirs={loadingDirs} onSelect={openFile} onToggle={toggleFolder} />
+                ))}
+                {filteredTree.length === 0 && search && (
+                  <p className="px-4 py-8 text-label text-muted-foreground text-center">No files matching &ldquo;{search}&rdquo;</p>
+                )}
+              </div>
+            )}
+
+            <div className="px-3 py-2 border-t text-micro text-muted-foreground flex items-center justify-between shrink-0">
+              <span>{fileCount} file{fileCount !== 1 ? "s" : ""}, {dirCount} folder{dirCount !== 1 ? "s" : ""} · {fmtSize(totalBytes)}</span>
+              <span>/output/</span>
+            </div>
+          </>
+        )}
+
+        {activeFileTab === "container" && (
           <div className="flex-1 overflow-y-auto">
-            {filteredTree.map((node) => (
-              <TreeNodeRow key={node.path} node={node} depth={0} selectedPath={selectedPath} expandedPaths={expandedPaths} loadingDirs={loadingDirs} onSelect={openFile} onToggle={toggleFolder} />
-            ))}
-            {filteredTree.length === 0 && search && (
-              <p className="px-4 py-8 text-label text-muted-foreground text-center">No files matching &ldquo;{search}&rdquo;</p>
+            {containerLoading ? (
+              <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : containerFiles.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
+                <Inbox className="h-10 w-10 text-muted-foreground/40 mb-3" />
+                <p className="text-body font-medium text-muted-foreground">No container files</p>
+                <p className="text-label text-muted-foreground mt-1">Start the container to browse its filesystem.</p>
+              </div>
+            ) : (
+              <div className="p-2 space-y-0.5">
+                {containerFiles.map((f) => (
+                  <div key={f.path} className="flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-accent">
+                    {f.is_dir ? <FolderClosed className="h-3.5 w-3.5 text-muted-foreground" /> : <FileText className="h-3.5 w-3.5 text-muted-foreground" />}
+                    <span className="truncate flex-1">{f.path}</span>
+                    {!f.is_dir && <span className="text-micro text-muted-foreground shrink-0">{fmtSize(f.size)}</span>}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}
 
-        <div className="px-3 py-2 border-t text-micro text-muted-foreground flex items-center justify-between shrink-0">
-          <span>{fileCount} file{fileCount !== 1 ? "s" : ""}, {dirCount} folder{dirCount !== 1 ? "s" : ""} · {fmtSize(totalBytes)}</span>
-          <span>/output/</span>
-        </div>
+        {activeFileTab === "git" && (
+          <div className="flex-1 overflow-y-auto">
+            {gitLoading ? (
+              <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : gitCommits.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
+                <GitBranch className="h-10 w-10 text-muted-foreground/40 mb-3" />
+                <p className="text-body font-medium text-muted-foreground">No git history</p>
+                <p className="text-label text-muted-foreground mt-1">No git repository found in this agent&apos;s workspace.</p>
+              </div>
+            ) : (
+              <div className="p-2 space-y-1">
+                {gitCommits.map((c) => (
+                  <div key={c.hash} className="px-2 py-1.5 rounded hover:bg-accent">
+                    <p className="text-xs font-medium truncate">{c.message}</p>
+                    <div className="flex items-center gap-2 text-micro text-muted-foreground mt-0.5">
+                      <code className="font-mono">{c.hash.slice(0, 7)}</code>
+                      <span>{c.author}</span>
+                      <span>{new Date(c.date).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Right: File preview/editor or empty state ── */}

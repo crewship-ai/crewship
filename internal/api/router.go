@@ -54,6 +54,9 @@ type Router struct {
 	captainLLM           llm.Provider
 	captainMissionEngine MissionStarter
 	allowSignup          bool
+	googleClientID       string
+	googleSecret         string
+	authBaseURL          string
 	license          *license.License
 	agentHandler     *AgentHandler
 	storagePath      string // base path for crew file storage
@@ -172,6 +175,14 @@ func WithKeeperConfig(cfg *config.KeeperConfig) RouterOption {
 func WithAllowSignup(allow bool) RouterOption {
 	return func(r *Router) {
 		r.allowSignup = allow
+	}
+}
+
+func WithGoogleOAuth(clientID, secret, baseURL string) RouterOption {
+	return func(r *Router) {
+		r.googleClientID = clientID
+		r.googleSecret = secret
+		r.authBaseURL = baseURL
 	}
 }
 
@@ -553,6 +564,16 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/v1/auth/signup", authH.Signup)
 	r.mux.Handle("GET /api/v1/ws-token", authed(http.HandlerFunc(authH.WsToken)))
 
+	// Google OAuth2
+	googleAuth := NewGoogleAuthHandler(r.db, r.logger, r.authMw.validator, r.googleClientID, r.googleSecret, r.authBaseURL)
+	if googleAuth.Enabled() {
+		r.mux.HandleFunc("GET /api/v1/auth/google/redirect", googleAuth.Redirect)
+		r.mux.HandleFunc("GET /api/v1/auth/google/callback", googleAuth.Callback)
+	}
+	r.mux.HandleFunc("GET /api/v1/auth/google/status", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]bool{"enabled": googleAuth.Enabled()})
+	})
+
 	// CLI token management (auth required)
 	cliTokenH := NewCLITokenHandler(r.db, r.logger)
 	r.mux.Handle("POST /api/v1/auth/cli-token", authed(http.HandlerFunc(cliTokenH.Create)))
@@ -596,6 +617,8 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("GET /api/v1/crews/{crewId}/files", authed(wsCtx(http.HandlerFunc(proxy.CrewFiles))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/files/download", authed(wsCtx(http.HandlerFunc(proxy.CrewFileDownload))))
 	r.mux.Handle("PUT /api/v1/crews/{crewId}/files/save", authed(wsCtx(http.HandlerFunc(proxy.CrewFileSave))))
+	r.mux.Handle("GET /api/v1/agents/{agentId}/container-files", authed(wsCtx(http.HandlerFunc(proxy.AgentContainerFiles))))
+	r.mux.Handle("GET /api/v1/agents/{agentId}/git-log", authed(wsCtx(http.HandlerFunc(proxy.AgentGitLog))))
 	r.mux.Handle("GET /api/v1/agents/{agentId}/logs", authed(wsCtx(http.HandlerFunc(proxy.AgentLogs))))
 	r.mux.Handle("POST /api/v1/agents/{agentId}/stop", authed(wsCtx(http.HandlerFunc(proxy.AgentStop))))
 	r.mux.Handle("GET /api/v1/chats/{chatId}/messages", authed(http.HandlerFunc(proxy.ChatMessages)))
