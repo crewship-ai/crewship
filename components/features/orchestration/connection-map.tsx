@@ -2,22 +2,12 @@
 
 import { useMemo } from "react"
 import { cn } from "@/lib/utils"
+import { CREW_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 import type { CrewSummary, CrewConnection } from "@/lib/types/orchestration"
 
-const crewColorMap: Record<string, string> = {
-  blue: "#3b82f6",
-  emerald: "#10b981",
-  violet: "#8b5cf6",
-  amber: "#f59e0b",
-  rose: "#f43f5e",
-  cyan: "#06b6d4",
-  lime: "#84cc16",
-  fuchsia: "#d946ef",
-}
-
 function resolveColor(color: string | null): string {
-  if (!color) return "#64748b"
-  return crewColorMap[color] || color
+  if (!color) return CREW_COLOR_DEFAULT
+  return CREW_COLORS[color] || color
 }
 
 export interface ConnectionMapProps {
@@ -130,10 +120,10 @@ export function ConnectionMap({ crews, connections, onConnectionClick }: Connect
     <svg viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`} className="w-full" style={{ height: SVG_HEIGHT }}>
       <defs>
         <marker id="arrow-bi" viewBox="0 0 6 6" refX={3} refY={3} markerWidth={6} markerHeight={6} orient="auto-start-reverse">
-          <path d="M0,0 L6,3 L0,6 Z" fill="#06b6d4" />
+          <path d="M0,0 L6,3 L0,6 Z" fill={CREW_COLORS.cyan} />
         </marker>
         <marker id="arrow-uni" viewBox="0 0 6 6" refX={6} refY={3} markerWidth={6} markerHeight={6} orient="auto">
-          <path d="M0,0 L6,3 L0,6 Z" fill="#f59e0b" />
+          <path d="M0,0 L6,3 L0,6 Z" fill={CREW_COLORS.amber} />
         </marker>
       </defs>
 
@@ -143,7 +133,7 @@ export function ConnectionMap({ crews, connections, onConnectionClick }: Connect
         if (!from || !to) return null
 
         const isBi = conn.direction === "bidirectional"
-        const stroke = isBi ? "#06b6d4" : "#f59e0b"
+        const stroke = isBi ? CREW_COLORS.cyan : CREW_COLORS.amber
         const mx = (from.cx + to.cx) / 2
         const my = (from.cy + to.cy) / 2
         const cx = SVG_WIDTH / 2

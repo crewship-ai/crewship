@@ -11,23 +11,13 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
+import { resolveCrewColor, CREW_COLORS } from "@/lib/colors"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { CrewSummary, AgentSummary } from "@/lib/types/orchestration"
 
-const crewColorMap: Record<string, string> = {
-  blue: "#3b82f6",
-  emerald: "#10b981",
-  violet: "#8b5cf6",
-  amber: "#f59e0b",
-  rose: "#f43f5e",
-  cyan: "#06b6d4",
-  lime: "#84cc16",
-  fuchsia: "#d946ef",
-}
-
 function resolveColor(color: string | null): string {
-  if (!color) return "#64748b"
-  return crewColorMap[color] || color
+  if (!color) return resolveCrewColor(null)
+  return CREW_COLORS[color] || color
 }
 
 export interface HierarchyTreeProps {

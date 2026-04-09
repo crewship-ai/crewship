@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge"
 import { PageHeader } from "@/components/layout/page-header"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { slugify } from "@/lib/utils/slugify"
+import { CREW_COLORS } from "@/lib/colors"
 import { toast } from "sonner"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -113,7 +114,7 @@ export default function NewCrewPage() {
   const [slug, setSlug] = useState("")
   const [slugManual, setSlugManual] = useState(false)
   const [description, setDescription] = useState("")
-  const [color, setColor] = useState("#3B82F6")
+  const [color, setColor] = useState(CREW_COLORS.blue)
   const [icon, setIcon] = useState("")
 
   useEffect(() => {
@@ -167,7 +168,7 @@ export default function NewCrewPage() {
     setName(t.name)
     setSlugManual(false)
     setDescription(t.description || "")
-    setColor(t.color || "#3B82F6")
+    setColor(t.color || CREW_COLORS.blue)
     setIcon(t.icon || "")
     setMode("template")
   }
@@ -784,7 +785,7 @@ export default function NewCrewPage() {
                 <Label htmlFor="color">Color</Label>
                 <div className="flex items-center gap-3">
                   <Input id="color" type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-9 w-14 cursor-pointer p-1" />
-                  <Input value={color} onChange={(e) => setColor(e.target.value)} placeholder="#3B82F6" className="font-mono text-sm" />
+                  <Input value={color} onChange={(e) => setColor(e.target.value)} placeholder={CREW_COLORS.blue} className="font-mono text-sm" />
                 </div>
               </div>
               <div className="space-y-2">

@@ -4,6 +4,7 @@ import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { ShieldCheck, ShieldX, ShieldAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { STATUS_COLORS, STATUS_BG } from "@/lib/colors"
 
 export interface ApprovalGateData {
   taskTitle: string
@@ -16,27 +17,27 @@ export interface ApprovalGateData {
 
 const statusConfig = {
   PENDING: {
-    accent: "#f59e0b",
+    accent: STATUS_COLORS.BLOCKED,
     border: "border-amber-500/40",
-    bg: "bg-[#1f1a0a]",
+    bg: STATUS_BG.BLOCKED,
     glow: "shadow-[0_0_20px_rgba(245,158,11,0.15)]",
     icon: ShieldAlert,
     label: "Awaiting Review",
     labelColor: "text-amber-400",
   },
   APPROVED: {
-    accent: "#22c55e",
+    accent: STATUS_COLORS.COMPLETED,
     border: "border-emerald-500/40",
-    bg: "bg-[#0a1f0f]",
+    bg: STATUS_BG.COMPLETED,
     glow: "shadow-[0_0_20px_rgba(34,197,94,0.15)]",
     icon: ShieldCheck,
     label: "Approved",
     labelColor: "text-emerald-400",
   },
   REJECTED: {
-    accent: "#ef4444",
+    accent: STATUS_COLORS.FAILED,
     border: "border-rose-500/40",
-    bg: "bg-[#1f0a0a]",
+    bg: STATUS_BG.FAILED,
     glow: "shadow-[0_0_20px_rgba(239,68,68,0.15)]",
     icon: ShieldX,
     label: "Rejected",

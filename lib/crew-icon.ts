@@ -60,6 +60,7 @@ import {
   Wine, Workflow, Worm,
   type LucideIcon,
 } from "lucide-react"
+import { CREW_COLOR_DEFAULT } from "@/lib/colors"
 
 export interface CrewIconDef {
   name: string
@@ -456,7 +457,7 @@ export function getGradientPalette(colorId: string | null | undefined): Gradient
 }
 
 export function getCrewDotColor(color: string | null | undefined): string {
-  if (!color) return "#6b7280"
+  if (!color) return CREW_COLOR_DEFAULT
   const palette = paletteById[color]
   if (palette) return palette.dot
   if (color.startsWith("#")) return color

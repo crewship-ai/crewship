@@ -4,6 +4,7 @@ import { memo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { AlertTriangle } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { STATUS_COLORS, STATUS_BG } from "@/lib/colors"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
 interface AgentNodeData {
@@ -31,64 +32,64 @@ const statusConfig: Record<string, {
   label: string
 }> = {
   COMPLETED: {
-    accent: "#22c55e",
-    bg: "bg-[#0a1f0f]",
+    accent: STATUS_COLORS.COMPLETED,
+    bg: STATUS_BG.COMPLETED,
     headerBg: "bg-gradient-to-r from-green-600/30 to-green-500/10",
     dot: "bg-green-500",
     glow: "",
     label: "Completed",
   },
   IN_PROGRESS: {
-    accent: "#3b82f6",
-    bg: "bg-[#0a1220]",
+    accent: STATUS_COLORS.IN_PROGRESS,
+    bg: STATUS_BG.IN_PROGRESS,
     headerBg: "bg-gradient-to-r from-blue-600/30 to-blue-500/10",
     dot: "bg-blue-500 animate-pulse",
     glow: "shadow-[0_0_25px_rgba(59,130,246,0.3)]",
     label: "Running",
   },
   FAILED: {
-    accent: "#ef4444",
-    bg: "bg-[#1f0a0a]",
+    accent: STATUS_COLORS.FAILED,
+    bg: STATUS_BG.FAILED,
     headerBg: "bg-gradient-to-r from-red-600/30 to-red-500/10",
     dot: "bg-red-500",
     glow: "shadow-[0_0_15px_rgba(239,68,68,0.2)]",
     label: "Failed",
   },
   BLOCKED: {
-    accent: "#f59e0b",
-    bg: "bg-[#1f1a0a]",
+    accent: STATUS_COLORS.BLOCKED,
+    bg: STATUS_BG.BLOCKED,
     headerBg: "bg-gradient-to-r from-amber-600/30 to-amber-500/10",
     dot: "bg-amber-500",
     glow: "",
     label: "Blocked",
   },
   PENDING: {
-    accent: "#64748b",
-    bg: "bg-[#0f1115]",
+    accent: STATUS_COLORS.PENDING,
+    bg: STATUS_BG.PENDING,
     headerBg: "bg-gradient-to-r from-slate-600/20 to-slate-500/5",
     dot: "bg-slate-400",
     glow: "",
     label: "Pending",
   },
   REVIEW: {
-    accent: "#a855f7",
-    bg: "bg-[#150a1f]",
+    accent: STATUS_COLORS.REVIEW,
+    bg: STATUS_BG.REVIEW,
     headerBg: "bg-gradient-to-r from-purple-600/30 to-purple-500/10",
     dot: "bg-purple-500",
     glow: "shadow-[0_0_15px_rgba(168,85,247,0.2)]",
     label: "Review",
   },
   SKIPPED: {
-    accent: "#6b7280",
-    bg: "bg-[#0f1115]",
+    accent: STATUS_COLORS.SKIPPED,
+    bg: STATUS_BG.SKIPPED,
     headerBg: "bg-gradient-to-r from-gray-600/20 to-gray-500/5",
     dot: "bg-gray-400",
     glow: "",
     label: "Skipped",
   },
   AWAITING_APPROVAL: {
-    accent: "#8b5cf6",
-    bg: "bg-[#150a1f]",
+    accent: STATUS_COLORS.AWAITING_APPROVAL,
+    bg: STATUS_BG.AWAITING_APPROVAL,
     headerBg: "bg-gradient-to-r from-violet-600/30 to-violet-500/10",
     dot: "bg-violet-500 animate-pulse",
     glow: "shadow-[0_0_15px_rgba(139,92,246,0.2)]",
@@ -105,7 +106,7 @@ function getInitials(name: string): string {
 }
 
 function hashColor(slug: string | null): string {
-  if (!slug) return "#64748b"
+  if (!slug) return STATUS_COLORS.PENDING
   let h = 0
   for (let i = 0; i < slug.length; i++) h = ((h << 5) - h + slug.charCodeAt(i)) | 0
   const hue = Math.abs(h) % 360

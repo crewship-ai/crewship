@@ -35,6 +35,7 @@ import {
 } from "@/lib/crew-icon"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
 import { cn } from "@/lib/utils"
+import { ISSUE_ICON_COLORS } from "@/lib/colors"
 import { toast } from "sonner"
 import type { IssueLabel, IssuePriority, ProjectStatus } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
@@ -42,12 +43,12 @@ import type { CrewSummary } from "@/lib/types/orchestration"
 const PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
 
 const PROJECT_STATUSES: { value: ProjectStatus; label: string; color: string }[] = [
-  { value: "backlog", label: "Backlog", color: "#8C8C8C" },
-  { value: "planned", label: "Planned", color: "#8C8C8C" },
-  { value: "in_progress", label: "In Progress", color: "#F2C94C" },
-  { value: "paused", label: "Paused", color: "#95959F" },
-  { value: "completed", label: "Completed", color: "#5E6AD2" },
-  { value: "cancelled", label: "Cancelled", color: "#95959F" },
+  { value: "backlog", label: "Backlog", color: ISSUE_ICON_COLORS.BACKLOG },
+  { value: "planned", label: "Planned", color: ISSUE_ICON_COLORS.BACKLOG },
+  { value: "in_progress", label: "In Progress", color: ISSUE_ICON_COLORS.IN_PROGRESS },
+  { value: "paused", label: "Paused", color: ISSUE_ICON_COLORS.CANCELLED },
+  { value: "completed", label: "Completed", color: ISSUE_ICON_COLORS.COMPLETED },
+  { value: "cancelled", label: "Cancelled", color: ISSUE_ICON_COLORS.CANCELLED },
 ]
 
 interface CreateProjectModalProps {

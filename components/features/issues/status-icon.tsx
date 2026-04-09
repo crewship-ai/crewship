@@ -1,6 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
+import { ISSUE_ICON_COLORS } from "@/lib/colors"
 import type { MissionStatus } from "@/lib/types/mission"
 
 export const statusLabel: Record<string, string> = {
@@ -16,18 +17,7 @@ export const statusLabel: Record<string, string> = {
   DUPLICATE: "Duplicate",
 }
 
-export const statusColor: Record<string, string> = {
-  BACKLOG: "#8C8C8C",
-  TODO: "#8C8C8C",
-  PLANNING: "#8C8C8C",
-  IN_PROGRESS: "#F2C94C",
-  REVIEW: "#F2994A",
-  COMPLETED: "#5E6AD2",
-  DONE: "#5E6AD2",
-  FAILED: "#EF4444",
-  CANCELLED: "#95959F",
-  DUPLICATE: "#95959F",
-}
+export const statusColor = ISSUE_ICON_COLORS
 
 interface StatusIconProps {
   status: MissionStatus | string
@@ -37,7 +27,7 @@ interface StatusIconProps {
 export function StatusIcon({ status, className }: StatusIconProps) {
   const size = "h-4 w-4"
   const cls = cn(size, "shrink-0", className)
-  const color = statusColor[status] || "#8C8C8C"
+  const color = statusColor[status] || ISSUE_ICON_COLORS.BACKLOG
 
   switch (status) {
     case "BACKLOG":
@@ -164,7 +154,7 @@ export function StatusIcon({ status, className }: StatusIconProps) {
             cx="8"
             cy="8"
             r="5.5"
-            stroke="#8C8C8C"
+            stroke={ISSUE_ICON_COLORS.BACKLOG}
             strokeWidth="1.5"
             fill="none"
           />
