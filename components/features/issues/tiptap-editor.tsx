@@ -14,7 +14,8 @@ import TableRow from "@tiptap/extension-table-row"
 import TableCell from "@tiptap/extension-table-cell"
 import TableHeader from "@tiptap/extension-table-header"
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight"
-import { common, createLowlight } from "lowlight"
+import { all, createLowlight } from "lowlight"
+import "highlight.js/styles/github-dark.css"
 import { cn } from "@/lib/utils"
 import {
   Bold, Italic, Strikethrough, Code, Heading1, Heading2, Heading3,
@@ -22,7 +23,7 @@ import {
   Undo, Redo,
 } from "lucide-react"
 
-const lowlight = createLowlight(common)
+const lowlight = createLowlight(all)
 
 interface TiptapEditorProps {
   content: string
@@ -144,8 +145,8 @@ export function TiptapEditor({ content, onChange, onBlur, placeholder, editable 
           "[&_p]:text-sm [&_p]:leading-relaxed [&_p]:mb-1.5 [&_p]:text-foreground/80",
           "[&_strong]:text-foreground [&_strong]:font-semibold",
           "[&_code]:bg-emerald-500/10 [&_code]:text-emerald-300 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono",
-          "[&_pre]:bg-[#1a1b26] [&_pre]:border [&_pre]:border-white/[0.08] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-2 [&_pre]:overflow-x-auto",
-          "[&_pre_code]:bg-transparent [&_pre_code]:text-foreground/80 [&_pre_code]:p-0 [&_pre_code]:text-xs",
+          "[&_pre]:bg-[#0d1117] [&_pre]:border [&_pre]:border-white/[0.08] [&_pre]:rounded-lg [&_pre]:p-4 [&_pre]:my-3 [&_pre]:overflow-x-auto",
+          "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-xs [&_pre_code]:font-mono",
           "[&_blockquote]:border-l-2 [&_blockquote]:border-amber-500/40 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-foreground/60",
           "[&_ul]:pl-4 [&_ul]:mb-2 [&_ol]:pl-4 [&_ol]:mb-2",
           "[&_li]:mb-0.5 [&_li]:text-sm [&_li]:text-foreground/80",

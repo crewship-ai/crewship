@@ -36,8 +36,8 @@ export const MarkdownContent = memo(function MarkdownContent({ children, classNa
         "[&_li]:mb-0.5",
         // Code — emerald inline, dark bg for blocks
         "[&_code]:bg-emerald-500/10 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono [&_code]:text-emerald-300",
-        "[&_pre]:bg-[#1a1b26] [&_pre]:border [&_pre]:border-white/[0.08] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:mb-3 [&_pre]:overflow-x-auto",
-        "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-xs [&_pre_code]:text-foreground/80",
+        "[&_pre]:bg-[#0d1117] [&_pre]:border [&_pre]:border-white/[0.08] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:mb-3 [&_pre]:overflow-x-auto",
+        "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-xs [&_pre_code]:font-mono",
         // Tables — more contrast
         "[&_table]:w-full [&_table]:text-xs [&_table]:mb-3",
         "[&_th]:text-left [&_th]:text-foreground/90 [&_th]:font-semibold [&_th]:py-1.5 [&_th]:px-2 [&_th]:border-b [&_th]:border-white/[0.1] [&_th]:bg-white/[0.02]",
