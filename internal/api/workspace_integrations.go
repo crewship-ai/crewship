@@ -18,10 +18,12 @@ type IntegrationHandler struct {
 	hub    *ws.Hub
 }
 
+// NewIntegrationHandler creates an IntegrationHandler with the given database and logger.
 func NewIntegrationHandler(db *sql.DB, logger *slog.Logger) *IntegrationHandler {
 	return &IntegrationHandler{db: db, logger: logger}
 }
 
+// SetHub attaches a WebSocket hub for broadcasting integration change events.
 func (h *IntegrationHandler) SetHub(hub *ws.Hub) { h.hub = hub }
 
 func (h *IntegrationHandler) broadcastEvent(eventType, workspaceID string, payload map[string]string) {
@@ -87,6 +89,8 @@ type updateIntegrationRequest struct {
 // Workspace MCP Servers
 // ==========================================
 
+// ListWorkspaceIntegrations returns all workspace-level MCP server integrations.
+// GET /api/v1/integrations/workspace
 func (h *IntegrationHandler) ListWorkspaceIntegrations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
@@ -131,6 +135,8 @@ func (h *IntegrationHandler) ListWorkspaceIntegrations(w http.ResponseWriter, r 
 	writeJSON(w, http.StatusOK, results)
 }
 
+// CreateWorkspaceIntegration adds a new workspace-level MCP server integration.
+// POST /api/v1/integrations/workspace
 func (h *IntegrationHandler) CreateWorkspaceIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -194,6 +200,8 @@ func (h *IntegrationHandler) CreateWorkspaceIntegration(w http.ResponseWriter, r
 	})
 }
 
+// GetWorkspaceIntegration returns a single workspace-level MCP server integration by ID.
+// GET /api/v1/integrations/workspace/{integrationId}
 func (h *IntegrationHandler) GetWorkspaceIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	id := r.PathValue("integrationId")
@@ -220,6 +228,8 @@ func (h *IntegrationHandler) GetWorkspaceIntegration(w http.ResponseWriter, r *h
 	writeJSON(w, http.StatusOK, s)
 }
 
+// UpdateWorkspaceIntegration modifies an existing workspace-level MCP server integration.
+// PATCH /api/v1/integrations/workspace/{integrationId}
 func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -324,6 +334,8 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 
 var errIntegrationNotFound = errors.New("integration not found")
 
+// DeleteWorkspaceIntegration removes a workspace-level MCP server integration and its crew/agent bindings.
+// DELETE /api/v1/integrations/workspace/{integrationId}
 func (h *IntegrationHandler) DeleteWorkspaceIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())

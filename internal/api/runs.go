@@ -10,11 +10,13 @@ import (
 	"strconv"
 )
 
+// RunHandler provides endpoints for listing and querying agent execution runs.
 type RunHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewRunHandler creates a RunHandler with the given database and logger.
 func NewRunHandler(db *sql.DB, logger *slog.Logger) *RunHandler {
 	return &RunHandler{db: db, logger: logger}
 }
@@ -57,6 +59,8 @@ type pagination struct {
 	TotalPages int `json:"total_pages"`
 }
 
+// List returns a paginated list of agent runs in the workspace with stats and optional filters.
+// GET /api/v1/runs
 func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
