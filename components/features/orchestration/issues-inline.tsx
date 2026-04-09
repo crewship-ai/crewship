@@ -1081,8 +1081,6 @@ export function IssueDetailInline({
                                     const updated = [...(issue.labels || []).map(l => l.id), label.id]
                                     patchIssue({ labels: updated })
                                   }
-                                  setLabelsPopoverOpen(false)
-                                  setLabelSearch("")
                                 }}
                               >
                                 <span
@@ -1820,10 +1818,10 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
           )}
 
           {/* ── Properties ─────────────────────────────────────────── */}
+          <div className="mt-2 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
           <SectionHeader title="Properties" open={propertiesOpen} onToggle={() => setPropertiesOpen((v) => !v)} />
-          <AnimatePresence initial={false}>
           {propertiesOpen && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}>
+            <div className="px-1 pb-1">
               {/* Status */}
               <Popover>
                 <PopoverTrigger asChild>
