@@ -17,6 +17,7 @@ var (
 	ErrInvalidToken = errors.New("invalid token")
 )
 
+// Claims represents the decoded payload of a NextAuth v5 JWE session token.
 type Claims struct {
 	ID    string `json:"id"`
 	Name  string `json:"name,omitempty"`
@@ -26,6 +27,8 @@ type Claims struct {
 	Jti   string `json:"jti"`
 }
 
+// JWTValidator decrypts and validates NextAuth v5 JWE session tokens using
+// an HKDF-derived encryption key.
 type JWTValidator struct {
 	encryptionKey []byte
 }
@@ -65,7 +68,7 @@ func (v *JWTValidator) Validate(tokenStr string) (*Claims, error) {
 		return nil, fmt.Errorf("%w: unmarshal: %v", ErrInvalidToken, err)
 	}
 
-	if claims.Exp > 0 && time.Now().Unix() > claims.Exp+15 {
+	if claims.Exp > 0 && time.Now().Unix() > claims.Exp+5 {
 		return nil, ErrTokenExpired
 	}
 

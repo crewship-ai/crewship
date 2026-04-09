@@ -44,7 +44,18 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get("X-Internal-Token")
-		if h.internalToken == "" || token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(h.internalToken)) != 1 {
+		// Always run constant-time comparison to avoid timing sidechannels.
+		// Pad empty strings to a fixed sentinel so the comparison still runs
+		// in constant time even when token or internalToken is empty.
+		expected := h.internalToken
+		if expected == "" {
+			expected = "\x00empty-sentinel\x00"
+		}
+		actual := token
+		if actual == "" {
+			actual = "\x00different-sentinel\x00"
+		}
+		if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 			return
 		}
