@@ -1585,10 +1585,18 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 4. Auto-create mission_task if none exists
+	// 4. Reset existing tasks to PENDING or create new one
 	var taskCount int
 	_ = h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mission_tasks WHERE mission_id = ?`, missionID).Scan(&taskCount)
-	if taskCount == 0 {
+	if taskCount > 0 {
+		// Reset existing tasks for re-run
+		resetNow := time.Now().UTC().Format(time.RFC3339)
+		_, _ = h.db.ExecContext(r.Context(), `
+			UPDATE mission_tasks SET status = 'PENDING', started_at = NULL, completed_at = NULL,
+			duration_ms = NULL, result_summary = NULL, error_message = NULL, assignment_id = NULL,
+			iteration = COALESCE(iteration, 0) + 1, updated_at = ?
+			WHERE mission_id = ?`, resetNow, missionID)
+	} else {
 		taskID := generateCUID()
 		now := time.Now().UTC().Format(time.RFC3339)
 		desc := ""
