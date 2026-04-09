@@ -331,10 +331,11 @@ var envVarNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // wrapping a payload inside single quotes passed to "bash -c '...|...'".
 var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun)\b\s+(-[ceE]|--eval)\b`)
 
-// awkPattern matches awk/gawk/mawk/nawk invocations. awk scripts can call
-// system() or use getline with pipe to execute arbitrary shell commands,
-// bypassing the metachar filter since the payload is inside single quotes.
-var awkPattern = regexp.MustCompile(`(?i)\b[gmnp]?awk\b`)
+// scriptToolPattern matches tools with built-in shell execution capabilities.
+// awk: system(), getline with pipe — executes arbitrary commands
+// sed: the /e flag executes the pattern space as a shell command (GNU sed)
+// These bypass the metachar filter since payloads are inside single quotes.
+var scriptToolPattern = regexp.MustCompile(`(?i)\b([gmnp]?awk|sed)\b`)
 
 func containsDangerousShellChars(cmd string) bool {
 	// Reject any non-printable control characters (except space and tab which
@@ -362,7 +363,7 @@ func containsDangerousShellChars(cmd string) bool {
 	// Block awk/gawk/nawk/mawk: awk scripts can call system() or use
 	// getline with pipe, executing arbitrary shell commands within
 	// single-quoted script arguments that bypass our metachar check.
-	if awkPattern.MatchString(cmd) {
+	if scriptToolPattern.MatchString(cmd) {
 		return true
 	}
 
