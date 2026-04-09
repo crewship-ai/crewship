@@ -545,9 +545,11 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load comment count
-	_ = h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM mission_comments WHERE mission_id = ?`,
-		issue.ID).Scan(&issue.CommentCount)
+		issue.ID).Scan(&issue.CommentCount); err != nil {
+		h.logger.Error("load comment count", "issue_id", issue.ID, "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, issue)
 }
@@ -1571,7 +1573,9 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	// 3b. Create synthetic chat so assignments can reference it (FK on chat_id)
 	var chatExists int
-	_ = h.db.QueryRowContext(r.Context(), `SELECT 1 FROM chats WHERE id = ?`, missionID).Scan(&chatExists)
+	if err := h.db.QueryRowContext(r.Context(), `SELECT 1 FROM chats WHERE id = ?`, missionID).Scan(&chatExists); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		h.logger.Error("start issue: check chat", "mission_id", missionID, "error", err)
+	}
 	if chatExists == 0 {
 		chatNow := time.Now().UTC().Format(time.RFC3339)
 		_, err = h.db.ExecContext(r.Context(), `
@@ -1587,15 +1591,19 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	// 4. Reset existing tasks to PENDING or create new one
 	var taskCount int
-	_ = h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mission_tasks WHERE mission_id = ?`, missionID).Scan(&taskCount)
+	if err := h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mission_tasks WHERE mission_id = ?`, missionID).Scan(&taskCount); err != nil {
+		h.logger.Error("start issue: count tasks", "mission_id", missionID, "error", err)
+	}
 	if taskCount > 0 {
 		// Reset existing tasks for re-run
 		resetNow := time.Now().UTC().Format(time.RFC3339)
-		_, _ = h.db.ExecContext(r.Context(), `
+		if _, err := h.db.ExecContext(r.Context(), `
 			UPDATE mission_tasks SET status = 'PENDING', started_at = NULL, completed_at = NULL,
 			duration_ms = NULL, result_summary = NULL, error_message = NULL, assignment_id = NULL,
 			iteration = COALESCE(iteration, 0) + 1, updated_at = ?
-			WHERE mission_id = ?`, resetNow, missionID)
+			WHERE mission_id = ?`, resetNow, missionID); err != nil {
+			h.logger.Error("start issue: reset tasks", "mission_id", missionID, "error", err)
+		}
 	} else {
 		taskID := generateCUID()
 		now := time.Now().UTC().Format(time.RFC3339)
@@ -1687,9 +1695,11 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Cancel running/pending tasks
-	_, _ = h.db.ExecContext(r.Context(), `
+	if _, err := h.db.ExecContext(r.Context(), `
 		UPDATE mission_tasks SET status = 'CANCELLED', updated_at = ? WHERE mission_id = ? AND status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED')`,
-		now, missionID)
+		now, missionID); err != nil {
+		h.logger.Error("stop issue: cancel tasks", "mission_id", missionID, "error", err)
+	}
 
 	// Update issue status → CANCELLED
 	_, err = h.db.ExecContext(r.Context(), `
@@ -1811,20 +1821,26 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 
 		// Update labels if provided
 		if req.Updates.Labels != nil {
-			_, _ = h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, issueID)
+			if _, err := h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, issueID); err != nil {
+				h.logger.Error("bulk update: delete labels", "issue_id", issueID, "error", err)
+			}
 			for _, labelID := range *req.Updates.Labels {
-				_, _ = h.db.ExecContext(r.Context(),
+				if _, err := h.db.ExecContext(r.Context(),
 					`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
-					issueID, labelID)
+					issueID, labelID); err != nil {
+					h.logger.Error("bulk update: insert label", "issue_id", issueID, "error", err)
+				}
 			}
 		}
 
 		// Activity log
 		if req.Updates.Status != nil {
 			actID := generateCUID()
-			_, _ = h.db.ExecContext(r.Context(),
+			if _, err := h.db.ExecContext(r.Context(),
 				`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'status_changed', ?, ?)`,
-				actID, issueID, user.ID, fmt.Sprintf("%s -> %s (bulk)", currentStatus, *req.Updates.Status), now)
+				actID, issueID, user.ID, fmt.Sprintf("%s -> %s (bulk)", currentStatus, *req.Updates.Status), now); err != nil {
+				h.logger.Error("bulk update: insert activity", "issue_id", issueID, "error", err)
+			}
 		}
 
 		updated++
