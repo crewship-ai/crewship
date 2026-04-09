@@ -518,6 +518,19 @@ export function IssueDetailInline({
           {issue.identifier || "--"}
         </span>
         <div className="flex-1" />
+        {issue.identifier && (
+          <a
+            href={`/orchestration/issues/${issue.identifier}`}
+            className="text-muted-foreground/40 hover:text-foreground p-1 rounded hover:bg-white/[0.06] transition-colors"
+            title="Open full page"
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-3" />
+              <path d="M10 2h4v4" />
+              <path d="M14 2L7 9" />
+            </svg>
+          </a>
+        )}
         <button
           onClick={onClose}
           className="text-muted-foreground/50 hover:text-foreground p-1 rounded hover:bg-white/[0.06] transition-colors"

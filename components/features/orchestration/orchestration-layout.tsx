@@ -733,9 +733,9 @@ export function OrchestrationLayout({
               {/* Board or List view */}
               <div className="p-4 h-[calc(100%-45px)]">
                 {issueViewMode === "board" ? (
-                  <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueNavigate} />
+                  <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
                 ) : (
-                  <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueNavigate} />
+                  <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
                 )}
               </div>
             </div>
