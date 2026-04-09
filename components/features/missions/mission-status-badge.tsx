@@ -16,102 +16,29 @@ import { Badge } from "@/components/ui/badge"
 import { CircleCheckIcon } from "@/components/ui/circle-check"
 import { LoaderPinwheelIcon } from "@/components/ui/loader-pinwheel"
 import type { MissionStatus, MissionTaskStatus } from "@/lib/types/mission"
+import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
 
-const MISSION_STATUS_CONFIG: Record<
-  MissionStatus,
-  { label: string; className: string; icon: React.ComponentType<{ className?: string }> }
-> = {
-  PLANNING: {
-    label: "Planning",
-    className: "bg-slate-100 text-slate-800 dark:bg-slate-900/40 dark:text-slate-300",
-    icon: FileEdit,
-  },
-  IN_PROGRESS: {
-    label: "In Progress",
-    className: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-    icon: Loader2,
-  },
-  REVIEW: {
-    label: "Review",
-    className: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-    icon: Eye,
-  },
-  COMPLETED: {
-    label: "Completed",
-    className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-    icon: CheckCircle2,
-  },
-  FAILED: {
-    label: "Failed",
-    className: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-    icon: XCircle,
-  },
-  CANCELLED: {
-    label: "Cancelled",
-    className: "bg-gray-100 text-gray-800 dark:bg-gray-900/40 dark:text-gray-300",
-    icon: Ban,
-  },
-  BACKLOG: {
-    label: "Backlog",
-    className: "bg-slate-100 text-slate-800 dark:bg-slate-900/40 dark:text-slate-300",
-    icon: Clock,
-  },
-  TODO: {
-    label: "Todo",
-    className: "bg-slate-100 text-slate-800 dark:bg-slate-900/40 dark:text-slate-300",
-    icon: Clock,
-  },
-  DONE: {
-    label: "Done",
-    className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-    icon: CheckCircle2,
-  },
-  DUPLICATE: {
-    label: "Duplicate",
-    className: "bg-gray-100 text-gray-800 dark:bg-gray-900/40 dark:text-gray-300",
-    icon: Ban,
-  },
+const MISSION_STATUS_CONFIG: Record<MissionStatus, StatusConfigEntryWithIcon> = {
+  PLANNING:    { label: "Planning",    className: STATUS_STYLES.slate,   icon: FileEdit },
+  IN_PROGRESS: { label: "In Progress", className: STATUS_STYLES.blue,    icon: Loader2 },
+  REVIEW:      { label: "Review",      className: STATUS_STYLES.purple,  icon: Eye },
+  COMPLETED:   { label: "Completed",   className: STATUS_STYLES.emerald, icon: CheckCircle2 },
+  FAILED:      { label: "Failed",      className: STATUS_STYLES.red,     icon: XCircle },
+  CANCELLED:   { label: "Cancelled",   className: STATUS_STYLES.gray,    icon: Ban },
+  BACKLOG:     { label: "Backlog",     className: STATUS_STYLES.slate,   icon: Clock },
+  TODO:        { label: "Todo",        className: STATUS_STYLES.slate,   icon: Clock },
+  DONE:        { label: "Done",        className: STATUS_STYLES.emerald, icon: CheckCircle2 },
+  DUPLICATE:   { label: "Duplicate",   className: STATUS_STYLES.gray,    icon: Ban },
 }
 
-const TASK_STATUS_CONFIG: Record<
-  MissionTaskStatus,
-  { label: string; className: string; icon: React.ComponentType<{ className?: string }> }
-> = {
-  PENDING: {
-    label: "Pending",
-    className: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-    icon: Clock,
-  },
-  BLOCKED: {
-    label: "Blocked",
-    className: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
-    icon: Lock,
-  },
-  IN_PROGRESS: {
-    label: "Working",
-    className: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-    icon: Loader2,
-  },
-  COMPLETED: {
-    label: "Completed",
-    className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-    icon: CheckCircle2,
-  },
-  FAILED: {
-    label: "Failed",
-    className: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-    icon: XCircle,
-  },
-  SKIPPED: {
-    label: "Skipped",
-    className: "bg-gray-100 text-gray-800 dark:bg-gray-900/40 dark:text-gray-300",
-    icon: MinusCircle,
-  },
-  AWAITING_APPROVAL: {
-    label: "Awaiting Approval",
-    className: "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300",
-    icon: ShieldAlert,
-  },
+const TASK_STATUS_CONFIG: Record<MissionTaskStatus, StatusConfigEntryWithIcon> = {
+  PENDING:           { label: "Pending",           className: STATUS_STYLES.amber,   icon: Clock },
+  BLOCKED:           { label: "Blocked",           className: STATUS_STYLES.orange,  icon: Lock },
+  IN_PROGRESS:       { label: "Working",           className: STATUS_STYLES.blue,    icon: Loader2 },
+  COMPLETED:         { label: "Completed",         className: STATUS_STYLES.emerald, icon: CheckCircle2 },
+  FAILED:            { label: "Failed",            className: STATUS_STYLES.red,     icon: XCircle },
+  SKIPPED:           { label: "Skipped",           className: STATUS_STYLES.gray,    icon: MinusCircle },
+  AWAITING_APPROVAL: { label: "Awaiting Approval", className: STATUS_STYLES.violet,  icon: ShieldAlert },
 }
 
 function StatusIcon({ status, icon: Icon }: { status: string; icon: React.ComponentType<{ className?: string }> }) {

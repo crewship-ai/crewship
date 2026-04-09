@@ -57,10 +57,45 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
-	// TODO: check Docker connectivity, bbolt state, etc.
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status": "ready",
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	checks := map[string]string{}
+
+	// Database
+	if s.db != nil {
+		if err := s.db.PingContext(ctx); err != nil {
+			checks["db"] = err.Error()
+		} else {
+			checks["db"] = "ok"
+		}
+	}
+
+	// State store (bbolt) — lightweight read on a non-existent bucket is safe
+	if s.state != nil {
+		if _, err := s.state.List(ctx, "readyz"); err != nil {
+			checks["state"] = err.Error()
+		} else {
+			checks["state"] = "ok"
+		}
+	}
+
+	allOK := true
+	for _, v := range checks {
+		if v != "ok" {
+			allOK = false
+			break
+		}
+	}
+
+	status := http.StatusOK
+	if !allOK {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, map[string]interface{}{
+		"status": allOK,
+		"checks": checks,
 	})
 }
 

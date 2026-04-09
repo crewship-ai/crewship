@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
@@ -310,31 +309,22 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	var setClauses []string
-	var args []interface{}
+	ub := newUpdate()
 	if req.Name != nil {
-		setClauses = append(setClauses, "name = ?")
-		args = append(args, *req.Name)
+		ub.Set("name", *req.Name)
 	}
 	if req.Slug != nil {
-		setClauses = append(setClauses, "slug = ?")
-		args = append(args, *req.Slug)
+		ub.Set("slug", *req.Slug)
 	}
 	if req.PreferredLanguage != nil {
 		if *req.PreferredLanguage == "" {
-			setClauses = append(setClauses, "preferred_language = NULL")
+			ub.SetNull("preferred_language")
 		} else {
-			setClauses = append(setClauses, "preferred_language = ?")
-			args = append(args, *req.PreferredLanguage)
+			ub.Set("preferred_language", *req.PreferredLanguage)
 		}
 	}
-	if len(setClauses) > 0 {
-		setClauses = append(setClauses, "updated_at = ?")
-		args = append(args, now)
-		args = append(args, workspaceID)
-		query := "UPDATE workspaces SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	if !ub.Empty() {
+		query, args := ub.Build("workspaces", "id = ?", workspaceID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 			h.logger.Error("update workspace", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})

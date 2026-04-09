@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { formatDateTime } from "@/lib/time"
 import { toast } from "sonner"
 import { CronExpressionParser } from "cron-parser"
 
@@ -31,14 +32,6 @@ const presets = [
   { label: "Every 6 hours", cron: "0 */6 * * *" },
   { label: "Weekdays 9:00", cron: "0 9 * * 1-5" },
 ]
-
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString()
-  } catch {
-    return iso
-  }
-}
 
 function getNextRuns(cronExpr: string, count: number): string[] {
   try {
@@ -252,12 +245,12 @@ export function SchedulePageClient() {
             </Button>
             {lastRun && (
               <span className="text-xs text-muted-foreground">
-                Last run: {formatDate(lastRun)}
+                Last run: {formatDateTime(lastRun)}
               </span>
             )}
             {nextRun && enabled && (
               <span className="text-xs text-muted-foreground">
-                Next: {formatDate(nextRun)}
+                Next: {formatDateTime(nextRun)}
               </span>
             )}
           </div>
@@ -300,7 +293,7 @@ export function SchedulePageClient() {
                       {run.status}
                     </Badge>
                     <span className="text-sm text-muted-foreground">
-                      {formatDate(run.started_at)}
+                      {formatDateTime(run.started_at)}
                     </span>
                   </div>
                   <div className="text-xs text-muted-foreground">

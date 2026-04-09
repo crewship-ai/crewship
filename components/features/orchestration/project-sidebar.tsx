@@ -22,6 +22,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
+import { formatDate, formatShortDate } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { ISSUE_STATUS_COLORS } from "@/lib/colors"
 import type {
@@ -35,21 +36,6 @@ import type {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })
-}
-
-function formatShortDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  })
-}
 
 // ---------------------------------------------------------------------------
 // Types

@@ -118,6 +118,26 @@ export const GRAPH_CHROME = {
   missionLabel: "#e2e8f0",
 } as const
 
+// ── Status badge classes (Tailwind, for Badge components) ──
+
+export const STATUS_BADGE_CLASSES: Record<string, string> = {
+  PENDING: "bg-muted text-muted-foreground",
+  BLOCKED: "bg-amber-500/20 text-amber-400",
+  IN_PROGRESS: "bg-cyan-500/20 text-cyan-400",
+  COMPLETED: "bg-emerald-500/20 text-emerald-400",
+  FAILED: "bg-red-500/20 text-red-400",
+  SKIPPED: "bg-muted text-muted-foreground",
+  AWAITING_APPROVAL: "bg-violet-500/20 text-violet-400",
+}
+
+// ── Complexity badge classes (Tailwind, for Badge components) ──
+
+export const COMPLEXITY_BADGE_CLASSES: Record<string, string> = {
+  SIMPLE: "bg-emerald-500/20 text-emerald-400",
+  MEDIUM: "bg-amber-500/20 text-amber-400",
+  COMPLEX: "bg-red-500/20 text-red-400",
+}
+
 // ── Graph background colors for status ──
 
 export const STATUS_BG: Record<string, string> = {

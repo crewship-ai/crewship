@@ -349,9 +349,8 @@ func seedOneCredential(client *cli.Client, cred seeddata.CredentialDef) (string,
 	if err != nil {
 		return "", err
 	}
-	if resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusInternalServerError {
+	if resp.StatusCode == http.StatusConflict {
 		resp.Body.Close()
-		// May already exist (API returns 500 on UNIQUE constraint instead of 409)
 		return resolveByName(client, "/api/v1/credentials", cred.Name)
 	}
 	if err := cli.CheckError(resp); err != nil {

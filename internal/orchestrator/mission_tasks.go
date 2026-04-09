@@ -14,6 +14,8 @@ import (
 
 // ResolveReadyTasks returns tasks that have all dependencies completed
 // and are in PENDING status (ready to be scheduled).
+// It also self-heals BLOCKED tasks whose dependencies are all COMPLETED
+// (e.g. after a mission restart that blindly set dep-tasks to BLOCKED).
 // Unassigned tasks are auto-assigned to an available crew member or the lead agent.
 func (e *MissionEngine) ResolveReadyTasks(ctx context.Context, missionID string) ([]TaskInfo, error) {
 	tasks, err := e.loadTasks(ctx, missionID)
@@ -25,6 +27,35 @@ func (e *MissionEngine) ResolveReadyTasks(ctx context.Context, missionID string)
 	for _, t := range tasks {
 		if t.Status == "COMPLETED" {
 			completed[t.ID] = true
+		}
+	}
+
+	// Self-heal: promote BLOCKED tasks whose deps are all COMPLETED to PENDING.
+	now := time.Now().UTC().Format(time.RFC3339)
+	for i, t := range tasks {
+		if t.Status != "BLOCKED" {
+			continue
+		}
+		deps, err := parseDependsOn(t.DependsOn)
+		if err != nil || len(deps) == 0 {
+			continue
+		}
+		allDone := true
+		for _, dep := range deps {
+			if !completed[dep] {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			if _, err := e.db.ExecContext(ctx,
+				`UPDATE mission_tasks SET status = 'PENDING', updated_at = ? WHERE id = ? AND status = 'BLOCKED'`,
+				now, t.ID); err != nil {
+				e.logger.Error("self-heal BLOCKED→PENDING failed", "task_id", t.ID, "error", err)
+				continue
+			}
+			tasks[i].Status = "PENDING"
+			e.logger.Info("self-healed BLOCKED→PENDING", "task_id", t.ID, "mission_id", missionID)
 		}
 	}
 
@@ -231,6 +262,19 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 		b.WriteString("You MUST use this information to complete your task:\n\n")
 		b.WriteString(strings.Join(depOutputs, "\n\n"))
 		b.WriteString("\n\n")
+	}
+
+	// Issue comments — so the agent has full context
+	if rows, err := e.db.QueryContext(ctx, `SELECT COALESCE(CASE mc.author_type WHEN 'agent' THEN (SELECT name FROM agents WHERE id = mc.author_id) WHEN 'user' THEN (SELECT COALESCE(name, email) FROM users WHERE id = mc.author_id) ELSE 'System' END, 'Unknown'), mc.body FROM mission_comments mc WHERE mc.mission_id = ? ORDER BY mc.created_at ASC LIMIT 30`, ms.ID); err == nil {
+		var hdr bool
+		for rows.Next() {
+			var n, bd string
+			if rows.Scan(&n, &bd) != nil { continue }
+			if !hdr { b.WriteString("[ISSUE COMMENTS]\n"); hdr = true }
+			if len(bd) > 500 { bd = bd[:500] + "..." }
+			b.WriteString(fmt.Sprintf("@%s: %s\n\n", n, bd))
+		}
+		rows.Close()
 	}
 
 	// Current task details — the actual assignment
@@ -531,16 +575,25 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 
 	// Auto-post agent comment on the issue with completion summary
 	if assignedAgentID.Valid {
+		var agentName string
+		_ = e.db.QueryRowContext(ctx, `SELECT name FROM agents WHERE id = ?`, assignedAgentID.String).Scan(&agentName)
+
 		var commentBody string
 		if handoff.Parsed && handoff.Summary != "" {
-			commentBody = fmt.Sprintf("**Task completed** (confidence: %s)\n\n%s", handoff.Confidence, handoff.Summary)
+			commentBody = fmt.Sprintf("**%s completed their work** (confidence: %s)\n\n%s", agentName, handoff.Confidence, handoff.Summary)
 			if handoff.Artifacts != "" {
-				commentBody += "\n\nArtifacts: " + handoff.Artifacts
+				commentBody += "\n\n**Artifacts:** " + handoff.Artifacts
 			}
 		} else if taskStatus == "COMPLETED" {
-			commentBody = "Task completed successfully."
+			fallback := resultSummary
+			if len(fallback) > 500 { fallback = fallback[:500] + "..." }
+			if fallback != "" {
+				commentBody = fmt.Sprintf("**%s completed their work**\n\n%s", agentName, fallback)
+			} else {
+				commentBody = fmt.Sprintf("**%s completed their work.**", agentName)
+			}
 		} else if taskStatus == "FAILED" {
-			commentBody = "Task failed."
+			commentBody = fmt.Sprintf("**%s encountered an issue.**", agentName)
 			if errorMessage != "" {
 				commentBody += " Error: " + errorMessage
 			}

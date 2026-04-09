@@ -21,6 +21,7 @@ import {
 import { AddCredentialDialog } from "@/components/features/credentials/add-credential-dialog"
 import { EditCredentialDialog } from "@/components/features/credentials/edit-credential-dialog"
 import type { CredentialData } from "@/components/features/credentials/edit-credential-dialog"
+import { formatDate } from "@/lib/time"
 import { useAbilities } from "@/hooks/use-abilities"
 
 interface Credential {
@@ -163,14 +164,6 @@ export default function CredentialsPage() {
     } catch {
       // silently fail
     }
-  }
-
-  function formatDate(dateStr: string): string {
-    return new Intl.DateTimeFormat("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    }).format(new Date(dateStr))
   }
 
   if (loading) {
