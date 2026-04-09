@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "motion/react"
 import {
   Workflow, Clock, Activity, RefreshCw, Focus,
@@ -39,6 +40,7 @@ import type { Mission, MissionTask, IssueLabel, IssueComment, Project } from "@/
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { IssuesExplorerPanel, IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectDetailInline } from "@/components/features/orchestration/issues-inline"
+import { UnifiedExplorer } from "@/components/features/orchestration/unified-explorer"
 
 import { toast } from "sonner"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
@@ -255,6 +257,14 @@ export function OrchestrationLayout({
   onMissionCreated,
 }: OrchestrationLayoutProps) {
   const isMobile = useIsMobile()
+  const router = useRouter()
+
+  // Navigate to full-page issue view (from board/list click)
+  const handleIssueNavigate = useCallback((issue: Mission) => {
+    if (issue.identifier) {
+      router.push(`/orchestration/issues/${issue.identifier}`)
+    }
+  }, [router])
 
   // Panel state
   const [leftCollapsed, setLeftCollapsed] = useState(false)
@@ -280,6 +290,7 @@ export function OrchestrationLayout({
   const [issueComments, setIssueComments] = useState<IssueComment[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
 
   const graphRef = useRef<WorkflowGraphRef>(null)
 
@@ -501,88 +512,9 @@ export function OrchestrationLayout({
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
-      {/* ---- Row 1: Mission context bar ---- */}
-      <div className="shrink-0 z-20 flex items-center justify-between h-9 bg-card border-b border-white/[0.1] px-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <Select value={selectedMissionId} onValueChange={onMissionChange}>
-            <SelectTrigger className="h-7 w-auto max-w-[300px] text-[13px] font-semibold bg-white/[0.04] border-white/[0.1] rounded-md text-foreground px-2.5 gap-2 shrink-0">
-              <SelectValue placeholder="All missions" />
-            </SelectTrigger>
-            <SelectContent className="min-w-[300px]">
-              <SelectItem value="all" className="font-medium">All missions</SelectItem>
-              {(["IN_PROGRESS", "PLANNING", "REVIEW", "COMPLETED", "FAILED", "CANCELLED"] as const)
-                .filter((s) => missions.some((m) => m.status === s))
-                .map((status) => {
-                  const sl: Record<string, string> = { IN_PROGRESS: "Running", PLANNING: "Planning", REVIEW: "In Review", COMPLETED: "Completed", FAILED: "Failed", CANCELLED: "Cancelled" }
-                  const sc: Record<string, string> = { IN_PROGRESS: "bg-blue-500", PLANNING: "bg-purple-500", REVIEW: "bg-amber-500", COMPLETED: "bg-green-500", FAILED: "bg-red-500", CANCELLED: "bg-gray-500" }
-                  const st: Record<string, string> = { IN_PROGRESS: "text-blue-400", PLANNING: "text-purple-400", REVIEW: "text-amber-400", COMPLETED: "text-green-400", FAILED: "text-red-400", CANCELLED: "text-gray-400" }
-                  return (
-                    <div key={status}>
-                      <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">{sl[status]}</div>
-                      {missions.filter((m) => m.status === status).map((m) => (
-                        <SelectItem key={m.id} value={m.id}>
-                          <div className="flex items-center gap-2 w-full">
-                            <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", sc[m.status], m.status === "IN_PROGRESS" && "animate-pulse")} />
-                            <span className="truncate flex-1">{m.title}</span>
-                            <span className={cn("text-[10px] font-mono shrink-0", st[m.status])}>{m.tasks?.length || 0}t</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </div>
-                  )
-                })}
-            </SelectContent>
-          </Select>
-
-          {/* Inline stats / mission info — hidden on mobile */}
-          {!isMobile && (
-            <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground">
-              {!selectedMission ? (
-                <>
-                  {[
-                    { label: "Active", value: stats.active, color: "bg-blue-500", tc: stats.active > 0 ? "text-blue-400" : "" },
-                    { label: "Planning", value: stats.planning, color: "bg-purple-500", tc: stats.planning > 0 ? "text-purple-400" : "" },
-                    { label: "Done", value: stats.completed, color: "bg-green-500", tc: stats.completed > 0 ? "text-green-400" : "" },
-                    { label: "Failed", value: stats.failed, color: "bg-red-500", tc: stats.failed > 0 ? "text-red-400" : "" },
-                  ].map(({ label, value, color, tc }) => (
-                    <div key={label} className="flex items-center gap-1">
-                      <div className={cn("w-1.5 h-1.5 rounded-full", color, value === 0 && "opacity-30")} />
-                      <span className={cn("tabular-nums", tc)}>{value}</span>
-                      <span className="text-muted-foreground/40 font-sans text-[10px]">{label}</span>
-                    </div>
-                  ))}
-                </>
-              ) : (
-                <>
-                  <span className="text-muted-foreground/50 font-sans">@{selectedMission.lead_agent_slug}</span>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-12 h-1 bg-white/[0.08] overflow-hidden rounded-full">
-                      <div className="h-full bg-blue-400 transition-all rounded-full" style={{ width: `${selectedMission.tasks?.length ? ((selectedMission.tasks.filter(t => t.status === "COMPLETED").length / selectedMission.tasks.length) * 100) : 0}%` }} />
-                    </div>
-                    <span className="tabular-nums">{selectedMission.tasks?.filter(t => t.status === "COMPLETED").length || 0}/{selectedMission.tasks?.length || 0}</span>
-                  </div>
-                  {(() => { const t = selectedMission.tasks || []; const tok = t.reduce((s, x) => s + (x.token_count || 0), 0); return tok > 0 ? <span className="tabular-nums">{(tok / 1000).toFixed(1)}k</span> : null })()}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          {selectedMission?.status === "PLANNING" && <MissionActionButton mission={selectedMission} action="start" workspaceId={workspaceId} onDone={onRefresh} />}
-          {selectedMission && (selectedMission.status === "PLANNING" || selectedMission.status === "IN_PROGRESS") && <MissionActionButton mission={selectedMission} action="cancel" workspaceId={workspaceId} onDone={onRefresh} />}
-          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground/80" onClick={() => graphRef.current?.focusActive()}>
-            <Focus className="h-3 w-3" />
-          </Button>
-          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground/80" onClick={onRefresh}>
-            <RefreshCw className="h-3 w-3" />
-          </Button>
-          <CreateMissionWizard workspaceId={workspaceId} onCreated={onMissionCreated} />
-        </div>
-      </div>
-
-      {/* ---- Row 2: Tab navigation ---- */}
-      <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
+      <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-3 gap-0">
+        {/* Tabs */}
         {([
           { id: "issues", label: "Issues", icon: CircleDot },
           { id: "graph", label: "Graph", icon: Workflow },
@@ -592,16 +524,9 @@ export function OrchestrationLayout({
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => {
-              setActiveTab(id)
-              if (id !== "issues") {
-                setSelectedIssue(null)
-                setIssueComments([])
-                setSelectedProjectId(null)
-              }
-            }}
+            onClick={() => setActiveTab(id)}
             className={cn(
-              "flex items-center gap-1.5 px-3 text-[12px] font-medium border-b-2 transition-all duration-100 relative top-px",
+              "flex items-center gap-1.5 px-3 h-full text-[12px] font-medium border-b-2 transition-all duration-100 relative top-px",
               activeTab === id
                 ? "border-blue-400 text-blue-400"
                 : "border-transparent text-muted-foreground hover:text-foreground/80",
@@ -611,6 +536,32 @@ export function OrchestrationLayout({
             {label}
           </button>
         ))}
+
+        {/* Separator */}
+        <div className="w-px h-4 bg-white/[0.08] mx-2" />
+
+        {/* Context badge — shows selected issue */}
+        {selectedIssue && (
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-400">
+            <span className="font-mono">{selectedIssue.identifier}</span>
+            <button
+              onClick={() => { setSelectedIssue(null); setIssueComments([]) }}
+              className="text-blue-400/60 hover:text-blue-300"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+
+        <div className="flex-1" />
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-1.5">
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground/80" onClick={onRefresh}>
+            <RefreshCw className="h-3 w-3" />
+          </Button>
+          <CreateMissionWizard workspaceId={workspaceId} onCreated={onMissionCreated} />
+        </div>
       </div>
 
       {/* ---- Main 3-column layout ---- */}
@@ -663,50 +614,31 @@ export function OrchestrationLayout({
                       </button>
                     </div>
                     <div className="flex-1 min-h-0 flex flex-col">
-                      {activeTab === "issues" ? (
-                        <IssuesExplorerPanel
-                          issues={issues}
-                          projects={projects}
-                          search={issueSearch}
-                          onSearchChange={setIssueSearch}
-                          selectedIssue={selectedIssue}
-                          selectedProjectId={selectedProjectId}
-                          onProjectSelect={(id) => {
-                            const newId = id === selectedProjectId ? null : id
-                            setSelectedProjectId(newId)
-                            if (newId) { setSelectedIssue(null); setIssueComments([]) }
-                          }}
-                          onIssueSelect={handleIssueSelect}
-                        />
-                      ) : (
-                        <>
-                          <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
-                            <HierarchyTree
-                              crews={panelCrews}
-                              agents={panelAgents}
-                              selectedCrewId={selectedCrewId}
-                              selectedAgentSlug={selectedAgentSlug}
-                              onCrewSelect={handleCrewSelect}
-                              onAgentSelect={handleAgentSelect}
-                            />
-                          </div>
-                          <div className="border-b border-border flex-1 min-h-0 flex flex-col">
-                            <UnifiedInbox
-                              missions={panelMissions}
-                              onTaskSelect={handleInboxTaskSelect}
-                            />
-                          </div>
-                          <div className="p-2 shrink-0">
-                            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
-                              Connections
-                            </div>
-                            <ConnectionMap
-                              crews={panelCrews}
-                              connections={panelConnections}
-                            />
-                          </div>
-                        </>
-                      )}
+                      <UnifiedExplorer
+                        issues={issues}
+                        projects={projects}
+                        search={issueSearch}
+                        onSearchChange={setIssueSearch}
+                        selectedIssue={selectedIssue}
+                        selectedProjectId={selectedProjectId}
+                        onProjectSelect={(id) => {
+                          const newId = id === selectedProjectId ? null : id
+                          setSelectedProjectId(newId)
+                          if (newId) { setSelectedIssue(null); setIssueComments([]) }
+                        }}
+                        onIssueSelect={handleIssueSelect}
+                        crews={panelCrews}
+                        agents={panelAgents}
+                        selectedCrewId={selectedCrewId}
+                        selectedAgentSlug={selectedAgentSlug}
+                        onCrewSelect={handleCrewSelect}
+                        onAgentSelect={handleAgentSelect}
+                        missions={panelMissions}
+                        onTaskSelect={handleInboxTaskSelect}
+                        connections={panelConnections}
+                        filterCrewId={filterCrewId}
+                        onCrewFilter={setFilterCrewId}
+                      />
                     </div>
                   </motion.div>
                 </>
@@ -745,55 +677,31 @@ export function OrchestrationLayout({
                   transition={{ duration: 0.2, ease: "easeOut" }}
                   className="flex-1 min-h-0 flex flex-col"
                 >
-                  {activeTab === "issues" ? (
-                    <IssuesExplorerPanel
-                      issues={issues}
-                      projects={projects}
-                      search={issueSearch}
-                      onSearchChange={setIssueSearch}
-                      selectedIssue={selectedIssue}
-                      selectedProjectId={selectedProjectId}
-                      onProjectSelect={(id) => {
-                            const newId = id === selectedProjectId ? null : id
-                            setSelectedProjectId(newId)
-                            if (newId) { setSelectedIssue(null); setIssueComments([]) }
-                          }}
-                      onIssueSelect={handleIssueSelect}
-                    />
-                  ) : (
-                    <>
-                      {/* Hierarchy tree */}
-                      <div className="border-b border-border shrink-0 max-h-[40%] overflow-y-auto">
-                        <HierarchyTree
-                          crews={panelCrews}
-                          agents={panelAgents}
-                          selectedCrewId={selectedCrewId}
-                          selectedAgentSlug={selectedAgentSlug}
-                          onCrewSelect={handleCrewSelect}
-                          onAgentSelect={handleAgentSelect}
-                        />
-                      </div>
-
-                      {/* Unified Inbox */}
-                      <div className="border-b border-border flex-1 min-h-0 flex flex-col">
-                        <UnifiedInbox
-                          missions={panelMissions}
-                          onTaskSelect={handleInboxTaskSelect}
-                        />
-                      </div>
-
-                      {/* Connection Map */}
-                      <div className="p-2 shrink-0">
-                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-1">
-                          Connections
-                        </div>
-                        <ConnectionMap
-                          crews={panelCrews}
-                          connections={panelConnections}
-                        />
-                      </div>
-                    </>
-                  )}
+                  <UnifiedExplorer
+                    issues={issues}
+                    projects={projects}
+                    search={issueSearch}
+                    onSearchChange={setIssueSearch}
+                    selectedIssue={selectedIssue}
+                    selectedProjectId={selectedProjectId}
+                    onProjectSelect={(id) => {
+                      const newId = id === selectedProjectId ? null : id
+                      setSelectedProjectId(newId)
+                      if (newId) { setSelectedIssue(null); setIssueComments([]) }
+                    }}
+                    onIssueSelect={handleIssueSelect}
+                    crews={panelCrews}
+                    agents={panelAgents}
+                    selectedCrewId={selectedCrewId}
+                    selectedAgentSlug={selectedAgentSlug}
+                    onCrewSelect={handleCrewSelect}
+                    onAgentSelect={handleAgentSelect}
+                    missions={panelMissions}
+                    onTaskSelect={handleInboxTaskSelect}
+                    connections={panelConnections}
+                    filterCrewId={filterCrewId}
+                    onCrewFilter={setFilterCrewId}
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -821,20 +729,13 @@ export function OrchestrationLayout({
                   </button>
                 </div>
                 <div className="flex-1" />
-                <button
-                  onClick={() => { /* TODO: open create dialog */ }}
-                  className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md bg-blue-600 text-white text-xs font-medium hover:bg-blue-500"
-                >
-                  <Plus className="h-3 w-3" />
-                  New Issue
-                </button>
               </div>
               {/* Board or List view */}
               <div className="p-4 h-[calc(100%-45px)]">
                 {issueViewMode === "board" ? (
-                  <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
+                  <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueNavigate} />
                 ) : (
-                  <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
+                  <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueNavigate} />
                 )}
               </div>
             </div>

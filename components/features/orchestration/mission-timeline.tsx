@@ -28,6 +28,7 @@ const statusBadge: Record<MissionStatus, string> = {
   TODO: "border-slate-400 text-slate-400",
   IN_PROGRESS: "border-blue-500 text-blue-400",
   COMPLETED: "border-emerald-500 text-emerald-400",
+  DONE: "border-emerald-500 text-emerald-400",
   FAILED: "border-red-500 text-red-400",
   PLANNING: "border-slate-400 text-slate-400",
   REVIEW: "border-purple-500 text-purple-400",

@@ -9,9 +9,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Deprecated: use "crewship seed" instead, which includes issue seeding.
 var seedIssuesCmd = &cobra.Command{
-	Use:   "seed-issues",
-	Short: "Seed sample issues, labels, and comments via the API",
+	Use:        "seed-issues",
+	Short:      "Seed sample issues, labels, and comments via the API",
+	Deprecated: "use 'crewship seed' instead (includes issues, crews, agents, and more)",
 	Long: `Creates a diverse set of labels, issues across crews with different
 statuses, priorities, and comments. Useful for demos and testing.
 Requires crews with LEAD agents to already exist.`,

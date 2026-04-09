@@ -78,7 +78,8 @@ func init() {
 	rootCmd.AddCommand(systemCmd)
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(projectCmd)
-	rootCmd.AddCommand(seedIssuesCmd)
+	rootCmd.AddCommand(seedCmd)
+	rootCmd.AddCommand(seedIssuesCmd) // deprecated: use "crewship seed" instead
 }
 
 func main() {

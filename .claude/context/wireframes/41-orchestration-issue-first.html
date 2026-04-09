@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crewship — Orchestration (Issue-First, No Mission Dropdown)</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Inter, -apple-system, sans-serif; background: #0f0f11; color: #eee; font-size: 13px; overflow: hidden; height: 100vh; }
+
+  /* === TOP NAV === */
+  .topnav { display: flex; align-items: center; height: 48px; border-bottom: 1px solid #1e1e22; padding: 0 16px; gap: 12px; background: #141416; }
+  .topnav .logo { font-weight: 700; font-size: 14px; color: #fff; margin-right: 20px; }
+  .topnav .nav-item { padding: 6px 12px; border-radius: 6px; color: #888; cursor: pointer; font-size: 13px; }
+  .topnav .nav-item.active { color: #fff; background: #1e1e22; }
+  .topnav .nav-item:hover { color: #ccc; }
+  .topnav .spacer { flex: 1; }
+  .topnav .status-pill { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; background: #0d2818; border: 1px solid #166534; font-size: 12px; color: #4ade80; }
+  .topnav .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; }
+  .topnav .fleet-badge { font-size: 12px; color: #666; padding: 4px 10px; background: #1a1a1e; border-radius: 6px; }
+  .topnav .user { display: flex; align-items: center; gap: 8px; }
+  .topnav .avatar { width: 28px; height: 28px; border-radius: 50%; background: #3b82f6; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff; font-weight: 600; }
+
+  /* === MAIN GRID: 3 columns === */
+  .main { display: grid; grid-template-columns: 260px 1fr 340px; grid-template-rows: 42px 1fr; height: calc(100vh - 48px); }
+
+  /* === TOOLBAR === */
+  .toolbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 0; padding: 0 12px; border-bottom: 1px solid #1e1e22; background: #141416; }
+  .toolbar .tab { padding: 10px 14px; color: #555; cursor: pointer; border-bottom: 2px solid transparent; font-size: 13px; font-weight: 500; transition: all 0.15s; }
+  .toolbar .tab.active { color: #fff; border-bottom-color: #3b82f6; }
+  .toolbar .tab:hover { color: #aaa; }
+  .toolbar .sep { width: 1px; height: 20px; background: #1e1e22; margin: 0 8px; }
+  .toolbar .view-modes { display: flex; gap: 2px; background: #1a1a1e; border-radius: 6px; padding: 2px; }
+  .toolbar .view-mode { padding: 4px 10px; border-radius: 4px; font-size: 12px; color: #555; cursor: pointer; }
+  .toolbar .view-mode.active { background: #2a2a2e; color: #fff; }
+  .toolbar .filter-btn { padding: 4px 10px; border-radius: 6px; background: #1a1a1e; border: 1px solid #2a2a2e; color: #888; cursor: pointer; font-size: 12px; display: flex; align-items: center; gap: 4px; margin-left: 4px; }
+  .toolbar .filter-btn:hover { border-color: #444; color: #ccc; }
+  .toolbar .filter-btn.on { background: #1e2a3a; border-color: #2563eb; color: #60a5fa; }
+  .toolbar .spacer { flex: 1; }
+  .toolbar .btn-new { padding: 5px 14px; border-radius: 6px; background: #3b82f6; color: #fff; border: none; cursor: pointer; font-size: 12px; font-weight: 500; }
+  .toolbar .btn-new:hover { background: #2563eb; }
+
+  /* === LEFT PANEL (Explorer) === */
+  .left { border-right: 1px solid #1e1e22; overflow-y: auto; background: #141416; display: flex; flex-direction: column; }
+  .left-search { margin: 8px; padding: 6px 10px; background: #1a1a1e; border: 1px solid #2a2a2e; border-radius: 6px; color: #ccc; font-size: 12px; outline: none; }
+  .left-search::placeholder { color: #444; }
+  .left-search:focus { border-color: #3b82f6; }
+
+  .section-header { padding: 6px 12px 4px; display: flex; align-items: center; justify-content: space-between; }
+  .section-header h3 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: #444; font-weight: 600; }
+  .section-header .count { font-size: 10px; color: #333; }
+
+  /* Project items */
+  .project-item { display: flex; align-items: center; gap: 8px; padding: 5px 12px; cursor: pointer; border-radius: 4px; margin: 0 4px; }
+  .project-item:hover { background: #1a1a1e; }
+  .project-item.active { background: #1e2a3a; }
+  .project-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+  .project-name { font-size: 12px; color: #999; flex: 1; }
+  .project-count { font-size: 11px; color: #444; min-width: 16px; text-align: right; }
+  .project-bar { width: 40px; height: 3px; border-radius: 2px; background: #1e1e22; overflow: hidden; }
+  .project-bar-fill { height: 100%; border-radius: 2px; }
+
+  /* Crew filter */
+  .crew-filter { display: flex; gap: 4px; padding: 4px 8px; flex-wrap: wrap; }
+  .crew-chip { padding: 2px 8px; border-radius: 4px; font-size: 11px; color: #666; background: #1a1a1e; cursor: pointer; border: 1px solid transparent; }
+  .crew-chip:hover { color: #ccc; border-color: #333; }
+  .crew-chip.active { border-color: #3b82f6; color: #60a5fa; background: #1e2a3a; }
+
+  /* Issue list */
+  .issue-list { flex: 1; overflow-y: auto; border-top: 1px solid #1e1e22; margin-top: 4px; }
+  .issue-row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 12px; cursor: pointer; border-left: 2px solid transparent; }
+  .issue-row:hover { background: #1a1a1e; }
+  .issue-row.selected { background: #1e2a3a; border-left-color: #3b82f6; }
+  .issue-status { width: 14px; height: 14px; border-radius: 50%; margin-top: 2px; flex-shrink: 0; }
+  .issue-status.backlog { border: 1.5px dashed #555; }
+  .issue-status.todo { border: 1.5px solid #666; }
+  .issue-status.progress { border: 1.5px solid #eab308; background: linear-gradient(90deg, #eab308 50%, transparent 50%); }
+  .issue-status.review { border: 1.5px solid #f97316; background: linear-gradient(90deg, #f97316 75%, transparent 25%); }
+  .issue-status.done { background: #5e6ad2; display: flex; align-items: center; justify-content: center; font-size: 8px; color: #fff; }
+  .issue-content { flex: 1; min-width: 0; }
+  .issue-id { font-size: 10px; color: #444; font-family: monospace; }
+  .issue-title { font-size: 12px; color: #bbb; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .issue-meta { display: flex; align-items: center; gap: 5px; margin-top: 2px; }
+  .issue-crew { font-size: 10px; color: #444; }
+  .issue-priority { display: flex; gap: 1px; }
+  .issue-priority .bar { width: 3px; height: 10px; border-radius: 1px; }
+
+  /* === CENTER (Board) === */
+  .center { overflow: auto; background: #0f0f11; padding: 12px; }
+
+  .board { display: flex; gap: 10px; height: 100%; }
+  .board-col { min-width: 220px; flex: 1; display: flex; flex-direction: column; }
+  .board-col-header { display: flex; align-items: center; gap: 6px; padding: 0 4px 8px; }
+  .board-col-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .board-col-name { font-size: 12px; font-weight: 500; color: #666; }
+  .board-col-count { font-size: 11px; color: #444; }
+  .board-col-body { flex: 1; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+
+  .card { background: #1a1a1e; border: 1px solid #252529; border-radius: 8px; padding: 10px 12px; cursor: pointer; transition: all 0.1s; }
+  .card:hover { border-color: #3a3a3e; background: #1e1e22; }
+  .card.selected { border-color: #3b82f6; background: #1a2240; }
+  .card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+  .card-id { font-size: 10px; font-family: monospace; color: #444; }
+  .card-title { font-size: 12px; color: #ccc; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card-bottom { display: flex; align-items: center; gap: 5px; margin-top: 6px; }
+  .card-avatar { width: 18px; height: 18px; border-radius: 50%; background: #333; font-size: 9px; display: flex; align-items: center; justify-content: center; color: #777; }
+  .card-assignee { font-size: 10px; color: #444; }
+  .card-labels { display: flex; gap: 3px; margin-left: auto; }
+  .card-label { width: 6px; height: 6px; border-radius: 50%; }
+
+  .empty-col { display: flex; align-items: center; justify-content: center; height: 60px; border: 1px dashed #252529; border-radius: 8px; }
+  .empty-col span { font-size: 11px; color: #333; }
+
+  /* === RIGHT PANEL (Detail) === */
+  .right { border-left: 1px solid #1e1e22; overflow-y: auto; background: #141416; }
+  .right.empty { display: flex; align-items: center; justify-content: center; }
+  .right.empty .placeholder { text-align: center; color: #333; }
+  .right.empty .placeholder svg { margin-bottom: 8px; }
+  .right.empty .placeholder p { font-size: 12px; }
+
+  .detail-header { padding: 12px 16px; border-bottom: 1px solid #1e1e22; display: flex; align-items: center; justify-content: space-between; }
+  .detail-header .id-badge { font-family: monospace; font-size: 11px; color: #555; background: #1a1a1e; padding: 2px 8px; border-radius: 4px; }
+  .detail-header .crew-badge { font-size: 10px; color: #60a5fa; background: #1e2a3a; padding: 2px 8px; border-radius: 4px; }
+  .detail-title { padding: 12px 16px; font-size: 15px; font-weight: 600; color: #fff; line-height: 1.3; }
+  .detail-desc { padding: 0 16px 12px; font-size: 12px; color: #777; line-height: 1.5; border-bottom: 1px solid #1e1e22; }
+
+  .props { padding: 12px 16px; border-bottom: 1px solid #1e1e22; }
+  .prop { display: flex; align-items: center; padding: 5px 0; }
+  .prop-label { width: 80px; font-size: 11px; color: #444; flex-shrink: 0; }
+  .prop-value { flex: 1; font-size: 12px; color: #bbb; display: flex; align-items: center; gap: 6px; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+  .badge.status-backlog { background: #1a1a1e; color: #666; }
+  .badge.priority-high { background: #431407; color: #fb923c; }
+  .badge.priority-medium { background: #422006; color: #fbbf24; }
+  .badge.priority-low { background: #172554; color: #60a5fa; }
+
+  /* Sub-tasks */
+  .subtasks { padding: 12px 16px; border-bottom: 1px solid #1e1e22; }
+  .subtasks-header { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #444; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .subtask { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; }
+  .subtask-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .subtask-dot.pending { border: 1.5px solid #555; }
+  .subtask-dot.running { border: 1.5px solid #eab308; background: linear-gradient(90deg, #eab308 50%, transparent 50%); }
+  .subtask-dot.done { background: #5e6ad2; display: flex; align-items: center; justify-content: center; font-size: 7px; color: #fff; }
+  .subtask-title { color: #999; flex: 1; }
+  .subtask-agent { font-size: 10px; color: #444; }
+
+  /* Comments */
+  .comments { padding: 12px 16px; border-bottom: 1px solid #1e1e22; }
+  .comments-header { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #444; font-weight: 600; margin-bottom: 8px; }
+  .comment { display: flex; gap: 8px; margin-bottom: 10px; }
+  .comment-avatar { width: 22px; height: 22px; border-radius: 50%; background: #2a2a2e; font-size: 9px; display: flex; align-items: center; justify-content: center; color: #666; flex-shrink: 0; margin-top: 1px; }
+  .comment-body { flex: 1; }
+  .comment-meta { font-size: 10px; color: #444; margin-bottom: 2px; }
+  .comment-meta strong { color: #888; }
+  .comment-text { font-size: 12px; color: #999; line-height: 1.4; }
+  .comment-input { margin-top: 8px; }
+  .comment-input textarea { width: 100%; background: #1a1a1e; border: 1px solid #2a2a2e; border-radius: 6px; padding: 8px; color: #ccc; font-size: 12px; resize: none; outline: none; height: 50px; font-family: inherit; }
+  .comment-input textarea:focus { border-color: #3b82f6; }
+
+  /* Activity */
+  .activity { padding: 12px 16px; }
+  .activity-header { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: #444; font-weight: 600; margin-bottom: 8px; }
+  .activity-item { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 11px; color: #444; }
+  .activity-item .dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+
+  /* Priority bars */
+  .prio-bars { display: flex; gap: 1.5px; align-items: flex-end; }
+  .prio-bars .b { width: 3px; border-radius: 1px; }
+  .prio-bars.urgent .b { background: #f97316; }
+  .prio-bars.urgent .b:nth-child(1) { height: 6px; }
+  .prio-bars.urgent .b:nth-child(2) { height: 9px; }
+  .prio-bars.urgent .b:nth-child(3) { height: 12px; }
+  .prio-bars.high .b { background: #f97316; }
+  .prio-bars.high .b:nth-child(1) { height: 6px; }
+  .prio-bars.high .b:nth-child(2) { height: 9px; }
+  .prio-bars.high .b:nth-child(3) { height: 12px; opacity: 0.3; }
+  .prio-bars.medium .b { background: #eab308; }
+  .prio-bars.medium .b:nth-child(1) { height: 6px; }
+  .prio-bars.medium .b:nth-child(2) { height: 9px; opacity: 0.3; }
+  .prio-bars.medium .b:nth-child(3) { height: 12px; opacity: 0.3; }
+  .prio-bars.low .b { background: #3b82f6; }
+  .prio-bars.low .b:nth-child(1) { height: 6px; }
+  .prio-bars.low .b:nth-child(2) { height: 9px; opacity: 0.3; }
+  .prio-bars.low .b:nth-child(3) { height: 12px; opacity: 0.3; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a2a2e; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- TOP NAV -->
+<div class="topnav">
+  <div class="logo">Crewship</div>
+  <div class="nav-item">Dashboard</div>
+  <div class="nav-item active">Orchestration</div>
+  <div class="nav-item">Fleet</div>
+  <div class="nav-item">Settings</div>
+  <div class="spacer"></div>
+  <div class="status-pill"><div class="status-dot"></div> Online</div>
+  <div class="fleet-badge">Fleet idle</div>
+  <div class="user">
+    <span style="color:#888; font-size:12px;">Demo</span>
+    <div class="avatar">DU</div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- TOOLBAR (no mission dropdown!) -->
+  <div class="toolbar">
+    <div class="tab active">Issues</div>
+    <div class="tab">Graph</div>
+    <div class="tab">Timeline</div>
+    <div class="tab">Activity</div>
+    <div class="tab">Approvals</div>
+    <div class="sep"></div>
+    <div class="view-modes">
+      <div class="view-mode active">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="1" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.2"/><rect x="1" y="9" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="9" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.2"/></svg>
+      </div>
+      <div class="view-mode">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><line x1="1" y1="4" x2="15" y2="4" stroke="currentColor" stroke-width="1.2"/><line x1="1" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="1.2"/><line x1="1" y1="12" x2="15" y2="12" stroke="currentColor" stroke-width="1.2"/></svg>
+      </div>
+    </div>
+    <div class="sep"></div>
+    <div class="filter-btn on">Crew</div>
+    <div class="filter-btn">Priority</div>
+    <div class="filter-btn">Labels</div>
+    <div class="spacer"></div>
+    <button class="btn-new">+ New Issue</button>
+  </div>
+
+  <!-- LEFT: Explorer -->
+  <div class="left">
+    <input class="left-search" placeholder="Search issues..." />
+
+    <!-- Projects -->
+    <div class="section-header"><h3>Projects</h3><span class="count">5</span></div>
+    <div class="project-item active">
+      <div class="project-dot" style="background:#3b82f6;"></div>
+      <div class="project-name">Network Probes</div>
+      <div class="project-count">4</div>
+      <div class="project-bar"><div class="project-bar-fill" style="width:25%; background:#3b82f6;"></div></div>
+    </div>
+    <div class="project-item">
+      <div class="project-dot" style="background:#22c55e;"></div>
+      <div class="project-name">File Operations</div>
+      <div class="project-count">3</div>
+      <div class="project-bar"><div class="project-bar-fill" style="width:0%; background:#22c55e;"></div></div>
+    </div>
+    <div class="project-item">
+      <div class="project-dot" style="background:#06b6d4;"></div>
+      <div class="project-name">Web Scraping</div>
+      <div class="project-count">3</div>
+      <div class="project-bar"><div class="project-bar-fill" style="width:0%; background:#06b6d4;"></div></div>
+    </div>
+    <div class="project-item">
+      <div class="project-dot" style="background:#a855f7;"></div>
+      <div class="project-name">Script Factory</div>
+      <div class="project-count">3</div>
+      <div class="project-bar"><div class="project-bar-fill" style="width:0%; background:#a855f7;"></div></div>
+    </div>
+    <div class="project-item">
+      <div class="project-dot" style="background:#f97316;"></div>
+      <div class="project-name">System Info</div>
+      <div class="project-count">2</div>
+      <div class="project-bar"><div class="project-bar-fill" style="width:0%; background:#f97316;"></div></div>
+    </div>
+
+    <!-- Crew chips -->
+    <div class="section-header" style="margin-top:8px;"><h3>Crews</h3></div>
+    <div class="crew-filter">
+      <div class="crew-chip active">All</div>
+      <div class="crew-chip">Engineering</div>
+      <div class="crew-chip">Quality</div>
+      <div class="crew-chip">DevOps</div>
+      <div class="crew-chip">Research</div>
+    </div>
+
+    <!-- Issue list -->
+    <div class="section-header" style="margin-top:4px;"><h3>Issues</h3><span class="count">15</span></div>
+    <div class="issue-list">
+
+      <div class="issue-row selected">
+        <div class="issue-status backlog"></div>
+        <div class="issue-content">
+          <span class="issue-id">ENG-1</span>
+          <div class="issue-title">Ping google.com 5 times and save results</div>
+          <div class="issue-meta">
+            <div class="prio-bars high"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            <span class="issue-crew">Engineering</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-row">
+        <div class="issue-status backlog"></div>
+        <div class="issue-content">
+          <span class="issue-id">ENG-2</span>
+          <div class="issue-title">Check HTTP status of 5 popular websites</div>
+          <div class="issue-meta">
+            <div class="prio-bars medium"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            <span class="issue-crew">Engineering</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-row">
+        <div class="issue-status backlog"></div>
+        <div class="issue-content">
+          <span class="issue-id">DEV-1</span>
+          <div class="issue-title">Trace DNS resolution for 3 domains</div>
+          <div class="issue-meta">
+            <div class="prio-bars medium"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            <span class="issue-crew">DevOps</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-row">
+        <div class="issue-status backlog"></div>
+        <div class="issue-content">
+          <span class="issue-id">ENG-3</span>
+          <div class="issue-title">Create a directory tree with sample files</div>
+          <div class="issue-meta">
+            <div class="prio-bars high"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            <span class="issue-crew">Engineering</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-row">
+        <div class="issue-status backlog"></div>
+        <div class="issue-content">
+          <span class="issue-id">RES-1</span>
+          <div class="issue-title">Fetch and parse the Hacker News front page</div>
+          <div class="issue-meta">
+            <div class="prio-bars high"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            <span class="issue-crew">Research</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-row">
+        <div class="issue-status backlog"></div>
+        <div class="issue-content">
+          <span class="issue-id">ENG-5</span>
+          <div class="issue-title">Write a Python script that generates Fibonacci</div>
+          <div class="issue-meta">
+            <div class="prio-bars high"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            <span class="issue-crew">Engineering</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-row">
+        <div class="issue-status backlog"></div>
+        <div class="issue-content">
+          <span class="issue-id">QUA-1</span>
+          <div class="issue-title">Write a log parser that extracts errors</div>
+          <div class="issue-meta">
+            <div class="prio-bars medium"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            <span class="issue-crew">Quality</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="issue-row">
+        <div class="issue-status backlog"></div>
+        <div class="issue-content">
+          <span class="issue-id">DEV-3</span>
+          <div class="issue-title">Inventory all installed tools in the container</div>
+          <div class="issue-meta">
+            <div class="prio-bars low"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            <span class="issue-crew">DevOps</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- CENTER: Board -->
+  <div class="center">
+    <div class="board">
+
+      <!-- Backlog -->
+      <div class="board-col">
+        <div class="board-col-header">
+          <svg width="12" height="12" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" stroke="#555" stroke-width="1.5" stroke-dasharray="3 2" fill="none"/></svg>
+          <span class="board-col-name">Backlog</span>
+          <span class="board-col-count">15</span>
+        </div>
+        <div class="board-col-body">
+          <div class="card selected">
+            <div class="card-top">
+              <span class="card-id">ENG-1</span>
+              <div class="prio-bars high"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            </div>
+            <div class="card-title">Ping google.com 5 times and save results</div>
+            <div class="card-bottom">
+              <div class="card-avatar" style="background:#3b82f6; color:#fff;">M</div>
+              <span class="card-assignee">Martin</span>
+              <div class="card-labels">
+                <div class="card-label" style="background:#3b82f6;"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-top">
+              <span class="card-id">ENG-2</span>
+              <div class="prio-bars medium"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            </div>
+            <div class="card-title">Check HTTP status of 5 popular websites</div>
+            <div class="card-bottom">
+              <div class="card-avatar" style="background:#3b82f6; color:#fff;">M</div>
+              <span class="card-assignee">Martin</span>
+              <div class="card-labels">
+                <div class="card-label" style="background:#3b82f6;"></div>
+                <div class="card-label" style="background:#06b6d4;"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-top">
+              <span class="card-id">DEV-1</span>
+              <div class="prio-bars medium"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            </div>
+            <div class="card-title">Trace DNS resolution for 3 domains</div>
+            <div class="card-bottom">
+              <div class="card-avatar" style="background:#ef4444; color:#fff;">R</div>
+              <span class="card-assignee">Radek</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-top">
+              <span class="card-id">ENG-3</span>
+              <div class="prio-bars high"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            </div>
+            <div class="card-title">Create a directory tree with sample files</div>
+            <div class="card-bottom">
+              <div class="card-avatar" style="background:#3b82f6; color:#fff;">V</div>
+              <span class="card-assignee">Viktor</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-top">
+              <span class="card-id">RES-1</span>
+              <div class="prio-bars high"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            </div>
+            <div class="card-title">Fetch and parse the Hacker News front page</div>
+            <div class="card-bottom">
+              <div class="card-avatar" style="background:#06b6d4; color:#fff;">F</div>
+              <span class="card-assignee">Filip</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-top">
+              <span class="card-id">ENG-5</span>
+              <div class="prio-bars high"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+            </div>
+            <div class="card-title">Write a Python script that generates Fibonacci</div>
+            <div class="card-bottom">
+              <div class="card-avatar" style="background:#3b82f6; color:#fff;">V</div>
+              <span class="card-assignee">Viktor</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Todo -->
+      <div class="board-col">
+        <div class="board-col-header">
+          <svg width="12" height="12" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" stroke="#666" stroke-width="1.5" fill="none"/></svg>
+          <span class="board-col-name">Todo</span>
+          <span class="board-col-count">0</span>
+        </div>
+        <div class="board-col-body">
+          <div class="empty-col"><span>No issues</span></div>
+        </div>
+      </div>
+
+      <!-- In Progress -->
+      <div class="board-col">
+        <div class="board-col-header">
+          <svg width="12" height="12" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" stroke="#eab308" stroke-width="1.5" fill="none"/><path d="M8 2.5A5.5 5.5 0 0 0 8 13.5V2.5z" fill="#eab308"/></svg>
+          <span class="board-col-name" style="color:#eab308;">In Progress</span>
+          <span class="board-col-count">0</span>
+        </div>
+        <div class="board-col-body">
+          <div class="empty-col"><span>No issues</span></div>
+        </div>
+      </div>
+
+      <!-- In Review -->
+      <div class="board-col">
+        <div class="board-col-header">
+          <svg width="12" height="12" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" stroke="#f97316" stroke-width="1.5" fill="none"/><path d="M8 2.5A5.5 5.5 0 0 0 8 13.5V2.5z" fill="#f97316"/><path d="M8 2.5A5.5 5.5 0 0 1 13.5 8H8V2.5z" fill="#f97316"/></svg>
+          <span class="board-col-name" style="color:#f97316;">In Review</span>
+          <span class="board-col-count">0</span>
+        </div>
+        <div class="board-col-body">
+          <div class="empty-col"><span>No issues</span></div>
+        </div>
+      </div>
+
+      <!-- Done -->
+      <div class="board-col">
+        <div class="board-col-header">
+          <svg width="12" height="12" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="#5e6ad2"/><path d="M5 8.5l2 2 4-4.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          <span class="board-col-name" style="color:#5e6ad2;">Done</span>
+          <span class="board-col-count">0</span>
+        </div>
+        <div class="board-col-body">
+          <div class="empty-col"><span>No issues</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RIGHT: Detail Panel (ENG-1 selected) -->
+  <div class="right">
+    <div class="detail-header">
+      <div style="display:flex; gap:8px; align-items:center;">
+        <span class="detail-header id-badge">ENG-1</span>
+        <span class="detail-header crew-badge">Engineering</span>
+      </div>
+      <span style="color:#444; font-size:11px;">9 Apr</span>
+    </div>
+
+    <div class="detail-title">Ping google.com 5 times and save results</div>
+    <div class="detail-desc">
+      Run <code style="background:#1e1e22; padding:1px 4px; border-radius:3px; color:#eab308;">ping -c 5 google.com</code> inside the container.
+      Save the full output to /tmp/ping-google.txt.
+      Report the average round-trip time in a summary.
+    </div>
+
+    <!-- Properties -->
+    <div class="props">
+      <div class="prop">
+        <div class="prop-label">Status</div>
+        <div class="prop-value">
+          <svg width="12" height="12" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" stroke="#555" stroke-width="1.5" stroke-dasharray="3 2" fill="none"/></svg>
+          <span class="badge status-backlog">Backlog</span>
+        </div>
+      </div>
+      <div class="prop">
+        <div class="prop-label">Priority</div>
+        <div class="prop-value">
+          <div class="prio-bars high"><div class="b"></div><div class="b"></div><div class="b"></div></div>
+          <span class="badge priority-high">High</span>
+        </div>
+      </div>
+      <div class="prop">
+        <div class="prop-label">Assignee</div>
+        <div class="prop-value">
+          <div style="width:16px; height:16px; border-radius:50%; background:#3b82f6; display:flex; align-items:center; justify-content:center; font-size:8px; color:#fff;">M</div>
+          Martin <span style="color:#444; font-size:10px;">(grumpy pragmatist)</span>
+        </div>
+      </div>
+      <div class="prop">
+        <div class="prop-label">Project</div>
+        <div class="prop-value">
+          <div style="width:8px; height:8px; border-radius:2px; background:#3b82f6;"></div>
+          Network Probes
+        </div>
+      </div>
+      <div class="prop">
+        <div class="prop-label">Labels</div>
+        <div class="prop-value">
+          <span style="background:#3b82f620; color:#60a5fa; padding:1px 8px; border-radius:3px; font-size:10px;">Network</span>
+        </div>
+      </div>
+      <div class="prop">
+        <div class="prop-label">Skills</div>
+        <div class="prop-value">
+          <span style="background:#22c55e20; color:#4ade80; padding:1px 8px; border-radius:3px; font-size:10px;">Network Probe</span>
+          <span style="background:#f9731620; color:#fb923c; padding:1px 8px; border-radius:3px; font-size:10px;">System Inspector</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sub-tasks (mission tasks — empty until mission starts) -->
+    <div class="subtasks">
+      <div class="subtasks-header">
+        Sub-tasks
+        <span style="color:#333;">—</span>
+        <span style="color:#333; font-size:10px; font-weight:400;">starts when issue moves to In Progress</span>
+      </div>
+      <div style="padding:12px 0; text-align:center; color:#333; font-size:11px;">
+        No mission running yet.<br/>
+        <span style="color:#555;">Click <strong style="color:#3b82f6;">Start</strong> or drag to <strong>In Progress</strong> to begin.</span>
+      </div>
+    </div>
+
+    <!-- Comments -->
+    <div class="comments">
+      <div class="comments-header">Comments <span style="color:#333;">0</span></div>
+      <div class="comment-input">
+        <textarea placeholder="Leave a comment..."></textarea>
+      </div>
+    </div>
+
+    <!-- Activity -->
+    <div class="activity">
+      <div class="activity-header">Activity</div>
+      <div class="activity-item">
+        <div class="dot" style="background:#3b82f6;"></div>
+        <span>Issue created</span>
+        <span style="margin-left:auto; color:#333;">9 Apr</span>
+      </div>
+      <div class="activity-item">
+        <div class="dot" style="background:#555;"></div>
+        <span>Assigned to <strong style="color:#888;">Martin</strong></span>
+        <span style="margin-left:auto; color:#333;">9 Apr</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

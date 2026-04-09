@@ -75,6 +75,7 @@ const STATUS_ORDER: Record<MissionStatus, number> = {
   IN_PROGRESS: 3,
   REVIEW: 4,
   COMPLETED: 5,
+  DONE: 5,
   FAILED: 6,
   CANCELLED: 7,
   DUPLICATE: 8,

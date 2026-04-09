@@ -77,14 +77,6 @@ export function HierarchyTree({
   return (
     <ScrollArea className="h-full">
       <div className="p-2 space-y-0.5">
-        {/* Workspace root */}
-        <div className="flex items-center gap-2 px-2 py-1.5 rounded-md text-muted-foreground">
-          <Network className="h-3.5 w-3.5 shrink-0" />
-          <span className="text-[11px] font-semibold uppercase tracking-wider">
-            Coordinator
-          </span>
-        </div>
-
         {/* Crews */}
         {crews.map((crew) => {
           const crewAgents = agentsByCrew.get(crew.id) || []
