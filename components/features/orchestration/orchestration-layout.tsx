@@ -8,7 +8,7 @@ import {
   FileText, PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
   ChevronUp, ChevronDown, ChevronLeft, X, Play, Square, Loader2,
-  CircleDot, LayoutGrid, List, Plus, FolderKanban,
+  CircleDot, LayoutGrid, List, Plus, FolderKanban, Bookmark, Save,
 } from "lucide-react"
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
@@ -43,7 +43,7 @@ import { A2AMessageStream } from "@/components/features/orchestration/a2a-messag
 import { MissionYamlEditor } from "@/components/features/orchestration/mission-yaml-editor"
 import { DockerOverview } from "@/components/features/orchestration/docker-overview"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
-import type { Mission, MissionTask, IssueLabel, IssueComment, Project } from "@/lib/types/mission"
+import type { Mission, MissionTask, IssueLabel, IssueComment, Project, SavedView } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { IssuesExplorerPanel, IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectDetailInline } from "@/components/features/orchestration/issues-inline"
@@ -306,6 +306,11 @@ export function OrchestrationLayout({
   const [showCreateIssue, setShowCreateIssue] = useState(false)
   const [showCreateProject, setShowCreateProject] = useState(false)
 
+  // Saved views
+  const [savedViews, setSavedViews] = useState<SavedView[]>([])
+  const [activeViewId, setActiveViewId] = useState<string | null>(null)
+  const [savedViewsOpen, setSavedViewsOpen] = useState(false)
+
   const graphRef = useRef<WorkflowGraphRef>(null)
 
   // Auto-collapse left panel on mobile
@@ -402,11 +407,23 @@ export function OrchestrationLayout({
     } catch { /* ignore */ }
   }, [workspaceId])
 
+  const fetchSavedViews = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(`/api/v1/saved-views?workspace_id=${workspaceId}`)
+      if (res.ok) {
+        const data = await res.json()
+        setSavedViews(Array.isArray(data) ? data : data.views ?? [])
+      }
+    } catch { /* ignore */ }
+  }, [workspaceId])
+
   useEffect(() => {
     fetchIssues()
     fetchIssueLabels()
     fetchProjects()
-  }, [fetchIssues, fetchIssueLabels, fetchProjects])
+    fetchSavedViews()
+  }, [fetchIssues, fetchIssueLabels, fetchProjects, fetchSavedViews])
 
   const handleIssueSelect = useCallback(async (issue: Mission) => {
     // Toggle: clicking the same issue again deselects it
@@ -767,6 +784,47 @@ export function OrchestrationLayout({
                     <List className="h-3.5 w-3.5" />
                   </button>
                 </div>
+
+                {/* Saved views dropdown */}
+                {savedViews.length > 0 && (
+                  <DropdownMenu open={savedViewsOpen} onOpenChange={setSavedViewsOpen}>
+                    <DropdownMenuTrigger asChild>
+                      <button className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs hover:bg-white/[0.06] text-muted-foreground transition-colors">
+                        <Bookmark className="h-3 w-3" />
+                        <span>{activeViewId ? savedViews.find((v) => v.id === activeViewId)?.name || "Saved Views" : "Saved Views"}</span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-52">
+                      <DropdownMenuItem
+                        onClick={() => { setActiveViewId(null); setSavedViewsOpen(false) }}
+                        className={cn("text-xs", !activeViewId && "bg-white/[0.04]")}
+                      >
+                        All Issues
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      {savedViews.map((view) => (
+                        <DropdownMenuItem
+                          key={view.id}
+                          onClick={() => {
+                            setActiveViewId(view.id)
+                            if (view.view_type === "board" || view.view_type === "list") {
+                              setIssueViewMode(view.view_type)
+                            }
+                            setSavedViewsOpen(false)
+                          }}
+                          className={cn("text-xs", activeViewId === view.id && "bg-white/[0.04]")}
+                        >
+                          <Save className="h-3 w-3 mr-1.5 text-muted-foreground/50" />
+                          {view.name}
+                          {view.shared && (
+                            <span className="ml-auto text-[9px] text-muted-foreground/40 uppercase">shared</span>
+                          )}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+
                 <div className="flex-1" />
               </div>
               {/* Board or List view */}

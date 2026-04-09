@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react"
+import { ArrowDown, ArrowUp, ArrowUpDown, X } from "lucide-react"
 import {
   Table,
   TableBody,
@@ -20,6 +20,8 @@ interface IssuesListViewProps {
   issues: Mission[]
   onIssueClick: (issue: Mission) => void
   selectedIssueId?: string | null
+  onBulkAction?: (ids: string[], updates: Record<string, unknown>) => void
+  workspaceId?: string | null
 }
 
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
@@ -99,9 +101,73 @@ function formatRelativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString()
 }
 
-export function IssuesListView({ issues, onIssueClick, selectedIssueId }: IssuesListViewProps) {
+const BULK_STATUSES: { value: MissionStatus; label: string }[] = [
+  { value: "BACKLOG", label: "Backlog" },
+  { value: "TODO", label: "Todo" },
+  { value: "IN_PROGRESS", label: "In Progress" },
+  { value: "REVIEW", label: "In Review" },
+  { value: "COMPLETED", label: "Done" },
+  { value: "CANCELLED", label: "Cancelled" },
+]
+
+const BULK_PRIORITIES: { value: IssuePriority; label: string }[] = [
+  { value: "urgent", label: "Urgent" },
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+  { value: "none", label: "None" },
+]
+
+export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAction, workspaceId }: IssuesListViewProps) {
   const [sortKey, setSortKey] = useState<SortKey>("updated")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkMenuOpen, setBulkMenuOpen] = useState<"status" | "priority" | null>(null)
+
+  const toggleSelect = useCallback((id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const toggleAll = useCallback(() => {
+    if (selectedIds.size === issues.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(issues.map((i) => i.id)))
+    }
+  }, [issues, selectedIds.size])
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+    setBulkMenuOpen(null)
+  }, [])
+
+  const handleBulkUpdate = useCallback(
+    async (updates: Record<string, unknown>) => {
+      if (selectedIds.size === 0) return
+      const ids = Array.from(selectedIds)
+      if (onBulkAction) {
+        onBulkAction(ids, updates)
+      } else if (workspaceId) {
+        try {
+          await fetch(`/api/v1/issues/bulk?workspace_id=${workspaceId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids, updates }),
+          })
+        } catch {
+          // silent
+        }
+      }
+      clearSelection()
+    },
+    [selectedIds, onBulkAction, workspaceId, clearSelection],
+  )
 
   const handleSort = useCallback(
     (key: SortKey) => {
@@ -168,9 +234,73 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId }: Issues
 
   return (
     <div className="rounded-lg border border-border overflow-hidden">
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-blue-500/10 border-b border-blue-500/20">
+          <span className="text-xs font-medium text-blue-400">{selectedIds.size} selected</span>
+          <div className="flex gap-1 ml-2">
+            <div className="relative">
+              <button
+                onClick={() => setBulkMenuOpen(bulkMenuOpen === "status" ? null : "status")}
+                className="px-2 py-1 text-[11px] rounded bg-white/[0.06] hover:bg-white/[0.1] text-foreground/80 transition-colors"
+              >
+                Status
+              </button>
+              {bulkMenuOpen === "status" && (
+                <div className="absolute top-full left-0 mt-1 z-50 w-40 bg-popover border border-border rounded-md shadow-lg py-1">
+                  {BULK_STATUSES.map((s) => (
+                    <button
+                      key={s.value}
+                      onClick={() => handleBulkUpdate({ status: s.value })}
+                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-white/[0.06] flex items-center gap-2"
+                    >
+                      <StatusIcon status={s.value} className="h-3 w-3" />
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="relative">
+              <button
+                onClick={() => setBulkMenuOpen(bulkMenuOpen === "priority" ? null : "priority")}
+                className="px-2 py-1 text-[11px] rounded bg-white/[0.06] hover:bg-white/[0.1] text-foreground/80 transition-colors"
+              >
+                Priority
+              </button>
+              {bulkMenuOpen === "priority" && (
+                <div className="absolute top-full left-0 mt-1 z-50 w-40 bg-popover border border-border rounded-md shadow-lg py-1">
+                  {BULK_PRIORITIES.map((p) => (
+                    <button
+                      key={p.value}
+                      onClick={() => handleBulkUpdate({ priority: p.value })}
+                      className="w-full px-3 py-1.5 text-xs text-left hover:bg-white/[0.06] flex items-center gap-2"
+                    >
+                      <PriorityIcon priority={p.value} className="h-3 w-3" />
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex-1" />
+          <button onClick={clearSelection} className="p-1 rounded hover:bg-white/[0.08] text-muted-foreground/60 hover:text-foreground transition-colors">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
+            <TableHead className="w-[40px]">
+              <input
+                type="checkbox"
+                checked={issues.length > 0 && selectedIds.size === issues.length}
+                onChange={toggleAll}
+                className="h-3.5 w-3.5 rounded border-border cursor-pointer accent-blue-500"
+              />
+            </TableHead>
             <TableHead
               className="w-[90px] cursor-pointer select-none"
               onClick={() => handleSort("identifier")}
@@ -238,9 +368,23 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId }: Issues
             return (
               <TableRow
                 key={issue.id}
-                className={cn("cursor-pointer transition-all duration-200", isDimmed && "opacity-40", isHighlighted && "bg-blue-500/5")}
+                className={cn(
+                  "cursor-pointer transition-all duration-200",
+                  isDimmed && "opacity-40",
+                  isHighlighted && "bg-blue-500/5",
+                  selectedIds.has(issue.id) && "bg-blue-500/[0.06]",
+                )}
                 onClick={() => onIssueClick(issue)}
               >
+                <TableCell>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(issue.id)}
+                    onClick={(e) => toggleSelect(issue.id, e)}
+                    onChange={() => {}}
+                    className="h-3.5 w-3.5 rounded border-border cursor-pointer accent-blue-500"
+                  />
+                </TableCell>
                 <TableCell className="text-xs font-mono text-muted-foreground">
                   {issue.identifier || "--"}
                 </TableCell>

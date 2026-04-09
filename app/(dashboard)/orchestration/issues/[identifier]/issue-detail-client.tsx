@@ -10,6 +10,7 @@ import {
   ChevronsUpDown,
   Copy,
   FolderKanban,
+  Hash,
   Link2,
   Loader2,
   MessageSquare,
@@ -971,6 +972,40 @@ export function IssueDetailClient() {
                       </Button>
                     )}
                   </div>
+                </PopoverContent>
+              </Popover>
+            </PropertyRow>
+
+            {/* Estimate */}
+            <PropertyRow label="Estimate">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button className="flex items-center gap-1.5 text-sm hover:bg-accent rounded px-1.5 py-0.5 transition-colors -mr-1.5">
+                    <Hash className="h-3.5 w-3.5 text-muted-foreground/60" />
+                    <span className="text-xs">
+                      {issue.estimate ? `${issue.estimate} points` : "No estimate"}
+                    </span>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-48 p-1" align="end">
+                  {[1, 2, 3, 5, 8, 13, 21].map((pts) => (
+                    <button
+                      key={pts}
+                      onClick={() => patchIssue({ estimate: pts })}
+                      className={cn(
+                        "w-full px-2 py-1.5 text-xs text-left rounded hover:bg-white/[0.06]",
+                        issue.estimate === pts && "bg-blue-500/10 text-blue-400",
+                      )}
+                    >
+                      {pts} points
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => patchIssue({ estimate: null })}
+                    className="w-full px-2 py-1.5 text-xs text-left rounded hover:bg-white/[0.06] text-muted-foreground/50"
+                  >
+                    Clear estimate
+                  </button>
                 </PopoverContent>
               </Popover>
             </PropertyRow>
