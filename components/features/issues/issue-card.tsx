@@ -38,7 +38,8 @@ export function IssueCard({ issue, onClick }: IssueCardProps) {
       aria-label={`Issue ${issue.identifier || ""}: ${issue.title}`}
       className={cn(
         "px-2.5 py-2 cursor-pointer hover:bg-accent/50 transition-colors border-border/60 gap-0",
-        overdue && "border-red-500/40"
+        overdue && "border-red-500/40",
+        issue.status === "IN_PROGRESS" && "agent-active-card",
       )}
       onClick={onClick}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick() } }}
@@ -54,12 +55,17 @@ export function IssueCard({ issue, onClick }: IssueCardProps) {
         {issue.assignee_id && (
           <div className="flex items-center gap-1 shrink-0">
             <span className="text-[10px] text-foreground/50 truncate max-w-[80px]">{issue.assignee_name}</span>
-            <img
-              src={getAgentAvatarUrl(issue.assignee_id)}
-              alt={issue.assignee_name || ""}
-              title={issue.assignee_name || ""}
-              className="h-4.5 w-4.5 rounded-full"
-            />
+            <div className="relative">
+              <img
+                src={getAgentAvatarUrl(issue.assignee_id)}
+                alt={issue.assignee_name || ""}
+                title={issue.assignee_name || ""}
+                className="h-4.5 w-4.5 rounded-full"
+              />
+              {issue.status === "IN_PROGRESS" && (
+                <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-green-500 ring-1 ring-card agent-active-dot" />
+              )}
+            </div>
           </div>
         )}
       </div>
