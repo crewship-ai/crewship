@@ -27,6 +27,7 @@ import { useSession } from "@/hooks/use-auth"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { StatusIcon, statusLabel, statusColor } from "@/components/features/issues/status-icon"
+import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { LabelBadge } from "@/components/features/issues/label-badge"
 import { Button } from "@/components/ui/button"
@@ -106,13 +107,6 @@ function formatDate(dateStr: string): string {
   })
 }
 
-function MarkdownContent({ content }: { content: string }) {
-  return (
-    <div className="text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap [&_code]:bg-white/[0.06] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono">
-      {content}
-    </div>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Sidebar property row
@@ -607,7 +601,7 @@ export function IssueDetailClient() {
             {/* Description */}
             <div>
               {issue.description ? (
-                <MarkdownContent content={issue.description} />
+                <MarkdownContent>{issue.description}</MarkdownContent>
               ) : (
                 <p className="text-sm text-muted-foreground/50 italic">
                   No description provided.
@@ -668,8 +662,8 @@ export function IssueDetailClient() {
                             {relativeTime(comment.created_at)}
                           </span>
                         </div>
-                        <div className="text-[13px] text-foreground/80 leading-relaxed whitespace-pre-wrap">
-                          {comment.body}
+                        <div className="mt-1">
+                          <MarkdownContent>{comment.body}</MarkdownContent>
                         </div>
                       </div>
                     </div>
