@@ -788,7 +788,7 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 		cutoff, cutoff, wsID)
 	if err != nil {
 		h.logger.Error("agent load query", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 	defer rows.Close()
@@ -800,14 +800,14 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 			&e.ActiveTasks, &e.PendingTasks, &e.CompletedToday,
 			&e.TokensUsedToday, &e.TokenBudget); err != nil {
 			h.logger.Error("scan agent load", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
 		result = append(result, e)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (agent load)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
