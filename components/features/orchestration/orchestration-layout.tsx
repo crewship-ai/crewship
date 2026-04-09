@@ -388,6 +388,12 @@ export function OrchestrationLayout({
   }, [fetchIssues, fetchIssueLabels, fetchProjects])
 
   const handleIssueSelect = useCallback(async (issue: Mission) => {
+    // Toggle: clicking the same issue again deselects it
+    if (selectedIssue?.id === issue.id) {
+      setSelectedIssue(null)
+      setIssueComments([])
+      return
+    }
     setSelectedIssue(issue)
     setDetailContext({ type: "none" })
     if (issue.crew_id && issue.identifier) {
@@ -397,7 +403,7 @@ export function OrchestrationLayout({
         else setIssueComments([])
       } catch { setIssueComments([]) }
     }
-  }, [workspaceId])
+  }, [workspaceId, selectedIssue?.id])
 
   const filteredIssues = useMemo(() => {
     let filtered = issues
