@@ -341,10 +341,16 @@ var issueCreateCmd = &cobra.Command{
 			body["priority"] = v
 		}
 		if v, _ := flags.GetString("assignee"); v != "" {
-			body["assignee_id"] = v
-		}
-		if v, _ := flags.GetString("assignee-type"); v != "" {
-			body["assignee_type"] = v
+			agentID, err := resolveAgentID(client, v)
+			if err != nil {
+				return fmt.Errorf("cannot resolve assignee %q: %w", v, err)
+			}
+			body["assignee_id"] = agentID
+			if atype, _ := flags.GetString("assignee-type"); atype != "" {
+				body["assignee_type"] = atype
+			} else {
+				body["assignee_type"] = "agent"
+			}
 		}
 		if v, _ := flags.GetString("labels"); v != "" {
 			body["label_ids"] = strings.Split(v, ",")
@@ -413,7 +419,16 @@ var issueUpdateCmd = &cobra.Command{
 		}
 		if flags.Changed("assignee") {
 			v, _ := flags.GetString("assignee")
-			body["assignee_id"] = v
+			// Resolve agent slug to ID
+			agentID, err := resolveAgentID(client, v)
+			if err != nil {
+				return fmt.Errorf("cannot resolve assignee %q: %w", v, err)
+			}
+			body["assignee_id"] = agentID
+			// Auto-set type to agent if not explicitly set
+			if !flags.Changed("assignee-type") {
+				body["assignee_type"] = "agent"
+			}
 		}
 		if flags.Changed("assignee-type") {
 			v, _ := flags.GetString("assignee-type")
@@ -565,6 +580,72 @@ var issueLabelsCmd = &cobra.Command{
 	},
 }
 
+var issueStartCmd = &cobra.Command{
+	Use:   "start <identifier>",
+	Short: "Start an issue — dispatch to assigned agent",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		iss, err := fetchIssue(client, args[0])
+		if err != nil {
+			return err
+		}
+		if iss.Identifier == nil {
+			return fmt.Errorf("issue has no identifier")
+		}
+
+		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/start", iss.CrewID, *iss.Identifier), nil)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Started %s — agent dispatched", *iss.Identifier))
+		return nil
+	},
+}
+
+var issueStopCmd = &cobra.Command{
+	Use:   "stop <identifier>",
+	Short: "Stop an issue — cancel running tasks",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		iss, err := fetchIssue(client, args[0])
+		if err != nil {
+			return err
+		}
+		if iss.Identifier == nil {
+			return fmt.Errorf("issue has no identifier")
+		}
+
+		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/stop", iss.CrewID, *iss.Identifier), nil)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		cli.PrintSuccess(fmt.Sprintf("Stopped %s", *iss.Identifier))
+		return nil
+	},
+}
+
 // ---------- init ----------
 
 func init() {
@@ -610,4 +691,6 @@ func init() {
 	issueCmd.AddCommand(issueDeleteCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueLabelsCmd)
+	issueCmd.AddCommand(issueStartCmd)
+	issueCmd.AddCommand(issueStopCmd)
 }
