@@ -61,8 +61,8 @@ func TestReadyz(t *testing.T) {
 	}
 
 	body := parseJSON(t, w.Body.Bytes())
-	if body["status"] != "ready" {
-		t.Errorf("expected status ready, got %v", body["status"])
+	if body["status"] != true {
+		t.Errorf("expected status true, got %v", body["status"])
 	}
 }
 

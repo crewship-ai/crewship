@@ -13,8 +13,9 @@ import { Progress } from "@/components/ui/progress"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
-import type { Mission, MissionTask, MissionTaskStatus, TaskComplexity, EvaluationStatus } from "@/lib/types/mission"
+import type { Mission, MissionTask, MissionTaskStatus, EvaluationStatus } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
+import { STATUS_BADGE_CLASSES, COMPLEXITY_BADGE_CLASSES } from "@/lib/colors"
 
 const crewBgClass: Record<string, string> = {
   blue: "bg-blue-500", emerald: "bg-emerald-500", violet: "bg-violet-500", amber: "bg-amber-500",
@@ -33,21 +34,6 @@ export interface ContextDetailPanelProps {
   onClose?: () => void
 }
 
-const STATUS_COLORS: Record<MissionTaskStatus, string> = {
-  PENDING: "bg-muted text-muted-foreground",
-  BLOCKED: "bg-amber-500/20 text-amber-400",
-  IN_PROGRESS: "bg-cyan-500/20 text-cyan-400",
-  COMPLETED: "bg-emerald-500/20 text-emerald-400",
-  FAILED: "bg-red-500/20 text-red-400",
-  SKIPPED: "bg-muted text-muted-foreground",
-  AWAITING_APPROVAL: "bg-violet-500/20 text-violet-400",
-}
-
-const COMPLEXITY_COLORS: Record<TaskComplexity, string> = {
-  SIMPLE: "bg-emerald-500/20 text-emerald-400",
-  MEDIUM: "bg-amber-500/20 text-amber-400",
-  COMPLEX: "bg-red-500/20 text-red-400",
-}
 
 function formatCost(cost: number | null): string {
   if (cost == null) return "--"
@@ -109,8 +95,8 @@ function TaskDetail({ task, mission, allTasks, onAction }: {
       <div>
         <h3 className="text-sm font-semibold text-foreground leading-tight">{task.title}</h3>
         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-          <Badge className={cn("text-[10px]", STATUS_COLORS[task.status])}>{task.status.replace("_", " ")}</Badge>
-          {task.complexity && <Badge className={cn("text-[10px]", COMPLEXITY_COLORS[task.complexity])}>{task.complexity}</Badge>}
+          <Badge className={cn("text-[10px]", STATUS_BADGE_CLASSES[task.status])}>{task.status.replace("_", " ")}</Badge>
+          {task.complexity && <Badge className={cn("text-[10px]", COMPLEXITY_BADGE_CLASSES[task.complexity])}>{task.complexity}</Badge>}
           {task.iteration != null && task.max_iterations != null && task.max_iterations > 1 && (
             <span className="text-[10px] text-muted-foreground">Iter {task.iteration}/{task.max_iterations}</span>
           )}
@@ -156,7 +142,7 @@ function TaskDetail({ task, mission, allTasks, onAction }: {
             <div key={d.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <GitBranch className="size-3" />
               <span className="truncate">{d.title}</span>
-              <Badge className={cn("text-[9px] ml-auto", STATUS_COLORS[d.status])}>{d.status}</Badge>
+              <Badge className={cn("text-[9px] ml-auto", STATUS_BADGE_CLASSES[d.status])}>{d.status}</Badge>
             </div>
           ))}
         </div>
@@ -169,7 +155,7 @@ function TaskDetail({ task, mission, allTasks, onAction }: {
             <div key={b.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <ArrowRight className="size-3" />
               <span className="truncate">{b.title}</span>
-              <Badge className={cn("text-[9px] ml-auto", STATUS_COLORS[b.status])}>{b.status}</Badge>
+              <Badge className={cn("text-[9px] ml-auto", STATUS_BADGE_CLASSES[b.status])}>{b.status}</Badge>
             </div>
           ))}
         </div>
@@ -248,7 +234,7 @@ function MissionDetail({ mission }: { mission: Mission }) {
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-semibold text-foreground">{mission.title}</h3>
-      <Badge className={cn("text-[10px]", STATUS_COLORS[mission.status as MissionTaskStatus] ?? "bg-muted text-muted-foreground")}>
+      <Badge className={cn("text-[10px]", STATUS_BADGE_CLASSES[mission.status as MissionTaskStatus] ?? "bg-muted text-muted-foreground")}>
         {mission.status}
       </Badge>
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
@@ -260,7 +246,7 @@ function MissionDetail({ mission }: { mission: Mission }) {
         </>)}
         {mission.complexity && (<>
           <div className="text-muted-foreground">Complexity</div>
-          <div><Badge className={cn("text-[10px]", COMPLEXITY_COLORS[mission.complexity])}>{mission.complexity}</Badge></div>
+          <div><Badge className={cn("text-[10px]", COMPLEXITY_BADGE_CLASSES[mission.complexity])}>{mission.complexity}</Badge></div>
         </>)}
         <div className="text-muted-foreground">Total tokens</div>
         <div className="text-foreground/80">{formatTokens(mission.total_token_count)}</div>

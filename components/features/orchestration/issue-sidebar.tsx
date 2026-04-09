@@ -33,6 +33,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
+import { formatDate } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { getCrewDotColor } from "@/lib/crew-icon"
 import type { IssueLabel, IssueRelation, Mission, Project } from "@/lib/types/mission"
@@ -40,14 +41,6 @@ import type { IssueLabel, IssueRelation, Mission, Project } from "@/lib/types/mi
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })
-}
 
 // ---------------------------------------------------------------------------
 // Types

@@ -23,7 +23,9 @@ import { escalationSchema, type Escalation } from "@/lib/types/escalation"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { useTick } from "@/hooks/use-tick"
 import { EscalationResponseCard, ActionBadge } from "@/components/features/escalations/escalation-response-card"
+import { formatRelativeTime } from "@/lib/time"
 import { z } from "zod"
+import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
 
 interface CrewEscalationsProps {
   crewId: string
@@ -35,21 +37,9 @@ function PendingIcon({ className }: { className?: string }) {
 }
 
 
-const STATUS_CONFIG: Record<Escalation["status"], {
-  label: string
-  className: string
-  icon: React.ComponentType<{ className?: string }>
-}> = {
-  PENDING: {
-    label: "Pending",
-    className: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-    icon: PendingIcon,
-  },
-  RESOLVED: {
-    label: "Resolved",
-    className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-    icon: CheckCircle2,
-  },
+const STATUS_CONFIG: Record<Escalation["status"], StatusConfigEntryWithIcon> = {
+  PENDING:  { label: "Pending",  className: STATUS_STYLES.amber,   icon: PendingIcon },
+  RESOLVED: { label: "Resolved", className: STATUS_STYLES.emerald, icon: CheckCircle2 },
 }
 
 const TYPE_LABELS: Record<string, { label: string; icon: React.ComponentType<{ className?: string }> }> = {
@@ -57,22 +47,6 @@ const TYPE_LABELS: Record<string, { label: string; icon: React.ComponentType<{ c
   CREDENTIAL: { label: "Credential", icon: KeyRound },
   LINK: { label: "Link", icon: ExternalLink },
 }
-
-function formatRelativeTime(dateStr: string): string {
-  const now = Date.now()
-  const date = new Date(dateStr).getTime()
-  const diffMs = now - date
-
-  const seconds = Math.floor(diffMs / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
 
 export function CrewEscalations({ crewId, workspaceId }: CrewEscalationsProps) {
   const [escalations, setEscalations] = useState<Escalation[]>([])

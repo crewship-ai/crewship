@@ -5,6 +5,7 @@ import { StatusIcon } from "./status-icon"
 import { PriorityIcon } from "./priority-icon"
 import { LabelBadge } from "./label-badge"
 import { Clock } from "lucide-react"
+import { formatShortDate } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { Mission } from "@/lib/types/mission"
@@ -13,11 +14,6 @@ function isOverdue(dueDate: string | null | undefined, status: string): boolean 
   const TERMINAL_STATUSES = new Set(["COMPLETED", "DONE", "CANCELLED", "FAILED", "DUPLICATE"])
   if (!dueDate || TERMINAL_STATUSES.has(status)) return false
   return new Date(dueDate) < new Date()
-}
-
-function formatShortDate(dateStr: string): string {
-  const d = new Date(dateStr)
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
 interface IssueCardProps {

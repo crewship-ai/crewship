@@ -185,11 +185,7 @@ func createOrResolve(client *cli.Client, createPath string, body interface{}, li
 	if err != nil {
 		return "", err
 	}
-	// Handle both 409 Conflict and 500 (some APIs return 500 on UNIQUE constraint).
-	// TODO(tech-debt): treating HTTP 500 as a conflict is a deliberate workaround
-	// for API inconsistency — some endpoints do not return 409 on duplicate inserts.
-	// Same rationale as seedOneCredential. Remove once all endpoints return 409.
-	if resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusInternalServerError {
+	if resp.StatusCode == http.StatusConflict {
 		resp.Body.Close()
 		return resolveBySlug(client, listPath, slug)
 	}

@@ -13,8 +13,10 @@ import {
 import { PriorityIcon, priorityLabel } from "./priority-icon"
 import { StatusIcon, statusLabel } from "./status-icon"
 import { LabelBadge } from "./label-badge"
+import { formatRelativeTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import type { Mission, MissionStatus, IssuePriority } from "@/lib/types/mission"
+import { STATUS_STYLES_SUBTLE, type StatusConfigEntry } from "@/lib/status-config"
 
 interface IssuesListViewProps {
   issues: Mission[]
@@ -24,43 +26,16 @@ interface IssuesListViewProps {
   workspaceId?: string | null
 }
 
-const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
-  BACKLOG: {
-    label: "Backlog",
-    className: "bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-300",
-  },
-  TODO: {
-    label: "Todo",
-    className: "bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-300",
-  },
-  PLANNING: {
-    label: "Planning",
-    className: "bg-slate-100 text-slate-700 dark:bg-slate-800/40 dark:text-slate-300",
-  },
-  IN_PROGRESS: {
-    label: "In Progress",
-    className: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  },
-  REVIEW: {
-    label: "In Review",
-    className: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-  },
-  COMPLETED: {
-    label: "Done",
-    className: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  },
-  FAILED: {
-    label: "Failed",
-    className: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-  },
-  CANCELLED: {
-    label: "Cancelled",
-    className: "bg-gray-100 text-gray-700 dark:bg-gray-900/40 dark:text-gray-300",
-  },
-  DUPLICATE: {
-    label: "Duplicate",
-    className: "bg-gray-100 text-gray-700 dark:bg-gray-900/40 dark:text-gray-300",
-  },
+const STATUS_CONFIG: Record<string, StatusConfigEntry> = {
+  BACKLOG:     { label: "Backlog",     className: STATUS_STYLES_SUBTLE.slate },
+  TODO:        { label: "Todo",        className: STATUS_STYLES_SUBTLE.slate },
+  PLANNING:    { label: "Planning",    className: STATUS_STYLES_SUBTLE.slate },
+  IN_PROGRESS: { label: "In Progress", className: STATUS_STYLES_SUBTLE.blue },
+  REVIEW:      { label: "In Review",   className: STATUS_STYLES_SUBTLE.amber },
+  COMPLETED:   { label: "Done",        className: STATUS_STYLES_SUBTLE.green },
+  FAILED:      { label: "Failed",      className: STATUS_STYLES_SUBTLE.red },
+  CANCELLED:   { label: "Cancelled",   className: STATUS_STYLES_SUBTLE.gray },
+  DUPLICATE:   { label: "Duplicate",   className: STATUS_STYLES_SUBTLE.gray },
 }
 
 const PRIORITY_ORDER: Record<IssuePriority, number> = {
@@ -86,20 +61,6 @@ const STATUS_ORDER: Record<MissionStatus, number> = {
 
 type SortKey = "identifier" | "title" | "status" | "priority" | "assignee" | "crew" | "updated"
 type SortDir = "asc" | "desc"
-
-function formatRelativeTime(dateStr: string): string {
-  const now = Date.now()
-  const date = new Date(dateStr).getTime()
-  const diffMs = now - date
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return "just now"
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHours = Math.floor(diffMin / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 30) return `${diffDays}d ago`
-  return new Date(dateStr).toLocaleDateString()
-}
 
 const BULK_STATUSES: { value: MissionStatus; label: string }[] = [
   { value: "BACKLOG", label: "Backlog" },

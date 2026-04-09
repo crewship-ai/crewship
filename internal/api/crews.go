@@ -484,43 +484,32 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-
 	// Build dynamic update
-	query := "UPDATE crews SET updated_at = ?"
-	args := []any{now}
+	ub := newUpdate()
 
 	if req.Name != nil {
-		query += ", name = ?"
-		args = append(args, *req.Name)
+		ub.Set("name", *req.Name)
 	}
 	if req.Slug != nil {
-		query += ", slug = ?"
-		args = append(args, *req.Slug)
+		ub.Set("slug", *req.Slug)
 	}
 	if req.Description != nil {
-		query += ", description = ?"
-		args = append(args, *req.Description)
+		ub.Set("description", *req.Description)
 	}
 	if req.Color != nil {
-		query += ", color = ?"
-		args = append(args, *req.Color)
+		ub.Set("color", *req.Color)
 	}
 	if req.Icon != nil {
-		query += ", icon = ?"
-		args = append(args, *req.Icon)
+		ub.Set("icon", *req.Icon)
 	}
 	if req.AvatarStyle != nil {
-		query += ", avatar_style = ?"
-		args = append(args, *req.AvatarStyle)
+		ub.Set("avatar_style", *req.AvatarStyle)
 	}
 	if req.ContainerMemoryMB != nil {
-		query += ", container_memory_mb = ?"
-		args = append(args, *req.ContainerMemoryMB)
+		ub.Set("container_memory_mb", *req.ContainerMemoryMB)
 	}
 	if req.ContainerCPUs != nil {
-		query += ", container_cpus = ?"
-		args = append(args, *req.ContainerCPUs)
+		ub.Set("container_cpus", *req.ContainerCPUs)
 	}
 	if req.ContainerTTLHours != nil {
 		if *req.ContainerTTLHours < 0 {
@@ -528,10 +517,9 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if *req.ContainerTTLHours == 0 {
-			query += ", container_ttl_hours = NULL"
+			ub.SetNull("container_ttl_hours")
 		} else {
-			query += ", container_ttl_hours = ?"
-			args = append(args, *req.ContainerTTLHours)
+			ub.Set("container_ttl_hours", *req.ContainerTTLHours)
 		}
 	}
 	if req.MCPConfigJSON != nil {
@@ -548,15 +536,13 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		query += ", mcp_config_json = ?"
-		args = append(args, *req.MCPConfigJSON)
+		ub.Set("mcp_config_json", *req.MCPConfigJSON)
 	}
 	if req.IssuePrefix != nil {
-		query += ", issue_prefix = ?"
 		if *req.IssuePrefix == "" {
-			args = append(args, nil)
+			ub.Set("issue_prefix", nil)
 		} else {
-			args = append(args, *req.IssuePrefix)
+			ub.Set("issue_prefix", *req.IssuePrefix)
 		}
 	}
 	if req.EscalationConfig != nil {
@@ -577,11 +563,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		query += ", escalation_config = ?"
 		if *req.EscalationConfig == "" {
-			args = append(args, nil)
+			ub.Set("escalation_config", nil)
 		} else {
-			args = append(args, *req.EscalationConfig)
+			ub.Set("escalation_config", *req.EscalationConfig)
 		}
 	}
 	// Track whether the resolved mode is free — if so, always clear allowed_domains.
@@ -592,11 +577,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "network_mode must be 'free' or 'restricted'"})
 			return
 		}
-		query += ", network_mode = ?"
-		args = append(args, mode)
+		ub.Set("network_mode", mode)
 		if mode == "free" {
 			updatedModeFree = true
-			query += ", allowed_domains = NULL"
+			ub.SetNull("allowed_domains")
 		}
 	}
 	// If mode was not explicitly set in this request, check the current DB mode.
@@ -609,7 +593,7 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if !updatedModeFree && req.AllowedDomains != nil {
 		if len(*req.AllowedDomains) == 0 {
-			query += ", allowed_domains = NULL"
+			ub.SetNull("allowed_domains")
 		} else {
 			normalized := make([]string, 0, len(*req.AllowedDomains))
 			for _, d := range *req.AllowedDomains {
@@ -626,14 +610,11 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 				return
 			}
-			query += ", allowed_domains = ?"
-			args = append(args, string(domainsJSON))
+			ub.Set("allowed_domains", string(domainsJSON))
 		}
 	}
 
-	query += " WHERE id = ?"
-	args = append(args, crewID)
-
+	query, args := ub.Build("crews", "id = ?", crewID)
 	_, err = h.db.ExecContext(r.Context(), query, args...)
 	if err != nil {
 		h.logger.Error("update crew", "error", err)

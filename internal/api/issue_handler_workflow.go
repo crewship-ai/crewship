@@ -236,20 +236,32 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 			iteration = COALESCE(iteration, 0) + 1, updated_at = ?
 			WHERE mission_id = ?`, resetNow, missionID)
 	} else {
-		taskID := generateCUID()
-		now := time.Now().UTC().Format(time.RFC3339)
-		desc := ""
-		if description.Valid {
-			desc = description.String
-		}
-		_, err = h.db.ExecContext(r.Context(), `
-			INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, description, status, task_order, depends_on, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, 'PENDING', 1, '[]', ?, ?)`,
-			taskID, missionID, assigneeID.String, title, desc, now, now)
-		if err != nil {
-			h.logger.Error("start issue: create task", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Failed to create task")
-			return
+		// If assignee is a LEAD agent, skip creating a default task so the mission engine
+		// triggers lead planning (with sidecar and crew context for delegation).
+		var assigneeRole string
+		_ = h.db.QueryRowContext(r.Context(),
+			`SELECT agent_role FROM agents WHERE id = ? AND deleted_at IS NULL`,
+			assigneeID.String).Scan(&assigneeRole)
+
+		if assigneeRole == "LEAD" {
+			h.logger.Info("start issue: LEAD assignee — skipping default task for lead planning",
+				"issue", ident, "assignee", assigneeID.String)
+		} else {
+			taskID := generateCUID()
+			now := time.Now().UTC().Format(time.RFC3339)
+			desc := ""
+			if description.Valid {
+				desc = description.String
+			}
+			_, err = h.db.ExecContext(r.Context(), `
+				INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, description, status, task_order, depends_on, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, 'PENDING', 1, '[]', ?, ?)`,
+				taskID, missionID, assigneeID.String, title, desc, now, now)
+			if err != nil {
+				h.logger.Error("start issue: create task", "error", err)
+				writeProblem(w, r, http.StatusInternalServerError, "Failed to create task")
+				return
+			}
 		}
 	}
 

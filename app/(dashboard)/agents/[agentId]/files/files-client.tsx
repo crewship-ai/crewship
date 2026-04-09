@@ -18,29 +18,12 @@ import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useRealtimeEvent, useRealtimeChannel } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import type { FileEntry, TreeNode } from "@/lib/types/agent"
 
 const FileEditor = dynamic(() => import("@/components/features/files/file-editor").then((m) => ({ default: m.FileEditor })), {
   ssr: false,
   loading: () => <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>,
 })
-
-interface FileEntry {
-  path: string
-  name: string
-  size: number
-  is_dir: boolean
-  mod_time: string
-}
-
-interface TreeNode {
-  path: string
-  name: string
-  size: number
-  is_dir: boolean
-  mod_time: string
-  children: TreeNode[]
-  childrenLoaded?: boolean
-}
 
 function sortNodes(nodes: TreeNode[]) {
   nodes.sort((a, b) => {

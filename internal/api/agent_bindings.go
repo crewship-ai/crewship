@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -251,8 +250,7 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	sets := []string{}
-	args := []any{}
+	ub := newUpdate()
 	if req.CredentialID != nil {
 		if *req.CredentialID != "" {
 			// Verify credential
@@ -268,49 +266,42 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 				return
 			}
 		}
-		sets = append(sets, "credential_id = ?")
-		args = append(args, req.CredentialID)
+		ub.Set("credential_id", req.CredentialID)
 	}
 	if req.Enabled != nil {
 		enabled := 0
 		if *req.Enabled {
 			enabled = 1
 		}
-		sets = append(sets, "enabled = ?")
-		args = append(args, enabled)
+		ub.Set("enabled", enabled)
 	}
 	if req.CredType != nil {
 		if *req.CredType != "bearer" && *req.CredType != "api_key" && *req.CredType != "basic" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cred_type must be 'bearer', 'api_key', or 'basic'"})
 			return
 		}
-		sets = append(sets, "cred_type = ?")
-		args = append(args, *req.CredType)
+		ub.Set("cred_type", *req.CredType)
 	}
 	if req.CredHeader != nil {
-		sets = append(sets, "cred_header = ?")
-		args = append(args, *req.CredHeader)
+		ub.Set("cred_header", *req.CredHeader)
 	}
 	if req.EnvVarName != nil {
 		if *req.EnvVarName == "" {
-			sets = append(sets, "env_var_name = NULL")
+			ub.SetNull("env_var_name")
 		} else {
-			sets = append(sets, "env_var_name = ?")
-			args = append(args, *req.EnvVarName)
+			ub.Set("env_var_name", *req.EnvVarName)
 		}
 	}
 	if req.ConfigOverride != nil {
-		sets = append(sets, "config_override_json = ?")
-		args = append(args, *req.ConfigOverride)
+		ub.Set("config_override_json", *req.ConfigOverride)
 	}
 
-	if len(sets) == 0 {
+	if ub.Empty() {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No fields to update"})
 		return
 	}
 
-	args = append(args, id)
-	query := "UPDATE agent_mcp_bindings SET " + strings.Join(sets, ", ") + " WHERE id = ?"
+	query, args := ub.Build("agent_mcp_bindings", "id = ?", id)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update agent binding", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})

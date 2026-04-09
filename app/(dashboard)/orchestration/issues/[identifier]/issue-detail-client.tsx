@@ -21,7 +21,7 @@ import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { ActivityFeed } from "@/components/features/issues/activity-feed"
 import { IssueSidebar, IssueSidebarMobile } from "@/components/features/orchestration/issue-sidebar"
-import { timeAgo } from "@/lib/time"
+import { timeAgo, formatDate } from "@/lib/time"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -49,14 +49,6 @@ function isMac(): boolean {
   const nav = navigator as Navigator & { userAgentData?: { platform?: string } }
   const platform = nav.userAgentData?.platform ?? navigator.platform ?? ""
   return platform.includes("Mac")
-}
-
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })
 }
 
 // ---------------------------------------------------------------------------

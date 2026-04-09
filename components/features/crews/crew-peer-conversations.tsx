@@ -20,48 +20,19 @@ import {
 } from "@/components/ui/tooltip"
 import { peerConversationSchema, type PeerConversation } from "@/lib/types/peer-conversation"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
+import { formatRelativeTime } from "@/lib/time"
 import { z } from "zod"
+import { STATUS_STYLES, type StatusConfigEntryWithIcon } from "@/lib/status-config"
 
 interface CrewPeerConversationsProps {
   crewId: string
   workspaceId: string
 }
 
-const STATUS_CONFIG: Record<PeerConversation["status"], {
-  label: string
-  className: string
-  icon: React.ComponentType<{ className?: string }>
-}> = {
-  COMPLETED: {
-    label: "Completed",
-    className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-    icon: CheckCircle2,
-  },
-  RUNNING: {
-    label: "Running",
-    className: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-    icon: Loader2,
-  },
-  FAILED: {
-    label: "Failed",
-    className: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
-    icon: XCircle,
-  },
-}
-
-function formatRelativeTime(dateStr: string): string {
-  const now = Date.now()
-  const date = new Date(dateStr).getTime()
-  const diffMs = now - date
-
-  const seconds = Math.floor(diffMs / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
+const STATUS_CONFIG: Record<PeerConversation["status"], StatusConfigEntryWithIcon> = {
+  COMPLETED: { label: "Completed", className: STATUS_STYLES.emerald, icon: CheckCircle2 },
+  RUNNING:   { label: "Running",   className: STATUS_STYLES.blue,    icon: Loader2 },
+  FAILED:    { label: "Failed",    className: STATUS_STYLES.red,     icon: XCircle },
 }
 
 function formatDurationMs(ms: number | null): string {

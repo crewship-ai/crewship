@@ -9,23 +9,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { formatRelativeTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
 import type { Notification } from "@/lib/types/mission"
-
-function formatRelativeTime(dateStr: string): string {
-  const now = Date.now()
-  const date = new Date(dateStr).getTime()
-  const diffMs = now - date
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return "just now"
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHours = Math.floor(diffMin / 60)
-  if (diffHours < 24) return `${diffHours}h ago`
-  const diffDays = Math.floor(diffHours / 24)
-  if (diffDays < 30) return `${diffDays}d ago`
-  return new Date(dateStr).toLocaleDateString()
-}
 
 const ACTION_LABELS: Record<string, string> = {
   created: "created",

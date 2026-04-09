@@ -200,43 +200,28 @@ func (h *TemplateHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build dynamic update
-	sets := []string{"updated_at = ?"}
-	args := []interface{}{time.Now().UTC().Format(time.RFC3339)}
+	ub := newUpdate()
 	if req.Name != nil {
-		sets = append(sets, "name = ?")
-		args = append(args, *req.Name)
+		ub.Set("name", *req.Name)
 	}
 	if req.Description != nil {
-		sets = append(sets, "description = ?")
-		args = append(args, *req.Description)
+		ub.Set("description", *req.Description)
 	}
 	if req.TemplateJSON != nil {
 		if !json.Valid(*req.TemplateJSON) {
 			writeProblem(w, r, http.StatusBadRequest, "template_json must be valid JSON")
 			return
 		}
-		sets = append(sets, "template_json = ?")
-		args = append(args, string(*req.TemplateJSON))
+		ub.Set("template_json", string(*req.TemplateJSON))
 	}
 	if req.Icon != nil {
-		sets = append(sets, "icon = ?")
-		args = append(args, *req.Icon)
+		ub.Set("icon", *req.Icon)
 	}
 	if req.Color != nil {
-		sets = append(sets, "color = ?")
-		args = append(args, *req.Color)
+		ub.Set("color", *req.Color)
 	}
 
-	args = append(args, templateID, wsID)
-	query := "UPDATE workflow_templates SET "
-	for i, s := range sets {
-		if i > 0 {
-			query += ", "
-		}
-		query += s
-	}
-	query += " WHERE id = ? AND workspace_id = ?"
-
+	query, args := ub.Build("workflow_templates", "id = ? AND workspace_id = ?", templateID, wsID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update template", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Failed to update template")
