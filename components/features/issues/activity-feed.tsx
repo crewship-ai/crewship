@@ -48,7 +48,7 @@ export function ActivityFeed({ activities }: { activities: IssueActivity[] }) {
       </div>
       <div className="space-y-0">
         {activities.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground/40">No activity yet</p>
+          <p className="text-[11px] text-foreground/40">No activity yet</p>
         ) : (
           activities.map((a, i) => (
             <div key={a.id} className="flex items-start gap-2.5 py-1.5 relative">
@@ -62,10 +62,10 @@ export function ActivityFeed({ activities }: { activities: IssueActivity[] }) {
                   {" "}
                   {actionLabel(a.action)}
                   {a.details && a.action === "status_changed" && (
-                    <span className="text-muted-foreground/50"> {a.details}</span>
+                    <span className="text-foreground/50"> {a.details}</span>
                   )}
                 </span>
-                <span className="text-[10px] text-muted-foreground/30 ml-1.5">{timeAgo(a.created_at)}</span>
+                <span className="text-[10px] text-foreground/35 ml-1.5">{timeAgo(a.created_at)}</span>
               </div>
             </div>
           ))

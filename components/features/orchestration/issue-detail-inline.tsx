@@ -542,7 +542,7 @@ export function IssueDetailInline({
                         {issue.assignee_id && (
                           <img src={getAgentAvatarUrl(issue.assignee_id)} alt="" className="h-4 w-4 rounded-full" />
                         )}
-                        {issue.assignee_name || <span className="text-muted-foreground/40">Unassigned</span>}
+                        {issue.assignee_name || <span className="text-foreground/40">Unassigned</span>}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -590,7 +590,7 @@ export function IssueDetailInline({
                       <PropertyRow label="Due date">
                         <span className="flex items-center gap-1.5">
                           <CalendarIcon className="h-3 w-3 text-muted-foreground/50" />
-                          {issue.due_date ? new Date(issue.due_date).toLocaleDateString() : <span className="text-muted-foreground/40">No due date</span>}
+                          {issue.due_date ? new Date(issue.due_date).toLocaleDateString() : <span className="text-foreground/40">No due date</span>}
                         </span>
                       </PropertyRow>
                     </div>
@@ -630,7 +630,7 @@ export function IssueDetailInline({
                   <PopoverTrigger asChild>
                     <div>
                       <PropertyRow label="Estimate">
-                        {issue.estimate ? `${issue.estimate} pts` : <span className="text-muted-foreground/40">&mdash;</span>}
+                        {issue.estimate ? `${issue.estimate} pts` : <span className="text-foreground/40">&mdash;</span>}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -661,7 +661,7 @@ export function IssueDetailInline({
                   <PopoverTrigger asChild>
                     <div>
                       <PropertyRow label="Milestone">
-                        {currentMilestone ? currentMilestone.name : <span className="text-muted-foreground/40">&mdash;</span>}
+                        {currentMilestone ? currentMilestone.name : <span className="text-foreground/40">&mdash;</span>}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -809,7 +809,7 @@ export function IssueDetailInline({
                     ))}
                   </div>
                 ) : (
-                  <span className="text-[11px] text-muted-foreground/40 pl-0.5">
+                  <span className="text-[11px] text-foreground/40 pl-0.5">
                     No labels
                   </span>
                 )}
@@ -959,7 +959,7 @@ export function IssueDetailInline({
                   <div className="space-y-2">
                     {Object.entries(relationsByType).map(([type, rels]) => (
                       <div key={type}>
-                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50">
+                        <span className="text-[10px] uppercase tracking-wider text-foreground/50">
                           {RELATION_TYPE_LABELS[type as RelationType] || type}
                         </span>
                         <div className="mt-0.5 space-y-0.5">
@@ -1010,7 +1010,7 @@ export function IssueDetailInline({
               {subIssuesOpen && (
                 <div className="px-3 pb-2 space-y-1">
                   {subIssues.length === 0 ? (
-                    <span className="text-[11px] text-muted-foreground/40 pl-0.5">Loading...</span>
+                    <span className="text-[11px] text-foreground/40 pl-0.5">Loading...</span>
                   ) : (
                     subIssues.map((sub) => (
                       <a
@@ -1032,7 +1032,7 @@ export function IssueDetailInline({
           {/* ── Comments section ─────────────────────────────────────────── */}
           <div className="border-t border-white/[0.06] mt-1">
             <div className="px-3 py-1.5">
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground/60 font-medium">
+              <span className="text-[11px] uppercase tracking-wider text-foreground/50 font-medium">
                 Comments ({comments.length})
               </span>
             </div>
@@ -1056,7 +1056,7 @@ export function IssueDetailInline({
                           <span className="text-[11px] font-medium text-foreground/80">
                             {comment.author_name || comment.author_type}
                           </span>
-                          <span className="text-[10px] text-muted-foreground/40">
+                          <span className="text-[10px] text-foreground/35">
                             {timeAgo(comment.created_at)}
                           </span>
                         </div>
@@ -1068,7 +1068,7 @@ export function IssueDetailInline({
                   ))}
                 </div>
               ) : (
-                <p className="text-[11px] text-muted-foreground/40">No comments yet</p>
+                <p className="text-[11px] text-foreground/40">No comments yet</p>
               )}
 
               {/* New comment input */}
