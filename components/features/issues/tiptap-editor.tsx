@@ -321,33 +321,14 @@ const SLASH_ITEMS: SlashCommandItem[] = [
     description: "Insert image from URL",
     icon: ImagePlus,
     command: ({ editor, range }) => {
+      editor.chain().focus().deleteRange(range).run()
       const url = window.prompt("Image URL:")
       if (!url) return
-      editor
-        .chain()
-        .focus()
-        .deleteRange(range)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ;(editor.chain().focus().deleteRange(range) as any)
-        .setImage({ src: url })
-        .run()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(editor.chain().focus() as any).setImage({ src: url }).run()
     },
   },
 ]
-
-// Fix Image slash command to work correctly
-SLASH_ITEMS[SLASH_ITEMS.length - 1] = {
-  title: "Image",
-  description: "Insert image from URL",
-  icon: ImagePlus,
-  command: ({ editor, range }) => {
-    editor.chain().focus().deleteRange(range).run()
-    const url = window.prompt("Image URL:")
-    if (!url) return
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ;(editor.chain().focus() as any).setImage({ src: url }).run()
-  },
-}
 
 // ---------------------------------------------------------------------------
 // Slash command suggestion dropdown (rendered via React ref)
@@ -881,7 +862,7 @@ export function TiptapEditor({
 }: TiptapEditorProps) {
   const [showHighlightPicker, setShowHighlightPicker] = useState(false)
   const [showTextColorPicker, setShowTextColorPicker] = useState(false)
-  const saveTimeoutRef = useRef<NodeJS.Timeout>(null)
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Bubble menu state
@@ -1043,7 +1024,7 @@ export function TiptapEditor({
     if (editor && content !== htmlToMarkdown(editor.getHTML())) {
       editor.commands.setContent(markdownToHtml(content))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally omit editor to avoid infinite loops on editor state changes
   }, [content])
 
   const handleInsertLink = useCallback(() => {

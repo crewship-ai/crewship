@@ -347,7 +347,9 @@ export function CreateProjectModal({
 
               {/* Name + Summary */}
               <div className="flex-1 min-w-0">
+                <label htmlFor="project-name" className="sr-only">Project name</label>
                 <input
+                  id="project-name"
                   ref={nameRef}
                   type="text"
                   value={name}
@@ -355,7 +357,9 @@ export function CreateProjectModal({
                   placeholder="Project name"
                   className="w-full bg-transparent text-base font-medium text-foreground placeholder:text-muted-foreground/50 outline-none"
                 />
+                <label htmlFor="project-summary" className="sr-only">Project summary</label>
                 <input
+                  id="project-summary"
                   type="text"
                   value={summary}
                   onChange={(e) => setSummary(e.target.value)}

@@ -66,7 +66,7 @@ func ResolveOAuthCredentials() []OAuthCredentialDef {
 
 	googleToken := os.Getenv("SEED_GOOGLE_OAUTH_ACCESS_TOKEN")
 	googleClientID := os.Getenv("SEED_GOOGLE_OAUTH_CLIENT_ID")
-	if googleToken != "" || googleClientID != "" {
+	if googleToken != "" || (googleClientID != "" && os.Getenv("SEED_GOOGLE_OAUTH_CLIENT_SECRET") != "") {
 		creds = append(creds, OAuthCredentialDef{
 			IntegrationName:   "google-workspace",
 			CredName:          "google-workspace-oauth",

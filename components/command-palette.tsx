@@ -18,7 +18,8 @@ import {
   CommandSeparator,
 } from "@/components/ui/command"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { getCrewDotColor } from "@/lib/crew-icon"
+import { getCrewDotColor, getGradientPalette } from "@/lib/crew-icon"
+import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { CrewIcon } from "@/components/ui/crew-icon"
 
@@ -192,12 +193,12 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           <>
             <CommandSeparator />
             <CommandGroup heading="Issues">
-              {issues.map((issue) => (
+              {issues.filter((issue) => issue.identifier).map((issue) => (
                 <CommandItem
                   key={issue.id}
-                  value={`issue ${issue.identifier ?? ""} ${issue.title}`}
+                  value={`issue ${issue.identifier} ${issue.title}`}
                   keywords={[issue.status, issue.priority, issue.assignee_name ?? "", issue.crew_name ?? ""]}
-                  onSelect={() => issue.identifier && runCommand(() => router.push(`/orchestration/issues/${issue.identifier}`))}
+                  onSelect={() => runCommand(() => router.push(`/orchestration/issues/${issue.identifier}`))}
                 >
                   <StatusIcon status={issue.status} className="h-4 w-4 shrink-0" />
                   <span className="text-xs font-mono text-muted-foreground shrink-0">{issue.identifier}</span>
@@ -220,8 +221,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   keywords={[project.status]}
                   onSelect={() => runCommand(() => router.push(`/orchestration/projects/${project.id}`))}
                 >
-                  <div className="h-4 w-4 rounded shrink-0 flex items-center justify-center" style={{ backgroundColor: project.color + "20" }}>
-                    <FolderKanban className="h-2.5 w-2.5" style={{ color: project.color }} />
+                  <div className={cn("h-4 w-4 rounded shrink-0 flex items-center justify-center bg-gradient-to-br", getGradientPalette(project.color).from, getGradientPalette(project.color).to)}>
+                    <FolderKanban className={cn("h-2.5 w-2.5", getGradientPalette(project.color).text)} />
                   </div>
                   <span className="flex-1 truncate">{project.name}</span>
                   <span className="text-xs text-muted-foreground">{project.issue_count} issues</span>

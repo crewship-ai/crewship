@@ -437,7 +437,11 @@ var issueUpdateCmd = &cobra.Command{
 		}
 		if flags.Changed("assignee-type") {
 			v, _ := flags.GetString("assignee-type")
-			body["assignee_type"] = v
+			if strings.TrimSpace(v) == "" {
+				body["assignee_type"] = nil
+			} else {
+				body["assignee_type"] = v
+			}
 		}
 		if flags.Changed("due-date") {
 			v, _ := flags.GetString("due-date")
@@ -708,7 +712,7 @@ var issueReviewCmd = &cobra.Command{
 
 func init() {
 	// issue list flags
-	issueListCmd.Flags().String("status", "", "Filter by status (BACKLOG, TODO, IN_PROGRESS, REVIEW, DONE, FAILED, CANCELLED)")
+	issueListCmd.Flags().String("status", "", "Filter by status (BACKLOG, TODO, IN_PROGRESS, REVIEW, DONE, FAILED, CANCELLED, DUPLICATE)")
 	issueListCmd.Flags().String("priority", "", "Filter by priority (none, low, medium, high, urgent)")
 	issueListCmd.Flags().String("crew", "", "Filter by crew slug or ID")
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee ID")
@@ -729,7 +733,7 @@ func init() {
 	// issue update flags
 	issueUpdateCmd.Flags().String("title", "", "New title")
 	issueUpdateCmd.Flags().String("description", "", "New description")
-	issueUpdateCmd.Flags().String("status", "", "New status: BACKLOG, TODO, IN_PROGRESS, REVIEW, DONE, FAILED, CANCELLED")
+	issueUpdateCmd.Flags().String("status", "", "New status: BACKLOG, TODO, IN_PROGRESS, REVIEW, DONE, FAILED, CANCELLED, DUPLICATE")
 	issueUpdateCmd.Flags().String("priority", "", "New priority: none, low, medium, high, urgent")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee ID")
 	issueUpdateCmd.Flags().String("assignee-type", "", "Assignee type: agent or user")

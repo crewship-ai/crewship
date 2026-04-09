@@ -22,6 +22,9 @@ interface LabelsDialogProps {
   onLabelsChanged: () => void
 }
 
+// Inline styles are used for color swatches and label dots because label colors
+// are stored as hex values in the database. Arbitrary hex colors from user-defined
+// labels cannot be reliably mapped to Tailwind utility classes.
 const PRESET_COLORS = [
   { name: "Red", value: "#EF4444" },
   { name: "Orange", value: "#F97316" },
@@ -54,6 +57,7 @@ export function LabelsDialog({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   async function handleCreate() {
+    if (creating) return
     if (!newName.trim()) {
       toast.error("Label name is required")
       return
@@ -89,6 +93,7 @@ export function LabelsDialog({
   }
 
   async function handleUpdate(id: string) {
+    if (saving) return
     if (!editName.trim()) {
       toast.error("Label name is required")
       return
@@ -122,6 +127,7 @@ export function LabelsDialog({
   }
 
   async function handleDelete(id: string) {
+    if (deletingId === id) return
     setDeletingId(id)
     try {
       const res = await fetch(
@@ -262,6 +268,7 @@ export function LabelsDialog({
                     className="h-6 w-6 shrink-0"
                     onClick={() => handleUpdate(label.id)}
                     disabled={saving}
+                    aria-label="Save changes"
                   >
                     {saving ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -274,6 +281,7 @@ export function LabelsDialog({
                     variant="ghost"
                     className="h-6 w-6 shrink-0"
                     onClick={() => setEditingId(null)}
+                    aria-label="Cancel editing"
                   >
                     <X className="h-3 w-3" />
                   </Button>
@@ -286,7 +294,15 @@ export function LabelsDialog({
                   />
                   <span
                     className="text-sm flex-1 cursor-pointer hover:underline"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => startEdit(label)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault()
+                        startEdit(label)
+                      }
+                    }}
                   >
                     {label.name}
                   </span>
@@ -298,8 +314,9 @@ export function LabelsDialog({
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100"
+                    className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                     onClick={() => startEdit(label)}
+                    aria-label={`Edit ${label.name}`}
                   >
                     <Pencil className="h-3 w-3" />
                   </Button>
@@ -311,6 +328,7 @@ export function LabelsDialog({
                         className="h-6 text-[10px] px-2"
                         onClick={() => handleDelete(label.id)}
                         disabled={deletingId === label.id}
+                        aria-label={`Confirm delete ${label.name}`}
                       >
                         {deletingId === label.id ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -323,6 +341,7 @@ export function LabelsDialog({
                         variant="ghost"
                         className="h-6 w-6"
                         onClick={() => setConfirmDeleteId(null)}
+                        aria-label="Cancel delete"
                       >
                         <X className="h-3 w-3" />
                       </Button>
@@ -331,8 +350,9 @@ export function LabelsDialog({
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+                      className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-destructive"
                       onClick={() => setConfirmDeleteId(label.id)}
+                      aria-label={`Delete ${label.name}`}
                     >
                       <Trash2 className="h-3 w-3" />
                     </Button>

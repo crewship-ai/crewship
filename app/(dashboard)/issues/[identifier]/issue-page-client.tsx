@@ -27,10 +27,14 @@ import type { Mission, IssueComment, IssuePriority, MissionStatus } from "@/lib/
 const STATUS_OPTIONS: { value: MissionStatus; label: string; color: string }[] = [
   { value: "BACKLOG", label: "Backlog", color: "bg-slate-400" },
   { value: "TODO", label: "Todo", color: "bg-slate-500" },
+  { value: "PLANNING", label: "Planning", color: "bg-indigo-400" },
   { value: "IN_PROGRESS", label: "In Progress", color: "bg-blue-500" },
   { value: "REVIEW", label: "In Review", color: "bg-amber-500" },
-  { value: "COMPLETED", label: "Done", color: "bg-green-500" },
+  { value: "COMPLETED", label: "Completed", color: "bg-green-500" },
+  { value: "DONE", label: "Done", color: "bg-emerald-500" },
+  { value: "FAILED", label: "Failed", color: "bg-red-500" },
   { value: "CANCELLED", label: "Cancelled", color: "bg-gray-400" },
+  { value: "DUPLICATE", label: "Duplicate", color: "bg-gray-300" },
 ]
 
 const PRIORITY_OPTIONS: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
@@ -317,7 +321,7 @@ export function IssuePageClient() {
               <input
                 type="date"
                 className="w-full h-8 text-xs px-2 border rounded-md bg-background"
-                value={issue.due_date || ""}
+                value={issue.due_date?.split("T")[0] || ""}
                 onChange={(e) => patchIssue("due_date", e.target.value || null)}
               />
             </div>

@@ -439,7 +439,7 @@ func seedCredentials(client *cli.Client, agentIDs map[string]string) error {
 	}
 
 	// Assign to all agents
-	for slug, agentID := range agentIDs {
+	for _, agentID := range agentIDs {
 		resp, err := client.Post(
 			fmt.Sprintf("/api/v1/agents/%s/credentials", agentID),
 			map[string]string{"credential_id": anthroID, "env_var_name": anthro.EnvVarName},
@@ -447,7 +447,6 @@ func seedCredentials(client *cli.Client, agentIDs map[string]string) error {
 		if err == nil {
 			resp.Body.Close()
 		}
-		_ = slug
 	}
 	fmt.Fprintf(os.Stderr, "  + Assigned %s to %d agents\n", anthro.Name, len(agentIDs))
 
@@ -878,7 +877,10 @@ func createOrResolve(client *cli.Client, createPath string, body interface{}, li
 	if err != nil {
 		return "", err
 	}
-	// Handle both 409 Conflict and 500 (some APIs return 500 on UNIQUE constraint)
+	// Handle both 409 Conflict and 500 (some APIs return 500 on UNIQUE constraint).
+	// TODO(tech-debt): treating HTTP 500 as a conflict is a deliberate workaround
+	// for API inconsistency — some endpoints do not return 409 on duplicate inserts.
+	// Same rationale as seedOneCredential. Remove once all endpoints return 409.
 	if resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusInternalServerError {
 		resp.Body.Close()
 		return resolveBySlug(client, listPath, slug)

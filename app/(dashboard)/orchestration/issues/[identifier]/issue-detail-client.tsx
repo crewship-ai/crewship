@@ -8,7 +8,6 @@ import {
   Check,
   ChevronRight,
   ChevronsUpDown,
-  Copy,
   FolderKanban,
   Hash,
   Link2,
@@ -27,7 +26,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useSession } from "@/hooks/use-auth"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { StatusIcon, statusLabel, statusColor } from "@/components/features/issues/status-icon"
+import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
@@ -73,8 +72,10 @@ const ALL_STATUSES: { value: MissionStatus; label: string }[] = [
   { value: "IN_PROGRESS", label: "In Progress" },
   { value: "REVIEW", label: "In Review" },
   { value: "COMPLETED", label: "Done" },
+  { value: "DONE", label: "Done" },
   { value: "FAILED", label: "Failed" },
   { value: "CANCELLED", label: "Cancelled" },
+  { value: "DUPLICATE", label: "Duplicate" },
 ]
 
 const ALL_PRIORITIES: IssuePriority[] = ["urgent", "high", "medium", "low", "none"]
@@ -160,7 +161,6 @@ export function IssueDetailClient() {
   const [loadingActivity, setLoadingActivity] = useState(false)
 
   // Description editing
-  const [editingDesc, setEditingDesc] = useState(false)
   const [descDraft, setDescDraft] = useState("")
 
   // Relations

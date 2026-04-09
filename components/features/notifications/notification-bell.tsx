@@ -48,7 +48,7 @@ export function NotificationBell() {
   const fetchCount = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/notifications/count?workspace_id=${workspaceId}`)
+      const res = await fetch(`/api/v1/notifications/count?workspace_id=${encodeURIComponent(workspaceId)}`)
       if (res.ok) {
         const data = await res.json()
         setUnreadCount(data.unread ?? data.count ?? 0)
@@ -63,7 +63,7 @@ export function NotificationBell() {
     if (!workspaceId) return
     setLoading(true)
     try {
-      const res = await fetch(`/api/v1/notifications?workspace_id=${workspaceId}&limit=20`)
+      const res = await fetch(`/api/v1/notifications?workspace_id=${encodeURIComponent(workspaceId)}&limit=20`)
       if (res.ok) {
         const data = await res.json()
         setNotifications(Array.isArray(data) ? data : data.notifications ?? [])
@@ -93,7 +93,7 @@ export function NotificationBell() {
     async (notificationId: string) => {
       if (!workspaceId) return
       try {
-        const res = await fetch(`/api/v1/notifications/${notificationId}/read?workspace_id=${workspaceId}`, {
+        const res = await fetch(`/api/v1/notifications/${encodeURIComponent(notificationId)}/read?workspace_id=${encodeURIComponent(workspaceId)}`, {
           method: "POST",
         })
         if (!res.ok) return
@@ -111,7 +111,7 @@ export function NotificationBell() {
   const markAllRead = useCallback(async () => {
     if (!workspaceId) return
     try {
-      const res = await fetch(`/api/v1/notifications/read-all?workspace_id=${workspaceId}`, {
+      const res = await fetch(`/api/v1/notifications/read-all?workspace_id=${encodeURIComponent(workspaceId)}`, {
         method: "POST",
       })
       if (!res.ok) return
