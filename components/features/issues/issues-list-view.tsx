@@ -19,6 +19,7 @@ import type { Mission, MissionStatus, IssuePriority } from "@/lib/types/mission"
 interface IssuesListViewProps {
   issues: Mission[]
   onIssueClick: (issue: Mission) => void
+  selectedIssueId?: string | null
 }
 
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
@@ -98,7 +99,7 @@ function formatRelativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString()
 }
 
-export function IssuesListView({ issues, onIssueClick }: IssuesListViewProps) {
+export function IssuesListView({ issues, onIssueClick, selectedIssueId }: IssuesListViewProps) {
   const [sortKey, setSortKey] = useState<SortKey>("updated")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
 
@@ -232,10 +233,12 @@ export function IssuesListView({ issues, onIssueClick }: IssuesListViewProps) {
         <TableBody>
           {sorted.map((issue) => {
             const statusCfg = STATUS_CONFIG[issue.status] || STATUS_CONFIG.BACKLOG
+            const isDimmed = selectedIssueId != null && issue.id !== selectedIssueId
+            const isHighlighted = selectedIssueId != null && issue.id === selectedIssueId
             return (
               <TableRow
                 key={issue.id}
-                className="cursor-pointer"
+                className={cn("cursor-pointer transition-all duration-200", isDimmed && "opacity-40", isHighlighted && "bg-blue-500/5")}
                 onClick={() => onIssueClick(issue)}
               >
                 <TableCell className="text-xs font-mono text-muted-foreground">

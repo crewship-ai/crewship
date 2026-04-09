@@ -749,9 +749,9 @@ export function OrchestrationLayout({
                     className="h-full"
                   >
                     {issueViewMode === "board" ? (
-                      <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
+                      <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} />
                     ) : (
-                      <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
+                      <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} selectedIssueId={selectedIssue?.id} />
                     )}
                   </motion.div>
                 </AnimatePresence>

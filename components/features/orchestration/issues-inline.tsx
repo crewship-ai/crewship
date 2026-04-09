@@ -161,10 +161,11 @@ export function IssuesExplorerPanel({
 interface IssuesBoardInlineProps {
   issues: Mission[]
   onIssueClick: (issue: Mission) => void
+  selectedIssueId?: string | null
 }
 
-export function IssuesBoardInline({ issues, onIssueClick }: IssuesBoardInlineProps) {
-  return <IssuesBoardView issues={issues} onIssueClick={onIssueClick} />
+export function IssuesBoardInline({ issues, onIssueClick, selectedIssueId }: IssuesBoardInlineProps) {
+  return <IssuesBoardView issues={issues} onIssueClick={onIssueClick} selectedIssueId={selectedIssueId} />
 }
 
 /* -------------------------------------------------------------------------- */
@@ -174,10 +175,11 @@ export function IssuesBoardInline({ issues, onIssueClick }: IssuesBoardInlinePro
 interface IssuesListInlineProps {
   issues: Mission[]
   onIssueClick: (issue: Mission) => void
+  selectedIssueId?: string | null
 }
 
-export function IssuesListInline({ issues, onIssueClick }: IssuesListInlineProps) {
-  return <IssuesListView issues={issues} onIssueClick={onIssueClick} />
+export function IssuesListInline({ issues, onIssueClick, selectedIssueId }: IssuesListInlineProps) {
+  return <IssuesListView issues={issues} onIssueClick={onIssueClick} selectedIssueId={selectedIssueId} />
 }
 
 /* -------------------------------------------------------------------------- */

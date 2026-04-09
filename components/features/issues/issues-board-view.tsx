@@ -11,12 +11,13 @@ interface IssuesBoardViewProps {
   issues: Mission[]
   onIssueClick: (issue: Mission) => void
   onCreateClick?: () => void
+  selectedIssueId?: string | null
 }
 
 const MAIN_STATUSES: MissionStatus[] = ["BACKLOG", "TODO", "IN_PROGRESS", "REVIEW", "COMPLETED"]
 const SECONDARY_STATUSES: MissionStatus[] = ["FAILED", "CANCELLED", "DUPLICATE"]
 
-export function IssuesBoardView({ issues, onIssueClick, onCreateClick }: IssuesBoardViewProps) {
+export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedIssueId }: IssuesBoardViewProps) {
   const hasIssues = issues.length > 0
   const secondaryIssues = issues.filter((i) =>
     SECONDARY_STATUSES.includes(i.status)
@@ -69,13 +70,25 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick }: IssuesB
                       <span className="text-xs text-muted-foreground/50">No issues</span>
                     </div>
                   ) : (
-                    colIssues.map((issue) => (
-                      <IssueCard
-                        key={issue.id}
-                        issue={issue}
-                        onClick={() => onIssueClick(issue)}
-                      />
-                    ))
+                    colIssues.map((issue) => {
+                      const isDimmed = selectedIssueId != null && issue.id !== selectedIssueId
+                      const isHighlighted = selectedIssueId != null && issue.id === selectedIssueId
+                      return (
+                        <div
+                          key={issue.id}
+                          className={cn(
+                            "transition-all duration-200",
+                            isDimmed && "opacity-40 scale-[0.98]",
+                            isHighlighted && "ring-1 ring-blue-500/50 rounded-lg",
+                          )}
+                        >
+                          <IssueCard
+                            issue={issue}
+                            onClick={() => onIssueClick(issue)}
+                          />
+                        </div>
+                      )
+                    })
                   )}
                 </div>
               </ScrollArea>
@@ -102,11 +115,14 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick }: IssuesB
                   </span>
                 </div>
                 <div className="flex gap-2 overflow-x-auto">
-                  {colIssues.map((issue) => (
-                    <div key={issue.id} className="w-[240px] shrink-0">
-                      <IssueCard issue={issue} onClick={() => onIssueClick(issue)} />
-                    </div>
-                  ))}
+                  {colIssues.map((issue) => {
+                    const isDimmed = selectedIssueId != null && issue.id !== selectedIssueId
+                    return (
+                      <div key={issue.id} className={cn("w-[240px] shrink-0 transition-all duration-200", isDimmed && "opacity-40")}>
+                        <IssueCard issue={issue} onClick={() => onIssueClick(issue)} />
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )
