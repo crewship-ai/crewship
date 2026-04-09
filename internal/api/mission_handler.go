@@ -12,6 +12,29 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// missionSelectColumns is the shared SELECT clause for fetching missions with agent info.
+const missionSelectColumns = `
+	SELECT m.id, m.workspace_id, m.crew_id, m.lead_agent_id, m.trace_id, m.title,
+	       m.description, m.status, m.plan, m.workflow_template,
+	       m.total_token_count, m.total_estimated_cost,
+	       m.created_at, m.updated_at, m.completed_at,
+	       a.name, a.slug
+	FROM missions m
+	JOIN agents a ON a.id = m.lead_agent_id`
+
+// scanMission scans a row into a missionResponse using the standard column order.
+func scanMission(s interface{ Scan(...interface{}) error }) (missionResponse, error) {
+	var m missionResponse
+	err := s.Scan(
+		&m.ID, &m.WorkspaceID, &m.CrewID, &m.LeadAgentID, &m.TraceID, &m.Title,
+		&m.Description, &m.Status, &m.Plan, &m.WorkflowTemplate,
+		&m.TotalTokenCount, &m.TotalEstimatedCost,
+		&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
+		&m.LeadAgentName, &m.LeadAgentSlug,
+	)
+	return m, err
+}
+
 // Create handles POST /api/v1/crews/{crewId}/missions
 func (h *MissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
@@ -146,14 +169,7 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 		offset = 0
 	}
 
-	query := `
-		SELECT m.id, m.workspace_id, m.crew_id, m.lead_agent_id, m.trace_id, m.title,
-		       m.description, m.status, m.plan, m.workflow_template,
-		       m.total_token_count, m.total_estimated_cost,
-		       m.created_at, m.updated_at, m.completed_at,
-		       a.name, a.slug
-		FROM missions m
-		JOIN agents a ON a.id = m.lead_agent_id
+	query := missionSelectColumns + `
 		WHERE m.crew_id = ? AND m.workspace_id = ?`
 	args := []interface{}{crewID, wsID}
 
@@ -174,14 +190,8 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	var result []missionResponse
 	for rows.Next() {
-		var m missionResponse
-		if err := rows.Scan(
-			&m.ID, &m.WorkspaceID, &m.CrewID, &m.LeadAgentID, &m.TraceID, &m.Title,
-			&m.Description, &m.Status, &m.Plan, &m.WorkflowTemplate,
-			&m.TotalTokenCount, &m.TotalEstimatedCost,
-			&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
-			&m.LeadAgentName, &m.LeadAgentSlug,
-		); err != nil {
+		m, err := scanMission(rows)
+		if err != nil {
 			h.logger.Error("scan mission", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
@@ -231,14 +241,7 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 		offset = 0
 	}
 
-	query := `
-		SELECT m.id, m.workspace_id, m.crew_id, m.lead_agent_id, m.trace_id, m.title,
-		       m.description, m.status, m.plan, m.workflow_template,
-		       m.total_token_count, m.total_estimated_cost,
-		       m.created_at, m.updated_at, m.completed_at,
-		       a.name, a.slug
-		FROM missions m
-		JOIN agents a ON a.id = m.lead_agent_id
+	query := missionSelectColumns + `
 		WHERE m.workspace_id = ?`
 	args := []interface{}{wsID}
 
@@ -259,14 +262,8 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 
 	var result []missionResponse
 	for rows.Next() {
-		var m missionResponse
-		if err := rows.Scan(
-			&m.ID, &m.WorkspaceID, &m.CrewID, &m.LeadAgentID, &m.TraceID, &m.Title,
-			&m.Description, &m.Status, &m.Plan, &m.WorkflowTemplate,
-			&m.TotalTokenCount, &m.TotalEstimatedCost,
-			&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
-			&m.LeadAgentName, &m.LeadAgentSlug,
-		); err != nil {
+		m, err := scanMission(rows)
+		if err != nil {
 			h.logger.Error("scan mission", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
@@ -317,23 +314,9 @@ func (h *MissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	missionID := r.PathValue("missionId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	var m missionResponse
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, m.lead_agent_id, m.trace_id, m.title,
-		       m.description, m.status, m.plan, m.workflow_template,
-		       m.total_token_count, m.total_estimated_cost,
-		       m.created_at, m.updated_at, m.completed_at,
-		       a.name, a.slug
-		FROM missions m
-		JOIN agents a ON a.id = m.lead_agent_id
-		WHERE m.id = ? AND m.crew_id = ? AND m.workspace_id = ?`,
-		missionID, crewID, wsID).Scan(
-		&m.ID, &m.WorkspaceID, &m.CrewID, &m.LeadAgentID, &m.TraceID, &m.Title,
-		&m.Description, &m.Status, &m.Plan, &m.WorkflowTemplate,
-		&m.TotalTokenCount, &m.TotalEstimatedCost,
-		&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
-		&m.LeadAgentName, &m.LeadAgentSlug,
-	)
+	m, err := scanMission(h.db.QueryRowContext(r.Context(),
+		missionSelectColumns+` WHERE m.id = ? AND m.crew_id = ? AND m.workspace_id = ?`,
+		missionID, crewID, wsID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Mission not found")
@@ -469,22 +452,9 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return updated mission
-	var m missionResponse
-	if err := h.db.QueryRowContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, m.lead_agent_id, m.trace_id, m.title,
-		       m.description, m.status, m.plan, m.workflow_template,
-		       m.total_token_count, m.total_estimated_cost,
-		       m.created_at, m.updated_at, m.completed_at,
-		       a.name, a.slug
-		FROM missions m
-		JOIN agents a ON a.id = m.lead_agent_id
-		WHERE m.id = ?`, missionID).Scan(
-		&m.ID, &m.WorkspaceID, &m.CrewID, &m.LeadAgentID, &m.TraceID, &m.Title,
-		&m.Description, &m.Status, &m.Plan, &m.WorkflowTemplate,
-		&m.TotalTokenCount, &m.TotalEstimatedCost,
-		&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
-		&m.LeadAgentName, &m.LeadAgentSlug,
-	); err != nil {
+	m, err := scanMission(h.db.QueryRowContext(r.Context(),
+		missionSelectColumns+` WHERE m.id = ?`, missionID))
+	if err != nil {
 		h.logger.Error("read updated mission", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
