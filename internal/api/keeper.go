@@ -326,6 +326,11 @@ var envVarNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // could be used for credential exfiltration or command injection.
 // It parses the command carefully: content inside single quotes is safe,
 // everything else is checked against the dangerous pattern list.
+// interpreterPattern matches commands that invoke a shell or scripting language
+// interpreter with inline code. An attacker can bypass the metachar filter by
+// wrapping a payload inside single quotes passed to "bash -c '...|...'".
+var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun)\b\s+(-[ceE]|--eval)\b`)
+
 func containsDangerousShellChars(cmd string) bool {
 	// Reject any non-printable control characters (except space and tab which
 	// are legitimate in shell commands). This catches \n, \r, vertical tab,
@@ -341,6 +346,14 @@ func containsDangerousShellChars(cmd string) bool {
 			return true
 		}
 	}
+
+	// Block interpreter re-invocation: "bash -c '...|...'" bypasses the
+	// single-quote-aware metachar check below because content inside quotes
+	// is treated as literal, but the invoked interpreter re-parses it.
+	if interpreterPattern.MatchString(cmd) {
+		return true
+	}
+
 	// Simple approach: check outside single-quoted strings
 	// Split by single quotes — odd-indexed segments are inside quotes
 	parts := strings.Split(cmd, "'")
