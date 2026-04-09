@@ -17,6 +17,7 @@ import { IssuesListView } from "@/components/features/issues/issues-list-view"
 import { Calendar } from "@/components/ui/calendar"
 import { getCrewIconDef } from "@/lib/crew-icon"
 import { cn } from "@/lib/utils"
+import { ISSUE_STATUS_COLORS, LABEL_PRESET_COLORS, CREW_COLOR_DEFAULT, STATUS_COLORS } from "@/lib/colors"
 import { toast } from "sonner"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { Mission, MissionStatus, IssueLabel, IssueComment, IssuePriority, IssueRelation, RelationType, Project, ProjectStatus, IssueActivity, Milestone } from "@/lib/types/mission"
@@ -571,11 +572,70 @@ export function IssueDetailInline({
 
   return (
     <div className="flex flex-col h-full bg-card overflow-hidden">
-      {/* ── Header: identifier badge + close ─────────────────────────────── */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.06] shrink-0">
+      {/* ── Header: identifier badge + actions + close ──────────────────── */}
+      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/[0.06] shrink-0">
         <span className="text-[11px] font-mono text-muted-foreground/70 bg-white/[0.06] px-1.5 py-0.5 rounded">
           {issue.identifier || "--"}
         </span>
+
+        {/* Workflow action buttons */}
+        {(issue.status === "BACKLOG" || issue.status === "TODO") && issue.assignee_id && (
+          <button
+            onClick={async () => {
+              const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+              const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/start${qs}`, { method: "POST" })
+              if (res.ok) { toast.success("Issue started"); onUpdated() }
+              else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to start") }
+            }}
+            className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors"
+            style={{ backgroundColor: `${STATUS_COLORS.IN_PROGRESS}18`, color: STATUS_COLORS.IN_PROGRESS }}
+          >
+            <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg>
+            Start
+          </button>
+        )}
+        {issue.status === "IN_PROGRESS" && (
+          <button
+            onClick={async () => {
+              const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+              const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/stop${qs}`, { method: "POST" })
+              if (res.ok) { toast.success("Issue stopped"); onUpdated() }
+              else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to stop") }
+            }}
+            className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors"
+            style={{ backgroundColor: `${STATUS_COLORS.FAILED}18`, color: STATUS_COLORS.FAILED }}
+          >
+            <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
+            Stop
+          </button>
+        )}
+        {issue.status === "REVIEW" && (
+          <>
+            <button
+              onClick={async () => {
+                const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+                const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "approve" }),
+                })
+                if (res.ok) { toast.success("Issue approved"); onUpdated() }
+                else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed") }
+              }}
+              className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors"
+              style={{ backgroundColor: `${STATUS_COLORS.COMPLETED}18`, color: STATUS_COLORS.COMPLETED }}
+            >
+              &#10003; Approve
+            </button>
+            <button
+              onClick={() => setReviewChangesOpen(!reviewChangesOpen)}
+              className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors"
+              style={{ backgroundColor: `${STATUS_COLORS.BLOCKED}18`, color: STATUS_COLORS.BLOCKED }}
+            >
+              Changes
+            </button>
+          </>
+        )}
+
         <div className="flex-1" />
         {issue.identifier && (
           <a
@@ -646,92 +706,37 @@ export function IssueDetailInline({
             )}
           </div>
 
-          {/* ── Actions (compact inline row) ──────────────────────────────── */}
-          <AnimatePresence mode="wait">
-          {(issue.status === "BACKLOG" || issue.status === "TODO") && issue.assignee_id && (
-            <motion.div key="start" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex gap-[5px] px-[10px] py-1">
-              <button
-                onClick={async () => {
-                  const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/start${qs}`, { method: "POST" })
-                  if (res.ok) { toast.success("Issue started"); onUpdated() }
-                  else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to start") }
-                }}
-                className="flex items-center justify-center gap-1.5 h-[26px] px-4 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-medium transition-colors"
-              >
-                <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg>
-                Start
-              </button>
-            </motion.div>
-          )}
-          {issue.status === "IN_PROGRESS" && (
-            <motion.div key="stop" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex gap-[5px] px-[10px] py-1">
-              <button
-                onClick={async () => {
-                  const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/stop${qs}`, { method: "POST" })
-                  if (res.ok) { toast.success("Issue stopped"); onUpdated() }
-                  else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to stop") }
-                }}
-                className="flex items-center justify-center gap-1.5 h-[26px] px-4 rounded-md bg-red-500/10 border border-red-500/25 text-red-400 text-[11px] font-medium hover:bg-red-500/20 transition-colors"
-              >
-                <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
-                Stop
-              </button>
-            </motion.div>
-          )}
-          {issue.status === "REVIEW" && (
-            <motion.div key="review" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="px-[10px] py-1 space-y-1.5">
-              <div className="flex gap-[5px]">
-                <button
-                  onClick={async () => {
-                    const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-                    const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
-                      method: "POST", headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ action: "approve" }),
-                    })
-                    if (res.ok) { toast.success("Issue approved"); onUpdated() }
-                    else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed") }
-                  }}
-                  className="flex-1 flex items-center justify-center gap-1.5 h-[26px] rounded-md bg-green-600 hover:bg-green-500 text-white text-[11px] font-medium transition-colors"
-                >
-                  &#10003; Approve
-                </button>
-                <button
-                  onClick={() => setReviewChangesOpen(true)}
-                  className="flex items-center justify-center gap-1 h-[26px] px-2.5 rounded-md bg-amber-500/8 border border-amber-500/20 text-amber-400 text-[11px] font-medium hover:bg-amber-500/15 transition-colors"
-                >
-                  Changes
-                </button>
-              </div>
-              {reviewChangesOpen && (
-                <div className="border border-white/[0.06] rounded-md p-2 space-y-1.5">
-                  <textarea
-                    className="w-full h-14 bg-transparent border border-white/[0.08] rounded px-2 py-1.5 text-[11px] text-foreground outline-none resize-none"
-                    placeholder="What needs to change..."
-                    value={reviewComment}
-                    onChange={(e) => setReviewComment(e.target.value)}
-                  />
-                  <div className="flex gap-1.5">
-                    <button
-                      onClick={() => { setReviewChangesOpen(false); setReviewComment("") }}
-                      className="flex-1 h-6 rounded text-[11px] text-muted-foreground hover:text-foreground border border-white/[0.06]"
-                    >Cancel</button>
-                    <button
-                      onClick={async () => {
-                        const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-                        const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
-                          method: "POST", headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ action: "request_changes", comment: reviewComment }),
-                        })
-                        if (res.ok) { toast.success("Changes requested"); setReviewChangesOpen(false); setReviewComment(""); onUpdated() }
-                        else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed") }
-                      }}
-                      className="flex-1 h-6 rounded text-[11px] bg-amber-600 text-white hover:bg-amber-500"
-                    >Send</button>
-                  </div>
+          {/* Review changes modal (triggered from header) */}
+          <AnimatePresence>
+          {reviewChangesOpen && (
+            <motion.div key="review-changes" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="px-3 py-1.5">
+              <div className="border border-white/[0.06] rounded-md p-2 space-y-1.5">
+                <textarea
+                  className="w-full h-14 bg-transparent border border-white/[0.08] rounded px-2 py-1.5 text-[11px] text-foreground outline-none resize-none"
+                  placeholder="What needs to change..."
+                  value={reviewComment}
+                  onChange={(e) => setReviewComment(e.target.value)}
+                />
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => { setReviewChangesOpen(false); setReviewComment("") }}
+                    className="flex-1 h-6 rounded text-[11px] text-muted-foreground hover:text-foreground border border-white/[0.06]"
+                  >Cancel</button>
+                  <button
+                    onClick={async () => {
+                      const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+                      const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "request_changes", comment: reviewComment }),
+                      })
+                      if (res.ok) { toast.success("Changes requested"); setReviewChangesOpen(false); setReviewComment(""); onUpdated() }
+                      else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed") }
+                    }}
+                    className="flex-1 h-6 rounded text-[11px] transition-colors"
+                    style={{ backgroundColor: STATUS_COLORS.BLOCKED, color: "white" }}
+                  >Send</button>
                 </div>
-              )}
+              </div>
             </motion.div>
           )}
           </AnimatePresence>
