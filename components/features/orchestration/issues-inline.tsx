@@ -1652,14 +1652,6 @@ interface ProjectStats {
   crews: string[]
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  BACKLOG: "#6b7280",
-  TODO: "#a3a3a3",
-  IN_PROGRESS: "#3b82f6",
-  REVIEW: "#a855f7",
-  DONE: "#22c55e",
-  CANCELLED: "#ef4444",
-}
 
 export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }: ProjectDetailInlineProps) {
   const [editingTitle, setEditingTitle] = useState(false)
@@ -1723,7 +1715,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
         status,
         value,
         pct: (value / total) * 100,
-        color: STATUS_COLORS[status] || "#6b7280",
+        color: ISSUE_STATUS_COLORS[status] || CREW_COLOR_DEFAULT,
       })
     })
     return segments
