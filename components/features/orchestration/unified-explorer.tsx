@@ -8,7 +8,7 @@ import { PriorityIcon } from "@/components/features/issues/priority-icon"
 import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { getCrewIconDef } from "@/lib/crew-icon"
+import { getCrewIconDef, getCrewDotColor } from "@/lib/crew-icon"
 import type { Mission, MissionTask, Project } from "@/lib/types/mission"
 import type { CrewSummary } from "@/lib/types/orchestration"
 
@@ -174,7 +174,7 @@ export function UnifiedExplorer({
                         onClick={() => { onCrewFilter(c.id); onAgentFilter(null); setFilterDropdownOpen(false) }}
                         className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterCrewId === c.id ? "text-blue-400" : "text-muted-foreground/80")}
                       >
-                        <CrewIconComp className="h-3.5 w-3.5 shrink-0" style={{ color: c.color || "#666" }} />
+                        <CrewIconComp className="h-3.5 w-3.5 shrink-0" style={{ color: getCrewDotColor(c.color) }} />
                         {c.name}
                       </button>
                     )
@@ -226,7 +226,7 @@ export function UnifiedExplorer({
                         selectedProjectId === p.id ? "bg-blue-500/10 border-l-2 border-blue-500" : "border-l-2 border-transparent",
                       )}
                     >
-                      <IconComp className="h-3.5 w-3.5 shrink-0" style={{ color: p.color }} />
+                      <IconComp className="h-3.5 w-3.5 shrink-0" style={{ color: getCrewDotColor(p.color) }} />
                       <span className="text-xs text-foreground/80 truncate flex-1">{p.name}</span>
                       <span className="text-[10px] text-muted-foreground/40 tabular-nums">{p.issue_count}</span>
                     </button>
