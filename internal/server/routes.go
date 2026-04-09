@@ -486,7 +486,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer reader.Close()
 
-	filename := filepath.Base(filePath)
+	filename := sanitizeDownloadFilename(filepath.Base(filePath))
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	if _, err := io.Copy(w, reader); err != nil {
@@ -691,6 +691,22 @@ func (s *Server) handleDebugInfo(w http.ResponseWriter, _ *http.Request) {
 	info["config"] = config
 
 	writeJSON(w, http.StatusOK, info)
+}
+
+func sanitizeDownloadFilename(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if r < 0x20 || r == '"' || r == '\\' || r == 0x7f {
+			b.WriteRune('_')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "download"
+	}
+	return b.String()
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

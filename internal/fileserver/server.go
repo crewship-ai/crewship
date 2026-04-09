@@ -145,7 +145,10 @@ func (s *Server) HandleFileDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", detectMIME(filePath))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(filePath)))
+	// Sanitize filename to prevent Content-Disposition header injection via
+	// quotes or control characters in filenames.
+	safeName := sanitizeFilename(filepath.Base(filePath))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeName))
 	io.Copy(w, f)
 }
 
@@ -173,6 +176,25 @@ func detectMIME(path string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// sanitizeFilename strips characters that can break Content-Disposition header
+// parsing (quotes, backslashes, control chars). Keeps the name human-readable.
+func sanitizeFilename(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if r < 0x20 || r == '"' || r == '\\' || r == 0x7f {
+			b.WriteRune('_')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	result := b.String()
+	if result == "" {
+		return "download"
+	}
+	return result
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
