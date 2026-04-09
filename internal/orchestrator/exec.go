@@ -36,6 +36,8 @@ CREDENTIALS:
 - API keys for LLM providers are injected automatically via the sidecar proxy
 `
 
+// BuildCLICommand constructs the CLI command and arguments for the configured
+// adapter (CLAUDE_CODE, OPENCODE, CODEX_CLI, or GEMINI_CLI).
 func BuildCLICommand(req AgentRunRequest) []string {
 	switch req.CLIAdapter {
 	case "CLAUDE_CODE":
@@ -355,6 +357,9 @@ func buildMCPConfig(servers []MCPServerConfig) (string, error) {
 	return string(b), nil
 }
 
+// BuildEnvVars constructs the environment variables for a container exec,
+// including agent identity, credentials (when sidecar is not used), and
+// provider-specific settings.
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	env := []string{
 		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),

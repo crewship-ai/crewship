@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// Edition represents the license tier (community, team, or enterprise).
 type Edition string
 
 const (
@@ -18,6 +19,8 @@ const (
 	EditionEnterprise Edition = "enterprise"
 )
 
+// Claims holds the verified payload of a signed license, including resource
+// limits, edition, and optional feature flags.
 type Claims struct {
 	LicenseID    string  `json:"license_id"`
 	LicenseeName string  `json:"licensee_name"`
@@ -59,6 +62,7 @@ type License struct {
 // Format: base64-encoded 32-byte Ed25519 public key.
 var publicKey = ""
 
+// New creates a License initialized with community edition defaults.
 func New() *License {
 	return &License{
 		claims: communityDefaults,
@@ -130,36 +134,42 @@ func (l *License) LoadFromBytes(data []byte) error {
 	return nil
 }
 
+// Claims returns a copy of the current license claims.
 func (l *License) Claims() Claims {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.claims
 }
 
+// Edition returns the current license edition (community, team, or enterprise).
 func (l *License) Edition() Edition {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.claims.Edition
 }
 
+// MaxCrews returns the maximum number of crews allowed per workspace.
 func (l *License) MaxCrews() int {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.claims.MaxCrews
 }
 
+// MaxAgentsPerCrew returns the maximum number of agents allowed in a single crew.
 func (l *License) MaxAgentsPerCrew() int {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.claims.MaxAgents
 }
 
+// MaxMembers returns the maximum number of members allowed per workspace.
 func (l *License) MaxMembers() int {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.claims.MaxMembers
 }
 
+// HasFeature reports whether the license includes the named feature flag.
 func (l *License) HasFeature(feature string) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -171,10 +181,12 @@ func (l *License) HasFeature(feature string) bool {
 	return false
 }
 
+// IsEnterprise reports whether the license is enterprise edition.
 func (l *License) IsEnterprise() bool {
 	return l.Edition() == EditionEnterprise
 }
 
+// IsCommunity reports whether the license is community (free) edition.
 func (l *License) IsCommunity() bool {
 	return l.Edition() == EditionCommunity
 }

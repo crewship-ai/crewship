@@ -11,6 +11,8 @@ type DBChannelAuthorizer struct {
 	db *sql.DB
 }
 
+// NewDBChannelAuthorizer creates a channel authorizer backed by workspace
+// membership queries against the given database.
 func NewDBChannelAuthorizer(db *sql.DB) *DBChannelAuthorizer {
 	return &DBChannelAuthorizer{db: db}
 }

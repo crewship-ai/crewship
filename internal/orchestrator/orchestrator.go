@@ -22,6 +22,8 @@ import (
 
 var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 
+// AgentRunRequest describes everything needed to execute an agent run inside
+// a container, including identity, credentials, prompts, and resource limits.
 type AgentRunRequest struct {
 	AgentID         string
 	AgentSlug       string
@@ -74,6 +76,8 @@ type MCPCredential struct {
 	Header     string `json:"header,omitempty"`
 }
 
+// Credential holds a decrypted credential ready for injection into a container
+// environment, with priority ordering for failover selection.
 type Credential struct {
 	ID         string `json:"id,omitempty"`
 	EnvVarName string `json:"env_var"`
@@ -82,6 +86,8 @@ type Credential struct {
 	Type       string `json:"type,omitempty"` // API_KEY, AI_CLI_TOKEN, SECRET
 }
 
+// RunState tracks the runtime state of an active agent run, persisted in the
+// state provider for crash recovery.
 type RunState struct {
 	ID           string    `json:"id"`
 	AgentID      string    `json:"agent_id"`
@@ -94,6 +100,8 @@ type RunState struct {
 	CredentialID string    `json:"credential_id,omitempty"`
 }
 
+// AgentEvent is a streaming event emitted during an agent run, such as text
+// output, tool calls, thinking steps, or completion signals.
 type AgentEvent struct {
 	Type      string    `json:"type"`
 	Content   string    `json:"content"`
@@ -101,6 +109,7 @@ type AgentEvent struct {
 	Timestamp time.Time `json:"ts"`
 }
 
+// EventHandler is a callback that receives streaming events during an agent run.
 type EventHandler func(event AgentEvent)
 
 // crewState tracks per-crew runtime state (activity, TTL, container).
@@ -110,6 +119,9 @@ type crewState struct {
 	containerID  string
 }
 
+// Orchestrator manages agent execution lifecycle: building CLI commands,
+// running them inside containers, streaming output, handling credential
+// failover, and managing container TTLs.
 type Orchestrator struct {
 	container      provider.ContainerProvider
 	state          provider.StateProvider
@@ -126,6 +138,7 @@ type Orchestrator struct {
 	crews          map[string]*crewState
 }
 
+// New creates an Orchestrator with the given container and state providers.
 func New(
 	container provider.ContainerProvider,
 	state provider.StateProvider,
@@ -152,12 +165,14 @@ func (o *Orchestrator) SetSidecarEnabled(enabled bool) {
 	o.sidecarEnabled = enabled
 }
 
+// SetKeeperEnabled enables or disables the Keeper AI assistant for agent runs.
 func (o *Orchestrator) SetKeeperEnabled(enabled bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.keeperEnabled = enabled
 }
 
+// KeeperEnabled reports whether the Keeper AI assistant is enabled.
 func (o *Orchestrator) KeeperEnabled() bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -206,6 +221,9 @@ func (o *Orchestrator) SetConversationStore(store *conversation.Store) {
 	o.convStore = store
 }
 
+// RunAgent executes an agent run inside its crew's container, streaming events
+// to handler. It manages credential injection, output parsing, failover on
+// rate limits, and run state persistence.
 func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handler EventHandler) error {
 	o.mu.RLock()
 	if !o.accepting {
@@ -618,12 +636,15 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	return nil
 }
 
+// StopAccepting prevents new agent runs from starting (used during shutdown).
 func (o *Orchestrator) StopAccepting() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.accepting = false
 }
 
+// RecoverFromCrash inspects all persisted run states and marks stale runs
+// as completed or errored, cleaning up after an unexpected server restart.
 func (o *Orchestrator) RecoverFromCrash(ctx context.Context) error {
 	runs, err := o.state.List(ctx, "agent_runs")
 	if err != nil {
@@ -691,6 +712,8 @@ func (o *Orchestrator) selectCredential(creds []Credential) *Credential {
 	return &creds[0]
 }
 
+// Start runs the container TTL manager, periodically stopping idle containers
+// that have exceeded their configured time-to-live.
 func (o *Orchestrator) Start(ctx context.Context) error {
 	o.logger.Info("starting orchestrator container TTL manager")
 	ticker := time.NewTicker(5 * time.Minute)

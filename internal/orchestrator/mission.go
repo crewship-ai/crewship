@@ -136,6 +136,8 @@ type missionState struct {
 	planningDispatched bool // true after lead planning dispatch (prevents re-dispatch)
 }
 
+// NewMissionEngine creates a MissionEngine that coordinates multi-agent mission
+// execution, dispatching tasks to agents and tracking progress.
 func NewMissionEngine(db *sql.DB, orch *Orchestrator, hub *ws.Hub, logger *slog.Logger) *MissionEngine {
 	pw := NewProgressWriter()
 	return &MissionEngine{

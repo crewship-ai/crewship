@@ -30,6 +30,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// Server is the main crewship process, wiring together the HTTP server, IPC
+// listener, WebSocket hub, orchestrator, scheduler, and all supporting services.
 type Server struct {
 	httpServer    *http.Server
 	ipcServer     *http.Server
@@ -62,6 +64,7 @@ type Server struct {
 	runCancel       context.CancelFunc
 }
 
+// Deps holds the external dependencies injected into the server at startup.
 type Deps struct {
 	Container provider.ContainerProvider
 	Storage   provider.StorageProvider
@@ -72,6 +75,7 @@ type Deps struct {
 	License   *license.License
 }
 
+// Close releases resources held by the dependencies (e.g. state provider).
 func (d *Deps) Close() {
 	if d == nil {
 		return

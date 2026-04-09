@@ -32,6 +32,7 @@ type ProgressEvent struct {
 	Duration  int64     `json:"duration_ms,omitempty"`
 }
 
+// NewProgressWriter creates a ProgressWriter for recording mission task events.
 func NewProgressWriter() *ProgressWriter {
 	return &ProgressWriter{}
 }
