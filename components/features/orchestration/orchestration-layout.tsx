@@ -692,7 +692,7 @@ export function OrchestrationLayout({
                     onProjectSelect={(id) => {
                       const newId = id === selectedProjectId ? null : id
                       setSelectedProjectId(newId)
-                      if (newId) { setSelectedIssue(null); setIssueComments([]) }
+                      setSelectedIssue(null); setIssueComments([])
                     }}
                     onIssueSelect={handleIssueSelect}
                     crews={panelCrews}
