@@ -297,7 +297,18 @@ export function IssueDetailInline({
   const [labelsPopoverOpen, setLabelsPopoverOpen] = useState(false)
   const [projectPopoverOpen, setProjectPopoverOpen] = useState(false)
   const [assigneeOpen, setAssigneeOpen] = useState(false)
-  const [crewAgents, setCrewAgents] = useState<{id: string, name: string, slug: string}[]>([])
+  const [crewAgents, setCrewAgents] = useState<{id: string, name: string, slug: string, crew_slug?: string}[]>([])
+
+  // Fetch all agents for assignee picker
+  useEffect(() => {
+    if (!workspaceId) return
+    fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
+      .then(r => r.ok ? r.json() : [])
+      .then((agents: Array<{id: string, name: string, slug: string, crew?: {slug: string}}>) =>
+        setCrewAgents(agents.map(a => ({ id: a.id, name: a.name, slug: a.slug, crew_slug: a.crew?.slug })))
+      )
+      .catch(() => {})
+  }, [workspaceId])
 
   const matchingProject = projects.find((p) => p.id === issue.project_id)
 
@@ -633,14 +644,16 @@ export function IssueDetailInline({
                           {crewAgents.map(agent => (
                             <CommandItem
                               key={agent.id}
-                              value={agent.name}
+                              value={`${agent.name} ${agent.slug} ${agent.crew_slug || ""}`}
                               className="text-xs"
                               onSelect={() => {
                                 patchIssue({ assignee_type: "agent", assignee_id: agent.id })
                                 setAssigneeOpen(false)
                               }}
                             >
-                              {agent.name} <span className="text-muted-foreground/50 ml-1">@{agent.slug}</span>
+                              <span>{agent.name}</span>
+                              <span className="text-muted-foreground/40 ml-1">@{agent.slug}</span>
+                              {agent.crew_slug && <span className="text-muted-foreground/30 ml-auto text-[10px]">{agent.crew_slug}</span>}
                             </CommandItem>
                           ))}
                         </CommandGroup>
@@ -767,45 +780,57 @@ export function IssueDetailInline({
             />
             {projectOpen && (
               <div className="px-3 pb-2">
-                {issue.project_id ? (
-                  <div className="flex items-center gap-2 py-1 group">
-                    <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: matchingProject?.color || '#6B7280' }} />
-                    <span className="text-[12px] text-foreground/80 flex-1">{matchingProject?.name || "Unknown"}</span>
-                    <button
-                      onClick={() => patchIssue({ project_id: null })}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/[0.08] text-muted-foreground/40 hover:text-red-400 transition-all"
-                    >
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <Popover open={projectPopoverOpen} onOpenChange={setProjectPopoverOpen}>
-                    <PopoverTrigger asChild>
+                <Popover open={projectPopoverOpen} onOpenChange={setProjectPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    {issue.project_id ? (
+                      <button className="flex items-center gap-2 py-1 w-full text-left group">
+                        <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: matchingProject?.color || '#6B7280' }} />
+                        <span className="text-[12px] text-foreground/80 flex-1 hover:text-foreground transition-colors">{matchingProject?.name || "Unknown"}</span>
+                      </button>
+                    ) : (
                       <button className="text-[12px] text-muted-foreground/50 hover:text-muted-foreground py-1 flex items-center gap-1.5">
                         <Plus className="h-3 w-3" /> Set project
                       </button>
-                    </PopoverTrigger>
+                    )}
+                  </PopoverTrigger>
                     <PopoverContent className="w-[220px] p-1" align="start" sideOffset={4}>
                       {projects.length === 0 ? (
                         <p className="text-[11px] text-muted-foreground/40 px-2 py-3 text-center">No projects</p>
                       ) : (
-                        projects.map((p) => (
-                          <button
-                            key={p.id}
-                            onClick={() => {
-                              patchIssue({ project_id: p.id })
-                              setProjectPopoverOpen(false)
-                            }}
-                            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-sm text-left text-[12px] hover:bg-white/[0.06] transition-colors"
-                          >
-                            <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: p.color }} />
-                            <span className="text-foreground/80 truncate">{p.name}</span>
-                          </button>
-                        ))
+                        <>
+                          {issue.project_id && (
+                            <button
+                              onClick={() => {
+                                patchIssue({ project_id: "" })
+                                setProjectPopoverOpen(false)
+                              }}
+                              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-sm text-left text-[12px] text-red-400/70 hover:bg-red-500/10 transition-colors"
+                            >
+                              <X className="h-3 w-3" />
+                              <span>Remove project</span>
+                            </button>
+                          )}
+                          {projects.map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => {
+                                patchIssue({ project_id: p.id })
+                                setProjectPopoverOpen(false)
+                              }}
+                              className={cn(
+                                "flex items-center gap-2 w-full px-2 py-1.5 rounded-sm text-left text-[12px] hover:bg-white/[0.06] transition-colors",
+                                p.id === issue.project_id && "bg-white/[0.04]"
+                              )}
+                            >
+                              <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: p.color }} />
+                              <span className="text-foreground/80 truncate">{p.name}</span>
+                              {p.id === issue.project_id && <span className="ml-auto text-[10px] text-muted-foreground/40">current</span>}
+                            </button>
+                          ))}
+                        </>
                       )}
                     </PopoverContent>
                   </Popover>
-                )}
               </div>
             )}
           </div>
