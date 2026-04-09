@@ -33,8 +33,8 @@ interface UnifiedExplorerProps {
 
 const sectionAnim = {
   initial: { height: 0, opacity: 0 },
-  animate: { height: "auto", opacity: 1, transition: { duration: 0.2, ease: "easeOut" } },
-  exit: { height: 0, opacity: 0, transition: { duration: 0.15, ease: "easeIn" } },
+  animate: { height: "auto", opacity: 1, transition: { duration: 0.2, ease: "easeOut" as const } },
+  exit: { height: 0, opacity: 0, transition: { duration: 0.15, ease: "easeIn" as const } },
 }
 
 const dropdownAnim = {

@@ -48,6 +48,8 @@ import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orch
 import { useIsMobile } from "@/hooks/use-mobile"
 import { IssuesExplorerPanel, IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectDetailInline } from "@/components/features/orchestration/issues-inline"
 import { UnifiedExplorer } from "@/components/features/orchestration/unified-explorer"
+import { CreateIssueModal } from "@/components/features/orchestration/create-issue-modal"
+import { CreateProjectModal } from "@/components/features/orchestration/create-project-modal"
 
 import { toast } from "sonner"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
@@ -301,6 +303,8 @@ export function OrchestrationLayout({
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
   const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
+  const [showCreateIssue, setShowCreateIssue] = useState(false)
+  const [showCreateProject, setShowCreateProject] = useState(false)
 
   const graphRef = useRef<WorkflowGraphRef>(null)
 
@@ -587,11 +591,11 @@ export function OrchestrationLayout({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuItem onClick={() => toast.info("Create issue dialog — coming soon")}>
+            <DropdownMenuItem onClick={() => setShowCreateIssue(true)}>
               <CircleDot className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
               New Issue
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => toast.info("Create project dialog — coming soon")}>
+            <DropdownMenuItem onClick={() => setShowCreateProject(true)}>
               <FolderKanban className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
               New Project
             </DropdownMenuItem>
@@ -1022,6 +1026,25 @@ export function OrchestrationLayout({
           </AnimatePresence>
         </motion.div>
       </div>
+
+      {/* Create modals */}
+      <CreateIssueModal
+        open={showCreateIssue}
+        onOpenChange={setShowCreateIssue}
+        crews={crews}
+        labels={issueLabels}
+        projects={projects}
+        workspaceId={workspaceId}
+        onCreated={() => { fetchIssues(); fetchProjects() }}
+      />
+      <CreateProjectModal
+        open={showCreateProject}
+        onOpenChange={setShowCreateProject}
+        crews={crews}
+        labels={issueLabels}
+        workspaceId={workspaceId}
+        onCreated={fetchProjects}
+      />
     </div>
   )
 }
