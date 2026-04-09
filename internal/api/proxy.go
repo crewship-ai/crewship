@@ -180,7 +180,12 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 		ipcPath += "&recursive=true"
 	}
 	if subdir := r.URL.Query().Get("subdir"); subdir != "" {
-		ipcPath += "&subdir=" + url.QueryEscape(subdir)
+		cleanSub := filepath.Clean(subdir)
+		if strings.HasPrefix(cleanSub, "..") || filepath.IsAbs(cleanSub) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid subdir path"})
+			return
+		}
+		ipcPath += "&subdir=" + url.QueryEscape(cleanSub)
 	}
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
@@ -411,14 +416,16 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	offset := r.URL.Query().Get("offset")
-	if offset == "" {
-		offset = "0"
+	offsetInt, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offsetInt < 0 {
+		offsetInt = 0
 	}
-	limit := r.URL.Query().Get("limit")
-	if limit == "" {
-		limit = "100"
+	limitInt, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limitInt <= 0 || limitInt > 500 {
+		limitInt = 100
 	}
+	offset := strconv.Itoa(offsetInt)
+	limit := strconv.Itoa(limitInt)
 
 	var crewID sql.NullString
 	var slug string

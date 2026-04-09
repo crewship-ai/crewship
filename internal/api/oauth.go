@@ -669,7 +669,8 @@ func (h *OAuthHandler) Discover(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Could not discover OAuth endpoints: " + err.Error()})
+		h.logger.Warn("OAuth discovery failed", "error", err)
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Could not discover OAuth endpoints for this issuer"})
 		return
 	}
 
