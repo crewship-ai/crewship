@@ -36,6 +36,7 @@ type Hub struct {
 	connCount   atomic.Int64
 	cancelFns   map[string]context.CancelFunc // session_id -> cancel function for active runs
 	cancelMu    sync.Mutex
+	channelAuth ChannelAuthorizer
 }
 
 type Client struct {
@@ -281,11 +282,43 @@ func (c *Client) writePump() {
 	}
 }
 
+// ChannelAuthorizer checks whether a user is allowed to subscribe to a given channel.
+// Must be set via Hub.SetChannelAuthorizer before accepting connections.
+type ChannelAuthorizer interface {
+	CanSubscribe(ctx context.Context, userID, channel string) bool
+}
+
+func (h *Hub) SetChannelAuthorizer(auth ChannelAuthorizer) {
+	h.channelAuth = auth
+}
+
 func (c *Client) subscribe(channel string) {
 	if channel == "" {
 		return
 	}
-	// TODO: validate channel access (team membership check via IPC)
+
+	// Validate channel access: deny by default when no authorizer is configured.
+	if c.hub.channelAuth == nil {
+		c.hub.logger.Warn("channel subscription denied: no authorizer configured", "user_id", c.userID, "channel", channel)
+		resp, _ := json.Marshal(ServerMessage{
+			Type:    "error",
+			Channel: channel,
+			Payload: map[string]string{"error": "access denied"},
+		})
+		c.safeSend(resp)
+		return
+	}
+	if !c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, channel) {
+		c.hub.logger.Warn("channel subscription denied", "user_id", c.userID, "channel", channel)
+		resp, _ := json.Marshal(ServerMessage{
+			Type:    "error",
+			Channel: channel,
+			Payload: map[string]string{"error": "access denied"},
+		})
+		c.safeSend(resp)
+		return
+	}
+
 	c.mu.Lock()
 	c.channels[channel] = true
 	c.mu.Unlock()
@@ -402,6 +435,21 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		})
 		c.safeSend(resp)
 		return
+	}
+
+	// Validate session access: user must be authorized for this chat's channel
+	if c.hub.channelAuth != nil {
+		sessionCh := "session:" + payload.ChatID
+		if !c.hub.channelAuth.CanSubscribe(c.ctx, c.userID, sessionCh) {
+			c.hub.logger.Warn("send_message denied: no access to session", "user_id", c.userID, "chat_id", payload.ChatID)
+			resp, _ := json.Marshal(ServerMessage{
+				Type:    "error",
+				Channel: msg.Channel,
+				Payload: map[string]string{"error": "access denied"},
+			})
+			c.safeSend(resp)
+			return
+		}
 	}
 
 	go func() {

@@ -90,7 +90,23 @@ func (s *Server) HandleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Open(full)
+	// V-09: Resolve symlinks and re-check containment
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	realFull, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if !strings.HasPrefix(realFull, realBase+string(os.PathSeparator)) && realFull != realBase {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	f, err := os.Open(realFull)
 	if err != nil {
 		if os.IsNotExist(err) {
 			http.Error(w, "not found", http.StatusNotFound)

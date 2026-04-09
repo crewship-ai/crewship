@@ -361,7 +361,7 @@ func TestResolveEscalation_NotFound(t *testing.T) {
 	body := strings.NewReader(`{"resolution":"done"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/nonexistent/resolve", body)
 	req.SetPathValue("escalationId", "nonexistent")
-	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -392,7 +392,7 @@ func TestResolveEscalation_Success(t *testing.T) {
 	body := strings.NewReader(`{"resolution":"Here is the token: done"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
-	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -444,7 +444,7 @@ func TestResolveEscalation_AlreadyResolved(t *testing.T) {
 	body := strings.NewReader(`{"resolution":"try again"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
-	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -467,7 +467,7 @@ func TestResolveEscalation_MissingResolution(t *testing.T) {
 	body := strings.NewReader(`{}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
-	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -498,7 +498,7 @@ func TestResolveEscalation_WithAction(t *testing.T) {
 	body := strings.NewReader(`{"resolution":"Rejected due to security concerns","action":"reject"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
-	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -543,7 +543,7 @@ func TestResolveEscalation_RedirectAction(t *testing.T) {
 	body := strings.NewReader(`{"resolution":"Viktor should handle this","action":"redirect","redirect_to":"viktor"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
-	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -590,7 +590,7 @@ func TestResolveEscalation_InvalidAction(t *testing.T) {
 	body := strings.NewReader(`{"resolution":"test","action":"invalid"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
-	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -621,7 +621,7 @@ func TestResolveEscalation_RedirectToNonexistentAgent(t *testing.T) {
 	body := strings.NewReader(`{"resolution":"Send to ghost","action":"redirect","redirect_to":"nonexistent"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
-	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -659,7 +659,7 @@ func TestResolveEscalation_NotifiesWaiter(t *testing.T) {
 		body := strings.NewReader(`{"resolution":"Approved","action":"approve"}`)
 		req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 		req.SetPathValue("escalationId", "esc1")
-		ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+		ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
 		req = req.WithContext(ctx)
 		w := httptest.NewRecorder()
 		h.ResolveEscalation(w, req)
@@ -722,7 +722,7 @@ func TestWaitForEscalationResponse_ResolvesBeforeTimeout(t *testing.T) {
 	body := strings.NewReader(`{"resolution":"Go ahead","action":"approve"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/escalations/esc1/resolve", body)
 	req.SetPathValue("escalationId", "esc1")
-	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.ResolveEscalation(w, req)
@@ -840,7 +840,7 @@ func TestListEscalations_IncludesAction(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/crews/crew1/escalations", nil)
 	req.SetPathValue("crewId", "crew1")
-	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
+	ctx := context.WithValue(context.WithValue(req.Context(), ctxWorkspaceID, wsID), ctxRole, "OWNER")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 

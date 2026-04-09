@@ -40,7 +40,10 @@ type DiscoveredOAuth struct {
 	SupportsDCR          bool   `json:"supports_dcr"`
 }
 
-var discoveryClient = &http.Client{Timeout: 10 * time.Second}
+var discoveryClient = &http.Client{
+	Timeout:   10 * time.Second,
+	Transport: ssrfSafeTransport(),
+}
 
 // discoverOAuthFromMCPURL tries to discover OAuth metadata for an MCP server URL.
 //

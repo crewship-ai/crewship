@@ -27,7 +27,11 @@ services:
       - crewship-data:/var/lib/crewship
       - crewship-logs:/var/log/crewship
       - crewship-db:/data
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # V-08: Use a Docker socket proxy instead of mounting the raw Docker socket.
+      # See https://github.com/Tecnativa/docker-socket-proxy for setup.
+      # Raw mount (NOT recommended for production):
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # TODO: replace with socket proxy in production
     networks:
       - crewship-internal
       - crewship-agents
