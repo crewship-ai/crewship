@@ -1326,12 +1326,12 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	// 1. Load issue
-	var missionID, status, title string
+	var missionID, status, title, leadAgentID string
 	var description, assigneeID sql.NullString
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT id, status, title, description, assignee_id
+		SELECT id, status, title, description, assignee_id, lead_agent_id
 		FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
-		ident, crewID, wsID).Scan(&missionID, &status, &title, &description, &assigneeID)
+		ident, crewID, wsID).Scan(&missionID, &status, &title, &description, &assigneeID, &leadAgentID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -1352,6 +1352,22 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	if !assigneeID.Valid || assigneeID.String == "" {
 		writeProblem(w, r, http.StatusBadRequest, "Issue must have an assignee before starting")
 		return
+	}
+
+	// 3b. Create synthetic chat so assignments can reference it (FK on chat_id)
+	var chatExists int
+	_ = h.db.QueryRowContext(r.Context(), `SELECT 1 FROM chats WHERE id = ?`, missionID).Scan(&chatExists)
+	if chatExists == 0 {
+		chatNow := time.Now().UTC().Format(time.RFC3339)
+		_, err = h.db.ExecContext(r.Context(), `
+			INSERT INTO chats (id, agent_id, workspace_id, title, mode, status, started_at, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'MISSION', 'ACTIVE', ?, ?, ?)`,
+			missionID, leadAgentID, wsID, "Issue: "+title, chatNow, chatNow, chatNow)
+		if err != nil {
+			h.logger.Error("start issue: create synthetic chat", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Failed to prepare issue execution")
+			return
+		}
 	}
 
 	// 4. Auto-create mission_task if none exists
