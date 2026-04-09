@@ -163,6 +163,7 @@ export function AppToolbar() {
   const [cmdkOpen, setCmdkOpen] = useState(false)
   const { role } = useAbilities()
   const settingsTab = useAppStore((s) => s.settingsTab)
+  const breadcrumbs = useAppStore((s) => s.breadcrumbs)
 
   useEffect(() => {
     if (wsStatus === "connected") {
@@ -289,7 +290,26 @@ export function AppToolbar() {
     }
 
     const title = config?.title ?? "Crewship"
-    return <span className="text-sm font-semibold truncate">{title}</span>
+    return (
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span className="text-sm font-semibold truncate">{title}</span>
+        {breadcrumbs.length > 0 && breadcrumbs.map((item, i) => (
+          <div key={i} className="flex items-center gap-1.5 min-w-0">
+            <span className="text-muted-foreground/30 text-xs">/</span>
+            {item.onClick ? (
+              <button
+                onClick={item.onClick}
+                className="text-xs text-muted-foreground/70 hover:text-foreground/90 transition-colors truncate max-w-[160px]"
+              >
+                {item.label}
+              </button>
+            ) : (
+              <span className="text-xs text-foreground/80 truncate max-w-[160px]">{item.label}</span>
+            )}
+          </div>
+        ))}
+      </div>
+    )
   }
 
   return (

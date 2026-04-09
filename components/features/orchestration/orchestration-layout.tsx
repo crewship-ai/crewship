@@ -44,6 +44,8 @@ import { UnifiedExplorer } from "@/components/features/orchestration/unified-exp
 
 import { toast } from "sonner"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
+import { useAppStore } from "@/lib/store"
+import type { BreadcrumbItem } from "@/lib/store"
 
 const MSG_TYPE_COLORS: Record<string, string> = {
   "task.updated": "text-blue-400",
@@ -525,6 +527,20 @@ export function OrchestrationLayout({
   const selectedProject = selectedProjectId ? projects.find((p) => p.id === selectedProjectId) || null : null
   const showRightPanel = detailContext.type !== "none" || selectedIssue !== null || (selectedProjectId !== null && !selectedIssue)
 
+  // Sync breadcrumbs to global store (rendered in app-toolbar)
+  const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
+  useEffect(() => {
+    const items: BreadcrumbItem[] = []
+    if (selectedProject) {
+      items.push({ label: selectedProject.name, onClick: () => { setSelectedIssue(null); setIssueComments([]) } })
+    }
+    if (selectedIssue) {
+      items.push({ label: selectedIssue.identifier || selectedIssue.title })
+    }
+    setBreadcrumbs(items)
+    return () => setBreadcrumbs([])
+  }, [selectedProject?.id, selectedProject?.name, selectedIssue?.id, selectedIssue?.identifier, setBreadcrumbs])
+
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
@@ -552,46 +568,7 @@ export function OrchestrationLayout({
           </button>
         ))}
 
-        {/* Breadcrumb: Orchestration / Project / Issue */}
-        {(selectedProject || selectedIssue) && (
-          <>
-            <div className="w-px h-4 bg-white/[0.08] mx-2 shrink-0" />
-            <div className="flex items-center gap-1 text-[11px] shrink-0">
-              <button
-                onClick={() => { setSelectedProjectId(null); setSelectedIssue(null); setIssueComments([]) }}
-                className="text-muted-foreground/50 hover:text-foreground/80 transition-colors"
-              >
-                All
-              </button>
-              {selectedProject && (
-                <>
-                  <span className="text-muted-foreground/30">/</span>
-                  <button
-                    onClick={() => { setSelectedIssue(null); setIssueComments([]) }}
-                    className={cn(
-                      "transition-colors truncate max-w-[120px]",
-                      selectedIssue ? "text-muted-foreground/50 hover:text-foreground/80" : "text-foreground/80",
-                    )}
-                  >
-                    {selectedProject.name}
-                  </button>
-                </>
-              )}
-              {selectedIssue && (
-                <>
-                  <span className="text-muted-foreground/30">/</span>
-                  <span className="font-mono text-blue-400">{selectedIssue.identifier}</span>
-                  <button
-                    onClick={() => { setSelectedIssue(null); setIssueComments([]) }}
-                    className="text-muted-foreground/40 hover:text-foreground/80 ml-0.5"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </>
-              )}
-            </div>
-          </>
-        )}
+        {/* spacer between tabs and actions */}
 
         <div className="flex-1" />
 
