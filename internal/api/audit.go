@@ -9,11 +9,13 @@ import (
 	"strconv"
 )
 
+// AuditHandler provides endpoints for querying the workspace audit log.
 type AuditHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewAuditHandler creates an AuditHandler with the given database and logger.
 func NewAuditHandler(db *sql.DB, logger *slog.Logger) *AuditHandler {
 	return &AuditHandler{db: db, logger: logger}
 }
@@ -38,6 +40,8 @@ type auditListResponse struct {
 	Pagination pagination      `json:"pagination"`
 }
 
+// List returns a paginated list of audit log entries for the workspace.
+// GET /api/v1/audit — supports filtering by action, entity_type, entity_id, user_id, and date range.
 func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
