@@ -130,16 +130,20 @@ export function UnifiedExplorer({
                   onClick={() => { onCrewFilter(null); setFilterAgentId(null); setFilterDropdownOpen(false) }}
                   className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06]", !filterCrewId && !filterAgentId ? "text-blue-400" : "text-muted-foreground/80")}
                 >All crews</button>
-                {crews.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => { onCrewFilter(c.id); setFilterAgentId(null); setFilterDropdownOpen(false) }}
-                    className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterCrewId === c.id ? "text-blue-400" : "text-muted-foreground/80")}
-                  >
-                    <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: c.color || "#666" }} />
-                    {c.name}
-                  </button>
-                ))}
+                {crews.map((c) => {
+                  const crewIcon = getCrewIconDef(c.icon || "users")
+                  const CrewIconComp = crewIcon.icon
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => { onCrewFilter(c.id); setFilterAgentId(null); setFilterDropdownOpen(false) }}
+                      className={cn("w-full text-left px-3 py-1.5 text-xs hover:bg-white/[0.06] flex items-center gap-2", filterCrewId === c.id ? "text-blue-400" : "text-muted-foreground/80")}
+                    >
+                      <CrewIconComp className="h-3.5 w-3.5 shrink-0" style={{ color: c.color || "#666" }} />
+                      {c.name}
+                    </button>
+                  )
+                })}
                 {agents.length > 0 && (
                   <>
                     <div className="border-t border-white/[0.06] mt-1" />
