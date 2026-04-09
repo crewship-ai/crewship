@@ -118,8 +118,10 @@ Requires crews with LEAD agents to already exist.`,
 				continue
 			}
 			if resp.StatusCode >= 400 {
-				resp.Body.Close()
-				continue // label may already exist
+				var errBody map[string]interface{}
+				_ = cli.ReadJSON(resp, &errBody)
+				fmt.Fprintf(os.Stderr, "  ! Label %s failed (%d): %v\n", l.Name, resp.StatusCode, errBody)
+				continue
 			}
 			resp.Body.Close()
 			fmt.Fprintf(os.Stderr, "  + Label: %s\n", l.Name)
@@ -157,7 +159,9 @@ Requires crews with LEAD agents to already exist.`,
 				continue
 			}
 			if resp.StatusCode >= 400 {
-				resp.Body.Close()
+				var errBody map[string]interface{}
+				_ = cli.ReadJSON(resp, &errBody)
+				fmt.Fprintf(os.Stderr, "  ! Project %s failed (%d): %v\n", pd.name, resp.StatusCode, errBody)
 				continue
 			}
 			var created struct {
