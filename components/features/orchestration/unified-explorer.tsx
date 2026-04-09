@@ -216,7 +216,7 @@ export function UnifiedExplorer({
               <ChevronDown className="h-3 w-3 text-muted-foreground/40" />
             </motion.div>
             <span className="text-[10px] font-semibold text-foreground/50 uppercase tracking-wider flex-1 text-left">Projects</span>
-            <span className="text-[10px] text-muted-foreground/30">{projects.length}</span>
+            <span className="text-[10px] text-foreground/35">{projects.length}</span>
           </button>
           <AnimatePresence initial={false}>
             {projectsOpen && (
@@ -234,7 +234,7 @@ export function UnifiedExplorer({
                     >
                       <IconComp className={cn("h-3.5 w-3.5 shrink-0", getGradientPalette(p.color).text)} />
                       <span className="text-xs text-foreground/80 truncate flex-1" title={p.name}>{p.name}</span>
-                      <span className="text-[10px] text-muted-foreground/40 tabular-nums">{p.issue_count}</span>
+                      <span className="text-[10px] text-foreground/40 tabular-nums">{p.issue_count}</span>
                     </button>
                   )
                 })}
@@ -252,7 +252,7 @@ export function UnifiedExplorer({
             key={displayed.length}
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-[10px] text-muted-foreground/30"
+            className="text-[10px] text-foreground/35"
           >
             {displayed.length}
           </motion.span>
@@ -276,7 +276,7 @@ export function UnifiedExplorer({
                         )}
                       >
                         <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
-                        <span className="text-[10px] font-mono text-muted-foreground/50 shrink-0 w-[44px] truncate">{issue.identifier || "--"}</span>
+                        <span className="text-[10px] font-mono text-foreground/50 shrink-0 w-[44px] truncate">{issue.identifier || "--"}</span>
                         <span className="text-xs text-foreground/80 truncate flex-1">{issue.title}</span>
                         {issue.assignee_id && (
                           <img src={getAgentAvatarUrl(issue.assignee_id)} alt={issue.assignee_name || ""} className="h-4 w-4 rounded-full shrink-0" />
@@ -295,7 +295,7 @@ export function UnifiedExplorer({
           {displayed.length === 0 && (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.1 }}
-              className="flex items-center justify-center py-6 text-xs text-muted-foreground/40"
+              className="flex items-center justify-center py-6 text-xs text-foreground/40"
             >
               No issues found
             </motion.div>

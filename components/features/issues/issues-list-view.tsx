@@ -213,7 +213,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
 
   function SortIcon({ column }: { column: SortKey }) {
     if (sortKey !== column)
-      return <ArrowUpDown className="h-3 w-3 text-muted-foreground/40" />
+      return <ArrowUpDown className="h-3 w-3 text-foreground/40" />
     return sortDir === "asc" ? (
       <ArrowUp className="h-3 w-3" />
     ) : (

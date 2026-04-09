@@ -47,13 +47,13 @@ export function IssueCard({ issue, onClick }: IssueCardProps) {
       <div className="flex items-center justify-between gap-2 mb-0.5">
         <div className="flex items-center gap-1">
           {issue.identifier && (
-            <span className="text-[10px] font-mono text-muted-foreground/50">{issue.identifier}</span>
+            <span className="text-[10px] font-mono text-foreground/50">{issue.identifier}</span>
           )}
           {overdue && <Clock className="h-2.5 w-2.5 text-red-500" />}
         </div>
         {issue.assignee_id && (
           <div className="flex items-center gap-1 shrink-0">
-            <span className="text-[10px] text-muted-foreground/50 truncate max-w-[80px]">{issue.assignee_name}</span>
+            <span className="text-[10px] text-foreground/50 truncate max-w-[80px]">{issue.assignee_name}</span>
             <img
               src={getAgentAvatarUrl(issue.assignee_id)}
               alt={issue.assignee_name || ""}
@@ -78,13 +78,13 @@ export function IssueCard({ issue, onClick }: IssueCardProps) {
             <LabelBadge key={label.id} label={label} />
           ))}
           {issue.labels && issue.labels.length > 3 && (
-            <span className="text-[9px] text-muted-foreground/40">+{issue.labels.length - 3}</span>
+            <span className="text-[9px] text-foreground/40">+{issue.labels.length - 3}</span>
           )}
         </div>
       )}
 
       {/* Row 4: date */}
-      <div className="text-[10px] text-muted-foreground/60">
+      <div className="text-[10px] text-foreground/40">
         {dateLabel} {formatShortDate(dateValue)}
       </div>
     </Card>

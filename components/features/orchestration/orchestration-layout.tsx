@@ -113,7 +113,7 @@ function LiveMessagesPanel() {
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground/50">
         <MessageSquare className="h-5 w-5 mb-1.5" />
         <p className="text-[11px]">No messages yet</p>
-        <p className="text-[10px] text-muted-foreground/30 mt-0.5">Task and mission updates appear here in real-time</p>
+        <p className="text-[10px] text-foreground/30 mt-0.5">Task and mission updates appear here in real-time</p>
       </div>
     )
   }
@@ -129,7 +129,7 @@ function LiveMessagesPanel() {
       <div className="flex-1 overflow-y-auto font-mono text-[11px] px-3 py-1">
         {messages.map((msg, i) => (
           <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02]">
-            <span className="text-muted-foreground/40 tabular-nums shrink-0 w-[52px]">{msg.ts.slice(11, 19)}</span>
+            <span className="text-foreground/40 tabular-nums shrink-0 w-[52px]">{msg.ts.slice(11, 19)}</span>
             <span className={cn("shrink-0 text-[10px] px-1 rounded", MSG_TYPE_COLORS[msg.type] || "text-muted-foreground", "bg-white/[0.03]")}>
               {MSG_TYPE_LABELS[msg.type] || msg.type}
             </span>
@@ -177,7 +177,7 @@ function ExecLogPanel() {
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground/50">
         <Terminal className="h-5 w-5 mb-1.5" />
         <p className="text-[11px]">Waiting for agent activity...</p>
-        <p className="text-[10px] text-muted-foreground/30 mt-0.5">Logs appear here when agents run</p>
+        <p className="text-[10px] text-foreground/30 mt-0.5">Logs appear here when agents run</p>
       </div>
     )
   }
@@ -193,7 +193,7 @@ function ExecLogPanel() {
       <div className="flex-1 overflow-y-auto font-mono text-[11px] px-3 py-1">
         {logs.map((log, i) => (
           <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02]">
-            <span className="text-muted-foreground/40 tabular-nums shrink-0 w-[52px]">{log.ts.slice(11, 19)}</span>
+            <span className="text-foreground/40 tabular-nums shrink-0 w-[52px]">{log.ts.slice(11, 19)}</span>
             <img src={getAgentAvatarUrl(log.agent)} alt="" className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5" />
             <span className="text-muted-foreground shrink-0 w-[60px] truncate">@{log.agent}</span>
             <span className={cn("truncate", EVENT_COLORS[log.event] || "text-foreground")}>{log.content}</span>
@@ -817,7 +817,7 @@ export function OrchestrationLayout({
                           <Save className="h-3 w-3 mr-1.5 text-muted-foreground/50" />
                           {view.name}
                           {view.shared && (
-                            <span className="ml-auto text-[9px] text-muted-foreground/40 uppercase">shared</span>
+                            <span className="ml-auto text-[9px] text-foreground/40 uppercase">shared</span>
                           )}
                         </DropdownMenuItem>
                       ))}

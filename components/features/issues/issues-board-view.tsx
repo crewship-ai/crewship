@@ -59,7 +59,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
                 <span className="text-sm font-medium text-foreground/80">
                   {statusLabel[status]}
                 </span>
-                <span className="text-xs text-muted-foreground/70 tabular-nums">
+                <span className="text-xs text-foreground/50 tabular-nums">
                   {colIssues.length}
                 </span>
               </div>
@@ -67,7 +67,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
                 <div className="flex flex-col gap-2 px-1 pb-2">
                   {colIssues.length === 0 ? (
                     <div className="flex items-center justify-center h-20 rounded-lg border border-dashed border-border/50">
-                      <span className="text-xs text-muted-foreground/50">No issues</span>
+                      <span className="text-xs text-foreground/40">No issues</span>
                     </div>
                   ) : (
                     colIssues.map((issue) => {
@@ -110,7 +110,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
                   <span className="text-xs font-medium text-muted-foreground">
                     {statusLabel[status]}
                   </span>
-                  <span className="text-xs text-muted-foreground/70 tabular-nums">
+                  <span className="text-xs text-foreground/50 tabular-nums">
                     {colIssues.length}
                   </span>
                 </div>
