@@ -136,9 +136,11 @@ func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 
 	// Get next position
 	var maxPos int
-	_ = h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COALESCE(MAX(position), 0) FROM triage_rules WHERE workspace_id = ?`,
-		wsID).Scan(&maxPos)
+		wsID).Scan(&maxPos); err != nil {
+		h.logger.Error("get max triage rule position", "error", err)
+	}
 
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -497,9 +499,11 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Increment match_count for matched rules
 	for ruleID, count := range matchedRules {
-		_, _ = h.db.ExecContext(r.Context(),
+		if _, err := h.db.ExecContext(r.Context(),
 			`UPDATE triage_rules SET match_count = match_count + ? WHERE id = ?`,
-			count, ruleID)
+			count, ruleID); err != nil {
+			h.logger.Error("update triage rule match_count", "rule_id", ruleID, "error", err)
+		}
 	}
 
 	if h.hub != nil && matched > 0 {
