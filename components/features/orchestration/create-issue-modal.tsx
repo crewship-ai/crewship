@@ -76,9 +76,9 @@ export function CreateIssueModal({
 
   const titleRef = useRef<HTMLInputElement>(null)
 
-  // Auto-select first crew if only one
+  // Auto-select first crew when opening
   useEffect(() => {
-    if (open && !crewId && crews.length === 1) {
+    if (open && !crewId && crews.length > 0) {
       setCrewId(crews[0].id)
     }
   }, [open, crewId, crews])

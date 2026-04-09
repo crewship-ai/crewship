@@ -1,10 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   X, Loader2, ChevronRight, Check, User, Bot, UserX,
-  Tag, Calendar, Rocket, Code, Clipboard, Briefcase, Zap,
-  Target, Shield, Database, Globe,
+  Tag, Calendar, Search,
 } from "lucide-react"
 import {
   Dialog,
@@ -25,9 +24,15 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
 import { LabelBadge } from "@/components/features/issues/label-badge"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
+import { CrewIcon } from "@/components/ui/crew-icon"
+import {
+  searchCrewIcons, getCrewIconDef,
+  CREW_ICON_CATEGORIES, GRADIENT_PALETTES,
+} from "@/lib/crew-icon"
 import type { AssigneeOption } from "@/components/features/issues/assignee-picker"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -43,29 +48,6 @@ const PROJECT_STATUSES: { value: ProjectStatus; label: string; color: string }[]
   { value: "paused", label: "Paused", color: "#95959F" },
   { value: "completed", label: "Completed", color: "#5E6AD2" },
   { value: "cancelled", label: "Cancelled", color: "#95959F" },
-]
-
-const PROJECT_ICONS = [
-  { name: "rocket", Icon: Rocket },
-  { name: "code", Icon: Code },
-  { name: "clipboard", Icon: Clipboard },
-  { name: "briefcase", Icon: Briefcase },
-  { name: "zap", Icon: Zap },
-  { name: "target", Icon: Target },
-  { name: "shield", Icon: Shield },
-  { name: "database", Icon: Database },
-  { name: "globe", Icon: Globe },
-]
-
-const PROJECT_COLORS = [
-  { name: "blue", value: "#3B82F6" },
-  { name: "emerald", value: "#10B981" },
-  { name: "violet", value: "#8B5CF6" },
-  { name: "amber", value: "#F59E0B" },
-  { name: "rose", value: "#F43F5E" },
-  { name: "cyan", value: "#06B6D4" },
-  { name: "lime", value: "#84CC16" },
-  { name: "fuchsia", value: "#D946EF" },
 ]
 
 interface CreateProjectModalProps {
@@ -102,6 +84,8 @@ export function CreateProjectModal({
 
   // Popover states
   const [iconOpen, setIconOpen] = useState(false)
+  const [iconQuery, setIconQuery] = useState("")
+  const [iconCategory, setIconCategory] = useState<string | null>(null)
   const [statusOpen, setStatusOpen] = useState(false)
   const [priorityOpen, setPriorityOpen] = useState(false)
   const [leadOpen, setLeadOpen] = useState(false)
@@ -110,6 +94,12 @@ export function CreateProjectModal({
   const [labelsOpen, setLabelsOpen] = useState(false)
 
   const nameRef = useRef<HTMLInputElement>(null)
+
+  // Icon search results
+  const iconResults = useMemo(() => {
+    if (iconCategory) return searchCrewIcons(iconCategory)
+    return searchCrewIcons(iconQuery)
+  }, [iconQuery, iconCategory])
 
   // Focus name on open
   useEffect(() => {
@@ -157,8 +147,6 @@ export function CreateProjectModal({
   }
 
   const statusInfo = PROJECT_STATUSES.find((s) => s.value === status) ?? PROJECT_STATUSES[0]
-  const colorInfo = PROJECT_COLORS.find((c) => c.name === color) ?? PROJECT_COLORS[0]
-  const IconComponent = PROJECT_ICONS.find((i) => i.name === icon)?.Icon ?? Rocket
   const leadName = (() => {
     if (!leadId) return null
     const found = agents.find((a) => a.id === leadId)
@@ -250,47 +238,107 @@ export function CreateProjectModal({
           <div className="px-5 pt-4 pb-2">
             {/* Icon + Name row */}
             <div className="flex items-start gap-3 mb-2">
-              {/* Icon button */}
-              <Popover open={iconOpen} onOpenChange={setIconOpen}>
+              {/* Icon button — uses crew icon system */}
+              <Popover open={iconOpen} onOpenChange={(v) => { setIconOpen(v); if (!v) { setIconQuery(""); setIconCategory(null) } }}>
                 <PopoverTrigger asChild>
-                  <button
-                    className="h-10 w-10 rounded-lg flex items-center justify-center border border-white/[0.08] hover:border-white/[0.15] transition-colors shrink-0"
-                    style={{ backgroundColor: `${colorInfo.value}15` }}
-                  >
-                    <IconComponent className="h-5 w-5" style={{ color: colorInfo.value }} />
+                  <button className="shrink-0 relative group cursor-pointer">
+                    <CrewIcon icon={icon} color={color} size="lg" />
                   </button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[240px] p-3" align="start">
-                  {/* Icons */}
-                  <p className="text-xs text-muted-foreground mb-2">Icon</p>
-                  <div className="grid grid-cols-5 gap-1 mb-3">
-                    {PROJECT_ICONS.map((item) => (
-                      <button
-                        key={item.name}
-                        onClick={() => setIcon(item.name)}
-                        className={cn(
-                          "h-8 w-8 rounded-md flex items-center justify-center transition-colors",
-                          icon === item.name ? "bg-white/[0.12] text-foreground" : "text-muted-foreground hover:bg-white/[0.08]",
-                        )}
-                      >
-                        <item.Icon className="h-4 w-4" />
-                      </button>
-                    ))}
+                <PopoverContent className="w-[340px] sm:w-[400px] p-0 rounded-2xl" align="start" sideOffset={8}>
+                  {/* Color picker row */}
+                  <div className="px-4 pt-4 pb-3 border-b">
+                    <div className="flex items-center justify-between mb-3">
+                      {GRADIENT_PALETTES.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setColor(p.id)}
+                          className="transition-all hover:scale-105 shrink-0"
+                        >
+                          <CrewIcon
+                            icon={icon}
+                            color={p.id}
+                            size="sm"
+                            className={cn(
+                              "transition-all",
+                              color === p.id ? "ring-2 ring-primary ring-offset-2 ring-offset-background scale-110" : "opacity-50 hover:opacity-100",
+                            )}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-micro text-muted-foreground">Pick a color, then choose an icon below</p>
                   </div>
-                  {/* Colors */}
-                  <p className="text-xs text-muted-foreground mb-2">Color</p>
-                  <div className="flex gap-1.5">
-                    {PROJECT_COLORS.map((c) => (
-                      <button
-                        key={c.name}
-                        onClick={() => { setColor(c.name); setIconOpen(false) }}
-                        className={cn(
-                          "h-6 w-6 rounded-full transition-all",
-                          color === c.name ? "ring-2 ring-offset-2 ring-offset-background" : "hover:scale-110",
-                        )}
-                        style={{ backgroundColor: c.value, "--tw-ring-color": c.value } as React.CSSProperties}
+
+                  {/* Search */}
+                  <div className="px-4 pt-3 pb-2">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        value={iconQuery}
+                        onChange={(e) => { setIconQuery(e.target.value); setIconCategory(null) }}
+                        placeholder="Search icons..."
+                        className="pl-9 h-8 text-xs"
                       />
-                    ))}
+                    </div>
+                  </div>
+
+                  {/* Category chips */}
+                  <div className="px-4 pb-2">
+                    <div className="flex flex-wrap gap-1">
+                      {CREW_ICON_CATEGORIES.map((cat) => (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => {
+                            if (iconCategory === cat) { setIconCategory(null); setIconQuery("") }
+                            else { setIconCategory(cat); setIconQuery("") }
+                          }}
+                          className={cn(
+                            "px-2 py-0.5 text-micro rounded-full capitalize transition-colors",
+                            iconCategory === cat
+                              ? "bg-primary text-primary-foreground font-medium"
+                              : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground",
+                          )}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Icon grid */}
+                  <div className="px-4 pb-4">
+                    <div className="grid grid-cols-8 gap-1 max-h-[240px] overflow-y-auto rounded-lg border bg-muted/20 p-2">
+                      {iconResults.map((iconName) => {
+                        const def = getCrewIconDef(iconName)
+                        const IconComp = def.icon
+                        const isSelected = icon === iconName
+                        return (
+                          <button
+                            key={iconName}
+                            type="button"
+                            title={def.label}
+                            onClick={() => { setIcon(iconName); setIconOpen(false) }}
+                            className={cn(
+                              "aspect-square rounded-lg flex items-center justify-center transition-all",
+                              isSelected
+                                ? "bg-primary text-primary-foreground shadow-sm scale-110"
+                                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                            )}
+                          >
+                            <IconComp className="h-4 w-4" />
+                          </button>
+                        )
+                      })}
+                      {iconResults.length === 0 && (
+                        <p className="col-span-8 text-center text-xs text-muted-foreground py-8">No icons found</p>
+                      )}
+                    </div>
+                    <p className="text-micro text-muted-foreground mt-2 text-center">
+                      {iconResults.length} icons {iconCategory ? `in ${iconCategory}` : "available"}
+                    </p>
                   </div>
                 </PopoverContent>
               </Popover>
