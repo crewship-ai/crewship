@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { marked } from "marked"
-import { useEditor, EditorContent } from "@tiptap/react"
+import { useEditor, EditorContent, NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
 import Placeholder from "@tiptap/extension-placeholder"
 import Link from "@tiptap/extension-link"
@@ -273,6 +273,32 @@ function LanguageSelector({
 }
 
 // ---------------------------------------------------------------------------
+// Code block NodeView — renders language selector directly on the code block
+// ---------------------------------------------------------------------------
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function CodeBlockView({ node, updateAttributes }: any) {
+  const lang = node.attrs.language || ""
+  return (
+    <NodeViewWrapper className="relative group my-3">
+      <div className="absolute right-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+        <LanguageSelector
+          language={lang}
+          onSelect={(l: string) => updateAttributes({ language: l })}
+        />
+      </div>
+      {lang && (
+        <div className="absolute right-2 top-2 text-[10px] font-mono text-muted-foreground/30 uppercase group-hover:opacity-0 transition-opacity pointer-events-none">
+          {LANGUAGES.find((l) => l.value === lang)?.label || lang}
+        </div>
+      )}
+      <pre className="bg-[#0d1117] border border-white/[0.08] rounded-lg p-4 pt-3 overflow-x-auto !my-0" spellCheck={false}>
+        <NodeViewContent as="div" className={cn("font-mono text-xs", lang ? `language-${lang} hljs` : "hljs")} />
+      </pre>
+    </NodeViewWrapper>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main editor
 // ---------------------------------------------------------------------------
 export function TiptapEditor({
@@ -314,6 +340,10 @@ export function TiptapEditor({
       CodeBlockLowlight.configure({
         lowlight,
         defaultLanguage: null,
+      }).extend({
+        addNodeView() {
+          return ReactNodeViewRenderer(CodeBlockView)
+        },
       }),
       Image.configure({
         inline: false,
@@ -628,16 +658,6 @@ export function TiptapEditor({
             <Redo className={iconSize} />
           </ToolbarButton>
 
-          {/* Code block language selector - appears when cursor is in a code block */}
-          {isInCodeBlock && (
-            <>
-              <Sep />
-              <LanguageSelector
-                language={codeBlockLanguage}
-                onSelect={handleLanguageChange}
-              />
-            </>
-          )}
         </div>
       )}
 
