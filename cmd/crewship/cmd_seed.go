@@ -773,16 +773,24 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 			}
 		}
 
-		// Assign agent
+		// Assign agent via PATCH
 		if def.Assignee != "" && ident != "" {
-			if aid, ok := agentIDs[def.Assignee]; ok {
+			aid, ok := agentIDs[def.Assignee]
+			if ok {
 				r, err := client.Patch(
 					fmt.Sprintf("/api/v1/crews/%s/issues/%s", crewID, ident),
 					map[string]string{"assignee_type": "agent", "assignee_id": aid},
 				)
-				if err == nil {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "    ! assign %s→%s: %v\n", ident, def.Assignee, err)
+				} else {
+					if r.StatusCode >= 400 {
+						fmt.Fprintf(os.Stderr, "    ! assign %s→%s: HTTP %d\n", ident, def.Assignee, r.StatusCode)
+					}
 					r.Body.Close()
 				}
+			} else {
+				fmt.Fprintf(os.Stderr, "    ! agent %q not in agentIDs\n", def.Assignee)
 			}
 		}
 
