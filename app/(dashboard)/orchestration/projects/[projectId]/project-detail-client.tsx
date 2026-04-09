@@ -1097,7 +1097,7 @@ function ProjectSidebar({
   return (
     <div className="p-4 space-y-1">
       {/* ── Properties ─────────────────────────────────────────── */}
-      <div className="rounded-lg border border-white/[0.04]">
+      <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
         <SectionHeader
           title="Properties"
           open={propertiesOpen}
@@ -1327,7 +1327,7 @@ function ProjectSidebar({
       </div>
 
       {/* ── Labels ─────────────────────────────────────────────── */}
-      <div className="rounded-lg border border-white/[0.04]">
+      <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
         <SectionHeader
           title="Labels"
           open={true}
@@ -1354,7 +1354,7 @@ function ProjectSidebar({
       </div>
 
       {/* ── Milestones ─────────────────────────────────────────── */}
-      <div className="rounded-lg border border-white/[0.04]">
+      <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
       <SectionHeader
         title={`Milestones${milestones.length > 0 ? ` (${milestones.length})` : ""}`}
         open={milestonesOpen}
@@ -1474,7 +1474,7 @@ function ProjectSidebar({
       </div>
 
       {/* ── Progress ─────────────────────────────────────────── */}
-      <div className="rounded-lg border border-white/[0.04]">
+      <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
         <SectionHeader
           title="Progress"
           open={progressOpen}
@@ -1622,7 +1622,7 @@ function ProjectSidebar({
       </div>
 
       {/* ── Activity ─────────────────────────────────────────── */}
-      <div className="rounded-lg border border-white/[0.04]">
+      <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
         <SectionHeader
           title="Activity"
           open={activityOpen}
