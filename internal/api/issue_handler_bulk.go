@@ -98,11 +98,15 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 
 		// Update labels if provided
 		if req.Updates.Labels != nil {
-			_, _ = h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, issueID)
+			if _, err := h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, issueID); err != nil {
+				h.logger.Error("bulk delete issue labels", "error", err, "issue_id", issueID)
+			}
 			for _, labelID := range *req.Updates.Labels {
-				_, _ = h.db.ExecContext(r.Context(),
+				if _, err := h.db.ExecContext(r.Context(),
 					`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
-					issueID, labelID)
+					issueID, labelID); err != nil {
+					h.logger.Error("bulk insert issue label", "error", err, "issue_id", issueID, "label_id", labelID)
+				}
 			}
 		}
 

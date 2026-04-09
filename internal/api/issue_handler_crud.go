@@ -564,9 +564,11 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			h.logger.Error("delete issue labels", "error", err)
 		}
 		for _, labelID := range *req.Labels {
-			_, _ = h.db.ExecContext(r.Context(),
+			if _, err := h.db.ExecContext(r.Context(),
 				`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
-				missionID, labelID)
+				missionID, labelID); err != nil {
+				h.logger.Error("insert mission label", "error", err, "mission_id", missionID, "label_id", labelID)
+			}
 		}
 	}
 
