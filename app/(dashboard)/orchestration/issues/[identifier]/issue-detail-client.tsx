@@ -816,11 +816,13 @@ export function IssueDetailClient() {
 
         {/* ---- Right: Sidebar ---- */}
         <div className="w-[320px] border-l border-border bg-card shrink-0 hidden lg:block">
-          <div className="sticky top-0 p-5 space-y-5 overflow-y-auto max-h-[calc(100vh-53px)]">
-            {/* PROPERTIES header */}
-            <h3 className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
-              Properties
-            </h3>
+          <div className="sticky top-0 p-3 space-y-1 overflow-y-auto max-h-[calc(100vh-53px)]">
+            {/* PROPERTIES */}
+            <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+              <div className="flex items-center px-3 py-2">
+                <span className="text-[11px] font-medium text-muted-foreground/70">Properties</span>
+              </div>
+              <div className="px-1 pb-1">
 
             {/* Status */}
             <PropertyRow label="Status">
@@ -1031,14 +1033,13 @@ export function IssueDetailClient() {
               </Popover>
             </PropertyRow>
 
-            <Separator className="bg-border/60" />
+              </div>
+            </div>
 
             {/* Labels */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
-                  Labels
-                </span>
+            <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+              <div className="flex items-center justify-between px-3 py-2">
+                <span className="text-[11px] font-medium text-muted-foreground/70">Labels</span>
                 <Popover open={labelsOpen} onOpenChange={setLabelsOpen}>
                   <PopoverTrigger asChild>
                     <Button
@@ -1077,25 +1078,25 @@ export function IssueDetailClient() {
                   </PopoverContent>
                 </Popover>
               </div>
-              {(issue.labels ?? []).length > 0 ? (
-                <div className="flex flex-wrap gap-1">
-                  {(issue.labels ?? []).map((label) => (
-                    <LabelBadge key={label.id} label={label} />
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground/40">None</p>
-              )}
+              <div className="px-3 pb-2">
+                {(issue.labels ?? []).length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {(issue.labels ?? []).map((label) => (
+                      <LabelBadge key={label.id} label={label} />
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground/40 pl-0.5">No labels</span>
+                )}
+              </div>
             </div>
 
-            <Separator className="bg-border/60" />
-
             {/* Project */}
-            <div className="space-y-2 relative">
-              <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
-                Project
-              </span>
-              <div className="flex items-center gap-1 group">
+            <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+              <div className="flex items-center px-3 py-2">
+                <span className="text-[11px] font-medium text-muted-foreground/70">Project</span>
+              </div>
+              <div className="flex items-center gap-1 group px-3 pb-2">
                 <Popover open={projectOpen} onOpenChange={setProjectOpen}>
                   <PopoverTrigger asChild>
                     <button className="flex items-center gap-1.5 text-sm hover:bg-accent rounded px-1.5 py-0.5 transition-colors flex-1">
@@ -1158,15 +1159,13 @@ export function IssueDetailClient() {
               </div>
             </div>
 
-            <Separator className="bg-border/60" />
-
             {/* Relations */}
-            <div className="space-y-2">
-              <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
-                Relations
-              </span>
+            <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
+              <div className="flex items-center px-3 py-2">
+                <span className="text-[11px] font-medium text-muted-foreground/70">Relations</span>
+              </div>
               {relations.length > 0 ? (
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 px-3 pb-2">
                   {relations.map((rel) => (
                     <button
                       key={rel.id}
@@ -1196,11 +1195,9 @@ export function IssueDetailClient() {
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground/40">No relations</p>
+                <p className="text-xs text-muted-foreground/40 px-3 pb-2">No relations</p>
               )}
             </div>
-
-            <Separator className="bg-border/60" />
 
             {/* Action buttons */}
             <div className="space-y-2">
