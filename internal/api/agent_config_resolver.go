@@ -707,7 +707,7 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 	}
 
 	// Step 4: Batch credential lookup (avoid N+1)
-	credIDs := make([]string, 0)
+	credIDs := make([]string, 0, len(merged))
 	for _, srv := range merged {
 		if b, ok := agentBindings[srv.id]; ok && b.enabled && b.credID != nil && *b.credID != "" {
 			credIDs = append(credIDs, *b.credID)

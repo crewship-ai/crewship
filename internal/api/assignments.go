@@ -33,6 +33,7 @@ type AssignmentHandler struct {
 	missionCallback MissionCallback
 }
 
+// NewAssignmentHandler creates an AssignmentHandler with the given orchestrator, WebSocket hub, and internal token.
 func NewAssignmentHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, internalToken string, logger *slog.Logger) *AssignmentHandler {
 	return &AssignmentHandler{
 		db:            db,
@@ -509,7 +510,7 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	items := make([]assignmentListItem, 0)
+	items := make([]assignmentListItem, 0, limit)
 	for rows.Next() {
 		var item assignmentListItem
 		if err := rows.Scan(

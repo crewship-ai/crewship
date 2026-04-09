@@ -363,7 +363,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	items := make([]escalationItem, 0)
+	items := make([]escalationItem, 0, limit)
 	for rows.Next() {
 		var item escalationItem
 		if err := rows.Scan(

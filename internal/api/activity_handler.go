@@ -153,7 +153,7 @@ func (h *QueryHandler) ListAllActivity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Collect activity from all sources
-	items := make([]activityItem, 0)
+	items := make([]activityItem, 0, limit)
 	items = append(items, h.fetchAssignmentActivity(r.Context(), workspaceID)...)
 	items = append(items, h.fetchPeerConversationActivity(r.Context(), workspaceID)...)
 	items = append(items, h.fetchEscalationActivity(r.Context(), workspaceID)...)

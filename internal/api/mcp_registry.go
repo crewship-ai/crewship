@@ -288,7 +288,7 @@ func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	servers := make([]mcpRegistryServerRow, 0)
+	servers := make([]mcpRegistryServerRow, 0, limit)
 	for rows.Next() {
 		s, err := scanRegistryRow(rows)
 		if err != nil {
@@ -337,7 +337,7 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	servers := make([]mcpRegistryServerRow, 0)
+	servers := make([]mcpRegistryServerRow, 0, limit)
 	for rows.Next() {
 		s, err := scanRegistryRow(rows)
 		if err != nil {

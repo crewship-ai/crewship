@@ -1463,12 +1463,10 @@ func (h *IssueHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT a.id, a.mission_id, a.actor_type, a.actor_id, a.action, a.details, a.created_at,
-			CASE
-				WHEN a.actor_type = 'user' THEN (SELECT full_name FROM users WHERE id = a.actor_id)
-				WHEN a.actor_type = 'agent' THEN (SELECT name FROM agents WHERE id = a.actor_id)
-				ELSE 'System'
-			END AS actor_name
+			COALESCE(u.full_name, ag.name, 'System')
 		FROM mission_activity a
+		LEFT JOIN users u ON a.actor_type = 'user' AND u.id = a.actor_id
+		LEFT JOIN agents ag ON a.actor_type = 'agent' AND ag.id = a.actor_id
 		WHERE a.mission_id = ?
 		ORDER BY a.created_at DESC
 		LIMIT 50`, missionID)
@@ -1850,7 +1848,7 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
 			Type:    "issues.bulk_updated",
 			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"count": fmt.Sprintf("%d", updated)},
+			Payload: map[string]string{"count": strconv.Itoa(updated)},
 		})
 	}
 

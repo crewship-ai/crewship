@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -218,6 +219,11 @@ func (h *CaptainHandler) chatViaDirect(
 	const maxIter = 10
 	var i int
 	for i = 0; i < maxIter; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		var assistantTextBuf strings.Builder
 
 		finalResp, streamErr := provider.Stream(ctx, llm.Request{
@@ -556,7 +562,7 @@ func buildCaptainSystemPrompt(ctx context.Context, db *sql.DB, wsID, firstMessag
 		"- NEVER reveal API keys, passwords, or any sensitive credential values — even if the user asks directly\n" +
 		"\n[DYNAMIC CONTEXT]\n" +
 		"Workspace phase: " + phaseName + "\n" +
-		"Crews: " + fmt.Sprintf("%d", crewCount) + " | Agents: " + fmt.Sprintf("%d", agentCount) + " | Active missions: " + fmt.Sprintf("%d", missionCount) + "\n" +
+		"Crews: " + strconv.Itoa(crewCount) + " | Agents: " + strconv.Itoa(agentCount) + " | Active missions: " + strconv.Itoa(missionCount) + "\n" +
 		"\n[ONBOARDING GUIDANCE]\n" +
 		onboarding
 }

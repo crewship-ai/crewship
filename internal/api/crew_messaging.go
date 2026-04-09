@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -109,7 +110,7 @@ func (h *CrewMessagingHandler) SendMessage(w http.ResponseWriter, r *http.Reques
 	// Audit log
 	h.logAudit(r, req.WorkspaceID, "message_sent", req.FromCrewID, req.ToCrewID, req.FromAgentID, map[string]string{
 		"message_id":     id,
-		"content_length": fmt.Sprintf("%d", len(req.Content)),
+		"content_length": strconv.Itoa(len(req.Content)),
 	})
 
 	writeJSON(w, http.StatusCreated, messageResponse{
@@ -344,12 +345,12 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 
 	h.logAudit(r, workspaceID, "file_read", requesterCrewID, targetCrewID, "", map[string]string{
 		"path": filePath,
-		"size": fmt.Sprintf("%d", info.Size()),
+		"size": strconv.FormatInt(info.Size(), 10),
 	})
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("X-File-Name", filepath.Base(absPath))
-	w.Header().Set("X-File-Size", fmt.Sprintf("%d", info.Size()))
+	w.Header().Set("X-File-Size", strconv.FormatInt(info.Size(), 10))
 	w.Write(data)
 }
 
@@ -460,7 +461,7 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 	h.logAudit(r, writeWorkspaceID, "file_written", requesterCrewID, targetCrewID, "", map[string]string{
 		"path":          destPath,
 		"original_name": header.Filename,
-		"size":          fmt.Sprintf("%d", written),
+		"size":          strconv.FormatInt(written, 10),
 	})
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
