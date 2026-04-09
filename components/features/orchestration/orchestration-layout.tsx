@@ -552,20 +552,45 @@ export function OrchestrationLayout({
           </button>
         ))}
 
-        {/* Separator */}
-        <div className="w-px h-4 bg-white/[0.08] mx-2" />
-
-        {/* Context badge — shows selected issue */}
-        {selectedIssue && (
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-400">
-            <span className="font-mono">{selectedIssue.identifier}</span>
-            <button
-              onClick={() => { setSelectedIssue(null); setIssueComments([]) }}
-              className="text-blue-400/60 hover:text-blue-300"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
+        {/* Breadcrumb: Orchestration / Project / Issue */}
+        {(selectedProject || selectedIssue) && (
+          <>
+            <div className="w-px h-4 bg-white/[0.08] mx-2 shrink-0" />
+            <div className="flex items-center gap-1 text-[11px] shrink-0">
+              <button
+                onClick={() => { setSelectedProjectId(null); setSelectedIssue(null); setIssueComments([]) }}
+                className="text-muted-foreground/50 hover:text-foreground/80 transition-colors"
+              >
+                All
+              </button>
+              {selectedProject && (
+                <>
+                  <span className="text-muted-foreground/30">/</span>
+                  <button
+                    onClick={() => { setSelectedIssue(null); setIssueComments([]) }}
+                    className={cn(
+                      "transition-colors truncate max-w-[120px]",
+                      selectedIssue ? "text-muted-foreground/50 hover:text-foreground/80" : "text-foreground/80",
+                    )}
+                  >
+                    {selectedProject.name}
+                  </button>
+                </>
+              )}
+              {selectedIssue && (
+                <>
+                  <span className="text-muted-foreground/30">/</span>
+                  <span className="font-mono text-blue-400">{selectedIssue.identifier}</span>
+                  <button
+                    onClick={() => { setSelectedIssue(null); setIssueComments([]) }}
+                    className="text-muted-foreground/40 hover:text-foreground/80 ml-0.5"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </>
+              )}
+            </div>
+          </>
         )}
 
         <div className="flex-1" />
