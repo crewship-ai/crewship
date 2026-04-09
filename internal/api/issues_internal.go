@@ -272,9 +272,11 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Labels
 	for _, labelID := range req.Labels {
-		_, _ = tx.ExecContext(r.Context(),
+		if _, err := tx.ExecContext(r.Context(),
 			`INSERT OR IGNORE INTO mission_labels(mission_id, label_id) VALUES(?, ?)`,
-			id, labelID)
+			id, labelID); err != nil {
+			h.logger.Error("insert issue label", "issue_id", id, "error", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
