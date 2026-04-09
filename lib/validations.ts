@@ -50,9 +50,6 @@ export const credentialTypeValues = ["AI_CLI_TOKEN", "API_KEY", "SECRET"] as con
 /** Allowed credential provider discriminators. */
 export const credentialProviderValues = ["ANTHROPIC", "OPENAI", "GOOGLE", "NONE"] as const
 
-/** Allowed credential status values for lifecycle tracking. */
-export const credentialStatusValues = ["ACTIVE", "EXPIRED", "RATE_LIMITED", "REVOKED", "ERROR"] as const
-
 /**
  * Zod schema for creating a credential with scope validation.
  * Enforces that CREW scope requires crew_id, and non-SECRET types require a provider.

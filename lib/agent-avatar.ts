@@ -44,7 +44,3 @@ export function getAgentAvatarUrl(seed: string, styleName?: string | null): stri
   return uri
 }
 
-/** Return all available avatar style keys (e.g. "bottts-neutral", "pixel-art"). */
-export function getAvatarStyleKeys(): string[] {
-  return Object.keys(AVATAR_STYLES)
-}
