@@ -1,0 +1,275 @@
+---
+title: "Crew Commands"
+description: "Create and manage crews, members, connections, and MCP configurations."
+icon: "users"
+---
+
+# crewship crew
+
+Manage crews (teams of AI agents sharing a container).
+
+```bash
+crewship crew <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List all crews in the workspace |
+| `get` | Show crew details |
+| `create` | Create a new crew |
+| `update` | Update a crew |
+| `delete` | Delete a crew |
+| `status` | Show live crew status (agents, assignments, escalations) |
+| `standup` | Show crew standup summary (last 24h activity) |
+| `peer-conversations` | List peer conversations in a crew |
+| `suggest` | Get AI-powered crew suggestions based on a goal |
+| `member list` | List crew members |
+| `member add` | Add a user to a crew |
+| `member remove` | Remove a member from a crew |
+| `connect` | Create a connection between two crews |
+| `disconnect` | Remove a crew connection |
+| `connections` | List all crew connections in the workspace |
+| `mcp` | Show or set MCP server configuration for a crew |
+
+---
+
+## `crewship crew list`
+
+List all crews in the workspace.
+
+```bash
+crewship crew list
+```
+
+**Output columns:** SLUG, NAME, AGENTS, NETWORK, MEMORY, CPUS
+
+---
+
+## `crewship crew get`
+
+Show detailed information about a crew.
+
+```bash
+crewship crew get <slug-or-id>
+```
+
+**Output fields:** Name, Slug, ID, Description, Memory, CPUs, TTL, Network Mode, Allowed Domains, Created.
+
+---
+
+## `crewship crew create`
+
+Create a new crew.
+
+```bash
+crewship crew create --name "Backend Team" --memory-mb 4096 --cpus 2.0
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `string` | _(required)_ | Crew name. |
+| `--slug` | `string` | _(auto from name)_ | Crew slug. |
+| `--description` | `string` | | Description. |
+| `--color` | `string` | | Color palette ID (e.g. `blue`, `emerald`, `violet`). |
+| `--icon` | `string` | | Lucide icon name (e.g. `code`, `rocket`). |
+| `--memory-mb` | `int` | | Container memory limit in MB. |
+| `--cpus` | `float64` | | Container CPU limit. |
+| `--ttl` | `int` | `0` | Auto-stop after idle hours (0 = never stop). |
+| `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
+| `--allowed-domains` | `string` | | Comma-separated allowed domains for restricted mode. |
+
+---
+
+## `crewship crew update`
+
+Update a crew. Only changed flags are sent.
+
+```bash
+crewship crew update <slug-or-id> --memory-mb 8192 --cpus 4.0
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `string` | | Crew name. |
+| `--description` | `string` | | Description. |
+| `--color` | `string` | | Hex color. |
+| `--icon` | `string` | | Emoji icon. |
+| `--memory-mb` | `int` | | Container memory limit in MB. |
+| `--cpus` | `float64` | | Container CPU limit. |
+| `--ttl` | `int` | `-1` | Auto-stop after idle hours (0 = disable TTL). |
+| `--network-mode` | `string` | | Network policy: `free` or `restricted`. |
+| `--allowed-domains` | `string` | | Comma-separated allowed domains. Pass empty string to clear. |
+
+---
+
+## `crewship crew delete`
+
+Delete a crew. Prompts for confirmation.
+
+```bash
+crewship crew delete <slug-or-id>
+crewship crew delete backend-team --yes
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |
+
+---
+
+## `crewship crew status`
+
+Show live crew status including agents, recent assignments, and open escalations.
+
+```bash
+crewship crew status <slug-or-id>
+```
+
+Displays a compound view with three sections:
+- **AGENTS** -- all agents with their slug, role, and status
+- **ASSIGNMENTS (last 5)** -- recent task assignments with status colors
+- **ESCALATIONS (open)** -- pending or open escalations
+
+---
+
+## `crewship crew standup`
+
+Show crew standup summary (last 24h activity).
+
+```bash
+crewship crew standup <slug-or-id>
+crewship crew standup backend-team --since 2024-01-01T00:00:00Z
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--since` | `string` | _(24h ago)_ | Show activity since (RFC3339 timestamp). |
+
+---
+
+## `crewship crew peer-conversations`
+
+List peer conversations in a crew.
+
+```bash
+crewship crew peer-conversations <slug-or-id>
+crewship crew peer-conversations backend-team --limit 20
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit` | `int` | `50` | Number of conversations to show. |
+
+**Output columns:** ID, FROM, TO, QUESTION, STATUS, ESCALATED, CREATED
+
+---
+
+## `crewship crew suggest`
+
+Get AI-powered crew suggestions based on a goal.
+
+```bash
+crewship crew suggest --goal "Build a SaaS billing system"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--goal` | `string` | _(required)_ | What should this crew accomplish? |
+
+---
+
+## Crew Members
+
+### `crewship crew member list`
+
+List members of a crew.
+
+```bash
+crewship crew member list <crew-slug-or-id>
+```
+
+**Output columns:** ID, USER, EMAIL, JOINED
+
+### `crewship crew member add`
+
+Add a user to a crew.
+
+```bash
+crewship crew member add <crew-slug-or-id> <user-id>
+```
+
+### `crewship crew member remove`
+
+Remove a member from a crew.
+
+```bash
+crewship crew member remove <crew-slug-or-id> <member-id>
+```
+
+---
+
+## Crew Connections
+
+Crew connections enable cross-crew task dispatch between two crews.
+
+### `crewship crew connect`
+
+Create a connection between two crews.
+
+```bash
+crewship crew connect <crew-slug-A> <crew-slug-B>
+crewship crew connect backend-team frontend-team --direction unidirectional
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--direction` | `string` | `bidirectional` | Connection direction: `bidirectional` or `unidirectional`. |
+
+### `crewship crew disconnect`
+
+Remove a crew connection by connection ID.
+
+```bash
+crewship crew disconnect <connection-id>
+```
+
+### `crewship crew connections`
+
+List all crew connections in the workspace.
+
+```bash
+crewship crew connections
+```
+
+**Output columns:** ID, FROM, TO, DIRECTION, STATUS, CREATED
+
+---
+
+## `crewship crew mcp`
+
+Show or set MCP server configuration for a crew.
+
+```bash
+# Show current config
+crewship crew mcp <crew-slug>
+
+# Set from inline JSON
+crewship crew mcp <crew-slug> --set '{"mcpServers":{"github":{"command":"npx","args":["-y","@modelcontextprotocol/server-github"]}}}'
+
+# Set from file
+crewship crew mcp <crew-slug> --set-file .mcp.json
+
+# Clear config
+crewship crew mcp <crew-slug> --set ''
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--set` | `string` | | Set MCP config from JSON string. Pass empty to clear. |
+| `--set-file` | `string` | | Set MCP config from file path. |
+
+<Note>
+`--set` and `--set-file` are mutually exclusive. The JSON must contain a `"mcpServers"` top-level object.
+</Note>

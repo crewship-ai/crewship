@@ -1,0 +1,190 @@
+---
+title: "Scheduling"
+description: "Cron-based automated agent runs with custom prompts, timeout management, and execution tracking."
+icon: "clock"
+---
+
+# Agent Scheduling
+
+Crewship includes a built-in scheduler that triggers agent runs on a cron schedule. Scheduled runs are fully autonomous -- the agent receives a prompt, executes inside its crew container, and the result is recorded as a run with the `SCHEDULED` trigger type.
+
+## How It Works
+
+The scheduler is a background goroutine that manages a pool of cron jobs, one per enabled agent schedule. On startup it loads all agents with `schedule_enabled = 1` from the database and registers their cron expressions. Each tick of a cron job triggers a full agent run cycle.
+
+```
+Scheduler goroutine
+    |
+    v
+cron library fires at scheduled time
+    |
+    v
+triggerAgent(agent)
+    |
+    +--> Create chat session (deterministic ID)
+    +--> Resolve chat (credentials, system prompt, skills)
+    +--> Ensure crew container is running
+    +--> Create run record (trigger: SCHEDULED)
+    +--> Execute agent via orchestrator.RunAgent
+    +--> Update run record (COMPLETED or FAILED)
+    +--> Update schedule_last_run and schedule_next_run
+```
+
+## Enabling a Schedule
+
+Schedules are configured via the API. There are no CLI flags for scheduling yet.
+
+```bash
+# Enable a schedule on an agent
+curl -X PATCH http://localhost:8080/api/v1/agents/{id} \
+  -H "Content-Type: application/json" \
+  -d '{
+    "schedule_cron": "0 9 * * 1-5",
+    "schedule_prompt": "Review open PRs and summarize status.",
+    "schedule_enabled": true
+  }'
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `schedule_cron` | string | Standard 5-field cron expression |
+| `schedule_prompt` | string | Custom prompt for scheduled runs (optional) |
+| `schedule_enabled` | boolean | Whether the schedule is active |
+
+When `schedule_prompt` is empty, the agent receives: `"This is a scheduled run. Execute your primary tasks."`
+
+<Note>
+  Scheduling is API-only for now. Use `PATCH /api/v1/agents/{id}` to configure. There are no CLI commands for schedule management yet.
+</Note>
+
+## Cron Expression Format
+
+The scheduler uses standard 5-field cron expressions:
+
+```
+┌───────────── minute (0-59)
+│ ┌───────────── hour (0-23)
+│ │ ┌───────────── day of month (1-31)
+│ │ │ ┌───────────── month (1-12)
+│ │ │ │ ┌───────────── day of week (0-6, Sun=0)
+│ │ │ │ │
+* * * * *
+```
+
+Examples:
+
+| Expression | Schedule |
+|-----------|----------|
+| `0 9 * * 1-5` | Every weekday at 9:00 AM |
+| `*/15 * * * *` | Every 15 minutes |
+| `0 0 * * *` | Daily at midnight |
+| `30 8 1 * *` | 8:30 AM on the 1st of every month |
+| `0 */2 * * *` | Every 2 hours |
+
+<Warning>
+  Invalid cron expressions are rejected at registration time. The API call will return an error if the expression cannot be parsed.
+</Warning>
+
+## Execution Flow
+
+Each scheduled trigger follows this sequence:
+
+### 1. Chat Session Creation
+
+A new chat session is created with a deterministic ID (format: `sched_{unixnano}_{random_hex}`). The chat title is set to `"Scheduled: {agent_name}"`.
+
+### 2. Chat Resolution
+
+The `ResolveChat` call loads the full agent context: credentials, system prompt, skills, MCP servers, network policy, and crew membership. This ensures the scheduled run has the same capabilities as an interactive run.
+
+### 3. Container Management
+
+If a container provider is configured, the scheduler ensures the crew container is running before execution. Default resource limits:
+
+| Resource | Default |
+|----------|---------|
+| Memory | 4096 MB |
+| CPUs | 2.0 |
+
+### 4. Run Record
+
+A run record is created with trigger type `SCHEDULED` before execution begins. Metadata includes the CLI adapter, crew info, and a `scheduled` tag.
+
+### 5. Agent Execution
+
+The agent runs through `orchestrator.RunAgent` with the same pipeline as interactive runs: sidecar proxy, credential injection, memory, and conversation history.
+
+### 6. Result Recording
+
+After execution completes, the run record is updated with:
+- Status: `COMPLETED` or `FAILED`
+- Duration in milliseconds
+- Cost and usage metadata (if available from the LLM provider)
+
+The assistant response is persisted to the conversation store and the message count is incremented.
+
+## Timeout
+
+Each scheduled run has a **45-minute timeout**. If the agent does not complete within this window, the context is cancelled and the run is marked as failed.
+
+```go
+ctx, cancel := context.WithTimeout(s.ctx, 45*time.Minute)
+```
+
+This is separate from the per-agent `timeout_secs` setting, which controls the LLM execution timeout within the container. The 45-minute limit is the outer boundary for the entire scheduled run cycle including container startup and chat resolution.
+
+## Monitoring
+
+### Timestamp Fields
+
+The scheduler maintains two fields on each agent:
+
+| Field | Updated | Description |
+|-------|---------|-------------|
+| `schedule_last_run` | After each run | ISO 8601 timestamp of the last completed run |
+| `schedule_next_run` | After each run and on schedule update | ISO 8601 timestamp of the next scheduled run |
+
+These fields are updated even on error -- `schedule_next_run` always reflects the next trigger time so monitoring dashboards stay accurate.
+
+### Run Records
+
+Scheduled runs appear in the standard agent runs list with `trigger = "SCHEDULED"`:
+
+```bash
+# List scheduled runs for an agent
+curl http://localhost:8080/api/v1/agents/{id}/runs?trigger=SCHEDULED
+```
+
+Each run record contains:
+- `trigger`: `"SCHEDULED"`
+- `tags`: `["scheduled", "{cli_adapter}"]`
+- `duration_ms`: execution time
+- `total_cost_usd`: LLM cost (if reported)
+- `num_turns`: conversation turns
+- `status`: `COMPLETED` or `FAILED`
+
+### Dynamic Updates
+
+When an agent's schedule is modified via the API, the scheduler hot-reloads the cron entry without restart. The `UpdateSchedule` method:
+
+1. Removes the old cron entry (if any)
+2. Registers the new cron expression
+3. Immediately calculates and persists the next run time
+
+Disabling a schedule (`schedule_enabled: false`) removes the cron entry and stops future triggers. The `schedule_last_run` timestamp is preserved for audit purposes.
+
+## Error Handling
+
+If any step in the trigger pipeline fails (chat creation, resolution, container startup), the scheduler:
+
+1. Logs the error
+2. Updates `schedule_next_run` to the next trigger time
+3. Does **not** update `schedule_last_run` (only updated on successful execution start)
+
+The next scheduled trigger will attempt the full pipeline again. There is no exponential backoff -- the cron schedule determines retry timing.
+
+## What's Next
+
+- [Orchestration](/guides/orchestration) -- multi-agent missions with task dependencies
+- [Captain](/guides/captain) -- natural language crew management
+- [Keeper](/guides/keeper) -- persistent agent memory

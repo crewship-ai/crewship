@@ -1,0 +1,169 @@
+---
+title: "Environment Variables"
+description: "Complete reference for all environment variables that configure the Crewship server, containers, auth, and integrations."
+icon: "sliders"
+---
+
+# Environment Variables
+
+All Crewship configuration can be set via environment variables. These override values from the YAML config file. The mapping is defined in `applyEnvOverrides` in `internal/config/config.go`.
+
+## Server
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_HOST` | `0.0.0.0` | Server listen address |
+| `CREWSHIP_PORT` | `8080` | Server listen port |
+
+## IPC
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_SOCKET_PATH` | `/tmp/crewship.sock` | Unix socket path for internal IPC |
+
+## Container
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_CONTAINER_PROVIDER` | `docker` | Container provider: `docker`, `apple`, `auto`, `k8s` |
+| `CREWSHIP_CONTAINER_NETWORK` | `crewship-agents` | Docker bridge network name |
+| `CREWSHIP_CONTAINER_PREFIX` | (empty) | Container name prefix for multi-instance isolation |
+| `CREWSHIP_RUNTIME_IMAGE` | `ghcr.io/crewship-ai/agent-runtime:latest` | Agent runtime Docker image |
+| `CREWSHIP_SIDECAR_ENABLED` | `false` | Enable sidecar proxy (`true` or `1`) |
+
+<Note>
+  `CREWSHIP_CONTAINER_PREFIX` is essential for multi-instance deployments. Without it, multiple Crewship instances will create containers with colliding names like `crewship-team-engineering`.
+</Note>
+
+## Storage
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_STORAGE_PROVIDER` | `localfs` | Storage backend: `localfs` or `s3` |
+| `CREWSHIP_STORAGE_BASE_PATH` | `/var/lib/crewship` | Base path for local file storage |
+| `CREWSHIP_LOG_PATH` | `/var/log/crewship` | Path for log files |
+
+## State
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_STATE_PROVIDER` | `bbolt` | State store: `bbolt` or `postgres` |
+| `CREWSHIP_BOLT_PATH` | `/var/lib/crewship/state.db` | BoltDB file path |
+
+## Logging
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `CREWSHIP_LOG_FORMAT` | `json` | Log format: `json` or `text` |
+
+## Authentication
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NEXTAUTH_SECRET` | (required) | JWT signing secret for user authentication |
+| `CREWSHIP_NEXTJS_URL` | Auto-derived from port | Internal URL for self-referencing API calls |
+| `CREWSHIP_INTERNAL_TOKEN` | Auto-generated | Token for sidecar-to-crewshipd IPC authentication |
+| `CREWSHIP_ALLOW_SIGNUP` | `false` | Allow new user registration (`true` or `1`) |
+
+<Warning>
+  If `CREWSHIP_INTERNAL_TOKEN` is not set, a cryptographically random 32-byte token is auto-generated at each startup. This is secure but means the token changes on restart. For clustered deployments, set it explicitly.
+</Warning>
+
+### Auto-Derived Values
+
+- `CREWSHIP_NEXTJS_URL`: If not explicitly set, defaults to `http://localhost:{CREWSHIP_PORT}`. In single-binary mode, the internal resolver calls itself on the same port.
+- `CREWSHIP_INTERNAL_TOKEN`: If empty, auto-generated via `crypto/rand` (32 bytes, hex-encoded = 64 chars).
+
+## Encryption
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENCRYPTION_KEY` | (required) | 256-bit hex-encoded AES key for credential encryption |
+| `ENCRYPTION_KEY_V2` | (optional) | Rotated encryption key (for key versioning) |
+
+## Keeper (AI Security Gatekeeper)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KEEPER_ENABLED` | `false` | Enable Keeper AI gatekeeper (`true` or `1`) |
+| `KEEPER_OLLAMA_URL` | `http://localhost:11434` | Ollama API URL for Keeper LLM |
+| `KEEPER_MODEL` | `phi3:mini` | Ollama model name for Keeper evaluations |
+
+<Tip>
+  Setting `KEEPER_OLLAMA_URL` auto-enables Keeper (unless `KEEPER_ENABLED` is explicitly `false`). This means you only need to set the URL to activate Keeper.
+</Tip>
+
+## LLM Proxy
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| (YAML only) | `llm_proxy.enabled: true` | Enable LLM proxy |
+| (YAML only) | `llm_proxy.token_sync_interval: 30s` | Token sync interval |
+| (YAML only) | `llm_proxy.health_check_interval: 60s` | Health check interval |
+
+## License
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_LICENSE_FILE` | (empty) | Path to license file |
+
+## Seed Data
+
+These variables are used by the `./dev.sh seed` command:
+
+| Variable | Description |
+|----------|-------------|
+| `SEED_ANTHROPIC_API_KEY` | Anthropic API key or OAuth token for demo agents |
+| `SEED_GOOGLE_EMAIL` | Google email for seed Google credential |
+| `SEED_GOOGLE_PASSWORD` | Google password for seed Google credential |
+
+## Container Runtime
+
+| Variable | Description |
+|----------|-------------|
+| `DOCKER_HOST` | Docker socket override (e.g., `unix:///var/run/docker.sock`) |
+
+The Docker provider checks `DOCKER_HOST` first, then auto-detects from candidate socket paths.
+
+## Complete Example
+
+```bash
+# Required
+ENCRYPTION_KEY=a1b2c3d4e5f6...  # 64 hex chars
+NEXTAUTH_SECRET=your-jwt-secret
+
+# Server
+CREWSHIP_HOST=0.0.0.0
+CREWSHIP_PORT=8080
+
+# Container
+CREWSHIP_CONTAINER_PROVIDER=docker
+CREWSHIP_SIDECAR_ENABLED=true
+CREWSHIP_RUNTIME_IMAGE=ghcr.io/crewship-ai/agent-runtime:latest
+
+# Auth
+CREWSHIP_ALLOW_SIGNUP=true
+
+# Keeper (optional)
+KEEPER_OLLAMA_URL=http://localhost:11434
+KEEPER_MODEL=phi3:mini
+
+# Logging
+CREWSHIP_LOG_LEVEL=info
+CREWSHIP_LOG_FORMAT=json
+```
+
+## Validation
+
+The config is validated at startup (`Config.Validate`). These constraints are enforced:
+
+| Field | Constraint |
+|-------|-----------|
+| `server.port` | 1-65535 |
+| `ipc.socket_path` | Non-empty |
+| `container.provider` | `docker`, `apple`, `auto`, or `k8s` |
+| `storage.provider` | `localfs` or `s3` |
+| `state.provider` | `bbolt` or `postgres` |
+| `container.default_runtime` | `runc`, `runsc`, `kata-runtime`, or `sysbox-runc` (if set) |
+| `auth.nextjs_url` | Non-empty |

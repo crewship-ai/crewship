@@ -96,6 +96,11 @@ var migrations = []migration{
 	{35, "add_pkce_code_verifier", migrationAddPKCECodeVerifier},
 	{36, "add_mcp_registry_cache", migrationAddMCPRegistryCache},
 	{37, "add_crew_messaging_and_audit", migrationAddCrewMessagingAndAudit},
+	{38, "add_issue_tracker", migrationAddIssueTracker},
+	{39, "add_issue_relations", migrationAddIssueRelations},
+	{40, "add_projects", migrationAddProjects},
+	{41, "add_issue_activity", migrationAddIssueActivity},
+	{42, "add_phase2_features", migrationAddPhase2Features},
 }
 
 const migrationAddKeeperObservability = `
@@ -1140,4 +1145,246 @@ CREATE TABLE IF NOT EXISTS mcp_registry_servers (
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_registry_name ON mcp_registry_servers(name);
 CREATE INDEX IF NOT EXISTS idx_mcp_registry_category ON mcp_registry_servers(category);
+`
+
+const migrationAddIssueTracker = `
+-- Extend missions with issue-tracker fields (Linear-like).
+ALTER TABLE missions ADD COLUMN number INTEGER;
+ALTER TABLE missions ADD COLUMN identifier TEXT;
+ALTER TABLE missions ADD COLUMN priority TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE missions ADD COLUMN assignee_type TEXT;
+ALTER TABLE missions ADD COLUMN assignee_id TEXT;
+ALTER TABLE missions ADD COLUMN due_date TEXT;
+ALTER TABLE missions ADD COLUMN sort_order REAL NOT NULL DEFAULT 0;
+ALTER TABLE missions ADD COLUMN mission_type TEXT NOT NULL DEFAULT 'orchestration';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_identifier ON missions(identifier) WHERE identifier IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mission_priority ON missions(priority);
+CREATE INDEX IF NOT EXISTS idx_mission_type ON missions(mission_type);
+CREATE INDEX IF NOT EXISTS idx_mission_sort_order ON missions(sort_order);
+
+-- Crew issue prefix for identifiers (e.g. "ENG" -> ENG-42).
+ALTER TABLE crews ADD COLUMN issue_prefix TEXT;
+
+-- Atomic sequential counter per crew for issue numbering.
+CREATE TABLE IF NOT EXISTS issue_counters (
+    crew_id TEXT PRIMARY KEY REFERENCES crews(id) ON DELETE CASCADE,
+    next_number INTEGER NOT NULL DEFAULT 1
+);
+
+-- Workspace-scoped labels.
+CREATE TABLE IF NOT EXISTS labels (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#6B7280',
+    label_group TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(workspace_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_labels_workspace ON labels(workspace_id);
+
+-- Many-to-many: missions <-> labels.
+CREATE TABLE IF NOT EXISTS mission_labels (
+    mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    label_id TEXT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    PRIMARY KEY (mission_id, label_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_labels_mission ON mission_labels(mission_id);
+CREATE INDEX IF NOT EXISTS idx_mission_labels_label ON mission_labels(label_id);
+
+-- Comments on missions/issues.
+CREATE TABLE IF NOT EXISTS mission_comments (
+    id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    author_type TEXT NOT NULL CHECK(author_type IN ('user','agent')),
+    author_id TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mission_comments_mission ON mission_comments(mission_id);
+`
+
+const migrationAddIssueRelations = `
+-- Relations between issues (blocks, blocked_by, relates_to, duplicate_of).
+CREATE TABLE IF NOT EXISTS mission_relations (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    relation_type TEXT NOT NULL CHECK(relation_type IN ('blocks','blocked_by','relates_to','duplicate_of')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(source_id, target_id, relation_type)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_rel_source ON mission_relations(source_id);
+CREATE INDEX IF NOT EXISTS idx_mission_rel_target ON mission_relations(target_id);
+`
+
+const migrationAddProjects = `
+-- Projects group issues toward a deliverable (like Linear Projects).
+CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    description TEXT,
+    icon TEXT,
+    color TEXT NOT NULL DEFAULT '#6B7280',
+    status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('backlog','planned','in_progress','paused','completed','cancelled')),
+    priority TEXT NOT NULL DEFAULT 'none' CHECK(priority IN ('none','low','medium','high','urgent')),
+    health TEXT NOT NULL DEFAULT 'on_track' CHECK(health IN ('on_track','at_risk','off_track')),
+    lead_type TEXT,
+    lead_id TEXT,
+    start_date TEXT,
+    target_date TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(workspace_id, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_projects_workspace ON projects(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+
+-- Link missions (issues) to projects.
+ALTER TABLE missions ADD COLUMN project_id TEXT REFERENCES projects(id);
+CREATE INDEX IF NOT EXISTS idx_mission_project ON missions(project_id);
+`
+
+const migrationAddIssueActivity = `
+-- Structured activity log for issues (status changes, assignments, completions).
+CREATE TABLE IF NOT EXISTS mission_activity (
+    id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    actor_type TEXT NOT NULL CHECK(actor_type IN ('user','agent','system')),
+    actor_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    details TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mission_activity_mission ON mission_activity(mission_id);
+CREATE INDEX IF NOT EXISTS idx_mission_activity_created ON mission_activity(created_at);
+`
+
+const migrationAddPhase2Features = `
+-- Phase 2: Milestones, Estimates, Sub-issues, Workflow States, Notifications,
+-- Saved Views, Recurring Issues, Triage Rules, Cost Budgets
+
+-- 1. Milestones within projects
+CREATE TABLE IF NOT EXISTS milestones (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    target_date TEXT,
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','completed','cancelled')),
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_milestones_project ON milestones(project_id);
+
+-- Link issues to milestones
+ALTER TABLE missions ADD COLUMN milestone_id TEXT REFERENCES milestones(id);
+CREATE INDEX IF NOT EXISTS idx_mission_milestone ON missions(milestone_id);
+
+-- 2. Estimates (story points)
+ALTER TABLE missions ADD COLUMN estimate INTEGER;
+
+-- 3. Sub-issues (parent-child hierarchy)
+ALTER TABLE missions ADD COLUMN parent_issue_id TEXT REFERENCES missions(id);
+CREATE INDEX IF NOT EXISTS idx_mission_parent ON missions(parent_issue_id);
+
+-- 4. Cost budgets on projects
+ALTER TABLE projects ADD COLUMN budget_tokens INTEGER;
+ALTER TABLE projects ADD COLUMN budget_cost REAL;
+
+-- 5. Custom workflow states per crew
+CREATE TABLE IF NOT EXISTS workflow_states (
+    id TEXT PRIMARY KEY,
+    crew_id TEXT NOT NULL REFERENCES crews(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL CHECK(category IN ('backlog','unstarted','started','completed','cancelled')),
+    color TEXT NOT NULL DEFAULT '#6B7280',
+    position INTEGER NOT NULL DEFAULT 0,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(crew_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_states_crew ON workflow_states(crew_id);
+
+-- 6. Persistent notifications
+CREATE TABLE IF NOT EXISTS notifications (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+    user_id TEXT NOT NULL,
+    actor_type TEXT NOT NULL CHECK(actor_type IN ('user','agent','system')),
+    actor_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT,
+    entity_title TEXT,
+    read_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_ws ON notifications(workspace_id);
+
+-- 7. Saved views (filter presets)
+CREATE TABLE IF NOT EXISTS saved_views (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    filters_json TEXT NOT NULL DEFAULT '{}',
+    sort_json TEXT,
+    view_type TEXT NOT NULL DEFAULT 'board' CHECK(view_type IN ('board','list')),
+    is_default INTEGER NOT NULL DEFAULT 0,
+    shared INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_saved_views_user ON saved_views(user_id, workspace_id);
+
+-- 8. Recurring issues (cron-based)
+CREATE TABLE IF NOT EXISTS recurring_issues (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+    crew_id TEXT NOT NULL REFERENCES crews(id),
+    title TEXT NOT NULL,
+    description TEXT,
+    priority TEXT NOT NULL DEFAULT 'none',
+    project_id TEXT REFERENCES projects(id),
+    milestone_id TEXT REFERENCES milestones(id),
+    assignee_type TEXT,
+    assignee_id TEXT,
+    labels_json TEXT DEFAULT '[]',
+    cron_expression TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    next_run TEXT,
+    last_run TEXT,
+    run_count INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_recurring_issues_next ON recurring_issues(next_run, enabled);
+
+-- 9. AI triage rules
+CREATE TABLE IF NOT EXISTS triage_rules (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+    name TEXT NOT NULL,
+    pattern TEXT NOT NULL,
+    match_type TEXT NOT NULL DEFAULT 'contains' CHECK(match_type IN ('contains','regex','exact')),
+    crew_id TEXT REFERENCES crews(id),
+    assignee_id TEXT,
+    priority TEXT,
+    project_id TEXT REFERENCES projects(id),
+    labels_json TEXT DEFAULT '[]',
+    position INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    match_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_triage_rules_ws ON triage_rules(workspace_id, enabled);
 `

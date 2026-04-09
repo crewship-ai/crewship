@@ -1,0 +1,383 @@
+---
+title: "Agents"
+description: "Manage agents -- AI workers with configurable roles, CLI adapters, skills, and credentials."
+icon: "robot"
+---
+
+All agent endpoints require authentication and workspace context (`workspace_id` query parameter).
+
+---
+
+## Fleet Status
+
+```
+GET /api/v1/agents/fleet-status?workspace_id={workspaceId}
+```
+
+Returns lightweight agent counts by status for toolbar/dashboard widgets.
+
+**Response:** `200 OK`
+
+```json
+{
+  "total": 12,
+  "running": 3,
+  "error": 1,
+  "idle": 8
+}
+```
+
+---
+
+## Agent Load
+
+```
+GET /api/v1/agent-load?workspace_id={workspaceId}
+```
+
+Returns agent load metrics across the workspace.
+
+---
+
+## List Agents
+
+```
+GET /api/v1/agents?workspace_id={workspaceId}
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `workspace_id` | string | Required. Workspace ID |
+| `crew_id` | string | Optional. Filter by crew |
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "agent_abc",
+    "crew_id": "crew_123",
+    "workspace_id": "ws_456",
+    "name": "Backend Dev",
+    "slug": "backend-dev",
+    "description": "Go backend developer",
+    "role_title": "Senior Developer",
+    "agent_role": "AGENT",
+    "lead_mode": null,
+    "status": "IDLE",
+    "cli_adapter": "CLAUDE_CODE",
+    "llm_provider": "ANTHROPIC",
+    "llm_model": "claude-sonnet-4-20250514",
+    "system_prompt": "You are a Go backend developer...",
+    "avatar_seed": "backend-dev",
+    "avatar_style": "bottts",
+    "timeout_seconds": 1800,
+    "tool_profile": "CODING",
+    "memory_enabled": true,
+    "cli_tools": null,
+    "schedule_cron": null,
+    "schedule_prompt": null,
+    "schedule_enabled": false,
+    "schedule_last_run": null,
+    "schedule_next_run": null,
+    "mcp_config_json": null,
+    "created_at": "2024-01-15T10:00:00Z",
+    "updated_at": "2024-01-15T10:00:00Z",
+    "crew": {
+      "name": "Engineering",
+      "slug": "engineering",
+      "color": "blue",
+      "avatar_style": "bottts"
+    },
+    "_count": {
+      "skills": 2,
+      "credentials": 1,
+      "chats": 5
+    }
+  }
+]
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Agent ID |
+| `crew_id` | string? | Parent crew ID (null for COORDINATOR agents) |
+| `workspace_id` | string | Workspace ID |
+| `name` | string | Display name |
+| `slug` | string | URL-safe identifier |
+| `description` | string? | Agent description |
+| `role_title` | string? | Human-readable role title |
+| `agent_role` | string | `AGENT`, `LEAD`, or `COORDINATOR` |
+| `lead_mode` | string? | `"active"` or `"passive"` (LEAD agents only) |
+| `status` | string | `IDLE`, `RUNNING`, or `ERROR` |
+| `cli_adapter` | string | CLI tool used to run the agent |
+| `llm_provider` | string? | LLM provider name |
+| `llm_model` | string? | LLM model identifier |
+| `system_prompt` | string? | System prompt for the agent |
+| `avatar_seed` | string? | Seed for avatar generation |
+| `avatar_style` | string? | Avatar style (e.g., `"bottts"`, `"pixel-art"`) |
+| `timeout_seconds` | integer | Maximum execution time |
+| `tool_profile` | string | Tool access profile |
+| `memory_enabled` | boolean | Whether agent memory is enabled |
+| `cli_tools` | string? | Comma-separated list of allowed CLI tools |
+| `schedule_cron` | string? | Cron expression for scheduled runs |
+| `schedule_prompt` | string? | Prompt used for scheduled runs |
+| `schedule_enabled` | boolean | Whether schedule is active |
+| `schedule_last_run` | string? | ISO 8601 timestamp of last scheduled run |
+| `schedule_next_run` | string? | ISO 8601 timestamp of next scheduled run |
+| `mcp_config_json` | string? | Agent-level MCP server config |
+| `crew` | object? | Embedded crew info (name, slug, color, avatar_style) |
+| `_count` | object | Counts: skills, credentials, chats |
+
+---
+
+## Create Agent
+
+```
+POST /api/v1/agents?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | string | Yes | -- | Display name (2-100 characters) |
+| `slug` | string | Yes | -- | URL-safe identifier (2-50 chars) |
+| `crew_id` | string | Conditional | `null` | Required for `AGENT` and `LEAD` roles; forbidden for `COORDINATOR` |
+| `description` | string | No | `null` | Agent description |
+| `role_title` | string | No | `null` | Human-readable role title |
+| `agent_role` | string | No | `"AGENT"` | `AGENT`, `LEAD`, or `COORDINATOR` |
+| `lead_mode` | string | No | `"active"` | `"active"` or `"passive"` (LEAD agents only) |
+| `cli_adapter` | string | No | `"CLAUDE_CODE"` | CLI adapter |
+| `llm_provider` | string | No | `null` | LLM provider |
+| `llm_model` | string | No | `null` | LLM model |
+| `system_prompt` | string | No | `null` | System prompt |
+| `avatar_seed` | string | No | `null` | Avatar seed |
+| `avatar_style` | string | No | `null` | Avatar style |
+| `timeout_seconds` | integer | No | `1800` | Max execution time in seconds |
+| `tool_profile` | string | No | `"CODING"` | Tool profile |
+| `memory_enabled` | boolean | No | `false` | Enable agent memory |
+
+```json
+{
+  "name": "Backend Dev",
+  "slug": "backend-dev",
+  "crew_id": "crew_123",
+  "agent_role": "AGENT",
+  "cli_adapter": "CLAUDE_CODE",
+  "system_prompt": "You are a Go backend developer...",
+  "memory_enabled": true,
+  "tool_profile": "CODING"
+}
+```
+
+**Agent Roles:**
+
+| Role | Description | Crew Required |
+|---|---|---|
+| `AGENT` | Worker that executes tasks | Yes |
+| `LEAD` | Crew leader that plans and delegates | Yes (max 1 per crew) |
+| `COORDINATOR` | Cross-crew orchestrator | No (must NOT have crew_id) |
+
+**CLI Adapters:** `CLAUDE_CODE`, `CODEX_CLI`, `GEMINI_CLI`, `OPENCODE`
+
+**Tool Profiles:** `MINIMAL`, `CODING`, `MESSAGING`, `FULL`
+
+**Response:** `201 Created` -- returns the created agent object.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid name, slug, role, or missing required crew_id |
+| `402` | License agent limit exceeded |
+| `403` | Insufficient role |
+| `409` | Slug already taken, or crew already has a LEAD agent |
+
+---
+
+## Get Agent
+
+```
+GET /api/v1/agents/{agentId}?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- full agent object.
+
+| Status | Condition |
+|---|---|
+| `404` | Agent not found |
+
+---
+
+## Update Agent
+
+```
+PATCH /api/v1/agents/{agentId}?workspace_id={workspaceId}
+```
+
+Partial update -- only provided fields are changed.
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Request Body:** Same fields as Create, all optional. Additionally supports:
+
+| Field | Type | Description |
+|---|---|---|
+| `status` | string | Agent status |
+| `cli_tools` | string | Comma-separated CLI tools |
+| `schedule_cron` | string | Cron expression |
+| `schedule_prompt` | string | Schedule prompt |
+| `schedule_enabled` | boolean | Enable/disable schedule |
+| `mcp_config_json` | string | Agent MCP config JSON |
+
+**Response:** `200 OK` -- updated agent object.
+
+---
+
+## Delete Agent
+
+```
+DELETE /api/v1/agents/{agentId}?workspace_id={workspaceId}
+```
+
+Soft-deletes the agent.
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Response:** `204 No Content`
+
+---
+
+## Agent Skills
+
+### List Skills
+
+```
+GET /api/v1/agents/{agentId}/skills?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- array of skill assignment objects.
+
+### Add Skill
+
+```
+POST /api/v1/agents/{agentId}/skills?workspace_id={workspaceId}
+```
+
+```json
+{
+  "skill_id": "skill_abc"
+}
+```
+
+**Response:** `201 Created`
+
+### Remove Skill
+
+```
+DELETE /api/v1/agents/{agentId}/skills/{skillId}?workspace_id={workspaceId}
+```
+
+**Response:** `204 No Content`
+
+---
+
+## Agent Credentials
+
+### List Credentials
+
+```
+GET /api/v1/agents/{agentId}/credentials?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- array of credential assignment objects.
+
+### Assign Credential
+
+```
+POST /api/v1/agents/{agentId}/credentials?workspace_id={workspaceId}
+```
+
+```json
+{
+  "credential_id": "cred_abc"
+}
+```
+
+**Response:** `201 Created`
+
+### Remove Credential
+
+```
+DELETE /api/v1/agents/{agentId}/credentials/{assignmentId}?workspace_id={workspaceId}
+```
+
+**Response:** `204 No Content`
+
+---
+
+## Agent Chats
+
+### List Chats
+
+```
+GET /api/v1/agents/{agentId}/chats?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- array of chat session objects.
+
+### Create Chat
+
+```
+POST /api/v1/agents/{agentId}/chats?workspace_id={workspaceId}
+```
+
+Creates a new interactive chat session with the agent.
+
+**Response:** `201 Created`
+
+---
+
+## Agent Runs
+
+```
+GET /api/v1/agents/{agentId}/runs?workspace_id={workspaceId}
+```
+
+List execution history for an agent.
+
+**Response:** `200 OK` -- array of run objects.
+
+---
+
+## Agent Proxy Endpoints
+
+These endpoints proxy requests through the crewshipd sidecar to the agent's container.
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `GET /api/v1/agents/{agentId}/debug` | GET | Debug information for a running agent |
+| `GET /api/v1/agents/{agentId}/files` | GET | List files in agent workspace |
+| `GET /api/v1/agents/{agentId}/files/download?path=...` | GET | Download a file |
+| `PUT /api/v1/agents/{agentId}/files/save` | PUT | Save/upload a file |
+| `GET /api/v1/agents/{agentId}/logs` | GET | Get agent logs |
+| `POST /api/v1/agents/{agentId}/stop` | POST | Stop a running agent |
+
+---
+
+## Chat Messages
+
+```
+GET /api/v1/chats/{chatId}/messages
+```
+
+Get messages for a specific chat session. Proxied through crewshipd.
+
+**Auth:** Session or CLI token (auth required, no workspace context needed)
+
+**Response:** `200 OK` -- array of message objects.

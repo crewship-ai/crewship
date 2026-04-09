@@ -1,0 +1,193 @@
+---
+title: "Files and Output"
+description: "Agent file system layout, file upload/download APIs, shared crew space, and real-time file events via WebSocket."
+icon: "folder-open"
+---
+
+# Files and Output
+
+Every crew container has a structured file system that separates agent workspaces, output, secrets, and shared space. Crewship provides REST APIs for listing, uploading, and downloading files, plus real-time WebSocket events for file changes.
+
+## Agent File System Layout
+
+Inside each crew container, the file system is organized into purpose-specific directories:
+
+```
+Crew Container (crewship-team-{slug})
+├── /workspace/              # Temporary scratch space
+├── /output/{agent-slug}/    # Agent output (visible in the UI Files panel)
+├── /secrets/{agent-slug}/   # Read-only credential files
+├── /crew/
+│   ├── agents/{slug}/       # Per-agent home directory
+│   │   ├── .memory/         # Persistent memory files
+│   │   └── .mcp.json        # MCP server config
+│   └── shared/              # Cross-agent shared space
+```
+
+| Directory | Purpose | Visibility |
+|-----------|---------|------------|
+| `/workspace/` | Temporary files, scratch space for agent work | Internal to container |
+| `/output/{slug}/` | Agent output files | Visible in UI Files panel |
+| `/crew/shared/` | Files shared between all agents in the crew | All agents in the crew |
+| `/secrets/{slug}/` | Credential files (read-only) | Per-agent, injected at startup |
+| `/crew/agents/{slug}/` | Agent home directory with memory and config | Per-agent |
+
+## File Listing
+
+List files for a specific agent or an entire crew.
+
+### Agent Files
+
+```
+GET /api/v1/agents/{agentId}/files
+```
+
+Query parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `recursive` | `boolean` | List files recursively (default: false) |
+| `subdir` | `string` | Subdirectory to list within the agent's output |
+
+The endpoint resolves the agent's crew and slug, then fetches files from the container via IPC.
+
+### Crew Files
+
+```
+GET /api/v1/crews/{crewId}/files
+```
+
+Query parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `agent_slug` | `string` | Filter files by a specific agent slug |
+| `recursive` | `boolean` | List files recursively (default: false) |
+| `subdir` | `string` | Subdirectory to list |
+
+## File Download
+
+Download a file from an agent's or crew's container.
+
+### Agent File Download
+
+```
+GET /api/v1/agents/{agentId}/files/download?path={filePath}
+```
+
+### Crew File Download
+
+```
+GET /api/v1/crews/{crewId}/files/download?path={filePath}
+```
+
+<Warning>
+  File paths are sanitized server-side. Absolute paths and path traversal (`..`) are rejected. Only relative paths within the container's file system are accepted.
+</Warning>
+
+The response streams the file as `application/octet-stream` with a `Content-Disposition` header for the filename.
+
+## File Upload
+
+Upload a file to an agent's or crew's container.
+
+### Agent File Save
+
+```
+PUT /api/v1/agents/{agentId}/files/save?path={filePath}
+```
+
+### Crew File Save
+
+```
+PUT /api/v1/crews/{crewId}/files/save?path={filePath}
+```
+
+The request body contains the raw file content. The `path` query parameter specifies the destination path inside the container.
+
+<Note>
+  File save operations require the `create` permission (MEMBER role or above). VIEWER role users cannot upload files.
+</Note>
+
+## Output Directory Convention
+
+Agents write their output to `/output/{agent-slug}/`. This directory is the primary location surfaced in the UI Files panel. When an agent produces artifacts (generated code, reports, images), they should be written to this directory.
+
+```
+/output/
+├── viktor/
+│   ├── report.md
+│   ├── generated-code.ts
+│   └── analysis/
+│       └── results.json
+├── elena/
+│   └── design-spec.pdf
+```
+
+The UI Files panel displays these files per-agent, allowing users to browse and download output without direct container access.
+
+## Shared Crew Space
+
+The `/crew/shared/` directory is accessible to all agents in a crew. Use it for:
+
+- Shared configuration files
+- Inter-agent data exchange
+- Common resources needed by multiple agents
+
+Any agent in the crew can read from and write to this directory.
+
+## File Events via WebSocket
+
+File changes inside crew containers are broadcast in real-time via WebSocket on the `files:{crewId}` channel.
+
+### Subscribing
+
+```json
+{
+  "type": "subscribe",
+  "channel": "files:{crewId}"
+}
+```
+
+### Event Types
+
+| Event | Description |
+|-------|-------------|
+| `file_created` | A new file was created in the output directory |
+| `file_modified` | An existing file was modified |
+| `file_deleted` | A file was deleted |
+
+### Event Payload
+
+```json
+{
+  "type": "file_event",
+  "channel": "files:crew-uuid",
+  "payload": {
+    "event": "file_created",
+    "path": "output/viktor/report.md",
+    "name": "report.md",
+    "size": 4096,
+    "modified_at": "2025-01-15T10:30:00Z"
+  }
+}
+```
+
+<Note>
+  File watching uses `fsnotify` under the hood. The file watcher monitors the storage base path for changes and broadcasts events to all WebSocket clients subscribed to the relevant crew channel.
+</Note>
+
+## Channel Authorization
+
+Subscribing to `files:{crewId}` requires membership in the crew's workspace. The WebSocket hub verifies workspace membership before allowing the subscription.
+
+## What's Next
+
+<CardGroup cols={2}>
+  <Card title="WebSocket Reference" icon="plug" href="/api-reference/websocket">
+    Full WebSocket protocol reference including all channel types and event formats.
+  </Card>
+  <Card title="Container Isolation" icon="shield" href="/security/container-isolation">
+    How file system permissions and UID boundaries protect agent data.
+  </Card>
+</CardGroup>

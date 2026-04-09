@@ -526,33 +526,29 @@ cmd_nuke() {
 }
 
 cmd_seed() {
-  log "Seeding database..."
+  log "Seeding database via CLI..."
 
-  # Verify .env.local exists
+  # Health check — ensure the server is running before attempting to seed
+  if ! curl -sf "http://localhost:${GO_PORT}/api/health" >/dev/null 2>&1; then
+    err "crewship is not running on :${GO_PORT} -- run ./dev.sh start first"
+    exit 1
+  fi
+
+  # Verify .env.local exists (needed for SEED_* env vars)
   if [[ ! -f "$PROJECT_DIR/.env.local" ]]; then
     err ".env.local not found -- copy from .env.example and fill in values"
     exit 1
   fi
 
-  # Verify DB exists (SQLite only — Postgres is remote, no file check needed)
-  local db_mode
-  db_mode=$(detect_db_mode)
-  if [[ "$db_mode" != "postgresql" ]]; then
-    local db_file
-    db_file=$(grep -E '^DATABASE_URL=' "$PROJECT_DIR/.env.local" | head -1 | cut -d'=' -f2- | tr -d '"' || true)
-    db_file="${db_file#file:}"
-    db_file="${db_file#./}"
-    db_file="${db_file:-crewship.db}"
-    if [[ ! -f "$PROJECT_DIR/$db_file" ]]; then
-      err "Database $db_file not found. Start the server first (./dev.sh start) so Go migrations create the DB."
-      exit 1
-    fi
-  fi
+  # Build CLI binary
+  log "Building crewship CLI..."
+  (cd "$PROJECT_DIR" && go build -o ./crewship ./cmd/crewship/)
 
+  # Source env vars and run seed via CLI (requires running server)
   (
     cd "$PROJECT_DIR"
     set -a && . ./.env.local && set +a
-    pnpm db:seed
+    ./crewship seed --server "http://localhost:${GO_PORT:-8080}"
   )
 
   ok "Seed complete."

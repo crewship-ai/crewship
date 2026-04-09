@@ -1,0 +1,171 @@
+---
+title: "Quick Start"
+description: "Install Crewship and run your first AI agent in under 5 minutes."
+icon: "rocket"
+---
+
+## Prerequisites
+
+- **Docker** (or Apple Containers on macOS 26+)
+- **Go 1.26+** (for building from source)
+- **Node.js 22+** and **pnpm** (for frontend development)
+- An LLM API key (Anthropic, OpenAI, or Google)
+
+## Installation
+
+<Tabs>
+  <Tab title="Binary (recommended)">
+    ```bash
+    # Download the latest release
+    curl -fsSL https://get.crewship.ai | sh
+
+    # Verify installation
+    crewship version
+    ```
+  </Tab>
+  <Tab title="From source">
+    ```bash
+    git clone https://github.com/crewship-ai/crewship.git
+    cd crewship
+    make build
+
+    # The binary is at ./bin/crewship
+    ./bin/crewship version
+    ```
+  </Tab>
+  <Tab title="Docker">
+    ```bash
+    docker run -d \
+      --name crewship \
+      -p 8080:8080 \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      -v crewship-data:/var/lib/crewship \
+      ghcr.io/crewship-ai/crewship:latest
+    ```
+  </Tab>
+</Tabs>
+
+## Initial Setup
+
+<Steps>
+  <Step title="Start the server">
+    ```bash
+    crewship start
+    ```
+    The server starts on `http://localhost:8080` with an embedded UI and SQLite database.
+  </Step>
+
+  <Step title="Create the first admin user">
+    ```bash
+    crewship init \
+      --server http://localhost:8080 \
+      --email admin@example.com \
+      --name "Your Name"
+    ```
+    You will be prompted for a password (min 8 characters). This creates an admin user with OWNER role and returns a CLI token.
+
+    <Note>
+      The `init` command only works on an empty database (no existing users). The `--email` and `--name` flags are required.
+    </Note>
+  </Step>
+
+  <Step title="Log in via CLI">
+    ```bash
+    crewship login
+    ```
+    Authenticates your CLI session against the server.
+  </Step>
+
+  <Step title="Check system health">
+    ```bash
+    crewship doctor
+    ```
+    Verifies Docker is running, the agent runtime image is available, and all dependencies are met.
+  </Step>
+</Steps>
+
+## Create Your First Crew
+
+<Steps>
+  <Step title="Add a credential">
+    Store your LLM API key in the encrypted vault:
+
+    ```bash
+    echo "sk-ant-api03-YOUR-KEY" | crewship credential create \
+      --name "anthropic-key" \
+      --provider ANTHROPIC \
+      --type AI_CLI_TOKEN \
+      --value-stdin
+    ```
+
+    The key is validated against the provider API, then encrypted with AES-256-GCM before storage.
+
+    <Tip>
+      Use `--value-stdin` to pipe the key securely. Using `--value` directly exposes the key in the process list.
+    </Tip>
+  </Step>
+
+  <Step title="Create a crew">
+    ```bash
+    crewship crew create \
+      --name "Dev Team" \
+      --slug dev-team \
+      --icon code \
+      --color blue
+    ```
+  </Step>
+
+  <Step title="Create an agent">
+    ```bash
+    crewship agent create \
+      --crew dev-team \
+      --name "Alice" \
+      --role AGENT \
+      --system-prompt "Senior full-stack developer specializing in Go and React."
+    ```
+  </Step>
+
+  <Step title="Assign the credential">
+    ```bash
+    crewship credential assign anthropic-key alice \
+      --env-var-name ANTHROPIC_API_KEY
+    ```
+
+    The `--env-var-name` flag is required — it specifies the environment variable the agent will use.
+  </Step>
+
+  <Step title="Run the agent">
+    ```bash
+    crewship run alice "Set up a basic Go HTTP server with health check endpoint"
+    ```
+
+    The agent starts in an isolated Docker container, receives your prompt, and streams output in real-time.
+  </Step>
+</Steps>
+
+## Open the Dashboard
+
+Navigate to [http://localhost:8080](http://localhost:8080) to see the web UI where you can:
+
+- View crew boards and agent status
+- Monitor real-time logs
+- Manage credentials and skills
+- Create and track missions
+- Chat with agents directly
+
+## What's Next?
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Learn how the sidecar model, container isolation, and IPC work under the hood.
+  </Card>
+  <Card title="Credentials" icon="key" href="/guides/credentials">
+    Set up credential failover, scoping, and Keeper security.
+  </Card>
+  <Card title="Skills & Marketplace" icon="puzzle-piece" href="/guides/skills">
+    Add capabilities to your agents from the marketplace.
+  </Card>
+  <Card title="Orchestration" icon="flag" href="/guides/orchestration">
+    Create missions with multi-agent task delegation.
+  </Card>
+</CardGroup>

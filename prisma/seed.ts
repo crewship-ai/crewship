@@ -1,3 +1,7 @@
+// DEPRECATED: This file is replaced by `crewship seed` (cmd/crewship/cmd_seed.go).
+// The CLI-based seed routes through the REST API instead of direct DB access.
+// Kept for reference only — will be removed in a future cleanup.
+
 import { randomBytes } from "crypto"
 
 import { hashSync } from "bcryptjs"

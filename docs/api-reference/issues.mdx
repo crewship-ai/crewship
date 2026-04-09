@@ -1,0 +1,753 @@
+---
+title: "Issues"
+description: "Linear-style issue tracker with projects, labels, comments, relations, and agent execution."
+icon: "circle-dot"
+---
+
+Issues are stored in the `missions` table with `mission_type = 'issue'`. They share infrastructure with missions but have their own status flow, identifiers (e.g., `ENG-42`), and lifecycle operations.
+
+All issue endpoints require authentication and workspace context.
+
+---
+
+## List Issues (Workspace)
+
+```
+GET /api/v1/issues?workspace_id={workspaceId}
+```
+
+Returns issues across the workspace with filtering, sorting, and pagination.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `workspace_id` | string | Required | Workspace ID |
+| `mission_type` | string | `"issue"` | Filter by type (`"issue"` or `"mission"`) |
+| `status` | string | -- | Comma-separated status filter (e.g., `TODO,IN_PROGRESS`) |
+| `priority` | string | -- | Comma-separated priority filter (e.g., `urgent,high`) |
+| `project_id` | string | -- | Filter by project |
+| `crew_id` | string | -- | Filter by crew |
+| `assignee_id` | string | -- | Filter by assignee |
+| `label` | string | -- | Filter by label name |
+| `search` | string | -- | Search in title (LIKE match) |
+| `sort` | string | `"created_at"` | Sort column: `created_at`, `updated_at`, `priority`, `sort_order` |
+| `limit` | integer | `50` | Max items (1-100) |
+| `offset` | integer | `0` | Pagination offset |
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "issue_abc",
+    "workspace_id": "ws_123",
+    "crew_id": "crew_456",
+    "crew_name": "Engineering",
+    "crew_slug": "engineering",
+    "number": 42,
+    "identifier": "ENG-42",
+    "title": "Fix authentication token refresh",
+    "description": "Tokens are not being refreshed before expiry",
+    "status": "TODO",
+    "priority": "high",
+    "assignee_type": "agent",
+    "assignee_id": "agent_789",
+    "assignee_name": "Backend Dev",
+    "due_date": "2024-02-01",
+    "sort_order": 0.0,
+    "mission_type": "issue",
+    "lead_agent_id": "agent_lead",
+    "created_at": "2024-01-15T10:00:00Z",
+    "updated_at": "2024-01-15T10:00:00Z",
+    "completed_at": null,
+    "labels": [
+      {
+        "id": "label_abc",
+        "name": "bug",
+        "color": "#ef4444",
+        "label_group": null
+      }
+    ],
+    "project_id": "proj_123",
+    "project_name": "Q1 Backend Overhaul",
+    "comment_count": 3
+  }
+]
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Issue ID (same as underlying mission ID) |
+| `workspace_id` | string | Workspace ID |
+| `crew_id` | string | Crew ID |
+| `crew_name` | string | Crew display name |
+| `crew_slug` | string | Crew slug |
+| `number` | integer | Sequential issue number within the crew |
+| `identifier` | string | Human-readable identifier (e.g., `ENG-42`) |
+| `title` | string | Issue title |
+| `description` | string? | Issue description |
+| `status` | string | Current status |
+| `priority` | string | Priority level |
+| `assignee_type` | string? | `"user"` or `"agent"` |
+| `assignee_id` | string? | Assignee ID |
+| `assignee_name` | string? | Resolved assignee name |
+| `due_date` | string? | Due date |
+| `sort_order` | number | Manual sort order for board views |
+| `mission_type` | string | Always `"issue"` for issues |
+| `lead_agent_id` | string | Crew's lead agent ID |
+| `labels` | array | Array of label objects |
+| `project_id` | string? | Parent project ID |
+| `project_name` | string? | Project name (when project_id is set) |
+| `comment_count` | integer | Number of comments |
+| `created_at` | string | ISO 8601 timestamp |
+| `updated_at` | string | ISO 8601 timestamp |
+| `completed_at` | string? | When issue was completed/cancelled |
+
+---
+
+## Get Issue (Workspace-scoped)
+
+```
+GET /api/v1/issues/{identifier}?workspace_id={workspaceId}
+```
+
+Get an issue by its identifier (e.g., `ENG-42`) across the entire workspace. No crew ID needed.
+
+**Response:** `200 OK` -- full issue object with labels and comment count.
+
+| Status | Condition |
+|---|---|
+| `404` | Issue not found |
+
+---
+
+## Create Issue
+
+```
+POST /api/v1/crews/{crewId}/issues?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+The crew must have a LEAD agent. The issue identifier is auto-generated from the crew's `issue_prefix` (or first 3 characters of the slug) and an auto-incrementing counter.
+
+**Request Body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `title` | string | Yes | -- | Issue title |
+| `description` | string | No | `null` | Issue description |
+| `priority` | string | No | `"none"` | Priority: `none`, `low`, `medium`, `high`, `urgent` |
+| `assignee_type` | string | No | `null` | `"user"` or `"agent"` |
+| `assignee_id` | string | No | `null` | Assignee ID |
+| `due_date` | string | No | `null` | Due date (YYYY-MM-DD) |
+| `project_id` | string | No | `null` | Parent project ID |
+| `labels` | string[] | No | `[]` | Array of label IDs to attach |
+
+```json
+{
+  "title": "Fix authentication token refresh",
+  "description": "Tokens are not being refreshed before expiry",
+  "priority": "high",
+  "assignee_type": "agent",
+  "assignee_id": "agent_789",
+  "labels": ["label_bug"]
+}
+```
+
+**Response:** `201 Created` -- issue object with generated `number` and `identifier`.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing title, crew has no lead agent |
+| `403` | Insufficient role |
+| `404` | Crew not found |
+
+**WebSocket event:** `issue.created` on `workspace:{workspaceId}`
+
+---
+
+## Get Issue (Crew-scoped)
+
+```
+GET /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
+```
+
+Get an issue by its identifier within a specific crew. Includes labels and comment count.
+
+**Response:** `200 OK` -- full issue object.
+
+---
+
+## Update Issue
+
+```
+PATCH /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:** All fields optional.
+
+| Field | Type | Description |
+|---|---|---|
+| `title` | string | Issue title |
+| `description` | string | Issue description |
+| `status` | string | New status (must be valid transition) |
+| `priority` | string | Priority level |
+| `assignee_type` | string | `"user"` or `"agent"` |
+| `assignee_id` | string | Assignee ID |
+| `due_date` | string | Due date |
+| `project_id` | string | Project ID (empty string to unlink) |
+| `sort_order` | number | Manual sort order |
+| `labels` | string[] | Replace all labels with this set of label IDs |
+
+**Status Transitions:**
+
+| From | Allowed To |
+|---|---|
+| `BACKLOG` | `TODO`, `IN_PROGRESS`, `CANCELLED` |
+| `TODO` | `IN_PROGRESS`, `BACKLOG`, `CANCELLED` |
+| `IN_PROGRESS` | `REVIEW`, `DONE`, `FAILED`, `CANCELLED`, `TODO` |
+| `REVIEW` | `DONE`, `TODO`, `IN_PROGRESS`, `FAILED`, `CANCELLED` |
+| `DONE` | `BACKLOG` |
+| `FAILED` | `BACKLOG`, `TODO`, `IN_PROGRESS` |
+| `CANCELLED` | `BACKLOG`, `TODO` |
+
+When status changes to `DONE` or `CANCELLED`, `completed_at` is automatically set.
+
+Significant changes (status, assignee, priority) are logged as activity entries.
+
+**Response:** `200 OK` -- updated issue object.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid status transition, no fields to update |
+| `404` | Issue not found |
+
+**WebSocket event:** `issue.updated` on `workspace:{workspaceId}`
+
+---
+
+## Delete Issue
+
+```
+DELETE /api/v1/crews/{crewId}/issues/{identifier}?workspace_id={workspaceId}
+```
+
+Hard-deletes the issue. Only issues in `BACKLOG` or `CANCELLED` status can be deleted.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `204 No Content`
+
+| Status | Condition |
+|---|---|
+| `400` | Issue is not in BACKLOG or CANCELLED status |
+| `404` | Issue not found |
+
+**WebSocket event:** `issue.deleted` on `workspace:{workspaceId}`
+
+---
+
+## Start Issue
+
+```
+POST /api/v1/crews/{crewId}/issues/{identifier}/start?workspace_id={workspaceId}
+```
+
+Starts execution of a `BACKLOG` or `TODO` issue. The issue must have an assignee. This:
+
+1. Creates a synthetic chat session for the mission
+2. Creates or resets tasks (resets existing tasks to PENDING for re-runs)
+3. Transitions status to `IN_PROGRESS`
+4. Starts the MissionEngine asynchronously
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `200 OK`
+
+```json
+{
+  "status": "IN_PROGRESS",
+  "identifier": "ENG-42"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Issue not in BACKLOG/TODO, or no assignee |
+| `404` | Issue not found |
+| `409` | Issue was already started by another request |
+
+**WebSocket event:** `issue.started` on `workspace:{workspaceId}`
+
+---
+
+## Stop Issue
+
+```
+POST /api/v1/crews/{crewId}/issues/{identifier}/stop?workspace_id={workspaceId}
+```
+
+Stops a running issue. Cancels all running/pending tasks and sets status to `CANCELLED`.
+
+Only issues in `IN_PROGRESS` or `REVIEW` status can be stopped.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `200 OK`
+
+```json
+{
+  "status": "CANCELLED",
+  "identifier": "ENG-42"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Issue not in IN_PROGRESS or REVIEW status |
+| `404` | Issue not found |
+
+---
+
+## Review Issue
+
+```
+POST /api/v1/crews/{crewId}/issues/{identifier}/review?workspace_id={workspaceId}
+```
+
+Submit a review decision for an issue in `REVIEW` or `IN_PROGRESS` status.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `action` | string | Yes | `"approve"` or `"request_changes"` |
+| `comment` | string | No | Review comment |
+| `reassign_to` | string | No | Agent slug to reassign to (for `request_changes`) |
+
+```json
+{
+  "action": "request_changes",
+  "comment": "The error handling needs improvement",
+  "reassign_to": "backend-dev"
+}
+```
+
+- **`approve`**: Transitions issue to `DONE`, adds approval comment and activity
+- **`request_changes`**: Transitions issue to `TODO`, optionally reassigns, adds comment and activity
+
+**Response:** `200 OK`
+
+```json
+{
+  "status": "ok",
+  "action": "request_changes"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid action, or issue not in reviewable status |
+| `404` | Issue not found |
+
+---
+
+## List Activity
+
+```
+GET /api/v1/crews/{crewId}/issues/{identifier}/activity?workspace_id={workspaceId}
+```
+
+Returns the activity log for an issue (status changes, assignments, reviews). Limited to 50 most recent entries.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "act_abc",
+    "mission_id": "issue_123",
+    "actor_type": "user",
+    "actor_id": "user_456",
+    "actor_name": "John Doe",
+    "action": "status_changed",
+    "details": "TODO -> IN_PROGRESS",
+    "created_at": "2024-01-15T10:00:00Z"
+  }
+]
+```
+
+**Activity Actions:** `status_changed`, `assignee_changed`, `priority_changed`, `review_approved`, `review_changes_requested`
+
+---
+
+## Comments
+
+### List Comments
+
+```
+GET /api/v1/crews/{crewId}/issues/{identifier}/comments?workspace_id={workspaceId}
+```
+
+Returns all comments on an issue, ordered by creation date ascending.
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "comment_abc",
+    "mission_id": "issue_123",
+    "author_type": "user",
+    "author_id": "user_456",
+    "author_name": "John Doe",
+    "body": "This looks good, just fix the edge case",
+    "created_at": "2024-01-15T10:00:00Z",
+    "updated_at": "2024-01-15T10:00:00Z"
+  }
+]
+```
+
+### Create Comment
+
+```
+POST /api/v1/crews/{crewId}/issues/{identifier}/comments?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `body` | string | Yes | Comment text |
+
+```json
+{
+  "body": "This looks good, just fix the edge case"
+}
+```
+
+**Response:** `201 Created` -- comment object with `author_type: "user"`.
+
+---
+
+## Relations
+
+### List Relations
+
+```
+GET /api/v1/crews/{crewId}/issues/{identifier}/relations?workspace_id={workspaceId}
+```
+
+Returns all relations for an issue. Relation types are flipped when viewed from the target side (e.g., `blocks` becomes `blocked_by`).
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "rel_abc",
+    "source_id": "issue_123",
+    "target_id": "issue_456",
+    "relation_type": "blocks",
+    "target_identifier": "ENG-43",
+    "target_title": "Deploy auth service",
+    "target_status": "BACKLOG",
+    "created_at": "2024-01-15T10:00:00Z"
+  }
+]
+```
+
+### Create Relation
+
+```
+POST /api/v1/crews/{crewId}/issues/{identifier}/relations?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target_identifier` | string | Yes | Target issue identifier (e.g., `ENG-43`) |
+| `relation_type` | string | Yes | `blocks`, `blocked_by`, `relates_to`, or `duplicate_of` |
+
+```json
+{
+  "target_identifier": "ENG-43",
+  "relation_type": "blocks"
+}
+```
+
+Internally, `blocked_by` is stored as `blocks` with source/target swapped for normalization.
+
+**Response:** `201 Created`
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid relation_type, self-relation |
+| `404` | Source or target issue not found |
+| `409` | Relation already exists |
+
+### Delete Relation
+
+```
+DELETE /api/v1/relations/{relationId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `200 OK` with `{"status": "ok"}`
+
+| Status | Condition |
+|---|---|
+| `404` | Relation not found |
+
+---
+
+## Labels
+
+Labels are workspace-scoped and can be attached to any issue.
+
+### List Labels
+
+```
+GET /api/v1/labels?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "label_abc",
+    "name": "bug",
+    "color": "#ef4444",
+    "label_group": null
+  }
+]
+```
+
+### Create Label
+
+```
+POST /api/v1/labels?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | Yes | Label name |
+| `color` | string | Yes | Color hex code |
+| `label_group` | string | No | Grouping category |
+
+**Response:** `201 Created`
+
+### Update Label
+
+```
+PATCH /api/v1/labels/{labelId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+All fields optional: `name`, `color`, `label_group`.
+
+**Response:** `200 OK` -- updated label.
+
+| Status | Condition |
+|---|---|
+| `400` | No fields to update |
+| `404` | Label not found |
+
+### Delete Label
+
+```
+DELETE /api/v1/labels/{labelId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Response:** `204 No Content`
+
+| Status | Condition |
+|---|---|
+| `404` | Label not found |
+
+---
+
+## Projects
+
+Projects group related issues together with tracking metadata.
+
+### List Projects
+
+```
+GET /api/v1/projects?workspace_id={workspaceId}
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `status` | string | Comma-separated status filter |
+| `sort` | string | Sort column: `name` (default), `created_at`, `updated_at` |
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "proj_abc",
+    "workspace_id": "ws_123",
+    "name": "Q1 Backend Overhaul",
+    "slug": "q1-backend-overhaul",
+    "description": "Major backend refactoring",
+    "icon": "rocket",
+    "color": "blue",
+    "status": "started",
+    "priority": "high",
+    "health": "on_track",
+    "lead_type": "user",
+    "lead_id": "user_123",
+    "lead_name": "John Doe",
+    "start_date": "2024-01-01",
+    "target_date": "2024-03-31",
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-15T10:00:00Z",
+    "issue_count": 12,
+    "done_count": 8,
+    "progress": 66
+  }
+]
+```
+
+### Create Project
+
+```
+POST /api/v1/projects?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | string | Yes | -- | Project name |
+| `description` | string | No | `null` | Description |
+| `icon` | string | No | `null` | Lucide icon name |
+| `color` | string | No | `"blue"` | Palette color |
+| `status` | string | No | `"backlog"` | Project status |
+| `priority` | string | No | `"none"` | Priority level |
+| `lead_type` | string | No | `null` | `"user"` or `"agent"` |
+| `lead_id` | string | No | `null` | Lead person/agent ID |
+| `start_date` | string | No | `null` | Start date |
+| `target_date` | string | No | `null` | Target date |
+
+**Response:** `201 Created`
+
+### Get Project
+
+```
+GET /api/v1/projects/{projectId}?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- project with computed `issue_count`, `done_count`, and `progress` fields.
+
+### Update Project
+
+```
+PATCH /api/v1/projects/{projectId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+All fields optional: `name`, `description`, `icon`, `color`, `status`, `priority`, `health`, `lead_type`, `lead_id`, `start_date`, `target_date`.
+
+**Response:** `200 OK` -- updated project.
+
+### Delete Project
+
+```
+DELETE /api/v1/projects/{projectId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER` or `ADMIN` role
+
+Unlinks all issues from the project before deletion.
+
+**Response:** `204 No Content`
+
+### Project Stats
+
+```
+GET /api/v1/projects/{projectId}/stats?workspace_id={workspaceId}
+```
+
+Returns breakdown data: counts by status, by assignee, by label, and crew list.
+
+**Response:** `200 OK`
+
+```json
+{
+  "total_issues": 12,
+  "completed_issues": 8,
+  "by_status": {
+    "BACKLOG": 1,
+    "TODO": 2,
+    "IN_PROGRESS": 1,
+    "DONE": 8
+  },
+  "by_assignee": [
+    {
+      "agent_id": "agent_abc",
+      "agent_name": "Backend Dev",
+      "total": 5,
+      "completed": 4
+    }
+  ],
+  "by_label": [
+    {
+      "label_name": "bug",
+      "color": "#ef4444",
+      "count": 3
+    }
+  ],
+  "crews": ["crew_abc"]
+}
+```
+
+---
+
+## Issue Statuses
+
+| Status | Description |
+|---|---|
+| `BACKLOG` | Not yet prioritized |
+| `TODO` | Planned for work |
+| `IN_PROGRESS` | Agent is actively working |
+| `REVIEW` | Waiting for human review |
+| `DONE` | Completed and approved |
+| `FAILED` | Agent encountered unresolvable error |
+| `CANCELLED` | Cancelled by user |
+| `DUPLICATE` | Marked as duplicate (no transitions out) |
+
+## Priority Levels
+
+| Value | Description |
+|---|---|
+| `none` | No priority set |
+| `low` | Low priority |
+| `medium` | Medium priority |
+| `high` | High priority |
+| `urgent` | Urgent priority |
