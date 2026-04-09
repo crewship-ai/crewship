@@ -518,7 +518,7 @@ export function IssueDetailInline({
         </button>
       </div>
 
-      <ScrollArea className="flex-1">
+      <div className="flex-1 overflow-y-auto min-h-0">
         <div className="py-3">
           {/* ── Title + Description ──────────────────────────────────────── */}
           <div className="px-3">
@@ -1177,7 +1177,7 @@ export function IssueDetailInline({
             </div>
           </div>
         </div>
-      </ScrollArea>
+      </div>
     </div>
   )
 }
