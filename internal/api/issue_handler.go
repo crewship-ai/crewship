@@ -33,16 +33,16 @@ const issueSelectColumns = `
 	SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
 	       m.number, m.identifier, m.title, m.description, m.status,
 	       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
-	       CASE
-	         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-	         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
-	       END,
+	       COALESCE(u.full_name, ag.name),
 	       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
 	       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
 	       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-	       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
+	       COALESCE(sub_cnt.cnt, 0)
 	FROM missions m
-	LEFT JOIN crews c ON m.crew_id = c.id`
+	LEFT JOIN crews c ON m.crew_id = c.id
+	LEFT JOIN users u ON m.assignee_type = 'user' AND u.id = m.assignee_id
+	LEFT JOIN agents ag ON m.assignee_type = 'agent' AND ag.id = m.assignee_id
+	LEFT JOIN (SELECT parent_issue_id, COUNT(*) AS cnt FROM missions WHERE parent_issue_id IS NOT NULL GROUP BY parent_issue_id) sub_cnt ON sub_cnt.parent_issue_id = m.id`
 
 // scanIssue scans a row into an issueResponse using the standard column order.
 func scanIssue(s interface{ Scan(...interface{}) error }) (issueResponse, error) {

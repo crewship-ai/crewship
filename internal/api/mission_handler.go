@@ -173,7 +173,6 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	var result []missionResponse
-	var missionIDs []string
 	for rows.Next() {
 		var m missionResponse
 		if err := rows.Scan(
@@ -188,7 +187,6 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result = append(result, m)
-		missionIDs = append(missionIDs, m.ID)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (missions)", "error", err)
@@ -196,14 +194,20 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load task stats for each mission
-	for i, m := range result {
-		stats, err := h.getTaskStats(r, m.ID)
-		if err != nil {
-			h.logger.Error("get task stats", "mission_id", m.ID, "error", err)
-			continue
+	// Load task stats for all missions in a single batch query
+	if len(result) > 0 {
+		ids := make([]string, len(result))
+		for i := range result {
+			ids[i] = result[i].ID
 		}
-		result[i].TaskStats = stats
+		statsMap, err := h.getBatchTaskStats(r, ids)
+		if err != nil {
+			h.logger.Error("batch get task stats", "error", err)
+		} else {
+			for i := range result {
+				result[i].TaskStats = statsMap[result[i].ID]
+			}
+		}
 	}
 
 	if result == nil {
@@ -275,21 +279,28 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load task stats and optionally tasks for each mission
-	for i, m := range result {
-		stats, statsErr := h.getTaskStats(r, m.ID)
-		if statsErr != nil {
-			h.logger.Error("get task stats", "mission_id", m.ID, "error", statsErr)
+	// Load task stats for all missions in a single batch query
+	if len(result) > 0 {
+		ids := make([]string, len(result))
+		for i := range result {
+			ids[i] = result[i].ID
 		}
-		result[i].TaskStats = stats
-
-		if includeTasks {
-			tasks, tasksErr := h.loadTasksForMission(r, m.ID)
-			if tasksErr != nil {
-				h.logger.Error("load tasks for mission", "mission_id", m.ID, "error", tasksErr)
-				result[i].Tasks = []missionTaskResponse{}
-			} else {
-				result[i].Tasks = tasks
+		statsMap, statsErr := h.getBatchTaskStats(r, ids)
+		if statsErr != nil {
+			h.logger.Error("batch get task stats", "error", statsErr)
+		}
+		for i := range result {
+			if statsMap != nil {
+				result[i].TaskStats = statsMap[result[i].ID]
+			}
+			if includeTasks {
+				tasks, tasksErr := h.loadTasksForMission(r, result[i].ID)
+				if tasksErr != nil {
+					h.logger.Error("load tasks for mission", "mission_id", result[i].ID, "error", tasksErr)
+					result[i].Tasks = []missionTaskResponse{}
+				} else {
+					result[i].Tasks = tasks
+				}
 			}
 		}
 	}

@@ -8,6 +8,9 @@ import (
 	"log/slog"
 )
 
+// Migrate applies all pending schema migrations to the database in order.
+// Migrations are tracked in the _migrations table to ensure idempotency.
+// This is the sole mechanism for schema changes; Prisma is not used for migrations.
 func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _migrations (
 		version INTEGER PRIMARY KEY,
@@ -101,6 +104,7 @@ var migrations = []migration{
 	{40, "add_projects", migrationAddProjects},
 	{41, "add_issue_activity", migrationAddIssueActivity},
 	{42, "add_phase2_features", migrationAddPhase2Features},
+	{43, "add_performance_indexes", migrationAddPerformanceIndexes},
 }
 
 const migrationAddKeeperObservability = `
@@ -1387,4 +1391,21 @@ CREATE TABLE IF NOT EXISTS triage_rules (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_triage_rules_ws ON triage_rules(workspace_id, enabled);
+`
+
+const migrationAddPerformanceIndexes = `
+-- Index for issue list filtering by assignee
+CREATE INDEX IF NOT EXISTS idx_mission_assignee ON missions(assignee_id) WHERE assignee_id IS NOT NULL;
+
+-- Compound index for the most common issue list filter pattern
+CREATE INDEX IF NOT EXISTS idx_mission_ws_type_status ON missions(workspace_id, mission_type, status);
+
+-- Index for sub-issue counting (parent_issue_id already indexed by idx_mission_parent, but compound helps)
+CREATE INDEX IF NOT EXISTS idx_mission_parent_ws ON missions(parent_issue_id, workspace_id) WHERE parent_issue_id IS NOT NULL;
+
+-- Index for notification entity lookups
+CREATE INDEX IF NOT EXISTS idx_notifications_entity ON notifications(entity_type, entity_id);
+
+-- Index for recurring issues workspace filtering
+CREATE INDEX IF NOT EXISTS idx_recurring_issues_ws ON recurring_issues(workspace_id);
 `

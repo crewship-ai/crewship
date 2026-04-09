@@ -57,15 +57,34 @@ func (h *MissionHandler) findUnblockableTasks(ctx context.Context, missionID, fi
 		candidates = append(candidates, blockedTask{id: id, deps: deps})
 	}
 
-	// Check if ALL dependencies are now completed
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// Batch-fetch all task statuses for this mission in one query
+	statusRows, err := h.db.QueryContext(ctx,
+		`SELECT id, status FROM mission_tasks WHERE mission_id = ?`, missionID)
+	if err != nil {
+		h.logger.Error("query task statuses", "error", err)
+		return nil
+	}
+	defer statusRows.Close()
+
+	statusMap := make(map[string]string)
+	for statusRows.Next() {
+		var id, st string
+		if err := statusRows.Scan(&id, &st); err != nil {
+			continue
+		}
+		statusMap[id] = st
+	}
+
+	// Check if ALL dependencies are now completed using the pre-fetched map
 	var result []blockedTask
 	for _, bt := range candidates {
 		allDone := true
 		for _, dep := range bt.deps {
-			var depStatus string
-			err := h.db.QueryRowContext(ctx,
-				`SELECT status FROM mission_tasks WHERE id = ?`, dep).Scan(&depStatus)
-			if err != nil || depStatus != "COMPLETED" {
+			if statusMap[dep] != "COMPLETED" {
 				allDone = false
 				break
 			}
