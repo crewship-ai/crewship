@@ -870,8 +870,8 @@ func (h *IssueHandler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	_, err := h.db.ExecContext(r.Context(),
-		`INSERT INTO labels (id, workspace_id, name, color, label_group, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, wsID, req.Name, req.Color, req.LabelGroup, now, now)
+		`INSERT INTO labels (id, workspace_id, name, color, label_group, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, wsID, req.Name, req.Color, req.LabelGroup, now)
 	if err != nil {
 		h.logger.Error("create label", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
