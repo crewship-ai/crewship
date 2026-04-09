@@ -91,13 +91,12 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	query := `
 		SELECT n.id, n.actor_type, n.actor_id,
-		       CASE
-		         WHEN n.actor_type = 'user' THEN (SELECT full_name FROM users WHERE id = n.actor_id)
-		         WHEN n.actor_type = 'agent' THEN (SELECT name FROM agents WHERE id = n.actor_id)
-		       END,
+		       COALESCE(u.full_name, ag.name),
 		       n.action, n.entity_type, n.entity_id, n.entity_title,
 		       n.read_at, n.created_at
 		FROM notifications n
+		LEFT JOIN users u ON n.actor_type = 'user' AND u.id = n.actor_id
+		LEFT JOIN agents ag ON n.actor_type = 'agent' AND ag.id = n.actor_id
 		WHERE n.user_id = ?`
 	args := []any{user.ID}
 

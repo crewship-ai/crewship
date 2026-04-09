@@ -58,14 +58,19 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		SELECT p.id, p.workspace_id, p.name, p.slug,
 		       p.description, p.icon, p.color, p.status, p.priority, p.health,
 		       p.lead_type, p.lead_id,
-		       CASE
-		         WHEN p.lead_type = 'user' THEN (SELECT full_name FROM users WHERE id = p.lead_id)
-		         WHEN p.lead_type = 'agent' THEN (SELECT name FROM agents WHERE id = p.lead_id)
-		       END,
+		       COALESCE(u.full_name, ag.name),
 		       p.start_date, p.target_date, p.created_at, p.updated_at,
-		       (SELECT COUNT(*) FROM missions WHERE project_id = p.id AND mission_type = 'issue') AS issue_count,
-		       (SELECT COUNT(*) FROM missions WHERE project_id = p.id AND mission_type = 'issue' AND status IN ('DONE','COMPLETED')) AS done_count
+		       COALESCE(ic.issue_count, 0),
+		       COALESCE(ic.done_count, 0)
 		FROM projects p
+		LEFT JOIN users u ON p.lead_type = 'user' AND u.id = p.lead_id
+		LEFT JOIN agents ag ON p.lead_type = 'agent' AND ag.id = p.lead_id
+		LEFT JOIN (
+		    SELECT project_id,
+		           COUNT(*) AS issue_count,
+		           SUM(CASE WHEN status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END) AS done_count
+		    FROM missions WHERE mission_type = 'issue' GROUP BY project_id
+		) ic ON ic.project_id = p.id
 		WHERE p.workspace_id = ?`
 	args := []interface{}{wsID}
 
@@ -504,11 +509,12 @@ func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	resp.ByLabel = []labelStat{}
 	resp.Crews = []string{}
 
-	// Total + completed
-	_ = h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM missions WHERE project_id = ? AND mission_type = 'issue'`, projectID).Scan(&resp.TotalIssues)
-	_ = h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM missions WHERE project_id = ? AND mission_type = 'issue' AND status IN ('DONE','COMPLETED')`, projectID).Scan(&resp.CompletedIssues)
+	// Total + completed in one query
+	_ = h.db.QueryRowContext(r.Context(), `
+		SELECT COUNT(*),
+		       SUM(CASE WHEN status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END)
+		FROM missions WHERE project_id = ? AND mission_type = 'issue'`,
+		projectID).Scan(&resp.TotalIssues, &resp.CompletedIssues)
 
 	// By status
 	statusRows, err := h.db.QueryContext(r.Context(),

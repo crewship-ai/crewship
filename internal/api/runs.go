@@ -160,21 +160,13 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var running, today, failed int
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND status = 'RUNNING'", workspaceID).Scan(&running); err != nil {
-		h.logger.Error("count running runs", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND date(created_at) = date('now')", workspaceID).Scan(&today); err != nil {
-		h.logger.Error("count today runs", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND status = 'FAILED' AND date(created_at) = date('now')", workspaceID).Scan(&failed); err != nil {
-		h.logger.Error("count failed runs", "error", err)
+	if err := h.db.QueryRowContext(r.Context(), `
+		SELECT
+			SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN date(created_at) = date('now') THEN 1 ELSE 0 END),
+			SUM(CASE WHEN status = 'FAILED' AND date(created_at) = date('now') THEN 1 ELSE 0 END)
+		FROM agent_runs WHERE workspace_id = ?`, workspaceID).Scan(&running, &today, &failed); err != nil {
+		h.logger.Error("count run stats", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}

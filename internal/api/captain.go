@@ -483,23 +483,15 @@ func detectLanguageFromMessage(msg string) string {
 // firstMessage is the current user message — used to detect language when workspace preference is unset.
 func buildCaptainSystemPrompt(ctx context.Context, db *sql.DB, wsID, firstMessage string) string {
 	var crewCount, agentCount, missionCount int
-	if err := db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&crewCount); err != nil {
-		slog.Warn("captain: count crews for prompt", "workspace", wsID, "error", err)
-	}
-	if err := db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&agentCount); err != nil {
-		slog.Warn("captain: count agents for prompt", "workspace", wsID, "error", err)
-	}
-	if err := db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'", wsID).Scan(&missionCount); err != nil {
-		slog.Warn("captain: count missions for prompt", "workspace", wsID, "error", err)
-	}
-
 	var lang string
-	if err := db.QueryRowContext(ctx,
-		"SELECT COALESCE(preferred_language, '') FROM workspaces WHERE id = ?", wsID).Scan(&lang); err != nil {
-		slog.Warn("captain: fetch workspace language", "workspace", wsID, "error", err)
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL),
+			(SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL),
+			(SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'),
+			(SELECT COALESCE(preferred_language, '') FROM workspaces WHERE id = ?)`,
+		wsID, wsID, wsID, wsID).Scan(&crewCount, &agentCount, &missionCount, &lang); err != nil {
+		slog.Warn("captain: fetch workspace stats for prompt", "workspace", wsID, "error", err)
 	}
 	if lang == "" {
 		lang = detectLanguageFromMessage(firstMessage)
