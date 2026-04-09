@@ -28,6 +28,40 @@ func NewIssueHandler(db *sql.DB, hub *ws.Hub, me MissionStarter, logger *slog.Lo
 	return &IssueHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }
 
+// issueSelectColumns is the shared SELECT clause for fetching issues/missions.
+const issueSelectColumns = `
+	SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
+	       m.number, m.identifier, m.title, m.description, m.status,
+	       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
+	       CASE
+	         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
+	         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
+	       END,
+	       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
+	       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
+	       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
+	       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
+	FROM missions m
+	LEFT JOIN crews c ON m.crew_id = c.id`
+
+// scanIssue scans a row into an issueResponse using the standard column order.
+func scanIssue(s interface{ Scan(...interface{}) error }) (issueResponse, error) {
+	var issue issueResponse
+	err := s.Scan(
+		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
+		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
+		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
+		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
+		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
+		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
+		&issue.SubIssuesCount,
+	)
+	if err == nil {
+		issue.Labels = []labelResponse{}
+	}
+	return issue, err
+}
+
 // ── Response types ──────────────────────────────────────────────────────────
 
 type issueResponse struct {
@@ -120,20 +154,7 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		offset = 0
 	}
 
-	query := `
-		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
-		       m.number, m.identifier, m.title, m.description, m.status,
-		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
-		       CASE
-		         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
-		       END,
-		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
-		FROM missions m
-		LEFT JOIN crews c ON m.crew_id = c.id
+	query := issueSelectColumns + `
 		WHERE m.workspace_id = ?`
 	args := []interface{}{wsID}
 
@@ -221,21 +242,12 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	var result []issueResponse
 	var issueIDs []string
 	for rows.Next() {
-		var issue issueResponse
-		if err := rows.Scan(
-			&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
-			&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-			&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
-			&issue.DueDate, &issue.SortOrder, &issue.MissionType,
-			&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-			&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
-			&issue.SubIssuesCount,
-		); err != nil {
+		issue, err := scanIssue(rows)
+		if err != nil {
 			h.logger.Error("scan issue", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
-		issue.Labels = []labelResponse{}
 		result = append(result, issue)
 		issueIDs = append(issueIDs, issue.ID)
 	}
@@ -501,31 +513,9 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	var issue issueResponse
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
-		       m.number, m.identifier, m.title, m.description, m.status,
-		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
-		       CASE
-		         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
-		       END,
-		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
-		FROM missions m
-		LEFT JOIN crews c ON m.crew_id = c.id
-		WHERE m.identifier = ? AND m.crew_id = ? AND m.workspace_id = ?`,
-		ident, crewID, wsID).Scan(
-		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
-		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
-		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
-		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
-		&issue.SubIssuesCount,
-	)
+	issue, err := scanIssue(h.db.QueryRowContext(r.Context(),
+		issueSelectColumns+` WHERE m.identifier = ? AND m.crew_id = ? AND m.workspace_id = ?`,
+		ident, crewID, wsID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -535,9 +525,6 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-
-	// Load labels
-	issue.Labels = []labelResponse{}
 	labelRows, err := h.db.QueryContext(r.Context(), `
 		SELECT l.id, l.name, l.color, l.label_group
 		FROM mission_labels ml
@@ -571,31 +558,9 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	var issue issueResponse
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
-		       m.number, m.identifier, m.title, m.description, m.status,
-		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
-		       CASE
-		         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
-		       END,
-		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
-		FROM missions m
-		LEFT JOIN crews c ON m.crew_id = c.id
-		WHERE m.identifier = ? AND m.workspace_id = ?`,
-		ident, wsID).Scan(
-		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
-		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
-		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
-		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
-		&issue.SubIssuesCount,
-	)
+	issue, err := scanIssue(h.db.QueryRowContext(r.Context(),
+		issueSelectColumns+` WHERE m.identifier = ? AND m.workspace_id = ?`,
+		ident, wsID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -808,36 +773,13 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return updated issue
-	var issue issueResponse
-	err = h.db.QueryRowContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
-		       m.number, m.identifier, m.title, m.description, m.status,
-		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
-		       CASE
-		         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
-		       END,
-		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
-		FROM missions m
-		LEFT JOIN crews c ON m.crew_id = c.id
-		WHERE m.id = ?`, missionID).Scan(
-		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
-		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
-		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
-		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
-		&issue.SubIssuesCount,
-	)
+	issue, err := scanIssue(h.db.QueryRowContext(r.Context(),
+		issueSelectColumns+` WHERE m.id = ?`, missionID))
 	if err != nil {
 		h.logger.Error("read updated issue", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	issue.Labels = []labelResponse{}
 
 	writeJSON(w, http.StatusOK, issue)
 }
@@ -1905,20 +1847,8 @@ func (h *IssueHandler) ListSubIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
-		       m.number, m.identifier, m.title, m.description, m.status,
-		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
-		       CASE
-		         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
-		       END,
-		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
-		FROM missions m
-		LEFT JOIN crews c ON m.crew_id = c.id
+	rows, err := h.db.QueryContext(r.Context(),
+		issueSelectColumns+`
 		WHERE m.parent_issue_id = ?
 		ORDER BY COALESCE(m.sort_order, 0) ASC, m.created_at ASC`, parentID)
 	if err != nil {
@@ -1930,21 +1860,12 @@ func (h *IssueHandler) ListSubIssues(w http.ResponseWriter, r *http.Request) {
 
 	var result []issueResponse
 	for rows.Next() {
-		var issue issueResponse
-		if err := rows.Scan(
-			&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
-			&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-			&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
-			&issue.DueDate, &issue.SortOrder, &issue.MissionType,
-			&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-			&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
-			&issue.SubIssuesCount,
-		); err != nil {
+		issue, err := scanIssue(rows)
+		if err != nil {
 			h.logger.Error("scan sub-issue", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
-		issue.Labels = []labelResponse{}
 		result = append(result, issue)
 	}
 	if err := rows.Err(); err != nil {
