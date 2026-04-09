@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText, AlertCircle, Pause, Target, Coins, Loader2, Square, ChevronRight, CheckCircle2, CircleDot } from "lucide-react"
 import { BotIcon as AnimatedBot } from "@/components/ui/bot"
@@ -204,16 +204,22 @@ export default function DashboardPage() {
     fetchData()
   }, [workspaceId, onboardingChecked, fetchData])
 
-  // Real-time: refetch dashboard data when agent/run events arrive
-  useRealtimeEvent("run.started", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("run.completed", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("run.failed", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("agent.status", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("mission.updated", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("task.updated", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("escalation.created", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("agent.created", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("agent.deleted", useCallback(() => { fetchData(false) }, [fetchData]))
+  // Real-time: debounced refetch on dashboard events (prevents burst of 9 concurrent fetches)
+  const dashDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const debouncedFetchData = useCallback(() => {
+    clearTimeout(dashDebounceRef.current)
+    dashDebounceRef.current = setTimeout(() => fetchData(false), 200)
+  }, [fetchData])
+
+  useRealtimeEvent("run.started", debouncedFetchData)
+  useRealtimeEvent("run.completed", debouncedFetchData)
+  useRealtimeEvent("run.failed", debouncedFetchData)
+  useRealtimeEvent("agent.status", debouncedFetchData)
+  useRealtimeEvent("mission.updated", debouncedFetchData)
+  useRealtimeEvent("task.updated", debouncedFetchData)
+  useRealtimeEvent("escalation.created", debouncedFetchData)
+  useRealtimeEvent("agent.created", debouncedFetchData)
+  useRealtimeEvent("agent.deleted", debouncedFetchData)
 
   useRealtimeEvent("container.stats", useCallback((event: RealtimeEvent) => {
     const p = event.payload

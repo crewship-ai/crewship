@@ -69,6 +69,13 @@ export interface FleetLayoutProps {
   onRefresh: () => void
 }
 
+const HEALTH_STATUS_COLORS: Record<string, string> = {
+  RUNNING: "text-emerald-400",
+  IDLE: "text-muted-foreground",
+  ERROR: "text-red-400",
+  STOPPED: "text-amber-400",
+}
+
 const FLEET_TABS = [
   { id: "overview" as const, label: "Overview", icon: LayoutGrid },
   { id: "activity" as const, label: "Activity", icon: Activity },
@@ -585,12 +592,7 @@ function HealthOverview({ crews, agents }: { crews: CrewData[]; agents: AgentDat
     return groups
   }, [agents])
 
-  const statusColors: Record<string, string> = {
-    RUNNING: "text-emerald-400",
-    IDLE: "text-muted-foreground",
-    ERROR: "text-red-400",
-    STOPPED: "text-amber-400",
-  }
+  // statusColors hoisted to HEALTH_STATUS_COLORS at module level
 
   return (
     <div className="space-y-4">
@@ -601,7 +603,7 @@ function HealthOverview({ crews, agents }: { crews: CrewData[]; agents: AgentDat
             key={status}
             className="rounded-xl border border-border/80 bg-card p-4 text-center"
           >
-            <p className={cn("text-2xl font-bold tabular-nums", statusColors[status])}>{group.length}</p>
+            <p className={cn("text-2xl font-bold tabular-nums", HEALTH_STATUS_COLORS[status])}>{group.length}</p>
             <p className="text-[11px] text-muted-foreground mt-0.5">{status.toLowerCase()}</p>
           </div>
         ))}

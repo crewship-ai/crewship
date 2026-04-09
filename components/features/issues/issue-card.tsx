@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import { Card } from "@/components/ui/card"
 import { StatusIcon } from "./status-icon"
 import { PriorityIcon } from "./priority-icon"
@@ -25,7 +26,7 @@ interface IssueCardProps {
   onClick: () => void
 }
 
-export function IssueCard({ issue, onClick }: IssueCardProps) {
+export const IssueCard = memo(function IssueCard({ issue, onClick }: IssueCardProps) {
   const overdue = isOverdue(issue.due_date, issue.status)
   const isUpdated = issue.updated_at && issue.updated_at !== issue.created_at
   const dateLabel = isUpdated ? "Updated" : "Created"
@@ -89,4 +90,4 @@ export function IssueCard({ issue, onClick }: IssueCardProps) {
       </div>
     </Card>
   )
-}
+})
