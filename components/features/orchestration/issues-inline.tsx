@@ -12,7 +12,7 @@ import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
 import { IssuesListView } from "@/components/features/issues/issues-list-view"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import type { Mission, MissionStatus, IssueLabel, IssueComment, IssuePriority, IssueRelation, RelationType, Project, ProjectStatus } from "@/lib/types/mission"
+import type { Mission, MissionStatus, IssueLabel, IssueComment, IssuePriority, IssueRelation, RelationType, Project, ProjectStatus, IssueActivity } from "@/lib/types/mission"
 
 /* -------------------------------------------------------------------------- */
 /*  IssuesExplorerPanel — left panel                                          */
@@ -209,6 +209,25 @@ function formatRelativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString()
 }
 
+function actionLabel(action: string): string {
+  switch (action) {
+    case "task_completed": return "completed a task"
+    case "task_failed": return "task failed"
+    case "status_changed": return "changed status"
+    case "assignee_changed": return "changed assignee"
+    case "priority_changed": return "changed priority"
+    case "review_approved": return "approved"
+    case "review_changes_requested": return "requested changes"
+    case "issue_started": return "started the issue"
+    case "issue_stopped": return "stopped the issue"
+    default: return action.replace(/_/g, " ")
+  }
+}
+
+function timeAgo(dateStr: string): string {
+  return formatRelativeTime(dateStr)
+}
+
 /* -- Collapsible section header ------------------------------------------- */
 
 function SectionHeader({
@@ -285,6 +304,13 @@ export function IssueDetailInline({
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(issue.title)
 
+  // Activities
+  const [activities, setActivities] = useState<IssueActivity[]>([])
+
+  // Review state
+  const [reviewChangesOpen, setReviewChangesOpen] = useState(false)
+  const [reviewComment, setReviewComment] = useState("")
+
   // Section collapse state
   const [propertiesOpen, setPropertiesOpen] = useState(true)
   const [labelsOpen, setLabelsOpen] = useState(true)
@@ -342,6 +368,15 @@ export function IssueDetailInline({
   useEffect(() => {
     fetchRelations()
   }, [fetchRelations])
+
+  // Fetch activities
+  useEffect(() => {
+    if (!issue.crew_id || !issue.identifier) return
+    fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/activity?workspace_id=${workspaceId}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(setActivities)
+      .catch(() => {})
+  }, [issue.crew_id, issue.identifier, workspaceId, issue.updated_at])
 
   useEffect(() => {
     if (!issue.crew_id || !workspaceId) return
@@ -552,6 +587,65 @@ export function IssueDetailInline({
                 <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
                 Stop
               </button>
+            </div>
+          )}
+          {issue.status === "REVIEW" && (
+            <div className="mt-3 space-y-2">
+              <button
+                onClick={async () => {
+                  const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}${qs}/review`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "approve" }),
+                  })
+                  if (res.ok) { toast.success("Issue approved"); onUpdated() }
+                  else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed") }
+                }}
+                className="w-full flex items-center justify-center gap-2 h-8 rounded-md bg-green-600 hover:bg-green-500 text-white text-xs font-medium transition-colors"
+              >
+                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 8.5l3.5 3.5 6.5-8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                Approve
+              </button>
+              <button
+                onClick={() => setReviewChangesOpen(true)}
+                className="w-full flex items-center justify-center gap-2 h-8 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium hover:bg-amber-500/20 transition-colors"
+              >
+                Request Changes
+              </button>
+              {reviewChangesOpen && (
+                <div className="border border-white/[0.06] rounded-md p-3 space-y-2">
+                  <textarea
+                    className="w-full h-16 bg-transparent border border-white/[0.08] rounded px-2 py-1.5 text-xs text-foreground outline-none resize-none"
+                    placeholder="What needs to change..."
+                    value={reviewComment}
+                    onChange={(e) => setReviewComment(e.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setReviewChangesOpen(false); setReviewComment("") }}
+                      className="flex-1 h-7 rounded text-xs text-muted-foreground hover:text-foreground border border-white/[0.06]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+                        const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}${qs}/review`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ action: "request_changes", comment: reviewComment }),
+                        })
+                        if (res.ok) { toast.success("Changes requested"); setReviewChangesOpen(false); setReviewComment(""); onUpdated() }
+                        else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed") }
+                      }}
+                      className="flex-1 h-7 rounded text-xs bg-amber-600 text-white hover:bg-amber-500"
+                    >
+                      Send
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1048,27 +1142,37 @@ export function IssueDetailInline({
             </div>
           </div>
 
-          {/* ── Activity section ─────────────────────────────────────────── */}
-          <div className="border-t border-white/[0.06] mt-3">
-            <div className="px-3 py-1.5">
-              <span className="text-[11px] uppercase tracking-wider text-muted-foreground/60 font-medium">
-                Activity
-              </span>
-            </div>
-            <div className="px-3 pb-3 space-y-1">
-              <div className="flex items-center gap-2 text-[10px] text-muted-foreground/50">
-                <div className="h-1.5 w-1.5 rounded-full border border-muted-foreground/30 shrink-0" />
-                <span>Created {formatRelativeTime(issue.created_at)}</span>
-              </div>
-              <div className="flex items-center gap-2 text-[10px] text-muted-foreground/50">
-                <div className="h-1.5 w-1.5 rounded-full border border-muted-foreground/30 shrink-0" />
-                <span>Updated {formatRelativeTime(issue.updated_at)}</span>
-              </div>
-              {issue.completed_at && (
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground/50">
-                  <div className="h-1.5 w-1.5 rounded-full border border-muted-foreground/30 shrink-0" />
-                  <span>Completed {formatRelativeTime(issue.completed_at)}</span>
-                </div>
+          {/* ── Activity timeline ────────────────────────────────────────── */}
+          <div className="border-t border-white/[0.06] pt-3 px-4 pb-4">
+            <div className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">Activity</div>
+            <div className="space-y-2">
+              {activities.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground/40">No activity yet</p>
+              ) : (
+                activities.map((a) => (
+                  <div key={a.id} className="flex items-start gap-2">
+                    <div className={cn(
+                      "w-1.5 h-1.5 rounded-full mt-1.5 shrink-0",
+                      a.action === "task_completed" ? "bg-green-500" :
+                      a.action === "task_failed" ? "bg-red-500" :
+                      a.action === "review_approved" ? "bg-indigo-500" :
+                      a.action === "review_changes_requested" ? "bg-amber-500" :
+                      a.action === "status_changed" ? "bg-blue-500" :
+                      "bg-muted-foreground/30"
+                    )} />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[11px] text-muted-foreground/70">
+                        <span className="text-foreground/60">{a.actor_name || a.actor_id}</span>
+                        {" "}
+                        {actionLabel(a.action)}
+                      </span>
+                      {a.details && (
+                        <p className="text-[10px] text-muted-foreground/40 mt-0.5 line-clamp-2">{a.details}</p>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-muted-foreground/30 shrink-0">{timeAgo(a.created_at)}</span>
+                  </div>
+                ))
               )}
             </div>
           </div>

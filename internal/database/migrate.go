@@ -99,6 +99,7 @@ var migrations = []migration{
 	{38, "add_issue_tracker", migrationAddIssueTracker},
 	{39, "add_issue_relations", migrationAddIssueRelations},
 	{40, "add_projects", migrationAddProjects},
+	{41, "add_issue_activity", migrationAddIssueActivity},
 }
 
 const migrationAddKeeperObservability = `
@@ -1245,4 +1246,19 @@ CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 -- Link missions (issues) to projects.
 ALTER TABLE missions ADD COLUMN project_id TEXT REFERENCES projects(id);
 CREATE INDEX IF NOT EXISTS idx_mission_project ON missions(project_id);
+`
+
+const migrationAddIssueActivity = `
+-- Structured activity log for issues (status changes, assignments, completions).
+CREATE TABLE IF NOT EXISTS mission_activity (
+    id TEXT PRIMARY KEY,
+    mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+    actor_type TEXT NOT NULL CHECK(actor_type IN ('user','agent','system')),
+    actor_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    details TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_mission_activity_mission ON mission_activity(mission_id);
+CREATE INDEX IF NOT EXISTS idx_mission_activity_created ON mission_activity(created_at);
 `

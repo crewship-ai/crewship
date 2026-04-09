@@ -170,6 +170,17 @@ export interface IssueRelation {
   created_at: string
 }
 
+export interface IssueActivity {
+  id: string
+  mission_id: string
+  actor_type: "user" | "agent" | "system"
+  actor_id: string
+  actor_name?: string
+  action: string
+  details: string | null
+  created_at: string
+}
+
 export interface IssueComment {
   id: string
   mission_id: string

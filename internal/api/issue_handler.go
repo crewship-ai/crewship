@@ -736,6 +736,31 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Log activity for significant changes
+	user := UserFromContext(r.Context())
+	actorType := "user"
+	actorID := user.ID
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	if req.Status != nil {
+		actID := generateCUID()
+		_, _ = h.db.ExecContext(r.Context(),
+			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'status_changed', ?, ?)`,
+			actID, missionID, actorType, actorID, fmt.Sprintf("%s → %s", currentStatus, *req.Status), now)
+	}
+	if req.AssigneeID != nil {
+		actID := generateCUID()
+		_, _ = h.db.ExecContext(r.Context(),
+			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'assignee_changed', ?, ?)`,
+			actID, missionID, actorType, actorID, fmt.Sprintf("assignee_id: %s", *req.AssigneeID), now)
+	}
+	if req.Priority != nil {
+		actID := generateCUID()
+		_, _ = h.db.ExecContext(r.Context(),
+			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'priority_changed', ?, ?)`,
+			actID, missionID, actorType, actorID, *req.Priority, now)
+	}
+
 	if h.hub != nil {
 		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
 			Type:    "issue.updated",
@@ -1286,6 +1311,196 @@ func (h *IssueHandler) CreateRelation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id, "status": "ok"})
+}
+
+// ── Review — POST /api/v1/crews/{crewId}/issues/{identifier}/review ────────
+
+func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	crewID := r.PathValue("crewId")
+	ident := r.PathValue("identifier")
+	wsID := WorkspaceIDFromContext(r.Context())
+	user := UserFromContext(r.Context())
+
+	var req struct {
+		Action     string  `json:"action"`       // "approve" or "request_changes"
+		Comment    string  `json:"comment"`
+		ReassignTo *string `json:"reassign_to"`  // agent slug for request_changes
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if req.Action != "approve" && req.Action != "request_changes" {
+		writeProblem(w, r, http.StatusBadRequest, "action must be 'approve' or 'request_changes'")
+		return
+	}
+
+	// Get issue
+	var missionID, status string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT id, status FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
+		ident, crewID, wsID).Scan(&missionID, &status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Issue not found")
+			return
+		}
+		h.logger.Error("review: load issue", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if status != "REVIEW" && status != "IN_PROGRESS" {
+		writeProblem(w, r, http.StatusBadRequest, "Issue must be in REVIEW or IN_PROGRESS to review (current: "+status+")")
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	if req.Action == "approve" {
+		// REVIEW → DONE
+		_, err = h.db.ExecContext(r.Context(),
+			`UPDATE missions SET status = 'DONE', completed_at = ?, updated_at = ? WHERE id = ?`,
+			now, now, missionID)
+		if err != nil {
+			h.logger.Error("review: approve", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+
+		// Add comment
+		commentBody := "Approved"
+		if req.Comment != "" {
+			commentBody = "Approved: " + req.Comment
+		}
+		commentID := generateCUID()
+		_, _ = h.db.ExecContext(r.Context(),
+			`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'user', ?, ?, ?, ?)`,
+			commentID, missionID, user.ID, commentBody, now, now)
+
+		// Activity
+		actID := generateCUID()
+		_, _ = h.db.ExecContext(r.Context(),
+			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'review_approved', ?, ?)`,
+			actID, missionID, user.ID, commentBody, now)
+
+	} else {
+		// request_changes → TODO
+		ub := newUpdate()
+		ub.Set("status", "TODO")
+
+		if req.ReassignTo != nil && *req.ReassignTo != "" {
+			// Resolve agent slug to ID
+			var agentID string
+			err := h.db.QueryRowContext(r.Context(),
+				`SELECT id FROM agents WHERE slug = ? AND deleted_at IS NULL LIMIT 1`,
+				*req.ReassignTo).Scan(&agentID)
+			if err == nil {
+				ub.Set("assignee_type", "agent")
+				ub.Set("assignee_id", agentID)
+			}
+		}
+
+		query, args := ub.Build("missions", "id = ?", missionID)
+		_, err = h.db.ExecContext(r.Context(), query, args...)
+		if err != nil {
+			h.logger.Error("review: request_changes", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+
+		// Add comment
+		commentBody := "Changes requested"
+		if req.Comment != "" {
+			commentBody = "Changes requested: " + req.Comment
+		}
+		commentID := generateCUID()
+		_, _ = h.db.ExecContext(r.Context(),
+			`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'user', ?, ?, ?, ?)`,
+			commentID, missionID, user.ID, commentBody, now, now)
+
+		// Activity
+		actID := generateCUID()
+		_, _ = h.db.ExecContext(r.Context(),
+			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'review_changes_requested', ?, ?)`,
+			actID, missionID, user.ID, commentBody, now)
+	}
+
+	if h.hub != nil {
+		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
+			Type:    "issue.updated",
+			Channel: "workspace:" + wsID,
+			Payload: map[string]string{"id": missionID, "identifier": ident},
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": req.Action})
+}
+
+// ── ListActivity — GET /api/v1/crews/{crewId}/issues/{identifier}/activity
+
+func (h *IssueHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("crewId")
+	ident := r.PathValue("identifier")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	var missionID string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT id FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
+		ident, crewID, wsID).Scan(&missionID)
+	if err != nil {
+		writeProblem(w, r, http.StatusNotFound, "Issue not found")
+		return
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT a.id, a.mission_id, a.actor_type, a.actor_id, a.action, a.details, a.created_at,
+			CASE
+				WHEN a.actor_type = 'user' THEN (SELECT full_name FROM users WHERE id = a.actor_id)
+				WHEN a.actor_type = 'agent' THEN (SELECT name FROM agents WHERE id = a.actor_id)
+				ELSE 'System'
+			END AS actor_name
+		FROM mission_activity a
+		WHERE a.mission_id = ?
+		ORDER BY a.created_at DESC
+		LIMIT 50`, missionID)
+	if err != nil {
+		h.logger.Error("list activity", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer rows.Close()
+
+	type activityResponse struct {
+		ID        string  `json:"id"`
+		MissionID string  `json:"mission_id"`
+		ActorType string  `json:"actor_type"`
+		ActorID   string  `json:"actor_id"`
+		ActorName *string `json:"actor_name,omitempty"`
+		Action    string  `json:"action"`
+		Details   *string `json:"details"`
+		CreatedAt string  `json:"created_at"`
+	}
+
+	var result []activityResponse
+	for rows.Next() {
+		var a activityResponse
+		if err := rows.Scan(&a.ID, &a.MissionID, &a.ActorType, &a.ActorID, &a.Action, &a.Details, &a.CreatedAt, &a.ActorName); err != nil {
+			h.logger.Error("scan activity", "error", err)
+			continue
+		}
+		result = append(result, a)
+	}
+	if result == nil {
+		result = []activityResponse{}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // ── 14. DeleteRelation — DELETE /api/v1/relations/{relationId}
