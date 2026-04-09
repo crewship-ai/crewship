@@ -1214,3 +1214,212 @@ export function ProjectsListView({ projects, onRefresh: _onRefresh, workspaceId:
     </div>
   )
 }
+
+
+/*  ProjectDetailInline — Right panel for editing project properties          */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+interface ProjectDetailInlineProps {
+  project: Project
+  workspaceId: string
+  onClose: () => void
+  onUpdated: () => void
+}
+
+const PROJECT_STATUSES: { value: ProjectStatus; label: string }[] = [
+  { value: "backlog", label: "Backlog" },
+  { value: "planned", label: "Planned" },
+  { value: "in_progress", label: "In Progress" },
+  { value: "paused", label: "Paused" },
+  { value: "completed", label: "Completed" },
+  { value: "cancelled", label: "Cancelled" },
+]
+
+const HEALTH_OPTIONS: { value: string; label: string; color: string }[] = [
+  { value: "on_track", label: "On Track", color: "text-green-400" },
+  { value: "at_risk", label: "At Risk", color: "text-yellow-400" },
+  { value: "off_track", label: "Off Track", color: "text-red-400" },
+]
+
+const PRIORITY_OPTIONS: { value: string; label: string }[] = [
+  { value: "urgent", label: "Urgent" },
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+  { value: "none", label: "No priority" },
+]
+
+export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }: ProjectDetailInlineProps) {
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(project.name)
+
+  const patchProject = useCallback(async (fields: Record<string, unknown>) => {
+    const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+    const res = await fetch(`/api/v1/projects/${project.id}${qs}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    })
+    if (res.ok) {
+      toast.success("Project updated")
+      onUpdated()
+    } else {
+      const err = await res.json().catch(() => null)
+      toast.error(err?.detail || "Failed to update project")
+    }
+  }, [project.id, workspaceId, onUpdated])
+
+  return (
+    <div className="h-full flex flex-col border-l border-white/[0.06] bg-card">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: project.color }} />
+          <span className="text-[11px] font-mono text-muted-foreground/60">Project</span>
+        </div>
+        <button onClick={onClose} className="p-1 rounded hover:bg-white/[0.06] text-muted-foreground/50 hover:text-muted-foreground transition-colors">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <ScrollArea className="flex-1">
+        <div className="p-4 space-y-4">
+          {/* Title */}
+          {editingTitle ? (
+            <input
+              className="text-[15px] font-semibold text-foreground bg-transparent border-b border-blue-500 outline-none w-full pb-1"
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={() => {
+                if (titleDraft.trim() && titleDraft !== project.name) patchProject({ name: titleDraft.trim() })
+                setEditingTitle(false)
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") { setTitleDraft(project.name); setEditingTitle(false) } }}
+              autoFocus
+            />
+          ) : (
+            <h2
+              className="text-[15px] font-semibold text-foreground cursor-pointer hover:text-blue-400 transition-colors"
+              onClick={() => { setTitleDraft(project.name); setEditingTitle(true) }}
+            >
+              {project.name}
+            </h2>
+          )}
+
+          {project.description && (
+            <p className="text-[12px] text-muted-foreground/70 leading-relaxed">{project.description}</p>
+          )}
+
+          {/* Properties */}
+          <div className="space-y-1">
+            <div className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider pb-1">Properties</div>
+
+            {/* Status */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <PropertyRow>
+                  <ProjectStatusIcon status={project.status} />
+                  <span className="text-[12px] text-foreground/80">{PROJECT_STATUSES.find(s => s.value === project.status)?.label || project.status}</span>
+                </PropertyRow>
+              </PopoverTrigger>
+              <PopoverContent className="w-48 p-1" align="start">
+                {PROJECT_STATUSES.map(s => (
+                  <button key={s.value} onClick={() => patchProject({ status: s.value })} className={cn("flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-white/[0.06]", s.value === project.status && "bg-white/[0.04]")}>
+                    <ProjectStatusIcon status={s.value as ProjectStatus} />
+                    {s.label}
+                  </button>
+                ))}
+              </PopoverContent>
+            </Popover>
+
+            {/* Priority */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <PropertyRow>
+                  <PriorityIcon priority={project.priority || "none"} className="h-3.5 w-3.5" />
+                  <span className="text-[12px] text-foreground/80">{priorityLabel[project.priority || "none"]}</span>
+                </PropertyRow>
+              </PopoverTrigger>
+              <PopoverContent className="w-48 p-1" align="start">
+                {PRIORITY_OPTIONS.map(p => (
+                  <button key={p.value} onClick={() => patchProject({ priority: p.value })} className={cn("flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-white/[0.06]", p.value === project.priority && "bg-white/[0.04]")}>
+                    <PriorityIcon priority={p.value as IssuePriority} className="h-3.5 w-3.5" />
+                    {p.label}
+                  </button>
+                ))}
+              </PopoverContent>
+            </Popover>
+
+            {/* Health */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <PropertyRow>
+                  <span className={cn("text-[12px] font-medium", HEALTH_OPTIONS.find(h => h.value === project.health)?.color || "text-muted-foreground")}>
+                    {HEALTH_OPTIONS.find(h => h.value === project.health)?.label || project.health}
+                  </span>
+                </PropertyRow>
+              </PopoverTrigger>
+              <PopoverContent className="w-48 p-1" align="start">
+                {HEALTH_OPTIONS.map(h => (
+                  <button key={h.value} onClick={() => patchProject({ health: h.value })} className={cn("flex items-center gap-2 w-full px-2 py-1.5 rounded text-xs hover:bg-white/[0.06]", h.value === project.health && "bg-white/[0.04]")}>
+                    <span className={h.color}>{h.label}</span>
+                  </button>
+                ))}
+              </PopoverContent>
+            </Popover>
+
+            {/* Lead */}
+            <PropertyRow>
+              <User className="h-3.5 w-3.5 text-muted-foreground/50" />
+              <span className="text-[12px] text-foreground/70">{project.lead_name || "No lead"}</span>
+            </PropertyRow>
+
+            {/* Dates */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <PropertyRow>
+                  <Clock className="h-3.5 w-3.5 text-muted-foreground/50" />
+                  <span className="text-[12px] text-foreground/70">
+                    {project.start_date || project.target_date
+                      ? `${project.start_date || "?"} → ${project.target_date || "?"}`
+                      : "No dates set"}
+                  </span>
+                </PropertyRow>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-3 space-y-2" align="start">
+                <div>
+                  <label className="text-[10px] text-muted-foreground/60 block mb-1">Start date</label>
+                  <input type="date" className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full" defaultValue={project.start_date || ""} onChange={(e) => patchProject({ start_date: e.target.value || null })} />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground/60 block mb-1">Target date</label>
+                  <input type="date" className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full" defaultValue={project.target_date || ""} onChange={(e) => patchProject({ target_date: e.target.value || null })} />
+                </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* Progress */}
+          <div className="space-y-2">
+            <div className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">Progress</div>
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-2 bg-white/[0.06] rounded-full overflow-hidden">
+                <div className="h-full bg-blue-500/70 rounded-full transition-all" style={{ width: `${project.progress}%` }} />
+              </div>
+              <span className="text-[12px] font-mono text-muted-foreground tabular-nums">{project.progress}%</span>
+            </div>
+            <div className="text-[11px] text-muted-foreground/50">
+              {project.done_count} of {project.issue_count} issues done
+            </div>
+          </div>
+
+          {/* Metadata */}
+          <div className="pt-2 border-t border-white/[0.06] space-y-1">
+            <div className="text-[10px] text-muted-foreground/40 font-mono">Created: {new Date(project.created_at).toLocaleDateString()}</div>
+            <div className="text-[10px] text-muted-foreground/40 font-mono">ID: {project.id}</div>
+          </div>
+        </div>
+      </ScrollArea>
+    </div>
+  )
+}

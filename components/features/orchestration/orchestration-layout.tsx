@@ -38,7 +38,7 @@ import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import type { Mission, MissionTask, IssueLabel, IssueComment, Project } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { IssuesExplorerPanel, IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectsListView } from "@/components/features/orchestration/issues-inline"
+import { IssuesExplorerPanel, IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectDetailInline } from "@/components/features/orchestration/issues-inline"
 
 import { toast } from "sonner"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
@@ -496,7 +496,8 @@ export function OrchestrationLayout({
     }
   }, [drawerOpen, drawerTab])
 
-  const showRightPanel = detailContext.type !== "none" || selectedIssue !== null
+  const selectedProject = selectedProjectId ? projects.find((p) => p.id === selectedProjectId) || null : null
+  const showRightPanel = detailContext.type !== "none" || selectedIssue !== null || (selectedProjectId !== null && !selectedIssue)
 
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
@@ -584,7 +585,6 @@ export function OrchestrationLayout({
       <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {([
           { id: "issues", label: "Issues", icon: CircleDot },
-          { id: "projects", label: "Projects", icon: FolderKanban },
           { id: "graph", label: "Graph", icon: Workflow },
           { id: "timeline", label: "Timeline", icon: Clock },
           { id: "activity", label: "Activity", icon: Activity },
@@ -671,7 +671,11 @@ export function OrchestrationLayout({
                           onSearchChange={setIssueSearch}
                           selectedIssue={selectedIssue}
                           selectedProjectId={selectedProjectId}
-                          onProjectSelect={(id) => setSelectedProjectId(id === selectedProjectId ? null : id)}
+                          onProjectSelect={(id) => {
+                            const newId = id === selectedProjectId ? null : id
+                            setSelectedProjectId(newId)
+                            if (newId) { setSelectedIssue(null); setIssueComments([]) }
+                          }}
                           onIssueSelect={handleIssueSelect}
                         />
                       ) : (
@@ -749,7 +753,11 @@ export function OrchestrationLayout({
                       onSearchChange={setIssueSearch}
                       selectedIssue={selectedIssue}
                       selectedProjectId={selectedProjectId}
-                      onProjectSelect={(id) => setSelectedProjectId(id === selectedProjectId ? null : id)}
+                      onProjectSelect={(id) => {
+                            const newId = id === selectedProjectId ? null : id
+                            setSelectedProjectId(newId)
+                            if (newId) { setSelectedIssue(null); setIssueComments([]) }
+                          }}
                       onIssueSelect={handleIssueSelect}
                     />
                   ) : (
@@ -867,11 +875,6 @@ export function OrchestrationLayout({
               </motion.div>
             )}
 
-            {activeTab === "projects" && (
-              <motion.div key="projects" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
-                <ProjectsListView projects={projects} onRefresh={fetchProjects} workspaceId={workspaceId} onProjectClick={(projectId) => { setSelectedProjectId(projectId); setActiveTab("issues"); }} />
-              </motion.div>
-            )}
 
           </AnimatePresence>
         </div>
@@ -921,6 +924,13 @@ export function OrchestrationLayout({
                         fetchProjects()
                       }}
                     />
+                  ) : selectedProject ? (
+                    <ProjectDetailInline
+                      project={selectedProject}
+                      workspaceId={workspaceId}
+                      onClose={() => setSelectedProjectId(null)}
+                      onUpdated={fetchProjects}
+                    />
                   ) : (
                     <ContextDetailPanel context={detailContext} onClose={handleDetailClose} onTaskAction={handleTaskAction} />
                   )}
@@ -966,6 +976,13 @@ export function OrchestrationLayout({
                         }
                         fetchProjects()
                       }}
+                    />
+                  ) : selectedProject ? (
+                    <ProjectDetailInline
+                      project={selectedProject}
+                      workspaceId={workspaceId}
+                      onClose={() => setSelectedProjectId(null)}
+                      onUpdated={fetchProjects}
                     />
                   ) : (
                     <ContextDetailPanel
