@@ -232,6 +232,13 @@ No authentication required. Returns `{"status": "ok"}` with HTTP 200.
 | `GET /api/v1/system/runtime` | Runtime info (Go version, uptime, etc.) |
 | `GET /api/v1/system/license` | License status and limits |
 | `GET /api/v1/system/keeper` | Keeper (credential access control) status |
+| `GET /api/v1/crewshipd` | Crewshipd process health and status |
+
+### Activity
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/activity` | Cross-crew activity feed (assignments, peer conversations, escalations). Supports `crew_id` and `limit` query parameters. See also `crewship activity` CLI command. |
 
 ### Captain (Workspace AI Assistant)
 
