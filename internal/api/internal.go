@@ -18,6 +18,7 @@ type mcpCredEntry struct {
 	Type     string `json:"type"`
 }
 
+// InternalHandler provides endpoints called by the sidecar over the Unix socket using X-Internal-Token auth.
 type InternalHandler struct {
 	db            *sql.DB
 	logger        *slog.Logger
@@ -26,14 +27,17 @@ type InternalHandler struct {
 	hub           *ws.Hub
 }
 
+// NewInternalHandler creates an InternalHandler with the given database, internal token, and logger.
 func NewInternalHandler(db *sql.DB, internalToken string, logger *slog.Logger) *InternalHandler {
 	return &InternalHandler{db: db, internalToken: internalToken, logger: logger}
 }
 
+// SetHub attaches a WebSocket hub for broadcasting events from internal endpoints.
 func (h *InternalHandler) SetHub(hub *ws.Hub) {
 	h.hub = hub
 }
 
+// SetKeeperEnabled toggles whether Keeper is advertised as enabled in the agent config.
 func (h *InternalHandler) SetKeeperEnabled(enabled bool) {
 	h.keeperEnabled.Store(enabled)
 }

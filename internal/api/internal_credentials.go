@@ -9,6 +9,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
+// ListCredentials returns active credentials for the sidecar, with decrypted values.
+// GET /api/v1/internal/credentials — called by sidecar to inject secrets into agent environments.
 func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("workspace_id")
 	provider := r.URL.Query().Get("provider")
@@ -89,6 +91,8 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, result)
 }
 
+// UpdateCredentialStatus updates the health status of a credential after the sidecar validates it.
+// PATCH /api/v1/internal/credentials/{credentialId}/status
 func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := r.URL.Query().Get("workspace_id") // optional for backwards compat
@@ -197,6 +201,8 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]string{"id": credID, "status": body.Status, "last_checked_at": now})
 }
 
+// GetWebhookSecret returns the webhook secret for a given agent, used by the sidecar for signature validation.
+// GET /api/v1/internal/agents/{agentId}/webhook-secret
 func (h *InternalHandler) GetWebhookSecret(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	var secret sql.NullString

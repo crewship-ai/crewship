@@ -9,6 +9,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// CreateRun records a new agent run started by the sidecar.
+// POST /api/v1/internal/runs
 func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ID          string          `json:"id"`
@@ -83,6 +85,8 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"id": body.ID, "status": "RUNNING"})
 }
 
+// UpdateRun updates the status of an agent run (e.g. COMPLETED, FAILED) when it finishes.
+// PATCH /api/v1/internal/runs/{runId}
 func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runId")
 	var body struct {
