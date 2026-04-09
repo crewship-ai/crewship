@@ -1551,12 +1551,25 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
           <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: project.color }} />
           <span className="text-[11px] font-mono text-muted-foreground/60">Project</span>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1 rounded hover:bg-white/[0.06] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <a
+            href={`/orchestration/projects/${project.id}`}
+            className="text-muted-foreground/40 hover:text-foreground p-1 rounded hover:bg-white/[0.06] transition-colors"
+            title="Open full page"
+          >
+            <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-3" />
+              <path d="M10 2h4v4" />
+              <path d="M14 2L7 9" />
+            </svg>
+          </a>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-white/[0.06] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
       <ScrollArea className="flex-1">
