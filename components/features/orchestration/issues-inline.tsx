@@ -272,10 +272,10 @@ function SectionHeader({
   action?: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between px-3 py-1.5">
+    <div className="flex items-center justify-between px-3 py-2">
       <button
         onClick={onToggle}
-        className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-muted-foreground/60 hover:text-muted-foreground/80 transition-colors"
+        className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground/70 hover:text-muted-foreground/90 transition-colors"
       >
         {open ? (
           <ChevronDown className="h-3 w-3" />
@@ -693,7 +693,7 @@ export function IssueDetailInline({
           )}
 
           {/* ── Properties section ───────────────────────────────────────── */}
-          <div className="mt-3 border-t border-white/[0.06]">
+          <div className="mt-3 mx-2 rounded-lg border border-white/[0.06]">
             <SectionHeader
               title="Properties"
               open={propertiesOpen}
@@ -869,7 +869,7 @@ export function IssueDetailInline({
           </div>
 
           {/* ── Labels section ───────────────────────────────────────────── */}
-          <div className="border-t border-white/[0.06]">
+          <div className="mt-2 mx-2 rounded-lg border border-white/[0.06]">
             <SectionHeader
               title="Labels"
               open={labelsOpen}
@@ -943,7 +943,7 @@ export function IssueDetailInline({
           </div>
 
           {/* ── Project section ────────────────────────────────────────── */}
-          <div className="border-t border-white/[0.06]">
+          <div className="mt-2 mx-2 rounded-lg border border-white/[0.06]">
             <SectionHeader
               title="Project"
               open={projectOpen}
@@ -1007,7 +1007,7 @@ export function IssueDetailInline({
           </div>
 
           {/* ── Relations section ────────────────────────────────────────── */}
-          <div className="border-t border-white/[0.06]">
+          <div className="mt-2 mx-2 rounded-lg border border-white/[0.06]">
             <SectionHeader
               title="Relations"
               open={relationsOpen}
