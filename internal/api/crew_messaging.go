@@ -245,49 +245,18 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 	// Resolve workspace_id for audit logging.
 	workspaceID := h.resolveWorkspaceID(r.Context(), targetCrewID)
 
-	// Sanitize path: must be within /crew/shared/ and cannot contain ..
-	cleanPath := filepath.Clean(filePath)
-	if strings.Contains(cleanPath, "..") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
-		return
-	}
-
-	// Resolve to host filesystem: {storagePath}/crews/{crewId}/shared/{path}
-	absPath := filepath.Join(h.storagePath, "crews", targetCrewID, "shared", cleanPath)
-
-	// Verify the resolved path is still within the expected directory.
-	crewSharedDir := filepath.Join(h.storagePath, "crews", targetCrewID, "shared")
-	if !strings.HasPrefix(absPath, crewSharedDir) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
-		return
-	}
-
-	// Resolve symlinks to prevent symlink-based path traversal.
-	realSharedDir, err := filepath.EvalSymlinks(crewSharedDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
-			return
+	// Validate and resolve path within crew shared directory.
+	absPath, pathErr := h.resolveCrewSharedPath(targetCrewID, filePath, false)
+	if pathErr != "" {
+		status := http.StatusBadRequest
+		if pathErr == "file not found" {
+			status = http.StatusNotFound
+		} else if pathErr == "internal error" {
+			status = http.StatusInternalServerError
 		}
-		h.logger.Error("eval symlinks for shared dir", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeJSON(w, status, map[string]string{"error": pathErr})
 		return
 	}
-	realAbsPath, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
-			return
-		}
-		h.logger.Error("eval symlinks for file path", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-	if !strings.HasPrefix(realAbsPath, realSharedDir+string(filepath.Separator)) && realAbsPath != realSharedDir {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
-		return
-	}
-	absPath = realAbsPath
 
 	info, err := os.Stat(absPath)
 	if err != nil {
@@ -399,46 +368,17 @@ func (h *CrewMessagingHandler) WriteFile(w http.ResponseWriter, r *http.Request)
 	}
 	defer file.Close()
 
-	// Sanitize destination path
-	cleanPath := filepath.Clean(destPath)
-	if strings.Contains(cleanPath, "..") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+	// Validate and resolve destination within crew shared directory.
+	incomingSubPath := filepath.Join("incoming", requesterCrewID, destPath)
+	absPath, pathErr := h.resolveCrewSharedPath(targetCrewID, incomingSubPath, true)
+	if pathErr != "" {
+		status := http.StatusBadRequest
+		if pathErr == "internal error" {
+			status = http.StatusInternalServerError
+		}
+		writeJSON(w, status, map[string]string{"error": pathErr})
 		return
 	}
-
-	// Write to: {storagePath}/crews/{crewId}/shared/incoming/{requester-crew-id}/{path}
-	absDir := filepath.Join(h.storagePath, "crews", targetCrewID, "shared", "incoming", requesterCrewID, filepath.Dir(cleanPath))
-	crewSharedDir := filepath.Join(h.storagePath, "crews", targetCrewID, "shared")
-	if !strings.HasPrefix(absDir, crewSharedDir) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
-		return
-	}
-
-	if err := os.MkdirAll(absDir, 0755); err != nil {
-		h.logger.Error("create incoming dir", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-
-	// Resolve symlinks after MkdirAll to prevent symlink-based path traversal.
-	realSharedDir, err := filepath.EvalSymlinks(crewSharedDir)
-	if err != nil {
-		h.logger.Error("eval symlinks for shared dir", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-	realAbsDir, err := filepath.EvalSymlinks(absDir)
-	if err != nil {
-		h.logger.Error("eval symlinks for target dir", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-	if !strings.HasPrefix(realAbsDir, realSharedDir+string(filepath.Separator)) && realAbsDir != realSharedDir {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path traversal not allowed"})
-		return
-	}
-
-	absPath := filepath.Join(realAbsDir, filepath.Base(cleanPath))
 	dst, err := os.Create(absPath)
 	if err != nil {
 		h.logger.Error("create file", "error", err)
@@ -520,4 +460,63 @@ func ptrRawJSON(data json.RawMessage) *json.RawMessage {
 		return nil
 	}
 	return &data
+}
+
+// resolveCrewSharedPath validates and resolves a user-supplied path within a
+// crew's shared directory. It cleans the path, rejects traversal attempts, and
+// resolves symlinks to ensure the result stays within the shared dir.
+// When mkdirForWrite is true, the parent directory is created and symlink
+// validation is performed on the directory (the file may not exist yet);
+// otherwise the full path must exist.
+// Returns the resolved absolute path or an error string suitable for the client.
+func (h *CrewMessagingHandler) resolveCrewSharedPath(crewID, subPath string, mkdirForWrite bool) (string, string) {
+	cleanPath := filepath.Clean(subPath)
+	if strings.Contains(cleanPath, "..") {
+		return "", "invalid path"
+	}
+
+	crewSharedDir := filepath.Join(h.storagePath, "crews", crewID, "shared")
+	absPath := filepath.Join(crewSharedDir, cleanPath)
+	if !strings.HasPrefix(absPath, crewSharedDir) {
+		return "", "path traversal not allowed"
+	}
+
+	realSharedDir, err := filepath.EvalSymlinks(crewSharedDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "file not found"
+		}
+		h.logger.Error("eval symlinks for shared dir", "error", err)
+		return "", "internal error"
+	}
+
+	if mkdirForWrite {
+		absDir := filepath.Dir(absPath)
+		if err := os.MkdirAll(absDir, 0755); err != nil {
+			h.logger.Error("create dir for crew shared path", "error", err)
+			return "", "internal error"
+		}
+		realDir, err := filepath.EvalSymlinks(absDir)
+		if err != nil {
+			h.logger.Error("eval symlinks for dir", "error", err)
+			return "", "internal error"
+		}
+		if !strings.HasPrefix(realDir, realSharedDir+string(filepath.Separator)) && realDir != realSharedDir {
+			return "", "path traversal not allowed"
+		}
+		return filepath.Join(realDir, filepath.Base(cleanPath)), ""
+	}
+
+	realAbsPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "file not found"
+		}
+		h.logger.Error("eval symlinks for path", "error", err)
+		return "", "internal error"
+	}
+	if !strings.HasPrefix(realAbsPath, realSharedDir+string(filepath.Separator)) && realAbsPath != realSharedDir {
+		return "", "path traversal not allowed"
+	}
+	return realAbsPath, ""
 }
