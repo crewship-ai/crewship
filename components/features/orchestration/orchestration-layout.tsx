@@ -733,11 +733,22 @@ export function OrchestrationLayout({
               </div>
               {/* Board or List view */}
               <div className="p-4 h-[calc(100%-45px)]">
-                {issueViewMode === "board" ? (
-                  <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
-                ) : (
-                  <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
-                )}
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || "all"}`}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className="h-full"
+                  >
+                    {issueViewMode === "board" ? (
+                      <IssuesBoardInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
+                    ) : (
+                      <IssuesListInline issues={filteredIssues} onIssueClick={handleIssueSelect} />
+                    )}
+                  </motion.div>
+                </AnimatePresence>
               </div>
             </div>
           )}
