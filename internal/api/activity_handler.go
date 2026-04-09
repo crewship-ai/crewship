@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"sort"
-	"strconv"
 )
 
 // activityItem represents a single entry in the unified activity feed.
@@ -147,10 +146,7 @@ func (h *QueryHandler) fetchEscalationActivity(ctx context.Context, workspaceID 
 func (h *QueryHandler) ListAllActivity(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 30
-	}
+	limit, _ := parsePagination(r, 30, 100)
 
 	// Collect activity from all sources
 	items := make([]activityItem, 0, limit)

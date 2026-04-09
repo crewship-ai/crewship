@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -160,14 +159,7 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	status := r.URL.Query().Get("status")
 
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := parsePagination(r, 20, 100)
 
 	query := missionSelectColumns + `
 		WHERE m.crew_id = ? AND m.workspace_id = ?`
@@ -232,14 +224,7 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	includeTasks := r.URL.Query().Get("include_tasks") == "true"
 
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := parsePagination(r, 20, 100)
 
 	query := missionSelectColumns + `
 		WHERE m.workspace_id = ?`

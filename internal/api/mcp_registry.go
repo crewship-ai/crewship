@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -276,7 +275,7 @@ const registrySelectCols = `id, name, display_name, description, icon, transport
 
 // List handles GET /api/v1/mcp-registry — returns paginated list.
 func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset := parsePagination(r)
+	limit, offset := parsePagination(r, 50, 200)
 
 	rows, err := h.db.QueryContext(r.Context(),
 		fmt.Sprintf(`SELECT %s FROM mcp_registry_servers ORDER BY name ASC LIMIT ? OFFSET ?`, registrySelectCols),
@@ -317,7 +316,7 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, offset := parsePagination(r)
+	limit, offset := parsePagination(r, 50, 200)
 	pattern := "%" + q + "%"
 
 	rows, err := h.db.QueryContext(r.Context(),
@@ -400,18 +399,3 @@ func (h *MCPRegistryHandler) Sync(w http.ResponseWriter, r *http.Request) {
 }
 
 // parsePagination extracts limit and offset from query params with defaults.
-func parsePagination(r *http.Request) (int, int) {
-	limit := 50
-	offset := 0
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
-			limit = n
-		}
-	}
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
-	return limit, offset
-}

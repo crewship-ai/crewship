@@ -7,9 +7,24 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// parsePagination reads "limit" and "offset" query params, clamping limit to
+// [1, maxLimit] with the given default, and offset to >= 0.
+func parsePagination(r *http.Request, defaultLimit, maxLimit int) (limit, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit <= 0 || limit > maxLimit {
+		limit = defaultLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return
+}
 
 // agentExists checks that an agent with the given ID belongs to the workspace
 // and is not soft-deleted. Returns nil on success, sql.ErrNoRows if not found.

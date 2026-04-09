@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -82,14 +81,7 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pagination
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := parsePagination(r, 50, 100)
 
 	query := `
 		SELECT n.id, n.actor_type, n.actor_id,

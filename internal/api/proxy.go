@@ -415,14 +415,7 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	offsetInt, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if offsetInt < 0 {
-		offsetInt = 0
-	}
-	limitInt, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limitInt <= 0 || limitInt > 500 {
-		limitInt = 100
-	}
+	limitInt, offsetInt := parsePagination(r, 100, 500)
 	offset := strconv.Itoa(offsetInt)
 	limit := strconv.Itoa(limitInt)
 
