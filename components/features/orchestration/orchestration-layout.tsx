@@ -314,15 +314,23 @@ export function OrchestrationLayout({
   }, [isMobile])
 
   // Derived data
+  // When an issue is selected, filter to just that mission so Graph/Timeline/Activity focus on it
   const filteredMissions = useMemo(() => {
+    if (selectedIssue) {
+      const match = missions.find((m) => m.id === selectedIssue.id)
+      return match ? [match] : missions
+    }
     if (selectedMissionId === "all") return missions
     return missions.filter((m) => m.id === selectedMissionId)
-  }, [missions, selectedMissionId])
+  }, [missions, selectedMissionId, selectedIssue])
 
   const selectedMission = useMemo(() => {
+    if (selectedIssue) {
+      return missions.find((m) => m.id === selectedIssue.id) || null
+    }
     if (selectedMissionId === "all") return null
     return missions.find((m) => m.id === selectedMissionId) || null
-  }, [missions, selectedMissionId])
+  }, [missions, selectedMissionId, selectedIssue])
 
   const stats = useMemo(() => ({
     active: missions.filter((m) => m.status === "IN_PROGRESS").length,
