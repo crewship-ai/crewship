@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
-  ArrowLeft, Loader2, Users, Sparkles, Bot, ChevronRight, ChevronDown, RefreshCw, AlertTriangle,
+  ArrowLeft, Loader2, Users, Sparkles, Bot, RefreshCw, AlertTriangle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -17,6 +17,9 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { slugify } from "@/lib/utils/slugify"
 import { CREW_COLORS } from "@/lib/colors"
 import { toast } from "sonner"
+import { CrewNameSlugFields } from "@/components/features/crews/crew-name-slug-fields"
+import { CrewAgentPreviewList } from "@/components/features/crews/crew-agent-preview-list"
+import { QuickStartTemplateGrid, TemplateGallery } from "@/components/features/crews/crew-template-picker"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,53 +43,20 @@ interface CrewTemplate {
   is_builtin: boolean
 }
 
-interface AISuggestedAgent {
-  name: string
-  slug: string
-  role_title: string
-  agent_role: string
-  system_prompt: string
-}
-
 interface AISuggestion {
   crew_name: string
   crew_slug: string
   description: string
-  agents: AISuggestedAgent[]
+  agents: Array<{
+    name: string
+    slug: string
+    role_title: string
+    agent_role: string
+    system_prompt: string
+  }>
 }
 
 type Mode = "choose" | "ai" | "ai-preview" | "template" | "manual" | "no-coordinator"
-
-// ─── AgentRow (expandable system prompt) ─────────────────────────────────────
-
-function AgentRow({ agent }: { agent: { name: string; slug: string; role_title: string; agent_role: string; system_prompt: string } }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="rounded-lg border border-border overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-3 p-3 text-left hover:bg-accent transition-colors"
-      >
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-sm">{agent.name}</span>
-            <Badge variant={agent.agent_role === "LEAD" ? "default" : "secondary"} className="text-xs">
-              {agent.agent_role === "LEAD" ? "Lead" : agent.agent_role}
-            </Badge>
-            <span className="text-xs text-muted-foreground">{agent.role_title}</span>
-          </div>
-        </div>
-        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="px-3 pb-3 border-t border-border bg-muted/30">
-          <p className="text-xs text-muted-foreground mt-2 whitespace-pre-wrap leading-relaxed">{agent.system_prompt}</p>
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -200,7 +170,6 @@ export default function NewCrewPage() {
       }
       setHasAnthropicKey(true)
       setAiSuggestion(data)
-      // Pre-fill name/slug from suggestion
       setName(data.crew_name)
       setSlugManual(false)
       setMode("ai-preview")
@@ -216,16 +185,10 @@ export default function NewCrewPage() {
     setSubmitting(true)
 
     try {
-      // 1. Create the crew
       const crewRes = await fetch(`/api/v1/crews?workspace_id=${workspaceId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          slug,
-          description: aiSuggestion.description,
-          color,
-        }),
+        body: JSON.stringify({ name, slug, description: aiSuggestion.description, color }),
       })
       if (!crewRes.ok) {
         const d = await crewRes.json()
@@ -235,7 +198,6 @@ export default function NewCrewPage() {
       }
       const crew = await crewRes.json()
 
-      // 2. Create each agent; on failure compensate by deleting the crew
       for (const a of aiSuggestion.agents) {
         const agentSlug = a.slug + "-" + slug
         const agentRes = await fetch(`/api/v1/agents?workspace_id=${workspaceId}`, {
@@ -258,7 +220,6 @@ export default function NewCrewPage() {
         })
         if (!agentRes.ok) {
           const d = await agentRes.json().catch(() => ({ error: "Failed to create agent" }))
-          // Compensating delete to avoid orphaned crew
           await fetch(`/api/v1/crews/${crew.id}?workspace_id=${workspaceId}`, { method: "DELETE" }).catch(() => {})
           toast.error(typeof d.error === "string" ? d.error : `Failed to create agent "${a.name}"`)
           setSubmitting(false)
@@ -413,41 +374,11 @@ export default function NewCrewPage() {
           </button>
         </div>
 
-        {/* Quick start template grid */}
-        {loadingTemplates ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading templates...
-          </div>
-        ) : templates.length > 0 && (
-          <div>
-            <h3 className="text-sm font-medium text-muted-foreground mb-3">Quick Start Templates</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {templates.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => handleSelectTemplate(t)}
-                  className="flex items-start gap-3 rounded-lg border border-border p-3 text-left transition-all hover:bg-accent hover:border-primary/50 group"
-                >
-                  <span className="text-2xl">{t.icon || "📦"}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1">
-                      <span className="font-medium text-sm truncate">{t.name}</span>
-                      <ChevronRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                    <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{t.description}</p>
-                    <div className="flex items-center gap-2 mt-1.5">
-                      <div className="flex items-center gap-1">
-                        <Bot className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">{t.agents.length} agents</span>
-                      </div>
-                      <Badge variant="outline" className="text-xs py-0">{t.category}</Badge>
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        <QuickStartTemplateGrid
+          templates={templates}
+          loading={loadingTemplates}
+          onSelect={handleSelectTemplate}
+        />
       </div>
     )
   }
@@ -563,49 +494,17 @@ export default function NewCrewPage() {
           </Button>
         </PageHeader>
 
-        <Card>
-          <CardHeader><CardTitle className="text-base">Crew Name</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="ai-name">Name *</Label>
-                <Input
-                  id="ai-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ai-slug">Slug</Label>
-                <Input
-                  id="ai-slug"
-                  value={slug}
-                  onChange={(e) => { setSlugManual(true); setSlug(slugify(e.target.value)) }}
-                  className="font-mono text-sm"
-                  required
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <CrewNameSlugFields
+          name={name}
+          slug={slug}
+          onNameChange={setName}
+          onSlugChange={setSlug}
+          onSlugManualEdit={() => setSlugManual(true)}
+          nameId="ai-name"
+          slugId="ai-slug"
+        />
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Bot className="h-4 w-4" />
-              Agents ({aiSuggestion.agents.length})
-              <span className="text-xs font-normal text-muted-foreground ml-1">— click to preview system prompt</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {aiSuggestion.agents.map((a) => (
-                <AgentRow key={a.slug} agent={a} />
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        <CrewAgentPreviewList agents={aiSuggestion.agents} />
 
         <div className="flex items-center gap-3 pt-2">
           <Button onClick={handleDeployAI} disabled={submitting || !name.trim()} className="gap-2">
@@ -640,50 +539,18 @@ export default function NewCrewPage() {
           </Button>
         </PageHeader>
 
-        <Card>
-          <CardHeader><CardTitle className="text-base">Crew Name</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="tmpl-name">Name *</Label>
-                <Input
-                  id="tmpl-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder={selectedTemplate.name}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="tmpl-slug">Slug</Label>
-                <Input
-                  id="tmpl-slug"
-                  value={slug}
-                  onChange={(e) => { setSlugManual(true); setSlug(slugify(e.target.value)) }}
-                  className="font-mono text-sm"
-                  required
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <CrewNameSlugFields
+          name={name}
+          slug={slug}
+          onNameChange={setName}
+          onSlugChange={setSlug}
+          onSlugManualEdit={() => setSlugManual(true)}
+          namePlaceholder={selectedTemplate.name}
+          nameId="tmpl-name"
+          slugId="tmpl-slug"
+        />
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Bot className="h-4 w-4" />
-              Agents ({selectedTemplate.agents.length})
-              <span className="text-xs font-normal text-muted-foreground ml-1">— click to preview system prompt</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {selectedTemplate.agents.map((a) => (
-                <AgentRow key={a.slug} agent={a} />
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        <CrewAgentPreviewList agents={selectedTemplate.agents} />
 
         <div className="flex items-center gap-3 pt-2">
           <Button onClick={handleDeployTemplate} disabled={submitting || !name.trim()} className="gap-2">
@@ -709,39 +576,11 @@ export default function NewCrewPage() {
           </Button>
         </PageHeader>
 
-        {loadingTemplates ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading templates...
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => handleSelectTemplate(t)}
-                className="flex flex-col items-start gap-2 rounded-lg border border-border p-4 text-left transition-all hover:bg-accent hover:border-primary/50"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">{t.icon || "📦"}</span>
-                  <span className="font-semibold">{t.name}</span>
-                </div>
-                <p className="text-sm text-muted-foreground">{t.description}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">{t.agents.length} agents</span>
-                  <Badge variant="outline" className="text-xs">{t.category}</Badge>
-                </div>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {t.agents.map((a) => (
-                    <Badge key={a.slug} variant={a.agent_role === "LEAD" ? "default" : "secondary"} className="text-xs">
-                      {a.name}
-                    </Badge>
-                  ))}
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
+        <TemplateGallery
+          templates={templates}
+          loading={loadingTemplates}
+          onSelect={handleSelectTemplate}
+        />
       </div>
     )
   }
