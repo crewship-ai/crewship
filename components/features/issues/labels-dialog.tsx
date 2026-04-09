@@ -44,7 +44,7 @@ export function LabelsDialog({
   onLabelsChanged,
 }: LabelsDialogProps) {
   const [newName, setNewName] = useState("")
-  const [newColor, setNewColor] = useState(PRESET_COLORS[4].value)
+  const [newColor, setNewColor] = useState<string>(PRESET_COLORS[4].value)
   const [newGroup, setNewGroup] = useState("")
   const [creating, setCreating] = useState(false)
 

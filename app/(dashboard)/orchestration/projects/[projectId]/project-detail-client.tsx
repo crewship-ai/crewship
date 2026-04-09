@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
   ArrowLeft,
-  Calendar,
+  CalendarIcon,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -16,6 +16,7 @@ import {
   Star,
   User,
 } from "lucide-react"
+import { Calendar } from "@/components/ui/calendar"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useSession } from "@/hooks/use-auth"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
@@ -175,7 +176,7 @@ function SectionHeader({
   action?: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between px-3 py-2">
       <button
         onClick={onToggle}
         className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground/70 hover:text-muted-foreground/90 transition-colors"
@@ -1099,21 +1100,20 @@ function ProjectSidebar({
   setEditMilestoneName: (v: string) => void
   handleRenameMilestone: (id: string) => Promise<void>
 }) {
+  const [startDateOpen, setStartDateOpen] = useState(false)
+  const [targetDateOpen, setTargetDateOpen] = useState(false)
+
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-1">
       {/* ── Properties ─────────────────────────────────────────── */}
-      <SectionHeader
-        title="Properties"
-        open={propertiesOpen}
-        onToggle={() => setPropertiesOpen(!propertiesOpen)}
-        action={
-          <button className="p-0.5 rounded hover:bg-white/[0.06] text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors">
-            <Plus className="h-3 w-3" />
-          </button>
-        }
-      />
-      {propertiesOpen && (
-        <div className="space-y-0.5">
+      <div className="rounded-lg border border-white/[0.04]">
+        <SectionHeader
+          title="Properties"
+          open={propertiesOpen}
+          onToggle={() => setPropertiesOpen(!propertiesOpen)}
+        />
+        {propertiesOpen && (
+          <div className="px-3 pb-2 space-y-0.5">
           {/* Status */}
           <Popover open={statusOpen} onOpenChange={setStatusOpen}>
             <PopoverTrigger asChild>
@@ -1243,35 +1243,72 @@ function ProjectSidebar({
             )}
           </SidebarPropertyRow>
 
-          {/* Dates */}
-          <SidebarPropertyRow label="Dates">
-            <Popover>
+          {/* Start date */}
+          <SidebarPropertyRow label="Start">
+            <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
               <PopoverTrigger asChild>
                 <button className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-white/[0.06] transition-colors text-xs text-foreground/70">
-                  {project.start_date || project.target_date
-                    ? `${project.start_date ? formatShortDate(project.start_date) : "?"} → ${project.target_date ? formatShortDate(project.target_date) : "?"}`
-                    : "Set dates"}
+                  <CalendarIcon className="h-3 w-3 text-muted-foreground/50" />
+                  {project.start_date ? formatShortDate(project.start_date) : <span className="text-muted-foreground/40">Set date</span>}
                 </button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-3 space-y-2" align="end">
-                <div>
-                  <label className="text-[10px] text-muted-foreground/60 block mb-1">Start date</label>
-                  <input
-                    type="date"
-                    className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full"
-                    defaultValue={project.start_date || ""}
-                    onBlur={(e) => patchProject({ start_date: e.target.value || null })}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-muted-foreground/60 block mb-1">Target date</label>
-                  <input
-                    type="date"
-                    className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full"
-                    defaultValue={project.target_date || ""}
-                    onBlur={(e) => patchProject({ target_date: e.target.value || null })}
-                  />
-                </div>
+              <PopoverContent className="w-auto p-0" align="end">
+                <Calendar
+                  mode="single"
+                  selected={project.start_date ? new Date(project.start_date) : undefined}
+                  onSelect={(date) => {
+                    if (date) {
+                      const v = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+                      patchProject({ start_date: v })
+                    } else {
+                      patchProject({ start_date: null })
+                    }
+                    setStartDateOpen(false)
+                  }}
+                  className="rounded-md"
+                />
+                {project.start_date && (
+                  <div className="border-t border-border px-3 py-2">
+                    <button className="text-[11px] text-red-400 hover:underline" onClick={() => { patchProject({ start_date: null }); setStartDateOpen(false) }}>
+                      Remove date
+                    </button>
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
+          </SidebarPropertyRow>
+
+          {/* Target date */}
+          <SidebarPropertyRow label="Target">
+            <Popover open={targetDateOpen} onOpenChange={setTargetDateOpen}>
+              <PopoverTrigger asChild>
+                <button className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-white/[0.06] transition-colors text-xs text-foreground/70">
+                  <CalendarIcon className="h-3 w-3 text-muted-foreground/50" />
+                  {project.target_date ? formatShortDate(project.target_date) : <span className="text-muted-foreground/40">Set date</span>}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="end">
+                <Calendar
+                  mode="single"
+                  selected={project.target_date ? new Date(project.target_date) : undefined}
+                  onSelect={(date) => {
+                    if (date) {
+                      const v = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+                      patchProject({ target_date: v })
+                    } else {
+                      patchProject({ target_date: null })
+                    }
+                    setTargetDateOpen(false)
+                  }}
+                  className="rounded-md"
+                />
+                {project.target_date && (
+                  <div className="border-t border-border px-3 py-2">
+                    <button className="text-[11px] text-red-400 hover:underline" onClick={() => { patchProject({ target_date: null }); setTargetDateOpen(false) }}>
+                      Remove date
+                    </button>
+                  </div>
+                )}
               </PopoverContent>
             </Popover>
           </SidebarPropertyRow>
@@ -1294,31 +1331,39 @@ function ProjectSidebar({
             )}
           </SidebarPropertyRow>
 
-          {/* Labels */}
-          <SidebarPropertyRow label="Labels">
-            {stats?.by_label && stats.by_label.length > 0 ? (
-              <div className="flex items-center gap-1 flex-wrap justify-end">
-                {stats.by_label.map((l) => (
-                  <span
-                    key={l.label_name}
-                    className="text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
-                    style={{ backgroundColor: `${l.color}20`, color: l.color }}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: l.color }} />
-                    {l.label_name}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <span className="text-xs text-muted-foreground/40">Add label</span>
-            )}
-          </SidebarPropertyRow>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
-      <Separator className="bg-white/[0.06]" />
+      {/* ── Labels ─────────────────────────────────────────────── */}
+      <div className="rounded-lg border border-white/[0.04]">
+        <SectionHeader
+          title="Labels"
+          open={true}
+          onToggle={() => {}}
+        />
+        <div className="px-3 pb-2">
+          {stats?.by_label && stats.by_label.length > 0 ? (
+            <div className="flex items-center gap-1 flex-wrap">
+              {stats.by_label.map((l) => (
+                <span
+                  key={l.label_name}
+                  className="text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
+                  style={{ backgroundColor: `${l.color}20`, color: l.color }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: l.color }} />
+                  {l.label_name}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span className="text-[11px] text-muted-foreground/40 pl-0.5">No labels</span>
+          )}
+        </div>
+      </div>
 
       {/* ── Milestones ─────────────────────────────────────────── */}
+      <div className="rounded-lg border border-white/[0.04]">
       <SectionHeader
         title={`Milestones${milestones.length > 0 ? ` (${milestones.length})` : ""}`}
         open={milestonesOpen}
@@ -1333,7 +1378,7 @@ function ProjectSidebar({
         }
       />
       {milestonesOpen && (
-        <div className="py-2 space-y-2">
+        <div className="px-3 pb-2 space-y-2">
           {milestones.length === 0 && !addingMilestone && (
             <p className="text-[12px] text-muted-foreground/40">No milestones yet</p>
           )}
@@ -1435,17 +1480,17 @@ function ProjectSidebar({
           )}
         </div>
       )}
-
-      <Separator className="bg-white/[0.06]" />
+      </div>
 
       {/* ── Progress ─────────────────────────────────────────── */}
-      <SectionHeader
-        title="Progress"
-        open={progressOpen}
-        onToggle={() => setProgressOpen(!progressOpen)}
-      />
-      {progressOpen && (
-        <div className="space-y-3">
+      <div className="rounded-lg border border-white/[0.04]">
+        <SectionHeader
+          title="Progress"
+          open={progressOpen}
+          onToggle={() => setProgressOpen(!progressOpen)}
+        />
+        {progressOpen && (
+          <div className="px-3 pb-3 space-y-3">
           {/* Stat boxes */}
           <div className="grid grid-cols-2 gap-2">
             <div className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2">
@@ -1581,24 +1626,24 @@ function ProjectSidebar({
               )}
             </div>
           )}
-        </div>
-      )}
-
-      <Separator className="bg-white/[0.06]" />
+          </div>
+        )}
+      </div>
 
       {/* ── Activity ─────────────────────────────────────────── */}
-      <SectionHeader
-        title="Activity"
-        open={activityOpen}
-        onToggle={() => setActivityOpen(!activityOpen)}
-        action={
-          <button className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors">
-            See all
-          </button>
-        }
-      />
-      {activityOpen && (
-        <div className="space-y-2 pb-4">
+      <div className="rounded-lg border border-white/[0.04]">
+        <SectionHeader
+          title="Activity"
+          open={activityOpen}
+          onToggle={() => setActivityOpen(!activityOpen)}
+          action={
+            <button className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors">
+              See all
+            </button>
+          }
+        />
+        {activityOpen && (
+          <div className="px-3 pb-3 space-y-2">
           <div className="flex items-start gap-2">
             <div className="w-4 h-4 rounded-full bg-white/[0.06] flex items-center justify-center shrink-0 mt-0.5">
               <svg className="h-2.5 w-2.5 text-muted-foreground/50" viewBox="0 0 16 16" fill="currentColor">
@@ -1615,7 +1660,8 @@ function ProjectSidebar({
             </div>
           </div>
         </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }

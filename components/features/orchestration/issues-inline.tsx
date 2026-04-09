@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { motion, AnimatePresence } from "motion/react"
-import { Search, X, Send, Clock, Plus, ChevronDown, User, Link2, FolderKanban, Hash, Flag } from "lucide-react"
+import { Search, X, Send, Clock, Plus, ChevronDown, User, Link2, FolderKanban, Hash, Flag, CalendarIcon } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
@@ -14,6 +14,8 @@ import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
 import { IssuesListView } from "@/components/features/issues/issues-list-view"
+import { Calendar } from "@/components/ui/calendar"
+import { getCrewIconDef } from "@/lib/crew-icon"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
@@ -366,6 +368,9 @@ export function IssueDetailInline({
   const [projectPopoverOpen, setProjectPopoverOpen] = useState(false)
   const [assigneeOpen, setAssigneeOpen] = useState(false)
   const [crewAgents, setCrewAgents] = useState<{id: string, name: string, slug: string, crew_slug?: string}[]>([])
+  const [labelSearch, setLabelSearch] = useState("")
+  const [creatingLabel, setCreatingLabel] = useState(false)
+  const [dueDateOpen, setDueDateOpen] = useState(false)
 
   // Sub-issues
   const [subIssues, setSubIssues] = useState<Mission[]>([])
@@ -867,30 +872,43 @@ export function IssueDetailInline({
                 </Popover>
 
                 {/* Due date */}
-                <Popover>
+                <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
                   <PopoverTrigger asChild>
                     <div>
                       <PropertyRow label="Due date">
-                        {issue.due_date ? new Date(issue.due_date).toLocaleDateString() : <span className="text-muted-foreground/40">No due date</span>}
+                        <span className="flex items-center gap-1.5">
+                          <CalendarIcon className="h-3 w-3 text-muted-foreground/50" />
+                          {issue.due_date ? new Date(issue.due_date).toLocaleDateString() : <span className="text-muted-foreground/40">No due date</span>}
+                        </span>
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-2" align="start">
-                    <input
-                      type="date"
-                      className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none"
-                      defaultValue={issue.due_date || ""}
-                      onChange={(e) => {
-                        patchIssue(e.target.value ? { due_date: e.target.value } : { due_date: null })
+                  <PopoverContent className="w-auto p-0" align="start" sideOffset={4}>
+                    <Calendar
+                      mode="single"
+                      selected={issue.due_date ? new Date(issue.due_date) : undefined}
+                      onSelect={(date) => {
+                        if (date) {
+                          const yyyy = date.getFullYear()
+                          const mm = String(date.getMonth() + 1).padStart(2, "0")
+                          const dd = String(date.getDate()).padStart(2, "0")
+                          patchIssue({ due_date: `${yyyy}-${mm}-${dd}` })
+                        } else {
+                          patchIssue({ due_date: null })
+                        }
+                        setDueDateOpen(false)
                       }}
+                      className="rounded-md"
                     />
                     {issue.due_date && (
-                      <button
-                        className="text-[11px] text-red-400 mt-1 hover:underline"
-                        onClick={() => patchIssue({ due_date: null })}
-                      >
-                        Remove date
-                      </button>
+                      <div className="border-t border-border px-3 py-2">
+                        <button
+                          className="text-[11px] text-red-400 hover:underline"
+                          onClick={() => { patchIssue({ due_date: null }); setDueDateOpen(false) }}
+                        >
+                          Remove date
+                        </button>
+                      </div>
                     )}
                   </PopoverContent>
                 </Popover>
@@ -991,10 +1009,48 @@ export function IssueDetailInline({
                     </button>
                   </PopoverTrigger>
                   <PopoverContent className="w-[220px] p-0" align="end" sideOffset={4}>
-                    <Command>
-                      <CommandInput placeholder="Search labels..." className="text-xs h-8" />
+                    <Command shouldFilter={true}>
+                      <CommandInput placeholder="Search labels..." className="text-xs h-8" onValueChange={setLabelSearch} />
                       <CommandList>
-                        <CommandEmpty>No labels found.</CommandEmpty>
+                        <CommandEmpty>
+                          {labelSearch.trim() ? (
+                            <button
+                              disabled={creatingLabel}
+                              className="flex items-center gap-2 w-full px-2 py-1.5 text-xs text-foreground/80 hover:bg-white/[0.06] transition-colors"
+                              onClick={async () => {
+                                setCreatingLabel(true)
+                                try {
+                                  const colors = ["#3b82f6", "#8b5cf6", "#ec4899", "#f97316", "#22c55e", "#06b6d4", "#eab308", "#ef4444"]
+                                  const color = colors[Math.floor(Math.random() * colors.length)]
+                                  const res = await fetch(`/api/v1/labels?workspace_id=${workspaceId}`, {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ name: labelSearch.trim(), color }),
+                                  })
+                                  if (res.ok) {
+                                    const created = await res.json()
+                                    const updated = [...(issue.labels || []).map(l => l.id), created.id]
+                                    await patchIssue({ labels: updated })
+                                    toast.success(`Label "${created.name}" created`)
+                                  } else {
+                                    toast.error("Failed to create label")
+                                  }
+                                } catch {
+                                  toast.error("Failed to create label")
+                                } finally {
+                                  setCreatingLabel(false)
+                                  setLabelsPopoverOpen(false)
+                                  setLabelSearch("")
+                                }
+                              }}
+                            >
+                              <Plus className="h-3 w-3 text-muted-foreground/60" />
+                              Create &quot;{labelSearch.trim()}&quot;
+                            </button>
+                          ) : (
+                            <span className="text-muted-foreground/40">No labels found.</span>
+                          )}
+                        </CommandEmpty>
                         <CommandGroup>
                           {workspaceLabels.map((label) => {
                             const isAssigned = issueLabels.some((l) => l.id === label.id)
@@ -1012,6 +1068,7 @@ export function IssueDetailInline({
                                     patchIssue({ labels: updated })
                                   }
                                   setLabelsPopoverOpen(false)
+                                  setLabelSearch("")
                                 }}
                               >
                                 <span
@@ -1065,7 +1122,7 @@ export function IssueDetailInline({
                     {issue.project_id ? (
                       <div className="flex items-center gap-2 py-1 w-full group">
                         <button className="flex items-center gap-2 flex-1 text-left">
-                          <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: matchingProject?.color || '#6B7280' }} />
+                          {(() => { const PIcon = getCrewIconDef(matchingProject?.icon || "folder").icon; return <PIcon className="h-3.5 w-3.5 shrink-0" style={{ color: matchingProject?.color || '#6B7280' }} /> })()}
                           <span className="text-[12px] text-foreground/80 hover:text-foreground transition-colors">{matchingProject?.name || "Unknown"}</span>
                         </button>
                         <a href={`/orchestration/projects/${issue.project_id}`}
@@ -1110,7 +1167,7 @@ export function IssueDetailInline({
                                 p.id === issue.project_id && "bg-white/[0.04]"
                               )}
                             >
-                              <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: p.color }} />
+                              {(() => { const PIco = getCrewIconDef(p.icon || "folder").icon; return <PIco className="h-3.5 w-3.5 shrink-0" style={{ color: p.color }} /> })()}
                               <span className="text-foreground/80 truncate">{p.name}</span>
                               {p.id === issue.project_id && <span className="ml-auto text-[10px] text-muted-foreground/40">current</span>}
                             </button>
@@ -1276,11 +1333,15 @@ export function IssueDetailInline({
                 <div className="space-y-2.5">
                   {comments.map((comment) => (
                     <div key={comment.id} className="flex gap-2">
-                      <div className="w-5 h-5 rounded-full bg-white/[0.08] flex items-center justify-center shrink-0 mt-0.5">
-                        <span className="text-[9px] font-semibold text-muted-foreground/60">
-                          {(comment.author_name || comment.author_type || "?")[0].toUpperCase()}
-                        </span>
-                      </div>
+                      {comment.author_type === "agent" && comment.author_id ? (
+                        <img src={getAgentAvatarUrl(comment.author_id)} alt="" className="w-5 h-5 rounded-full shrink-0 mt-0.5" />
+                      ) : (
+                        <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+                          <span className="text-[9px] font-semibold text-primary">
+                            {(comment.author_name || comment.author_type || "?")[0].toUpperCase()}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-[11px] font-medium text-foreground/80">
