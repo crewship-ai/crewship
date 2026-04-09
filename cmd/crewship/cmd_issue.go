@@ -646,6 +646,59 @@ var issueStopCmd = &cobra.Command{
 	},
 }
 
+var issueReviewCmd = &cobra.Command{
+	Use:   "review <identifier>",
+	Short: "Review an issue — approve or request changes",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		client := newAPIClient()
+		iss, err := fetchIssue(client, args[0])
+		if err != nil {
+			return err
+		}
+		if iss.Identifier == nil {
+			return fmt.Errorf("issue has no identifier")
+		}
+
+		action, _ := cmd.Flags().GetString("action")
+		if action == "" {
+			return fmt.Errorf("--action is required (approve or request_changes)")
+		}
+		if action != "approve" && action != "request_changes" {
+			return fmt.Errorf("--action must be 'approve' or 'request_changes'")
+		}
+
+		body := map[string]interface{}{"action": action}
+		if comment, _ := cmd.Flags().GetString("comment"); comment != "" {
+			body["comment"] = comment
+		}
+		if reassign, _ := cmd.Flags().GetString("reassign"); reassign != "" {
+			body["reassign_to"] = reassign
+		}
+
+		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues/%s/review", iss.CrewID, *iss.Identifier), body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		if action == "approve" {
+			cli.PrintSuccess(fmt.Sprintf("Approved %s", *iss.Identifier))
+		} else {
+			cli.PrintSuccess(fmt.Sprintf("Changes requested on %s", *iss.Identifier))
+		}
+		return nil
+	},
+}
+
 // ---------- init ----------
 
 func init() {
@@ -677,6 +730,11 @@ func init() {
 	issueUpdateCmd.Flags().String("assignee-type", "", "Assignee type: agent or user")
 	issueUpdateCmd.Flags().String("due-date", "", "Due date (ISO 8601)")
 
+	// issue review flags
+	issueReviewCmd.Flags().String("action", "", "Review action: approve or request_changes (required)")
+	issueReviewCmd.Flags().String("comment", "", "Review comment")
+	issueReviewCmd.Flags().String("reassign", "", "Agent slug to reassign to (for request_changes)")
+
 	// issue delete flags
 	issueDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
 
@@ -693,4 +751,5 @@ func init() {
 	issueCmd.AddCommand(issueLabelsCmd)
 	issueCmd.AddCommand(issueStartCmd)
 	issueCmd.AddCommand(issueStopCmd)
+	issueCmd.AddCommand(issueReviewCmd)
 }

@@ -562,7 +562,7 @@ export function IssueDetailInline({
               <button
                 onClick={async () => {
                   const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}${qs}/start`, { method: "POST" })
+                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/start${qs}`, { method: "POST" })
                   if (res.ok) { toast.success("Issue started — agent dispatched"); onUpdated() }
                   else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to start") }
                 }}
@@ -578,7 +578,7 @@ export function IssueDetailInline({
               <button
                 onClick={async () => {
                   const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}${qs}/stop`, { method: "POST" })
+                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/stop${qs}`, { method: "POST" })
                   if (res.ok) { toast.success("Issue stopped"); onUpdated() }
                   else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to stop") }
                 }}
@@ -594,7 +594,7 @@ export function IssueDetailInline({
               <button
                 onClick={async () => {
                   const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}${qs}/review`, {
+                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ action: "approve" }),
@@ -631,7 +631,7 @@ export function IssueDetailInline({
                     <button
                       onClick={async () => {
                         const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-                        const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}${qs}/review`, {
+                        const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ action: "request_changes", comment: reviewComment }),
