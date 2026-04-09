@@ -289,6 +289,70 @@ Requires crews with LEAD agents to already exist.`,
 			time.Sleep(50 * time.Millisecond)
 		}
 
+		// ── Step 5: Create relations between issues ──
+		fmt.Fprintln(os.Stderr, "Creating relations...")
+		type relDef struct {
+			source string
+			target string
+			rtype  string
+		}
+		// Use identifiers that were just created — they share the same prefix patterns
+		// We need to figure out the actual identifiers. Let's fetch all issues to get them.
+		resp, err = client.Get("/api/v1/issues?limit=100")
+		if err == nil {
+			var allIssues []struct {
+				ID         string  `json:"id"`
+				CrewID     string  `json:"crew_id"`
+				Identifier *string `json:"identifier"`
+				Title      string  `json:"title"`
+			}
+			if cli.ReadJSON(resp, &allIssues) == nil && len(allIssues) >= 6 {
+				// Create some meaningful relations between first few issues
+				identifiers := make([]string, 0)
+				crewIDs := make([]string, 0)
+				for _, iss := range allIssues {
+					if iss.Identifier != nil {
+						identifiers = append(identifiers, *iss.Identifier)
+						crewIDs = append(crewIDs, iss.CrewID)
+					}
+				}
+				relDefs := []relDef{}
+				if len(identifiers) >= 6 {
+					// Issue 0 blocks issue 1 (e.g., WebSocket auth blocks rate limiting)
+					relDefs = append(relDefs, relDef{identifiers[0], identifiers[1], "blocks"})
+					// Issue 0 relates to issue 4 (auth relates to encryption)
+					relDefs = append(relDefs, relDef{identifiers[0], identifiers[4], "relates_to"})
+					// Issue 2 relates to issue 3 (notifications relates to connection pooling)
+					relDefs = append(relDefs, relDef{identifiers[2], identifiers[3], "relates_to"})
+					// Issue 5 blocked by issue 4 (security audit blocked by encryption)
+					relDefs = append(relDefs, relDef{identifiers[5], identifiers[4], "blocked_by"})
+				}
+				for _, rd := range relDefs {
+					// Find crew for source
+					var srcCrewID string
+					for i, ident := range identifiers {
+						if ident == rd.source {
+							srcCrewID = crewIDs[i]
+							break
+						}
+					}
+					if srcCrewID == "" {
+						continue
+					}
+					r, err := client.Post(
+						fmt.Sprintf("/api/v1/crews/%s/issues/%s/relations", srcCrewID, rd.source),
+						map[string]string{"target_identifier": rd.target, "relation_type": rd.rtype},
+					)
+					if err == nil {
+						if r.StatusCode < 400 {
+							fmt.Fprintf(os.Stderr, "  + %s %s %s\n", rd.source, rd.rtype, rd.target)
+						}
+						r.Body.Close()
+					}
+				}
+			}
+		}
+
 		fmt.Fprintln(os.Stderr, "")
 		cli.PrintSuccess(fmt.Sprintf("Seeded %d projects, %d issues across %d crews", len(projectByName), len(issueDefs), len(crewBySlug)))
 		return nil

@@ -7,7 +7,7 @@ import {
   FileText, PanelLeftClose, PanelLeftOpen,
   MessageSquare, Terminal, FileCode2, Container,
   ChevronUp, ChevronDown, ChevronLeft, X, Play, Square, Loader2,
-  CircleDot, LayoutGrid, List, Plus,
+  CircleDot, LayoutGrid, List, Plus, FolderKanban,
 } from "lucide-react"
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
@@ -35,10 +35,10 @@ import { A2AMessageStream } from "@/components/features/orchestration/a2a-messag
 import { MissionYamlEditor } from "@/components/features/orchestration/mission-yaml-editor"
 import { DockerOverview } from "@/components/features/orchestration/docker-overview"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
-import type { Mission, MissionTask, IssueLabel, IssueComment } from "@/lib/types/mission"
+import type { Mission, MissionTask, IssueLabel, IssueComment, Project } from "@/lib/types/mission"
 import type { CrewSummary, AgentSummary, CrewConnection } from "@/lib/types/orchestration"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { IssuesExplorerPanel, IssuesBoardInline, IssuesListInline, IssueDetailInline } from "@/components/features/orchestration/issues-inline"
+import { IssuesExplorerPanel, IssuesBoardInline, IssuesListInline, IssueDetailInline, ProjectsListView } from "@/components/features/orchestration/issues-inline"
 
 import { toast } from "sonner"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
@@ -278,6 +278,8 @@ export function OrchestrationLayout({
   const [issueSearch, setIssueSearch] = useState("")
   const [selectedIssue, setSelectedIssue] = useState<Mission | null>(null)
   const [issueComments, setIssueComments] = useState<IssueComment[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
 
   const graphRef = useRef<WorkflowGraphRef>(null)
 
@@ -359,10 +361,19 @@ export function OrchestrationLayout({
     } catch { /* ignore */ }
   }, [workspaceId])
 
+  const fetchProjects = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      const res = await fetch(`/api/v1/projects?workspace_id=${workspaceId}`)
+      if (res.ok) setProjects(await res.json())
+    } catch { /* ignore */ }
+  }, [workspaceId])
+
   useEffect(() => {
     fetchIssues()
     fetchIssueLabels()
-  }, [fetchIssues, fetchIssueLabels])
+    fetchProjects()
+  }, [fetchIssues, fetchIssueLabels, fetchProjects])
 
   const handleIssueSelect = useCallback(async (issue: Mission) => {
     setSelectedIssue(issue)
@@ -377,13 +388,19 @@ export function OrchestrationLayout({
   }, [workspaceId])
 
   const filteredIssues = useMemo(() => {
-    if (!issueSearch) return issues
-    const q = issueSearch.toLowerCase()
-    return issues.filter((i) =>
-      i.title.toLowerCase().includes(q) ||
-      (i.identifier && i.identifier.toLowerCase().includes(q))
-    )
-  }, [issues, issueSearch])
+    let filtered = issues
+    if (selectedProjectId) {
+      filtered = filtered.filter((i) => i.project_id === selectedProjectId)
+    }
+    if (issueSearch) {
+      const q = issueSearch.toLowerCase()
+      filtered = filtered.filter((i) =>
+        i.title.toLowerCase().includes(q) ||
+        (i.identifier && i.identifier.toLowerCase().includes(q))
+      )
+    }
+    return filtered
+  }, [issues, issueSearch, selectedProjectId])
 
   // Handlers
   const handleNodeClick = useCallback((task: MissionTask) => {
@@ -567,6 +584,7 @@ export function OrchestrationLayout({
       <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {([
           { id: "issues", label: "Issues", icon: CircleDot },
+          { id: "projects", label: "Projects", icon: FolderKanban },
           { id: "graph", label: "Graph", icon: Workflow },
           { id: "timeline", label: "Timeline", icon: Clock },
           { id: "activity", label: "Activity", icon: Activity },
@@ -579,6 +597,7 @@ export function OrchestrationLayout({
               if (id !== "issues") {
                 setSelectedIssue(null)
                 setIssueComments([])
+                setSelectedProjectId(null)
               }
             }}
             className={cn(
@@ -647,9 +666,12 @@ export function OrchestrationLayout({
                       {activeTab === "issues" ? (
                         <IssuesExplorerPanel
                           issues={issues}
+                          projects={projects}
                           search={issueSearch}
                           onSearchChange={setIssueSearch}
                           selectedIssue={selectedIssue}
+                          selectedProjectId={selectedProjectId}
+                          onProjectSelect={(id) => setSelectedProjectId(id === selectedProjectId ? null : id)}
                           onIssueSelect={handleIssueSelect}
                         />
                       ) : (
@@ -722,9 +744,12 @@ export function OrchestrationLayout({
                   {activeTab === "issues" ? (
                     <IssuesExplorerPanel
                       issues={issues}
+                      projects={projects}
                       search={issueSearch}
                       onSearchChange={setIssueSearch}
                       selectedIssue={selectedIssue}
+                      selectedProjectId={selectedProjectId}
+                      onProjectSelect={(id) => setSelectedProjectId(id === selectedProjectId ? null : id)}
                       onIssueSelect={handleIssueSelect}
                     />
                   ) : (
@@ -842,6 +867,12 @@ export function OrchestrationLayout({
               </motion.div>
             )}
 
+            {activeTab === "projects" && (
+              <motion.div key="projects" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
+                <ProjectsListView projects={projects} onRefresh={fetchProjects} workspaceId={workspaceId} />
+              </motion.div>
+            )}
+
           </AnimatePresence>
         </div>
 
@@ -871,9 +902,10 @@ export function OrchestrationLayout({
                       issue={selectedIssue}
                       comments={issueComments}
                       labels={issueLabels}
+                      projects={projects}
                       workspaceId={workspaceId}
                       onClose={() => { setSelectedIssue(null); setIssueComments([]) }}
-                      onUpdated={() => { fetchIssues(); handleIssueSelect(selectedIssue) }}
+                      onUpdated={() => { fetchIssues(); if (selectedIssue) handleIssueSelect(selectedIssue); fetchProjects() }}
                     />
                   ) : (
                     <ContextDetailPanel context={detailContext} onClose={handleDetailClose} onTaskAction={handleTaskAction} />
@@ -902,9 +934,10 @@ export function OrchestrationLayout({
                       issue={selectedIssue}
                       comments={issueComments}
                       labels={issueLabels}
+                      projects={projects}
                       workspaceId={workspaceId}
                       onClose={() => { setSelectedIssue(null); setIssueComments([]) }}
-                      onUpdated={() => { fetchIssues(); handleIssueSelect(selectedIssue) }}
+                      onUpdated={() => { fetchIssues(); if (selectedIssue) handleIssueSelect(selectedIssue); fetchProjects() }}
                     />
                   ) : (
                     <ContextDetailPanel

@@ -1,8 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Search, X, Send, Clock, Plus, ChevronDown, ChevronRight, User, LayoutGrid, Link2 } from "lucide-react"
+import { Search, X, Send, Clock, Plus, ChevronDown, ChevronRight, User, Link2, FolderKanban } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
@@ -12,7 +12,7 @@ import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
 import { IssuesListView } from "@/components/features/issues/issues-list-view"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
-import type { Mission, MissionStatus, IssueLabel, IssueComment, IssuePriority, IssueRelation, RelationType } from "@/lib/types/mission"
+import type { Mission, MissionStatus, IssueLabel, IssueComment, IssuePriority, IssueRelation, RelationType, Project, ProjectStatus } from "@/lib/types/mission"
 
 /* -------------------------------------------------------------------------- */
 /*  IssuesExplorerPanel — left panel                                          */
@@ -20,26 +20,40 @@ import type { Mission, MissionStatus, IssueLabel, IssueComment, IssuePriority, I
 
 interface IssuesExplorerPanelProps {
   issues: Mission[]
+  projects: Project[]
   search: string
   onSearchChange: (value: string) => void
   selectedIssue: Mission | null
+  selectedProjectId: string | null
+  onProjectSelect: (id: string) => void
   onIssueSelect: (issue: Mission) => void
 }
 
 export function IssuesExplorerPanel({
   issues,
+  projects,
   search,
   onSearchChange,
   selectedIssue,
+  selectedProjectId,
+  onProjectSelect,
   onIssueSelect,
 }: IssuesExplorerPanelProps) {
-  const filtered = search
-    ? issues.filter(
+  const displayed = useMemo(() => {
+    let filtered = issues
+    if (selectedProjectId) {
+      filtered = filtered.filter((i) => i.project_id === selectedProjectId)
+    }
+    if (search) {
+      const q = search.toLowerCase()
+      filtered = filtered.filter(
         (i) =>
-          i.title.toLowerCase().includes(search.toLowerCase()) ||
-          (i.identifier && i.identifier.toLowerCase().includes(search.toLowerCase())),
+          i.title.toLowerCase().includes(q) ||
+          (i.identifier && i.identifier.toLowerCase().includes(q)),
       )
-    : issues
+    }
+    return filtered
+  }, [issues, search, selectedProjectId])
 
   return (
     <div className="flex flex-col h-full">
@@ -62,15 +76,43 @@ export function IssuesExplorerPanel({
         </div>
       </div>
 
+      {/* Projects */}
+      {projects.length > 0 && (
+        <div className="border-b border-white/[0.06] pb-1">
+          <div className="flex items-center justify-between px-3 py-1.5">
+            <span className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">Projects</span>
+          </div>
+          {projects.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => onProjectSelect(p.id)}
+              className={cn(
+                "flex items-center gap-2 w-full px-3 py-1.5 text-left hover:bg-white/[0.04] transition-colors",
+                selectedProjectId === p.id && "bg-blue-500/10 border-l-2 border-blue-500",
+                selectedProjectId !== p.id && "border-l-2 border-transparent",
+              )}
+            >
+              <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: p.color }} />
+              <span className="text-[12px] text-foreground/80 truncate flex-1">{p.name}</span>
+              <span className="text-[10px] text-muted-foreground/50 tabular-nums">{p.issue_count}</span>
+              {/* Mini progress bar */}
+              <div className="w-8 h-1 bg-white/[0.06] rounded-full overflow-hidden">
+                <div className="h-full bg-blue-500/60 rounded-full" style={{ width: `${p.progress}%` }} />
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Issue count */}
-      <div className="px-3 pb-1 shrink-0">
-        <span className="text-[10px] text-muted-foreground/50">{filtered.length} issues</span>
+      <div className="px-3 pb-1 pt-1 shrink-0">
+        <span className="text-[10px] text-muted-foreground/50">{displayed.length} issues</span>
       </div>
 
       {/* Issue list */}
       <ScrollArea className="flex-1">
         <div className="px-1">
-          {filtered.map((issue) => {
+          {displayed.map((issue) => {
             const isSelected = selectedIssue?.id === issue.id
             return (
               <button
@@ -92,7 +134,7 @@ export function IssuesExplorerPanel({
               </button>
             )
           })}
-          {filtered.length === 0 && (
+          {displayed.length === 0 && (
             <div className="flex items-center justify-center py-8 text-[11px] text-muted-foreground/40">
               No issues found
             </div>
@@ -223,6 +265,7 @@ interface IssueDetailInlineProps {
   issue: Mission
   comments: IssueComment[]
   labels: IssueLabel[]
+  projects: Project[]
   workspaceId: string
   onClose: () => void
   onUpdated: () => void
@@ -232,6 +275,7 @@ export function IssueDetailInline({
   issue,
   comments,
   labels: workspaceLabels,
+  projects,
   workspaceId,
   onClose,
   onUpdated,
@@ -251,6 +295,9 @@ export function IssueDetailInline({
   const [statusOpen, setStatusOpen] = useState(false)
   const [priorityOpen, setPriorityOpen] = useState(false)
   const [labelsPopoverOpen, setLabelsPopoverOpen] = useState(false)
+  const [projectPopoverOpen, setProjectPopoverOpen] = useState(false)
+
+  const matchingProject = projects.find((p) => p.id === issue.project_id)
 
   // Relations
   const [relations, setRelations] = useState<IssueRelation[]>([])
@@ -630,7 +677,7 @@ export function IssueDetailInline({
             )}
           </div>
 
-          {/* ── Project section (placeholder) ────────────────────────────── */}
+          {/* ── Project section ────────────────────────────────────────── */}
           <div className="border-t border-white/[0.06]">
             <SectionHeader
               title="Project"
@@ -638,10 +685,47 @@ export function IssueDetailInline({
               onToggle={() => setProjectOpen((v) => !v)}
             />
             {projectOpen && (
-              <PropertyRow>
-                <LayoutGrid className="h-3.5 w-3.5 text-muted-foreground/40" />
-                <span className="text-[12px] text-muted-foreground/40">No project</span>
-              </PropertyRow>
+              <div className="px-3 pb-2">
+                {issue.project_id ? (
+                  <div className="flex items-center gap-2 py-1 group">
+                    <div className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: matchingProject?.color || '#6B7280' }} />
+                    <span className="text-[12px] text-foreground/80 flex-1">{matchingProject?.name || "Unknown"}</span>
+                    <button
+                      onClick={() => patchIssue({ project_id: null })}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-white/[0.08] text-muted-foreground/40 hover:text-red-400 transition-all"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <Popover open={projectPopoverOpen} onOpenChange={setProjectPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <button className="text-[12px] text-muted-foreground/50 hover:text-muted-foreground py-1 flex items-center gap-1.5">
+                        <Plus className="h-3 w-3" /> Set project
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[220px] p-1" align="start" sideOffset={4}>
+                      {projects.length === 0 ? (
+                        <p className="text-[11px] text-muted-foreground/40 px-2 py-3 text-center">No projects</p>
+                      ) : (
+                        projects.map((p) => (
+                          <button
+                            key={p.id}
+                            onClick={() => {
+                              patchIssue({ project_id: p.id })
+                              setProjectPopoverOpen(false)
+                            }}
+                            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-sm text-left text-[12px] hover:bg-white/[0.06] transition-colors"
+                          >
+                            <div className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: p.color }} />
+                            <span className="text-foreground/80 truncate">{p.name}</span>
+                          </button>
+                        ))
+                      )}
+                    </PopoverContent>
+                  </Popover>
+                )}
+              </div>
             )}
           </div>
 
@@ -850,6 +934,176 @@ export function IssueDetailInline({
           </div>
         </div>
       </ScrollArea>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/*  ProjectsListView — Linear-style projects table for center panel           */
+/* -------------------------------------------------------------------------- */
+
+function ProjectStatusIcon({ status, className }: { status: ProjectStatus; className?: string }) {
+  switch (status) {
+    case "backlog":
+      return (
+        <svg className={className} viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 3" opacity="0.5" />
+        </svg>
+      )
+    case "planned":
+      return (
+        <svg className={className} viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.6" />
+        </svg>
+      )
+    case "in_progress":
+      return (
+        <svg className={className} viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
+          <path d="M8 2a6 6 0 0 1 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      )
+    case "paused":
+      return (
+        <svg className={className} viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
+          <rect x="6" y="5" width="1.5" height="6" rx="0.5" fill="currentColor" opacity="0.6" />
+          <rect x="8.5" y="5" width="1.5" height="6" rx="0.5" fill="currentColor" opacity="0.6" />
+        </svg>
+      )
+    case "completed":
+      return (
+        <svg className={className} viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6" fill="currentColor" opacity="0.15" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M5.5 8l2 2 3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )
+    case "cancelled":
+      return (
+        <svg className={className} viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
+          <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      )
+    default:
+      return null
+  }
+}
+
+function HealthBadge({ health }: { health: string }) {
+  switch (health) {
+    case "at_risk":
+      return <span className="text-[11px] text-amber-400">At risk</span>
+    case "off_track":
+      return <span className="text-[11px] text-red-400">Off track</span>
+    default:
+      return <span className="text-[11px] text-muted-foreground/40">No updates</span>
+  }
+}
+
+interface ProjectsListViewProps {
+  projects: Project[]
+  onRefresh: () => void
+  workspaceId: string
+}
+
+export function ProjectsListView({ projects, onRefresh: _onRefresh, workspaceId: _workspaceId }: ProjectsListViewProps) {
+  const sorted = useMemo(
+    () => [...projects].sort((a, b) => a.name.localeCompare(b.name)),
+    [projects],
+  )
+
+  if (projects.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground/50">
+        <FolderKanban className="h-6 w-6 mb-2" />
+        <p className="text-[12px]">No projects yet</p>
+        <p className="text-[10px] text-muted-foreground/30 mt-1">Projects will appear here once created</p>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <table className="w-full text-[12px]">
+        <thead>
+          <tr className="text-left text-muted-foreground/60 border-b border-white/[0.06]">
+            <th className="py-2 px-3 font-medium">Name</th>
+            <th className="py-2 px-3 font-medium w-24">Health</th>
+            <th className="py-2 px-3 font-medium w-20">Priority</th>
+            <th className="py-2 px-3 font-medium w-28">Lead</th>
+            <th className="py-2 px-3 font-medium w-28">Target date</th>
+            <th className="py-2 px-3 font-medium w-32">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((p) => (
+            <tr key={p.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+              {/* Name */}
+              <td className="py-2 px-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-sm shrink-0 flex items-center justify-center" style={{ backgroundColor: p.color }}>
+                    {p.icon ? (
+                      <span className="text-[8px] text-white font-bold">{p.icon.charAt(0).toUpperCase()}</span>
+                    ) : null}
+                  </div>
+                  <span className="text-foreground/90 font-medium truncate">{p.name}</span>
+                </div>
+              </td>
+              {/* Health */}
+              <td className="py-2 px-3">
+                <HealthBadge health={p.health} />
+              </td>
+              {/* Priority */}
+              <td className="py-2 px-3">
+                <div className="flex items-center gap-1.5">
+                  <PriorityIcon priority={p.priority || "none"} className="h-3.5 w-3.5" />
+                  <span className="text-foreground/60 capitalize">{p.priority || "None"}</span>
+                </div>
+              </td>
+              {/* Lead */}
+              <td className="py-2 px-3">
+                {p.lead_name ? (
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-4 h-4 rounded-full bg-white/[0.08] flex items-center justify-center shrink-0">
+                      <span className="text-[8px] font-semibold text-muted-foreground/60">
+                        {p.lead_name.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <span className="text-foreground/60 truncate">{p.lead_name}</span>
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground/30">&mdash;</span>
+                )}
+              </td>
+              {/* Target date */}
+              <td className="py-2 px-3">
+                {p.target_date ? (
+                  <span className="text-foreground/60">{new Date(p.target_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
+                ) : (
+                  <span className="text-muted-foreground/30">&mdash;</span>
+                )}
+              </td>
+              {/* Status / Progress */}
+              <td className="py-2 px-3">
+                <div className="flex items-center gap-2">
+                  <ProjectStatusIcon status={p.status} className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
+                  <span className="text-foreground/60 tabular-nums w-8 text-right">{p.progress}%</span>
+                  <div className="w-12 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all",
+                        p.progress >= 100 ? "bg-green-500/70" : "bg-blue-500/60",
+                      )}
+                      style={{ width: `${Math.min(p.progress, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
