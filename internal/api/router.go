@@ -2,7 +2,6 @@ package api
 
 import (
 	"database/sql"
-	"io/fs"
 	"log/slog"
 	"net/http"
 
@@ -95,13 +94,6 @@ func (r *Router) SetScheduler(su ScheduleUpdater) {
 
 type RouterOption func(*Router)
 
-func WithStaticFS(webFS fs.FS) RouterOption {
-	return func(r *Router) {
-		r.mux.Handle("GET /", StaticFileHandler(webFS))
-		r.logger.Info("serving embedded static UI")
-	}
-}
-
 func WithSocketPath(path string) RouterOption {
 	return func(r *Router) {
 		r.socketPath = path
@@ -132,11 +124,6 @@ func WithOrchestrator(orch *orchestrator.Orchestrator) RouterOption {
 	}
 }
 
-func WithScheduler(su ScheduleUpdater) RouterOption {
-	return func(r *Router) {
-		r.scheduleUpdater = su
-	}
-}
 
 func WithKeeperGatekeeper(gk gatekeeper.Evaluator) RouterOption {
 	return func(r *Router) {
@@ -196,18 +183,6 @@ func WithMissionCallback(cb MissionCallback) RouterOption {
 func WithLogWriter(lw *logcollector.Writer) RouterOption {
 	return func(r *Router) {
 		r.logWriter = lw
-	}
-}
-
-func WithCaptainLLM(p llm.Provider) RouterOption {
-	return func(r *Router) {
-		r.captainLLM = p
-	}
-}
-
-func WithCaptainMissionCallback(ms MissionStarter) RouterOption {
-	return func(r *Router) {
-		r.captainMissionEngine = ms
 	}
 }
 
