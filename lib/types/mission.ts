@@ -118,6 +118,10 @@ export interface Mission {
   mission_type?: MissionType
   project_id?: string | null
   project_name?: string | null
+  milestone_id?: string | null
+  parent_issue_id?: string | null
+  estimate?: number | null
+  sub_issues_count?: number
   labels?: IssueLabel[]
   crew_name?: string
   crew_slug?: string
@@ -155,6 +159,79 @@ export interface Project {
   issue_count: number
   done_count: number
   progress: number
+}
+
+export interface Milestone {
+  id: string
+  project_id: string
+  name: string
+  description: string | null
+  target_date: string | null
+  status: "active" | "completed" | "cancelled"
+  position: number
+  issue_count?: number
+  done_count?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Notification {
+  id: string
+  actor_type: "user" | "agent" | "system"
+  actor_id: string
+  actor_name?: string
+  action: string
+  entity_type: string
+  entity_id: string | null
+  entity_title: string | null
+  read_at: string | null
+  created_at: string
+}
+
+export interface SavedView {
+  id: string
+  name: string
+  filters_json: string
+  sort_json: string | null
+  view_type: "board" | "list"
+  is_default: boolean
+  shared: boolean
+  created_at: string
+}
+
+export interface RecurringIssue {
+  id: string
+  crew_id: string
+  crew_name?: string
+  title: string
+  description: string | null
+  priority: string
+  project_id: string | null
+  milestone_id: string | null
+  assignee_type: string | null
+  assignee_id: string | null
+  cron_expression: string
+  enabled: boolean
+  next_run: string | null
+  last_run: string | null
+  run_count: number
+  created_at: string
+}
+
+export interface TriageRule {
+  id: string
+  name: string
+  pattern: string
+  match_type: "contains" | "regex" | "exact"
+  crew_id: string | null
+  assignee_id: string | null
+  priority: string | null
+  project_id: string | null
+  labels_json: string
+  position: number
+  enabled: boolean
+  match_count: number
+  created_at: string
 }
 
 export type RelationType = "blocks" | "blocked_by" | "relates_to" | "duplicate_of"

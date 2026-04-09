@@ -413,6 +413,43 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("DELETE /api/v1/projects/{projectId}", authed(wsCtx(http.HandlerFunc(projects.Delete))))
 	r.mux.Handle("GET /api/v1/projects/{projectId}/stats", authed(wsCtx(http.HandlerFunc(projects.Stats))))
 
+	// Milestones
+	milestones := NewMilestoneHandler(r.db, r.hub, r.logger)
+	r.mux.Handle("GET /api/v1/projects/{projectId}/milestones", authed(wsCtx(http.HandlerFunc(milestones.List))))
+	r.mux.Handle("POST /api/v1/projects/{projectId}/milestones", authed(wsCtx(http.HandlerFunc(milestones.Create))))
+	r.mux.Handle("PATCH /api/v1/milestones/{milestoneId}", authed(wsCtx(http.HandlerFunc(milestones.Update))))
+	r.mux.Handle("DELETE /api/v1/milestones/{milestoneId}", authed(wsCtx(http.HandlerFunc(milestones.Delete))))
+	// Notifications
+	notifications := NewNotificationHandler(r.db, r.hub, r.logger)
+	r.mux.Handle("GET /api/v1/notifications", authed(wsCtx(http.HandlerFunc(notifications.List))))
+	r.mux.Handle("GET /api/v1/notifications/count", authed(wsCtx(http.HandlerFunc(notifications.Count))))
+	r.mux.Handle("POST /api/v1/notifications/{notificationId}/read", authed(wsCtx(http.HandlerFunc(notifications.MarkRead))))
+	r.mux.Handle("POST /api/v1/notifications/read-all", authed(wsCtx(http.HandlerFunc(notifications.MarkAllRead))))
+	r.mux.Handle("DELETE /api/v1/notifications/{notificationId}", authed(wsCtx(http.HandlerFunc(notifications.Delete))))
+	// Saved Views
+	savedViews := NewSavedViewHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/saved-views", authed(wsCtx(http.HandlerFunc(savedViews.List))))
+	r.mux.Handle("POST /api/v1/saved-views", authed(wsCtx(http.HandlerFunc(savedViews.Create))))
+	r.mux.Handle("PATCH /api/v1/saved-views/{viewId}", authed(wsCtx(http.HandlerFunc(savedViews.Update))))
+	r.mux.Handle("DELETE /api/v1/saved-views/{viewId}", authed(wsCtx(http.HandlerFunc(savedViews.Delete))))
+	// Recurring Issues
+	recurringIssues := NewRecurringIssueHandler(r.db, r.hub, r.logger)
+	r.mux.Handle("GET /api/v1/recurring-issues", authed(wsCtx(http.HandlerFunc(recurringIssues.List))))
+	r.mux.Handle("POST /api/v1/recurring-issues", authed(wsCtx(http.HandlerFunc(recurringIssues.Create))))
+	r.mux.Handle("PATCH /api/v1/recurring-issues/{recurringId}", authed(wsCtx(http.HandlerFunc(recurringIssues.Update))))
+	r.mux.Handle("DELETE /api/v1/recurring-issues/{recurringId}", authed(wsCtx(http.HandlerFunc(recurringIssues.Delete))))
+	// Triage Rules
+	triage := NewTriageHandler(r.db, r.hub, r.logger)
+	r.mux.Handle("GET /api/v1/triage-rules", authed(wsCtx(http.HandlerFunc(triage.ListRules))))
+	r.mux.Handle("POST /api/v1/triage-rules", authed(wsCtx(http.HandlerFunc(triage.CreateRule))))
+	r.mux.Handle("PATCH /api/v1/triage-rules/{ruleId}", authed(wsCtx(http.HandlerFunc(triage.UpdateRule))))
+	r.mux.Handle("DELETE /api/v1/triage-rules/{ruleId}", authed(wsCtx(http.HandlerFunc(triage.DeleteRule))))
+	r.mux.Handle("POST /api/v1/triage/process", authed(wsCtx(http.HandlerFunc(triage.Process))))
+	// Issue Bulk Operations
+	r.mux.Handle("PATCH /api/v1/issues/bulk", authed(wsCtx(http.HandlerFunc(issues.BulkUpdate))))
+	// Issue Sub-issues
+	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks", authed(wsCtx(http.HandlerFunc(issues.ListSubIssues))))
+
 	// Mission Proposals (workspace-scoped)
 	proposals := NewProposalHandler(r.db, r.hub, missionEngineForPublic, r.logger)
 	r.mux.Handle("GET /api/v1/mission-proposals", authed(wsCtx(http.HandlerFunc(proposals.List))))

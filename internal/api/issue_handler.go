@@ -52,10 +52,14 @@ type issueResponse struct {
 	CreatedAt    string          `json:"created_at"`
 	UpdatedAt    string          `json:"updated_at"`
 	CompletedAt  *string         `json:"completed_at"`
-	Labels       []labelResponse `json:"labels"`
-	ProjectID    *string         `json:"project_id"`
-	ProjectName  *string         `json:"project_name,omitempty"`
-	CommentCount int             `json:"comment_count"`
+	Labels         []labelResponse `json:"labels"`
+	ProjectID      *string         `json:"project_id"`
+	ProjectName    *string         `json:"project_name,omitempty"`
+	Estimate       *int            `json:"estimate"`
+	ParentIssueID  *string         `json:"parent_issue_id"`
+	MilestoneID    *string         `json:"milestone_id"`
+	SubIssuesCount int             `json:"sub_issues_count"`
+	CommentCount   int             `json:"comment_count"`
 }
 
 type labelResponse struct {
@@ -126,7 +130,8 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		       END,
 		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
 		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id
+		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
+		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
 		FROM missions m
 		LEFT JOIN crews c ON m.crew_id = c.id
 		WHERE m.workspace_id = ?`
@@ -223,7 +228,8 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 			&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
 			&issue.DueDate, &issue.SortOrder, &issue.MissionType,
 			&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-			&issue.ProjectID,
+			&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
+			&issue.SubIssuesCount,
 		); err != nil {
 			h.logger.Error("scan issue", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
@@ -324,14 +330,17 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
-		Title        string   `json:"title"`
-		Description  *string  `json:"description"`
-		Priority     string   `json:"priority"`
-		AssigneeType *string  `json:"assignee_type"`
-		AssigneeID   *string  `json:"assignee_id"`
-		DueDate      *string  `json:"due_date"`
-		ProjectID    *string  `json:"project_id"`
-		Labels       []string `json:"labels"`
+		Title         string   `json:"title"`
+		Description   *string  `json:"description"`
+		Priority      string   `json:"priority"`
+		AssigneeType  *string  `json:"assignee_type"`
+		AssigneeID    *string  `json:"assignee_id"`
+		DueDate       *string  `json:"due_date"`
+		ProjectID     *string  `json:"project_id"`
+		Estimate      *int     `json:"estimate"`
+		ParentIssueID *string  `json:"parent_issue_id"`
+		MilestoneID   *string  `json:"milestone_id"`
+		Labels        []string `json:"labels"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -417,12 +426,14 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO missions (id, workspace_id, crew_id, lead_agent_id, trace_id,
 		    title, description, status, number, identifier, priority,
-		    assignee_type, assignee_id, due_date, project_id, sort_order, mission_type,
+		    assignee_type, assignee_id, due_date, project_id, estimate,
+		    parent_issue_id, milestone_id, sort_order, mission_type,
 		    created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'BACKLOG', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'issue', ?, ?)`,
 		id, wsID, crewID, leadAgentID, traceID,
 		req.Title, req.Description, issueNumber, identifier, req.Priority,
 		req.AssigneeType, req.AssigneeID, req.DueDate, req.ProjectID,
+		req.Estimate, req.ParentIssueID, req.MilestoneID,
 		now, now)
 	if err != nil {
 		h.logger.Error("insert issue", "error", err)
@@ -449,24 +460,27 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := issueResponse{
-		ID:           id,
-		WorkspaceID:  wsID,
-		CrewID:       crewID,
-		Number:       &issueNumber,
-		Identifier:   &identifier,
-		Title:        req.Title,
-		Description:  req.Description,
-		Status:       "BACKLOG",
-		Priority:     req.Priority,
-		AssigneeType: req.AssigneeType,
-		AssigneeID:   req.AssigneeID,
-		DueDate:      req.DueDate,
-		SortOrder:    0,
-		MissionType:  "issue",
-		LeadAgentID:  leadAgentID,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		Labels:       []labelResponse{},
+		ID:            id,
+		WorkspaceID:   wsID,
+		CrewID:        crewID,
+		Number:        &issueNumber,
+		Identifier:    &identifier,
+		Title:         req.Title,
+		Description:   req.Description,
+		Status:        "BACKLOG",
+		Priority:      req.Priority,
+		AssigneeType:  req.AssigneeType,
+		AssigneeID:    req.AssigneeID,
+		DueDate:       req.DueDate,
+		SortOrder:     0,
+		MissionType:   "issue",
+		LeadAgentID:   leadAgentID,
+		Estimate:      req.Estimate,
+		ParentIssueID: req.ParentIssueID,
+		MilestoneID:   req.MilestoneID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Labels:        []labelResponse{},
 	}
 
 	if h.hub != nil {
@@ -498,7 +512,8 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		       END,
 		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
 		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id
+		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
+		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
 		FROM missions m
 		LEFT JOIN crews c ON m.crew_id = c.id
 		WHERE m.identifier = ? AND m.crew_id = ? AND m.workspace_id = ?`,
@@ -508,7 +523,8 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
 		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
 		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-		&issue.ProjectID,
+		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
+		&issue.SubIssuesCount,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -566,7 +582,8 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 		       END,
 		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
 		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id
+		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
+		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
 		FROM missions m
 		LEFT JOIN crews c ON m.crew_id = c.id
 		WHERE m.identifier = ? AND m.workspace_id = ?`,
@@ -576,7 +593,8 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
 		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
 		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-		&issue.ProjectID,
+		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
+		&issue.SubIssuesCount,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -625,16 +643,19 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
-		Title        *string  `json:"title"`
-		Description  *string  `json:"description"`
-		Status       *string  `json:"status"`
-		Priority     *string  `json:"priority"`
-		AssigneeType *string  `json:"assignee_type"`
-		AssigneeID   *string  `json:"assignee_id"`
-		DueDate      *string   `json:"due_date"`
-		ProjectID    *string   `json:"project_id"`
-		SortOrder    *float64  `json:"sort_order"`
-		Labels       *[]string `json:"labels"`
+		Title         *string   `json:"title"`
+		Description   *string   `json:"description"`
+		Status        *string   `json:"status"`
+		Priority      *string   `json:"priority"`
+		AssigneeType  *string   `json:"assignee_type"`
+		AssigneeID    *string   `json:"assignee_id"`
+		DueDate       *string   `json:"due_date"`
+		ProjectID     *string   `json:"project_id"`
+		Estimate      *int      `json:"estimate"`
+		ParentIssueID *string   `json:"parent_issue_id"`
+		MilestoneID   *string   `json:"milestone_id"`
+		SortOrder     *float64  `json:"sort_order"`
+		Labels        *[]string `json:"labels"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -684,6 +705,23 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 			ub.SetNull("project_id")
 		} else {
 			ub.Set("project_id", *req.ProjectID)
+		}
+	}
+	if req.Estimate != nil {
+		ub.Set("estimate", *req.Estimate)
+	}
+	if req.ParentIssueID != nil {
+		if *req.ParentIssueID == "" {
+			ub.SetNull("parent_issue_id")
+		} else {
+			ub.Set("parent_issue_id", *req.ParentIssueID)
+		}
+	}
+	if req.MilestoneID != nil {
+		if *req.MilestoneID == "" {
+			ub.SetNull("milestone_id")
+		} else {
+			ub.Set("milestone_id", *req.MilestoneID)
 		}
 	}
 
@@ -780,7 +818,9 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
 		       END,
 		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at
+		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
+		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
+		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
 		FROM missions m
 		LEFT JOIN crews c ON m.crew_id = c.id
 		WHERE m.id = ?`, missionID).Scan(
@@ -789,6 +829,8 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
 		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
 		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
+		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
+		&issue.SubIssuesCount,
 	)
 	if err != nil {
 		h.logger.Error("read updated issue", "error", err)
@@ -1711,4 +1753,208 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("issue stopped", "identifier", ident)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "CANCELLED", "identifier": ident})
+}
+
+// ── 17. BulkUpdate — POST /api/v1/issues/bulk-update ──────────────────────
+
+func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	wsID := WorkspaceIDFromContext(r.Context())
+	user := UserFromContext(r.Context())
+
+	var req struct {
+		IDs     []string `json:"ids"`
+		Updates struct {
+			Status       *string   `json:"status"`
+			Priority     *string   `json:"priority"`
+			AssigneeType *string   `json:"assignee_type"`
+			AssigneeID   *string   `json:"assignee_id"`
+			ProjectID    *string   `json:"project_id"`
+			Labels       *[]string `json:"labels"`
+		} `json:"updates"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeProblem(w, r, http.StatusBadRequest, "ids is required")
+		return
+	}
+	if len(req.IDs) > 100 {
+		writeProblem(w, r, http.StatusBadRequest, "Maximum 100 issues per bulk update")
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	updated := 0
+
+	for _, issueID := range req.IDs {
+		// Verify issue belongs to workspace
+		var currentStatus string
+		err := h.db.QueryRowContext(r.Context(),
+			`SELECT status FROM missions WHERE id = ? AND workspace_id = ?`,
+			issueID, wsID).Scan(&currentStatus)
+		if err != nil {
+			continue // skip missing issues
+		}
+
+		ub := newUpdate()
+
+		if req.Updates.Status != nil {
+			newStatus := *req.Updates.Status
+			allowed := validIssueTransitions[currentStatus]
+			valid := false
+			for _, s := range allowed {
+				if s == newStatus {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				continue // skip invalid transitions
+			}
+			ub.Set("status", newStatus)
+			if newStatus == "DONE" || newStatus == "CANCELLED" {
+				ub.Set("completed_at", now)
+			}
+		}
+		if req.Updates.Priority != nil {
+			ub.Set("priority", *req.Updates.Priority)
+		}
+		if req.Updates.AssigneeType != nil {
+			ub.Set("assignee_type", *req.Updates.AssigneeType)
+		}
+		if req.Updates.AssigneeID != nil {
+			ub.Set("assignee_id", *req.Updates.AssigneeID)
+		}
+		if req.Updates.ProjectID != nil {
+			if *req.Updates.ProjectID == "" {
+				ub.SetNull("project_id")
+			} else {
+				ub.Set("project_id", *req.Updates.ProjectID)
+			}
+		}
+
+		if ub.Empty() {
+			continue
+		}
+
+		query, args := ub.Build("missions", "id = ? AND workspace_id = ?", issueID, wsID)
+		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
+			h.logger.Error("bulk update issue", "error", err, "issue_id", issueID)
+			continue
+		}
+
+		// Update labels if provided
+		if req.Updates.Labels != nil {
+			_, _ = h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, issueID)
+			for _, labelID := range *req.Updates.Labels {
+				_, _ = h.db.ExecContext(r.Context(),
+					`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
+					issueID, labelID)
+			}
+		}
+
+		// Activity log
+		if req.Updates.Status != nil {
+			actID := generateCUID()
+			_, _ = h.db.ExecContext(r.Context(),
+				`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'status_changed', ?, ?)`,
+				actID, issueID, user.ID, fmt.Sprintf("%s -> %s (bulk)", currentStatus, *req.Updates.Status), now)
+		}
+
+		updated++
+	}
+
+	if h.hub != nil && updated > 0 {
+		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
+			Type:    "issues.bulk_updated",
+			Channel: "workspace:" + wsID,
+			Payload: map[string]string{"count": fmt.Sprintf("%d", updated)},
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]int{"updated": updated})
+}
+
+// ── 18. ListSubIssues — GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks
+
+func (h *IssueHandler) ListSubIssues(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("crewId")
+	ident := r.PathValue("identifier")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	// Resolve identifier to ID
+	var parentID string
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT id FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
+		ident, crewID, wsID).Scan(&parentID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Issue not found")
+			return
+		}
+		h.logger.Error("resolve issue for subtasks", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
+		       m.number, m.identifier, m.title, m.description, m.status,
+		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
+		       CASE
+		         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
+		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
+		       END,
+		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
+		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
+		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
+		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
+		FROM missions m
+		LEFT JOIN crews c ON m.crew_id = c.id
+		WHERE m.parent_issue_id = ?
+		ORDER BY COALESCE(m.sort_order, 0) ASC, m.created_at ASC`, parentID)
+	if err != nil {
+		h.logger.Error("list sub-issues", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	defer rows.Close()
+
+	var result []issueResponse
+	for rows.Next() {
+		var issue issueResponse
+		if err := rows.Scan(
+			&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
+			&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
+			&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
+			&issue.DueDate, &issue.SortOrder, &issue.MissionType,
+			&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
+			&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
+			&issue.SubIssuesCount,
+		); err != nil {
+			h.logger.Error("scan sub-issue", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		issue.Labels = []labelResponse{}
+		result = append(result, issue)
+	}
+	if err := rows.Err(); err != nil {
+		h.logger.Error("rows iteration (sub-issues)", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if result == nil {
+		result = []issueResponse{}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
