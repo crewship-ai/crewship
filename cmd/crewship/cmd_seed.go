@@ -80,7 +80,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 
 	// ── Phase 10: Issues ──
 	if !skipIssues {
-		if err := seedIssues(client, crewIDs); err != nil {
+		if err := seedIssues(client, crewIDs, agentIDs); err != nil {
 			return err
 		}
 	}
@@ -672,7 +672,7 @@ func resolveCrewIntegration(client *cli.Client, crewID, name string) (string, er
 // Phase 10: Issues
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedIssues(client *cli.Client, crewIDs map[string]string) error {
+func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 	// Create labels
 	fmt.Fprintln(os.Stderr, "Creating labels...")
 	for _, l := range seeddata.Labels {
@@ -732,6 +732,12 @@ func seedIssues(client *cli.Client, crewIDs map[string]string) error {
 		if def.Project != "" {
 			if pid, ok := projectIDs[def.Project]; ok {
 				body["project_id"] = pid
+			}
+		}
+		if def.Assignee != "" {
+			if aid, ok := agentIDs[def.Assignee]; ok {
+				body["assignee_type"] = "agent"
+				body["assignee_id"] = aid
 			}
 		}
 

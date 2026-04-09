@@ -39,6 +39,7 @@ var Projects = []ProjectDef{
 // Keep them simple, idempotent, and safe to run 100x.
 type IssueDef struct {
 	CrewSlug    string
+	Assignee    string // agent slug — resolved to ID during seed
 	Title       string
 	Description string
 	Priority    string
@@ -50,14 +51,14 @@ type IssueDef struct {
 var Issues = []IssueDef{
 	// ── Network Probes: test container networking ──
 	{
-		CrewSlug: "engineering", Project: "Network Probes", Priority: "high",
+		CrewSlug: "engineering", Assignee: "martin", Project: "Network Probes", Priority: "high",
 		Title: "Ping google.com 5 times and save results",
 		Description: `Run ping -c 5 google.com inside the container.
 Save the full output to /tmp/ping-google.txt.
 Report the average round-trip time in a summary.`,
 	},
 	{
-		CrewSlug: "engineering", Project: "Network Probes", Priority: "medium",
+		CrewSlug: "engineering", Assignee: "martin", Project: "Network Probes", Priority: "medium",
 		Title: "Check HTTP status of 5 popular websites",
 		Description: `Use curl to check the HTTP status code of these URLs:
 - https://google.com
@@ -69,7 +70,7 @@ Report the average round-trip time in a summary.`,
 Save results as a CSV file: /tmp/http-status.csv with columns: url,status_code,response_time_ms`,
 	},
 	{
-		CrewSlug: "devops", Project: "Network Probes", Priority: "medium",
+		CrewSlug: "devops", Assignee: "radek", Project: "Network Probes", Priority: "medium",
 		Title: "Trace DNS resolution for 3 domains",
 		Description: `Resolve these domains and save the results:
 - api.anthropic.com
@@ -80,7 +81,7 @@ For each domain, record the IP addresses returned.
 Save output to /tmp/dns-results.txt with format: domain -> ip1, ip2, ...`,
 	},
 	{
-		CrewSlug: "devops", Project: "Network Probes", Priority: "low",
+		CrewSlug: "devops", Assignee: "radek", Project: "Network Probes", Priority: "low",
 		Title: "Measure download speed with a 1MB test file",
 		Description: `Download a 1MB test file from https://httpbin.org/bytes/1048576 using curl.
 Measure and report the download time and speed.
@@ -90,7 +91,7 @@ Delete the downloaded file after measuring.`,
 
 	// ── File Operations: test container filesystem ──
 	{
-		CrewSlug: "engineering", Project: "File Operations", Priority: "high",
+		CrewSlug: "engineering", Assignee: "viktor", Project: "File Operations", Priority: "high",
 		Title: "Create a directory tree with sample files",
 		Description: `Create the following directory structure under /tmp/demo-project/:
   /tmp/demo-project/
@@ -106,7 +107,7 @@ Delete the downloaded file after measuring.`,
 Verify all files exist and list the tree.`,
 	},
 	{
-		CrewSlug: "engineering", Project: "File Operations", Priority: "medium",
+		CrewSlug: "engineering", Assignee: "nela", Project: "File Operations", Priority: "medium",
 		Title: "Generate a CSV report with random data",
 		Description: `Create a Python script that generates a CSV file with 50 rows of sample data.
 Columns: id, name, email, score (random 0-100), status (active/inactive).
@@ -115,7 +116,7 @@ Output CSV should be at /tmp/sample-data.csv.
 Print the first 5 rows and a summary (total rows, average score).`,
 	},
 	{
-		CrewSlug: "quality", Project: "File Operations", Priority: "medium",
+		CrewSlug: "quality", Assignee: "petra", Project: "File Operations", Priority: "medium",
 		Title: "Write a log parser that extracts errors",
 		Description: `Create a bash script /tmp/log-parser.sh that:
 1. Generates a sample log file /tmp/app.log with 100 lines (mix of INFO, WARN, ERROR)
@@ -128,7 +129,7 @@ Run the script and verify the output.`,
 
 	// ── Web Scraping: test network + data processing ──
 	{
-		CrewSlug: "research", Project: "Web Scraping", Priority: "high",
+		CrewSlug: "research", Assignee: "filip", Project: "Web Scraping", Priority: "high",
 		Title: "Fetch and parse the Hacker News front page",
 		Description: `Use curl to download https://news.ycombinator.com/ (HTML).
 Parse the response to extract the top 10 story titles.
@@ -140,7 +141,7 @@ Save to /tmp/hackernews-top10.txt with format:
 Note: Use grep/sed/awk for parsing, no external libraries needed.`,
 	},
 	{
-		CrewSlug: "research", Project: "Web Scraping", Priority: "medium",
+		CrewSlug: "research", Assignee: "filip", Project: "Web Scraping", Priority: "medium",
 		Title: "Fetch current weather data from wttr.in",
 		Description: `Use curl to fetch weather for Prague from wttr.in:
   curl -s "wttr.in/Prague?format=j1"
@@ -154,7 +155,7 @@ Parse the JSON response and extract:
 Save a human-readable summary to /tmp/weather-prague.txt`,
 	},
 	{
-		CrewSlug: "research", Project: "Web Scraping", Priority: "low",
+		CrewSlug: "research", Assignee: "lucie", Project: "Web Scraping", Priority: "low",
 		Title: "Download and analyze a public JSON API",
 		Description: `Fetch a list of users from https://jsonplaceholder.typicode.com/users
 Parse the JSON and create a report /tmp/users-report.txt with:
@@ -167,7 +168,7 @@ Use curl + python3 or jq for parsing.`,
 
 	// ── Script Factory: test code execution in container ──
 	{
-		CrewSlug: "engineering", Project: "Script Factory", Priority: "high",
+		CrewSlug: "engineering", Assignee: "viktor", Project: "Script Factory", Priority: "high",
 		Title: "Write a Python script that generates Fibonacci",
 		Description: `Create /tmp/fibonacci.py that:
 1. Takes an argument N (default 20)
@@ -177,7 +178,7 @@ Use curl + python3 or jq for parsing.`,
 Run it with N=20 and save output to /tmp/fibonacci-output.txt`,
 	},
 	{
-		CrewSlug: "engineering", Project: "Script Factory", Priority: "medium",
+		CrewSlug: "engineering", Assignee: "nela", Project: "Script Factory", Priority: "medium",
 		Title: "Create a bash system info collector",
 		Description: `Write /tmp/sysinfo.sh that collects and saves to /tmp/sysinfo.txt:
 - Hostname and OS info (uname -a)
@@ -191,7 +192,7 @@ Run it with N=20 and save output to /tmp/fibonacci-output.txt`,
 Make it executable and run it.`,
 	},
 	{
-		CrewSlug: "quality", Project: "Script Factory", Priority: "medium",
+		CrewSlug: "quality", Assignee: "daniel", Project: "Script Factory", Priority: "medium",
 		Title: "Write and run a simple test suite in bash",
 		Description: `Create /tmp/test-suite.sh — a minimal test framework in bash.
 Define at least 5 test cases:
@@ -207,7 +208,7 @@ Run the test suite and save results to /tmp/test-results.txt`,
 
 	// ── System Info: test container environment ──
 	{
-		CrewSlug: "devops", Project: "System Info", Priority: "low",
+		CrewSlug: "devops", Assignee: "ondrej", Project: "System Info", Priority: "low",
 		Title: "Inventory all installed tools in the container",
 		Description: `Check which common tools are available in the container:
 curl, wget, python3, node, git, jq, sed, awk, grep, tar, gzip, ssh, ping, nslookup, dig
@@ -219,7 +220,7 @@ Save a report to /tmp/tool-inventory.txt with:
 This helps us know what agents can use.`,
 	},
 	{
-		CrewSlug: "devops", Project: "System Info", Priority: "low",
+		CrewSlug: "devops", Assignee: "jakub", Project: "System Info", Priority: "low",
 		Title: "Map container resource limits and environment",
 		Description: `Collect container environment info and save to /tmp/container-info.txt:
 - CPU count (nproc)
