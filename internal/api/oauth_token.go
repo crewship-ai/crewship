@@ -47,7 +47,7 @@ func exchangeOAuthCode(ctx context.Context, tokenURL, clientID, clientSecret, co
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{Timeout: 15 * time.Second, Transport: ssrfSafeTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token request: %w", err)
@@ -209,7 +209,7 @@ func refreshOAuthToken(ctx context.Context, tokenURL, clientID, clientSecret, re
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{Timeout: 15 * time.Second, Transport: ssrfSafeTransport()}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("refresh request: %w", err)

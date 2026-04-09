@@ -251,6 +251,12 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	// V-21: Require create permission for file save operations
+	if !canRole(role, "create") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
 	filePath := r.URL.Query().Get("path")
 
 	if filePath == "" {
@@ -368,6 +374,12 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	// V-21: Require create permission for file save operations
+	if !canRole(role, "create") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path parameter required"})

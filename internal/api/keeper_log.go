@@ -44,6 +44,12 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
+	// Require ADMIN+ to view Keeper security logs
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "manage") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden: ADMIN or OWNER only"})
+		return
+	}
 
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
