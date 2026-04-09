@@ -628,14 +628,8 @@ export function OrchestrationLayout({
                         }}
                         onIssueSelect={handleIssueSelect}
                         crews={panelCrews}
-                        agents={panelAgents}
-                        selectedCrewId={selectedCrewId}
-                        selectedAgentSlug={selectedAgentSlug}
-                        onCrewSelect={handleCrewSelect}
-                        onAgentSelect={handleAgentSelect}
                         missions={panelMissions}
                         onTaskSelect={handleInboxTaskSelect}
-                        connections={panelConnections}
                         filterCrewId={filterCrewId}
                         onCrewFilter={setFilterCrewId}
                       />
@@ -691,14 +685,8 @@ export function OrchestrationLayout({
                     }}
                     onIssueSelect={handleIssueSelect}
                     crews={panelCrews}
-                    agents={panelAgents}
-                    selectedCrewId={selectedCrewId}
-                    selectedAgentSlug={selectedAgentSlug}
-                    onCrewSelect={handleCrewSelect}
-                    onAgentSelect={handleAgentSelect}
                     missions={panelMissions}
                     onTaskSelect={handleInboxTaskSelect}
-                    connections={panelConnections}
                     filterCrewId={filterCrewId}
                     onCrewFilter={setFilterCrewId}
                   />
