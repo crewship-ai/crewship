@@ -2,7 +2,8 @@
 
 import { Card } from "@/components/ui/card"
 import { PriorityIcon } from "./priority-icon"
-import { Clock } from "lucide-react"
+import { LabelBadge } from "./label-badge"
+import { Clock, FolderKanban } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { Mission } from "@/lib/types/mission"
@@ -12,30 +13,14 @@ function isOverdue(dueDate: string | null | undefined, status: string): boolean 
   return new Date(dueDate) < new Date()
 }
 
+function formatShortDate(dateStr: string): string {
+  const d = new Date(dateStr)
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
+
 interface IssueCardProps {
   issue: Mission
   onClick: () => void
-}
-
-const LABEL_DOT_COLORS: Record<string, string> = {
-  red: "bg-red-500",
-  orange: "bg-orange-500",
-  yellow: "bg-yellow-500",
-  green: "bg-green-500",
-  blue: "bg-blue-500",
-  purple: "bg-purple-500",
-  pink: "bg-pink-500",
-  gray: "bg-gray-500",
-  slate: "bg-slate-500",
-  cyan: "bg-cyan-500",
-  teal: "bg-teal-500",
-  indigo: "bg-indigo-500",
-  violet: "bg-violet-500",
-  amber: "bg-amber-500",
-  emerald: "bg-emerald-500",
-  rose: "bg-rose-500",
-  lime: "bg-lime-500",
-  fuchsia: "bg-fuchsia-500",
 }
 
 export function IssueCard({ issue, onClick }: IssueCardProps) {
@@ -53,7 +38,7 @@ export function IssueCard({ issue, onClick }: IssueCardProps) {
       <div className="flex items-center justify-between gap-2 mb-1">
         <div className="flex items-center gap-1.5">
           {issue.identifier && (
-            <span className="text-xs font-mono text-muted-foreground">
+            <span className="text-[11px] font-mono text-muted-foreground">
               {issue.identifier}
             </span>
           )}
@@ -67,46 +52,52 @@ export function IssueCard({ issue, onClick }: IssueCardProps) {
         />
       </div>
 
-      {/* Title */}
-      <p className="text-sm font-medium leading-snug line-clamp-2 text-foreground">
+      {/* Title — full, wrapping */}
+      <p className="text-sm font-medium leading-snug text-foreground mb-2">
         {issue.title}
       </p>
 
-      {/* Bottom: assignee + labels */}
-      <div className="flex items-center gap-2 mt-2">
-        {issue.assignee_name && (
-          <div className="flex items-center gap-1.5 min-w-0">
-            <img
-              src={getAgentAvatarUrl(issue.assignee_id || issue.assignee_name)}
-              alt=""
-              className="h-[18px] w-[18px] rounded-full shrink-0"
-            />
-            <span className="text-xs text-muted-foreground truncate">
-              {issue.assignee_name}
+      {/* Assignee */}
+      {issue.assignee_name && (
+        <div className="flex items-center gap-1.5 mb-2">
+          <img
+            src={getAgentAvatarUrl(issue.assignee_id || issue.assignee_name)}
+            alt=""
+            className="h-[18px] w-[18px] rounded-full shrink-0"
+          />
+          <span className="text-xs text-muted-foreground truncate">
+            {issue.assignee_name}
+          </span>
+        </div>
+      )}
+
+      {/* Project */}
+      {issue.project_name && (
+        <div className="flex items-center gap-1.5 mb-2">
+          <FolderKanban className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+          <span className="text-[11px] text-muted-foreground truncate">
+            {issue.project_name}
+          </span>
+        </div>
+      )}
+
+      {/* Labels — as proper badges, max 3 */}
+      {issue.labels && issue.labels.length > 0 && (
+        <div className="flex items-center gap-1 flex-wrap mb-2">
+          {issue.labels.slice(0, 3).map((label) => (
+            <LabelBadge key={label.id} label={label} />
+          ))}
+          {issue.labels.length > 3 && (
+            <span className="text-[10px] text-muted-foreground/50">
+              +{issue.labels.length - 3}
             </span>
-          </div>
-        )}
-        <div className="flex-1" />
-        {issue.labels && issue.labels.length > 0 && (
-          <div className="flex items-center gap-1">
-            {issue.labels.slice(0, 3).map((label) => {
-              const dotClass =
-                LABEL_DOT_COLORS[label.color.toLowerCase()] || "bg-gray-400"
-              return (
-                <span
-                  key={label.id}
-                  className={cn("h-2 w-2 rounded-full shrink-0", dotClass)}
-                  title={label.name}
-                  style={
-                    !LABEL_DOT_COLORS[label.color.toLowerCase()]
-                      ? { backgroundColor: label.color }
-                      : undefined
-                  }
-                />
-              )
-            })}
-          </div>
-        )}
+          )}
+        </div>
+      )}
+
+      {/* Created date */}
+      <div className="text-[10px] text-muted-foreground/40">
+        Created {formatShortDate(issue.created_at)}
       </div>
     </Card>
   )
