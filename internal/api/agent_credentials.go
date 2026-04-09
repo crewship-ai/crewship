@@ -19,6 +19,8 @@ type agentCredentialResponse struct {
 	CreatedAt    string `json:"created_at"`
 }
 
+// ListCredentials returns all credentials assigned to the specified agent.
+// GET /api/v1/agents/{agentId}/credentials
 func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -77,6 +79,8 @@ type addAgentCredentialRequest struct {
 	Priority     int    `json:"priority"`
 }
 
+// AddCredential assigns an existing credential to an agent with a specified environment variable name.
+// POST /api/v1/agents/{agentId}/credentials
 func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -133,6 +137,8 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
 
+// RemoveCredential unassigns a credential from an agent.
+// DELETE /api/v1/agents/{agentId}/credentials/{credentialId}
 func (h *AgentHandler) RemoveCredential(w http.ResponseWriter, r *http.Request) {
 	assignmentID := r.PathValue("assignmentId")
 	agentID := r.PathValue("agentId")

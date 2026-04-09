@@ -6,6 +6,8 @@ import (
 	"net/http"
 )
 
+// ListChats returns all chat sessions for a given agent.
+// GET /api/v1/agents/{agentId}/chats
 func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -61,6 +63,8 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// CreateChat starts a new chat session with the specified agent.
+// POST /api/v1/agents/{agentId}/chats
 func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -123,6 +127,8 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"id": chatID})
 }
 
+// ListRuns returns all execution runs for a given agent, ordered by most recent first.
+// GET /api/v1/agents/{agentId}/runs
 func (h *AgentHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())

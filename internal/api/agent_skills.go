@@ -27,6 +27,8 @@ type agentSkillResponse struct {
 	Skill   agentSkillSkillData `json:"skill"`
 }
 
+// ListSkills returns all skills assigned to the specified agent.
+// GET /api/v1/agents/{agentId}/skills
 func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -87,6 +89,8 @@ type addAgentSkillRequest struct {
 	Config  *string `json:"config"`
 }
 
+// AddSkill assigns a skill to an agent.
+// POST /api/v1/agents/{agentId}/skills
 func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -128,6 +132,8 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
 
+// RemoveSkill unassigns a skill from an agent.
+// DELETE /api/v1/agents/{agentId}/skills/{skillId}
 func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	skillID := r.PathValue("skillId")

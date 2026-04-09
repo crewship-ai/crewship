@@ -19,6 +19,7 @@ type ScheduleUpdater interface {
 	UpdateSchedule(ctx context.Context, agentID, cronExpr, prompt string, enabled bool) error
 }
 
+// AgentHandler provides CRUD endpoints for managing AI agents within a workspace.
 type AgentHandler struct {
 	db               *sql.DB
 	hub              *ws.Hub
@@ -27,10 +28,12 @@ type AgentHandler struct {
 	scheduleUpdater  ScheduleUpdater
 }
 
+// NewAgentHandler creates an AgentHandler with the given database and logger.
 func NewAgentHandler(db *sql.DB, logger *slog.Logger) *AgentHandler {
 	return &AgentHandler{db: db, logger: logger}
 }
 
+// SetHub attaches a WebSocket hub for broadcasting agent events to connected clients.
 func (h *AgentHandler) SetHub(hub *ws.Hub) { h.hub = hub }
 
 func (h *AgentHandler) broadcastAgentEvent(eventType, workspaceID string, payload map[string]string) {
@@ -44,7 +47,10 @@ func (h *AgentHandler) broadcastAgentEvent(eventType, workspaceID string, payloa
 	})
 }
 
+// SetLicense attaches the license for enforcing agent-per-crew limits.
 func (h *AgentHandler) SetLicense(lic *license.License) { h.license = lic }
+
+// SetScheduler attaches a ScheduleUpdater for live-updating agent cron schedules.
 func (h *AgentHandler) SetScheduler(su ScheduleUpdater) { h.scheduleUpdater = su }
 
 // FleetStatus returns lightweight agent counts by status for the toolbar.
@@ -141,6 +147,8 @@ type agentResponse struct {
 	Count           agentCounts    `json:"_count"`
 }
 
+// List returns all non-deleted agents in the workspace with their crew and count metadata.
+// GET /api/v1/agents
 func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
@@ -240,6 +248,8 @@ type createAgentRequest struct {
 	MemoryEnabled  bool    `json:"memory_enabled"`
 }
 
+// Create provisions a new agent in the workspace, optionally assigning it to a crew.
+// POST /api/v1/agents
 func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -424,6 +434,8 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Get returns a single agent by ID with full details including crew info and counts.
+// GET /api/v1/agents/{agentId}
 func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	if agentID == "" {
@@ -478,6 +490,8 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
+// Update modifies agent properties such as name, role, model, system prompt, and schedule.
+// PATCH /api/v1/agents/{agentId}
 func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -698,6 +712,8 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	h.broadcastAgentEvent("agent.updated", workspaceID, map[string]string{"id": agentID})
 }
 
+// Delete soft-deletes an agent by setting deleted_at.
+// DELETE /api/v1/agents/{agentId}
 func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
