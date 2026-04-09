@@ -295,25 +295,16 @@ func (h *CaptainHandler) Context(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var crewCount, agentCount, escalationCount, proposalCount, missionCount int
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&crewCount); err != nil {
-		h.logger.Error("captain context: count crews", "workspace", wsID, "error", err)
-	}
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&agentCount); err != nil {
-		h.logger.Error("captain context: count agents", "workspace", wsID, "error", err)
-	}
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM escalations WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&escalationCount); err != nil {
-		h.logger.Error("captain context: count escalations", "workspace", wsID, "error", err)
-	}
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM mission_proposals WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&proposalCount); err != nil {
-		h.logger.Error("captain context: count proposals", "workspace", wsID, "error", err)
-	}
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'", wsID).Scan(&missionCount); err != nil {
-		h.logger.Error("captain context: count missions", "workspace", wsID, "error", err)
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT
+			(SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL),
+			(SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL),
+			(SELECT COUNT(*) FROM escalations WHERE workspace_id = ? AND status = 'PENDING'),
+			(SELECT COUNT(*) FROM mission_proposals WHERE workspace_id = ? AND status = 'PENDING'),
+			(SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS')`,
+		wsID, wsID, wsID, wsID, wsID).Scan(&crewCount, &agentCount, &escalationCount, &proposalCount, &missionCount)
+	if err != nil {
+		h.logger.Error("captain context: count workspace stats", "workspace", wsID, "error", err)
 	}
 
 	phase := captainWorkspacePhase(r.Context(), h.db, wsID, crewCount, agentCount)

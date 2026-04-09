@@ -467,6 +467,17 @@ function AllCrewsOverview({
   onCrewSelect: (id: string) => void
   onAgentSelect: (id: string) => void
 }) {
+  // Pre-compute agents grouped by crew to avoid O(crews × agents) per render
+  const agentsByCrew = useMemo(() => {
+    const map: Record<string, AgentData[]> = {}
+    for (const agent of agents) {
+      if (agent.crew_id) {
+        ;(map[agent.crew_id] ||= []).push(agent)
+      }
+    }
+    return map
+  }, [agents])
+
   return (
     <div className="p-4 sm:p-6 h-full overflow-y-auto space-y-5">
       <div>
@@ -478,7 +489,7 @@ function AllCrewsOverview({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {crews.map((crew) => {
-          const crewAgents = agents.filter((a) => a.crew_id === crew.id)
+          const crewAgents = agentsByCrew[crew.id] || []
           const running = crewAgents.filter((a) => a.status === "RUNNING").length
           const error = crewAgents.filter((a) => a.status === "ERROR").length
 
@@ -551,6 +562,16 @@ function AllCrewsOverview({
 
 /** Health overview tab */
 function HealthOverview({ crews, agents }: { crews: CrewData[]; agents: AgentData[] }) {
+  const agentsByCrew = useMemo(() => {
+    const map: Record<string, AgentData[]> = {}
+    for (const agent of agents) {
+      if (agent.crew_id) {
+        ;(map[agent.crew_id] ||= []).push(agent)
+      }
+    }
+    return map
+  }, [agents])
+
   const statusGroups = useMemo(() => {
     const groups: Record<string, AgentData[]> = { RUNNING: [], IDLE: [], ERROR: [], STOPPED: [] }
     for (const agent of agents) {
@@ -605,7 +626,7 @@ function HealthOverview({ crews, agents }: { crews: CrewData[]; agents: AgentDat
         <h3 className="text-[13px] font-semibold mb-2">By Crew</h3>
         <div className="space-y-1.5">
           {crews.map((crew) => {
-            const crewAgents = agents.filter((a) => a.crew_id === crew.id)
+            const crewAgents = agentsByCrew[crew.id] || []
             const running = crewAgents.filter((a) => a.status === "RUNNING").length
             const error = crewAgents.filter((a) => a.status === "ERROR").length
             const total = crewAgents.length

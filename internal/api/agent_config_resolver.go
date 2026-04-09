@@ -561,32 +561,41 @@ func (h *InternalHandler) resolveCoordinatorCrews(r *http.Request, data *agentCo
 	defer crewRows.Close()
 
 	var allCrews []crewInfoEntry
+	crewIndex := map[string]int{} // crewID -> index in allCrews
 	for crewRows.Next() {
 		var ci crewInfoEntry
 		if err := crewRows.Scan(&ci.ID, &ci.Name, &ci.Slug); err != nil {
 			h.logger.Error("scan crew for coordinator", "error", err)
 			continue
 		}
+		crewIndex[ci.ID] = len(allCrews)
+		allCrews = append(allCrews, ci)
+	}
+
+	if len(allCrews) > 0 {
+		// Batch-fetch all agents for all crews in a single query
 		agentRows, err := h.db.QueryContext(r.Context(), `
-			SELECT a.id, a.name, a.slug, COALESCE(a.role_title, ''), COALESCE(a.description, ''), a.status,
+			SELECT a.crew_id, a.id, a.name, a.slug, COALESCE(a.role_title, ''), COALESCE(a.description, ''), a.status,
 			       COALESCE((SELECT c.id FROM chats c WHERE c.agent_id = a.id AND c.status = 'ACTIVE' ORDER BY c.created_at DESC LIMIT 1), '')
 			FROM agents a
-			WHERE a.crew_id = ? AND a.deleted_at IS NULL
-			ORDER BY a.name`, ci.ID)
+			WHERE a.workspace_id = ? AND a.deleted_at IS NULL
+			ORDER BY a.name`, data.wsID)
 		if err != nil {
-			h.logger.Error("query agents for coordinator crew", "error", err, "crew_id", ci.ID)
+			h.logger.Error("query agents for coordinator", "error", err)
 		} else {
+			defer agentRows.Close()
 			for agentRows.Next() {
+				var crewID string
 				var m crewMemberEntry
-				if err := agentRows.Scan(&m.ID, &m.Name, &m.Slug, &m.RoleTitle, &m.Description, &m.Status, &m.ChatID); err != nil {
+				if err := agentRows.Scan(&crewID, &m.ID, &m.Name, &m.Slug, &m.RoleTitle, &m.Description, &m.Status, &m.ChatID); err != nil {
 					h.logger.Error("scan agent for coordinator", "error", err)
 					continue
 				}
-				ci.Members = append(ci.Members, m)
+				if idx, ok := crewIndex[crewID]; ok {
+					allCrews[idx].Members = append(allCrews[idx].Members, m)
+				}
 			}
-			agentRows.Close()
 		}
-		allCrews = append(allCrews, ci)
 	}
 	return allCrews
 }

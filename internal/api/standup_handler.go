@@ -98,22 +98,22 @@ func formatConversations(b *strings.Builder, convs []standupConvEntry) {
 		return
 	}
 
-	b.WriteString(fmt.Sprintf("Peer interactions (%d):\n\n", len(convs)))
+	fmt.Fprintf(b, "Peer interactions (%d):\n\n", len(convs))
 	for i, c := range convs {
 		ts := formatStandupTimestamp(c.createdAt)
-		b.WriteString(fmt.Sprintf("%d. %s -> %s: \"%s\"\n", i+1, c.fromName, c.toName, c.question))
+		fmt.Fprintf(b, "%d. %s -> %s: \"%s\"\n", i+1, c.fromName, c.toName, c.question)
 		if c.response != "" {
 			resp := c.response
 			if len(resp) > 200 {
 				resp = resp[:200] + "..."
 			}
-			b.WriteString(fmt.Sprintf("   %s: \"%s\"\n", c.toName, resp))
+			fmt.Fprintf(b, "   %s: \"%s\"\n", c.toName, resp)
 		}
 		suffix := ""
 		if c.escalated != 0 {
 			suffix = ", ESCALATED"
 		}
-		b.WriteString(fmt.Sprintf("   (%s%s)\n\n", ts, suffix))
+		fmt.Fprintf(b, "   (%s%s)\n\n", ts, suffix)
 	}
 }
 
