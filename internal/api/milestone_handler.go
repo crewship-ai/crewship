@@ -47,10 +47,7 @@ func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")
 
 	// Verify project belongs to workspace
-	var exists int
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM projects WHERE id = ? AND workspace_id = ?`,
-		projectID, wsID).Scan(&exists); err != nil {
+	if err := projectExists(r.Context(), h.db, projectID, wsID); err != nil {
 		writeProblem(w, r, http.StatusNotFound, "Project not found")
 		return
 	}
@@ -117,10 +114,7 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")
 
 	// Verify project belongs to workspace
-	var exists int
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM projects WHERE id = ? AND workspace_id = ?`,
-		projectID, wsID).Scan(&exists); err != nil {
+	if err := projectExists(r.Context(), h.db, projectID, wsID); err != nil {
 		writeProblem(w, r, http.StatusNotFound, "Project not found")
 		return
 	}

@@ -29,6 +29,15 @@ func crewExists(ctx context.Context, db *sql.DB, crewID, workspaceID string) err
 		crewID, workspaceID).Scan(&id)
 }
 
+// projectExists checks that a project with the given ID belongs to the workspace.
+// Returns nil on success, sql.ErrNoRows if not found.
+func projectExists(ctx context.Context, db *sql.DB, projectID, workspaceID string) error {
+	var id int
+	return db.QueryRowContext(ctx,
+		"SELECT 1 FROM projects WHERE id = ? AND workspace_id = ?",
+		projectID, workspaceID).Scan(&id)
+}
+
 // validSlugRe matches safe slug values: lowercase alphanumeric, starting with a letter or digit.
 var validSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 

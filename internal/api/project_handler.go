@@ -283,10 +283,7 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	// Verify project exists
-	var existingID string
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id FROM projects WHERE id = ? AND workspace_id = ?`,
-		projectID, wsID).Scan(&existingID)
+	err := projectExists(r.Context(), h.db, projectID, wsID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Project not found")
@@ -476,9 +473,7 @@ func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	// Verify project exists
-	var exists int
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM projects WHERE id = ? AND workspace_id = ?`, projectID, wsID).Scan(&exists); err != nil {
+	if err := projectExists(r.Context(), h.db, projectID, wsID); err != nil {
 		writeProblem(w, r, http.StatusNotFound, "Project not found")
 		return
 	}
