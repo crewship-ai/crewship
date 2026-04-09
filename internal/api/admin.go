@@ -29,18 +29,21 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		Running    int `json:"running"`
 	}
 
+	// Scope stats to the current workspace to prevent cross-workspace data leakage
+	wsID := WorkspaceIDFromContext(r.Context())
 	var s stats
 	queries := []struct {
 		sql  string
+		args []any
 		dest *int
 	}{
-		{"SELECT COUNT(*) FROM workspaces WHERE deleted_at IS NULL", &s.Workspaces},
-		{"SELECT COUNT(*) FROM users", &s.Users},
-		{"SELECT COUNT(*) FROM agents WHERE deleted_at IS NULL", &s.Agents},
-		{"SELECT COUNT(*) FROM agent_runs WHERE status = 'RUNNING'", &s.Running},
+		{"SELECT 1", nil, &s.Workspaces}, // always 1 (the current workspace)
+		{"SELECT COUNT(*) FROM workspace_members WHERE workspace_id = ?", []any{wsID}, &s.Users},
+		{"SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", []any{wsID}, &s.Agents},
+		{"SELECT COUNT(*) FROM agent_runs ar JOIN agents a ON a.id = ar.agent_id WHERE a.workspace_id = ? AND ar.status = 'RUNNING'", []any{wsID}, &s.Running},
 	}
 	for _, q := range queries {
-		if err := h.db.QueryRowContext(r.Context(), q.sql).Scan(q.dest); err != nil {
+		if err := h.db.QueryRowContext(r.Context(), q.sql, q.args...).Scan(q.dest); err != nil {
 			h.logger.Error("stats query", "sql", q.sql, "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
@@ -57,14 +60,17 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Scope to users in the current workspace to prevent cross-workspace data leakage
+	workspaceID := WorkspaceIDFromContext(r.Context())
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT u.id, u.email, u.full_name, u.avatar_url, u.created_at,
 			wm.workspace_id, w.name AS workspace_name, w.slug AS workspace_slug, wm.role
 		FROM users u
-		LEFT JOIN workspace_members wm ON wm.user_id = u.id
-		LEFT JOIN workspaces w ON w.id = wm.workspace_id
+		JOIN workspace_members wm ON wm.user_id = u.id
+		JOIN workspaces w ON w.id = wm.workspace_id
+		WHERE wm.workspace_id = ?
 		ORDER BY u.created_at DESC
-	`)
+	`, workspaceID)
 	if err != nil {
 		h.logger.Error("list users", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -126,15 +132,17 @@ func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Scope to the current workspace to prevent cross-workspace data leakage
+	wsID := WorkspaceIDFromContext(r.Context())
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT w.id, w.name, w.slug, w.created_at, w.updated_at,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count
 		FROM workspaces w
-		WHERE w.deleted_at IS NULL
+		WHERE w.id = ? AND w.deleted_at IS NULL
 		ORDER BY w.created_at DESC
-	`)
+	`, wsID)
 	if err != nil {
 		h.logger.Error("list workspaces (admin)", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})

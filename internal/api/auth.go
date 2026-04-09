@@ -311,13 +311,18 @@ func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return the session cookie value as the ws token.
-	// The WebSocket hub validates it using the same JWTValidator.
-	for _, name := range []string{"__Secure-authjs.session-token", "authjs.session-token"} {
-		if c, err := r.Cookie(name); err == nil && c.Value != "" {
-			writeJSON(w, http.StatusOK, map[string]string{"token": c.Value})
-			return
-		}
+	// V-11: Always generate a short-lived JWE for WebSocket auth,
+	// instead of exposing the long-lived session cookie in query params.
+	jweToken, err := h.validator.CreateToken(&auth.Claims{
+		ID:    user.ID,
+		Name:  user.Name,
+		Email: user.Email,
+		Exp:   time.Now().Add(15 * time.Minute).Unix(),
+	})
+	if err != nil {
+		h.logger.Error("create WS token for browser session", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
 	}
-	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+	writeJSON(w, http.StatusOK, map[string]string{"token": jweToken})
 }

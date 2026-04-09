@@ -516,9 +516,12 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Note: "status" is intentionally excluded to prevent users from
+	// re-activating revoked/expired credentials. Status changes are
+	// managed by the credential monitor and OAuth refresh worker.
 	allowed := map[string]string{
 		"name": "name", "description": "description", "type": "type",
-		"provider": "provider", "status": "status", "scope": "scope",
+		"provider": "provider", "scope": "scope",
 		"crew_id": "crew_id", "account_label": "account_label",
 		"account_email": "account_email", "token_expires_at": "token_expires_at",
 		"security_level": "security_level",
