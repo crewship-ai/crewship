@@ -1781,8 +1781,9 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-4 space-y-4">
+        <div className="py-3 space-y-1">
           {/* Title */}
+          <div className="px-4">
           {editingTitle ? (
             <input
               className="text-[15px] font-semibold text-foreground bg-transparent border-b border-blue-500 outline-none w-full pb-1"
@@ -1816,6 +1817,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
           {project.description && (
             <p className="text-[12px] text-muted-foreground/70 leading-relaxed">{project.description}</p>
           )}
+          </div>
 
           {/* ── Properties ─────────────────────────────────────────── */}
           <div className="mt-2 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
@@ -1961,37 +1963,14 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
               )}
 
               {/* Dates */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <div>
-                    <PropertyRow label="Dates">
-                      {project.start_date || project.target_date
-                        ? `${project.start_date || "?"} → ${project.target_date || "?"}`
-                        : <span className="text-muted-foreground/40">Set dates</span>}
-                    </PropertyRow>
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-3 space-y-2" align="start">
-                  <div>
-                    <label className="text-[10px] text-muted-foreground/60 block mb-1">Start date</label>
-                    <input
-                      type="date"
-                      className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full"
-                      defaultValue={project.start_date || ""}
-                      onChange={(e) => patchProject({ start_date: e.target.value || null })}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-muted-foreground/60 block mb-1">Target date</label>
-                    <input
-                      type="date"
-                      className="bg-transparent border border-white/[0.1] rounded px-2 py-1 text-xs text-foreground outline-none w-full"
-                      defaultValue={project.target_date || ""}
-                      onChange={(e) => patchProject({ target_date: e.target.value || null })}
-                    />
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <PropertyRow label="Dates">
+                <span className="flex items-center gap-1.5 text-muted-foreground/60">
+                  <CalendarIcon className="h-3 w-3" />
+                  {project.start_date || project.target_date
+                    ? `${project.start_date ? new Date(project.start_date).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "?"} → ${project.target_date ? new Date(project.target_date).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "?"}`
+                    : "Set dates"}
+                </span>
+              </PropertyRow>
 
               {/* Teams */}
               {stats?.crews && stats.crews.length > 0 && (
@@ -2003,38 +1982,44 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                   </div>
                 </PropertyRow>
               )}
-
-              {/* Labels */}
-              {stats?.by_label && stats.by_label.length > 0 && (
-                <PropertyRow label="Labels" className="cursor-default">
-                  <div className="flex items-center gap-1 flex-wrap justify-end">
-                    {stats.by_label.map((l) => (
-                      <span key={l.label_name} className="text-[9px] px-1.5 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: `${l.color}18`, color: l.color }}>
-                        {l.label_name}
-                      </span>
-                    ))}
-                  </div>
-                </PropertyRow>
-              )}
-            </motion.div>
-          )}
-          </AnimatePresence>
-
-          {/* ── Milestones ─────────────────────────────────────────── */}
-          <SectionHeader title="Milestones" open={milestonesOpen} onToggle={() => setMilestonesOpen((v) => !v)} />
-          {milestonesOpen && (
-            <div className="px-3 py-2">
-              <p className="text-[12px] text-muted-foreground/50">No milestones yet</p>
-              <p className="text-[11px] text-muted-foreground/30 mt-1">
-                Add milestones to organize work within your project
-              </p>
             </div>
           )}
+          </div>
+
+          {/* ── Labels ─────────────────────────────────────────────── */}
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+            <SectionHeader title="Labels" open={true} onToggle={() => {}} />
+            <div className="px-3 pb-2">
+              {stats?.by_label && stats.by_label.length > 0 ? (
+                <div className="flex items-center gap-1 flex-wrap">
+                  {stats.by_label.map((l) => (
+                    <span key={l.label_name} className="text-[9px] px-1.5 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: `${l.color}18`, color: l.color }}>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: l.color }} />
+                      {l.label_name}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <span className="text-[11px] text-muted-foreground/40 pl-0.5">No labels</span>
+              )}
+            </div>
+          </div>
+
+          {/* ── Milestones ─────────────────────────────────────────── */}
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
+            <SectionHeader title="Milestones" open={milestonesOpen} onToggle={() => setMilestonesOpen((v) => !v)} />
+            {milestonesOpen && (
+              <div className="px-3 pb-2">
+                <p className="text-[12px] text-muted-foreground/50">No milestones yet</p>
+              </div>
+            )}
+          </div>
 
           {/* ── Progress ─────────────────────────────────────────── */}
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D]">
           <SectionHeader title="Progress" open={progressOpen} onToggle={() => setProgressOpen((v) => !v)} />
           {progressOpen && (
-            <div className="space-y-3 px-3">
+            <div className="space-y-3 px-3 pb-3">
               {/* Stat boxes */}
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-white/[0.03] border border-white/[0.06] rounded-md px-3 py-2">
@@ -2158,9 +2143,10 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
               )}
             </div>
           )}
+          </div>
 
           {/* ── Activity ─────────────────────────────────────────── */}
-          <div className="pt-2 border-t border-white/[0.06] space-y-1 px-3">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04] bg-[#18171D] px-3 py-2 space-y-1">
             <div className="text-[10px] text-muted-foreground/40 font-mono">
               Created: {new Date(project.created_at).toLocaleDateString()}
             </div>
