@@ -256,6 +256,14 @@ export interface OrchestrationLayoutProps {
   onMissionCreated: () => void
 }
 
+const ORCH_TABS = [
+  { id: "issues", label: "Issues", icon: CircleDot },
+  { id: "graph", label: "Graph", icon: Workflow },
+  { id: "timeline", label: "Timeline", icon: Clock },
+  { id: "activity", label: "Activity", icon: Activity },
+  { id: "proposals", label: "Approvals", icon: FileText },
+] as const
+
 export function OrchestrationLayout({
   missions,
   crews,
@@ -582,13 +590,7 @@ export function OrchestrationLayout({
       {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
       <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {/* Tabs */}
-        {([
-          { id: "issues", label: "Issues", icon: CircleDot },
-          { id: "graph", label: "Graph", icon: Workflow },
-          { id: "timeline", label: "Timeline", icon: Clock },
-          { id: "activity", label: "Activity", icon: Activity },
-          { id: "proposals", label: "Approvals", icon: FileText },
-        ] as const).map(({ id, label, icon: Icon }) => (
+        {ORCH_TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}

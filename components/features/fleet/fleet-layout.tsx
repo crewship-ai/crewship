@@ -69,6 +69,19 @@ export interface FleetLayoutProps {
   onRefresh: () => void
 }
 
+const FLEET_TABS = [
+  { id: "overview" as const, label: "Overview", icon: LayoutGrid },
+  { id: "activity" as const, label: "Activity", icon: Activity },
+  { id: "connections" as const, label: "Connections", icon: Share2 },
+  { id: "health" as const, label: "Health", icon: HeartPulse },
+]
+
+const FLEET_BOTTOM_TABS = [
+  { id: "activity" as const, label: "Activity", icon: Activity },
+  { id: "bulk" as const, label: "Bulk Actions", icon: Layers },
+  { id: "export" as const, label: "Export", icon: Download },
+]
+
 export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }: FleetLayoutProps) {
   const isMobile = useIsMobile()
 
@@ -136,12 +149,7 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
       <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {/* Left: tabs */}
         <div className="flex items-stretch">
-          {([
-            { id: "overview" as const, label: "Overview", icon: LayoutGrid },
-            { id: "activity" as const, label: "Activity", icon: Activity },
-            { id: "connections" as const, label: "Connections", icon: Share2 },
-            { id: "health" as const, label: "Health", icon: HeartPulse },
-          ]).map(({ id, label, icon: Icon }) => (
+          {FLEET_TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveTab(id)}
@@ -371,11 +379,7 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
             className="flex items-center gap-0 px-2 shrink-0 h-8 cursor-pointer select-none"
             onClick={() => { if (!drawerOpen) setDrawerOpen(true) }}
           >
-            {([
-              { id: "activity" as const, label: "Activity", icon: Activity },
-              { id: "bulk" as const, label: "Bulk Actions", icon: Layers },
-              { id: "export" as const, label: "Export", icon: Download },
-            ]).map(({ id, label, icon: Icon }) => (
+            {FLEET_BOTTOM_TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 className={cn(
