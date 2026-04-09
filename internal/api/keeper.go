@@ -331,6 +331,11 @@ var envVarNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // wrapping a payload inside single quotes passed to "bash -c '...|...'".
 var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun)\b\s+(-[ceE]|--eval)\b`)
 
+// awkPattern matches awk/gawk/mawk/nawk invocations. awk scripts can call
+// system() or use getline with pipe to execute arbitrary shell commands,
+// bypassing the metachar filter since the payload is inside single quotes.
+var awkPattern = regexp.MustCompile(`(?i)\b[gmnp]?awk\b`)
+
 func containsDangerousShellChars(cmd string) bool {
 	// Reject any non-printable control characters (except space and tab which
 	// are legitimate in shell commands). This catches \n, \r, vertical tab,
@@ -351,6 +356,13 @@ func containsDangerousShellChars(cmd string) bool {
 	// single-quote-aware metachar check below because content inside quotes
 	// is treated as literal, but the invoked interpreter re-parses it.
 	if interpreterPattern.MatchString(cmd) {
+		return true
+	}
+
+	// Block awk/gawk/nawk/mawk: awk scripts can call system() or use
+	// getline with pipe, executing arbitrary shell commands within
+	// single-quoted script arguments that bypass our metachar check.
+	if awkPattern.MatchString(cmd) {
 		return true
 	}
 
