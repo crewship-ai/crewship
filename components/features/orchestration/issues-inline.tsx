@@ -1005,9 +1005,10 @@ interface ProjectsListViewProps {
   projects: Project[]
   onRefresh: () => void
   workspaceId: string
+  onProjectClick?: (projectId: string) => void
 }
 
-export function ProjectsListView({ projects, onRefresh: _onRefresh, workspaceId: _workspaceId }: ProjectsListViewProps) {
+export function ProjectsListView({ projects, onRefresh: _onRefresh, workspaceId: _workspaceId, onProjectClick }: ProjectsListViewProps) {
   const sorted = useMemo(
     () => [...projects].sort((a, b) => a.name.localeCompare(b.name)),
     [projects],
@@ -1038,7 +1039,7 @@ export function ProjectsListView({ projects, onRefresh: _onRefresh, workspaceId:
         </thead>
         <tbody>
           {sorted.map((p) => (
-            <tr key={p.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+            <tr key={p.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors cursor-pointer" onClick={() => onProjectClick?.(p.id)}>
               {/* Name */}
               <td className="py-2 px-3">
                 <div className="flex items-center gap-2">

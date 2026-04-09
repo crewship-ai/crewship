@@ -869,7 +869,7 @@ export function OrchestrationLayout({
 
             {activeTab === "projects" && (
               <motion.div key="projects" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="p-4 h-full overflow-auto">
-                <ProjectsListView projects={projects} onRefresh={fetchProjects} workspaceId={workspaceId} />
+                <ProjectsListView projects={projects} onRefresh={fetchProjects} workspaceId={workspaceId} onProjectClick={(projectId) => { setSelectedProjectId(projectId); setActiveTab("issues"); }} />
               </motion.div>
             )}
 
