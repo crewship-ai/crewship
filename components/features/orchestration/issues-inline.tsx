@@ -635,6 +635,16 @@ export function IssueDetailInline({
             </button>
           </>
         )}
+        {(issue.status === "CANCELLED" || issue.status === "DONE") && (
+          <button
+            onClick={() => patchIssue({ status: "BACKLOG" })}
+            className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors"
+            style={{ backgroundColor: `${STATUS_COLORS.IN_PROGRESS}18`, color: STATUS_COLORS.IN_PROGRESS }}
+          >
+            <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 8a6 6 0 0 1 10.47-4M14 8a6 6 0 0 1-10.47 4"/><path d="M14 2v4h-4M2 14v-4h4"/></svg>
+            Reopen
+          </button>
+        )}
 
         <div className="flex-1" />
         {issue.identifier && (
