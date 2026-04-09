@@ -103,6 +103,13 @@ type AgentEvent struct {
 
 type EventHandler func(event AgentEvent)
 
+// crewState tracks per-crew runtime state (activity, TTL, container).
+type crewState struct {
+	lastActivity time.Time
+	ttl          time.Duration
+	containerID  string
+}
+
 type Orchestrator struct {
 	container      provider.ContainerProvider
 	state          provider.StateProvider
@@ -114,11 +121,9 @@ type Orchestrator struct {
 	keeperEnabled  bool
 	ipcBaseURL     string
 	ipcToken       string
-	mu             sync.Mutex
+	mu             sync.RWMutex
 	accepting      bool
-	crewLastActivity map[string]time.Time
-	crewTTL          map[string]time.Duration
-	crewContainers   map[string]string
+	crews          map[string]*crewState
 }
 
 func New(
@@ -132,10 +137,8 @@ func New(
 		scrubber:         scrubber.New(),
 		logger:           logger,
 		cooldown:         NewCooldownManager(),
-		accepting:        true,
-		crewLastActivity: make(map[string]time.Time),
-		crewTTL:          make(map[string]time.Duration),
-		crewContainers:   make(map[string]string),
+		accepting: true,
+		crews:     make(map[string]*crewState),
 	}
 }
 
@@ -156,8 +159,8 @@ func (o *Orchestrator) SetKeeperEnabled(enabled bool) {
 }
 
 func (o *Orchestrator) KeeperEnabled() bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	o.mu.RLock()
+	defer o.mu.RUnlock()
 	return o.keeperEnabled
 }
 
@@ -204,12 +207,12 @@ func (o *Orchestrator) SetConversationStore(store *conversation.Store) {
 }
 
 func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handler EventHandler) error {
-	o.mu.Lock()
+	o.mu.RLock()
 	if !o.accepting {
-		o.mu.Unlock()
+		o.mu.RUnlock()
 		return fmt.Errorf("orchestrator not accepting new runs")
 	}
-	o.mu.Unlock()
+	o.mu.RUnlock()
 
 	if req.ContainerID != "" {
 		o.refreshActivity(req.CrewID, req.ContainerID, req.TTLHours)
@@ -294,12 +297,12 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		"est_tokens", tokenutil.EstimateTokens(req.SystemPrompt),
 	)
 
-	o.mu.Lock()
+	o.mu.RLock()
 	sidecarEnabled := o.sidecarEnabled && !req.SkipSidecar
 	keeperEnabled := o.keeperEnabled
 	ipcBaseURL := o.ipcBaseURL
 	ipcToken := o.ipcToken
-	o.mu.Unlock()
+	o.mu.RUnlock()
 
 	var env []string
 	if sidecarEnabled {
@@ -706,12 +709,17 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 func (o *Orchestrator) refreshActivity(crewID, containerID string, ttlHours int) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.crewLastActivity[crewID] = time.Now()
-	o.crewContainers[crewID] = containerID
+	cs := o.crews[crewID]
+	if cs == nil {
+		cs = &crewState{}
+		o.crews[crewID] = cs
+	}
+	cs.lastActivity = time.Now()
+	cs.containerID = containerID
 	if ttlHours > 0 {
-		o.crewTTL[crewID] = time.Duration(ttlHours) * time.Hour
+		cs.ttl = time.Duration(ttlHours) * time.Hour
 	} else {
-		delete(o.crewTTL, crewID)
+		cs.ttl = 0
 	}
 }
 
@@ -722,19 +730,16 @@ func (o *Orchestrator) checkTTLs(ctx context.Context) {
 		containerID string
 	}
 	now := time.Now()
-	for crewID, last := range o.crewLastActivity {
-		ttl, ok := o.crewTTL[crewID]
-		if !ok || ttl <= 0 {
+	for crewID, cs := range o.crews {
+		if cs.ttl <= 0 {
 			continue
 		}
-		if now.Sub(last) > ttl {
+		if now.Sub(cs.lastActivity) > cs.ttl {
 			toStop = append(toStop, struct {
 				crewID      string
 				containerID string
-			}{crewID: crewID, containerID: o.crewContainers[crewID]})
-			delete(o.crewLastActivity, crewID)
-			delete(o.crewContainers, crewID)
-			delete(o.crewTTL, crewID)
+			}{crewID: crewID, containerID: cs.containerID})
+			delete(o.crews, crewID)
 		}
 	}
 	o.mu.Unlock()
