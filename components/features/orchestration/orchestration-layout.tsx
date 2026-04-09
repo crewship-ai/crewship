@@ -579,21 +579,20 @@ export function OrchestrationLayout({
 
         <div className="flex-1" />
 
-        {/* Create dropdown — Linear style */}
+        {/* Create dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" className="h-7 gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs shrink-0">
+            <button className="flex items-center gap-1 h-7 px-2.5 rounded-md text-xs text-muted-foreground hover:text-foreground bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] hover:border-white/[0.12] transition-colors shrink-0">
               <Plus className="h-3.5 w-3.5" />
-              New
-            </Button>
+            </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44">
             <DropdownMenuItem onClick={() => toast.info("Create issue dialog — coming soon")}>
-              <CircleDot className="h-3.5 w-3.5 mr-2" />
+              <CircleDot className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
               New Issue
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => toast.info("Create project dialog — coming soon")}>
-              <FolderKanban className="h-3.5 w-3.5 mr-2" />
+              <FolderKanban className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
               New Project
             </DropdownMenuItem>
           </DropdownMenuContent>
