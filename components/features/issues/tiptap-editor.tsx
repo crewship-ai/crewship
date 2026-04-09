@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect } from "react"
+import { useEffect } from "react"
+import { marked } from "marked"
 import { useEditor, EditorContent } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
 import Placeholder from "@tiptap/extension-placeholder"
@@ -34,48 +35,10 @@ interface TiptapEditorProps {
   autoFocus?: boolean
 }
 
-// Convert markdown to HTML (basic conversion for tiptap)
+// Convert markdown to HTML using `marked` library (handles tables, lists, code blocks correctly)
 function markdownToHtml(md: string): string {
   if (!md) return ""
-  let html = md
-  // Code blocks
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>')
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, "<code>$1</code>")
-  // Bold
-  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-  // Italic
-  html = html.replace(/\*([^*]+)\*/g, "<em>$1</em>")
-  // Headings
-  html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>")
-  html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>")
-  html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>")
-  // Blockquote
-  html = html.replace(/^> (.+)$/gm, "<blockquote><p>$1</p></blockquote>")
-  // Task lists
-  html = html.replace(/^- \[x\] (.+)$/gm, '<ul data-type="taskList"><li data-type="taskItem" data-checked="true"><p>$1</p></li></ul>')
-  html = html.replace(/^- \[ \] (.+)$/gm, '<ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>$1</p></li></ul>')
-  // Unordered lists
-  html = html.replace(/^- (.+)$/gm, "<li>$1</li>")
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`)
-  // Ordered lists
-  html = html.replace(/^\d+\. (.+)$/gm, "<li>$1</li>")
-  // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
-  // Horizontal rule
-  html = html.replace(/^---$/gm, "<hr>")
-  // Paragraphs (lines not already wrapped)
-  html = html.replace(/^(?!<[hupob]|<li|<hr|<pre|<ul|<ol)(.+)$/gm, "<p>$1</p>")
-  // Tables (basic)
-  html = html.replace(/\|(.+)\|\n\|[-| ]+\|\n((?:\|.+\|\n?)+)/g, (_, header, body) => {
-    const ths = header.split("|").filter(Boolean).map((h: string) => `<th>${h.trim()}</th>`).join("")
-    const rows = body.trim().split("\n").map((row: string) => {
-      const tds = row.split("|").filter(Boolean).map((d: string) => `<td>${d.trim()}</td>`).join("")
-      return `<tr>${tds}</tr>`
-    }).join("")
-    return `<table><thead><tr>${ths}</tr></thead><tbody>${rows}</tbody></table>`
-  })
-  return html
+  return marked.parse(md, { async: false, breaks: true, gfm: true }) as string
 }
 
 // Convert tiptap HTML back to markdown

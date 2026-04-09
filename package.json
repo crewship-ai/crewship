@@ -77,6 +77,7 @@
     "cron-parser": "^5.5.0",
     "lowlight": "^3.3.0",
     "lucide-react": "^1.7.0",
+    "marked": "^18.0.0",
     "motion": "^12.36.0",
     "nanoid": "^5.1.7",
     "next": "^16.2.2",
