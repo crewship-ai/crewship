@@ -734,13 +734,6 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 				body["project_id"] = pid
 			}
 		}
-		if def.Assignee != "" {
-			if aid, ok := agentIDs[def.Assignee]; ok {
-				body["assignee_type"] = "agent"
-				body["assignee_id"] = aid
-			}
-		}
-
 		resp, err := client.Post(fmt.Sprintf("/api/v1/crews/%s/issues", crewID), body)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  ! %s: %v\n", def.Title, err)
@@ -776,6 +769,19 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 				r.Body.Close()
 				if r.StatusCode >= 400 {
 					break
+				}
+			}
+		}
+
+		// Assign agent
+		if def.Assignee != "" && ident != "" {
+			if aid, ok := agentIDs[def.Assignee]; ok {
+				r, err := client.Patch(
+					fmt.Sprintf("/api/v1/crews/%s/issues/%s", crewID, ident),
+					map[string]string{"assignee_type": "agent", "assignee_id": aid},
+				)
+				if err == nil {
+					r.Body.Close()
 				}
 			}
 		}
