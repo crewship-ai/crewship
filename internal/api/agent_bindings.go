@@ -55,10 +55,7 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 	agentID := r.PathValue("agentId")
 
 	// Verify agent
-	var agentExists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&agentExists); err != nil {
+	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
@@ -121,10 +118,7 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 	}
 
 	agentID := r.PathValue("agentId")
-	var agentExists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&agentExists); err != nil {
+	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}

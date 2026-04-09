@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,6 +10,15 @@ import (
 	"strings"
 	"time"
 )
+
+// agentExists checks that an agent with the given ID belongs to the workspace
+// and is not soft-deleted. Returns nil on success, sql.ErrNoRows if not found.
+func agentExists(ctx context.Context, db *sql.DB, agentID, workspaceID string) error {
+	var id string
+	return db.QueryRowContext(ctx,
+		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&id)
+}
 
 // validSlugRe matches safe slug values: lowercase alphanumeric, starting with a letter or digit.
 var validSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)

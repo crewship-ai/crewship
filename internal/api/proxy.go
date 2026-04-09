@@ -462,11 +462,7 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists string
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&exists)
-	if err != nil {
+	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}

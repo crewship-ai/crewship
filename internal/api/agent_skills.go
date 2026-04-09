@@ -31,10 +31,7 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	var exists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&exists); err != nil {
+	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
 		if err == sql.ErrNoRows {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 			return
@@ -100,10 +97,7 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&exists); err != nil {
+	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
 		if err == sql.ErrNoRows {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 			return
@@ -145,10 +139,7 @@ func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&exists); err != nil {
+	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
 		if err == sql.ErrNoRows {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 			return
