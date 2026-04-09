@@ -83,6 +83,7 @@ export const CREW_COLORS: Record<string, string> = {
 
 export const CREW_COLOR_DEFAULT = "#64748b"
 
+/** Resolves a crew palette ID to its hex color, falling back to slate gray. */
 export function resolveCrewColor(color: string | null | undefined): string {
   return (color && CREW_COLORS[color]) || CREW_COLOR_DEFAULT
 }

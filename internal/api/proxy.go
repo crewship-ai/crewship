@@ -535,3 +535,73 @@ func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	h.proxyJSON(w, resp)
 }
+
+// AgentContainerFiles lists files inside the agent's running container.
+func (h *ProxyHandler) AgentContainerFiles(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	var crewID sql.NullString
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&crewID)
+	if err != nil || !crewID.Valid {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found or not assigned to a crew"})
+		return
+	}
+
+	ipcPath := fmt.Sprintf("/crews/%s/container-files", crewID.String)
+	if subdir := r.URL.Query().Get("subdir"); subdir != "" {
+		ipcPath += "?subdir=" + url.QueryEscape(subdir)
+	}
+	resp, err := h.ipcGet(r.Context(), ipcPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to fetch container files"})
+		return
+	}
+	defer resp.Body.Close()
+
+	var data map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&data) == nil {
+		if files, ok := data["files"]; ok {
+			writeJSON(w, http.StatusOK, files)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, []interface{}{})
+}
+
+// AgentGitLog fetches recent git commits from inside the agent's container.
+func (h *ProxyHandler) AgentGitLog(w http.ResponseWriter, r *http.Request) {
+	agentID := r.PathValue("agentId")
+	workspaceID := WorkspaceIDFromContext(r.Context())
+
+	var slug, crewID sql.NullString
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT slug, crew_id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&slug, &crewID)
+	if err != nil || !crewID.Valid {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found or not assigned to a crew"})
+		return
+	}
+
+	ipcPath := fmt.Sprintf("/crews/%s/git-log", crewID.String)
+	if slug.Valid {
+		ipcPath += "?agent_slug=" + url.QueryEscape(slug.String)
+	}
+	resp, err := h.ipcGet(r.Context(), ipcPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Failed to fetch git log"})
+		return
+	}
+	defer resp.Body.Close()
+
+	var data map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&data) == nil {
+		if commits, ok := data["commits"]; ok {
+			writeJSON(w, http.StatusOK, commits)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, []interface{}{})
+}

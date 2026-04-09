@@ -284,7 +284,7 @@ func seedCredentials(client *cli.Client, agentIDs map[string]string) error {
 	if isReal {
 		fmt.Fprintf(os.Stderr, "  Using real %s from SEED_ANTHROPIC_API_KEY\n", anthro.Type)
 	} else {
-		fmt.Fprintf(os.Stderr, "  Using demo placeholder (set SEED_ANTHROPIC_API_KEY for real agents)\n")
+		fmt.Fprintf(os.Stderr, "  WARNING: using demo placeholder key — agents will not work. Set SEED_ANTHROPIC_API_KEY for real credentials.\n")
 	}
 
 	anthroID, err := seedOneCredential(client, anthro)

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,13 +31,19 @@ All data is created through the REST API, ensuring business logic
 func init() {
 	seedCmd.Flags().Bool("nuke", false, "Delete all workspace contents before seeding")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
-	seedCmd.Flags().String("password", "password123", "Admin password for bootstrap")
+	seedCmd.Flags().String("password", "", "Admin password for bootstrap (random if omitted)")
 }
 
 func runSeed(cmd *cobra.Command, args []string) error {
 	nuke, _ := cmd.Flags().GetBool("nuke")
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")
 	password, _ := cmd.Flags().GetString("password")
+	if password == "" {
+		b := make([]byte, 16)
+		_, _ = rand.Read(b)
+		password = hex.EncodeToString(b)
+		fmt.Fprintf(os.Stderr, "  Generated admin password: %s\n", password)
+	}
 
 	// ── Phase 1: Bootstrap / Auth ──
 	client, userID, err := seedBootstrap(password)

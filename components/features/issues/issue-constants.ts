@@ -1,3 +1,7 @@
+/**
+ * Shared constants for issue/project status, priority, and relation types.
+ * Used across orchestration, issue detail, and project detail views.
+ */
 import type { MissionStatus, IssuePriority, RelationType, ProjectStatus } from "@/lib/types/mission"
 
 export const ISSUE_STATUSES: MissionStatus[] = [

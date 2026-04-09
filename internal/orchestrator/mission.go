@@ -140,6 +140,7 @@ type missionState struct {
 	planningDispatched bool // true after lead planning dispatch (prevents re-dispatch)
 }
 
+// NewMissionEngine creates a MissionEngine with the given dependencies.
 func NewMissionEngine(db *sql.DB, orch *Orchestrator, hub *ws.Hub, logger *slog.Logger) *MissionEngine {
 	pw := NewProgressWriter()
 	return &MissionEngine{

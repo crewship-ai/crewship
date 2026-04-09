@@ -24,12 +24,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { cn } from "@/lib/utils"
 
@@ -202,17 +196,31 @@ export default function AuditPage() {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" className="h-7 text-label" disabled>
-                  <Download className="mr-1.5 h-3.5 w-3.5" />
-                  Export
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Available in Phase 2</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-label"
+            disabled={filteredLogs.length === 0}
+            onClick={() => {
+              const rows = filteredLogs.map((log) => ({
+                timestamp: log.created_at,
+                action: log.action,
+                entity_type: log.entity_type,
+                entity_id: log.entity_id,
+                user: log.user?.full_name ?? log.user?.email ?? "",
+                ip_address: log.ip_address ?? "",
+              }))
+              const header = Object.keys(rows[0] ?? {}).join(",")
+              const csv = [header, ...rows.map((r) => Object.values(r).map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))].join("\n")
+              const blob = new Blob([csv], { type: "text/csv" })
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement("a"); a.href = url; a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`; a.click()
+              URL.revokeObjectURL(url)
+            }}
+          >
+            <Download className="mr-1.5 h-3.5 w-3.5" />
+            Export CSV
+          </Button>
         </div>
       </div>
 

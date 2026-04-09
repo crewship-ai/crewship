@@ -12,6 +12,15 @@ import {
   Save,
   Maximize2,
   Minimize2,
+  Clock,
+  Globe,
+  Copy,
+  CheckCircle2,
+  XCircle,
+  Terminal,
+  Shield,
+  Cpu,
+  Bot,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -39,6 +48,304 @@ const RIGHT_PANEL_TABS = [
   { id: "team", label: "Team", icon: Users },
   { id: "context", label: "Context", icon: Bookmark },
 ] as const
+
+// ── Triggers Tab ──
+
+interface AgentScheduleInfo {
+  schedule_cron: string | null
+  schedule_prompt: string | null
+  schedule_enabled: boolean
+  schedule_last_run: string | null
+  schedule_next_run: string | null
+  webhook_secret: string | null
+  crew_id: string | null
+  slug: string
+}
+
+function TriggersTab({ agentId, workspaceId }: { agentId: string; workspaceId: string | null }) {
+  const [agent, setAgent] = useState<AgentScheduleInfo | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!workspaceId) return
+    setLoading(true)
+    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
+      .then((r) => r.json())
+      .then((data) => setAgent(data))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [agentId, workspaceId])
+
+  if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  if (!agent) return <div className="p-4 text-label text-muted-foreground">Unable to load agent</div>
+
+  const webhookUrl = agent.crew_id && agent.slug
+    ? `/api/v1/webhooks/${agent.crew_id}/${agentId}/trigger`
+    : null
+
+  return (
+    <div className="p-3 space-y-4 text-sm">
+      {/* Cron Schedule */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 text-label font-medium text-muted-foreground uppercase tracking-wider">
+          <Clock className="h-3 w-3" />
+          Schedule
+        </div>
+        {agent.schedule_cron ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <code className="text-label bg-accent px-1.5 py-0.5 rounded font-mono">{agent.schedule_cron}</code>
+              {agent.schedule_enabled ? (
+                <span className="flex items-center gap-1 text-micro text-emerald-500"><CheckCircle2 className="h-3 w-3" /> Active</span>
+              ) : (
+                <span className="flex items-center gap-1 text-micro text-muted-foreground"><XCircle className="h-3 w-3" /> Disabled</span>
+              )}
+            </div>
+            {agent.schedule_prompt && (
+              <p className="text-label text-muted-foreground line-clamp-2">{agent.schedule_prompt}</p>
+            )}
+            {agent.schedule_next_run && (
+              <p className="text-micro text-muted-foreground">
+                Next run: {new Date(agent.schedule_next_run).toLocaleString()}
+              </p>
+            )}
+            {agent.schedule_last_run && (
+              <p className="text-micro text-muted-foreground">
+                Last run: {new Date(agent.schedule_last_run).toLocaleString()}
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-label text-muted-foreground">No schedule configured. Set one in Agent Settings &rarr; Schedule.</p>
+        )}
+      </div>
+
+      {/* Webhook */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 text-label font-medium text-muted-foreground uppercase tracking-wider">
+          <Globe className="h-3 w-3" />
+          Webhook
+        </div>
+        {webhookUrl ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1">
+              <code className="text-micro bg-accent px-1.5 py-0.5 rounded font-mono truncate flex-1">{webhookUrl}</code>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(window.location.origin + webhookUrl)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 2000)
+                }}
+                className="p-1 rounded hover:bg-accent text-muted-foreground"
+              >
+                {copied ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+              </button>
+            </div>
+            <p className="text-micro text-muted-foreground">
+              POST with JSON body. {agent.webhook_secret ? "Secret header required." : "No secret configured."}
+            </p>
+          </div>
+        ) : (
+          <p className="text-label text-muted-foreground">Assign agent to a crew to enable webhooks.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Shared Context Tab ──
+
+interface AgentContextInfo {
+  name: string
+  slug: string
+  agent_role: string
+  system_prompt: string | null
+  tool_profile: string | null
+  cli_adapter: string | null
+  llm_provider: string | null
+  llm_model: string | null
+  crew_id: string | null
+  description: string | null
+}
+
+function SharedContextTab({ agentId, workspaceId }: { agentId: string; workspaceId: string | null }) {
+  const [agent, setAgent] = useState<AgentContextInfo | null>(null)
+  const [crew, setCrew] = useState<{ name: string; description: string | null; network_mode: string | null; allowed_domains: string | null } | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!workspaceId) return
+    setLoading(true)
+    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
+      .then((r) => r.json())
+      .then((data: AgentContextInfo) => {
+        setAgent(data)
+        if (data.crew_id) {
+          fetch(`/api/v1/crews/${data.crew_id}?workspace_id=${workspaceId}`)
+            .then((r) => r.json())
+            .then((c) => setCrew(c))
+            .catch(() => {})
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [agentId, workspaceId])
+
+  if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  if (!agent) return <div className="p-4 text-label text-muted-foreground">Unable to load agent</div>
+
+  return (
+    <div className="p-3 space-y-4 text-sm">
+      {/* Agent Info */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 text-label font-medium text-muted-foreground uppercase tracking-wider">
+          <Bot className="h-3 w-3" />
+          Agent
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-label font-medium">{agent.name}</span>
+            <span className="text-micro bg-accent px-1.5 py-0.5 rounded">{agent.agent_role}</span>
+          </div>
+          {agent.description && <p className="text-label text-muted-foreground line-clamp-2">{agent.description}</p>}
+          <div className="flex flex-wrap gap-2 text-micro text-muted-foreground">
+            {agent.llm_provider && <span className="flex items-center gap-1"><Cpu className="h-3 w-3" />{agent.llm_provider}/{agent.llm_model ?? "default"}</span>}
+            {agent.cli_adapter && <span className="flex items-center gap-1"><Terminal className="h-3 w-3" />{agent.cli_adapter}</span>}
+            {agent.tool_profile && <span className="flex items-center gap-1"><Shield className="h-3 w-3" />{agent.tool_profile}</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* System Prompt */}
+      {agent.system_prompt && (
+        <div className="space-y-2">
+          <div className="text-label font-medium text-muted-foreground uppercase tracking-wider">System Prompt</div>
+          <pre className="text-label text-muted-foreground bg-accent p-2 rounded whitespace-pre-wrap break-words max-h-48 overflow-y-auto font-mono leading-relaxed">
+            {agent.system_prompt}
+          </pre>
+        </div>
+      )}
+
+      {/* Crew Context */}
+      {crew && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-label font-medium text-muted-foreground uppercase tracking-wider">
+            <Users className="h-3 w-3" />
+            Crew
+          </div>
+          <div className="space-y-1">
+            <span className="text-label font-medium">{crew.name}</span>
+            {crew.description && <p className="text-label text-muted-foreground line-clamp-2">{crew.description}</p>}
+            {crew.network_mode && (
+              <p className="text-micro text-muted-foreground">
+                Network: {crew.network_mode}
+                {crew.allowed_domains && ` (${crew.allowed_domains})`}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Team Chat Tab ──
+
+interface PeerMessage {
+  id: string
+  from_name: string
+  from_slug: string
+  to_name: string
+  to_slug: string
+  question: string
+  response: string | null
+  status: string
+  created_at: string
+}
+
+function TeamChatTab({ agentId, workspaceId }: { agentId: string; workspaceId: string | null }) {
+  const [messages, setMessages] = useState<PeerMessage[]>([])
+  const [agentSlug, setAgentSlug] = useState<string | null>(null)
+  const [crewId, setCrewId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!workspaceId) return
+    setLoading(true)
+    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
+      .then((r) => r.json())
+      .then((agent) => {
+        setAgentSlug(agent.slug)
+        setCrewId(agent.crew_id)
+        if (agent.crew_id) {
+          return fetch(`/api/v1/crews/${agent.crew_id}/peer-conversations?workspace_id=${workspaceId}`)
+            .then((r) => r.json())
+            .then((data) => {
+              const all = Array.isArray(data) ? data : []
+              // Filter to conversations involving this agent
+              setMessages(all.filter((m: PeerMessage) => m.from_slug === agent.slug || m.to_slug === agent.slug))
+            })
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [agentId, workspaceId])
+
+  if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+
+  if (!crewId) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center p-6">
+        <Users className="h-8 w-8 text-muted-foreground/30 mb-2" />
+        <p className="text-label text-muted-foreground">Assign agent to a crew to see team conversations.</p>
+      </div>
+    )
+  }
+
+  if (messages.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center p-6">
+        <Users className="h-8 w-8 text-muted-foreground/30 mb-2" />
+        <p className="text-body font-medium text-muted-foreground">No conversations yet</p>
+        <p className="text-label text-muted-foreground mt-1">Agent-to-agent conversations will appear here.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-2 space-y-2">
+      {messages.map((msg) => {
+        const isOutgoing = msg.from_slug === agentSlug
+        return (
+          <div key={msg.id} className="rounded-lg border border-border/50 p-2.5 space-y-1.5">
+            <div className="flex items-center gap-1.5 text-micro">
+              <span className={cn("font-medium", isOutgoing ? "text-blue-400" : "text-emerald-400")}>
+                {msg.from_name}
+              </span>
+              <span className="text-muted-foreground/50">&rarr;</span>
+              <span className="font-medium text-muted-foreground">{msg.to_name}</span>
+              <span className="ml-auto text-muted-foreground/40">
+                {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
+            <p className="text-xs text-foreground/80 whitespace-pre-wrap line-clamp-3">{msg.question}</p>
+            {msg.response && (
+              <div className="pl-2 border-l-2 border-emerald-500/30">
+                <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-3">{msg.response}</p>
+              </div>
+            )}
+            {msg.status === "RUNNING" && (
+              <div className="flex items-center gap-1 text-micro text-blue-400">
+                <Loader2 className="h-3 w-3 animate-spin" /> Processing...
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 interface RightPanelProps {
   agentId: string
@@ -149,36 +456,15 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
         )}
 
         {activeTab === "triggers" && (
-          <div className="flex flex-col items-center justify-center h-full text-center p-6">
-            <div className="h-10 w-10 rounded-full bg-accent flex items-center justify-center mb-3">
-              <Zap className="h-5 w-5 text-muted-foreground" />
-            </div>
-            <p className="text-body font-medium">Triggers</p>
-            <p className="text-label text-muted-foreground mt-1">Schedule cron jobs, webhooks, and automated triggers for this agent.</p>
-            <span className="text-micro text-muted-foreground mt-3 px-2 py-1 bg-accent rounded-full">Coming soon</span>
-          </div>
+          <TriggersTab agentId={agentId} workspaceId={workspaceId} />
         )}
 
         {activeTab === "team" && (
-          <div className="flex flex-col items-center justify-center h-full text-center p-6">
-            <div className="h-10 w-10 rounded-full bg-accent flex items-center justify-center mb-3">
-              <Users className="h-5 w-5 text-muted-foreground" />
-            </div>
-            <p className="text-body font-medium">Team Chat</p>
-            <p className="text-label text-muted-foreground mt-1">Real-time communication between agents, leads, and crew members.</p>
-            <span className="text-micro text-muted-foreground mt-3 px-2 py-1 bg-accent rounded-full">Coming soon</span>
-          </div>
+          <TeamChatTab agentId={agentId} workspaceId={workspaceId} />
         )}
 
         {activeTab === "context" && (
-          <div className="flex flex-col items-center justify-center h-full text-center p-6">
-            <div className="h-10 w-10 rounded-full bg-accent flex items-center justify-center mb-3">
-              <Bookmark className="h-5 w-5 text-muted-foreground" />
-            </div>
-            <p className="text-body font-medium">Shared Context</p>
-            <p className="text-label text-muted-foreground mt-1">Shared instructions, knowledge base, and mission context for the agent.</p>
-            <span className="text-micro text-muted-foreground mt-3 px-2 py-1 bg-accent rounded-full">Coming soon</span>
-          </div>
+          <SharedContextTab agentId={agentId} workspaceId={workspaceId} />
         )}
       </div>
 

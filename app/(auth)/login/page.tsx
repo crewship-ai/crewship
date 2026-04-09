@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useState, type FormEvent } from "react"
+import { Suspense, useState, useEffect, type FormEvent } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Ship } from "lucide-react"
 import { useAuth } from "@/hooks/use-auth"
@@ -26,6 +26,14 @@ function LoginForm() {
   const searchParams = useSearchParams()
   const registered = searchParams.get("registered") === "true"
   const { signIn } = useAuth()
+  const [googleEnabled, setGoogleEnabled] = useState(false)
+
+  useEffect(() => {
+    fetch("/api/v1/auth/google/status")
+      .then((r) => r.json())
+      .then((data) => setGoogleEnabled(data.enabled === true))
+      .catch(() => {})
+  }, [])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -102,8 +110,11 @@ function LoginForm() {
               type="button"
               variant="outline"
               className="w-full"
-              disabled
-              title="Google sign-in coming in Phase 2"
+              disabled={!googleEnabled}
+              title={googleEnabled ? "Sign in with your Google account" : "Google sign-in not configured (set GOOGLE_CLIENT_ID)"}
+              onClick={() => {
+                window.location.href = "/api/v1/auth/google/redirect"
+              }}
             >
               Sign in with Google
             </Button>

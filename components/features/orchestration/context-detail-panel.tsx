@@ -264,6 +264,149 @@ function MissionDetail({ mission }: { mission: Mission }) {
   )
 }
 
+// ── Logs Components ──
+
+function TaskLogs({ task }: { task: MissionTask }) {
+  const entries: { time: string; level: string; message: string }[] = []
+
+  if (task.started_at) {
+    entries.push({ time: task.started_at, level: "info", message: `Task started${task.agent_slug ? ` — assigned to ${task.agent_slug}` : ""}` })
+  }
+  if (task.result_summary) {
+    entries.push({ time: task.completed_at ?? task.updated_at, level: "info", message: task.result_summary })
+  }
+  if (task.error_message) {
+    entries.push({ time: task.completed_at ?? task.updated_at, level: "error", message: task.error_message })
+  }
+  if (task.evaluation_notes) {
+    entries.push({ time: task.updated_at, level: task.evaluation_status === "FAILED" ? "warn" : "info", message: `Evaluation: ${task.evaluation_notes}` })
+  }
+  if (task.handoff_context) {
+    entries.push({ time: task.completed_at ?? task.updated_at, level: "info", message: `Handoff: ${task.handoff_context}` })
+  }
+  if (task.status === "COMPLETED" && task.completed_at) {
+    entries.push({
+      time: task.completed_at,
+      level: "info",
+      message: `Completed${task.duration_ms ? ` in ${(task.duration_ms / 1000).toFixed(1)}s` : ""}${task.token_count ? ` — ${formatTokens(task.token_count)} tokens (${formatCost(task.estimated_cost)})` : ""}`,
+    })
+  }
+
+  if (entries.length === 0) {
+    return <p className="text-xs text-muted-foreground text-center py-8">No log entries yet</p>
+  }
+
+  return (
+    <div className="space-y-1">
+      {entries.map((e, i) => (
+        <div key={i} className="flex gap-2 text-[11px] font-mono">
+          <span className="text-muted-foreground/60 shrink-0 w-[52px]">
+            {new Date(e.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </span>
+          <span className={cn(
+            "shrink-0 w-[38px] uppercase",
+            e.level === "error" ? "text-red-400" : e.level === "warn" ? "text-amber-400" : "text-muted-foreground/60",
+          )}>{e.level}</span>
+          <span className={cn(
+            "break-words whitespace-pre-wrap",
+            e.level === "error" ? "text-red-300" : "text-foreground/80",
+          )}>{e.message}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MissionLogs({ mission }: { mission: Mission }) {
+  const tasks = mission.tasks ?? []
+  if (tasks.length === 0) {
+    return <p className="text-xs text-muted-foreground text-center py-8">No tasks in this mission</p>
+  }
+
+  const entries = tasks
+    .filter((t) => t.started_at || t.error_message || t.result_summary)
+    .flatMap((t) => {
+      const items: { time: string; level: string; message: string }[] = []
+      if (t.started_at) items.push({ time: t.started_at, level: "info", message: `[${t.agent_slug ?? "?"}] Started: ${t.title}` })
+      if (t.error_message) items.push({ time: t.completed_at ?? t.updated_at, level: "error", message: `[${t.agent_slug ?? "?"}] ${t.error_message}` })
+      if (t.status === "COMPLETED" && t.completed_at) {
+        items.push({ time: t.completed_at, level: "info", message: `[${t.agent_slug ?? "?"}] Completed: ${t.title}${t.duration_ms ? ` (${(t.duration_ms / 1000).toFixed(1)}s)` : ""}` })
+      }
+      return items
+    })
+    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+
+  if (entries.length === 0) {
+    return <p className="text-xs text-muted-foreground text-center py-8">No activity yet</p>
+  }
+
+  return (
+    <div className="space-y-1">
+      {entries.map((e, i) => (
+        <div key={i} className="flex gap-2 text-[11px] font-mono">
+          <span className="text-muted-foreground/60 shrink-0 w-[52px]">
+            {new Date(e.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          </span>
+          <span className={cn(
+            "shrink-0 w-[38px] uppercase",
+            e.level === "error" ? "text-red-400" : "text-muted-foreground/60",
+          )}>{e.level}</span>
+          <span className={cn(
+            "break-words whitespace-pre-wrap",
+            e.level === "error" ? "text-red-300" : "text-foreground/80",
+          )}>{e.message}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Trace Timeline ──
+
+const traceStatusIcon: Record<string, React.ReactNode> = {
+  COMPLETED: <CheckCircle2 className="size-3 text-emerald-500" />,
+  FAILED: <XCircle className="size-3 text-red-400" />,
+  IN_PROGRESS: <Clock className="size-3 text-blue-400 animate-pulse" />,
+  PENDING: <Clock className="size-3 text-muted-foreground/40" />,
+  BLOCKED: <AlertTriangle className="size-3 text-amber-400" />,
+  SKIPPED: <ArrowRight className="size-3 text-muted-foreground/40" />,
+}
+
+function TraceTimeline({ tasks, missionStatus }: { tasks: MissionTask[]; missionStatus: string }) {
+  if (!tasks || tasks.length === 0) {
+    return <p className="text-xs text-muted-foreground text-center py-8">No tasks to trace</p>
+  }
+
+  const sorted = [...tasks].sort((a, b) => a.task_order - b.task_order)
+
+  return (
+    <div className="space-y-0">
+      {sorted.map((task, idx) => (
+        <div key={task.id} className="flex gap-2.5">
+          {/* Vertical line + dot */}
+          <div className="flex flex-col items-center shrink-0 w-4">
+            <div className="mt-1">{traceStatusIcon[task.status] ?? <Clock className="size-3 text-muted-foreground/40" />}</div>
+            {idx < sorted.length - 1 && <div className="flex-1 w-px bg-border mt-1" />}
+          </div>
+          {/* Content */}
+          <div className="pb-3 min-w-0">
+            <p className="text-xs font-medium truncate">{task.title}</p>
+            <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
+              {task.agent_slug && <span>{task.agent_slug}</span>}
+              {task.duration_ms != null && <span>{(task.duration_ms / 1000).toFixed(1)}s</span>}
+              {task.token_count != null && <span>{formatTokens(task.token_count)} tok</span>}
+              <Badge className={cn("text-[9px] px-1 py-0", STATUS_BADGE_CLASSES[task.status as MissionTaskStatus])}>{task.status}</Badge>
+            </div>
+            {task.error_message && (
+              <p className="text-[10px] text-red-400 mt-0.5 line-clamp-2">{task.error_message}</p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function ContextDetailPanel({ context, onTaskAction, onClose }: ContextDetailPanelProps) {
   const [activeDetailTab, setActiveDetailTab] = useState("detail")
 
@@ -312,17 +455,38 @@ export function ContextDetailPanel({ context, onTaskAction, onClose }: ContextDe
         </TabsContent>
 
         <TabsContent value="logs" className="flex-1 min-h-0">
-          <div className="flex flex-col items-center justify-center h-full py-12 text-muted-foreground/70">
-            <AlertTriangle className="size-6 mb-2" />
-            <p className="text-xs">Coming soon</p>
-          </div>
+          <ScrollArea className="h-full">
+            <div className="p-3 space-y-3">
+              {context.type === "task" && context.task ? (
+                <TaskLogs task={context.task} />
+              ) : context.type === "mission" ? (
+                <MissionLogs mission={context.mission} />
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground/70">
+                  <MousePointerClick className="size-6 mb-2" />
+                  <p className="text-xs">Select a task or mission to view logs</p>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
         </TabsContent>
 
         <TabsContent value="trace" className="flex-1 min-h-0">
-          <div className="flex flex-col items-center justify-center h-full py-12 text-muted-foreground/70">
-            <Box className="size-6 mb-2" />
-            <p className="text-xs">Coming soon</p>
-          </div>
+          <ScrollArea className="h-full">
+            <div className="p-3">
+              {(context.type === "task" || context.type === "mission") ? (
+                <TraceTimeline
+                  tasks={context.type === "mission" ? context.mission.tasks : context.allTasks}
+                  missionStatus={context.type === "mission" ? context.mission.status : context.mission.status}
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground/70">
+                  <MousePointerClick className="size-6 mb-2" />
+                  <p className="text-xs">Select a mission or task to view trace</p>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
         </TabsContent>
       </Tabs>
     </div>

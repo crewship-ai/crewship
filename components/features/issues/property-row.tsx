@@ -3,6 +3,7 @@
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 
+/** Collapsible section header with chevron toggle and optional action slot. */
 export function SectionHeader({
   title,
   open,
@@ -31,6 +32,7 @@ export function SectionHeader({
   )
 }
 
+/** Label-value row used in side-panel property sections. */
 export function PropertyRow({
   label,
   children,
