@@ -521,6 +521,40 @@ export function IssueDetailInline({
             )}
           </div>
 
+          {/* ── Start / Stop actions ──────────────────────────────────────── */}
+          {(issue.status === "BACKLOG" || issue.status === "TODO") && issue.assignee_id && (
+            <div className="mt-3 px-0">
+              <button
+                onClick={async () => {
+                  const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}${qs}/start`, { method: "POST" })
+                  if (res.ok) { toast.success("Issue started — agent dispatched"); onUpdated() }
+                  else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to start") }
+                }}
+                className="w-full flex items-center justify-center gap-2 h-8 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+              >
+                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg>
+                Start
+              </button>
+            </div>
+          )}
+          {issue.status === "IN_PROGRESS" && (
+            <div className="mt-3 px-0">
+              <button
+                onClick={async () => {
+                  const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}${qs}/stop`, { method: "POST" })
+                  if (res.ok) { toast.success("Issue stopped"); onUpdated() }
+                  else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to stop") }
+                }}
+                className="w-full flex items-center justify-center gap-2 h-8 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium hover:bg-red-500/20 transition-colors"
+              >
+                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
+                Stop
+              </button>
+            </div>
+          )}
+
           {/* ── Properties section ───────────────────────────────────────── */}
           <div className="mt-3 border-t border-white/[0.06]">
             <SectionHeader

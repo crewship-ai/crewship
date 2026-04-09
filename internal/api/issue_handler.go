@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -14,15 +15,17 @@ import (
 )
 
 // IssueHandler implements endpoints for the issue tracker (Linear-like).
+// Uses MissionStarter interface defined in captain.go.
 type IssueHandler struct {
-	db     *sql.DB
-	hub    *ws.Hub
-	logger *slog.Logger
+	db            *sql.DB
+	hub           *ws.Hub
+	missionEngine MissionStarter
+	logger        *slog.Logger
 }
 
 // NewIssueHandler creates a new IssueHandler.
-func NewIssueHandler(db *sql.DB, hub *ws.Hub, logger *slog.Logger) *IssueHandler {
-	return &IssueHandler{db: db, hub: hub, logger: logger}
+func NewIssueHandler(db *sql.DB, hub *ws.Hub, me MissionStarter, logger *slog.Logger) *IssueHandler {
+	return &IssueHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }
 
 // ── Response types ──────────────────────────────────────────────────────────
@@ -1307,4 +1310,166 @@ func (h *IssueHandler) DeleteRelation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ── 15. Start — POST /api/v1/crews/{crewId}/issues/{identifier}/start ──────
+
+func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	crewID := r.PathValue("crewId")
+	ident := r.PathValue("identifier")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	// 1. Load issue
+	var missionID, status, title string
+	var description, assigneeID sql.NullString
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT id, status, title, description, assignee_id
+		FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
+		ident, crewID, wsID).Scan(&missionID, &status, &title, &description, &assigneeID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Issue not found")
+			return
+		}
+		h.logger.Error("start issue: load", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// 2. Validate status
+	if status != "BACKLOG" && status != "TODO" {
+		writeProblem(w, r, http.StatusBadRequest, "Issue must be in BACKLOG or TODO to start (current: "+status+")")
+		return
+	}
+
+	// 3. Validate assignee
+	if !assigneeID.Valid || assigneeID.String == "" {
+		writeProblem(w, r, http.StatusBadRequest, "Issue must have an assignee before starting")
+		return
+	}
+
+	// 4. Auto-create mission_task if none exists
+	var taskCount int
+	_ = h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mission_tasks WHERE mission_id = ?`, missionID).Scan(&taskCount)
+	if taskCount == 0 {
+		taskID := generateCUID()
+		now := time.Now().UTC().Format(time.RFC3339)
+		desc := ""
+		if description.Valid {
+			desc = description.String
+		}
+		_, err = h.db.ExecContext(r.Context(), `
+			INSERT INTO mission_tasks (id, mission_id, assigned_agent_id, title, description, status, task_order, depends_on, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, 'PENDING', 1, '[]', ?, ?)`,
+			taskID, missionID, assigneeID.String, title, desc, now, now)
+		if err != nil {
+			h.logger.Error("start issue: create task", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Failed to create task")
+			return
+		}
+	}
+
+	// 5. Update status → IN_PROGRESS (atomic CAS)
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := h.db.ExecContext(r.Context(), `
+		UPDATE missions SET status = 'IN_PROGRESS', updated_at = ? WHERE id = ? AND status IN ('BACKLOG', 'TODO')`,
+		now, missionID)
+	if err != nil {
+		h.logger.Error("start issue: update status", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		writeProblem(w, r, http.StatusConflict, "Issue was already started by another request")
+		return
+	}
+
+	// 6. Start mission engine (async)
+	if h.missionEngine != nil {
+		go func() {
+			if err := h.missionEngine.StartMission(context.Background(), missionID); err != nil {
+				h.logger.Error("start issue: engine", "error", err, "issue", ident)
+			}
+		}()
+	}
+
+	// 7. Broadcast
+	if h.hub != nil {
+		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
+			Type:    "issue.started",
+			Channel: "workspace:" + wsID,
+			Payload: map[string]string{"id": missionID, "identifier": ident, "status": "IN_PROGRESS"},
+		})
+	}
+
+	h.logger.Info("issue started", "identifier", ident, "agent", assigneeID.String)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "IN_PROGRESS", "identifier": ident})
+}
+
+// ── 16. Stop — POST /api/v1/crews/{crewId}/issues/{identifier}/stop ────────
+
+func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
+	role := RoleFromContext(r.Context())
+	if !canRole(role, "create") {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
+		return
+	}
+
+	crewID := r.PathValue("crewId")
+	ident := r.PathValue("identifier")
+	wsID := WorkspaceIDFromContext(r.Context())
+
+	var missionID, status string
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT id, status FROM missions WHERE identifier = ? AND crew_id = ? AND workspace_id = ?`,
+		ident, crewID, wsID).Scan(&missionID, &status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Issue not found")
+			return
+		}
+		h.logger.Error("stop issue: load", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if status != "IN_PROGRESS" && status != "REVIEW" {
+		writeProblem(w, r, http.StatusBadRequest, "Issue must be IN_PROGRESS or REVIEW to stop (current: "+status+")")
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Cancel running/pending tasks
+	_, _ = h.db.ExecContext(r.Context(), `
+		UPDATE mission_tasks SET status = 'CANCELLED', updated_at = ? WHERE mission_id = ? AND status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED')`,
+		now, missionID)
+
+	// Update issue status → CANCELLED
+	_, err = h.db.ExecContext(r.Context(), `
+		UPDATE missions SET status = 'CANCELLED', completed_at = ?, updated_at = ? WHERE id = ?`,
+		now, now, missionID)
+	if err != nil {
+		h.logger.Error("stop issue: update", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	if h.hub != nil {
+		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
+			Type:    "issue.updated",
+			Channel: "workspace:" + wsID,
+			Payload: map[string]string{"id": missionID, "identifier": ident, "status": "CANCELLED"},
+		})
+	}
+
+	h.logger.Info("issue stopped", "identifier", ident)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "CANCELLED", "identifier": ident})
 }

@@ -377,13 +377,19 @@ func (r *Router) registerRoutes() {
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}", authed(wsCtx(http.HandlerFunc(missions.UpdateTask))))
 
 	// Issues (Linear-like issue tracker)
-	issues := NewIssueHandler(r.db, r.hub, r.logger)
+	var issueStarter MissionStarter
+	if missionEngineForPublic != nil {
+		issueStarter = missionEngineForPublic
+	}
+	issues := NewIssueHandler(r.db, r.hub, issueStarter, r.logger)
 	r.mux.Handle("GET /api/v1/issues", authed(wsCtx(http.HandlerFunc(issues.List))))
 	r.mux.Handle("GET /api/v1/issues/{identifier}", authed(wsCtx(http.HandlerFunc(issues.GetByIdentifier))))
 	r.mux.Handle("POST /api/v1/crews/{crewId}/issues", authed(wsCtx(http.HandlerFunc(issues.Create))))
 	r.mux.Handle("GET /api/v1/crews/{crewId}/issues/{identifier}", authed(wsCtx(http.HandlerFunc(issues.Get))))
 	r.mux.Handle("PATCH /api/v1/crews/{crewId}/issues/{identifier}", authed(wsCtx(http.HandlerFunc(issues.Update))))
 	r.mux.Handle("DELETE /api/v1/crews/{crewId}/issues/{identifier}", authed(wsCtx(http.HandlerFunc(issues.Delete))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/issues/{identifier}/start", authed(wsCtx(http.HandlerFunc(issues.Start))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/issues/{identifier}/stop", authed(wsCtx(http.HandlerFunc(issues.Stop))))
 	// Labels
 	r.mux.Handle("GET /api/v1/labels", authed(wsCtx(http.HandlerFunc(issues.ListLabels))))
 	r.mux.Handle("POST /api/v1/labels", authed(wsCtx(http.HandlerFunc(issues.CreateLabel))))
