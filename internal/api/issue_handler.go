@@ -749,16 +749,18 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if ub.Empty() {
+	if ub.Empty() && req.Labels == nil {
 		writeProblem(w, r, http.StatusBadRequest, "No fields to update")
 		return
 	}
 
-	query, args := ub.Build("missions", "id = ?", missionID)
-	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
-		h.logger.Error("update issue", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
+	if !ub.Empty() {
+		query, args := ub.Build("missions", "id = ?", missionID)
+		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
+			h.logger.Error("update issue", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
 	}
 
 	// Update labels if provided
