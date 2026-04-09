@@ -594,7 +594,17 @@ export function IssueDetailInline({
 
             {issue.description && (
               <div className="mt-1.5">
-                <MarkdownContent compact>{issue.description}</MarkdownContent>
+                <div className="line-clamp-4 overflow-hidden">
+                  <MarkdownContent compact>{issue.description}</MarkdownContent>
+                </div>
+                {issue.description.length > 200 && issue.identifier && (
+                  <a
+                    href={`/orchestration/issues/${issue.identifier}`}
+                    className="text-[11px] text-blue-400 hover:text-blue-300 mt-1 inline-block"
+                  >
+                    Show full issue →
+                  </a>
+                )}
               </div>
             )}
           </div>

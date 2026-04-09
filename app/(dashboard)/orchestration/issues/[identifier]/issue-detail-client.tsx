@@ -157,6 +157,10 @@ export function IssueDetailClient() {
   const [activities, setActivities] = useState<IssueActivity[]>([])
   const [loadingActivity, setLoadingActivity] = useState(false)
 
+  // Description editing
+  const [editingDesc, setEditingDesc] = useState(false)
+  const [descDraft, setDescDraft] = useState("")
+
   // Relations
   const [relations, setRelations] = useState<IssueRelation[]>([])
 
@@ -598,14 +602,46 @@ export function IssueDetailClient() {
               )}
             </div>
 
-            {/* Description */}
+            {/* Description (click to edit) */}
             <div>
-              {issue.description ? (
-                <MarkdownContent>{issue.description}</MarkdownContent>
+              {editingDesc ? (
+                <div className="space-y-2">
+                  <textarea
+                    className="w-full min-h-[200px] bg-white/[0.02] border border-white/[0.1] rounded-lg p-4 text-sm font-mono text-foreground outline-none resize-y focus:border-blue-500/50"
+                    value={descDraft}
+                    onChange={(e) => setDescDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") { setDescDraft(issue.description || ""); setEditingDesc(false) }
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { patchIssue({ description: descDraft }); setEditingDesc(false) }
+                    }}
+                    autoFocus
+                    placeholder="Write description in Markdown..."
+                  />
+                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground/50">
+                    <span>Markdown supported</span>
+                    <span className="ml-auto">Cmd+Enter to save, Escape to cancel</span>
+                    <button
+                      onClick={() => { patchIssue({ description: descDraft }); setEditingDesc(false) }}
+                      className="px-2 py-0.5 rounded bg-blue-600 text-white text-[11px] hover:bg-blue-500"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
               ) : (
-                <p className="text-sm text-muted-foreground/50 italic">
-                  No description provided.
-                </p>
+                <div
+                  onClick={() => { setDescDraft(issue.description || ""); setEditingDesc(true) }}
+                  className="cursor-text hover:bg-white/[0.015] rounded-lg p-1 -m-1 transition-colors min-h-[40px] group"
+                >
+                  {issue.description ? (
+                    <>
+                      <MarkdownContent>{issue.description}</MarkdownContent>
+                      <p className="text-[10px] text-muted-foreground/0 group-hover:text-muted-foreground/30 mt-2 transition-colors">Click to edit</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground/40 italic py-4">Click to add description...</p>
+                  )}
+                </div>
               )}
             </div>
 

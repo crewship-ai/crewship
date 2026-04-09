@@ -34,22 +34,22 @@ export const MarkdownContent = memo(function MarkdownContent({ children, classNa
         "[&_ul]:text-sm [&_ul]:text-foreground/80 [&_ul]:pl-4 [&_ul]:mb-2",
         "[&_ol]:text-sm [&_ol]:text-foreground/80 [&_ol]:pl-4 [&_ol]:mb-2",
         "[&_li]:mb-0.5",
-        // Code
-        "[&_code]:bg-white/[0.06] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono [&_code]:text-blue-300",
-        "[&_pre]:bg-white/[0.04] [&_pre]:border [&_pre]:border-white/[0.06] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:mb-3 [&_pre]:overflow-x-auto",
-        "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-xs",
-        // Tables
+        // Code — emerald inline, dark bg for blocks
+        "[&_code]:bg-emerald-500/10 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs [&_code]:font-mono [&_code]:text-emerald-300",
+        "[&_pre]:bg-[#1a1b26] [&_pre]:border [&_pre]:border-white/[0.08] [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:mb-3 [&_pre]:overflow-x-auto",
+        "[&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-xs [&_pre_code]:text-foreground/80",
+        // Tables — more contrast
         "[&_table]:w-full [&_table]:text-xs [&_table]:mb-3",
-        "[&_th]:text-left [&_th]:text-muted-foreground [&_th]:font-medium [&_th]:py-1.5 [&_th]:px-2 [&_th]:border-b [&_th]:border-white/[0.08]",
+        "[&_th]:text-left [&_th]:text-foreground/90 [&_th]:font-semibold [&_th]:py-1.5 [&_th]:px-2 [&_th]:border-b [&_th]:border-white/[0.1] [&_th]:bg-white/[0.02]",
         "[&_td]:py-1.5 [&_td]:px-2 [&_td]:border-b [&_td]:border-white/[0.04] [&_td]:text-foreground/70",
         // Links
         "[&_a]:text-blue-400 [&_a]:underline [&_a]:underline-offset-2 hover:[&_a]:text-blue-300",
-        // Blockquotes
-        "[&_blockquote]:border-l-2 [&_blockquote]:border-blue-500/30 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_blockquote]:italic",
+        // Blockquotes — amber accent
+        "[&_blockquote]:border-l-2 [&_blockquote]:border-amber-500/40 [&_blockquote]:pl-3 [&_blockquote]:text-foreground/60 [&_blockquote]:italic [&_blockquote]:my-2",
         // HR
         "[&_hr]:border-white/[0.06] [&_hr]:my-3",
         // Compact mode for right panel
-        compact && "[&_p]:text-xs [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_ul]:text-xs [&_ol]:text-xs",
+        compact && "[&_p]:text-xs [&_h1]:text-sm [&_h2]:text-sm [&_h3]:text-xs [&_ul]:text-xs [&_ol]:text-xs [&_table]:text-[10px] [&_th]:py-1 [&_td]:py-1",
         className,
       )}
       plugins={plugins}
