@@ -16,6 +16,8 @@ type trackedContainer struct {
 	WorkspaceID string
 }
 
+// StatsCollector periodically polls container metrics and broadcasts them
+// to WebSocket clients subscribed to workspace channels.
 type StatsCollector struct {
 	container provider.ContainerProvider
 	hub       *ws.Hub
@@ -27,6 +29,8 @@ type StatsCollector struct {
 	latest    map[string]*provider.ContainerMetrics
 }
 
+// NewStatsCollector creates a StatsCollector that polls container metrics at
+// the given interval and broadcasts them via the WebSocket hub.
 func NewStatsCollector(ctr provider.ContainerProvider, hub *ws.Hub, logger *slog.Logger, interval time.Duration) *StatsCollector {
 	if interval <= 0 {
 		interval = 5 * time.Second
@@ -38,12 +42,14 @@ func NewStatsCollector(ctr provider.ContainerProvider, hub *ws.Hub, logger *slog
 	}
 }
 
+// Register adds a container to the polling set.
 func (sc *StatsCollector) Register(containerID, crewID, workspaceID string) {
 	sc.mu.Lock()
 	sc.tracked[containerID] = trackedContainer{ContainerID: containerID, CrewID: crewID, WorkspaceID: workspaceID}
 	sc.mu.Unlock()
 }
 
+// Unregister removes a container from the polling set.
 func (sc *StatsCollector) Unregister(containerID string) {
 	sc.mu.Lock()
 	delete(sc.tracked, containerID)
@@ -53,6 +59,7 @@ func (sc *StatsCollector) Unregister(containerID string) {
 	sc.latestMu.Unlock()
 }
 
+// Latest returns the most recent metrics for a container, or nil if unavailable.
 func (sc *StatsCollector) Latest(containerID string) *provider.ContainerMetrics {
 	sc.latestMu.RLock()
 	defer sc.latestMu.RUnlock()
@@ -81,6 +88,7 @@ func (sc *StatsCollector) LatestByCrewID(crewID string) (string, *provider.Conta
 	return containerID, m
 }
 
+// Run starts the polling loop, blocking until ctx is cancelled.
 func (sc *StatsCollector) Run(ctx context.Context) {
 	ticker := time.NewTicker(sc.interval)
 	defer ticker.Stop()

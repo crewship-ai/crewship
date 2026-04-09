@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// FileInfo describes a file or directory returned by the file listing API.
 type FileInfo struct {
 	Path    string    `json:"path"`
 	Name    string    `json:"name"`
@@ -19,14 +20,17 @@ type FileInfo struct {
 	ModTime time.Time `json:"mod_time"`
 }
 
+// Server serves file listing and download endpoints for crew output directories.
 type Server struct {
 	basePath string
 }
 
+// NewServer creates a file server rooted at basePath.
 func NewServer(basePath string) *Server {
 	return &Server{basePath: basePath}
 }
 
+// HandleFileList returns a JSON listing of files in a crew's output directory.
 func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("id")
 	subPath := r.URL.Query().Get("path")
@@ -43,7 +47,23 @@ func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries, err := os.ReadDir(dir)
+	// Resolve symlinks and re-check containment (matches HandleFileDownload V-09).
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"crew_id": crewID, "files": []FileInfo{}})
+		return
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"crew_id": crewID, "files": []FileInfo{}})
+		return
+	}
+	if realDir != realBase && !strings.HasPrefix(realDir, realBase+string(os.PathSeparator)) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	entries, err := os.ReadDir(realDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			writeJSON(w, http.StatusOK, map[string]any{
@@ -52,7 +72,7 @@ func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -78,6 +98,7 @@ func (s *Server) HandleFileList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleFileDownload serves a file from a crew's output directory for download.
 func (s *Server) HandleFileDownload(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("id")
 	filePath := r.PathValue("path")
@@ -112,14 +133,14 @@ func (s *Server) HandleFileDownload(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", detectMIME(filePath))
