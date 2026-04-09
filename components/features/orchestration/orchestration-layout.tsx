@@ -579,42 +579,22 @@ export function OrchestrationLayout({
 
         <div className="flex-1" />
 
-        {/* Context action: Start button when issue is selected */}
-        {selectedIssue && (selectedIssue.status === "BACKLOG" || selectedIssue.status === "TODO") && (
-          <Button
-            size="sm"
-            className="h-7 gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs shrink-0"
-            onClick={() => {
-              // TODO: start mission for this issue
-              toast.info(`Starting ${selectedIssue.identifier}...`)
-            }}
-          >
-            <Play className="h-3 w-3" />
-            Start
-          </Button>
-        )}
-
-        {/* Create dropdown */}
+        {/* Create dropdown — Linear style */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm" className="h-7 gap-1 bg-blue-600 hover:bg-blue-500 text-white text-xs shrink-0">
+            <Button size="sm" className="h-7 gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs shrink-0">
               <Plus className="h-3.5 w-3.5" />
+              New
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem onClick={() => toast.info("Create issue dialog coming soon")}>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuItem onClick={() => toast.info("Create issue dialog — coming soon")}>
               <CircleDot className="h-3.5 w-3.5 mr-2" />
               New Issue
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => toast.info("Create project dialog coming soon")}>
+            <DropdownMenuItem onClick={() => toast.info("Create project dialog — coming soon")}>
               <FolderKanban className="h-3.5 w-3.5 mr-2" />
               New Project
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem disabled className="opacity-40">
-              <Clock className="h-3.5 w-3.5 mr-2" />
-              New Routine
-              <span className="ml-auto text-[9px] bg-muted px-1.5 rounded">soon</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
