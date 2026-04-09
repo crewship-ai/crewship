@@ -1304,12 +1304,31 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 	}
 	rows.Close()
 
+	if len(candidates) == 0 {
+		return
+	}
+
+	// Batch-fetch all task statuses for this mission to avoid per-dep queries
+	statusRows, sErr := e.db.QueryContext(ctx,
+		`SELECT id, status FROM mission_tasks WHERE mission_id = ?`, missionID)
+	if sErr != nil {
+		e.logger.Error("batch query task statuses", "error", sErr)
+		return
+	}
+	statusMap := make(map[string]string)
+	for statusRows.Next() {
+		var id, st string
+		if err := statusRows.Scan(&id, &st); err == nil {
+			statusMap[id] = st
+		}
+	}
+	statusRows.Close()
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, bt := range candidates {
 		allDone := true
 		for _, d := range bt.deps {
-			var s string
-			if err := e.db.QueryRowContext(ctx, `SELECT status FROM mission_tasks WHERE id = ?`, d).Scan(&s); err != nil || s != "COMPLETED" {
+			if statusMap[d] != "COMPLETED" {
 				allDone = false
 				break
 			}

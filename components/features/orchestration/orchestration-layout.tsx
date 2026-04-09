@@ -257,6 +257,13 @@ export interface OrchestrationLayoutProps {
   onMissionCreated: () => void
 }
 
+const ORCH_DRAWER_TABS = [
+  { id: "messages" as const, label: "Messages", icon: MessageSquare },
+  { id: "exec" as const, label: "Exec Log", icon: Terminal },
+  { id: "yaml" as const, label: "YAML", icon: FileCode2 },
+  { id: "docker" as const, label: "Docker", icon: Container },
+]
+
 const ORCH_TABS = [
   { id: "issues", label: "Issues", icon: CircleDot },
   { id: "graph", label: "Graph", icon: Workflow },
@@ -1021,12 +1028,7 @@ export function OrchestrationLayout({
               if (!drawerOpen) setDrawerOpen(true)
             }}
           >
-            {([
-              { id: "messages" as const, label: "Messages", icon: MessageSquare },
-              { id: "exec" as const, label: "Exec Log", icon: Terminal },
-              { id: "yaml" as const, label: "YAML", icon: FileCode2 },
-              { id: "docker" as const, label: "Docker", icon: Container },
-            ]).map(({ id, label, icon: Icon }) => (
+            {ORCH_DRAWER_TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 className={cn(

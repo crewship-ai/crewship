@@ -121,29 +121,27 @@ func (pw *ProgressWriter) BuildProgressContext(traceID, crewSlug string) string 
 		return ""
 	}
 
-	var result string
-	result = "[MISSION PROGRESS - previous events in this mission]\n"
+	var b strings.Builder
+	b.WriteString("[MISSION PROGRESS - previous events in this mission]\n")
 	for _, ev := range events {
+		ts := ev.Timestamp.Format("15:04:05")
 		switch ev.Type {
 		case "task_completed", "task_COMPLETED":
-			result += fmt.Sprintf("[%s] Task '%s' by @%s: COMPLETED — %s\n",
-				ev.Timestamp.Format("15:04:05"), ev.Title, ev.AgentSlug, ev.Summary)
+			fmt.Fprintf(&b, "[%s] Task '%s' by @%s: COMPLETED — %s\n", ts, ev.Title, ev.AgentSlug, ev.Summary)
 		case "task_FAILED", "task_failed":
-			result += fmt.Sprintf("[%s] Task '%s' by @%s: FAILED — %s\n",
-				ev.Timestamp.Format("15:04:05"), ev.Title, ev.AgentSlug, ev.Error)
+			fmt.Fprintf(&b, "[%s] Task '%s' by @%s: FAILED — %s\n", ts, ev.Title, ev.AgentSlug, ev.Error)
 		case "task_started":
-			result += fmt.Sprintf("[%s] Task '%s' assigned to @%s\n",
-				ev.Timestamp.Format("15:04:05"), ev.Title, ev.AgentSlug)
+			fmt.Fprintf(&b, "[%s] Task '%s' assigned to @%s\n", ts, ev.Title, ev.AgentSlug)
 		case "mission_started":
-			result += fmt.Sprintf("[%s] Mission started\n", ev.Timestamp.Format("15:04:05"))
+			fmt.Fprintf(&b, "[%s] Mission started\n", ts)
 		case "mission_REVIEW", "mission_review":
-			result += fmt.Sprintf("[%s] All tasks completed — mission in review\n", ev.Timestamp.Format("15:04:05"))
+			fmt.Fprintf(&b, "[%s] All tasks completed — mission in review\n", ts)
 		default:
-			result += fmt.Sprintf("[%s] %s\n", ev.Timestamp.Format("15:04:05"), ev.Type)
+			fmt.Fprintf(&b, "[%s] %s\n", ts, ev.Type)
 		}
 	}
-	result += "[END MISSION PROGRESS]\n"
-	return result
+	b.WriteString("[END MISSION PROGRESS]\n")
+	return b.String()
 }
 
 func splitLines(data []byte) [][]byte {
