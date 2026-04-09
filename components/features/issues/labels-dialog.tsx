@@ -85,7 +85,8 @@ export function LabelsDialog({
       setNewName("")
       setNewGroup("")
       onLabelsChanged()
-    } catch {
+    } catch (err) {
+      console.error("Failed to create label:", err)
       toast.error("Failed to create label")
     } finally {
       setCreating(false)
@@ -101,7 +102,7 @@ export function LabelsDialog({
     setSaving(true)
     try {
       const res = await fetch(
-        `/api/v1/labels/${id}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        `/api/v1/labels/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -119,7 +120,8 @@ export function LabelsDialog({
       toast.success("Label updated")
       setEditingId(null)
       onLabelsChanged()
-    } catch {
+    } catch (err) {
+      console.error("Failed to update label:", err)
       toast.error("Failed to update label")
     } finally {
       setSaving(false)
@@ -131,7 +133,7 @@ export function LabelsDialog({
     setDeletingId(id)
     try {
       const res = await fetch(
-        `/api/v1/labels/${id}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        `/api/v1/labels/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
           method: "DELETE",
         },
@@ -144,7 +146,8 @@ export function LabelsDialog({
       toast.success("Label deleted")
       setConfirmDeleteId(null)
       onLabelsChanged()
-    } catch {
+    } catch (err) {
+      console.error("Failed to delete label:", err)
       toast.error("Failed to delete label")
     } finally {
       setDeletingId(null)

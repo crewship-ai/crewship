@@ -119,6 +119,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [credentials, setCredentials] = useState<CredentialResult[]>([])
   const [issues, setIssues] = useState<IssueResult[]>([])
   const [projects, setProjects] = useState<ProjectResult[]>([])
+  const filteredIssues = issues.filter((issue) => issue.identifier)
 
   useEffect(() => {
     if (!open || !workspaceId) return
@@ -189,11 +190,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           ))}
         </CommandGroup>
 
-        {issues.length > 0 && (
+        {filteredIssues.length > 0 && (
           <>
             <CommandSeparator />
             <CommandGroup heading="Issues">
-              {issues.filter((issue) => issue.identifier).map((issue) => (
+              {filteredIssues.map((issue) => (
                 <CommandItem
                   key={issue.id}
                   value={`issue ${issue.identifier} ${issue.title}`}

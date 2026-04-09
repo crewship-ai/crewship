@@ -617,6 +617,7 @@ var issueStartCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
+		resp.Body.Close()
 		cli.PrintSuccess(fmt.Sprintf("Started %s — agent dispatched", *iss.Identifier))
 		return nil
 	},
@@ -650,6 +651,7 @@ var issueStopCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
+		resp.Body.Close()
 		cli.PrintSuccess(fmt.Sprintf("Stopped %s", *iss.Identifier))
 		return nil
 	},
@@ -699,6 +701,7 @@ var issueReviewCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
+		resp.Body.Close()
 		if action == "approve" {
 			cli.PrintSuccess(fmt.Sprintf("Approved %s", *iss.Identifier))
 		} else {
@@ -725,7 +728,7 @@ func init() {
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description")
 	issueCreateCmd.Flags().String("priority", "none", "Priority: none, low, medium, high, urgent")
-	issueCreateCmd.Flags().String("assignee", "", "Assignee agent slug or user email")
+	issueCreateCmd.Flags().String("assignee", "", "Assignee agent slug")
 	issueCreateCmd.Flags().String("assignee-type", "agent", "Assignee type: agent or user")
 	issueCreateCmd.Flags().String("labels", "", "Comma-separated label IDs")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (ISO 8601)")
@@ -735,7 +738,7 @@ func init() {
 	issueUpdateCmd.Flags().String("description", "", "New description")
 	issueUpdateCmd.Flags().String("status", "", "New status: BACKLOG, TODO, IN_PROGRESS, REVIEW, DONE, FAILED, CANCELLED, DUPLICATE")
 	issueUpdateCmd.Flags().String("priority", "", "New priority: none, low, medium, high, urgent")
-	issueUpdateCmd.Flags().String("assignee", "", "New assignee ID")
+	issueUpdateCmd.Flags().String("assignee", "", "Assignee agent slug")
 	issueUpdateCmd.Flags().String("assignee-type", "", "Assignee type: agent or user")
 	issueUpdateCmd.Flags().String("due-date", "", "Due date (ISO 8601)")
 

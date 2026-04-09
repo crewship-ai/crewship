@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Bell, Check, CheckCheck } from "lucide-react"
 import {
   DropdownMenu,
@@ -43,13 +43,16 @@ export function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
+  const countRequestSeq = useRef(0)
+  const listRequestSeq = useRef(0)
 
   // Fetch unread count
   const fetchCount = useCallback(async () => {
     if (!workspaceId) return
+    const seq = ++countRequestSeq.current
     try {
       const res = await fetch(`/api/v1/notifications/count?workspace_id=${encodeURIComponent(workspaceId)}`)
-      if (res.ok) {
+      if (res.ok && seq === countRequestSeq.current) {
         const data = await res.json()
         setUnreadCount(data.unread ?? data.count ?? 0)
       }
@@ -61,17 +64,20 @@ export function NotificationBell() {
   // Fetch notification list
   const fetchNotifications = useCallback(async () => {
     if (!workspaceId) return
+    const seq = ++listRequestSeq.current
     setLoading(true)
     try {
       const res = await fetch(`/api/v1/notifications?workspace_id=${encodeURIComponent(workspaceId)}&limit=20`)
-      if (res.ok) {
+      if (res.ok && seq === listRequestSeq.current) {
         const data = await res.json()
         setNotifications(Array.isArray(data) ? data : data.notifications ?? [])
       }
     } catch {
       // silent
     } finally {
-      setLoading(false)
+      if (seq === listRequestSeq.current) {
+        setLoading(false)
+      }
     }
   }, [workspaceId])
 

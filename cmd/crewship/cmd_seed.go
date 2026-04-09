@@ -134,7 +134,18 @@ func seedBootstrap(password string) (*cli.Client, string, error) {
 		fmt.Fprintf(os.Stderr, "  Workspace: %s\n", result.WorkspaceID)
 		return cli.NewClient(server, result.CLIToken, result.WorkspaceID), result.UserID, nil
 	}
-	resp.Body.Close()
+	// Only fall through to auth for 409 (already initialized).
+	// Other errors are real failures.
+	if resp.StatusCode != http.StatusConflict {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		bodyStr := strings.TrimSpace(string(bodyBytes))
+		if !strings.Contains(bodyStr, "already initialized") {
+			return nil, "", fmt.Errorf("bootstrap failed: HTTP %d: %s", resp.StatusCode, bodyStr)
+		}
+	} else {
+		resp.Body.Close()
+	}
 
 	// Already initialized — fall back to existing auth
 	if err := requireAuth(); err != nil {
@@ -182,10 +193,17 @@ func seedNuke(client *cli.Client) error {
 				if iss.Identifier == nil {
 					continue
 				}
-				// Move to CANCELLED first (only BACKLOG/CANCELLED can be deleted)
+				// Transition through valid status path to CANCELLED (only BACKLOG/CANCELLED can be deleted)
 				if iss.Status != "BACKLOG" && iss.Status != "CANCELLED" {
-					r, _ := client.Patch(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier), map[string]string{"status": "CANCELLED"})
-					if r != nil {
+					for _, status := range seeddata.StatusPath("CANCELLED") {
+						r, err := client.Patch(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier), map[string]string{"status": status})
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "  ! nuke transition %s→%s: %v\n", *iss.Identifier, status, err)
+							break
+						}
+						if r.StatusCode >= 400 {
+							fmt.Fprintf(os.Stderr, "  ! nuke transition %s→%s: HTTP %d\n", *iss.Identifier, status, r.StatusCode)
+						}
 						r.Body.Close()
 					}
 				}
@@ -704,6 +722,14 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 		}
 		if resp.StatusCode >= 400 {
 			resp.Body.Close()
+			// Resolve existing project by name (same pattern as credentials)
+			existingID, err := resolveByName(client, "/api/v1/projects", p.Name)
+			if err == nil && existingID != "" {
+				projectIDs[p.Name] = existingID
+				fmt.Fprintf(os.Stderr, "  = Project exists: %s\n", p.Name)
+			} else {
+				fmt.Fprintf(os.Stderr, "  ! Project %s: HTTP %d (could not resolve existing)\n", p.Name, resp.StatusCode)
+			}
 			continue
 		}
 		var created struct{ ID string `json:"id"` }
@@ -713,8 +739,14 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 		}
 	}
 
-	// Create issues
+	// Create issues — track identifiers and crew IDs for relations
 	fmt.Fprintln(os.Stderr, "Creating issues...")
+	type createdIssue struct {
+		Identifier string
+		CrewID     string
+	}
+	createdIssues := make([]createdIssue, 0, len(seeddata.Issues))
+
 	for _, def := range seeddata.Issues {
 		crewID, ok := crewIDs[def.CrewSlug]
 		if !ok {
@@ -753,6 +785,9 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 		ident := ""
 		if created.Identifier != nil {
 			ident = *created.Identifier
+		}
+		if ident != "" {
+			createdIssues = append(createdIssues, createdIssue{Identifier: ident, CrewID: crewID})
 		}
 		fmt.Fprintf(os.Stderr, "  + %s: %s (%s)\n", ident, truncate(def.Title, 50), def.Priority)
 
@@ -808,57 +843,37 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// Create relations between issues
+	// Create relations between issues using tracked identifiers
 	fmt.Fprintln(os.Stderr, "Creating relations...")
-	resp, err := client.Get("/api/v1/issues?limit=100")
-	if err == nil {
-		var allIssues []struct {
-			ID         string  `json:"id"`
-			CrewID     string  `json:"crew_id"`
-			Identifier *string `json:"identifier"`
+	if len(createdIssues) >= 6 {
+		type relDef struct {
+			source, target, rtype string
 		}
-		if cli.ReadJSON(resp, &allIssues) == nil && len(allIssues) >= 6 {
-			identifiers := make([]string, 0)
-			issueCrew := make([]string, 0)
-			for _, iss := range allIssues {
-				if iss.Identifier != nil {
-					identifiers = append(identifiers, *iss.Identifier)
-					issueCrew = append(issueCrew, iss.CrewID)
-				}
+		rels := []relDef{
+			{createdIssues[0].Identifier, createdIssues[1].Identifier, "blocks"},
+			{createdIssues[0].Identifier, createdIssues[4].Identifier, "relates_to"},
+			{createdIssues[2].Identifier, createdIssues[3].Identifier, "relates_to"},
+			{createdIssues[5].Identifier, createdIssues[4].Identifier, "blocked_by"},
+		}
+		// Build identifier→crewID lookup from tracked data
+		issueCrew := map[string]string{}
+		for _, ci := range createdIssues {
+			issueCrew[ci.Identifier] = ci.CrewID
+		}
+		for _, rd := range rels {
+			srcCrewID := issueCrew[rd.source]
+			if srcCrewID == "" {
+				continue
 			}
-			type relDef struct {
-				source, target, rtype string
-			}
-			var rels []relDef
-			if len(identifiers) >= 6 {
-				rels = []relDef{
-					{identifiers[0], identifiers[1], "blocks"},
-					{identifiers[0], identifiers[4], "relates_to"},
-					{identifiers[2], identifiers[3], "relates_to"},
-					{identifiers[5], identifiers[4], "blocked_by"},
+			r, err := client.Post(
+				fmt.Sprintf("/api/v1/crews/%s/issues/%s/relations", srcCrewID, rd.source),
+				map[string]string{"target_identifier": rd.target, "relation_type": rd.rtype},
+			)
+			if err == nil {
+				if r.StatusCode < 400 {
+					fmt.Fprintf(os.Stderr, "  + %s %s %s\n", rd.source, rd.rtype, rd.target)
 				}
-			}
-			for _, rd := range rels {
-				var srcCrewID string
-				for i, ident := range identifiers {
-					if ident == rd.source {
-						srcCrewID = issueCrew[i]
-						break
-					}
-				}
-				if srcCrewID == "" {
-					continue
-				}
-				r, err := client.Post(
-					fmt.Sprintf("/api/v1/crews/%s/issues/%s/relations", srcCrewID, rd.source),
-					map[string]string{"target_identifier": rd.target, "relation_type": rd.rtype},
-				)
-				if err == nil {
-					if r.StatusCode < 400 {
-						fmt.Fprintf(os.Stderr, "  + %s %s %s\n", rd.source, rd.rtype, rd.target)
-					}
-					r.Body.Close()
-				}
+				r.Body.Close()
 			}
 		}
 	}

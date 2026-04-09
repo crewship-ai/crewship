@@ -49,6 +49,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { getCrewDotColor } from "@/lib/crew-icon"
 import { toast } from "sonner"
 import type {
   IssueActivity,
@@ -162,6 +163,13 @@ export function IssueDetailClient() {
 
   // Description editing
   const [descDraft, setDescDraft] = useState("")
+
+  // Sync descDraft when issue description changes (prevents patching empty on blur)
+  useEffect(() => {
+    if (issue?.description !== undefined) {
+      setDescDraft(issue.description || "")
+    }
+  }, [issue?.description])
 
   // Relations
   const [relations, setRelations] = useState<IssueRelation[]>([])
@@ -501,6 +509,7 @@ export function IssueDetailClient() {
           size="icon"
           className="h-7 w-7 text-muted-foreground hover:text-foreground"
           onClick={() => router.push("/orchestration")}
+          aria-label="Back to issues"
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
@@ -535,6 +544,7 @@ export function IssueDetailClient() {
                 size="icon"
                 className="h-7 w-7 text-muted-foreground hover:text-foreground"
                 onClick={handleCopyUrl}
+                aria-label="Copy link"
               >
                 <Link2 className="h-3.5 w-3.5" />
               </Button>
@@ -569,6 +579,7 @@ export function IssueDetailClient() {
                     className="h-8 w-8 shrink-0"
                     onClick={handleSaveTitle}
                     disabled={saving}
+                    aria-label="Save title"
                   >
                     {saving ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -581,6 +592,7 @@ export function IssueDetailClient() {
                     variant="ghost"
                     className="h-8 w-8 shrink-0"
                     onClick={() => setEditingTitle(false)}
+                    aria-label="Cancel editing"
                   >
                     <X className="h-4 w-4" />
                   </Button>
@@ -1024,6 +1036,7 @@ export function IssueDetailClient() {
                       variant="ghost"
                       size="icon"
                       className="h-5 w-5 text-muted-foreground/50 hover:text-foreground"
+                      aria-label="Add label"
                     >
                       <Plus className="h-3 w-3" />
                     </Button>
@@ -1111,7 +1124,7 @@ export function IssueDetailClient() {
                           >
                             <span
                               className="mr-2 h-2.5 w-2.5 rounded shrink-0"
-                              style={{ backgroundColor: project.color }}
+                              style={{ backgroundColor: getCrewDotColor(project.color) }}
                             />
                             <span className="text-xs">{project.name}</span>
                             {issue.project_id === project.id && (
