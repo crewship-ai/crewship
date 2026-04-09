@@ -608,24 +608,21 @@ export function OrchestrationLayout({
 
         <div className="flex-1" />
 
-        {/* Create dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-1 h-7 px-2.5 rounded-md text-xs text-muted-foreground hover:text-foreground bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] hover:border-white/[0.12] transition-colors shrink-0">
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuItem onClick={() => setShowCreateIssue(true)}>
-              <CircleDot className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
-              New Issue
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setShowCreateProject(true)}>
-              <FolderKanban className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
-              New Project
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Create buttons */}
+        <button
+          onClick={() => setShowCreateIssue(true)}
+          className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20"
+        >
+          <CircleDot className="h-3 w-3" />
+          New Issue
+        </button>
+        <button
+          onClick={() => setShowCreateProject(true)}
+          className="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium transition-colors shrink-0 bg-accent text-accent-foreground hover:bg-accent/80 border border-white/[0.08]"
+        >
+          <FolderKanban className="h-3 w-3" />
+          New Project
+        </button>
       </div>
 
       {/* ---- Main 3-column layout ---- */}
