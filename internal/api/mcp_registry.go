@@ -83,7 +83,7 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 		return fmt.Errorf("parse registry response: %w", err)
 	}
 
-	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	now := time.Now().UTC().Format(time.RFC3339)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin sync transaction: %w", err)
