@@ -2,13 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Search, X, Send, Clock, Plus, ChevronDown, ChevronRight, User, Link2, FolderKanban, Hash, Flag } from "lucide-react"
+import { motion, AnimatePresence } from "motion/react"
+import { Search, X, Send, Clock, Plus, ChevronDown, User, Link2, FolderKanban, Hash, Flag } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
 import { LabelBadge } from "@/components/features/issues/label-badge"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
+import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { IssuesBoardView } from "@/components/features/issues/issues-board-view"
 import { IssuesListView } from "@/components/features/issues/issues-list-view"
@@ -275,40 +277,46 @@ function SectionHeader({
   action?: React.ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between px-3 py-2">
+    <div className="group/sh flex items-center px-2 py-1.5">
       <button
         onClick={onToggle}
-        className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground/70 hover:text-muted-foreground/90 transition-colors"
+        className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/35 hover:text-muted-foreground/60 transition-colors"
       >
-        {open ? (
-          <ChevronDown className="h-3 w-3" />
-        ) : (
-          <ChevronRight className="h-3 w-3" />
-        )}
+        <ChevronDown className={cn("h-2.5 w-2.5 transition-transform duration-200", !open && "-rotate-90")} />
         {title}
       </button>
-      {action}
+      <div className="flex-1" />
+      <div className="opacity-0 group-hover/sh:opacity-100 transition-opacity">
+        {action}
+      </div>
     </div>
   )
 }
 
-/* -- Clickable property row ----------------------------------------------- */
+/* -- Two-column property row: label left (72px), value right-aligned ------ */
 
 function PropertyRow({
+  label,
   children,
   className,
 }: {
+  label?: string
   children: React.ReactNode
   className?: string
 }) {
   return (
     <div
       className={cn(
-        "flex items-center gap-2 px-3 py-1.5 rounded-sm hover:bg-white/[0.04] transition-colors cursor-pointer",
+        "flex items-center px-2 py-1 mx-1 rounded hover:bg-white/[0.03] transition-colors cursor-pointer",
         className,
       )}
     >
-      {children}
+      {label && (
+        <span className="text-[11px] text-muted-foreground/30 w-[72px] shrink-0">{label}</span>
+      )}
+      <span className="flex-1 flex items-center gap-[5px] justify-end text-[11.5px] text-foreground/65 min-w-0">
+        {children}
+      </span>
     </div>
   )
 }
@@ -384,17 +392,6 @@ export function IssueDetailInline({
       .catch(() => {})
   }, [issue.project_id, workspaceId])
 
-  // Fetch all agents for assignee picker
-  useEffect(() => {
-    if (!workspaceId) return
-    fetch(`/api/v1/agents?workspace_id=${workspaceId}`)
-      .then(r => r.ok ? r.json() : [])
-      .then((agents: Array<{id: string, name: string, slug: string, crew?: {slug: string}}>) =>
-        setCrewAgents(agents.map(a => ({ id: a.id, name: a.name, slug: a.slug, crew_slug: a.crew?.slug })))
-      )
-      .catch(() => {})
-  }, [workspaceId])
-
   const matchingProject = projects.find((p) => p.id === issue.project_id)
 
   // Relations
@@ -437,11 +434,17 @@ export function IssueDetailInline({
       .catch(() => {})
   }, [issue.crew_id, issue.identifier, workspaceId, issue.updated_at])
 
+  // Fetch agents for assignee picker — crew-scoped when available, all agents otherwise
   useEffect(() => {
-    if (!issue.crew_id || !workspaceId) return
-    fetch(`/api/v1/agents?workspace_id=${workspaceId}&crew_id=${issue.crew_id}`)
+    if (!workspaceId) return
+    const url = issue.crew_id
+      ? `/api/v1/agents?workspace_id=${workspaceId}&crew_id=${issue.crew_id}`
+      : `/api/v1/agents?workspace_id=${workspaceId}`
+    fetch(url)
       .then(r => r.ok ? r.json() : [])
-      .then(agents => setCrewAgents(agents.map((a: any) => ({ id: a.id, name: a.name, slug: a.slug }))))
+      .then((agents: Array<{id: string, name: string, slug: string, crew?: {slug: string}}>) =>
+        setCrewAgents(agents.map(a => ({ id: a.id, name: a.name, slug: a.slug, crew_slug: a.crew?.slug })))
+      )
       .catch(() => {})
   }, [issue.crew_id, workspaceId])
 
@@ -638,25 +641,26 @@ export function IssueDetailInline({
             )}
           </div>
 
-          {/* ── Start / Stop actions ──────────────────────────────────────── */}
+          {/* ── Actions (compact inline row) ──────────────────────────────── */}
+          <AnimatePresence mode="wait">
           {(issue.status === "BACKLOG" || issue.status === "TODO") && issue.assignee_id && (
-            <div className="mt-3 px-0">
+            <motion.div key="start" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex gap-[5px] px-[10px] py-1">
               <button
                 onClick={async () => {
                   const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
                   const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/start${qs}`, { method: "POST" })
-                  if (res.ok) { toast.success("Issue started — agent dispatched"); onUpdated() }
+                  if (res.ok) { toast.success("Issue started"); onUpdated() }
                   else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to start") }
                 }}
-                className="w-full flex items-center justify-center gap-2 h-8 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors"
+                className="flex-1 flex items-center justify-center gap-1.5 h-[26px] rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-medium transition-colors"
               >
-                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg>
+                <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg>
                 Start
               </button>
-            </div>
+            </motion.div>
           )}
           {issue.status === "IN_PROGRESS" && (
-            <div className="mt-3 px-0">
+            <motion.div key="stop" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex gap-[5px] px-[10px] py-1">
               <button
                 onClick={async () => {
                   const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
@@ -664,91 +668,86 @@ export function IssueDetailInline({
                   if (res.ok) { toast.success("Issue stopped"); onUpdated() }
                   else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to stop") }
                 }}
-                className="w-full flex items-center justify-center gap-2 h-8 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-medium hover:bg-red-500/20 transition-colors"
+                className="flex-1 flex items-center justify-center gap-1.5 h-[26px] rounded-md bg-red-500/10 border border-red-500/25 text-red-400 text-[11px] font-medium hover:bg-red-500/20 transition-colors"
               >
-                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
+                <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
                 Stop
               </button>
-            </div>
+            </motion.div>
           )}
           {issue.status === "REVIEW" && (
-            <div className="mt-3 space-y-2">
-              <button
-                onClick={async () => {
-                  const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ action: "approve" }),
-                  })
-                  if (res.ok) { toast.success("Issue approved"); onUpdated() }
-                  else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed") }
-                }}
-                className="w-full flex items-center justify-center gap-2 h-8 rounded-md bg-green-600 hover:bg-green-500 text-white text-xs font-medium transition-colors"
-              >
-                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 8.5l3.5 3.5 6.5-8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                Approve
-              </button>
-              <button
-                onClick={() => setReviewChangesOpen(true)}
-                className="w-full flex items-center justify-center gap-2 h-8 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium hover:bg-amber-500/20 transition-colors"
-              >
-                Request Changes
-              </button>
+            <motion.div key="review" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="px-[10px] py-1 space-y-1.5">
+              <div className="flex gap-[5px]">
+                <button
+                  onClick={async () => {
+                    const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+                    const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
+                      method: "POST", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "approve" }),
+                    })
+                    if (res.ok) { toast.success("Issue approved"); onUpdated() }
+                    else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed") }
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 h-[26px] rounded-md bg-green-600 hover:bg-green-500 text-white text-[11px] font-medium transition-colors"
+                >
+                  &#10003; Approve
+                </button>
+                <button
+                  onClick={() => setReviewChangesOpen(true)}
+                  className="flex items-center justify-center gap-1 h-[26px] px-2.5 rounded-md bg-amber-500/8 border border-amber-500/20 text-amber-400 text-[11px] font-medium hover:bg-amber-500/15 transition-colors"
+                >
+                  Changes
+                </button>
+              </div>
               {reviewChangesOpen && (
-                <div className="border border-white/[0.06] rounded-md p-3 space-y-2">
+                <div className="border border-white/[0.06] rounded-md p-2 space-y-1.5">
                   <textarea
-                    className="w-full h-16 bg-transparent border border-white/[0.08] rounded px-2 py-1.5 text-xs text-foreground outline-none resize-none"
+                    className="w-full h-14 bg-transparent border border-white/[0.08] rounded px-2 py-1.5 text-[11px] text-foreground outline-none resize-none"
                     placeholder="What needs to change..."
                     value={reviewComment}
                     onChange={(e) => setReviewComment(e.target.value)}
                   />
-                  <div className="flex gap-2">
+                  <div className="flex gap-1.5">
                     <button
                       onClick={() => { setReviewChangesOpen(false); setReviewComment("") }}
-                      className="flex-1 h-7 rounded text-xs text-muted-foreground hover:text-foreground border border-white/[0.06]"
-                    >
-                      Cancel
-                    </button>
+                      className="flex-1 h-6 rounded text-[11px] text-muted-foreground hover:text-foreground border border-white/[0.06]"
+                    >Cancel</button>
                     <button
                       onClick={async () => {
                         const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
                         const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
+                          method: "POST", headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ action: "request_changes", comment: reviewComment }),
                         })
                         if (res.ok) { toast.success("Changes requested"); setReviewChangesOpen(false); setReviewComment(""); onUpdated() }
                         else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed") }
                       }}
-                      className="flex-1 h-7 rounded text-xs bg-amber-600 text-white hover:bg-amber-500"
-                    >
-                      Send
-                    </button>
+                      className="flex-1 h-6 rounded text-[11px] bg-amber-600 text-white hover:bg-amber-500"
+                    >Send</button>
                   </div>
                 </div>
               )}
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
 
           {/* ── Properties section ───────────────────────────────────────── */}
-          <div className="mt-3 mx-2 rounded-lg border border-white/[0.06]">
+          <div className="mt-2 mx-2 rounded-lg border border-white/[0.04]">
             <SectionHeader
               title="Properties"
               open={propertiesOpen}
               onToggle={() => setPropertiesOpen((v) => !v)}
             />
+            <AnimatePresence initial={false}>
             {propertiesOpen && (
-              <div>
+              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}>
                 {/* Status */}
                 <Popover open={statusOpen} onOpenChange={setStatusOpen}>
                   <PopoverTrigger asChild>
                     <div>
-                      <PropertyRow>
+                      <PropertyRow label="Status">
                         <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-                        <span className="text-[12px] text-foreground/80">
-                          {statusLabel[issue.status] || issue.status}
-                        </span>
+                        {statusLabel[issue.status] || issue.status}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -785,14 +784,9 @@ export function IssueDetailInline({
                 <Popover open={priorityOpen} onOpenChange={setPriorityOpen}>
                   <PopoverTrigger asChild>
                     <div>
-                      <PropertyRow>
-                        <PriorityIcon
-                          priority={(issue.priority || "none") as IssuePriority}
-                          className="h-3.5 w-3.5"
-                        />
-                        <span className="text-[12px] text-foreground/80">
-                          {priorityLabel[(issue.priority || "none") as IssuePriority]}
-                        </span>
+                      <PropertyRow label="Priority">
+                        <PriorityIcon priority={(issue.priority || "none") as IssuePriority} className="h-3.5 w-3.5" />
+                        {priorityLabel[(issue.priority || "none") as IssuePriority]}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -827,11 +821,11 @@ export function IssueDetailInline({
                 <Popover open={assigneeOpen} onOpenChange={setAssigneeOpen}>
                   <PopoverTrigger asChild>
                     <div>
-                      <PropertyRow>
-                        <User className="h-3.5 w-3.5 text-muted-foreground/50" />
-                        <span className="text-[12px] text-foreground/70 hover:text-foreground transition-colors">
-                          {issue.assignee_name || "Unassigned"}
-                        </span>
+                      <PropertyRow label="Assignee">
+                        {issue.assignee_id && (
+                          <img src={getAgentAvatarUrl(issue.assignee_id)} alt="" className="h-4 w-4 rounded-full" />
+                        )}
+                        {issue.assignee_name || <span className="text-muted-foreground/25">Unassigned</span>}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -876,11 +870,8 @@ export function IssueDetailInline({
                 <Popover>
                   <PopoverTrigger asChild>
                     <div>
-                      <PropertyRow>
-                        <Clock className="h-3.5 w-3.5 text-muted-foreground/50" />
-                        <span className="text-[12px] text-foreground/70 hover:text-foreground transition-colors">
-                          {issue.due_date ? new Date(issue.due_date).toLocaleDateString() : "No due date"}
-                        </span>
+                      <PropertyRow label="Due date">
+                        {issue.due_date ? new Date(issue.due_date).toLocaleDateString() : <span className="text-muted-foreground/25">No due date</span>}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -908,11 +899,8 @@ export function IssueDetailInline({
                 <Popover>
                   <PopoverTrigger asChild>
                     <div>
-                      <PropertyRow>
-                        <Hash className="h-3.5 w-3.5 text-muted-foreground/50" />
-                        <span className="text-[12px] text-foreground/70 hover:text-foreground transition-colors">
-                          {issue.estimate ? `${issue.estimate} points` : "No estimate"}
-                        </span>
+                      <PropertyRow label="Estimate">
+                        {issue.estimate ? `${issue.estimate} pts` : <span className="text-muted-foreground/25">&mdash;</span>}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -942,11 +930,8 @@ export function IssueDetailInline({
                 <Popover>
                   <PopoverTrigger asChild>
                     <div>
-                      <PropertyRow>
-                        <Flag className="h-3.5 w-3.5 text-muted-foreground/50" />
-                        <span className="text-[12px] text-foreground/70 hover:text-foreground transition-colors">
-                          {currentMilestone ? currentMilestone.name : "No milestone"}
-                        </span>
+                      <PropertyRow label="Milestone">
+                        {currentMilestone ? currentMilestone.name : <span className="text-muted-foreground/25">&mdash;</span>}
                       </PropertyRow>
                     </div>
                   </PopoverTrigger>
@@ -987,12 +972,13 @@ export function IssueDetailInline({
                     )}
                   </PopoverContent>
                 </Popover>
-              </div>
+              </motion.div>
             )}
+            </AnimatePresence>
           </div>
 
           {/* ── Labels section ───────────────────────────────────────────── */}
-          <div className="mt-2 mx-2 rounded-lg border border-white/[0.06]">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04]">
             <SectionHeader
               title="Labels"
               open={labelsOpen}
@@ -1066,7 +1052,7 @@ export function IssueDetailInline({
           </div>
 
           {/* ── Project section ────────────────────────────────────────── */}
-          <div className="mt-2 mx-2 rounded-lg border border-white/[0.06]">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04]">
             <SectionHeader
               title="Project"
               open={projectOpen}
@@ -1138,7 +1124,7 @@ export function IssueDetailInline({
           </div>
 
           {/* ── Relations section ────────────────────────────────────────── */}
-          <div className="mt-2 mx-2 rounded-lg border border-white/[0.06]">
+          <div className="mt-1 mx-2 rounded-lg border border-white/[0.04]">
             <SectionHeader
               title="Relations"
               open={relationsOpen}
@@ -1249,7 +1235,7 @@ export function IssueDetailInline({
 
           {/* ── Sub-issues section ──────────────────────────────────────── */}
           {issue.sub_issues_count != null && issue.sub_issues_count > 0 && (
-            <div className="mt-2 mx-2 rounded-lg border border-white/[0.06]">
+            <div className="mt-1 mx-2 rounded-lg border border-white/[0.04]">
               <SectionHeader
                 title={`Sub-issues (${issue.sub_issues_count})`}
                 open={subIssuesOpen}
@@ -1768,17 +1754,16 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
 
           {/* ── Properties ─────────────────────────────────────────── */}
           <SectionHeader title="Properties" open={propertiesOpen} onToggle={() => setPropertiesOpen((v) => !v)} />
+          <AnimatePresence initial={false}>
           {propertiesOpen && (
-            <div className="space-y-0.5">
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}>
               {/* Status */}
               <Popover>
                 <PopoverTrigger asChild>
                   <div>
-                    <PropertyRow>
-                      <ProjectStatusIcon status={project.status} />
-                      <span className="text-[12px] text-foreground/80">
-                        {PROJECT_STATUSES.find((s) => s.value === project.status)?.label || project.status}
-                      </span>
+                    <PropertyRow label="Status">
+                      <ProjectStatusIcon status={project.status} className="h-3.5 w-3.5 shrink-0" />
+                      {PROJECT_STATUSES.find((s) => s.value === project.status)?.label || project.status}
                     </PropertyRow>
                   </div>
                 </PopoverTrigger>
@@ -1792,7 +1777,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
                         s.value === project.status && "bg-white/[0.04]",
                       )}
                     >
-                      <ProjectStatusIcon status={s.value as ProjectStatus} />
+                      <ProjectStatusIcon status={s.value as ProjectStatus} className="h-3.5 w-3.5 shrink-0" />
                       {s.label}
                     </button>
                   ))}
@@ -1803,9 +1788,9 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
               <Popover>
                 <PopoverTrigger asChild>
                   <div>
-                    <PropertyRow>
+                    <PropertyRow label="Priority">
                       <PriorityIcon priority={project.priority || "none"} className="h-3.5 w-3.5" />
-                      <span className="text-[12px] text-foreground/80">{priorityLabel[project.priority || "none"]}</span>
+                      {priorityLabel[project.priority || "none"]}
                     </PropertyRow>
                   </div>
                 </PopoverTrigger>
@@ -1830,13 +1815,8 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
               <Popover>
                 <PopoverTrigger asChild>
                   <div>
-                    <PropertyRow>
-                      <span
-                        className={cn(
-                          "text-[12px] font-medium",
-                          HEALTH_OPTIONS.find((h) => h.value === project.health)?.color || "text-muted-foreground",
-                        )}
-                      >
+                    <PropertyRow label="Health">
+                      <span className={cn("font-medium", HEALTH_OPTIONS.find((h) => h.value === project.health)?.color || "text-muted-foreground")}>
                         {HEALTH_OPTIONS.find((h) => h.value === project.health)?.label || project.health}
                       </span>
                     </PropertyRow>
@@ -1862,16 +1842,9 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
               <Popover open={leadOpen} onOpenChange={setLeadOpen}>
                 <PopoverTrigger asChild>
                   <div>
-                    <PropertyRow>
-                      <User className="h-3.5 w-3.5 text-muted-foreground/50" />
-                      <span className="text-[12px] text-foreground/70">{project.lead_name || "Add lead"}</span>
-                      {project.lead_id && (
-                        <img
-                          src={getAgentAvatarUrl(project.lead_id)}
-                          alt=""
-                          className="h-4 w-4 rounded-full ml-auto"
-                        />
-                      )}
+                    <PropertyRow label="Lead">
+                      {project.lead_id && <img src={getAgentAvatarUrl(project.lead_id)} alt="" className="h-4 w-4 rounded-full" />}
+                      {project.lead_name || <span className="text-muted-foreground/25">Add lead</span>}
                     </PropertyRow>
                   </div>
                 </PopoverTrigger>
@@ -1910,26 +1883,14 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
 
               {/* Members */}
               {stats?.by_assignee && stats.by_assignee.length > 0 && (
-                <PropertyRow className="cursor-default">
-                  <FolderKanban className="h-3.5 w-3.5 text-muted-foreground/50" />
-                  <div className="flex items-center gap-1 flex-1 min-w-0">
-                    <span className="text-[12px] text-foreground/70 shrink-0">Members</span>
-                    <div className="flex -space-x-1 ml-auto">
-                      {stats.by_assignee.slice(0, 5).map((a) => (
-                        <img
-                          key={a.agent_id}
-                          src={getAgentAvatarUrl(a.agent_id || a.agent_name)}
-                          alt={a.agent_name}
-                          title={a.agent_name}
-                          className="h-4 w-4 rounded-full ring-1 ring-card"
-                        />
-                      ))}
-                      {stats.by_assignee.length > 5 && (
-                        <span className="text-[10px] text-muted-foreground/50 pl-1">
-                          +{stats.by_assignee.length - 5}
-                        </span>
-                      )}
-                    </div>
+                <PropertyRow label="Members" className="cursor-default">
+                  <div className="flex -space-x-1">
+                    {stats.by_assignee.slice(0, 5).map((a) => (
+                      <img key={a.agent_id} src={getAgentAvatarUrl(a.agent_id || a.agent_name)} alt={a.agent_name} title={a.agent_name} className="h-4 w-4 rounded-full ring-1 ring-card" />
+                    ))}
+                    {stats.by_assignee.length > 5 && (
+                      <span className="text-[10px] text-muted-foreground/50 pl-1">+{stats.by_assignee.length - 5}</span>
+                    )}
                   </div>
                 </PropertyRow>
               )}
@@ -1938,13 +1899,10 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
               <Popover>
                 <PopoverTrigger asChild>
                   <div>
-                    <PropertyRow>
-                      <Clock className="h-3.5 w-3.5 text-muted-foreground/50" />
-                      <span className="text-[12px] text-foreground/70">
-                        {project.start_date || project.target_date
-                          ? `${project.start_date || "?"} → ${project.target_date || "?"}`
-                          : "No dates set"}
-                      </span>
+                    <PropertyRow label="Dates">
+                      {project.start_date || project.target_date
+                        ? `${project.start_date || "?"} → ${project.target_date || "?"}`
+                        : <span className="text-muted-foreground/25">Set dates</span>}
                     </PropertyRow>
                   </div>
                 </PopoverTrigger>
@@ -1972,17 +1930,10 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
 
               {/* Teams */}
               {stats?.crews && stats.crews.length > 0 && (
-                <PropertyRow className="cursor-default">
-                  <FolderKanban className="h-3.5 w-3.5 text-muted-foreground/50" />
-                  <span className="text-[12px] text-foreground/70 shrink-0">Teams</span>
-                  <div className="flex items-center gap-1 ml-auto flex-wrap justify-end">
+                <PropertyRow label="Teams" className="cursor-default">
+                  <div className="flex items-center gap-1 flex-wrap justify-end">
                     {stats.crews.map((crew) => (
-                      <span
-                        key={crew}
-                        className="text-[10px] px-1.5 py-0.5 rounded bg-white/[0.06] text-muted-foreground/70"
-                      >
-                        {crew}
-                      </span>
+                      <span key={crew} className="text-[9px] px-1.5 py-0.5 rounded bg-white/[0.04] text-muted-foreground/50">{crew}</span>
                     ))}
                   </div>
                 </PropertyRow>
@@ -1990,24 +1941,19 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
 
               {/* Labels */}
               {stats?.by_label && stats.by_label.length > 0 && (
-                <PropertyRow className="cursor-default">
-                  <span className="text-[12px] text-foreground/70 shrink-0">Labels</span>
-                  <div className="flex items-center gap-1 ml-auto flex-wrap justify-end">
+                <PropertyRow label="Labels" className="cursor-default">
+                  <div className="flex items-center gap-1 flex-wrap justify-end">
                     {stats.by_label.map((l) => (
-                      <span
-                        key={l.label_name}
-                        className="text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1"
-                        style={{ backgroundColor: `${l.color}20`, color: l.color }}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: l.color }} />
+                      <span key={l.label_name} className="text-[9px] px-1.5 py-0.5 rounded-full flex items-center gap-1" style={{ backgroundColor: `${l.color}18`, color: l.color }}>
                         {l.label_name}
                       </span>
                     ))}
                   </div>
                 </PropertyRow>
               )}
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
 
           {/* ── Milestones ─────────────────────────────────────────── */}
           <SectionHeader title="Milestones" open={milestonesOpen} onToggle={() => setMilestonesOpen((v) => !v)} />
@@ -2043,7 +1989,7 @@ export function ProjectDetailInline({ project, workspaceId, onClose, onUpdated }
               {/* Donut chart */}
               {donutPaths.length > 0 && (
                 <div className="flex items-center gap-4">
-                  <svg viewBox="0 0 40 40" className="w-16 h-16 shrink-0">
+                  <svg viewBox="0 0 40 40" className="w-12 h-12 shrink-0">
                     {donutPaths.map((seg) => (
                       <circle
                         key={seg.status}
