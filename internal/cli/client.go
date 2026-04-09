@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// Client is the HTTP client for the crewship API, used by the CLI.
 type Client struct {
 	BaseURL     string
 	Token       string
@@ -21,6 +22,8 @@ type Client struct {
 	resolvedWorkspaceID string
 }
 
+// NewClient creates a CLI client targeting the given server URL with
+// optional JWT token and workspace ID.
 func NewClient(baseURL, token, workspaceID string) *Client {
 	return &Client{
 		BaseURL:     baseURL,
@@ -32,6 +35,7 @@ func NewClient(baseURL, token, workspaceID string) *Client {
 	}
 }
 
+// Do sends an HTTP request with the configured auth token and workspace ID.
 func (c *Client) Do(method, path string, body interface{}) (*http.Response, error) {
 	var bodyReader io.Reader
 	if body != nil {

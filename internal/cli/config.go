@@ -8,6 +8,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// CLIConfig holds persisted CLI settings including server URL, workspace,
+// auth token, and output format.
 type CLIConfig struct {
 	Server    string `yaml:"server,omitempty"`
 	Workspace string `yaml:"workspace,omitempty"`
@@ -15,6 +17,7 @@ type CLIConfig struct {
 	Format    string `yaml:"format,omitempty"`
 }
 
+// DefaultConfigDir returns the path to ~/.crewship.
 func DefaultConfigDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -23,6 +26,7 @@ func DefaultConfigDir() (string, error) {
 	return filepath.Join(home, ".crewship"), nil
 }
 
+// DefaultConfigPath returns the path to ~/.crewship/cli-config.yaml.
 func DefaultConfigPath() (string, error) {
 	dir, err := DefaultConfigDir()
 	if err != nil {
@@ -31,6 +35,8 @@ func DefaultConfigPath() (string, error) {
 	return filepath.Join(dir, "cli-config.yaml"), nil
 }
 
+// LoadConfig reads the CLI configuration from the default config file,
+// returning an empty config if the file does not exist.
 func LoadConfig() (*CLIConfig, error) {
 	path, err := DefaultConfigPath()
 	if err != nil {
@@ -52,6 +58,7 @@ func LoadConfig() (*CLIConfig, error) {
 	return &cfg, nil
 }
 
+// SaveConfig writes the CLI configuration to the default config file.
 func SaveConfig(cfg *CLIConfig) error {
 	path, err := DefaultConfigPath()
 	if err != nil {
