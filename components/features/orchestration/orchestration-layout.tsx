@@ -101,6 +101,10 @@ export function OrchestrationLayout({
   const [issueComments, setIssueComments] = useState<IssueComment[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  // Project filter applied via saved views — does NOT open the detail panel.
+  // `selectedProjectId` is for explicit project clicks (opens detail panel);
+  // `filterProjectId` is only for filtering the issues list.
+  const [filterProjectId, setFilterProjectId] = useState<string | null>(null)
   const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
   const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
   const [showCreateIssue, setShowCreateIssue] = useState(false)
@@ -232,8 +236,10 @@ export function OrchestrationLayout({
 
   const filteredIssues = useMemo(() => {
     let filtered = issues
-    if (selectedProjectId) {
-      filtered = filtered.filter((i) => i.project_id === selectedProjectId)
+    // Prefer explicit selection (user clicked a project) over saved-view filter.
+    const effectiveProjectId = selectedProjectId ?? filterProjectId
+    if (effectiveProjectId) {
+      filtered = filtered.filter((i) => i.project_id === effectiveProjectId)
     }
     if (filterCrewId) {
       filtered = filtered.filter((i) => i.crew_id === filterCrewId)
@@ -251,7 +257,7 @@ export function OrchestrationLayout({
       )
     }
     return filtered
-  }, [issues, issueSearch, selectedProjectId, filterCrewId, filterAgentId])
+  }, [issues, issueSearch, selectedProjectId, filterProjectId, filterCrewId, filterAgentId])
 
   // Handlers
   const handleNodeClick = useCallback((task: MissionTask) => {
@@ -617,7 +623,7 @@ export function OrchestrationLayout({
               <div className="p-4 h-[calc(100%-45px)]">
                 <AnimatePresence mode="wait">
                   <motion.div
-                    key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || "all"}`}
+                    key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || filterProjectId || "all"}`}
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}
@@ -689,7 +695,7 @@ export function OrchestrationLayout({
                     onClick={closeMobileDetail}
                     className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
                   >
-                    <ChevronLeft className="h-4 w-4" />
+                    <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                   </button>
                   <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Detail</span>
                 </div>

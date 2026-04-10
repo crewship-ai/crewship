@@ -87,8 +87,10 @@ func BuildCLICommand(req AgentRunRequest) []string {
 	}
 }
 
-// BuildEnvVars constructs the environment variable slice for a non-sidecar agent execution.
-// It sets HOME, Crewship identifiers, and injects all credential values directly as env vars.
+// BuildEnvVars constructs the environment variables for a container exec,
+// including agent identity, credentials (when sidecar is not used), and
+// provider-specific settings. nodeJSLauncher/filterNpxServers/buildMCPConfig
+// and friends live in exec_mcp.go on this branch (file-split refactor).
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	env := []string{
 		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),

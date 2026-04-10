@@ -169,9 +169,8 @@ func WithAllowSignup(allow bool) RouterOption {
 	}
 }
 
-// WithGoogleOAuth configures Google OAuth client credentials for the auth flow.
-// Preserved from HEAD — the Google OAuth integration is a unique
-// contribution from this branch not present on main.
+// WithGoogleOAuth configures the Google OAuth client credentials and base URL
+// used by the NextAuth-compatible auth routes.
 func WithGoogleOAuth(clientID, secret, baseURL string) RouterOption {
 	return func(r *Router) {
 		r.googleClientID = clientID

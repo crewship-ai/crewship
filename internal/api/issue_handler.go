@@ -227,10 +227,12 @@ func (h *IssueHandler) loadIssueLabels(ctx context.Context, missionID string) []
 	return labels
 }
 
+// broadcastIssueEvent and logActivity are defined earlier in this file (the
+// merge pulled in main's modernized versions that delegate to the package-level
+// broadcastWorkspaceEvent helper). The duplicates that lived here in the
+// pre-merge feat/code-quality version were removed to avoid redeclaration.
+
 // validateStatusTransition checks if a status transition is allowed.
-// Unique HEAD contribution — consumed by issue_handler_crud.go and
-// issue_handler_bulk.go splits. broadcastIssueEvent/logActivity duplicates
-// were removed in favor of the canonical versions near the top of this file.
 func (h *IssueHandler) validateStatusTransition(currentStatus, newStatus string) bool {
 	allowed := validIssueTransitions[currentStatus]
 	for _, s := range allowed {
@@ -241,8 +243,9 @@ func (h *IssueHandler) validateStatusTransition(currentStatus, newStatus string)
 	return false
 }
 
-// addIssueComment inserts a comment on an issue.
-// Unique HEAD contribution — consumed by issue_handler_workflow.go split.
+// addIssueComment inserts a comment on an issue (used by best-effort flows
+// like auto-posted review notes; distinct from the public CreateComment
+// handler in issue_handler_comments.go).
 func (h *IssueHandler) addIssueComment(ctx context.Context, missionID, authorType, authorID, body string) {
 	commentID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)

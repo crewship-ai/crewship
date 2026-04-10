@@ -453,7 +453,7 @@ func (h *AssignmentHandler) finishAssignment(
 
 	// Post completion comment for assignments linked to a mission (via group_id or chat_id).
 	// This covers sub-agent assignments from sidecar /assign and lead planning assignments.
-	// Unique HEAD contribution — not present on main (PR #130 perf sweep did not remove this).
+	// Unique to feat/code-quality (commit 686c6c2) — main does not post these comments.
 	{
 		var groupID sql.NullString
 		var agentID string

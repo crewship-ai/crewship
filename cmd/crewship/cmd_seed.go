@@ -236,7 +236,9 @@ func createOrResolve(client *cli.Client, createPath string, body interface{}, li
 	if err := cli.CheckError(resp); err != nil {
 		return "", err
 	}
-	var created struct{ ID string `json:"id"` }
+	var created struct {
+		ID string `json:"id"`
+	}
 	if err := cli.ReadJSON(resp, &created); err != nil {
 		return "", err
 	}

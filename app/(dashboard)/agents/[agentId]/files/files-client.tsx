@@ -239,6 +239,8 @@ export function FilesPageClient() {
   const [saving, setSaving] = useState(false)
   const editorSaveRef = useRef<(() => void) | null>(null)
   const fileAbortRef = useRef<AbortController | null>(null)
+  const containerAbortRef = useRef<AbortController | null>(null)
+  const gitAbortRef = useRef<AbortController | null>(null)
   const fetchFilesRef = useRef<(() => void) | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -302,6 +304,9 @@ export function FilesPageClient() {
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
+      fileAbortRef.current?.abort()
+      containerAbortRef.current?.abort()
+      gitAbortRef.current?.abort()
     }
   }, [])
 
