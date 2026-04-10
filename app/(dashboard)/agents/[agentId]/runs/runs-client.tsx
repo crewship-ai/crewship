@@ -2,29 +2,27 @@
 
 import { useParams } from "next/navigation"
 import { useState, useEffect, useCallback } from "react"
-import { AlertCircle, Inbox } from "lucide-react"
+import { AlertCircle, Activity } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { StatusBadge } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyState } from "@/components/layout/empty-state"
 import { formatRelativeTime } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { AgentRun } from "@/lib/types/agent"
 
-const STATUS_STYLES: Record<string, { class: string; pulse: boolean }> = {
-  PENDING: { class: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400", pulse: false },
-  RUNNING: { class: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400", pulse: true },
-  COMPLETED: { class: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400", pulse: false },
-  FAILED: { class: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400", pulse: false },
-  CANCELLED: { class: "bg-neutral-100 text-neutral-600 dark:bg-neutral-900 dark:text-neutral-400", pulse: false },
-  TIMEOUT: { class: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400", pulse: false },
-}
-
-const TRIGGER_STYLES: Record<string, string> = {
-  USER: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400",
-  WEBHOOK: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400",
-  CRON: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
-  AGENT: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
-  SYSTEM: "bg-neutral-100 text-neutral-600 dark:bg-neutral-900 dark:text-neutral-400",
+// Map run status → canonical status id (shared palette) + live flag.
+function runStatusId(status: string): { id: string; live: boolean } {
+  switch (status) {
+    case "PENDING": return { id: "BLOCKED", live: false }
+    case "RUNNING": return { id: "IN_PROGRESS", live: true }
+    case "COMPLETED": return { id: "COMPLETED", live: false }
+    case "FAILED": return { id: "FAILED", live: false }
+    case "CANCELLED": return { id: "CANCELLED", live: false }
+    case "TIMEOUT": return { id: "BLOCKED", live: false }
+    default: return { id: "PENDING", live: false }
+  }
 }
 
 function formatDuration(start: string | null, end: string | null): string {
@@ -103,77 +101,74 @@ export function RunsPageClient() {
   const failedCount = runs.filter((r) => r.status === "FAILED").length
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      {runs.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-body font-medium text-muted-foreground">No runs yet</p>
-          <p className="text-label text-muted-foreground mt-1">Runs will appear here when the agent is triggered.</p>
-        </div>
-      ) : (
-        <>
-          <div className="border rounded-lg overflow-x-auto">
-            <table className="w-full text-body">
-              <thead>
-                <tr className="border-b bg-muted/50 text-label text-muted-foreground uppercase tracking-wide">
-                  <th className="text-left px-4 sm:px-6 py-3 font-medium">Status</th>
-                  <th className="text-left px-4 sm:px-6 py-3 font-medium">Trigger</th>
-                  <th className="text-left px-4 sm:px-6 py-3 font-medium">Duration</th>
-                  <th className="text-left px-4 sm:px-6 py-3 font-medium hidden sm:table-cell">Started</th>
-                  <th className="text-left px-4 sm:px-6 py-3 font-medium hidden md:table-cell">Error</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {runs.map((r) => {
-                  const statusStyle = STATUS_STYLES[r.status] ?? STATUS_STYLES.PENDING
-                  return (
-                    <tr key={r.id} className="hover:bg-muted/50">
-                      <td className="px-4 sm:px-6 py-3">
-                        <Badge variant="secondary" className={`${statusStyle.class} text-label gap-1.5`}>
-                          {statusStyle.pulse && (
-                            <span className="relative flex h-1.5 w-1.5">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-                            </span>
-                          )}
-                          {r.status}
-                        </Badge>
-                      </td>
-                      <td className="px-4 sm:px-6 py-3">
-                        <Badge variant="secondary" className={`${TRIGGER_STYLES[r.trigger_type] ?? ""} text-label`}>
-                          {r.trigger_type}
-                        </Badge>
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 font-mono text-xs tabular-nums">
-                        {r.status === "RUNNING" && r.started_at
-                          ? <LiveDuration startedAt={r.started_at} />
-                          : formatDuration(r.started_at, r.finished_at)}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 text-label text-muted-foreground hidden sm:table-cell">
-                        {r.started_at ? formatRelativeTime(r.started_at) : "—"}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 hidden md:table-cell">
-                        {r.status === "FAILED" && r.error_message && (
-                          <span className="text-label text-red-600 dark:text-red-400 truncate block max-w-[200px]" title={r.error_message}>
-                            {r.error_message}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+    <div className="p-4 sm:p-6 space-y-6">
+      <div>
+        <h2 className="text-title font-semibold">Runs</h2>
+        <p className="text-body text-muted-foreground">
+          {runs.length} run{runs.length !== 1 ? "s" : ""} total
+          {completedCount > 0 && ` · ${completedCount} completed`}
+          {runningCount > 0 && ` · ${runningCount} running`}
+          {failedCount > 0 && ` · ${failedCount} failed`}
+        </p>
+      </div>
 
-          {/* Footer */}
-          <p className="text-label text-muted-foreground">
-            {runs.length} run{runs.length !== 1 ? "s" : ""} total
-            {completedCount > 0 && ` · ${completedCount} completed`}
-            {runningCount > 0 && ` · ${runningCount} running`}
-            {failedCount > 0 && ` · ${failedCount} failed`}
-          </p>
-        </>
+      {runs.length === 0 ? (
+        <EmptyState
+          icon={Activity}
+          title="No runs yet"
+          description="Runs will appear here when the agent is triggered."
+        />
+      ) : (
+        <div className="border border-border rounded-lg overflow-x-auto bg-card">
+          <table className="w-full text-body">
+            <thead>
+              <tr className="border-b border-border bg-muted/50 text-label text-muted-foreground uppercase tracking-wide">
+                <th className="text-left px-4 sm:px-6 py-3 font-medium">Status</th>
+                <th className="text-left px-4 sm:px-6 py-3 font-medium">Trigger</th>
+                <th className="text-left px-4 sm:px-6 py-3 font-medium">Duration</th>
+                <th className="text-left px-4 sm:px-6 py-3 font-medium hidden sm:table-cell">Started</th>
+                <th className="text-left px-4 sm:px-6 py-3 font-medium hidden md:table-cell">Error</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {runs.map((r) => {
+                const { id: statusId, live } = runStatusId(r.status)
+                return (
+                  <tr key={r.id} className="hover:bg-muted/50">
+                    <td className="px-4 sm:px-6 py-3">
+                      <StatusBadge
+                        status={statusId}
+                        withDot={live}
+                        label={r.status}
+                        className="text-label"
+                      />
+                    </td>
+                    <td className="px-4 sm:px-6 py-3">
+                      <Badge variant="outline" className="text-label border-border bg-muted/40 text-muted-foreground">
+                        {r.trigger_type}
+                      </Badge>
+                    </td>
+                    <td className="px-4 sm:px-6 py-3 font-mono text-label tabular-nums">
+                      {r.status === "RUNNING" && r.started_at
+                        ? <LiveDuration startedAt={r.started_at} />
+                        : formatDuration(r.started_at, r.finished_at)}
+                    </td>
+                    <td className="px-4 sm:px-6 py-3 text-label text-muted-foreground hidden sm:table-cell">
+                      {r.started_at ? formatRelativeTime(r.started_at) : "—"}
+                    </td>
+                    <td className="px-4 sm:px-6 py-3 hidden md:table-cell">
+                      {r.status === "FAILED" && r.error_message && (
+                        <span className="text-label text-destructive truncate block max-w-[200px]" title={r.error_message}>
+                          {r.error_message}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )
