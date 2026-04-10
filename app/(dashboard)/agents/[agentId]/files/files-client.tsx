@@ -253,6 +253,7 @@ export function FilesPageClient() {
     setContainerLoading(false)
     setGitCommits([])
     setGitLoading(false)
+    setSearch("")
   }, [agentId, workspaceId])
 
   useEffect(() => {
@@ -305,6 +306,7 @@ export function FilesPageClient() {
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
+      fileAbortRef.current?.abort()
       containerAbortRef.current?.abort()
       gitAbortRef.current?.abort()
     }
@@ -457,8 +459,15 @@ export function FilesPageClient() {
             onClick={() => setActiveFileTab("home")}
           >Agent Home</button>
           <button
-            className={cn("px-2.5 py-1 text-micro rounded-md", activeFileTab === "container" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent")}
+            disabled={!crewId}
+            className={cn(
+              "px-2.5 py-1 text-micro rounded-md",
+              activeFileTab === "container" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent",
+              !crewId && "opacity-50 cursor-not-allowed hover:bg-transparent",
+            )}
+            title={crewId ? "Browse container filesystem" : "No crew assigned"}
             onClick={() => {
+              if (!crewId) return
               setActiveFileTab("container")
               if (containerFiles.length === 0 && !containerLoading && workspaceId) {
                 containerAbortRef.current?.abort()
@@ -494,8 +503,15 @@ export function FilesPageClient() {
             onClick={() => crewId && router.push(`/crews/${crewId}/files`)}
           >Crew</button>
           <button
-            className={cn("px-2.5 py-1 text-micro rounded-md flex items-center gap-1", activeFileTab === "git" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent")}
+            disabled={!crewId}
+            className={cn(
+              "px-2.5 py-1 text-micro rounded-md flex items-center gap-1",
+              activeFileTab === "git" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent",
+              !crewId && "opacity-50 cursor-not-allowed hover:bg-transparent",
+            )}
+            title={crewId ? "View git history" : "No crew assigned"}
             onClick={() => {
+              if (!crewId) return
               setActiveFileTab("git")
               if (gitCommits.length === 0 && !gitLoading && workspaceId) {
                 gitAbortRef.current?.abort()

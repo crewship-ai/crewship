@@ -85,6 +85,10 @@ export function OrchestrationLayout({
   const [issueComments, setIssueComments] = useState<IssueComment[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  // Project filter applied via saved views — does NOT open the detail panel.
+  // `selectedProjectId` is for explicit project clicks (opens detail panel);
+  // `filterProjectId` is only for filtering the issues list.
+  const [filterProjectId, setFilterProjectId] = useState<string | null>(null)
   const [filterCrewId, setFilterCrewId] = useState<string | null>(null)
   const [filterAgentId, setFilterAgentId] = useState<string | null>(null)
   const [showCreateIssue, setShowCreateIssue] = useState(false)
@@ -216,8 +220,10 @@ export function OrchestrationLayout({
 
   const filteredIssues = useMemo(() => {
     let filtered = issues
-    if (selectedProjectId) {
-      filtered = filtered.filter((i) => i.project_id === selectedProjectId)
+    // Prefer explicit selection (user clicked a project) over saved-view filter.
+    const effectiveProjectId = selectedProjectId ?? filterProjectId
+    if (effectiveProjectId) {
+      filtered = filtered.filter((i) => i.project_id === effectiveProjectId)
     }
     if (filterCrewId) {
       filtered = filtered.filter((i) => i.crew_id === filterCrewId)
@@ -235,7 +241,7 @@ export function OrchestrationLayout({
       )
     }
     return filtered
-  }, [issues, issueSearch, selectedProjectId, filterCrewId, filterAgentId])
+  }, [issues, issueSearch, selectedProjectId, filterProjectId, filterCrewId, filterAgentId])
 
   // Handlers
   const handleNodeClick = useCallback((task: MissionTask) => {
@@ -331,7 +337,7 @@ export function OrchestrationLayout({
         }
       } catch {}
     }
-    fetchProjects()
+    await fetchProjects()
   }, [fetchIssues, fetchProjects, selectedIssue?.crew_id, selectedIssue?.identifier, workspaceId])
 
   const handleProjectClose = useCallback(() => {
@@ -562,9 +568,11 @@ export function OrchestrationLayout({
                   if (viewType) setIssueViewMode(viewType)
 
                   // Clearing the selected view ("All Issues"): reset filters to
-                  // the same defaults used when the page initialises.
+                  // the same defaults used when the page initialises. Only the
+                  // saved-view-driven filters are reset — an explicit project
+                  // selection (`selectedProjectId`) is preserved.
                   if (id === null) {
-                    setSelectedProjectId(null)
+                    setFilterProjectId(null)
                     setFilterCrewId(null)
                     setFilterAgentId(null)
                     setIssueSearch("")
@@ -582,7 +590,9 @@ export function OrchestrationLayout({
                       ? JSON.parse(view.filters_json)
                       : {}
                     const projectId = parsed.project_id ?? parsed.projectId
-                    setSelectedProjectId(
+                    // Apply to filter-only state so the project detail panel
+                    // does not open when loading a saved view.
+                    setFilterProjectId(
                       typeof projectId === "string" ? projectId : null,
                     )
                     const crewId = parsed.crew_id ?? parsed.crewId
@@ -605,7 +615,7 @@ export function OrchestrationLayout({
               <div className="p-4 h-[calc(100%-45px)]">
                 <AnimatePresence mode="wait">
                   <motion.div
-                    key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || "all"}`}
+                    key={`${issueViewMode}-${filterCrewId || "all"}-${filterAgentId || "all"}-${selectedProjectId || filterProjectId || "all"}`}
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -6 }}

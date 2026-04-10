@@ -333,7 +333,6 @@ body {
 
 .agent-active-card {
   animation: agent-pulse 2.5s ease-in-out infinite;
-  border-color: rgba(59, 130, 246, 0.25);
 }
 
 .agent-active-dot {

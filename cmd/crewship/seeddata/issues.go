@@ -235,26 +235,10 @@ This helps us know what agents can use.`,
 }
 
 // StatusPath returns the sequence of status transitions needed to reach
-// target from BACKLOG.
+// target from BACKLOG. It delegates to StatusPathFrom so that seed creation
+// and nuke cleanup share the same DAG defined in validIssueTransitions.
 func StatusPath(target string) []string {
-	switch target {
-	case "TODO":
-		return []string{"TODO"}
-	case "IN_PROGRESS":
-		return []string{"TODO", "IN_PROGRESS"}
-	case "REVIEW":
-		return []string{"TODO", "IN_PROGRESS", "REVIEW"}
-	case "DONE":
-		return []string{"TODO", "IN_PROGRESS", "REVIEW", "DONE"}
-	case "FAILED":
-		return []string{"TODO", "IN_PROGRESS", "FAILED"}
-	case "CANCELLED":
-		return []string{"TODO", "CANCELLED"}
-	case "DUPLICATE":
-		return []string{"TODO", "DUPLICATE"}
-	default:
-		return nil
-	}
+	return StatusPathFrom("BACKLOG", target)
 }
 
 // validIssueTransitions mirrors the server-side issue status DAG defined in

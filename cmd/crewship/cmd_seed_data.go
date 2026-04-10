@@ -27,21 +27,28 @@ func seedNuke(ctx context.Context, client *cli.Client) error {
 
 	// Delete issues — page through ALL issues, cancel, then delete.
 	// The server caps list limit at 100 per page. Because successful deletes
-	// shift the list under us, we always refetch from the head; the
-	// safetyCap bounds total iterations so a misbehaving API cannot wedge us
-	// in an infinite loop.
+	// shift the list under us, we walk the pages with a mutable offset, but
+	// reset back to offset=0 whenever a delete succeeds (since the remaining
+	// rows have shifted). "Blocked" issues — ones we could not transition or
+	// delete — are remembered by ID so we skip them on subsequent passes and
+	// can still advance past them. Termination: a complete pass over every
+	// page yielded zero deletes (every remaining row is blocked), or we hit
+	// the safety cap.
 	const (
 		issuePageSize = 100
 		safetyCap     = 10_000
 	)
 	totalDeleted := 0
-	noProgressStreak := 0
+	blocked := map[string]bool{}
+	offset := 0
+	deletedInCurrentSweep := 0
+	sawRowsInCurrentSweep := false
 pageLoop:
 	for iter := 0; iter < safetyCap; iter++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		resp, err := client.Get(fmt.Sprintf("/api/v1/issues?limit=%d&offset=0", issuePageSize))
+		resp, err := client.Get(fmt.Sprintf("/api/v1/issues?limit=%d&offset=%d", issuePageSize, offset))
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("list issues: %v", err))
 			break pageLoop
@@ -52,14 +59,30 @@ pageLoop:
 			break pageLoop
 		}
 		if len(issues) == 0 {
-			break pageLoop
+			// End of pages. If we saw no rows and deleted nothing, we're
+			// done. If we saw rows but they were all blocked, also done.
+			if !sawRowsInCurrentSweep || deletedInCurrentSweep == 0 {
+				if sawRowsInCurrentSweep && deletedInCurrentSweep == 0 {
+					fmt.Fprintf(os.Stderr, "  ! nuke issues: %d issue(s) could not be transitioned/deleted, giving up\n", len(blocked))
+				}
+				break pageLoop
+			}
+			// Completed a sweep with progress; start another from offset 0.
+			offset = 0
+			deletedInCurrentSweep = 0
+			sawRowsInCurrentSweep = false
+			continue
 		}
+		sawRowsInCurrentSweep = true
 		deletedThisPage := 0
 		for _, iss := range issues {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			if iss.Identifier == nil {
+				continue
+			}
+			if blocked[iss.ID] {
 				continue
 			}
 			// Transition to a deletable state (BACKLOG or CANCELLED) by
@@ -73,6 +96,7 @@ pageLoop:
 				if path == nil {
 					failures = append(failures, fmt.Sprintf("no status path from %s for %s", iss.Status, *iss.Identifier))
 					fmt.Fprintf(os.Stderr, "  ! nuke %s: no valid transition path from %s\n", *iss.Identifier, iss.Status)
+					blocked[iss.ID] = true
 					continue
 				}
 				transitionFailed := false
@@ -94,6 +118,7 @@ pageLoop:
 					r.Body.Close()
 				}
 				if transitionFailed {
+					blocked[iss.ID] = true
 					continue
 				}
 			}
@@ -101,28 +126,27 @@ pageLoop:
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("delete issue %s: %v", *iss.Identifier, err))
 				fmt.Fprintf(os.Stderr, "  ! delete issue %s: %v\n", *iss.Identifier, err)
+				blocked[iss.ID] = true
 				continue
 			}
 			if r.StatusCode >= 300 {
 				failures = append(failures, fmt.Sprintf("delete issue %s: HTTP %d", *iss.Identifier, r.StatusCode))
 				fmt.Fprintf(os.Stderr, "  ! delete issue %s: HTTP %d\n", *iss.Identifier, r.StatusCode)
+				blocked[iss.ID] = true
 			} else {
 				deletedThisPage++
 				totalDeleted++
+				deletedInCurrentSweep++
 			}
 			r.Body.Close()
 		}
-		// If a page returned items but we deleted none of them, we'd loop
-		// forever (e.g. every issue is un-transitionable). Abort after two
-		// consecutive zero-progress iterations.
-		if deletedThisPage == 0 {
-			noProgressStreak++
-			if noProgressStreak >= 2 {
-				fmt.Fprintf(os.Stderr, "  ! nuke issues: no progress after %d unreachable items, giving up\n", len(issues))
-				break pageLoop
-			}
+		// If we deleted anything on this page the earlier rows shifted under
+		// us — refetch from the head. Otherwise advance to the next page so
+		// we don't stall on a page of blocked items.
+		if deletedThisPage > 0 {
+			offset = 0
 		} else {
-			noProgressStreak = 0
+			offset += len(issues)
 		}
 	}
 	fmt.Fprintf(os.Stderr, "  Deleted %d issues\n", totalDeleted)
@@ -529,7 +553,9 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		ID     string
 		CrewID string
 	}
-	integrationIDs := map[string]integrationRef{} // integration name → (id, crewID)
+	// Keyed by crewID first, then integration name, so two crews can each
+	// seed an integration with the same name without overwriting each other.
+	integrationIDs := map[string]map[string]integrationRef{} // crewID → (name → ref)
 
 	for _, integ := range seeddata.Integrations {
 		if err := ctx.Err(); err != nil {
@@ -570,7 +596,10 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 			// Resolve existing
 			id, err := resolveCrewIntegration(client, crewID, integ.Name)
 			if err == nil {
-				integrationIDs[integ.Name] = integrationRef{ID: id, CrewID: crewID}
+				if integrationIDs[crewID] == nil {
+					integrationIDs[crewID] = map[string]integrationRef{}
+				}
+				integrationIDs[crewID][integ.Name] = integrationRef{ID: id, CrewID: crewID}
 			}
 			fmt.Fprintf(os.Stderr, "  = Integration exists: %s\n", integ.DisplayName)
 			continue
@@ -582,7 +611,10 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		}
 		var created struct{ ID string `json:"id"` }
 		if cli.ReadJSON(resp, &created) == nil {
-			integrationIDs[integ.Name] = integrationRef{ID: created.ID, CrewID: crewID}
+			if integrationIDs[crewID] == nil {
+				integrationIDs[crewID] = map[string]integrationRef{}
+			}
+			integrationIDs[crewID][integ.Name] = integrationRef{ID: created.ID, CrewID: crewID}
 		}
 		fmt.Fprintf(os.Stderr, "  + Integration: %s\n", integ.DisplayName)
 	}
@@ -659,10 +691,7 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 			fmt.Fprintf(os.Stderr, "  ! crew %q for agent %s not in crewIDs, skipping bindings\n", agentCrewSlug, agentSlug)
 			continue
 		}
-		for integName, integRef := range integrationIDs {
-			if integRef.CrewID != agentCrewID {
-				continue // integration belongs to a different crew
-			}
+		for integName, integRef := range integrationIDs[agentCrewID] {
 			body := map[string]interface{}{
 				"mcp_server_id":    integRef.ID,
 				"mcp_server_scope": "crew",
@@ -681,8 +710,12 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 			}
 		}
 	}
-	if len(integrationIDs) > 0 {
-		fmt.Fprintf(os.Stderr, "  + Bound %d agents to %d integrations\n", len(seeddata.AgentBindingSlugs), len(integrationIDs))
+	totalIntegrations := 0
+	for _, perCrew := range integrationIDs {
+		totalIntegrations += len(perCrew)
+	}
+	if totalIntegrations > 0 {
+		fmt.Fprintf(os.Stderr, "  + Bound %d agents to %d integrations\n", len(seeddata.AgentBindingSlugs), totalIntegrations)
 	}
 
 	return nil

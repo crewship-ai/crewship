@@ -403,7 +403,14 @@ function TemplateEditor({ workspaceId, onClose, onCreated }: TemplateEditorProps
     <div className="rounded-xl border border-border bg-card p-4 space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium">New Workflow Template</p>
-        <button onClick={onClose} className="p-1 rounded hover:bg-accent text-muted-foreground"><X className="h-4 w-4" /></button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close editor"
+          className="p-1 rounded hover:bg-accent text-muted-foreground"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
       </div>
 
       <div className="space-y-3">
@@ -440,8 +447,13 @@ function TemplateEditor({ workspaceId, onClose, onCreated }: TemplateEditorProps
               onChange={(e) => updateStep(idx, "agent_role", e.target.value)}
             />
             {steps.length > 1 && (
-              <button className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive" onClick={() => removeStep(idx)}>
-                <X className="h-3 w-3" />
+              <button
+                type="button"
+                aria-label={`Remove step ${idx + 1}`}
+                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                onClick={() => removeStep(idx)}
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
               </button>
             )}
           </div>

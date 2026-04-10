@@ -215,7 +215,16 @@ function FleetBulkActions({
           Stop All Running ({runningAgents.length})
         </Button>
       </div>
-      {result && <p className="text-[10px] text-muted-foreground">{result}</p>}
+      {result && (
+        <p
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="text-[10px] text-muted-foreground"
+        >
+          {result}
+        </p>
+      )}
     </div>
   )
 }
