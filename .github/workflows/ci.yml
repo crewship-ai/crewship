@@ -124,10 +124,14 @@ jobs:
       - name: Create embed stub
         run: mkdir -p web/out && echo '<!doctype html>' > web/out/index.html
 
+      # golangci-lint v1.x is built with Go 1.24 and cannot analyze code
+      # targeting Go 1.26 (error: "Go language version go1.24 is lower than
+      # targeted 1.26"). Our .golangci.yml uses v2 format already
+      # ('version: "2"' at top), so pin to a specific v2.x release.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
+          version: v2.1.6
           args: --timeout=5m
 
   # ── Full binary build (push to main only — verifies embed works) ──
