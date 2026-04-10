@@ -564,8 +564,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var setClauses []string
-	var args []interface{}
+	ub := newUpdate()
 
 	// Handle value separately (needs encryption)
 	if val, ok := body["value"]; ok {
@@ -576,27 +575,23 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt credential"})
 				return
 			}
-			setClauses = append(setClauses, "encrypted_value = ?")
-			args = append(args, encrypted)
+			ub.Set("encrypted_value", encrypted)
 			// Reset status when value changes so monitor re-validates
-			setClauses = append(setClauses, "status = ?", "last_error = ?")
-			args = append(args, "ACTIVE", nil)
+			ub.Set("status", "ACTIVE")
+			ub.SetNull("last_error")
 		}
 	}
 
 	for jsonKey, col := range allowed {
 		if val, ok := body[jsonKey]; ok {
-			setClauses = append(setClauses, col+" = ?")
-			args = append(args, val)
+			ub.Set(col, val)
 		}
 	}
 
-	if len(setClauses) == 0 && !updateCrewIDs {
+	if ub.Empty() && !updateCrewIDs {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No fields to update"})
 		return
 	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -605,11 +600,8 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(setClauses) > 0 {
-		setClauses = append(setClauses, "updated_at = ?")
-		args = append(args, now, credID, workspaceID)
-
-		query := fmt.Sprintf("UPDATE credentials SET %s WHERE id = ? AND workspace_id = ?", strings.Join(setClauses, ", "))
+	if !ub.Empty() {
+		query, args := ub.Build("credentials", "id = ? AND workspace_id = ?", credID, workspaceID)
 		if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
 			tx.Rollback()
 			h.logger.Error("update credential", "error", err)

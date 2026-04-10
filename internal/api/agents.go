@@ -4,10 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
@@ -608,8 +606,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var setClauses []string
-	var args []interface{}
+	ub := newUpdate()
 	for jsonKey, col := range allowed {
 		if val, ok := body[jsonKey]; ok {
 			if col == "memory_enabled" || col == "schedule_enabled" {
@@ -621,21 +618,16 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			setClauses = append(setClauses, col+" = ?")
-			args = append(args, val)
+			ub.Set(col, val)
 		}
 	}
 
-	if len(setClauses) == 0 {
+	if ub.Empty() {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No fields to update"})
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	setClauses = append(setClauses, "updated_at = ?")
-	args = append(args, now, agentID, workspaceID)
-
-	query := fmt.Sprintf("UPDATE agents SET %s WHERE id = ? AND workspace_id = ?", strings.Join(setClauses, ", "))
+	query, args := ub.Build("agents", "id = ? AND workspace_id = ?", agentID, workspaceID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update agent", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
