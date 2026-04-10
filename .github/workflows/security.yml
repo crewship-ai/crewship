@@ -68,8 +68,10 @@ jobs:
       - name: Create embed stub
         run: mkdir -p web/out && echo '<!doctype html>' > web/out/index.html
 
+      # Pin to a specific govulncheck version so CI runs are reproducible.
+      # '@latest' would silently upgrade across breaking changes.
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
 
       - name: Run govulncheck (known-accepted CVEs allowlisted)
         run: |
@@ -78,20 +80,36 @@ jobs:
           exit_code=$?
           cat /tmp/govuln.log
 
-          # Exit 0 = no vulns at all — pass
+          # Exit 0 = clean, pass immediately.
           if [ $exit_code -eq 0 ]; then
             exit 0
           fi
 
-          # Exit 3 = vulns found. Check if ONLY known-accepted CVEs.
-          # Extract all "Vulnerability #N: GO-YYYY-NNNN" lines and verify they
-          # only contain the accepted IDs.
+          # Exit 3 = vulnerabilities found. Anything else (1, 2, signal, ...)
+          # means a tool/runtime/analysis error — fail loudly, do NOT silently
+          # pass by landing in the allowlist branch with no parsed IDs.
+          if [ $exit_code -ne 3 ]; then
+            echo "::error::govulncheck failed to execute (exit code ${exit_code}). See output above."
+            exit $exit_code
+          fi
+
+          # exit_code == 3: vulnerabilities were reported. Extract the GO IDs
+          # and verify every one of them is on the known-accepted list.
           accepted_pattern='GO-2026-4887|GO-2026-4883'
           all_vulns=$(grep -oE 'GO-[0-9]{4}-[0-9]+' /tmp/govuln.log | sort -u)
           echo ""
           echo "=== Detected vulnerability IDs ==="
           echo "$all_vulns"
           echo ""
+
+          # Defensive: exit 3 without any parseable GO IDs means the output
+          # format changed or parsing is broken — we cannot safely allowlist,
+          # so fail.
+          if [ -z "$all_vulns" ]; then
+            echo "::error::govulncheck reported vulnerabilities (exit 3) but no GO-YYYY-NNNN IDs could be parsed from the output. Output format may have changed."
+            exit 1
+          fi
+
           unexpected=$(echo "$all_vulns" | grep -vE "^($accepted_pattern)$" || true)
           if [ -n "$unexpected" ]; then
             echo "::error::New unexpected vulnerability detected — not in accepted list:"
@@ -114,7 +132,9 @@ jobs:
 
       - name: Run grype on source tree
         id: scan
-        uses: anchore/scan-action@v7
+        # Pinned to a specific commit SHA so a retargeted mutable tag cannot
+        # silently inject a modified action. Tracks anchore/scan-action v7.
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
         with:
           path: "."
           fail-build: false  # warning only in Phase 1 — promote after baseline is clean
@@ -125,7 +145,8 @@ jobs:
       # ./results.sarif in the workspace like v6 did). Reference the output
       # variable so the upload step finds the file.
       - name: Upload SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+        # Pinned to a specific commit SHA for supply-chain hardening.
+        uses: github/codeql-action/upload-sarif@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c # v3
         if: always()
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
@@ -145,8 +166,12 @@ jobs:
       - name: Create embed stub
         run: mkdir -p web/out && echo '<!doctype html>' > web/out/index.html
 
+      # Pin to a specific go-licenses version for reproducible CI runs.
+      # Note: v2.x has a different CLI surface (different `check` / `csv`
+      # subcommand flags). This pin locks to v1.6.0, which matches the
+      # scripts/gen-notices.sh wrapper and the locally-tested behavior.
       - name: Install go-licenses
-        run: go install github.com/google/go-licenses@latest
+        run: go install github.com/google/go-licenses@v1.6.0
 
       # modernc.org/mathutil is BSD-3-Clause but go-licenses cannot detect it
       # due to a file-matching edge case. Verified and documented.
