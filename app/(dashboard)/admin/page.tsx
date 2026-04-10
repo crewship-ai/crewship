@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { PageHeader } from "@/components/layout/page-header"
 import { cn } from "@/lib/utils"
 
 import type { TabKey, Stats, AdminOrg, AdminUser, KeeperStatus, KeeperLogEntry } from "./types"
@@ -225,7 +226,7 @@ export default function AdminPage() {
       <Card>
         <CardContent className="p-6 text-center space-y-2">
           <Badge variant="outline">Coming Soon</Badge>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-body text-muted-foreground">
             This section will be available in a future release.
           </p>
         </CardContent>
@@ -233,24 +234,29 @@ export default function AdminPage() {
     )
   }
 
+  const activeSection = sections.find((s) => s.key === tab)
+
   return (
     <div className="flex h-full">
       {/* Admin left nav */}
-      <div className="w-52 border-r bg-background flex flex-col flex-shrink-0 overflow-y-auto">
-        <div className="p-3 border-b">
+      <aside className="w-52 border-r border-border bg-card flex flex-col flex-shrink-0 overflow-y-auto">
+        <div className="p-3 border-b border-border">
           <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-amber-700" />
-            <span className="text-xs font-semibold">Admin Console</span>
-            <Badge variant="outline" className="text-micro ml-auto bg-amber-50 text-amber-700 border-amber-200">
+            <Shield className="h-4 w-4 text-muted-foreground" />
+            <span className="text-label font-semibold">Admin Console</span>
+            <Badge variant="outline" className="text-micro ml-auto">
               OWNER
             </Badge>
           </div>
         </div>
-        <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto" aria-label="Admin sections">
           {sections.map((s, i) => {
             if (s.type === "section") {
               return (
-                <div key={i} className="text-micro font-semibold text-muted-foreground uppercase tracking-wider px-3 pt-3 pb-1">
+                <div
+                  key={i}
+                  className="text-micro font-semibold text-muted-foreground uppercase tracking-wider px-3 pt-3 pb-1"
+                >
                   {s.label}
                 </div>
               )
@@ -260,9 +266,12 @@ export default function AdminPage() {
             return (
               <button
                 key={s.key}
+                aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-xs transition-colors",
-                  isActive ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:bg-muted"
+                  "flex items-center gap-2.5 w-full px-3 py-2 rounded-md text-label transition-colors",
+                  isActive
+                    ? "bg-accent text-foreground font-medium"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
                 )}
                 onClick={() => setTab(s.key!)}
               >
@@ -272,11 +281,17 @@ export default function AdminPage() {
             )
           })}
         </nav>
-      </div>
+      </aside>
 
       {/* Admin content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-8 py-6">
+        <div className="max-w-3xl mx-auto p-6 space-y-6">
+          {activeSection && !activeSection.type && (
+            <PageHeader
+              title={activeSection.label}
+              description="Platform administration"
+            />
+          )}
           {renderContent()}
         </div>
       </div>

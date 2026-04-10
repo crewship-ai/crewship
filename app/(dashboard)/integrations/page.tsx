@@ -24,8 +24,11 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { PageHeader } from "@/components/layout/page-header"
+import { PageShell } from "@/components/layout/page-shell"
 import { EmptyState } from "@/components/layout/empty-state"
+import { SectionCard } from "@/components/ui/section-card"
+import { StatusBadge } from "@/components/ui/status-badge"
+import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -50,6 +53,7 @@ import { CredentialPicker } from "@/components/features/mcp/components/credentia
 import { RegistryBrowser } from "@/components/features/mcp/components/registry-browser"
 import type { RegistryAddPayload } from "@/components/features/mcp/components/registry-browser"
 import { useCredentials } from "@/components/features/mcp/hooks/use-credentials"
+import { cn } from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
 // OAuth Auto-Connect component
@@ -139,12 +143,12 @@ function OAuthAutoConnect({
 
   if (status === "done" && authStatus !== "missing" && authStatus !== "expired") {
     return (
-      <div className="rounded-md border border-green-500/30 bg-green-500/5 p-4">
-        <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+      <Card className="p-4 bg-surface-subtle">
+        <div className="flex items-center gap-2 text-body font-medium">
           <Check className="h-4 w-4" />
-          OAuth connected
+          <StatusBadge status="COMPLETED" label="OAuth connected" />
         </div>
-      </div>
+      </Card>
     )
   }
 
@@ -152,24 +156,26 @@ function OAuthAutoConnect({
   const isExpired = authStatus === "expired"
 
   return (
-    <div className={`rounded-md border p-4 space-y-3 ${
-      isMissing ? "border-destructive/50 bg-destructive/5" :
-      isExpired ? "border-yellow-500/50 bg-yellow-500/5" :
-      "bg-background"
-    }`}>
+    <Card
+      className={cn(
+        "p-4 space-y-3",
+        isMissing && "border-destructive/50 bg-destructive/5",
+        isExpired && "border-amber-500/50 bg-amber-500/5",
+      )}
+    >
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm font-medium">
+        <div className="flex items-center gap-2 text-body font-medium">
           <ExternalLink className="h-4 w-4 text-muted-foreground" />
           Authentication
         </div>
         {isMissing && (
-          <Badge variant="destructive" className="text-xs">Credential missing</Badge>
+          <StatusBadge status="FAILED" label="Credential missing" />
         )}
         {isExpired && (
-          <Badge variant="outline" className="text-xs border-yellow-500 text-yellow-600">Expired</Badge>
+          <StatusBadge status="BLOCKED" label="Expired" />
         )}
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-label text-muted-foreground">
         {isMissing
           ? "The credential for this integration was deleted. Reconnect to restore access."
           : isExpired
@@ -177,7 +183,7 @@ function OAuthAutoConnect({
             : "Connect with OAuth to automatically authenticate with this service."}
       </p>
       {error && (
-        <p className="text-xs text-destructive">{error}</p>
+        <p className="text-label text-destructive">{error}</p>
       )}
       <Button
         size="sm"
@@ -192,7 +198,7 @@ function OAuthAutoConnect({
           : isMissing || isExpired ? "Reconnect with OAuth"
           : "Connect with OAuth"}
       </Button>
-    </div>
+    </Card>
   )
 }
 
@@ -312,7 +318,7 @@ function TemplatePopover({
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       <PopoverContent className="w-80 p-3" align="end">
         <div className="space-y-2">
-          <p className="text-sm font-medium">Add from template</p>
+          <p className="text-body font-medium">Add from template</p>
           <div className="grid grid-cols-2 gap-2">
             {MCP_TEMPLATES.map((t) => {
               const Icon = TEMPLATE_ICONS[t.icon] ?? Plug
@@ -320,7 +326,7 @@ function TemplatePopover({
                 <button
                   key={t.name}
                   type="button"
-                  className="flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm hover:bg-muted/60 transition-colors"
+                  className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-body hover:bg-muted/60 transition-colors"
                   onClick={() => onSelect(t)}
                 >
                   <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -332,7 +338,7 @@ function TemplatePopover({
           <div className="flex gap-2">
             <button
               type="button"
-              className="flex flex-1 items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
+              className="flex flex-1 items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-body text-muted-foreground hover:bg-muted/60 transition-colors"
               onClick={() => onSelect(null)}
             >
               <Terminal className="h-4 w-4" />
@@ -340,7 +346,7 @@ function TemplatePopover({
             </button>
             <button
               type="button"
-              className="flex flex-1 items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 transition-colors"
+              className="flex flex-1 items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-body text-muted-foreground hover:bg-muted/60 transition-colors"
               onClick={onBrowseRegistry}
             >
               <Search className="h-4 w-4" />
@@ -715,15 +721,36 @@ export default function IntegrationsPage() {
   // Render: loading
   // -------------------------------------------------------------------------
 
+  const headerActions = canManage ? (
+    <TemplatePopover
+      open={templatePopoverOpen}
+      onOpenChange={setTemplatePopoverOpen}
+      onSelect={handleAddServer}
+      onBrowseRegistry={() => {
+        setTemplatePopoverOpen(false)
+        setRegistryOpen(true)
+      }}
+      trigger={
+        <Button>
+          <Plus className="mr-2 h-4 w-4" />
+          Add MCP Server
+        </Button>
+      }
+    />
+  ) : null
+
   if (wsLoading || loading) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-        <PageHeader title="Integrations" description="Manage MCP server connections" />
+      <PageShell
+        title="Integrations"
+        description="MCP server connections for your workspace"
+        actions={headerActions}
+      >
         <div className="space-y-3">
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
-      </div>
+      </PageShell>
     )
   }
 
@@ -732,27 +759,11 @@ export default function IntegrationsPage() {
   // -------------------------------------------------------------------------
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <PageHeader title="Integrations" description="Manage MCP server connections for your workspace">
-        {canManage && (
-          <TemplatePopover
-            open={templatePopoverOpen}
-            onOpenChange={setTemplatePopoverOpen}
-            onSelect={handleAddServer}
-            onBrowseRegistry={() => {
-              setTemplatePopoverOpen(false)
-              setRegistryOpen(true)
-            }}
-            trigger={
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Add MCP Server
-              </Button>
-            }
-          />
-        )}
-      </PageHeader>
-
+    <PageShell
+      title="Integrations"
+      description="MCP server connections for your workspace"
+      actions={headerActions}
+    >
       {servers.length === 0 ? (
         <EmptyState
           icon={Plug}
@@ -778,7 +789,7 @@ export default function IntegrationsPage() {
           )}
         </EmptyState>
       ) : (
-        <div className="rounded-md border divide-y">
+        <Card className="overflow-hidden p-0 divide-y divide-border">
           {servers.map((server) => {
             const isExpanded = expandedId === server.id
             const agents = crewAgents[server.crew_id] ?? []
@@ -804,23 +815,23 @@ export default function IntegrationsPage() {
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     <Plug className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <div className="min-w-0">
-                      <p className="font-medium text-sm truncate">
+                      <p className="font-medium text-body truncate">
                         {server.display_name || server.name}
                       </p>
-                      <p className="text-xs text-muted-foreground truncate">
+                      <p className="text-label text-muted-foreground truncate">
                         {subtitleFor(server)}
                       </p>
                     </div>
                   </div>
 
                   {/* Crew badge */}
-                  <Badge variant="outline" className="text-xs font-normal shrink-0">
+                  <Badge variant="outline" className="text-label font-normal shrink-0">
                     <Users className="mr-1 h-3 w-3" />
                     {server.crew_name}
                   </Badge>
 
                   {/* Transport */}
-                  <span className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+                  <span className="hidden sm:flex items-center gap-1.5 text-label text-muted-foreground shrink-0">
                     {server.transport === "streamable-http" ? (
                       <Globe className="h-3 w-3" />
                     ) : (
@@ -831,18 +842,18 @@ export default function IntegrationsPage() {
 
                   {/* Auth status indicator */}
                   {server.auth_status === "missing" && (
-                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0 shrink-0">No credential</Badge>
+                    <StatusBadge status="FAILED" label="No credential" className="shrink-0" />
                   )}
                   {server.auth_status === "expired" && (
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 border-yellow-500 text-yellow-600">Expired</Badge>
+                    <StatusBadge status="BLOCKED" label="Expired" className="shrink-0" />
                   )}
                   {server.auth_status === "connected" && (
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 border-green-500 text-green-600">Connected</Badge>
+                    <StatusBadge status="COMPLETED" label="Connected" className="shrink-0" />
                   )}
 
                   {/* Agent count */}
                   {server.agent_binding_count > 0 && (
-                    <span className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+                    <span className="hidden sm:flex items-center gap-1 text-label text-muted-foreground shrink-0">
                       <Bot className="h-3 w-3" />
                       {server.agent_binding_count}
                     </span>
@@ -873,7 +884,7 @@ export default function IntegrationsPage() {
               </div>
             )
           })}
-        </div>
+        </Card>
       )}
 
       {/* Registry browser dialog */}
@@ -882,7 +893,7 @@ export default function IntegrationsPage() {
         onOpenChange={setRegistryOpen}
         onAdd={handleRegistryAdd}
       />
-    </div>
+    </PageShell>
   )
 }
 
@@ -953,7 +964,7 @@ function TestConnectionButton({
       <Button
         variant="outline"
         size="sm"
-        className="h-8 text-xs"
+        className="h-8 text-label"
         onClick={handleTest}
         disabled={testing}
       >
@@ -965,30 +976,21 @@ function TestConnectionButton({
         Test Connection
       </Button>
       {result && (
-        <span className="inline-flex items-center gap-1.5 text-xs">
+        <span className="inline-flex items-center gap-1.5">
           {result.status === "ok" && (
-            <>
-              <Check className="h-3.5 w-3.5 text-green-600" />
-              <span className="text-green-600">Connected</span>
-            </>
+            <StatusBadge status="COMPLETED" label={<span className="inline-flex items-center gap-1"><Check className="h-3 w-3" />Connected</span>} />
           )}
           {result.status === "auth_required" && (
-            <>
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-              <span className="text-amber-600">Authentication required</span>
-            </>
+            <StatusBadge status="BLOCKED" label={<span className="inline-flex items-center gap-1"><AlertTriangle className="h-3 w-3" />Authentication required</span>} />
           )}
           {result.status === "error" && (
-            <>
-              <XCircle className="h-3.5 w-3.5 text-destructive" />
-              <span className="text-destructive">{result.message || "Connection failed"}</span>
-            </>
+            <StatusBadge status="FAILED" label={<span className="inline-flex items-center gap-1"><XCircle className="h-3 w-3" />{result.message || "Connection failed"}</span>} />
           )}
           {result.status === "skipped" && (
-            <>
-              <Info className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-muted-foreground">Tested at runtime</span>
-            </>
+            <span className="inline-flex items-center gap-1.5 text-label text-muted-foreground">
+              <Info className="h-3.5 w-3.5" />
+              Tested at runtime
+            </span>
           )}
         </span>
       )}
@@ -1157,17 +1159,17 @@ function ExpandedPanel({
   const isConfirming = confirmDeleteId === server.id
 
   return (
-    <div className="bg-muted/20 border-t px-6 py-5 space-y-4">
+    <div className="bg-surface-subtle border-t border-border px-6 py-5 space-y-4">
       {/* Section 1: Scope & Assignment */}
-      <div className="rounded-md border bg-background p-4 space-y-4">
-        <div className="flex items-center gap-2 text-sm font-medium">
+      <SectionCard surface="subtle" className="p-4 space-y-4">
+        <div className="flex items-center gap-2 text-body font-medium">
           <Users className="h-4 w-4 text-muted-foreground" />
           Scope & Assignment
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <Label htmlFor={`crew-${server.id}`} className="text-xs">
+            <Label htmlFor={`crew-${server.id}`} className="text-label">
               Assigned to crew
             </Label>
             <Select
@@ -1175,7 +1177,7 @@ function ExpandedPanel({
               onValueChange={(v) => onCrewMove(v)}
               disabled={!canManage}
             >
-              <SelectTrigger id={`crew-${server.id}`} className="h-8 text-xs">
+              <SelectTrigger id={`crew-${server.id}`} className="h-8 text-label">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1192,7 +1194,7 @@ function ExpandedPanel({
         {/* Agent assignment */}
         {agents.length > 0 && (
           <div className="space-y-2">
-            <Label className="text-xs">Agent access</Label>
+            <Label className="text-label">Agent access</Label>
             <div className="flex flex-wrap gap-1.5">
               {agents.map((a) => {
                 const bound = agentBindings[server.id]?.has(a.id) ?? false
@@ -1201,11 +1203,12 @@ function ExpandedPanel({
                   <button
                     key={a.id}
                     type="button"
-                    className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-label transition-colors",
                       hasAccess
                         ? "bg-primary/10 border-primary/30 text-primary"
                         : "bg-muted/30 border-border text-muted-foreground"
-                    }`}
+                    )}
                     onClick={() => onAgentToggle(a, hasAccess, hasAnyBindings)}
                     disabled={!canManage}
                     title={hasAccess ? `Remove ${a.name} access` : `Grant ${a.name} access`}
@@ -1217,30 +1220,30 @@ function ExpandedPanel({
                 )
               })}
             </div>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-label text-muted-foreground">
               {hasAnyBindings
                 ? "Only selected agents have access. Click to toggle."
                 : "No agents have access yet. Click an agent to grant access."}
             </p>
           </div>
         )}
-      </div>
+      </SectionCard>
 
       {/* Section 2: Server Configuration */}
-      <div className="rounded-md border bg-background p-4 space-y-4">
-        <div className="flex items-center gap-2 text-sm font-medium">
+      <SectionCard surface="subtle" className="p-4 space-y-4">
+        <div className="flex items-center gap-2 text-body font-medium">
           <Settings2 className="h-4 w-4 text-muted-foreground" />
           Server Configuration
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <Label htmlFor={`name-${server.id}`} className="text-xs">
+            <Label htmlFor={`name-${server.id}`} className="text-label">
               Server name
             </Label>
             <Input
               id={`name-${server.id}`}
-              className="h-8 text-xs"
+              className="h-8 text-label"
               value={name}
               onChange={(e) => setName(e.target.value)}
               onBlur={() => handleBlur("name", name)}
@@ -1248,12 +1251,12 @@ function ExpandedPanel({
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor={`display-${server.id}`} className="text-xs">
+            <Label htmlFor={`display-${server.id}`} className="text-label">
               Display name
             </Label>
             <Input
               id={`display-${server.id}`}
-              className="h-8 text-xs"
+              className="h-8 text-label"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               onBlur={() => handleBlur("display_name", displayName)}
@@ -1263,7 +1266,7 @@ function ExpandedPanel({
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor={`transport-${server.id}`} className="text-xs">
+          <Label htmlFor={`transport-${server.id}`} className="text-label">
             Transport
           </Label>
           <Select
@@ -1271,7 +1274,7 @@ function ExpandedPanel({
             onValueChange={handleTransportChange}
             disabled={!canManage}
           >
-            <SelectTrigger id={`transport-${server.id}`} className="h-8 text-xs w-40">
+            <SelectTrigger id={`transport-${server.id}`} className="h-8 text-label w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1292,12 +1295,12 @@ function ExpandedPanel({
         {transport === "stdio" ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor={`cmd-${server.id}`} className="text-xs">
+              <Label htmlFor={`cmd-${server.id}`} className="text-label">
                 Command
               </Label>
               <Input
                 id={`cmd-${server.id}`}
-                className="h-8 text-xs font-mono"
+                className="h-8 text-label font-mono"
                 placeholder="npx"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
@@ -1306,12 +1309,12 @@ function ExpandedPanel({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor={`args-${server.id}`} className="text-xs">
+              <Label htmlFor={`args-${server.id}`} className="text-label">
                 Arguments
               </Label>
               <Input
                 id={`args-${server.id}`}
-                className="h-8 text-xs font-mono"
+                className="h-8 text-label font-mono"
                 placeholder="-y @modelcontextprotocol/server-github"
                 value={args}
                 onChange={(e) => setArgs(e.target.value)}
@@ -1323,25 +1326,27 @@ function ExpandedPanel({
         ) : (
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
-              <Label htmlFor={`url-${server.id}`} className="text-xs">
+              <Label htmlFor={`url-${server.id}`} className="text-label">
                 URL
               </Label>
               {discovering && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                <span className="inline-flex items-center gap-1 text-micro text-muted-foreground">
                   <Loader2 className="h-3 w-3 animate-spin" />
                   Checking...
                 </span>
               )}
               {!discovering && oauthDiscovered && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-500 text-blue-600">
-                  <ExternalLink className="mr-0.5 h-2.5 w-2.5" />
-                  OAuth detected
-                </Badge>
+                <StatusBadge status="IN_PROGRESS" label={
+                  <span className="inline-flex items-center gap-1">
+                    <ExternalLink className="h-2.5 w-2.5" />
+                    OAuth detected
+                  </span>
+                } />
               )}
             </div>
             <Input
               id={`url-${server.id}`}
-              className="h-8 text-xs font-mono"
+              className="h-8 text-label font-mono"
               placeholder="https://example.com/mcp"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -1355,7 +1360,7 @@ function ExpandedPanel({
             />
           </div>
         )}
-      </div>
+      </SectionCard>
 
       {/* Section 3: OAuth Auto-Connect (HTTP servers only) */}
       {canManage && transport === "streamable-http" && (url || server.endpoint) && (server.auth_status !== "none" || oauthDiscovered) && (
@@ -1402,9 +1407,9 @@ function ExpandedPanel({
       )}
 
       {/* Section 4: Environment Variables (hidden for HTTP servers that use OAuth) */}
-      {!(server.transport === "streamable-http" && server.endpoint) && <div className="rounded-md border bg-background p-4 space-y-4">
+      {!(server.transport === "streamable-http" && server.endpoint) && <SectionCard surface="subtle" className="p-4 space-y-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm font-medium">
+          <div className="flex items-center gap-2 text-body font-medium">
             <KeyRound className="h-4 w-4 text-muted-foreground" />
             Environment Variables
           </div>
@@ -1412,7 +1417,7 @@ function ExpandedPanel({
             <Button
               variant="outline"
               size="sm"
-              className="h-7 text-xs"
+              className="h-7 text-label"
               onClick={addEnvVar}
             >
               <Plus className="mr-1 h-3 w-3" />
@@ -1422,13 +1427,13 @@ function ExpandedPanel({
         </div>
 
         {envVars.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No environment variables configured.</p>
+          <p className="text-label text-muted-foreground">No environment variables configured.</p>
         ) : (
           <div className="space-y-2">
             {envVars.map((env, idx) => (
               <div key={idx} className="flex items-center gap-2">
                 <Input
-                  className="h-8 text-xs font-mono flex-1"
+                  className="h-8 text-label font-mono flex-1"
                   placeholder="KEY"
                   value={env.key}
                   onChange={(e) => updateEnvVar(idx, "key", e.target.value)}
@@ -1436,7 +1441,7 @@ function ExpandedPanel({
                   readOnly={!canManage}
                   aria-label={`Environment variable key ${idx + 1}`}
                 />
-                <span className="text-xs text-muted-foreground">=</span>
+                <span className="text-label text-muted-foreground">=</span>
                 {canManage && workspaceId ? (
                   <div className="flex-1">
                     <CredentialPicker
@@ -1457,7 +1462,7 @@ function ExpandedPanel({
                   </div>
                 ) : (
                   <Input
-                    className="h-8 text-xs font-mono flex-1"
+                    className="h-8 text-label font-mono flex-1"
                     placeholder="value"
                     value={env.value ? "••••••••" : ""}
                     readOnly
@@ -1480,7 +1485,7 @@ function ExpandedPanel({
             ))}
           </div>
         )}
-      </div>}
+      </SectionCard>}
 
       {/* Section 5: Test Connection */}
       {canManage && <TestConnectionButton
@@ -1494,7 +1499,7 @@ function ExpandedPanel({
         <div className="flex justify-end">
           {isConfirming ? (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Delete this integration?</span>
+              <span className="text-body text-muted-foreground">Delete this integration?</span>
               <Button
                 variant="destructive"
                 size="sm"
