@@ -147,37 +147,12 @@ func (s *Server) handleStandup(w http.ResponseWriter, r *http.Request) {
 
 	since := r.URL.Query().Get("since")
 
-	standupURL := fmt.Sprintf("%s/api/v1/internal/standup?crew_id=%s", s.ipc.BaseURL, neturl.QueryEscape(s.ipc.CrewID))
+	standupPath := "/api/v1/internal/standup?crew_id=" + neturl.QueryEscape(s.ipc.CrewID)
 	if since != "" {
-		standupURL += "&since=" + neturl.QueryEscape(since)
+		standupPath += "&since=" + neturl.QueryEscape(since)
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, standupURL, nil)
-	if err != nil {
-		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
-		return
-	}
-	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
-
-	resp, err := ipcClient.Do(httpReq)
-	if err != nil {
-		writeJSONResponse(w, http.StatusBadGateway, map[string]string{
-			"error": fmt.Sprintf("standup request failed: %v", err),
-		})
-		return
-	}
-	defer resp.Body.Close()
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "invalid response from crewshipd"})
-		return
-	}
-
-	writeJSONResponse(w, resp.StatusCode, result)
+	s.proxyIPCJSON(w, r, http.MethodGet, standupPath, "standup", nil)
 }
 
 // handleEscalate handles POST /escalate from agents wanting to flag something for the lead.

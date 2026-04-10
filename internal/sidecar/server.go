@@ -1,9 +1,11 @@
 package sidecar
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -322,6 +324,51 @@ func writeJSONResponse(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// proxyIPCJSON forwards a request to crewshipd over IPC with a 15s timeout,
+// decodes the JSON response, and writes it back to the client. The label is
+// used in error messages (e.g. "issue create" → "issue create request failed").
+// If body is nil, no request body is sent.
+func (s *Server) proxyIPCJSON(w http.ResponseWriter, r *http.Request, method, path, label string, body []byte) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	var reqBody io.Reader
+	if body != nil {
+		reqBody = bytes.NewReader(body)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, s.ipc.BaseURL+path, reqBody)
+	if err != nil {
+		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
+		return
+	}
+	if body != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
+
+	resp, err := ipcClient.Do(httpReq)
+	if err != nil {
+		writeJSONResponse(w, http.StatusBadGateway, map[string]string{
+			"error": fmt.Sprintf("%s request failed: %v", label, err),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "invalid response from crewshipd"})
+		return
+	}
+
+	writeJSONResponse(w, resp.StatusCode, result)
 }
 
 // CredStore returns the credential store for external updates.
