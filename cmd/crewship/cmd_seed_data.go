@@ -455,23 +455,34 @@ func seedCredentials(ctx context.Context, client *cli.Client, agentIDs map[strin
 	}
 	fmt.Fprintf(os.Stderr, "  + Assigned %s to %d/%d agents\n", anthro.Name, assigned, len(agentIDs))
 
-	// Google credential (optional)
+	// Google credential (optional). Same idempotent/surface-failure pattern
+	// as the Anthropic assignment above — treat 409 as already linked,
+	// report only genuinely successful assignments in the summary.
 	googleCred := seeddata.ResolveGoogleCredential()
 	if googleCred != nil {
 		googleID, err := seedOneCredential(client, *googleCred)
 		if err != nil {
 			cli.PrintWarning("Google credential: " + err.Error())
 		} else {
-			for _, agentID := range agentIDs {
+			googleAssigned := 0
+			for slug, agentID := range agentIDs {
 				resp, err := client.Post(
 					fmt.Sprintf("/api/v1/agents/%s/credentials", agentID),
 					map[string]string{"credential_id": googleID, "env_var_name": googleCred.EnvVarName},
 				)
-				if err == nil {
-					resp.Body.Close()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "  ! Assign Google credential to agent %s: %v\n", slug, err)
+					continue
 				}
+				status := resp.StatusCode
+				resp.Body.Close()
+				if status >= 400 && status != http.StatusConflict {
+					fmt.Fprintf(os.Stderr, "  ! Assign Google credential to agent %s: HTTP %d\n", slug, status)
+					continue
+				}
+				googleAssigned++
 			}
-			fmt.Fprintf(os.Stderr, "  + Assigned %s to %d agents\n", googleCred.Name, len(agentIDs))
+			fmt.Fprintf(os.Stderr, "  + Assigned %s to %d/%d agents\n", googleCred.Name, googleAssigned, len(agentIDs))
 		}
 	} else {
 		fmt.Fprintln(os.Stderr, "  Skipping Google credential (set SEED_GOOGLE_EMAIL + SEED_GOOGLE_PASSWORD)")

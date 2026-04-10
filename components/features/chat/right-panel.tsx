@@ -139,6 +139,8 @@ function TriggersTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
             <div className="flex items-center gap-1">
               <code className="text-micro bg-accent px-1.5 py-0.5 rounded font-mono truncate flex-1">{webhookUrl}</code>
               <button
+                type="button"
+                aria-label={copied ? "Webhook URL copied" : "Copy webhook URL"}
                 onClick={() => {
                   navigator.clipboard.writeText(window.location.origin + webhookUrl)
                   setCopied(true)
@@ -189,15 +191,17 @@ function SharedContextTab({ agentId, workspaceId }: { agentId: string; workspace
       return
     }
     setLoading(true)
+    // Chain the crew fetch into the outer promise so the finally()
+    // block only fires once BOTH have resolved/rejected — otherwise the
+    // crew section "pops in" after the spinner clears.
     fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
       .then((r) => r.json())
       .then((data: AgentContextInfo) => {
         setAgent(data)
         if (data.crew_id) {
-          fetch(`/api/v1/crews/${data.crew_id}?workspace_id=${workspaceId}`)
+          return fetch(`/api/v1/crews/${data.crew_id}?workspace_id=${workspaceId}`)
             .then((r) => r.json())
             .then((c) => setCrew(c))
-            .catch(() => {})
         }
       })
       .catch(() => {})
