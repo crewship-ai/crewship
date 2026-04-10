@@ -148,22 +148,16 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 				Metadata:  event.Metadata,
 			})
 
-			if h.hub != nil {
-				channel := "workspace:" + info.WorkspaceID
-				h.hub.Broadcast(channel, ws.ServerMessage{
-					Type:    "agent.log",
-					Channel: channel,
-					Payload: map[string]interface{}{
-						"ts":       event.Timestamp,
-						"level":    "info",
-						"agent":    info.AgentSlug,
-						"agent_id": info.AgentID,
-						"event":    event.Type,
-						"content":  event.Content,
-						"metadata": event.Metadata,
-					},
+			broadcastWorkspaceEvent(h.hub, info.WorkspaceID, "agent.log",
+				map[string]interface{}{
+					"ts":       event.Timestamp,
+					"level":    "info",
+					"agent":    info.AgentSlug,
+					"agent_id": info.AgentID,
+					"event":    event.Type,
+					"content":  event.Content,
+					"metadata": event.Metadata,
 				})
-			}
 		}
 
 		startedAt := time.Now()
