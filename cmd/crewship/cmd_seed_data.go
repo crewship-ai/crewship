@@ -688,14 +688,24 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		var created struct {
 			ID string `json:"id"`
 		}
-		if cli.ReadJSON(resp, &created) == nil {
-			oauthCredIDs[oc.IntegrationName] = created.ID
-			status := "ACTIVE"
-			if oc.AccessToken == "" {
-				status = "PENDING"
-			}
-			fmt.Fprintf(os.Stderr, "  + OAuth credential: %s (%s)\n", oc.CredName, status)
+		// Mirror the integration-create parse-failure handling above so
+		// OAuth provisioning is debuggable on its own: surface ReadJSON
+		// errors and skip tracking instead of silently leaving
+		// oauthCredIDs without an entry for this integration.
+		if err := cli.ReadJSON(resp, &created); err != nil {
+			fmt.Fprintf(os.Stderr, "  ! OAuth credential %s: parse response: %v\n", oc.CredName, err)
+			continue
 		}
+		if created.ID == "" {
+			fmt.Fprintf(os.Stderr, "  ! OAuth credential %s: response missing id\n", oc.CredName)
+			continue
+		}
+		oauthCredIDs[oc.IntegrationName] = created.ID
+		status := "ACTIVE"
+		if oc.AccessToken == "" {
+			status = "PENDING"
+		}
+		fmt.Fprintf(os.Stderr, "  + OAuth credential: %s (%s)\n", oc.CredName, status)
 	}
 
 	// Bind agents to integrations. Treat 409 Conflict as idempotent; surface
