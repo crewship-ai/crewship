@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 )
 
+// AuthHandler provides user authentication endpoints including signup, login, and WebSocket token exchange.
 type AuthHandler struct {
 	db          *sql.DB
 	logger      *slog.Logger
@@ -23,6 +24,7 @@ type AuthHandler struct {
 	allowSignup bool
 }
 
+// NewAuthHandler creates an AuthHandler with the given dependencies and signup configuration.
 func NewAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator, allowSignup bool) *AuthHandler {
 	return &AuthHandler{db: db, logger: logger, validator: validator, allowSignup: allowSignup}
 }
@@ -64,6 +66,8 @@ type signupRequest struct {
 
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
 
+// Signup registers a new user, creates their default workspace, and sets a session cookie.
+// POST /api/v1/auth/signup — disabled when CREWSHIP_ALLOW_SIGNUP is false.
 func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	if !h.allowSignup {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Registration is disabled. Set CREWSHIP_ALLOW_SIGNUP=true to enable."})
@@ -286,6 +290,8 @@ func (h *AuthHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// WsToken generates a short-lived JWT for authenticating WebSocket connections.
+// POST /api/v1/auth/ws-token — works with both session cookies and CLI tokens.
 func (h *AuthHandler) WsToken(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {

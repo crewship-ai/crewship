@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,6 +29,7 @@ type QueryHandler struct {
 	escalationWaiters map[string]chan escalationResult
 }
 
+// NewQueryHandler creates a QueryHandler with the given orchestrator, hub, and internal token.
 func NewQueryHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, internalToken string, logger *slog.Logger) *QueryHandler {
 	return &QueryHandler{
 		db:                db,
@@ -143,17 +143,12 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Broadcast event
-	if h.hub != nil {
-		h.hub.Broadcast("session:"+body.ChatID, ws.ServerMessage{
-			Type:    "peer_query_running",
-			Channel: "session:" + body.ChatID,
-			Payload: map[string]string{
-				"id":     convID,
-				"from":   body.FromSlug,
-				"target": body.TargetSlug,
-			},
+	broadcastChannelEvent(h.hub, "session", body.ChatID, "peer_query_running",
+		map[string]string{
+			"id":     convID,
+			"from":   body.FromSlug,
+			"target": body.TargetSlug,
 		})
-	}
 
 	h.logger.Info("peer query started",
 		"query_id", convID,
@@ -293,38 +288,27 @@ func (h *QueryHandler) finishQuery(
 	}
 
 	// Broadcast completion
-	if h.hub != nil {
-		eventType := "peer_query_completed"
-		payload := map[string]string{
-			"id":     convID,
-			"from":   fromSlug,
-			"target": targetSlug,
-		}
-		if errMsg != "" {
-			eventType = "peer_query_failed"
-			payload["error"] = errMsg
-		} else {
-			payload["response"] = result
-		}
-		h.hub.Broadcast("session:"+chatID, ws.ServerMessage{
-			Type:    eventType,
-			Channel: "session:" + chatID,
-			Payload: payload,
-		})
-		// Broadcast to workspace for global visibility
-		if workspaceID != "" {
-			wsChannel := "workspace:" + workspaceID
-			h.hub.Broadcast(wsChannel, ws.ServerMessage{
-				Type:    "peer_conversation.updated",
-				Channel: wsChannel,
-				Payload: map[string]string{
-					"id":     convID,
-					"from":   fromSlug,
-					"target": targetSlug,
-					"status": status,
-				},
+	eventType := "peer_query_completed"
+	payload := map[string]string{
+		"id":     convID,
+		"from":   fromSlug,
+		"target": targetSlug,
+	}
+	if errMsg != "" {
+		eventType = "peer_query_failed"
+		payload["error"] = errMsg
+	} else {
+		payload["response"] = result
+	}
+	broadcastChannelEvent(h.hub, "session", chatID, eventType, payload)
+	if workspaceID != "" {
+		broadcastWorkspaceEvent(h.hub, workspaceID, "peer_conversation.updated",
+			map[string]string{
+				"id":     convID,
+				"from":   fromSlug,
+				"target": targetSlug,
+				"status": status,
 			})
-		}
 	}
 
 	h.logger.Info("peer query finished", "query_id", convID, "status", status, "duration_ms", durationMs)
@@ -366,14 +350,7 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := parsePagination(r, 50, 100)
 
 	type peerConvItem struct {
 		ID           string  `json:"id"`
@@ -408,7 +385,7 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 	}
 	defer rows.Close()
 
-	items := make([]peerConvItem, 0)
+	items := make([]peerConvItem, 0, limit)
 	for rows.Next() {
 		var item peerConvItem
 		var escalatedInt int

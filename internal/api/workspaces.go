@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
@@ -58,16 +57,19 @@ func resolveLanguage(val string) (string, error) {
 	return "", fmt.Errorf("invalid language %q — use a name (e.g. Czech) or ISO code (e.g. cs)", val)
 }
 
+// WorkspaceHandler provides CRUD endpoints for workspaces and their membership/invitation management.
 type WorkspaceHandler struct {
 	db      *sql.DB
 	logger  *slog.Logger
 	license *license.License
 }
 
+// NewWorkspaceHandler creates a WorkspaceHandler with the given database and logger.
 func NewWorkspaceHandler(db *sql.DB, logger *slog.Logger) *WorkspaceHandler {
 	return &WorkspaceHandler{db: db, logger: logger}
 }
 
+// SetLicense attaches the license for enforcing workspace member limits.
 func (h *WorkspaceHandler) SetLicense(lic *license.License) { h.license = lic }
 
 type workspaceResponse struct {
@@ -84,6 +86,8 @@ type workspaceResponse struct {
 	MemberCount       int     `json:"_count_members,omitempty"`
 }
 
+// List returns all workspaces the authenticated user belongs to.
+// GET /api/v1/workspaces
 func (h *WorkspaceHandler) List(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -140,6 +144,8 @@ type createWorkspaceRequest struct {
 	PreferredLanguage *string `json:"preferred_language"`
 }
 
+// Create provisions a new workspace and adds the current user as OWNER.
+// POST /api/v1/workspaces
 func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -228,6 +234,8 @@ func (h *WorkspaceHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Get returns a single workspace by ID with crew, agent, and member counts.
+// GET /api/v1/workspaces/{workspaceId}
 func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -262,6 +270,8 @@ type updateWorkspaceRequest struct {
 	PreferredLanguage *string `json:"preferred_language"`
 }
 
+// Update modifies workspace settings such as name, slug, logo, and preferred language.
+// PATCH /api/v1/workspaces/{workspaceId}
 func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -310,31 +320,22 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-
-	var setClauses []string
-	var args []interface{}
+	ub := newUpdate()
 	if req.Name != nil {
-		setClauses = append(setClauses, "name = ?")
-		args = append(args, *req.Name)
+		ub.Set("name", *req.Name)
 	}
 	if req.Slug != nil {
-		setClauses = append(setClauses, "slug = ?")
-		args = append(args, *req.Slug)
+		ub.Set("slug", *req.Slug)
 	}
 	if req.PreferredLanguage != nil {
 		if *req.PreferredLanguage == "" {
-			setClauses = append(setClauses, "preferred_language = NULL")
+			ub.SetNull("preferred_language")
 		} else {
-			setClauses = append(setClauses, "preferred_language = ?")
-			args = append(args, *req.PreferredLanguage)
+			ub.Set("preferred_language", *req.PreferredLanguage)
 		}
 	}
-	if len(setClauses) > 0 {
-		setClauses = append(setClauses, "updated_at = ?")
-		args = append(args, now)
-		args = append(args, workspaceID)
-		query := "UPDATE workspaces SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	if !ub.Empty() {
+		query, args := ub.Build("workspaces", "id = ?", workspaceID)
 		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 			h.logger.Error("update workspace", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -378,6 +379,8 @@ type memberUser struct {
 	AvatarURL *string `json:"avatar_url"`
 }
 
+// ListMembers returns all members of the workspace with their roles and user details.
+// GET /api/v1/workspaces/{workspaceId}/members
 func (h *WorkspaceHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
@@ -427,6 +430,8 @@ type addMemberRequest struct {
 	Role   string `json:"role"`
 }
 
+// AddMember adds a user to the workspace with a specified role.
+// POST /api/v1/workspaces/{workspaceId}/members
 func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -522,6 +527,8 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// RemoveMember removes a user from the workspace (owners cannot remove themselves).
+// DELETE /api/v1/workspaces/{workspaceId}/members/{memberId}
 func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -587,6 +594,8 @@ type inviterUser struct {
 	FullName *string `json:"full_name"`
 }
 
+// ListInvitations returns all pending invitations for the workspace.
+// GET /api/v1/workspaces/{workspaceId}/invitations
 func (h *WorkspaceHandler) ListInvitations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
@@ -646,6 +655,8 @@ func generateToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// CreateInvitation creates a new invitation link for the workspace.
+// POST /api/v1/workspaces/{workspaceId}/invitations
 func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())

@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// CreateRun records a new agent run started by the sidecar.
+// POST /api/v1/internal/runs
 func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ID          string          `json:"id"`
@@ -58,31 +58,26 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			h.logger.Debug("fetch agent name for broadcast", "error", err, "agent_id", body.AgentID)
 		}
 
-		channel := "workspace:" + body.WorkspaceID
-		h.hub.Broadcast(channel, ws.ServerMessage{
-			Type:    "run.started",
-			Channel: channel,
-			Payload: map[string]string{
+		broadcastWorkspaceEvent(h.hub, body.WorkspaceID, "run.started",
+			map[string]string{
 				"run_id":     body.ID,
 				"agent_id":   body.AgentID,
 				"agent_name": agentName,
 				"status":     "RUNNING",
-			},
-		})
-		h.hub.Broadcast(channel, ws.ServerMessage{
-			Type:    "agent.status",
-			Channel: channel,
-			Payload: map[string]string{
+			})
+		broadcastWorkspaceEvent(h.hub, body.WorkspaceID, "agent.status",
+			map[string]string{
 				"agent_id":   body.AgentID,
 				"agent_name": agentName,
 				"status":     "RUNNING",
-			},
-		})
+			})
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": body.ID, "status": "RUNNING"})
 }
 
+// UpdateRun updates the status of an agent run (e.g. COMPLETED, FAILED) when it finishes.
+// PATCH /api/v1/internal/runs/{runId}
 func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runId")
 	var body struct {
@@ -171,27 +166,24 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Broadcast real-time events (only when hub is available)
-		if h.hub != nil && workspaceID != "" {
-			channel := "workspace:" + workspaceID
+		if workspaceID != "" {
 			eventType := "run.completed"
 			if body.Status == "FAILED" || body.Status == "CANCELLED" {
 				eventType = "run.failed"
 			}
-			h.hub.Broadcast(channel, ws.ServerMessage{
-				Type: eventType, Channel: channel, Payload: map[string]string{
+			broadcastWorkspaceEvent(h.hub, workspaceID, eventType,
+				map[string]string{
 					"run_id":     runID,
 					"agent_id":   agentID,
 					"agent_name": agentName.String,
 					"status":     body.Status,
-				},
-			})
-			h.hub.Broadcast(channel, ws.ServerMessage{
-				Type: "agent.status", Channel: channel, Payload: map[string]string{
+				})
+			broadcastWorkspaceEvent(h.hub, workspaceID, "agent.status",
+				map[string]string{
 					"agent_id":   agentID,
 					"agent_name": agentName.String,
 					"status":     agentStatus,
-				},
-			})
+				})
 		}
 	}
 

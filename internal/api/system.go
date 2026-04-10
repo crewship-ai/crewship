@@ -10,10 +10,12 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/docker"
 )
 
+// SystemHandler provides endpoints for system-level health and runtime detection.
 type SystemHandler struct {
 	logger *slog.Logger
 }
 
+// NewSystemHandler creates a SystemHandler with the given logger.
 func NewSystemHandler(logger *slog.Logger) *SystemHandler {
 	return &SystemHandler{logger: logger}
 }

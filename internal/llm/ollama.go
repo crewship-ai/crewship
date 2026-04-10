@@ -29,8 +29,10 @@ func NewOllama(baseURL, model string) *Ollama {
 	}
 }
 
+// Name returns "ollama".
 func (o *Ollama) Name() string { return "ollama" }
 
+// Complete sends a non-streaming completion request to the Ollama API.
 func (o *Ollama) Complete(ctx context.Context, req Request) (*Response, error) {
 	body, err := o.buildRequestBody(req, false)
 	if err != nil {
@@ -60,6 +62,7 @@ func (o *Ollama) Complete(ctx context.Context, req Request) (*Response, error) {
 	return raw.toResponse(), nil
 }
 
+// Stream sends a streaming completion request, calling handler for each event.
 func (o *Ollama) Stream(ctx context.Context, req Request, handler func(StreamEvent) error) (*Response, error) {
 	body, err := o.buildRequestBody(req, true)
 	if err != nil {

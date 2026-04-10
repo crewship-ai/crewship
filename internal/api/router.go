@@ -2,7 +2,6 @@ package api
 
 import (
 	"database/sql"
-	"io/fs"
 	"log/slog"
 	"net/http"
 
@@ -24,15 +23,12 @@ type keeperWSBroadcaster struct {
 	hub *ws.Hub
 }
 
+// BroadcastKeeperEvent sends a Keeper event to all WebSocket clients subscribed to the workspace.
 func (b *keeperWSBroadcaster) BroadcastKeeperEvent(workspaceID string, event map[string]any) {
-	channel := "keeper:" + workspaceID
-	b.hub.Broadcast(channel, ws.ServerMessage{
-		Type:    "keeper_event",
-		Channel: channel,
-		Payload: event,
-	})
+	broadcastChannelEvent(b.hub, "keeper", workspaceID, "keeper_event", event)
 }
 
+// Router is the top-level HTTP multiplexer that registers all API, internal, and static routes.
 type Router struct {
 	mux              *http.ServeMux
 	db               *sql.DB
@@ -59,6 +55,7 @@ type Router struct {
 	storagePath      string // base path for crew file storage
 }
 
+// NewRouter creates a Router, applies the given options, and registers all HTTP routes.
 func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...RouterOption) (*Router, error) {
 	validator, err := auth.NewJWTValidator(jwtSecret, "")
 	if err != nil {
@@ -93,51 +90,45 @@ func (r *Router) SetScheduler(su ScheduleUpdater) {
 	}
 }
 
+// RouterOption is a functional option for configuring a Router.
 type RouterOption func(*Router)
 
-func WithStaticFS(webFS fs.FS) RouterOption {
-	return func(r *Router) {
-		r.mux.Handle("GET /", StaticFileHandler(webFS))
-		r.logger.Info("serving embedded static UI")
-	}
-}
-
+// WithSocketPath sets the Unix socket path used for IPC with the sidecar.
 func WithSocketPath(path string) RouterOption {
 	return func(r *Router) {
 		r.socketPath = path
 	}
 }
 
+// WithInternalToken sets the shared secret used to authenticate internal API calls from the sidecar.
 func WithInternalToken(token string) RouterOption {
 	return func(r *Router) {
 		r.internalToken = token
 	}
 }
 
+// WithInternalBaseURL sets the base URL for internal API calls from the backend to itself.
 func WithInternalBaseURL(url string) RouterOption {
 	return func(r *Router) {
 		r.internalBaseURL = url
 	}
 }
 
+// WithHub attaches a WebSocket hub for real-time event broadcasting to connected clients.
 func WithHub(hub *ws.Hub) RouterOption {
 	return func(r *Router) {
 		r.hub = hub
 	}
 }
 
+// WithOrchestrator attaches the container orchestrator used to run agent assignments.
 func WithOrchestrator(orch *orchestrator.Orchestrator) RouterOption {
 	return func(r *Router) {
 		r.orch = orch
 	}
 }
 
-func WithScheduler(su ScheduleUpdater) RouterOption {
-	return func(r *Router) {
-		r.scheduleUpdater = su
-	}
-}
-
+// WithKeeperGatekeeper attaches the Keeper gatekeeper policy evaluator.
 func WithKeeperGatekeeper(gk gatekeeper.Evaluator) RouterOption {
 	return func(r *Router) {
 		r.keeperGK = gk
@@ -175,48 +166,42 @@ func WithAllowSignup(allow bool) RouterOption {
 	}
 }
 
+// WithStoragePath sets the base filesystem path for crew file storage.
 func WithStoragePath(path string) RouterOption {
 	return func(r *Router) {
 		r.storagePath = path
 	}
 }
 
+// WithKeeperConversations attaches a conversation reader so Keeper can inspect agent chat history.
 func WithKeeperConversations(cr ConversationReader) RouterOption {
 	return func(r *Router) {
 		r.keeperConvReader = cr
 	}
 }
 
+// WithMissionCallback attaches a callback invoked when assignment results affect missions.
 func WithMissionCallback(cb MissionCallback) RouterOption {
 	return func(r *Router) {
 		r.missionCallback = cb
 	}
 }
 
+// WithLogWriter attaches a log collector writer for structured log ingestion from agents.
 func WithLogWriter(lw *logcollector.Writer) RouterOption {
 	return func(r *Router) {
 		r.logWriter = lw
 	}
 }
 
-func WithCaptainLLM(p llm.Provider) RouterOption {
-	return func(r *Router) {
-		r.captainLLM = p
-	}
-}
-
-func WithCaptainMissionCallback(ms MissionStarter) RouterOption {
-	return func(r *Router) {
-		r.captainMissionEngine = ms
-	}
-}
-
+// WithLicense attaches the license for enforcing feature gates and seat limits.
 func WithLicense(lic *license.License) RouterOption {
 	return func(r *Router) {
 		r.license = lic
 	}
 }
 
+// ServeHTTP dispatches incoming requests to the registered route handlers.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)
 }

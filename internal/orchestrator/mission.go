@@ -136,6 +136,8 @@ type missionState struct {
 	planningDispatched bool // true after lead planning dispatch (prevents re-dispatch)
 }
 
+// NewMissionEngine creates a MissionEngine that coordinates multi-agent mission
+// execution, dispatching tasks to agents and tracking progress.
 func NewMissionEngine(db *sql.DB, orch *Orchestrator, hub *ws.Hub, logger *slog.Logger) *MissionEngine {
 	pw := NewProgressWriter()
 	return &MissionEngine{
@@ -490,7 +492,7 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 	// Collect dependency outputs first — we need to know if they exist for the preamble.
 	// Prefer structured handoff summary when available (concise, designed for next agent).
 	deps, _ := parseDependsOn(task.DependsOn)
-	depOutputs := make([]string, 0)
+	depOutputs := make([]string, 0, len(deps))
 	for _, depID := range deps {
 		for _, t := range allTasks {
 			if t.ID == depID && t.ResultSummary != nil && *t.ResultSummary != "" {
@@ -888,18 +890,22 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		}
 		if commentBody != "" {
 			commentID := generateID()
-			_, _ = e.db.ExecContext(ctx,
+			if _, err := e.db.ExecContext(ctx,
 				`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-				commentID, missionID, assignedAgentID.String, commentBody, now, now)
+				commentID, missionID, assignedAgentID.String, commentBody, now, now); err != nil {
+				e.logger.Error("insert task comment", "mission_id", missionID, "error", err)
+			}
 			// Activity log
 			activityID := generateID()
 			action := "task_completed"
 			if taskStatus == "FAILED" {
 				action = "task_failed"
 			}
-			_, _ = e.db.ExecContext(ctx,
+			if _, err := e.db.ExecContext(ctx,
 				`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
-				activityID, missionID, assignedAgentID.String, action, commentBody, now)
+				activityID, missionID, assignedAgentID.String, action, commentBody, now); err != nil {
+				e.logger.Error("insert task activity", "mission_id", missionID, "error", err)
+			}
 		}
 	}
 
@@ -989,15 +995,12 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		})
 
 		// Notify workspace about pending approval for dashboard badge.
-		if taskStatus == "AWAITING_APPROVAL" && e.hub != nil {
-			e.hub.Broadcast("workspace:"+ms.WorkspaceID, ws.ServerMessage{
-				Type:    "approval.required",
-				Channel: "workspace:" + ms.WorkspaceID,
-				Payload: map[string]string{
+		if taskStatus == "AWAITING_APPROVAL" {
+			e.hub.BroadcastWorkspace(ms.WorkspaceID, "approval.required",
+				map[string]string{
 					"task_id":    taskID,
 					"mission_id": missionID,
-				},
-			})
+				})
 		}
 	}
 
@@ -1066,12 +1069,9 @@ func (e *MissionEngine) checkApprovalGate(ctx context.Context, taskID, missionID
 		e.mu.Lock()
 		ms := e.active[missionID]
 		e.mu.Unlock()
-		if ms != nil && e.hub != nil {
-			e.hub.Broadcast("workspace:"+ms.WorkspaceID, ws.ServerMessage{
-				Type:    "confidence.low",
-				Channel: "workspace:" + ms.WorkspaceID,
-				Payload: map[string]string{"task_id": taskID, "mission_id": missionID, "level": "notify"},
-			})
+		if ms != nil {
+			e.hub.BroadcastWorkspace(ms.WorkspaceID, "confidence.low",
+				map[string]string{"task_id": taskID, "mission_id": missionID, "level": "notify"})
 		}
 	}
 
@@ -1131,13 +1131,8 @@ func (e *MissionEngine) ApproveTask(ctx context.Context, taskID, userID string, 
 
 	if ms != nil {
 		e.broadcastTaskStatus(ms, taskID, newStatus)
-		if e.hub != nil {
-			e.hub.Broadcast("workspace:"+ms.WorkspaceID, ws.ServerMessage{
-				Type:    "approval.resolved",
-				Channel: "workspace:" + ms.WorkspaceID,
-				Payload: map[string]string{"task_id": taskID, "mission_id": missionID, "action": approvalStatus},
-			})
-		}
+		e.hub.BroadcastWorkspace(ms.WorkspaceID, "approval.resolved",
+			map[string]string{"task_id": taskID, "mission_id": missionID, "action": approvalStatus})
 		e.checkMissionCompletion(ctx, ms) //nolint:errcheck
 	}
 
@@ -1298,12 +1293,31 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 	}
 	rows.Close()
 
+	if len(candidates) == 0 {
+		return
+	}
+
+	// Batch-fetch all task statuses for this mission to avoid per-dep queries
+	statusRows, sErr := e.db.QueryContext(ctx,
+		`SELECT id, status FROM mission_tasks WHERE mission_id = ?`, missionID)
+	if sErr != nil {
+		e.logger.Error("batch query task statuses", "error", sErr)
+		return
+	}
+	statusMap := make(map[string]string)
+	for statusRows.Next() {
+		var id, st string
+		if err := statusRows.Scan(&id, &st); err == nil {
+			statusMap[id] = st
+		}
+	}
+	statusRows.Close()
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, bt := range candidates {
 		allDone := true
 		for _, d := range bt.deps {
-			var s string
-			if err := e.db.QueryRowContext(ctx, `SELECT status FROM mission_tasks WHERE id = ?`, d).Scan(&s); err != nil || s != "COMPLETED" {
+			if statusMap[d] != "COMPLETED" {
 				allDone = false
 				break
 			}
@@ -1384,37 +1398,17 @@ func (e *MissionEngine) loadTasks(ctx context.Context, missionID string) ([]Task
 }
 
 func (e *MissionEngine) broadcastTaskStatus(ms *missionState, taskID, status string) {
-	if e.hub == nil {
-		return
-	}
-	e.hub.Broadcast("mission:"+ms.ID, ws.ServerMessage{
-		Type:    "task.status",
-		Channel: "mission:" + ms.ID,
-		Payload: map[string]string{"id": taskID, "status": status},
-	})
-	wsChannel := "workspace:" + ms.WorkspaceID
-	e.hub.Broadcast(wsChannel, ws.ServerMessage{
-		Type:    "task.updated",
-		Channel: wsChannel,
-		Payload: map[string]string{"id": taskID, "mission_id": ms.ID, "status": status},
-	})
+	e.hub.BroadcastChannel("mission", ms.ID, "task.status",
+		map[string]string{"id": taskID, "status": status})
+	e.hub.BroadcastWorkspace(ms.WorkspaceID, "task.updated",
+		map[string]string{"id": taskID, "mission_id": ms.ID, "status": status})
 }
 
 func (e *MissionEngine) broadcastMissionStatus(ms *missionState, status string) {
-	if e.hub == nil {
-		return
-	}
-	e.hub.Broadcast("mission:"+ms.ID, ws.ServerMessage{
-		Type:    "mission.status",
-		Channel: "mission:" + ms.ID,
-		Payload: map[string]string{"id": ms.ID, "title": ms.Title, "status": status},
-	})
-	wsChannel := "workspace:" + ms.WorkspaceID
-	e.hub.Broadcast(wsChannel, ws.ServerMessage{
-		Type:    "mission.updated",
-		Channel: wsChannel,
-		Payload: map[string]string{"id": ms.ID, "crew_id": ms.CrewID, "title": ms.Title, "status": status},
-	})
+	e.hub.BroadcastChannel("mission", ms.ID, "mission.status",
+		map[string]string{"id": ms.ID, "title": ms.Title, "status": status})
+	e.hub.BroadcastWorkspace(ms.WorkspaceID, "mission.updated",
+		map[string]string{"id": ms.ID, "crew_id": ms.CrewID, "title": ms.Title, "status": status})
 }
 
 // countTasks returns the number of tasks in a mission.

@@ -40,8 +40,10 @@ func NewOpenAIWithBaseURL(apiKey, baseURL string) *OpenAI {
 	}
 }
 
+// Name returns "openai".
 func (o *OpenAI) Name() string { return "openai" }
 
+// Complete sends a non-streaming completion request to the OpenAI-compatible API.
 func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 	body, err := o.buildRequestBody(req, false)
 	if err != nil {
@@ -68,6 +70,7 @@ func (o *OpenAI) Complete(ctx context.Context, req Request) (*Response, error) {
 	return raw.toResponse(), nil
 }
 
+// Stream sends a streaming completion request, calling handler for each event.
 func (o *OpenAI) Stream(ctx context.Context, req Request, handler func(StreamEvent) error) (*Response, error) {
 	body, err := o.buildRequestBody(req, true)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"time"
 )
 
+// Role identifies the sender of a conversation message.
 type Role string
 
 const (
@@ -22,6 +23,8 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// Message represents a single message in a chat conversation, including
+// role, content, and optional tool call metadata.
 type Message struct {
 	ID        string    `json:"id"`
 	ChatID string    `json:"session_id"`
@@ -33,6 +36,7 @@ type Message struct {
 	Timestamp   time.Time `json:"ts"`
 }
 
+// Store persists chat conversation messages as JSONL files, one file per session.
 type Store struct {
 	basePath string
 	logger   *slog.Logger
@@ -40,6 +44,7 @@ type Store struct {
 	files    map[string]*os.File
 }
 
+// NewStore creates a conversation Store that writes session files under basePath.
 func NewStore(basePath string, logger *slog.Logger) *Store {
 	return &Store{
 		basePath: basePath,
@@ -48,6 +53,7 @@ func NewStore(basePath string, logger *slog.Logger) *Store {
 	}
 }
 
+// Append writes a message to the session's JSONL file, creating it if needed.
 func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -91,6 +97,7 @@ func (s *Store) Append(ctx context.Context, sessionID string, msg Message) error
 	return nil
 }
 
+// Read returns messages from a session's JSONL file with optional pagination.
 func (s *Store) Read(ctx context.Context, sessionID string, offset, limit int) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -140,6 +147,7 @@ func (s *Store) Read(ctx context.Context, sessionID string, offset, limit int) (
 	return messages, scanner.Err()
 }
 
+// Close closes all open session file handles.
 func (s *Store) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

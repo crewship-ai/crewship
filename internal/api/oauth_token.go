@@ -146,12 +146,8 @@ func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger 
 			if _, dbErr := db.ExecContext(ctx, "UPDATE credentials SET status = 'EXPIRED', updated_at = datetime('now') WHERE id = ?", id); dbErr != nil {
 				logger.Error("mark credential expired", "credential_id", id, "error", dbErr)
 			}
-			if hub != nil {
-				hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-					Type: "credential.expired", Channel: "workspace:" + wsID,
-					Payload: map[string]string{"credential_id": id, "reason": "OAuth token refresh failed"},
-				})
-			}
+			broadcastWorkspaceEvent(hub, wsID, "credential.expired",
+				map[string]string{"credential_id": id, "reason": "OAuth token refresh failed"})
 			continue
 		}
 

@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// ProposalHandler manages Captain-generated mission proposals that users can approve or reject.
 type ProposalHandler struct {
 	db            *sql.DB
 	hub           *ws.Hub
@@ -22,6 +22,7 @@ type ProposalHandler struct {
 	logger        *slog.Logger
 }
 
+// NewProposalHandler creates a ProposalHandler with the given dependencies.
 func NewProposalHandler(db *sql.DB, hub *ws.Hub, me *orchestrator.MissionEngine, logger *slog.Logger) *ProposalHandler {
 	return &ProposalHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }
@@ -66,11 +67,7 @@ func (h *ProposalHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	status := r.URL.Query().Get("status")
 
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
+	limit, offset := parsePagination(r, 20, 100)
 
 	query := `
 		SELECT p.id, p.workspace_id, p.proposed_by_id, p.title, p.description,
@@ -186,11 +183,13 @@ func (h *ProposalHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusBadRequest, fmt.Sprintf("missions[%d].crew_id is required", i))
 			return
 		}
-		var exists int
-		err := h.db.QueryRowContext(r.Context(),
-			`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-			m.CrewID, wsID).Scan(&exists)
+		found, err := crewExists(r.Context(), h.db, m.CrewID, wsID)
 		if err != nil {
+			h.logger.Error("crew exists check", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if !found {
 			writeProblem(w, r, http.StatusBadRequest, fmt.Sprintf("missions[%d].crew_id %q not found", i, m.CrewID))
 			return
 		}
@@ -509,15 +508,7 @@ func (h *ProposalHandler) loadProposalMissionIDs(ctx context.Context, proposalID
 }
 
 func (h *ProposalHandler) broadcastProposalEvent(wsID, eventType, proposalID string) {
-	if h.hub == nil {
-		return
-	}
-	channel := "workspace:" + wsID
-	h.hub.Broadcast(channel, ws.ServerMessage{
-		Type:    eventType,
-		Channel: channel,
-		Payload: map[string]string{"proposal_id": proposalID},
-	})
+	broadcastWorkspaceEvent(h.hub, wsID, eventType, map[string]string{"proposal_id": proposalID})
 }
 
 func nilIfEmpty(s string) *string {

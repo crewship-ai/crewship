@@ -3,8 +3,11 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,16 +16,23 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+// ChatHandler processes incoming chat messages from WebSocket clients and
+// streams response events back via the provided callback.
 type ChatHandler interface {
 	HandleChatMessage(ctx context.Context, userID, sessionID, content string, streamFn func(event ChatEvent)) error
 }
 
+// ChatEvent is a streaming event sent from an agent run back to the client,
+// such as text output, tool calls, thinking steps, or completion signals.
 type ChatEvent struct {
 	Type     string `json:"type"`                // "text", "tool_call", "tool_result", "thinking", "status", "done", "error", "result", "system"
 	Content  string `json:"content"`
 	Metadata any    `json:"metadata,omitempty"`   // structured data for tool calls, cost/usage, session init, etc.
 }
 
+// Hub manages WebSocket connections, channel subscriptions, and message
+// broadcasting. It authenticates clients via JWT and routes chat messages
+// to the configured ChatHandler.
 type Hub struct {
 	logger       *slog.Logger
 	chatHandler  ChatHandler
@@ -39,6 +49,8 @@ type Hub struct {
 	channelAuth ChannelAuthorizer
 }
 
+// Client represents a single authenticated WebSocket connection with its
+// channel subscriptions and outbound message buffer.
 type Client struct {
 	conn     *websocket.Conn
 	hub      *Hub
@@ -50,23 +62,28 @@ type Client struct {
 	mu       sync.Mutex // protects channels map
 }
 
+// ClientMessage is a JSON message received from a WebSocket client.
 type ClientMessage struct {
 	Type    string          `json:"type"`
 	Channel string          `json:"channel,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
+// ServerMessage is a JSON message sent from the server to WebSocket clients.
 type ServerMessage struct {
 	Type    string      `json:"type"`
 	Channel string      `json:"channel,omitempty"`
 	Payload interface{} `json:"payload"`
 }
 
+// ChannelMessage is an internal message routed to all subscribers of a channel.
 type ChannelMessage struct {
 	Channel string
 	Data    []byte
 }
 
+// NewHub creates a WebSocket hub. Optional deps are inspected for a *auth.JWTValidator
+// to enable token-based authentication on upgrade.
 func NewHub(logger *slog.Logger, chatHandler ChatHandler, deps ...interface{}) *Hub {
 	h := &Hub{
 		logger:      logger,
@@ -86,6 +103,8 @@ func NewHub(logger *slog.Logger, chatHandler ChatHandler, deps ...interface{}) *
 	return h
 }
 
+// Run starts the hub's event loop, processing client registrations,
+// unregistrations, and broadcast messages until ctx is cancelled.
 func (h *Hub) Run(ctx context.Context) {
 	h.logger.Info("websocket hub started")
 	for {
@@ -133,14 +152,17 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 }
 
+// ConnectionCount returns the number of currently connected WebSocket clients.
 func (h *Hub) ConnectionCount() int {
 	return int(h.connCount.Load())
 }
 
+// SetChatHandler replaces the current chat message handler.
 func (h *Hub) SetChatHandler(handler ChatHandler) {
 	h.chatHandler = handler
 }
 
+// Broadcast sends a message to all clients subscribed to the given channel.
 func (h *Hub) Broadcast(channel string, msg ServerMessage) {
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -150,6 +172,26 @@ func (h *Hub) Broadcast(channel string, msg ServerMessage) {
 	h.broadcast <- ChannelMessage{Channel: channel, Data: data}
 }
 
+// BroadcastChannel sends a WebSocket event on the "prefix:id" channel
+// (e.g. "workspace:abc", "crew:xyz", "mission:m_1"). No-op if h is nil.
+func (h *Hub) BroadcastChannel(prefix, id, eventType string, payload any) {
+	if h == nil {
+		return
+	}
+	channel := prefix + ":" + id
+	h.Broadcast(channel, ServerMessage{
+		Type:    eventType,
+		Channel: channel,
+		Payload: payload,
+	})
+}
+
+// BroadcastWorkspace is a shortcut for BroadcastChannel("workspace", wsID, ...).
+func (h *Hub) BroadcastWorkspace(wsID, eventType string, payload any) {
+	h.BroadcastChannel("workspace", wsID, eventType, payload)
+}
+
+// BroadcastExcept sends a message to all channel subscribers except the excluded client.
 func (h *Hub) BroadcastExcept(channel string, exclude *Client, msg ServerMessage) {
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -171,6 +213,8 @@ func (h *Hub) BroadcastExcept(channel string, exclude *Client, msg ServerMessage
 	h.mu.RUnlock()
 }
 
+// HandleUpgrade authenticates the JWT token from the query parameter and
+// upgrades the HTTP connection to a WebSocket.
 func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
@@ -194,10 +238,27 @@ func (h *Hub) HandleUpgrade(w http.ResponseWriter, r *http.Request) {
 
 	wsServer := websocket.Server{
 		Handshake: func(config *websocket.Config, req *http.Request) error {
-			// Skip default origin check — token-based auth on the query
-			// parameter is the sole gate.  The default Handshake rejects
-			// connections where Origin port != Host port, which breaks
-			// dev proxies and SSH tunnels.
+			// Validate that Origin header, when present, matches the
+			// Host header's hostname. This prevents cross-site WebSocket
+			// hijacking while allowing dev proxies and SSH tunnels (which
+			// typically don't set Origin or set it to the same host).
+			origin := req.Header.Get("Origin")
+			if origin != "" {
+				u, err := url.Parse(origin)
+				if err != nil {
+					return fmt.Errorf("invalid origin: %w", err)
+				}
+				host := req.Host
+				// Strip port from host for comparison (dev proxies
+				// often use different ports on the same hostname).
+				if h, _, err := net.SplitHostPort(host); err == nil {
+					host = h
+				}
+				originHost := u.Hostname()
+				if originHost != host && originHost != "localhost" && originHost != "127.0.0.1" {
+					return fmt.Errorf("origin %q not allowed for host %q", origin, req.Host)
+				}
+			}
 			return nil
 		},
 		Handler: func(conn *websocket.Conn) {
@@ -288,6 +349,7 @@ type ChannelAuthorizer interface {
 	CanSubscribe(ctx context.Context, userID, channel string) bool
 }
 
+// SetChannelAuthorizer sets the authorizer used to check channel subscription permissions.
 func (h *Hub) SetChannelAuthorizer(auth ChannelAuthorizer) {
 	h.channelAuth = auth
 }

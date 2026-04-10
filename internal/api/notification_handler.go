@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -55,23 +54,20 @@ func CreateNotification(db *sql.DB, hub *ws.Hub, wsID, userID, actorType, actorI
 		return // best-effort; caller should not fail because of notification
 	}
 
-	if hub != nil {
-		hub.Broadcast("user:"+userID, ws.ServerMessage{
-			Type:    "notification.created",
-			Channel: "user:" + userID,
-			Payload: map[string]string{
-				"id":           id,
-				"action":       action,
-				"entity_type":  entityType,
-				"entity_id":    entityID,
-				"entity_title": entityTitle,
-			},
+	broadcastChannelEvent(hub, "user", userID, "notification.created",
+		map[string]string{
+			"id":           id,
+			"action":       action,
+			"entity_type":  entityType,
+			"entity_id":    entityID,
+			"entity_title": entityTitle,
 		})
-	}
 }
 
 // ── 1. List — GET /api/v1/notifications ───────────────────────────────────
 
+// List returns paginated notifications for the authenticated user.
+// GET /api/v1/notifications
 func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -80,24 +76,16 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pagination
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := parsePagination(r, 50, 100)
 
 	query := `
 		SELECT n.id, n.actor_type, n.actor_id,
-		       CASE
-		         WHEN n.actor_type = 'user' THEN (SELECT full_name FROM users WHERE id = n.actor_id)
-		         WHEN n.actor_type = 'agent' THEN (SELECT name FROM agents WHERE id = n.actor_id)
-		       END,
+		       COALESCE(u.full_name, ag.name),
 		       n.action, n.entity_type, n.entity_id, n.entity_title,
 		       n.read_at, n.created_at
 		FROM notifications n
+		LEFT JOIN users u ON n.actor_type = 'user' AND u.id = n.actor_id
+		LEFT JOIN agents ag ON n.actor_type = 'agent' AND ag.id = n.actor_id
 		WHERE n.user_id = ?`
 	args := []any{user.ID}
 
@@ -149,6 +137,8 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // ── 2. MarkRead — POST /api/v1/notifications/{id}/read ───────────────────
 
+// MarkRead marks a single notification as read.
+// POST /api/v1/notifications/{notificationId}/read
 func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -195,6 +185,8 @@ func (h *NotificationHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 
 // ── 3. MarkAllRead — POST /api/v1/notifications/read-all ─────────────────
 
+// MarkAllRead marks all notifications as read for the authenticated user.
+// POST /api/v1/notifications/read-all
 func (h *NotificationHandler) MarkAllRead(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -219,6 +211,8 @@ func (h *NotificationHandler) MarkAllRead(w http.ResponseWriter, r *http.Request
 
 // ── 4. Delete — DELETE /api/v1/notifications/{id} ─────────────────────────
 
+// Delete removes a notification for the authenticated user.
+// DELETE /api/v1/notifications/{notificationId}
 func (h *NotificationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -252,6 +246,8 @@ func (h *NotificationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // ── 5. Count — GET /api/v1/notifications/count ────────────────────────────
 
+// Count returns the number of unread notifications for the authenticated user.
+// GET /api/v1/notifications/count
 func (h *NotificationHandler) Count(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {

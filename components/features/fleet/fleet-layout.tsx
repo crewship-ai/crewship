@@ -69,6 +69,30 @@ export interface FleetLayoutProps {
   onRefresh: () => void
 }
 
+const ACTIVITY_TYPE_COLORS: Record<string, string> = {
+  status: "text-blue-400", run: "text-emerald-400", mission: "text-purple-400",
+}
+
+const HEALTH_STATUS_COLORS: Record<string, string> = {
+  RUNNING: "text-emerald-400",
+  IDLE: "text-muted-foreground",
+  ERROR: "text-red-400",
+  STOPPED: "text-amber-400",
+}
+
+const FLEET_TABS = [
+  { id: "overview" as const, label: "Overview", icon: LayoutGrid },
+  { id: "activity" as const, label: "Activity", icon: Activity },
+  { id: "connections" as const, label: "Connections", icon: Share2 },
+  { id: "health" as const, label: "Health", icon: HeartPulse },
+]
+
+const FLEET_BOTTOM_TABS = [
+  { id: "activity" as const, label: "Activity", icon: Activity },
+  { id: "bulk" as const, label: "Bulk Actions", icon: Layers },
+  { id: "export" as const, label: "Export", icon: Download },
+]
+
 export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }: FleetLayoutProps) {
   const isMobile = useIsMobile()
 
@@ -136,12 +160,7 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
       <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {/* Left: tabs */}
         <div className="flex items-stretch">
-          {([
-            { id: "overview" as const, label: "Overview", icon: LayoutGrid },
-            { id: "activity" as const, label: "Activity", icon: Activity },
-            { id: "connections" as const, label: "Connections", icon: Share2 },
-            { id: "health" as const, label: "Health", icon: HeartPulse },
-          ]).map(({ id, label, icon: Icon }) => (
+          {FLEET_TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveTab(id)}
@@ -371,11 +390,7 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
             className="flex items-center gap-0 px-2 shrink-0 h-8 cursor-pointer select-none"
             onClick={() => { if (!drawerOpen) setDrawerOpen(true) }}
           >
-            {([
-              { id: "activity" as const, label: "Activity", icon: Activity },
-              { id: "bulk" as const, label: "Bulk Actions", icon: Layers },
-              { id: "export" as const, label: "Export", icon: Download },
-            ]).map(({ id, label, icon: Icon }) => (
+            {FLEET_BOTTOM_TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 className={cn(
@@ -467,6 +482,17 @@ function AllCrewsOverview({
   onCrewSelect: (id: string) => void
   onAgentSelect: (id: string) => void
 }) {
+  // Pre-compute agents grouped by crew to avoid O(crews × agents) per render
+  const agentsByCrew = useMemo(() => {
+    const map: Record<string, AgentData[]> = {}
+    for (const agent of agents) {
+      if (agent.crew_id) {
+        ;(map[agent.crew_id] ||= []).push(agent)
+      }
+    }
+    return map
+  }, [agents])
+
   return (
     <div className="p-4 sm:p-6 h-full overflow-y-auto space-y-5">
       <div>
@@ -478,7 +504,7 @@ function AllCrewsOverview({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {crews.map((crew) => {
-          const crewAgents = agents.filter((a) => a.crew_id === crew.id)
+          const crewAgents = agentsByCrew[crew.id] || []
           const running = crewAgents.filter((a) => a.status === "RUNNING").length
           const error = crewAgents.filter((a) => a.status === "ERROR").length
 
@@ -551,6 +577,16 @@ function AllCrewsOverview({
 
 /** Health overview tab */
 function HealthOverview({ crews, agents }: { crews: CrewData[]; agents: AgentData[] }) {
+  const agentsByCrew = useMemo(() => {
+    const map: Record<string, AgentData[]> = {}
+    for (const agent of agents) {
+      if (agent.crew_id) {
+        ;(map[agent.crew_id] ||= []).push(agent)
+      }
+    }
+    return map
+  }, [agents])
+
   const statusGroups = useMemo(() => {
     const groups: Record<string, AgentData[]> = { RUNNING: [], IDLE: [], ERROR: [], STOPPED: [] }
     for (const agent of agents) {
@@ -560,12 +596,7 @@ function HealthOverview({ crews, agents }: { crews: CrewData[]; agents: AgentDat
     return groups
   }, [agents])
 
-  const statusColors: Record<string, string> = {
-    RUNNING: "text-emerald-400",
-    IDLE: "text-muted-foreground",
-    ERROR: "text-red-400",
-    STOPPED: "text-amber-400",
-  }
+  // statusColors hoisted to HEALTH_STATUS_COLORS at module level
 
   return (
     <div className="space-y-4">
@@ -576,7 +607,7 @@ function HealthOverview({ crews, agents }: { crews: CrewData[]; agents: AgentDat
             key={status}
             className="rounded-xl border border-border/80 bg-card p-4 text-center"
           >
-            <p className={cn("text-2xl font-bold tabular-nums", statusColors[status])}>{group.length}</p>
+            <p className={cn("text-2xl font-bold tabular-nums", HEALTH_STATUS_COLORS[status])}>{group.length}</p>
             <p className="text-[11px] text-muted-foreground mt-0.5">{status.toLowerCase()}</p>
           </div>
         ))}
@@ -605,7 +636,7 @@ function HealthOverview({ crews, agents }: { crews: CrewData[]; agents: AgentDat
         <h3 className="text-[13px] font-semibold mb-2">By Crew</h3>
         <div className="space-y-1.5">
           {crews.map((crew) => {
-            const crewAgents = agents.filter((a) => a.crew_id === crew.id)
+            const crewAgents = agentsByCrew[crew.id] || []
             const running = crewAgents.filter((a) => a.status === "RUNNING").length
             const error = crewAgents.filter((a) => a.status === "ERROR").length
             const total = crewAgents.length
@@ -642,29 +673,33 @@ function FleetActivityFeed({ agents }: { agents: AgentData[] }) {
   const [entries, setEntries] = useState<ActivityEntry[]>([])
   const endRef = useRef<HTMLDivElement>(null)
 
+  // Use ref to avoid re-creating callbacks when agents array changes
+  const agentsRef = useRef(agents)
+  useEffect(() => { agentsRef.current = agents }, [agents])
+
   const handleAgentStatus = useCallback((ev: RealtimeEvent) => {
     const slug = (ev.payload.agent_slug ?? ev.payload.slug ?? "") as string
     const status = (ev.payload.status ?? "") as string
     if (!slug || !status) return
-    const agent = agents.find((a) => a.slug === slug)
+    const agent = agentsRef.current.find((a) => a.slug === slug)
     setEntries((prev) => [...prev.slice(-100), {
       ts: new Date().toISOString(), agent: slug,
       avatarSeed: agent?.avatar_seed || slug, avatarStyle: agent?.avatar_style,
       content: `Status → ${status}`, type: "status",
     }])
-  }, [agents])
+  }, [])
 
   const handleRunEvent = useCallback((ev: RealtimeEvent) => {
     const slug = (ev.payload.agent_slug ?? "") as string
     const status = (ev.payload.status ?? ev.type?.split(".")[1] ?? "") as string
     if (!slug) return
-    const agent = agents.find((a) => a.slug === slug)
+    const agent = agentsRef.current.find((a) => a.slug === slug)
     setEntries((prev) => [...prev.slice(-100), {
       ts: new Date().toISOString(), agent: slug,
       avatarSeed: agent?.avatar_seed || slug, avatarStyle: agent?.avatar_style,
       content: `Run ${status}`, type: "run",
     }])
-  }, [agents])
+  }, [])
 
   const handleMissionUpdate = useCallback((ev: RealtimeEvent) => {
     const title = (ev.payload.title ?? "") as string
@@ -687,9 +722,7 @@ function FleetActivityFeed({ agents }: { agents: AgentData[] }) {
     endRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [entries])
 
-  const typeColors: Record<string, string> = {
-    status: "text-blue-400", run: "text-emerald-400", mission: "text-purple-400",
-  }
+  // typeColors hoisted to ACTIVITY_TYPE_COLORS at module level
 
   if (entries.length === 0) {
     return (
@@ -706,7 +739,7 @@ function FleetActivityFeed({ agents }: { agents: AgentData[] }) {
       {entries.map((entry, i) => (
         <div key={i} className="flex items-center gap-2 py-0.5 hover:bg-white/[0.02]">
           <span className="text-muted-foreground/40 tabular-nums shrink-0 w-[52px]">{entry.ts.slice(11, 19)}</span>
-          <span className={cn("text-[10px] px-1 rounded bg-white/[0.03] shrink-0", typeColors[entry.type] || "text-muted-foreground")}>
+          <span className={cn("text-[10px] px-1 rounded bg-white/[0.03] shrink-0", ACTIVITY_TYPE_COLORS[entry.type] || "text-muted-foreground")}>
             {entry.type}
           </span>
           <img src={getAgentAvatarUrl(entry.avatarSeed, entry.avatarStyle)} alt="" className="w-3.5 h-3.5 rounded-full shrink-0" />

@@ -10,11 +10,16 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// DB wraps sql.DB with the resolved database file path. It uses the "sqlite"
+// driver from modernc.org/sqlite with WAL mode and foreign keys enabled.
 type DB struct {
 	*sql.DB
 	path string
 }
 
+// Open parses the given database URL (e.g. "file:/path/to/db"), creates the
+// parent directory if needed, and opens an SQLite connection with WAL mode,
+// foreign keys, and a 5-second busy timeout.
 func Open(databaseURL string) (*DB, error) {
 	path, err := parseDSN(databaseURL)
 	if err != nil {
@@ -87,6 +92,7 @@ func Open(databaseURL string) (*DB, error) {
 	return &DB{DB: db, path: path}, nil
 }
 
+// Path returns the resolved filesystem path of the SQLite database file.
 func (d *DB) Path() string {
 	return d.path
 }

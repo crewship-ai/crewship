@@ -1,12 +1,8 @@
 package sidecar
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"time"
 )
 
 // handleIssueCreate handles POST /issue/create from agents.
@@ -69,32 +65,5 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		s.ipc.BaseURL+"/api/v1/internal/issues", bytes.NewReader(bodyJSON))
-	if err != nil {
-		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
-		return
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("X-Internal-Token", s.ipc.Token)
-
-	resp, err := ipcClient.Do(httpReq)
-	if err != nil {
-		writeJSONResponse(w, http.StatusBadGateway, map[string]string{
-			"error": fmt.Sprintf("issue create request failed: %v", err),
-		})
-		return
-	}
-	defer resp.Body.Close()
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "invalid response from crewshipd"})
-		return
-	}
-
-	writeJSONResponse(w, resp.StatusCode, result)
+	s.proxyIPCJSON(w, r, http.MethodPost, "/api/v1/internal/issues", "issue create", bodyJSON)
 }

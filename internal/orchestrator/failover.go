@@ -6,23 +6,28 @@ import (
 	"time"
 )
 
+// CooldownManager tracks credentials that are temporarily unavailable due to
+// rate limiting, allowing the orchestrator to fail over to alternative credentials.
 type CooldownManager struct {
 	cooldowns map[string]time.Time
 	mu        sync.RWMutex
 }
 
+// NewCooldownManager creates a new empty CooldownManager.
 func NewCooldownManager() *CooldownManager {
 	return &CooldownManager{
 		cooldowns: make(map[string]time.Time),
 	}
 }
 
+// MarkCooldown places a credential in cooldown for the given duration.
 func (cm *CooldownManager) MarkCooldown(credID string, duration time.Duration) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	cm.cooldowns[credID] = time.Now().Add(duration)
 }
 
+// IsInCooldown reports whether the credential is currently in a cooldown period.
 func (cm *CooldownManager) IsInCooldown(credID string) bool {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
@@ -36,6 +41,7 @@ func (cm *CooldownManager) IsInCooldown(credID string) bool {
 	return true
 }
 
+// ClearExpired removes cooldown entries that have passed their expiry time.
 func (cm *CooldownManager) ClearExpired() {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -57,6 +63,8 @@ var rateLimitPatterns = []string{
 	"billing_hard_limit",
 }
 
+// IsRateLimitError checks whether the agent exit code and stderr indicate a
+// rate limit or quota error from the LLM provider.
 func IsRateLimitError(exitCode int, stderr string) bool {
 	if exitCode != 1 {
 		return false

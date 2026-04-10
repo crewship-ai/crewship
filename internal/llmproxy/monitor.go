@@ -29,6 +29,8 @@ type CredentialMonitor struct {
 	onChange      func(connID string, oldStatus, newStatus ConnectionStatus)
 }
 
+// NewCredentialMonitor creates a monitor that periodically validates provider
+// credentials and updates their status in the pool and database.
 func NewCredentialMonitor(
 	pool *TokenPool,
 	nextjsURL, internalToken string,
@@ -45,10 +47,12 @@ func NewCredentialMonitor(
 	}
 }
 
+// SetOnChange registers a callback invoked when a credential's status changes.
 func (cm *CredentialMonitor) SetOnChange(fn func(connID string, oldStatus, newStatus ConnectionStatus)) {
 	cm.onChange = fn
 }
 
+// Run starts the credential validation loop, blocking until ctx is cancelled.
 func (cm *CredentialMonitor) Run(ctx context.Context) {
 	cm.logger.Info("credential monitor starting", "interval", cm.interval)
 

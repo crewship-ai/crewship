@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -33,6 +32,7 @@ type AssignmentHandler struct {
 	missionCallback MissionCallback
 }
 
+// NewAssignmentHandler creates an AssignmentHandler with the given orchestrator, WebSocket hub, and internal token.
 func NewAssignmentHandler(db *sql.DB, orch *orchestrator.Orchestrator, hub *ws.Hub, internalToken string, logger *slog.Logger) *AssignmentHandler {
 	return &AssignmentHandler{
 		db:            db,
@@ -164,17 +164,12 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Broadcast assignment_created event to the session channel
-	if h.hub != nil {
-		h.hub.Broadcast("session:"+body.ChatID, ws.ServerMessage{
-			Type:    "assignment_created",
-			Channel: "session:" + body.ChatID,
-			Payload: map[string]string{
-				"id":     assignmentID,
-				"target": body.TargetSlug,
-				"task":   body.Task,
-			},
+	broadcastChannelEvent(h.hub, "session", body.ChatID, "assignment_created",
+		map[string]string{
+			"id":     assignmentID,
+			"target": body.TargetSlug,
+			"task":   body.Task,
 		})
-	}
 
 	h.logger.Info("assignment created",
 		"assignment_id", assignmentID,
@@ -274,27 +269,17 @@ func (h *AssignmentHandler) runAssignment(
 		`UPDATE assignments SET status='RUNNING', started_at=? WHERE id=?`, now, assignmentID); err != nil {
 		h.logger.Error("update assignment to running", "error", err, "assignment_id", assignmentID)
 	}
-	if h.hub != nil {
-		h.hub.Broadcast("session:"+body.ChatID, ws.ServerMessage{
-			Type:    "assignment_running",
-			Channel: "session:" + body.ChatID,
-			Payload: map[string]string{
-				"id":     assignmentID,
-				"target": body.TargetSlug,
-			},
+	broadcastChannelEvent(h.hub, "session", body.ChatID, "assignment_running",
+		map[string]string{
+			"id":     assignmentID,
+			"target": body.TargetSlug,
 		})
-		// Broadcast to workspace for global visibility
-		wsChannel := "workspace:" + body.WorkspaceID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "assignment.updated",
-			Channel: wsChannel,
-			Payload: map[string]string{
-				"id":     assignmentID,
-				"status": "RUNNING",
-				"target": body.TargetSlug,
-			},
+	broadcastWorkspaceEvent(h.hub, body.WorkspaceID, "assignment.updated",
+		map[string]string{
+			"id":     assignmentID,
+			"status": "RUNNING",
+			"target": body.TargetSlug,
 		})
-	}
 
 	if h.orch == nil {
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "", "orchestrator not available")
@@ -416,44 +401,30 @@ func (h *AssignmentHandler) finishAssignment(
 		}
 	}
 
-	if h.hub == nil {
-		return
-	}
-
 	if errMsg != "" {
-		h.hub.Broadcast("session:"+chatID, ws.ServerMessage{
-			Type:    "assignment_failed",
-			Channel: "session:" + chatID,
-			Payload: map[string]string{
+		broadcastChannelEvent(h.hub, "session", chatID, "assignment_failed",
+			map[string]string{
 				"id":     assignmentID,
 				"target": targetSlug,
 				"error":  errMsg,
-			},
-		})
+			})
 	} else {
-		h.hub.Broadcast("session:"+chatID, ws.ServerMessage{
-			Type:    "assignment_completed",
-			Channel: "session:" + chatID,
-			Payload: map[string]string{
+		broadcastChannelEvent(h.hub, "session", chatID, "assignment_completed",
+			map[string]string{
 				"id":     assignmentID,
 				"target": targetSlug,
 				"result": result,
-			},
-		})
+			})
 	}
 
 	// Broadcast to workspace channel for real-time dashboard updates
 	if workspaceID != "" {
-		wsChannel := "workspace:" + workspaceID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "assignment.updated",
-			Channel: wsChannel,
-			Payload: map[string]string{
+		broadcastWorkspaceEvent(h.hub, workspaceID, "assignment.updated",
+			map[string]string{
 				"id":     assignmentID,
 				"status": status,
 				"target": targetSlug,
-			},
-		})
+			})
 	}
 
 	h.logger.Info("assignment finished", "assignment_id", assignmentID, "status", status)
@@ -465,14 +436,7 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := parsePagination(r, 50, 100)
 
 	type assignmentListItem struct {
 		ID             string  `json:"id"`
@@ -509,7 +473,7 @@ func (h *AssignmentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	items := make([]assignmentListItem, 0)
+	items := make([]assignmentListItem, 0, limit)
 	for rows.Next() {
 		var item assignmentListItem
 		if err := rows.Scan(

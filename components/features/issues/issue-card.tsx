@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import { Card } from "@/components/ui/card"
 import { StatusIcon } from "./status-icon"
 import { PriorityIcon } from "./priority-icon"
@@ -9,8 +10,9 @@ import { cn } from "@/lib/utils"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import type { Mission } from "@/lib/types/mission"
 
+const TERMINAL_STATUSES = new Set(["COMPLETED", "DONE", "CANCELLED", "FAILED", "DUPLICATE"])
+
 function isOverdue(dueDate: string | null | undefined, status: string): boolean {
-  const TERMINAL_STATUSES = new Set(["COMPLETED", "DONE", "CANCELLED", "FAILED", "DUPLICATE"])
   if (!dueDate || TERMINAL_STATUSES.has(status)) return false
   return new Date(dueDate) < new Date()
 }
@@ -25,7 +27,7 @@ interface IssueCardProps {
   onClick: () => void
 }
 
-export function IssueCard({ issue, onClick }: IssueCardProps) {
+export const IssueCard = memo(function IssueCard({ issue, onClick }: IssueCardProps) {
   const overdue = isOverdue(issue.due_date, issue.status)
   const isUpdated = issue.updated_at && issue.updated_at !== issue.created_at
   const dateLabel = isUpdated ? "Updated" : "Created"
@@ -89,4 +91,4 @@ export function IssueCard({ issue, onClick }: IssueCardProps) {
       </div>
     </Card>
   )
-}
+})

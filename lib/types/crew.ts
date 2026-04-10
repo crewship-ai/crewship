@@ -1,3 +1,4 @@
+/** A user who belongs to a crew, with basic profile information. */
 export interface CrewMember {
   id: string
   user_id: string

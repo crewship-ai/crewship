@@ -34,11 +34,7 @@ func (h *InternalIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
+	limit, offset := parsePagination(r, 50, 100)
 
 	query := `
 		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
@@ -57,12 +53,10 @@ func (h *InternalIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if status := r.URL.Query().Get("status"); status != "" {
 		vals := strings.Split(status, ",")
-		placeholders := make([]string, len(vals))
-		for i, v := range vals {
-			placeholders[i] = "?"
+		for _, v := range vals {
 			args = append(args, strings.TrimSpace(v))
 		}
-		query += " AND m.status IN (" + strings.Join(placeholders, ",") + ")"
+		query += " AND m.status IN (" + sqlPlaceholders(len(vals)) + ")"
 	}
 	if assignee := r.URL.Query().Get("assignee_id"); assignee != "" {
 		query += " AND m.assignee_id = ?"
@@ -160,9 +154,11 @@ func (h *InternalIssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load comment count
-	_ = h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM mission_comments WHERE mission_id = ?`,
-		issue.ID).Scan(&issue.CommentCount)
+		issue.ID).Scan(&issue.CommentCount); err != nil {
+		h.logger.Error("load comment count", "issue_id", issue.ID, "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, issue)
 }
@@ -272,9 +268,11 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Labels
 	for _, labelID := range req.Labels {
-		_, _ = tx.ExecContext(r.Context(),
+		if _, err := tx.ExecContext(r.Context(),
 			`INSERT OR IGNORE INTO mission_labels(mission_id, label_id) VALUES(?, ?)`,
-			id, labelID)
+			id, labelID); err != nil {
+			h.logger.Error("insert issue label", "issue_id", id, "error", err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -283,13 +281,7 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+req.WorkspaceID, ws.ServerMessage{
-			Type:    "issue.created",
-			Channel: "workspace:" + req.WorkspaceID,
-			Payload: map[string]string{"id": id, "identifier": identifier, "title": req.Title},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.created", map[string]string{"id": id, "identifier": identifier, "title": req.Title})
 
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"id":         id,
@@ -385,13 +377,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+req.WorkspaceID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + req.WorkspaceID,
-			Payload: map[string]string{"id": missionID, "identifier": ident},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -447,13 +433,7 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+req.WorkspaceID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + req.WorkspaceID,
-			Payload: map[string]string{"id": missionID, "identifier": ident},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
 
 	writeJSON(w, http.StatusCreated, commentResponse{
 		ID:         commentID,

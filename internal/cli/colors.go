@@ -20,6 +20,8 @@ var (
 	Gray    = "\033[90m"
 )
 
+// InitColors disables ANSI color codes when noColor is true, NO_COLOR env var
+// is set, or stdout is not a terminal.
 func InitColors(noColor bool) {
 	if noColor || os.Getenv("NO_COLOR") != "" || !isTerminal() {
 		Reset = ""

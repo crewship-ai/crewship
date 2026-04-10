@@ -3,10 +3,10 @@ package api
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,6 +45,8 @@ type triageRuleResponse struct {
 
 // ── 1. ListRules — GET /api/v1/triage-rules ────────────────────────────────
 
+// ListRules returns all triage rules for the workspace.
+// GET /api/v1/triage/rules
 func (h *TriageHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
@@ -89,6 +91,8 @@ func (h *TriageHandler) ListRules(w http.ResponseWriter, r *http.Request) {
 
 // ── 2. CreateRule — POST /api/v1/triage-rules ──────────────────────────────
 
+// CreateRule creates a new triage rule with pattern matching and action configuration.
+// POST /api/v1/triage/rules
 func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -136,9 +140,11 @@ func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 
 	// Get next position
 	var maxPos int
-	_ = h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COALESCE(MAX(position), 0) FROM triage_rules WHERE workspace_id = ?`,
-		wsID).Scan(&maxPos)
+		wsID).Scan(&maxPos); err != nil {
+		h.logger.Error("get max triage rule position", "error", err)
+	}
 
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -173,19 +179,15 @@ func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:  now,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "triage_rule.created",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": id},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "triage_rule.created", map[string]string{"id": id})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
 
 // ── 3. UpdateRule — PATCH /api/v1/triage-rules/{id} ────────────────────────
 
+// UpdateRule modifies an existing triage rule.
+// PATCH /api/v1/triage/rules/{ruleId}
 func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -299,13 +301,7 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "triage_rule.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": ruleID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "triage_rule.updated", map[string]string{"id": ruleID})
 
 	// Return updated rule
 	var tr triageRuleResponse
@@ -329,6 +325,8 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 
 // ── 4. DeleteRule — DELETE /api/v1/triage-rules/{id} ───────────────────────
 
+// DeleteRule removes a triage rule.
+// DELETE /api/v1/triage/rules/{ruleId}
 func (h *TriageHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
@@ -357,19 +355,15 @@ func (h *TriageHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "triage_rule.deleted",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": ruleID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "triage_rule.deleted", map[string]string{"id": ruleID})
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // ── 5. Process — POST /api/v1/triage/process ───────────────────────────────
 
+// Process evaluates triage rules against an issue and applies the matching actions.
+// POST /api/v1/triage/process
 func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -401,6 +395,7 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 		Priority   *string
 		ProjectID  *string
 		LabelsJSON *string
+		compiledRe *regexp.Regexp // pre-compiled for "regex" match type
 	}
 
 	var rules []triageRule
@@ -410,6 +405,14 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 			&tr.CrewID, &tr.AssigneeID, &tr.Priority, &tr.ProjectID, &tr.LabelsJSON); err != nil {
 			h.logger.Error("triage: scan rule", "error", err)
 			continue
+		}
+		if tr.MatchType == "regex" {
+			re, err := regexp.Compile(tr.Pattern)
+			if err != nil {
+				h.logger.Warn("triage: invalid regex pattern, skipping rule", "rule_id", tr.ID, "pattern", tr.Pattern)
+				continue
+			}
+			tr.compiledRe = re
 		}
 		rules = append(rules, tr)
 	}
@@ -463,7 +466,7 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 
 	for _, iss := range issues {
 		for _, rule := range rules {
-			if !triageMatch(rule.MatchType, rule.Pattern, iss.Title) {
+			if !triageMatchCompiled(rule.MatchType, rule.Pattern, iss.Title, rule.compiledRe) {
 				continue
 			}
 
@@ -497,33 +500,35 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 
 	// 5. Increment match_count for matched rules
 	for ruleID, count := range matchedRules {
-		_, _ = h.db.ExecContext(r.Context(),
+		if _, err := h.db.ExecContext(r.Context(),
 			`UPDATE triage_rules SET match_count = match_count + ? WHERE id = ?`,
-			count, ruleID)
+			count, ruleID); err != nil {
+			h.logger.Error("update triage rule match_count", "rule_id", ruleID, "error", err)
+		}
 	}
 
-	if h.hub != nil && matched > 0 {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "triage.processed",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{
-				"processed": fmt.Sprintf("%d", processed),
-				"matched":   fmt.Sprintf("%d", matched),
-			},
-		})
+	if matched > 0 {
+		broadcastWorkspaceEvent(h.hub, wsID, "triage.processed",
+			map[string]string{
+				"processed": strconv.Itoa(processed),
+				"matched":   strconv.Itoa(matched),
+			})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]int{"processed": processed, "matched": matched})
 }
 
-// triageMatch checks if a title matches a rule pattern based on the match type.
-func triageMatch(matchType, pattern, title string) bool {
+// triageMatchCompiled checks if a title matches a rule pattern based on match type.
+// For "regex" type, uses the pre-compiled *regexp.Regexp to avoid recompilation per call.
+func triageMatchCompiled(matchType, pattern, title string, compiledRe *regexp.Regexp) bool {
 	switch matchType {
 	case "contains":
 		return strings.Contains(strings.ToLower(title), strings.ToLower(pattern))
 	case "regex":
-		matched, err := regexp.MatchString(pattern, title)
-		return err == nil && matched
+		if compiledRe != nil {
+			return compiledRe.MatchString(title)
+		}
+		return false
 	case "exact":
 		return title == pattern
 	default:

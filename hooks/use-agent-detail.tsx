@@ -24,6 +24,7 @@ interface AgentCounts {
   chats: number
 }
 
+/** Full agent record including crew association, LLM configuration, and resource counts. */
 export interface AgentDetail {
   id: string
   workspace_id: string
@@ -60,6 +61,9 @@ interface AgentDetailContextValue {
 
 const AgentDetailContext = createContext<AgentDetailContextValue | null>(null)
 
+/**
+ * Context provider that fetches and caches agent detail, auto-refreshing on real-time status/run events.
+ */
 export function AgentDetailProvider({
   agentId,
   children,
@@ -123,6 +127,7 @@ export function AgentDetailProvider({
   )
 }
 
+/** Access the current agent's detail data. Returns safe defaults when used outside AgentDetailProvider. */
 export function useAgentDetail(): AgentDetailContextValue {
   const ctx = useContext(AgentDetailContext)
   if (!ctx) {

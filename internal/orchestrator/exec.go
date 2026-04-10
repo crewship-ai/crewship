@@ -36,6 +36,8 @@ CREDENTIALS:
 - API keys for LLM providers are injected automatically via the sidecar proxy
 `
 
+// BuildCLICommand constructs the CLI command and arguments for the configured
+// adapter (CLAUDE_CODE, OPENCODE, CODEX_CLI, or GEMINI_CLI).
 func BuildCLICommand(req AgentRunRequest) []string {
 	switch req.CLIAdapter {
 	case "CLAUDE_CODE":
@@ -355,6 +357,9 @@ func buildMCPConfig(servers []MCPServerConfig) (string, error) {
 	return string(b), nil
 }
 
+// BuildEnvVars constructs the environment variables for a container exec,
+// including agent identity, credentials (when sidecar is not used), and
+// provider-specific settings.
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	env := []string{
 		fmt.Sprintf("HOME=/crew/agents/%s", req.AgentSlug),
@@ -1401,6 +1406,34 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	}
 }
 
+// emitToolResultBlock sends a tool_result event for the given content block.
+func emitToolResultBlock(block contentBlock, handler EventHandler) {
+	meta := map[string]interface{}{}
+	if block.ToolUseID != "" {
+		meta["tool_use_id"] = block.ToolUseID
+	}
+	handler(AgentEvent{
+		Type:      "tool_result",
+		Content:   block.Text,
+		Metadata:  meta,
+		Timestamp: time.Now(),
+	})
+}
+
+// emitImageBlock sends an image event for the given content block.
+func emitImageBlock(block contentBlock, handler EventHandler) {
+	if block.Source != nil && block.Source.Data != "" {
+		handler(AgentEvent{
+			Type:    "image",
+			Content: block.Source.Data,
+			Metadata: map[string]interface{}{
+				"media_type": block.Source.MediaType,
+			},
+			Timestamp: time.Now(),
+		})
+	}
+}
+
 func (o *Orchestrator) handleStreamJSONLine(line string, handler EventHandler) {
 	if handler == nil {
 		return
@@ -1465,27 +1498,9 @@ func (o *Orchestrator) handleStreamJSONLine(line string, handler EventHandler) {
 					Timestamp: time.Now(),
 				})
 			case "tool_result":
-				meta := map[string]interface{}{}
-				if block.ToolUseID != "" {
-					meta["tool_use_id"] = block.ToolUseID
-				}
-				handler(AgentEvent{
-					Type:      "tool_result",
-					Content:   block.Text,
-					Metadata:  meta,
-					Timestamp: time.Now(),
-				})
+				emitToolResultBlock(block, handler)
 			case "image":
-				if block.Source != nil && block.Source.Data != "" {
-					handler(AgentEvent{
-						Type:    "image",
-						Content: block.Source.Data,
-						Metadata: map[string]interface{}{
-							"media_type": block.Source.MediaType,
-						},
-						Timestamp: time.Now(),
-					})
-				}
+				emitImageBlock(block, handler)
 			}
 		}
 
@@ -1494,27 +1509,9 @@ func (o *Orchestrator) handleStreamJSONLine(line string, handler EventHandler) {
 		for _, block := range msg.Content {
 			switch block.Type {
 			case "tool_result":
-				meta := map[string]interface{}{}
-				if block.ToolUseID != "" {
-					meta["tool_use_id"] = block.ToolUseID
-				}
-				handler(AgentEvent{
-					Type:      "tool_result",
-					Content:   block.Text,
-					Metadata:  meta,
-					Timestamp: time.Now(),
-				})
+				emitToolResultBlock(block, handler)
 			case "image":
-				if block.Source != nil && block.Source.Data != "" {
-					handler(AgentEvent{
-						Type:    "image",
-						Content: block.Source.Data,
-						Metadata: map[string]interface{}{
-							"media_type": block.Source.MediaType,
-						},
-						Timestamp: time.Now(),
-					})
-				}
+				emitImageBlock(block, handler)
 			}
 		}
 

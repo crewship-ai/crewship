@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"net/http"
 	"time"
 )
@@ -19,20 +18,20 @@ type agentCredentialResponse struct {
 	CreatedAt    string `json:"created_at"`
 }
 
+// ListCredentials returns all credentials assigned to the specified agent.
+// GET /api/v1/agents/{agentId}/credentials
 func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	var exists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&exists); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 
@@ -80,6 +79,8 @@ type addAgentCredentialRequest struct {
 	Priority     int    `json:"priority"`
 }
 
+// AddCredential assigns an existing credential to an agent with a specified environment variable name.
+// POST /api/v1/agents/{agentId}/credentials
 func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -90,16 +91,14 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&exists); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	foundAgent, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !foundAgent {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 
@@ -110,23 +109,21 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify credential exists in this workspace (single query prevents enumeration)
-	var credExists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		req.CredentialID, workspaceID).Scan(&credExists); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
-			return
-		}
+	foundCred, err := credentialExists(r.Context(), h.db, req.CredentialID, workspaceID)
+	if err != nil {
 		h.logger.Error("check credential exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !foundCred {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
 		return
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := generateCUID()
 
-	_, err := h.db.ExecContext(r.Context(),
+	_, err = h.db.ExecContext(r.Context(),
 		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		id, agentID, req.CredentialID, req.EnvVarName, req.Priority, now)
@@ -139,6 +136,8 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
 
+// RemoveCredential unassigns a credential from an agent.
+// DELETE /api/v1/agents/{agentId}/credentials/{credentialId}
 func (h *AgentHandler) RemoveCredential(w http.ResponseWriter, r *http.Request) {
 	assignmentID := r.PathValue("assignmentId")
 	agentID := r.PathValue("agentId")
