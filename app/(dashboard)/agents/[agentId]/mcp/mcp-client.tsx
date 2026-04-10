@@ -3,11 +3,9 @@
 import { useEffect, useState, useCallback } from "react"
 import { useParams } from "next/navigation"
 import { Plug, Loader2, AlertCircle, Info } from "lucide-react"
-import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
-} from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { SectionCard } from "@/components/ui/section-card"
 import { toast } from "sonner"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { MCPConfigEditor } from "@/components/features/mcp/mcp-config-editor"
@@ -165,7 +163,7 @@ export function MCPPageClient() {
 
   if (error) {
     return (
-      <div className="p-4 sm:p-6">
+      <div className="p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
           <p className="text-body">{error}</p>
@@ -179,28 +177,34 @@ export function MCPPageClient() {
   const hasCrew = Boolean(agent?.crew_id && crew)
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
+    <div className="p-6 space-y-6 max-w-3xl">
+      <div>
+        <h2 className="text-title font-semibold">MCP Servers</h2>
+        <p className="text-body text-muted-foreground mt-1">
+          Model Context Protocol servers available to this agent.
+        </p>
+      </div>
+
       {/* Info banner */}
-      <div className="flex items-start gap-2 rounded-lg border bg-muted/50 p-3">
+      <div className="flex items-start gap-2 rounded-lg border border-border bg-surface-subtle p-3">
         <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-label text-muted-foreground">
           Use <code className="font-mono text-foreground">{"${VAR_NAME}"}</code> to reference credentials assigned to this agent.
           Claude Code expands environment variables automatically.
         </p>
       </div>
 
       {/* Agent MCP servers */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
+      <SectionCard
+        title={
+          <span className="flex items-center gap-2">
             <Plug className="h-4 w-4 text-muted-foreground" />
-            <CardTitle className="text-default">Agent MCP Servers</CardTitle>
-          </div>
-          <CardDescription>
-            MCP servers specific to this agent. These are merged with crew-level servers at runtime.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+            Agent MCP Servers
+          </span>
+        }
+        description="MCP servers specific to this agent. These are merged with crew-level servers at runtime."
+      >
+        <div className="space-y-4">
           <MCPConfigEditor value={configJson} onChange={setConfigJson} workspaceId={workspaceId ?? undefined} />
 
           {hasChanges && (
@@ -209,36 +213,29 @@ export function MCPPageClient() {
               {saving ? "Saving..." : "Save MCP Configuration"}
             </Button>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
 
       {/* Effective (merged) configuration */}
       {hasCrew && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
+        <SectionCard
+          surface="subtle"
+          title={
+            <span className="flex items-center gap-2">
               <Plug className="h-4 w-4 text-muted-foreground" />
-              <CardTitle className="text-default">Effective Configuration</CardTitle>
-            </div>
-            <CardDescription>
-              Merged view of crew-level ({crew?.name}) and agent-level MCP servers.
-              Agent servers override crew servers with the same name.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {mergedJson ? (
-              <MCPConfigEditor
-                value={mergedJson}
-                onChange={() => {}}
-                readOnly
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No MCP servers configured at either level.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+              Effective Configuration
+            </span>
+          }
+          description={`Merged view of crew-level (${crew?.name}) and agent-level MCP servers. Agent servers override crew servers with the same name.`}
+        >
+          {mergedJson ? (
+            <MCPConfigEditor value={mergedJson} onChange={() => {}} readOnly />
+          ) : (
+            <p className="text-body text-muted-foreground">
+              No MCP servers configured at either level.
+            </p>
+          )}
+        </SectionCard>
       )}
     </div>
   )
@@ -250,18 +247,21 @@ export function MCPPageClient() {
 
 function MCPPageSkeleton() {
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
+    <div className="p-6 space-y-6 max-w-3xl">
+      <div className="space-y-2">
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-4 w-72" />
+      </div>
       <Skeleton className="h-12 w-full rounded-lg" />
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-4 w-72" />
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <SectionCard
+        title={<Skeleton className="h-5 w-40" />}
+        description={<Skeleton className="h-4 w-72" />}
+      >
+        <div className="space-y-4">
           <Skeleton className="h-32 w-full" />
           <Skeleton className="h-32 w-full" />
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
     </div>
   )
 }
