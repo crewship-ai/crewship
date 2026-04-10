@@ -505,10 +505,7 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		credID, workspaceID).Scan(&exists); err != nil {
+	if err := credentialExists(r.Context(), h.db, credID, workspaceID); err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
 		return
 	}

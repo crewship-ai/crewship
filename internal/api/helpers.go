@@ -63,6 +63,15 @@ func projectExists(ctx context.Context, db *sql.DB, projectID, workspaceID strin
 		projectID, workspaceID).Scan(&id)
 }
 
+// credentialExists checks that a credential with the given ID belongs to the
+// workspace and is not soft-deleted. Returns nil on success, sql.ErrNoRows if not found.
+func credentialExists(ctx context.Context, db *sql.DB, credentialID, workspaceID string) error {
+	var id string
+	return db.QueryRowContext(ctx,
+		"SELECT id FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		credentialID, workspaceID).Scan(&id)
+}
+
 // validSlugRe matches safe slug values: lowercase alphanumeric, starting with a letter or digit.
 var validSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
