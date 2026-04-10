@@ -75,18 +75,27 @@ function TriggersTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
       setAgent(null)
       return
     }
+    // Abort in-flight requests on agent/workspace change so a stale response
+    // can't overwrite state for the new selection.
+    const controller = new AbortController()
     setLoading(true)
-    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
+    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
+      signal: controller.signal,
+    })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
       })
       .then((data) => setAgent(data))
       .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return
         console.error("TriggersTab: failed to load agent", err)
         setAgent(null)
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
   }, [agentId, workspaceId])
 
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
@@ -203,19 +212,28 @@ function SharedContextTab({ agentId, workspaceId }: { agentId: string; workspace
       setCrew(null)
       return
     }
+    const controller = new AbortController()
     setLoading(true)
     // Chain the crew fetch into the outer promise so the finally()
     // block only fires once BOTH have resolved/rejected — otherwise the
     // crew section "pops in" after the spinner clears.
-    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
+    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
+      signal: controller.signal,
+    })
       .then((r) => {
         if (!r.ok) throw new Error(`agent fetch HTTP ${r.status}`)
         return r.json()
       })
       .then((data: AgentContextInfo) => {
         setAgent(data)
+        // Always reset crew before conditionally refetching — otherwise the
+        // previously selected agent's crew card stays rendered when the new
+        // agent has no crew_id.
+        setCrew(null)
         if (data.crew_id) {
-          return fetch(`/api/v1/crews/${data.crew_id}?workspace_id=${workspaceId}`)
+          return fetch(`/api/v1/crews/${data.crew_id}?workspace_id=${workspaceId}`, {
+            signal: controller.signal,
+          })
             .then((r) => {
               if (!r.ok) throw new Error(`crew fetch HTTP ${r.status}`)
               return r.json()
@@ -224,11 +242,15 @@ function SharedContextTab({ agentId, workspaceId }: { agentId: string; workspace
         }
       })
       .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return
         console.error("SharedContextTab: failed to load", err)
         setAgent(null)
         setCrew(null)
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
   }, [agentId, workspaceId])
 
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
@@ -318,8 +340,11 @@ function TeamChatTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
       setAgentSlug(null)
       return
     }
+    const controller = new AbortController()
     setLoading(true)
-    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
+    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
+      signal: controller.signal,
+    })
       .then((r) => {
         if (!r.ok) throw new Error(`agent fetch HTTP ${r.status}`)
         return r.json()
@@ -332,8 +357,13 @@ function TeamChatTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
         }
         setAgentSlug(agent.slug)
         setCrewId(agent.crew_id ?? null)
+        // Always reset the message list when switching agents so a fast-
+        // navigation leaves no residue from the previous selection.
+        setMessages([])
         if (agent.crew_id) {
-          return fetch(`/api/v1/crews/${agent.crew_id}/peer-conversations?workspace_id=${workspaceId}`)
+          return fetch(`/api/v1/crews/${agent.crew_id}/peer-conversations?workspace_id=${workspaceId}`, {
+            signal: controller.signal,
+          })
             .then((r) => {
               if (!r.ok) throw new Error(`peer-conversations fetch HTTP ${r.status}`)
               return r.json()
@@ -346,15 +376,31 @@ function TeamChatTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
         }
       })
       .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return
         console.error("TeamChatTab: failed to load", err)
         setAgentSlug(null)
         setCrewId(null)
         setMessages([])
       })
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
   }, [agentId, workspaceId])
 
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+
+  // Workspace-specific empty state — reachable when useWorkspace() returns
+  // null. Must come BEFORE the !crewId fall-through so users don't see
+  // "Assign agent to a crew…" when the real problem is "no workspace".
+  if (!workspaceId) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center p-6">
+        <Users className="h-8 w-8 text-muted-foreground/30 mb-2" />
+        <p className="text-label text-muted-foreground">Select a workspace to view team conversations.</p>
+      </div>
+    )
+  }
 
   if (!crewId) {
     return (

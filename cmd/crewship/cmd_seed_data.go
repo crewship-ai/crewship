@@ -618,9 +618,18 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		var created struct {
 			ID string `json:"id"`
 		}
-		if cli.ReadJSON(resp, &created) == nil {
-			integrationIDs[integ.Name] = created.ID
+		// Report parse failures — otherwise the integration exists server-side
+		// but isn't tracked in integrationIDs, so the bindings loop below
+		// silently skips it while the success line still prints.
+		if err := cli.ReadJSON(resp, &created); err != nil {
+			fmt.Fprintf(os.Stderr, "  ! Integration %s: parse response: %v\n", integ.Name, err)
+			continue
 		}
+		if created.ID == "" {
+			fmt.Fprintf(os.Stderr, "  ! Integration %s: response missing id\n", integ.Name)
+			continue
+		}
+		integrationIDs[integ.Name] = created.ID
 		fmt.Fprintf(os.Stderr, "  + Integration: %s\n", integ.DisplayName)
 	}
 

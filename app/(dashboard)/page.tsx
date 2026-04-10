@@ -126,6 +126,18 @@ const missionStatusLabels: Record<string, string> = {
   CANCELLED: "Cancelled",
 }
 
+// Map mission status → StatusBadge canonical keys in lib/colors.ts.
+// Without this mapping, missions in PLANNING/REVIEW/CANCELLED would render
+// with default muted styling, inconsistent with the runs and agents tables.
+const missionStatusToBadge: Record<string, string> = {
+  PLANNING: "PENDING",
+  IN_PROGRESS: "IN_PROGRESS",
+  REVIEW: "AWAITING_APPROVAL",
+  COMPLETED: "COMPLETED",
+  FAILED: "FAILED",
+  CANCELLED: "FAILED",
+}
+
 const missionStatusIcons: Record<string, React.ElementType> = {
   PLANNING: Clock,
   IN_PROGRESS: Loader2,
@@ -493,6 +505,7 @@ export default function DashboardPage() {
                 {recentMissions.map((mission) => {
                   const label = missionStatusLabels[mission.status] ?? mission.status
                   const StatusIcon = missionStatusIcons[mission.status] ?? Clock
+                  const missionBadgeStatus = missionStatusToBadge[mission.status] ?? "PENDING"
                   const stats = mission.task_stats
                   const completed = stats?.completed ?? 0
                   const total = stats?.total ?? 0
@@ -512,7 +525,7 @@ export default function DashboardPage() {
                         </Link>
                       </TableCell>
                       <TableCell>
-                        <StatusBadge status={mission.status} label={
+                        <StatusBadge status={missionBadgeStatus} label={
                           <span className="inline-flex items-center gap-1.5">
                             {mission.status === "IN_PROGRESS" && (
                               <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
