@@ -559,7 +559,18 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 	}
 	fmt.Fprintln(os.Stderr, "Seeding integrations...")
 
-	integrationIDs := map[string]string{} // integration name → id
+	// Crew-scoped integration map: crewID → (integration name → id).
+	// A flat name→id map would silently collide when two crews share an
+	// integration name (which is legal — names are unique per crew, not per
+	// workspace) and would also let the binding loop wire agents up to
+	// integrations that belong to other crews.
+	integrationIDs := map[string]map[string]string{}
+	addIntegration := func(crewID, name, id string) {
+		if integrationIDs[crewID] == nil {
+			integrationIDs[crewID] = map[string]string{}
+		}
+		integrationIDs[crewID][name] = id
+	}
 
 	for _, integ := range seeddata.Integrations {
 		if err := ctx.Err(); err != nil {
@@ -606,7 +617,7 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 				fmt.Fprintf(os.Stderr, "  ! Integration %s: 409 conflict but lookup failed: %v\n", integ.Name, err)
 				continue
 			}
-			integrationIDs[integ.Name] = id
+			addIntegration(crewID, integ.Name, id)
 			fmt.Fprintf(os.Stderr, "  = Integration exists: %s\n", integ.DisplayName)
 			continue
 		}
@@ -629,7 +640,7 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 			fmt.Fprintf(os.Stderr, "  ! Integration %s: response missing id\n", integ.Name)
 			continue
 		}
-		integrationIDs[integ.Name] = created.ID
+		addIntegration(crewID, integ.Name, created.ID)
 		fmt.Fprintf(os.Stderr, "  + Integration: %s\n", integ.DisplayName)
 	}
 
@@ -690,6 +701,19 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 	// Bind agents to integrations. Treat 409 Conflict as idempotent; surface
 	// every other failure so the summary line doesn't claim successful
 	// bindings that never happened.
+	//
+	// Bindings are scoped to the agent's own crew — otherwise an agent in
+	// crew A could end up bound to an integration provisioned for crew B,
+	// which is both a scope leak and a server-side permission error waiting
+	// to happen. Build a slug → crewID lookup from the static seed data so
+	// we can resolve each agent's crew without an extra API round-trip.
+	agentCrewIDBySlug := map[string]string{}
+	for _, a := range seeddata.Agents {
+		if cid, ok := crewIDs[a.CrewSlug]; ok {
+			agentCrewIDBySlug[a.Slug] = cid
+		}
+	}
+
 	fmt.Fprintln(os.Stderr, "Binding agents to integrations...")
 	boundAgents := 0
 	totalBindings := 0
@@ -702,8 +726,13 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		if !ok {
 			continue
 		}
+		crewID, ok := agentCrewIDBySlug[agentSlug]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "  ! Bind %s: crew not found, skipping\n", agentSlug)
+			continue
+		}
 		perAgentSuccess := 0
-		for integName, integID := range integrationIDs {
+		for integName, integID := range integrationIDs[crewID] {
 			totalBindings++
 			body := map[string]interface{}{
 				"mcp_server_id":    integID,
