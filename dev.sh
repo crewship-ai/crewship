@@ -347,6 +347,12 @@ stop_service() {
 cmd_start() {
   check_prerequisites
 
+  # Install git pre-commit hook (idempotent, auto-skips if already installed)
+  # See scripts/install-hooks.sh — runs gitleaks + golangci-lint on changed files.
+  if [[ -x "$PROJECT_DIR/scripts/install-hooks.sh" ]]; then
+    "$PROJECT_DIR/scripts/install-hooks.sh" >/dev/null 2>&1 || true
+  fi
+
   echo -e "${BOLD}Crewship Dev Environment${NC}"
   if [[ "$INSTANCE_NUM" -gt 0 ]]; then
     echo -e "${BOLD}Instance ${INSTANCE_NUM}${NC} (Go :${GO_PORT}, Next.js :${NEXT_PORT})"
