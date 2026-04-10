@@ -180,3 +180,60 @@ export const STATUS_BG: Record<string, string> = {
   SKIPPED: "bg-[#0f1115]",
   AWAITING_APPROVAL: "bg-[#150a1f]",
 }
+
+// ── Light-theme aware status banner backgrounds ──
+// Use for alert banners, info strips, escalation cards. Light in light mode,
+// tinted-dark in dark mode. Pairs bg + text for one-shot consumption.
+export const STATUS_BG_LIGHT: Record<string, string> = {
+  COMPLETED: "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400",
+  IN_PROGRESS: "bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400",
+  FAILED: "bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400",
+  BLOCKED: "bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400",
+  PENDING: "bg-muted text-muted-foreground",
+  REVIEW: "bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-400",
+  AWAITING_APPROVAL: "bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-400",
+  CANCELLED: "bg-muted text-muted-foreground",
+  SKIPPED: "bg-muted text-muted-foreground",
+}
+
+// ── Tailwind classes for StatusDot (solid fill, ≤ 2×2) ──
+// Use inside <StatusDot status={...} /> or wherever an inline hex would leak.
+export const STATUS_DOT_CLASSES: Record<string, string> = {
+  COMPLETED: "bg-emerald-500",
+  IN_PROGRESS: "bg-blue-500",
+  FAILED: "bg-red-500",
+  BLOCKED: "bg-amber-500",
+  PENDING: "bg-slate-400",
+  REVIEW: "bg-violet-500",
+  AWAITING_APPROVAL: "bg-violet-500",
+  CANCELLED: "bg-gray-500",
+  SKIPPED: "bg-gray-500",
+  PLANNING: "bg-violet-500",
+}
+
+// ── Provider icon colors (Anthropic/OpenAI/GitHub/etc.) ──
+// Replaces hardcoded text-violet-600 / text-amber-600 / text-emerald-600 etc.
+// in credentials and integrations pages. Values are tint-only — pair with
+// lucide icons via <Icon className={PROVIDER_ICON_COLOR[provider]} />.
+export const PROVIDER_ICON_COLOR: Record<string, string> = {
+  ANTHROPIC: "text-violet-500",
+  OPENAI: "text-emerald-500",
+  GOOGLE: "text-blue-500",
+  GITHUB: "text-foreground",
+  GITLAB: "text-orange-500",
+  VERCEL: "text-foreground",
+  AWS: "text-amber-500",
+  CUSTOM_CLI: "text-muted-foreground",
+  NONE: "text-muted-foreground",
+}
+
+// ── Credential type icon colors (AI_CLI_TOKEN, API_KEY, etc.) ──
+// Replaces hardcoded text-{color}-600 constants in TYPE_CONFIG maps
+// scattered through credential/agent pages.
+export const CREDENTIAL_TYPE_ICON_COLOR: Record<string, string> = {
+  AI_CLI_TOKEN: "text-violet-500",
+  API_KEY: "text-amber-500",
+  CLI_TOKEN: "text-blue-500",
+  SECRET: "text-muted-foreground",
+  OAUTH2: "text-emerald-500",
+}

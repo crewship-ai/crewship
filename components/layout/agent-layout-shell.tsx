@@ -8,9 +8,15 @@ import { AgentHeader } from "@/components/layout/agent-header"
 interface AgentLayoutShellProps {
   agentId: string
   children: ReactNode
+  /**
+   * Optional in-page toolbar rendered above the content area (typically a ToolbarStrip
+   * for sub-navigation like overview/logs/history inside a single route). Sticky so it
+   * stays visible while the content area scrolls.
+   */
+  toolbar?: ReactNode
 }
 
-export function AgentLayoutShell({ agentId, children }: AgentLayoutShellProps) {
+export function AgentLayoutShell({ agentId, children, toolbar }: AgentLayoutShellProps) {
   return (
     <AgentDetailProvider agentId={agentId}>
       <div className="flex flex-col md:flex-row h-full min-h-full overflow-hidden">
@@ -26,6 +32,9 @@ export function AgentLayoutShell({ agentId, children }: AgentLayoutShellProps) {
         {/* Content area (single render) */}
         <div className="flex-1 min-w-0 min-h-0 relative">
           <div className="absolute inset-0 overflow-y-auto">
+            {toolbar && (
+              <div className="sticky top-0 z-10 bg-background">{toolbar}</div>
+            )}
             {children}
           </div>
         </div>
