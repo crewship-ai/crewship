@@ -1,0 +1,68 @@
+# Crewship gitleaks configuration
+# CRE-122 Phase 1: extend default rules with allowlist for test fixtures,
+# documentation, wireframes, and committed binaries that trigger false positives.
+#
+# Verified 2026-04-10: all 33 initial findings were confirmed as false positives
+# in scrubber test fixtures, encryption test vectors, documentation examples,
+# HTML wireframes, and trivial Next.js page wrappers.
+
+title = "Crewship gitleaks config"
+
+[extend]
+# Inherit built-in gitleaks default rules (API keys, tokens, private keys, etc.)
+useDefault = true
+
+[allowlist]
+description = "Test fixtures, docs, wireframes, and committed binary artifacts"
+
+paths = [
+  # Go test files — scrubber/encryption/security tests MUST contain fake secrets
+  # to exercise detection logic. Tests live in *_test.go files only.
+  '''.*_test\.go$''',
+
+  # E2E test fixtures
+  '''e2e/.*''',
+  '''tests/fixtures/.*''',
+
+  # Example / template env files (documented as placeholders)
+  '''\.env\.example$''',
+
+  # Committed SQLite database (binary, triggers entropy hits)
+  '''crewship\.db.*$''',
+
+  # Embed stubs built at CI time (never contain real secrets)
+  '''web/out/.*''',
+
+  # Prisma schema files (type definitions only)
+  '''prisma/.*''',
+
+  # Documentation with API key examples (sk-..., example-api-key, etc.)
+  '''docs/.*''',
+
+  # HTML wireframes with mockup data
+  '''.*/wireframes/.*\.html$''',
+
+  # Legacy factory/claude context dirs (read-only reference material)
+  '''\.factory/.*''',
+  '''\.claude/context/.*''',
+
+  # Next.js generated types and client-side page wrappers
+  # (these are compile-time generated or trivial re-exports — false positives)
+  '''app/.*/page\.tsx$''',
+  '''\.next/.*''',
+
+  # Gitleaks' own config files (false positive loop prevention)
+  '''\.gitleaks\.toml$''',
+  '''\.gitleaksignore$''',
+]
+
+# Strings that look like secrets but are documented placeholders
+stopwords = [
+  "ci-build-secret-not-real",
+  "build-time-placeholder",
+  "change-me-in-production",
+  "your-api-key-here",
+  "example-api-key",
+  "placeholder",
+  "generateStaticParams",
+]
