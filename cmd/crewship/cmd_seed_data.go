@@ -48,6 +48,7 @@ func seedNuke(ctx context.Context, client *cli.Client) error {
 		if len(issues) == 0 {
 			break
 		}
+		deletedOnPage := 0
 		for _, iss := range issues {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -82,16 +83,25 @@ func seedNuke(ctx context.Context, client *cli.Client) error {
 			if r.StatusCode >= 300 {
 				failures = append(failures, fmt.Sprintf("delete issue %s: HTTP %d", *iss.Identifier, r.StatusCode))
 				fmt.Fprintf(os.Stderr, "  ! delete issue %s: HTTP %d\n", *iss.Identifier, r.StatusCode)
+				r.Body.Close()
+				continue
 			}
 			r.Body.Close()
 			totalDeleted++
+			deletedOnPage++
 		}
-		// A partial page (fewer than pageLimit rows) means we've seen
-		// everything. Do NOT advance offset on a full page because we
-		// just deleted the rows on it — the next page starts at the
-		// same offset.
+		// End conditions:
+		// - Partial page (fewer than pageLimit rows) → nothing left to scan.
+		// - Full page but zero deletions → every row is undeletable; advance
+		//   offset past them so we don't re-fetch the same 500 rows forever.
+		// - Full page with deletions → the rows we removed shifted the
+		//   result set, so the next page starts at the same offset (0).
 		if len(issues) < pageLimit {
 			break
+		}
+		if deletedOnPage == 0 {
+			fmt.Fprintf(os.Stderr, "  ! nuke: page at offset=%d had no deletable issues, advancing\n", offset)
+			offset += pageLimit
 		}
 	}
 	fmt.Fprintf(os.Stderr, "  Deleted %d issues\n", totalDeleted)
@@ -574,11 +584,16 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		}
 		if resp.StatusCode == http.StatusConflict {
 			resp.Body.Close()
-			// Resolve existing
+			// Resolve existing — only treat the conflict as recovered if the
+			// follow-up lookup actually returns an ID. Otherwise integrationIDs
+			// is left without an entry and later binding code will silently
+			// skip this integration, so we surface it as a failure instead.
 			id, err := resolveCrewIntegration(client, crewID, integ.Name)
-			if err == nil {
-				integrationIDs[integ.Name] = id
+			if err != nil || id == "" {
+				fmt.Fprintf(os.Stderr, "  ! Integration %s: 409 conflict but lookup failed: %v\n", integ.Name, err)
+				continue
 			}
+			integrationIDs[integ.Name] = id
 			fmt.Fprintf(os.Stderr, "  = Integration exists: %s\n", integ.DisplayName)
 			continue
 		}
@@ -618,13 +633,20 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		}
 		if resp.StatusCode == http.StatusConflict {
 			resp.Body.Close()
-			id, _ := resolveByName(client, "/api/v1/credentials", oc.CredName)
-			if id != "" {
-				oauthCredIDs[oc.IntegrationName] = id
+			// Same caveat as the integration conflict above: a 409 is only
+			// a recovered state if we actually find the existing credential.
+			// Otherwise bindings below would silently miss the credential_id,
+			// so surface the failure explicitly.
+			id, err := resolveByName(client, "/api/v1/credentials", oc.CredName)
+			if err != nil || id == "" {
+				fmt.Fprintf(os.Stderr, "  ! OAuth credential %s: 409 conflict but lookup failed: %v\n", oc.CredName, err)
+				continue
 			}
+			oauthCredIDs[oc.IntegrationName] = id
 			continue
 		}
 		if resp.StatusCode >= 400 {
+			fmt.Fprintf(os.Stderr, "  ! OAuth credential %s: HTTP %d\n", oc.CredName, resp.StatusCode)
 			resp.Body.Close()
 			continue
 		}

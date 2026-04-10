@@ -141,10 +141,17 @@ function TriggersTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
               <button
                 type="button"
                 aria-label={copied ? "Webhook URL copied" : "Copy webhook URL"}
-                onClick={() => {
-                  navigator.clipboard.writeText(window.location.origin + webhookUrl)
-                  setCopied(true)
-                  setTimeout(() => setCopied(false), 2000)
+                onClick={async () => {
+                  // Clipboard write can reject if the page loses focus or
+                  // the permission is denied — surface a toast instead of
+                  // leaving an unhandled promise rejection.
+                  try {
+                    await navigator.clipboard.writeText(window.location.origin + webhookUrl)
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  } catch {
+                    toast.error("Failed to copy webhook URL")
+                  }
                 }}
                 className="p-1 rounded hover:bg-accent text-muted-foreground"
               >
