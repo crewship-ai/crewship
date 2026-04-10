@@ -127,8 +127,8 @@ var skillGetCmd = &cobra.Command{
 		// in the serialized struct.
 		if skill.Description != nil && *skill.Description != "" &&
 			(f.Format == "" || f.Format == "table") {
-			fmt.Fprintln(os.Stdout)
-			fmt.Fprintf(os.Stdout, "%sDescription:%s\n", cli.Bold, cli.Reset)
+			fmt.Fprintln(f.Writer)
+			fmt.Fprintf(f.Writer, "%sDescription:%s\n", cli.Bold, cli.Reset)
 			f.Markdown(*skill.Description)
 		}
 		return nil

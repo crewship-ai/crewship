@@ -113,6 +113,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Run grype on source tree
+        id: scan
         uses: anchore/scan-action@v7
         with:
           path: "."
@@ -120,11 +121,14 @@ jobs:
           severity-cutoff: high
           output-format: sarif
 
+      # anchore/scan-action@v7 writes SARIF to a random temp path (not
+      # ./results.sarif in the workspace like v6 did). Reference the output
+      # variable so the upload step finds the file.
       - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: results.sarif
+          sarif_file: ${{ steps.scan.outputs.sarif }}
         continue-on-error: true
 
   # ── License policy: go-licenses (forbidden-license check) ──
