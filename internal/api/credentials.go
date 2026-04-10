@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -332,7 +333,12 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Validate all crew IDs
 	for _, cid := range crewIDs {
 		if err := crewExists(r.Context(), h.db, cid, workspaceID); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
+				return
+			}
+			h.logger.Error("check crew existence", "error", err, "crew_id", cid)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
 	}
@@ -506,7 +512,12 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := credentialExists(r.Context(), h.db, credID, workspaceID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
+			return
+		}
+		h.logger.Error("check credential existence", "error", err, "credential_id", credID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -542,7 +553,12 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// Validate all crew IDs
 		for _, cid := range crewIDs {
 			if err := crewExists(r.Context(), h.db, cid, workspaceID); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
+				if errors.Is(err, sql.ErrNoRows) {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
+					return
+				}
+				h.logger.Error("check crew existence", "error", err, "crew_id", cid)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 				return
 			}
 		}
@@ -558,7 +574,12 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	} else if crewIDVal, ok := body["crew_id"]; ok && crewIDVal != nil {
 		if crewIDStr, ok := crewIDVal.(string); ok && crewIDStr != "" {
 			if err := crewExists(r.Context(), h.db, crewIDStr, workspaceID); err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid crew_id"})
+				if errors.Is(err, sql.ErrNoRows) {
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid crew_id"})
+					return
+				}
+				h.logger.Error("check crew existence", "error", err, "crew_id", crewIDStr)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 				return
 			}
 		}

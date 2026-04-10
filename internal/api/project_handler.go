@@ -454,7 +454,12 @@ func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
 
 	// Verify project exists
 	if err := projectExists(r.Context(), h.db, projectID, wsID); err != nil {
-		writeProblem(w, r, http.StatusNotFound, "Project not found")
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Project not found")
+			return
+		}
+		h.logger.Error("check project existence", "error", err, "project_id", projectID)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 

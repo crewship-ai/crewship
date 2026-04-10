@@ -306,7 +306,12 @@ func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+			return
+		}
+		h.logger.Error("check crew existence", "error", err, "crew_id", crewID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 	ipcPath := fmt.Sprintf("/crews/%s/files", crewID)
@@ -348,7 +353,12 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+			return
+		}
+		h.logger.Error("check crew existence", "error", err, "crew_id", crewID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 	cleanPath := filepath.Clean(filePath)
@@ -393,7 +403,12 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+			return
+		}
+		h.logger.Error("check crew existence", "error", err, "crew_id", crewID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 	cleanPath := filepath.Clean(filePath)
@@ -463,7 +478,12 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent existence", "error", err, "agent_id", agentID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 

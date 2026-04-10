@@ -205,11 +205,26 @@ export default function DashboardPage() {
   }, [workspaceId, onboardingChecked, fetchData])
 
   // Real-time: debounced refetch on dashboard events (prevents burst of 9 concurrent fetches)
-  const dashDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const dashDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const debouncedFetchData = useCallback(() => {
-    clearTimeout(dashDebounceRef.current)
-    dashDebounceRef.current = setTimeout(() => fetchData(false), 200)
+    if (dashDebounceRef.current !== null) clearTimeout(dashDebounceRef.current)
+    dashDebounceRef.current = setTimeout(() => {
+      dashDebounceRef.current = null
+      void fetchData(false)
+    }, 200)
   }, [fetchData])
+
+  // Clear any pending timer on unmount / workspace change so a late timeout
+  // cannot call fetchData with stale closure state after the component is
+  // gone or after the user has switched workspaces.
+  useEffect(() => {
+    return () => {
+      if (dashDebounceRef.current !== null) {
+        clearTimeout(dashDebounceRef.current)
+        dashDebounceRef.current = null
+      }
+    }
+  }, [workspaceId])
 
   useRealtimeEvent("run.started", debouncedFetchData)
   useRealtimeEvent("run.completed", debouncedFetchData)

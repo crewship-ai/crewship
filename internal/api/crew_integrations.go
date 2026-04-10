@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -183,7 +184,12 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 
 	// Verify crew belongs to workspace
 	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+			return
+		}
+		h.logger.Error("check crew existence", "error", err, "crew_id", crewID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -317,7 +323,12 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 	crewID := r.PathValue("crewId")
 	// Verify crew
 	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
+			return
+		}
+		h.logger.Error("check crew existence", "error", err, "crew_id", crewID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 

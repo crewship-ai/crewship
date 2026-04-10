@@ -1,6 +1,8 @@
 package api
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -58,7 +60,12 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 
 	// Verify agent
 	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent existence", "error", err, "agent_id", agentID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
@@ -123,7 +130,12 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 
 	agentID := r.PathValue("agentId")
 	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+			return
+		}
+		h.logger.Error("check agent existence", "error", err, "agent_id", agentID)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 
