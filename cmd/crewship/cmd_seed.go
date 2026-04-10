@@ -523,7 +523,9 @@ func seedOneCredential(client *cli.Client, cred seeddata.CredentialDef) (string,
 	if err := cli.CheckError(resp); err != nil {
 		return "", err
 	}
-	var created struct{ ID string `json:"id"` }
+	var created struct {
+		ID string `json:"id"`
+	}
 	if err := cli.ReadJSON(resp, &created); err != nil {
 		return "", err
 	}
@@ -586,7 +588,9 @@ func seedIntegrations(client *cli.Client, crewIDs, agentIDs map[string]string) e
 			fmt.Fprintf(os.Stderr, "  ! Integration %s: HTTP %d\n", integ.Name, resp.StatusCode)
 			continue
 		}
-		var created struct{ ID string `json:"id"` }
+		var created struct {
+			ID string `json:"id"`
+		}
 		if cli.ReadJSON(resp, &created) == nil {
 			integrationIDs[integ.Name] = created.ID
 		}
@@ -624,7 +628,9 @@ func seedIntegrations(client *cli.Client, crewIDs, agentIDs map[string]string) e
 			resp.Body.Close()
 			continue
 		}
-		var created struct{ ID string `json:"id"` }
+		var created struct {
+			ID string `json:"id"`
+		}
 		if cli.ReadJSON(resp, &created) == nil {
 			oauthCredIDs[oc.IntegrationName] = created.ID
 			status := "ACTIVE"
@@ -734,7 +740,9 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 			}
 			continue
 		}
-		var created struct{ ID string `json:"id"` }
+		var created struct {
+			ID string `json:"id"`
+		}
 		if cli.ReadJSON(resp, &created) == nil {
 			projectIDs[p.Name] = created.ID
 			fmt.Fprintf(os.Stderr, "  + Project: %s\n", p.Name)
@@ -905,7 +913,9 @@ func createOrResolve(client *cli.Client, createPath string, body interface{}, li
 	if err := cli.CheckError(resp); err != nil {
 		return "", err
 	}
-	var created struct{ ID string `json:"id"` }
+	var created struct {
+		ID string `json:"id"`
+	}
 	if err := cli.ReadJSON(resp, &created); err != nil {
 		return "", err
 	}

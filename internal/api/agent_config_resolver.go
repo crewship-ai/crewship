@@ -11,17 +11,17 @@ import (
 
 // agentConfigData holds the intermediate state during agent config resolution.
 type agentConfigData struct {
-	agentID   string
-	agentSlug string
-	agentName string
-	roleTitle sql.NullString
-	agentRole sql.NullString
-	cliAdapter   string
-	toolProfile  string
-	wsID         string
-	systemPrompt sql.NullString
-	llmModel     sql.NullString
-	timeoutSecs  int
+	agentID       string
+	agentSlug     string
+	agentName     string
+	roleTitle     sql.NullString
+	agentRole     sql.NullString
+	cliAdapter    string
+	toolProfile   string
+	wsID          string
+	systemPrompt  sql.NullString
+	llmModel      sql.NullString
+	timeoutSecs   int
 	memoryEnabled bool
 
 	crewID             sql.NullString
@@ -57,9 +57,9 @@ type crewMemberEntry struct {
 
 // crewInfoEntry describes a crew and its agents (used for COORDINATOR context).
 type crewInfoEntry struct {
-	ID      string           `json:"id"`
-	Name    string           `json:"name"`
-	Slug    string           `json:"slug"`
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Slug    string            `json:"slug"`
 	Members []crewMemberEntry `json:"members"`
 }
 
@@ -81,7 +81,7 @@ type mcpServerEntry struct {
 
 // mcpServerRow is a raw DB row for an MCP server definition.
 type mcpServerRow struct {
-	id, name, displayName, transport string
+	id, name, displayName, transport     string
 	endpoint, command, argsJSON, envJSON *string
 }
 
@@ -193,27 +193,27 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 	}
 
 	resp := map[string]interface{}{
-		"agent_id":             agentID,
-		"agent_slug":           data.agentSlug,
-		"agent_role":           roleStr,
-		"crew_id":              crewIDStr,
-		"crew_slug":            crewSlugStr,
-		"container_id":         "",
-		"cli_adapter":          data.cliAdapter,
-		"llm_model":            llmModelStr,
-		"system_prompt":        sysPrompt,
-		"tool_profile":         data.toolProfile,
-		"credentials":          creds,
-		"timeout_seconds":      data.timeoutSecs,
-		"workspace_id":         data.wsID,
-		"memory_enabled":       data.memoryEnabled,
-		"crew_members":         crewMembers,
-		"network_mode":         networkMode,
-		"allowed_domains":      allowedDomains,
-		"memory_mb":            memoryMB,
-		"cpus":                 cpus,
-		"ttl_hours":            ttlHours,
-		"mcp_servers":          mcpServers,
+		"agent_id":              agentID,
+		"agent_slug":            data.agentSlug,
+		"agent_role":            roleStr,
+		"crew_id":               crewIDStr,
+		"crew_slug":             crewSlugStr,
+		"container_id":          "",
+		"cli_adapter":           data.cliAdapter,
+		"llm_model":             llmModelStr,
+		"system_prompt":         sysPrompt,
+		"tool_profile":          data.toolProfile,
+		"credentials":           creds,
+		"timeout_seconds":       data.timeoutSecs,
+		"workspace_id":          data.wsID,
+		"memory_enabled":        data.memoryEnabled,
+		"crew_members":          crewMembers,
+		"network_mode":          networkMode,
+		"allowed_domains":       allowedDomains,
+		"memory_mb":             memoryMB,
+		"cpus":                  cpus,
+		"ttl_hours":             ttlHours,
+		"mcp_servers":           mcpServers,
 		"crew_mcp_config_json":  data.crewMCPConfigJSON.String,
 		"agent_mcp_config_json": data.agentMCPConfigJSON.String,
 	}
@@ -425,7 +425,7 @@ func (h *InternalHandler) resolveSkillsBlock(r *http.Request, creds []mcpCredEnt
 		}
 
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("<skill name=%q category=%q>\n", displayName, category))
+		fmt.Fprintf(&sb, "<skill name=%q category=%q>\n", displayName, category)
 		if len(credLines) > 0 {
 			sb.WriteString("Credentials:\n")
 			for _, cl := range credLines {
@@ -851,16 +851,16 @@ func (h *InternalHandler) buildKeeperBlock(agentSlug string, creds []mcpCredEntr
 	keeperBlock.WriteString("You do NOT have these credentials in your environment. To access them:\n\n")
 	keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/request \\\n")
 	keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
-	keeperBlock.WriteString(fmt.Sprintf("    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why you need it>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug))
+	fmt.Fprintf(&keeperBlock, "    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why you need it>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug)
 	keeperBlock.WriteString("The Keeper (AI gatekeeper) will evaluate your request and respond with ALLOW or DENY.\n")
 	keeperBlock.WriteString("If ALLOW, the response contains the credential value. If DENY, do NOT retry \u2014 explain to the user why access was denied.\n\n")
 	keeperBlock.WriteString("To execute a command with a credential (without seeing the value):\n")
 	keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/execute \\\n")
 	keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
-	keeperBlock.WriteString(fmt.Sprintf("    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why>\",\"command\":\"<shell command>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug))
+	fmt.Fprintf(&keeperBlock, "    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why>\",\"command\":\"<shell command>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug)
 	keeperBlock.WriteString("Keeper-guarded credentials available to you:\n")
 	for _, name := range secretCreds {
-		keeperBlock.WriteString(fmt.Sprintf("  - %s\n", name))
+		fmt.Fprintf(&keeperBlock, "  - %s\n", name)
 	}
 	keeperBlock.WriteString("[END CREDENTIAL ACCESS CONTROL]")
 	return keeperBlock.String()

@@ -850,12 +850,12 @@ func startSidecar(
 		Credential  *MCPCredential    `json:"credential,omitempty"`
 	}
 	type sidecarInput struct {
-		Credentials   []sidecarCred          `json:"credentials"`
-		Memory        *SidecarMemoryConfig   `json:"memory,omitempty"`
-		IPC           *SidecarIPCConfig      `json:"ipc,omitempty"`
-		CrewMembers   []SidecarCrewMember    `json:"crew_members,omitempty"`
-		NetworkPolicy *SidecarNetworkPolicy  `json:"network_policy,omitempty"`
-		MCPServers    []sidecarMCPServer     `json:"mcp_servers,omitempty"`
+		Credentials   []sidecarCred         `json:"credentials"`
+		Memory        *SidecarMemoryConfig  `json:"memory,omitempty"`
+		IPC           *SidecarIPCConfig     `json:"ipc,omitempty"`
+		CrewMembers   []SidecarCrewMember   `json:"crew_members,omitempty"`
+		NetworkPolicy *SidecarNetworkPolicy `json:"network_policy,omitempty"`
+		MCPServers    []sidecarMCPServer    `json:"mcp_servers,omitempty"`
 	}
 
 	// Only pass HTTP servers to sidecar — stdio servers are handled
@@ -1321,10 +1321,10 @@ type streamJSONMessage struct {
 	ModelUsage   json.RawMessage `json:"modelUsage,omitempty"`
 	Errors       []string        `json:"errors,omitempty"`
 	// For "system" type with subtype "init"
-	Model    string            `json:"model,omitempty"`
-	Tools    []string          `json:"tools,omitempty"`
-	CWD      string            `json:"cwd,omitempty"`
-	MCPSrvrs json.RawMessage   `json:"mcp_servers,omitempty"`
+	Model    string          `json:"model,omitempty"`
+	Tools    []string        `json:"tools,omitempty"`
+	CWD      string          `json:"cwd,omitempty"`
+	MCPSrvrs json.RawMessage `json:"mcp_servers,omitempty"`
 	// For stream_event type (--include-partial-messages)
 	Event *streamEvent `json:"event,omitempty"`
 }
@@ -1336,14 +1336,14 @@ type nestedMessage struct {
 }
 
 type contentBlock struct {
-	Type      string        `json:"type"`
-	Text      string        `json:"text,omitempty"`
-	Thinking  string        `json:"thinking,omitempty"`
-	Name      string        `json:"name,omitempty"`
-	ID        string        `json:"id,omitempty"`
-	Input     any           `json:"input,omitempty"`
-	ToolUseID string        `json:"tool_use_id,omitempty"`
-	Source    *imageSource  `json:"source,omitempty"`
+	Type      string       `json:"type"`
+	Text      string       `json:"text,omitempty"`
+	Thinking  string       `json:"thinking,omitempty"`
+	Name      string       `json:"name,omitempty"`
+	ID        string       `json:"id,omitempty"`
+	Input     any          `json:"input,omitempty"`
+	ToolUseID string       `json:"tool_use_id,omitempty"`
+	Source    *imageSource `json:"source,omitempty"`
 }
 
 type imageSource struct {
@@ -1519,12 +1519,12 @@ func (o *Orchestrator) handleStreamJSONLine(line string, handler EventHandler) {
 		// Emit run result metadata (cost, usage, duration) as a dedicated event.
 		// The text is NOT re-emitted (already delivered via "assistant" blocks).
 		meta := map[string]interface{}{
-			"subtype":        msg.Subtype,
-			"duration_ms":    msg.DurationMs,
+			"subtype":         msg.Subtype,
+			"duration_ms":     msg.DurationMs,
 			"duration_api_ms": msg.DurationAPI,
-			"total_cost_usd": msg.TotalCostUSD,
-			"num_turns":      msg.NumTurns,
-			"is_error":       msg.IsError,
+			"total_cost_usd":  msg.TotalCostUSD,
+			"num_turns":       msg.NumTurns,
+			"is_error":        msg.IsError,
 		}
 		if len(msg.Usage) > 0 {
 			var usage map[string]interface{}

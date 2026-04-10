@@ -109,24 +109,24 @@ type crewCountResponse struct {
 }
 
 type crewResponse struct {
-	ID                string           `json:"id"`
-	WorkspaceID       string           `json:"workspace_id"`
-	Name              string           `json:"name"`
-	Slug              string           `json:"slug"`
-	Description       *string          `json:"description"`
-	Color             *string          `json:"color"`
-	Icon              *string          `json:"icon"`
-	AvatarStyle       *string          `json:"avatar_style"`
-	ContainerMemoryMB int              `json:"container_memory_mb"`
-	ContainerCPUs     float64          `json:"container_cpus"`
-	ContainerTTLHours *int             `json:"container_ttl_hours"`
-	NetworkMode       string           `json:"network_mode"`
-	AllowedDomains    []string         `json:"allowed_domains"`
-	MCPConfigJSON     *string          `json:"mcp_config_json,omitempty"`
-	EscalationConfig  *string          `json:"escalation_config,omitempty"`
-	IssuePrefix       *string          `json:"issue_prefix"`
-	CreatedAt         string           `json:"created_at"`
-	UpdatedAt         string           `json:"updated_at"`
+	ID                string            `json:"id"`
+	WorkspaceID       string            `json:"workspace_id"`
+	Name              string            `json:"name"`
+	Slug              string            `json:"slug"`
+	Description       *string           `json:"description"`
+	Color             *string           `json:"color"`
+	Icon              *string           `json:"icon"`
+	AvatarStyle       *string           `json:"avatar_style"`
+	ContainerMemoryMB int               `json:"container_memory_mb"`
+	ContainerCPUs     float64           `json:"container_cpus"`
+	ContainerTTLHours *int              `json:"container_ttl_hours"`
+	NetworkMode       string            `json:"network_mode"`
+	AllowedDomains    []string          `json:"allowed_domains"`
+	MCPConfigJSON     *string           `json:"mcp_config_json,omitempty"`
+	EscalationConfig  *string           `json:"escalation_config,omitempty"`
+	IssuePrefix       *string           `json:"issue_prefix"`
+	CreatedAt         string            `json:"created_at"`
+	UpdatedAt         string            `json:"updated_at"`
 	Count             crewCountResponse `json:"_count"`
 }
 

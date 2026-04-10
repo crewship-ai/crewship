@@ -146,8 +146,6 @@ func getTaskAssignmentID(t *testing.T, db *sql.DB, taskID string) string {
 	return aid.String
 }
 
-func strPtr(s string) *string { return &s }
-
 // ============================================================
 // Test 1: Linear DAG — Research → Write → Review
 // ============================================================
@@ -1378,12 +1376,10 @@ func TestE2E_BUG_DeletedAgentDuringMission(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	db.Exec(`UPDATE agents SET deleted_at = ? WHERE id = ?`, now, agentID)
 
-	// Tick: should fail to schedule (agent not found)
-	err := tickEngine(context.Background(), engine, ms)
-	if err != nil {
-		// tickEngine itself doesn't return the inner scheduling error — it logs it
-		// and marks the task as FAILED
-	}
+	// Tick: should fail to schedule (agent not found).
+	// tickEngine itself doesn't return the inner scheduling error — it logs it
+	// and marks the task as FAILED. We intentionally ignore the return value.
+	_ = tickEngine(context.Background(), engine, ms)
 
 	time.Sleep(100 * time.Millisecond)
 	allDisp := disp.getDispatches()

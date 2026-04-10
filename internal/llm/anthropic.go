@@ -106,8 +106,8 @@ func (a *Anthropic) buildRequestBody(req Request, stream bool) ([]byte, error) {
 		// Use structured system prompt with cache_control for prompt caching.
 		// This allows Anthropic to cache the system prompt across turns in a session.
 		body["system"] = []map[string]any{{
-			"type": "text",
-			"text": req.System,
+			"type":          "text",
+			"text":          req.System,
 			"cache_control": map[string]string{"type": "ephemeral"},
 		}}
 	}
@@ -153,7 +153,7 @@ type anthropicTool struct {
 
 type anthropicResponse struct {
 	Content    []anthropicContentBlock `json:"content"`
-	StopReason string                 `json:"stop_reason"`
+	StopReason string                  `json:"stop_reason"`
 	Usage      struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
@@ -230,11 +230,7 @@ func toAnthropicMessage(m Message) anthropicMessage {
 func toAnthropicTools(tools []ToolDef) []anthropicTool {
 	out := make([]anthropicTool, len(tools))
 	for i, t := range tools {
-		out[i] = anthropicTool{
-			Name:        t.Name,
-			Description: t.Description,
-			InputSchema: t.InputSchema,
-		}
+		out[i] = anthropicTool(t)
 	}
 	return out
 }

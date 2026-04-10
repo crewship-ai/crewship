@@ -34,7 +34,7 @@ type DispatchRequest struct {
 	Task         string
 	TraceID      string // mission trace ID for end-to-end observability
 	MissionID    string
-	LeadPlanning bool   // when true, dispatch as LEAD with sidecar (for task planning phase)
+	LeadPlanning bool // when true, dispatch as LEAD with sidecar (for task planning phase)
 }
 
 // MissionEngine manages the lifecycle of missions and their tasks.
@@ -69,7 +69,7 @@ type EscalationConfig struct {
 }
 
 const (
-	circuitBreakerThreshold = 3     // consecutive failures before tripping
+	circuitBreakerThreshold = 3 // consecutive failures before tripping
 	maxResultSummaryLen     = 8000
 	maxBriefTotalLen        = 32000 // total brief size cap (bytes) to avoid LLM token budget issues
 	maxDepOutputLen         = 4000  // per-dependency output truncation
@@ -1013,7 +1013,6 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 	return nil
 }
 
-
 // checkApprovalGate determines whether a completed task should be held for human approval.
 func (e *MissionEngine) checkApprovalGate(ctx context.Context, taskID, missionID string) string {
 	var approvalRequired int
@@ -1267,8 +1266,8 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 	}
 
 	type blockedTask struct {
-		id      string
-		deps    []string
+		id   string
+		deps []string
 	}
 	var candidates []blockedTask
 	for rows.Next() {
@@ -1561,7 +1560,7 @@ func (e *MissionEngine) ValidateDAG(ctx context.Context, missionID string) error
 	}
 
 	// Build adjacency list and check for nonexistent deps
-	graph := make(map[string][]string, len(tasks))     // taskID → deps
+	graph := make(map[string][]string, len(tasks)) // taskID → deps
 	inDegree := make(map[string]int, len(tasks))
 	for _, t := range tasks {
 		graph[t.ID] = nil
@@ -1651,13 +1650,6 @@ func parseDependsOn(raw string) ([]string, error) {
 		return nil, err
 	}
 	return deps, nil
-}
-
-func derefStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }
 
 func generateID() string {

@@ -17,13 +17,13 @@ func NewLicenseHandler(lic *license.License) *LicenseHandler {
 }
 
 type licenseResponse struct {
-	Edition      string   `json:"edition"`
-	LicenseID    string   `json:"license_id"`
+	Edition     string   `json:"edition"`
+	LicenseID   string   `json:"license_id"`
 	LicenseeOrg string   `json:"licensee_org"`
-	MaxCrews     int      `json:"max_crews"`
-	MaxAgents    int      `json:"max_agents_per_crew"`
-	MaxMembers   int      `json:"max_members"`
-	Features     []string `json:"features"`
+	MaxCrews    int      `json:"max_crews"`
+	MaxAgents   int      `json:"max_agents_per_crew"`
+	MaxMembers  int      `json:"max_members"`
+	Features    []string `json:"features"`
 }
 
 // Status returns the current license edition, limits, and enabled features.
@@ -49,12 +49,12 @@ func (h *LicenseHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, licenseResponse{
-		Edition:      string(c.Edition),
-		LicenseID:    c.LicenseID,
-		LicenseeOrg:  c.LicenseeOrg,
-		MaxCrews:     c.MaxCrews,
-		MaxAgents:    c.MaxAgents,
-		MaxMembers:   c.MaxMembers,
-		Features:     features,
+		Edition:     string(c.Edition),
+		LicenseID:   c.LicenseID,
+		LicenseeOrg: c.LicenseeOrg,
+		MaxCrews:    c.MaxCrews,
+		MaxAgents:   c.MaxAgents,
+		MaxMembers:  c.MaxMembers,
+		Features:    features,
 	})
 }

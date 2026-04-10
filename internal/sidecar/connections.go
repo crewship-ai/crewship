@@ -21,11 +21,6 @@ func (s *Server) handleConnectionsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type connEntry struct {
-		CrewSlug  string `json:"crew_slug"`
-		Direction string `json:"direction"`
-	}
-
 	// Build connections from crew_connections via crewshipd (live query).
 	// Filter to only connections involving this crew (not the entire workspace graph).
 	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/crew-connections?workspace_id="+

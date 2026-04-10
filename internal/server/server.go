@@ -7,8 +7,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net"
-	"os"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -33,30 +33,30 @@ import (
 // Server is the main crewship process, wiring together the HTTP server, IPC
 // listener, WebSocket hub, orchestrator, scheduler, and all supporting services.
 type Server struct {
-	httpServer    *http.Server
-	ipcServer     *http.Server
-	mux           *http.ServeMux
-	ipcMux        *http.ServeMux
-	spaHandler    http.Handler
-	cfg           *config.Config
-	logger        *slog.Logger
-	wsHub         *ws.Hub
-	orchestrator  *orchestrator.Orchestrator
-	missionEngine *orchestrator.MissionEngine
-	container     provider.ContainerProvider
-	storage       provider.StorageProvider
-	state         provider.StateProvider
-	logWriter     *logcollector.Writer
-	logReader     *logcollector.Reader
-	convStore     *conversation.Store
-	tokenPool     *llmproxy.TokenPool
-	tokenSyncer   *llmproxy.TokenSyncer
-	credMonitor   *llmproxy.CredentialMonitor
-	debugLogs     *logging.RingBuffer
-	db             *sql.DB
-	apiRouter      *goapi.Router
-	fileWatcher    *fileserver.Watcher
-	watchedCrews   sync.Map
+	httpServer      *http.Server
+	ipcServer       *http.Server
+	mux             *http.ServeMux
+	ipcMux          *http.ServeMux
+	spaHandler      http.Handler
+	cfg             *config.Config
+	logger          *slog.Logger
+	wsHub           *ws.Hub
+	orchestrator    *orchestrator.Orchestrator
+	missionEngine   *orchestrator.MissionEngine
+	container       provider.ContainerProvider
+	storage         provider.StorageProvider
+	state           provider.StateProvider
+	logWriter       *logcollector.Writer
+	logReader       *logcollector.Reader
+	convStore       *conversation.Store
+	tokenPool       *llmproxy.TokenPool
+	tokenSyncer     *llmproxy.TokenSyncer
+	credMonitor     *llmproxy.CredentialMonitor
+	debugLogs       *logging.RingBuffer
+	db              *sql.DB
+	apiRouter       *goapi.Router
+	fileWatcher     *fileserver.Watcher
+	watchedCrews    sync.Map
 	statsCollector  *StatsCollector
 	terminalHandler *terminal.Handler
 	startedAt       time.Time

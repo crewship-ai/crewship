@@ -38,10 +38,10 @@ type Provider struct {
 	logger *slog.Logger
 	hostIP string
 
-	mu       sync.RWMutex
-	execSeq  atomic.Int64
-	execs    map[string]*execEntry
-	done     chan struct{}
+	mu      sync.RWMutex
+	execSeq atomic.Int64
+	execs   map[string]*execEntry
+	done    chan struct{}
 }
 
 type execEntry struct {
@@ -424,7 +424,7 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 		return nil, fmt.Errorf("container inspect: %w", err)
 	}
 
-	state := "stopped"
+	var state string
 	switch strings.ToLower(info.Status) {
 	case "running":
 		state = "running"

@@ -25,9 +25,9 @@ type ChatHandler interface {
 // ChatEvent is a streaming event sent from an agent run back to the client,
 // such as text output, tool calls, thinking steps, or completion signals.
 type ChatEvent struct {
-	Type     string `json:"type"`                // "text", "tool_call", "tool_result", "thinking", "status", "done", "error", "result", "system"
+	Type     string `json:"type"` // "text", "tool_call", "tool_result", "thinking", "status", "done", "error", "result", "system"
 	Content  string `json:"content"`
-	Metadata any    `json:"metadata,omitempty"`   // structured data for tool calls, cost/usage, session init, etc.
+	Metadata any    `json:"metadata,omitempty"` // structured data for tool calls, cost/usage, session init, etc.
 }
 
 // Hub manages WebSocket connections, channel subscriptions, and message
@@ -38,15 +38,15 @@ type Hub struct {
 	chatHandler  ChatHandler
 	jwtValidator *auth.JWTValidator
 	clients      map[*Client]bool
-	channels    map[string]map[*Client]bool
-	register    chan *Client
-	unregister  chan *Client
-	broadcast   chan ChannelMessage
-	mu          sync.RWMutex
-	connCount   atomic.Int64
-	cancelFns   map[string]context.CancelFunc // session_id -> cancel function for active runs
-	cancelMu    sync.Mutex
-	channelAuth ChannelAuthorizer
+	channels     map[string]map[*Client]bool
+	register     chan *Client
+	unregister   chan *Client
+	broadcast    chan ChannelMessage
+	mu           sync.RWMutex
+	connCount    atomic.Int64
+	cancelFns    map[string]context.CancelFunc // session_id -> cancel function for active runs
+	cancelMu     sync.Mutex
+	channelAuth  ChannelAuthorizer
 }
 
 // Client represents a single authenticated WebSocket connection with its
@@ -428,8 +428,8 @@ func (c *Client) safeSend(data []byte) (sent bool) {
 }
 
 type sendMessagePayload struct {
-	ChatID string `json:"session_id"`
-	Content   string `json:"content"`
+	ChatID  string `json:"session_id"`
+	Content string `json:"content"`
 }
 
 func (c *Client) handleCancelMessage(msg ClientMessage) {

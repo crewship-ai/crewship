@@ -98,9 +98,9 @@ func (s *Server) handleGetManifest(w http.ResponseWriter, _ *http.Request) {
 // Agents POST partial updates: new packages, credentials, or setup commands are appended.
 func (s *Server) handleUpdateManifest(w http.ResponseWriter, r *http.Request) {
 	var patch struct {
-		Packages      *ManifestPackages    `json:"packages"`
-		Credentials   []ManifestCredEntry  `json:"credentials"`
-		SetupCommands []string             `json:"setup_commands"`
+		Packages      *ManifestPackages   `json:"packages"`
+		Credentials   []ManifestCredEntry `json:"credentials"`
+		SetupCommands []string            `json:"setup_commands"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})

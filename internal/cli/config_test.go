@@ -8,11 +8,11 @@ import (
 
 func TestResolveServer(t *testing.T) {
 	tests := []struct {
-		name    string
-		flag    string
-		env     string
-		config  *CLIConfig
-		want    string
+		name   string
+		flag   string
+		env    string
+		config *CLIConfig
+		want   string
 	}{
 		{"flag wins", "http://flag:1234", "", &CLIConfig{Server: "http://config:5678"}, "http://flag:1234"},
 		{"env wins over config", "", "http://env:1234", &CLIConfig{Server: "http://config:5678"}, "http://env:1234"},

@@ -657,7 +657,7 @@ func (s *Server) handleDebugInfo(w http.ResponseWriter, _ *http.Request) {
 		"status":      "ok",
 		"uptime":      time.Since(s.startedAt).String(),
 		"uptime_secs": time.Since(s.startedAt).Seconds(),
-		"connections":  s.wsHub.ConnectionCount(),
+		"connections": s.wsHub.ConnectionCount(),
 		"started_at":  s.startedAt.Format(time.RFC3339),
 	}
 
@@ -768,5 +768,3 @@ func sanitizeMetadata(raw any) map[string]interface{} {
 	}
 	return safe
 }
-
-

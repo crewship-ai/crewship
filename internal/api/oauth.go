@@ -663,12 +663,12 @@ func (h *OAuthHandler) Discover(w http.ResponseWriter, r *http.Request) {
 		// Fallback: check if URL matches a known provider
 		if provider := matchKnownProvider(req.MCPURL); provider != nil {
 			writeJSON(w, http.StatusOK, map[string]any{
-				"auth_url":    provider.AuthURL,
-				"token_url":   provider.TokenURL,
-				"scopes":      provider.DefaultScopes,
-				"supports_dcr": false,
+				"auth_url":      provider.AuthURL,
+				"token_url":     provider.TokenURL,
+				"scopes":        provider.DefaultScopes,
+				"supports_dcr":  false,
 				"supports_pkce": true,
-				"source":       "known_provider",
+				"source":        "known_provider",
 			})
 			return
 		}
@@ -766,11 +766,11 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			h.logger.Warn("DCR failed, returning needs_client_id", "error", err)
 			writeJSON(w, http.StatusOK, map[string]any{
-				"status":   "needs_client_id",
-				"auth_url": authURL,
+				"status":    "needs_client_id",
+				"auth_url":  authURL,
 				"token_url": tokenURL,
-				"scopes":   scopes,
-				"message":  "Automatic registration not available. Please create an OAuth app and provide Client ID.",
+				"scopes":    scopes,
+				"message":   "Automatic registration not available. Please create an OAuth app and provide Client ID.",
 			})
 			return
 		}
@@ -780,11 +780,11 @@ func (h *OAuthHandler) AutoConnect(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// No DCR — return info so frontend can ask for Client ID
 		writeJSON(w, http.StatusOK, map[string]any{
-			"status":   "needs_client_id",
-			"auth_url": authURL,
+			"status":    "needs_client_id",
+			"auth_url":  authURL,
 			"token_url": tokenURL,
-			"scopes":   scopes,
-			"message":  "This provider requires a Client ID. Create an OAuth app in the provider's settings.",
+			"scopes":    scopes,
+			"message":   "This provider requires a Client ID. Create an OAuth app in the provider's settings.",
 		})
 		return
 	}

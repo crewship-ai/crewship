@@ -754,7 +754,7 @@ func TestCheckApprovalGate_ConfidenceThreshold(t *testing.T) {
 	}{
 		{"t-high", 0.95, "COMPLETED"},       // above auto-approve
 		{"t-low", 0.3, "AWAITING_APPROVAL"}, // below require_approval
-		{"t-mid", 0.6, "COMPLETED"},          // between thresholds (notify only)
+		{"t-mid", 0.6, "COMPLETED"},         // between thresholds (notify only)
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))

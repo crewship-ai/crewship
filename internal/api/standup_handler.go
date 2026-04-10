@@ -132,10 +132,10 @@ func formatEscalations(b *strings.Builder, escs []standupEscEntry) (pending, res
 		return 0, 0
 	}
 
-	b.WriteString(fmt.Sprintf("Escalations (%d pending, %d resolved):\n", pending, resolved))
+	fmt.Fprintf(b, "Escalations (%d pending, %d resolved):\n", pending, resolved)
 	for _, e := range escs {
 		ts := formatStandupTimestamp(e.createdAt)
-		b.WriteString(fmt.Sprintf("- %s [%s]: \"%s\" (%s)\n", e.fromName, e.status, e.reason, ts))
+		fmt.Fprintf(b, "- %s [%s]: \"%s\" (%s)\n", e.fromName, e.status, e.reason, ts)
 	}
 	return pending, resolved
 }
@@ -202,9 +202,9 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	queryCount := len(convs)
 	escalationCount := pending + resolved
 
-	b.WriteString(fmt.Sprintf("\nSummary: %d queries", queryCount))
+	fmt.Fprintf(&b, "\nSummary: %d queries", queryCount)
 	if escalationCount > 0 {
-		b.WriteString(fmt.Sprintf(", %d escalations", escalationCount))
+		fmt.Fprintf(&b, ", %d escalations", escalationCount)
 	}
 	b.WriteString("\n[END CREW STANDUP]")
 

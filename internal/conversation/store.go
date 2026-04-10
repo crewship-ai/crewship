@@ -26,10 +26,10 @@ const (
 // Message represents a single message in a chat conversation, including
 // role, content, and optional tool call metadata.
 type Message struct {
-	ID        string    `json:"id"`
-	ChatID string    `json:"session_id"`
-	Role      Role      `json:"role"`
-	Content   string    `json:"content"`
+	ID          string    `json:"id"`
+	ChatID      string    `json:"session_id"`
+	Role        Role      `json:"role"`
+	Content     string    `json:"content"`
 	ToolName    string    `json:"tool_name,omitempty"`
 	ToolSummary string    `json:"tool_summary,omitempty"`
 	Metadata    any       `json:"metadata,omitempty"`

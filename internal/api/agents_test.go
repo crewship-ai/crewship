@@ -10,16 +10,6 @@ import (
 	"testing"
 )
 
-func seedTestCrew(t *testing.T, db interface{ Exec(string, ...interface{}) (interface{ RowsAffected() (int64, error) }, error) }, wsID string) string {
-	t.Helper()
-	crewID := "test-crew-id"
-	_, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES (?, ?, 'Test Crew', 'test-crew')`, crewID, wsID)
-	if err != nil {
-		t.Fatalf("insert crew: %v", err)
-	}
-	return crewID
-}
-
 func TestCreateAgent_RoleValidation(t *testing.T) {
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))

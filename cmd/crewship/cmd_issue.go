@@ -15,25 +15,25 @@ import (
 // ---------- types ----------
 
 type issueItem struct {
-	ID           string  `json:"id"`
-	CrewID       string  `json:"crew_id"`
-	CrewName     string  `json:"crew_name"`
-	CrewSlug     string  `json:"crew_slug"`
-	Number       *int    `json:"number"`
-	Identifier   *string `json:"identifier"`
-	Title        string  `json:"title"`
-	Description  *string `json:"description"`
-	Status       string  `json:"status"`
-	Priority     string  `json:"priority"`
-	AssigneeType *string `json:"assignee_type"`
-	AssigneeID   *string `json:"assignee_id"`
-	AssigneeName *string `json:"assignee_name"`
-	DueDate      *string `json:"due_date"`
-	MissionType  string  `json:"mission_type"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	ID           string       `json:"id"`
+	CrewID       string       `json:"crew_id"`
+	CrewName     string       `json:"crew_name"`
+	CrewSlug     string       `json:"crew_slug"`
+	Number       *int         `json:"number"`
+	Identifier   *string      `json:"identifier"`
+	Title        string       `json:"title"`
+	Description  *string      `json:"description"`
+	Status       string       `json:"status"`
+	Priority     string       `json:"priority"`
+	AssigneeType *string      `json:"assignee_type"`
+	AssigneeID   *string      `json:"assignee_id"`
+	AssigneeName *string      `json:"assignee_name"`
+	DueDate      *string      `json:"due_date"`
+	MissionType  string       `json:"mission_type"`
+	CreatedAt    string       `json:"created_at"`
+	UpdatedAt    string       `json:"updated_at"`
 	Labels       []issueLabel `json:"labels"`
-	CommentCount int     `json:"comment_count"`
+	CommentCount int          `json:"comment_count"`
 }
 
 type issueLabel struct {
@@ -252,6 +252,8 @@ var issueGetCmd = &cobra.Command{
 			labelNames = append(labelNames, l.Name)
 		}
 
+		// Description is rendered separately via glamour (see below) so it
+		// doesn't get truncated inside the tabwriter column alignment.
 		pairs := [][]string{
 			{"Identifier", derefStr(issue.Identifier, "-")},
 			{"Title", issue.Title},
@@ -260,7 +262,6 @@ var issueGetCmd = &cobra.Command{
 			{"Crew", issue.CrewSlug},
 			{"Assignee", derefStr(issue.AssigneeName, "-")},
 			{"Assignee Type", derefStr(issue.AssigneeType, "-")},
-			{"Description", derefStr(issue.Description, "-")},
 			{"Due Date", derefStr(issue.DueDate, "-")},
 			{"Mission Type", issue.MissionType},
 			{"Labels", strings.Join(labelNames, ", ")},
@@ -272,6 +273,17 @@ var issueGetCmd = &cobra.Command{
 
 		if err := f.AutoDetail(issue, pairs); err != nil {
 			return err
+		}
+
+		// Render description as markdown (glamour) below the metadata table,
+		// but ONLY for human-facing formats. JSON/YAML/quiet already serialize
+		// the description in the struct, so an extra styled rendering would
+		// pollute machine output.
+		desc := derefStr(issue.Description, "")
+		if desc != "" && (f.Format == "" || f.Format == "table") {
+			fmt.Fprintln(os.Stdout)
+			fmt.Fprintf(os.Stdout, "%sDescription:%s\n", cli.Bold, cli.Reset)
+			f.Markdown(desc)
 		}
 
 		// Fetch and display comments
@@ -290,12 +302,14 @@ var issueGetCmd = &cobra.Command{
 		}
 
 		if len(comments) > 0 {
-			fmt.Fprintln(os.Stderr)
-			fmt.Fprintf(os.Stderr, "  Comments:\n")
+			fmt.Fprintln(os.Stdout)
+			fmt.Fprintf(os.Stdout, "%sComments:%s\n", cli.Bold, cli.Reset)
 			for _, c := range comments {
 				author := derefStr(c.Author, "unknown")
 				ts := issueRelativeTime(c.CreatedAt)
-				fmt.Fprintf(os.Stderr, "  @%s (%s): %s\n", author, ts, c.Body)
+				fmt.Fprintf(os.Stdout, "\n%s@%s%s %s(%s)%s\n", cli.Bold, author, cli.Reset, cli.Dim, ts, cli.Reset)
+				// Render comment body as markdown
+				f.Markdown(c.Body)
 			}
 		}
 

@@ -21,22 +21,22 @@ func NewRunHandler(db *sql.DB, logger *slog.Logger) *RunHandler {
 }
 
 type runResponse struct {
-	ID           string  `json:"id"`
-	AgentID      string  `json:"agent_id"`
-	ChatID       *string `json:"chat_id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	TriggeredBy  *string `json:"triggered_by"`
-	TriggerType  string  `json:"trigger_type"`
-	Status       string  `json:"status"`
-	StartedAt    *string `json:"started_at"`
-	FinishedAt   *string `json:"finished_at"`
-	ErrorMessage *string `json:"error_message"`
-	ExitCode     *int             `json:"exit_code"`
-	Metadata     json.RawMessage  `json:"metadata"`
-	CreatedAt    string           `json:"created_at"`
-	AgentName    *string          `json:"agent_name,omitempty"`
-	AgentSlug    *string          `json:"agent_slug,omitempty"`
-	CrewName     *string          `json:"crew_name,omitempty"`
+	ID           string          `json:"id"`
+	AgentID      string          `json:"agent_id"`
+	ChatID       *string         `json:"chat_id"`
+	WorkspaceID  string          `json:"workspace_id"`
+	TriggeredBy  *string         `json:"triggered_by"`
+	TriggerType  string          `json:"trigger_type"`
+	Status       string          `json:"status"`
+	StartedAt    *string         `json:"started_at"`
+	FinishedAt   *string         `json:"finished_at"`
+	ErrorMessage *string         `json:"error_message"`
+	ExitCode     *int            `json:"exit_code"`
+	Metadata     json.RawMessage `json:"metadata"`
+	CreatedAt    string          `json:"created_at"`
+	AgentName    *string         `json:"agent_name,omitempty"`
+	AgentSlug    *string         `json:"agent_slug,omitempty"`
+	CrewName     *string         `json:"crew_name,omitempty"`
 }
 
 type runListResponse struct {

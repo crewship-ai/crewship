@@ -19,11 +19,11 @@ type ScheduleUpdater interface {
 
 // AgentHandler provides CRUD endpoints for managing AI agents within a workspace.
 type AgentHandler struct {
-	db               *sql.DB
-	hub              *ws.Hub
-	logger           *slog.Logger
-	license          *license.License
-	scheduleUpdater  ScheduleUpdater
+	db              *sql.DB
+	hub             *ws.Hub
+	logger          *slog.Logger
+	license         *license.License
+	scheduleUpdater ScheduleUpdater
 }
 
 // NewAgentHandler creates an AgentHandler with the given database and logger.
@@ -512,7 +512,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	allowed := map[string]string{
 		"name": "name", "slug": "slug", "description": "description",
 		"role_title": "role_title", "agent_role": "agent_role",
-		"lead_mode": "lead_mode",
+		"lead_mode":   "lead_mode",
 		"cli_adapter": "cli_adapter", "llm_provider": "llm_provider",
 		"llm_model": "llm_model", "system_prompt": "system_prompt",
 		"avatar_seed": "avatar_seed", "avatar_style": "avatar_style",
@@ -520,7 +520,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"memory_enabled": "memory_enabled", "cli_tools": "cli_tools", "crew_id": "crew_id",
 		"schedule_cron": "schedule_cron", "schedule_prompt": "schedule_prompt",
 		"schedule_enabled": "schedule_enabled",
-		"mcp_config_json": "mcp_config_json",
+		"mcp_config_json":  "mcp_config_json",
 	}
 
 	// Validate slug format if being updated

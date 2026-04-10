@@ -23,18 +23,18 @@ func NewCrewConnectionHandler(db *sql.DB, logger *slog.Logger) *CrewConnectionHa
 }
 
 type crewConnectionResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	FromCrewID  string `json:"from_crew_id"`
+	ID           string `json:"id"`
+	WorkspaceID  string `json:"workspace_id"`
+	FromCrewID   string `json:"from_crew_id"`
 	FromCrewName string `json:"from_crew_name,omitempty"`
 	FromCrewSlug string `json:"from_crew_slug,omitempty"`
-	ToCrewID    string `json:"to_crew_id"`
-	ToCrewName  string `json:"to_crew_name,omitempty"`
-	ToCrewSlug  string `json:"to_crew_slug,omitempty"`
-	Direction   string `json:"direction"`
-	Status      string `json:"status"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ToCrewID     string `json:"to_crew_id"`
+	ToCrewName   string `json:"to_crew_name,omitempty"`
+	ToCrewSlug   string `json:"to_crew_slug,omitempty"`
+	Direction    string `json:"direction"`
+	Status       string `json:"status"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // List handles GET /api/v1/crew-connections

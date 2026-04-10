@@ -30,29 +30,29 @@ func (b *keeperWSBroadcaster) BroadcastKeeperEvent(workspaceID string, event map
 
 // Router is the top-level HTTP multiplexer that registers all API, internal, and static routes.
 type Router struct {
-	mux              *http.ServeMux
-	db               *sql.DB
-	logger           *slog.Logger
-	authMw           *AuthMiddleware
-	socketPath       string
-	internalToken    string
-	internalBaseURL  string
-	hub              *ws.Hub
-	orch             *orchestrator.Orchestrator
-	keeperGK         gatekeeper.Evaluator
-	keeperSecrets    SecretGetter
-	keeperContainer  provider.ContainerProvider
-	keeperConfig     *config.KeeperConfig
-	keeperConvReader ConversationReader
-	missionCallback  MissionCallback
-	scheduleUpdater  ScheduleUpdater
-	logWriter        *logcollector.Writer
+	mux                  *http.ServeMux
+	db                   *sql.DB
+	logger               *slog.Logger
+	authMw               *AuthMiddleware
+	socketPath           string
+	internalToken        string
+	internalBaseURL      string
+	hub                  *ws.Hub
+	orch                 *orchestrator.Orchestrator
+	keeperGK             gatekeeper.Evaluator
+	keeperSecrets        SecretGetter
+	keeperContainer      provider.ContainerProvider
+	keeperConfig         *config.KeeperConfig
+	keeperConvReader     ConversationReader
+	missionCallback      MissionCallback
+	scheduleUpdater      ScheduleUpdater
+	logWriter            *logcollector.Writer
 	captainLLM           llm.Provider
 	captainMissionEngine MissionStarter
 	allowSignup          bool
-	license          *license.License
-	agentHandler     *AgentHandler
-	storagePath      string // base path for crew file storage
+	license              *license.License
+	agentHandler         *AgentHandler
+	storagePath          string // base path for crew file storage
 }
 
 // NewRouter creates a Router, applies the given options, and registers all HTTP routes.

@@ -24,69 +24,69 @@ func NewMissionHandler(db *sql.DB, hub *ws.Hub, me *orchestrator.MissionEngine, 
 }
 
 type missionResponse struct {
-	ID                string   `json:"id"`
-	WorkspaceID       string   `json:"workspace_id"`
-	CrewID            string   `json:"crew_id"`
-	LeadAgentID       string   `json:"lead_agent_id"`
-	LeadAgentName     string   `json:"lead_agent_name,omitempty"`
-	LeadAgentSlug     string   `json:"lead_agent_slug,omitempty"`
-	TraceID           string   `json:"trace_id"`
-	Title             string   `json:"title"`
-	Description       *string  `json:"description"`
-	Status            string   `json:"status"`
-	Plan              *string  `json:"plan"`
-	WorkflowTemplate  *string  `json:"workflow_template"`
-	TotalTokenCount   *int     `json:"total_token_count"`
-	TotalEstimatedCost *float64 `json:"total_estimated_cost"`
-	CreatedAt         string   `json:"created_at"`
-	UpdatedAt         string   `json:"updated_at"`
-	CompletedAt       *string  `json:"completed_at"`
-	TaskStats         *taskStats `json:"task_stats,omitempty"`
-	Tasks             []missionTaskResponse `json:"tasks,omitempty"`
+	ID                 string                `json:"id"`
+	WorkspaceID        string                `json:"workspace_id"`
+	CrewID             string                `json:"crew_id"`
+	LeadAgentID        string                `json:"lead_agent_id"`
+	LeadAgentName      string                `json:"lead_agent_name,omitempty"`
+	LeadAgentSlug      string                `json:"lead_agent_slug,omitempty"`
+	TraceID            string                `json:"trace_id"`
+	Title              string                `json:"title"`
+	Description        *string               `json:"description"`
+	Status             string                `json:"status"`
+	Plan               *string               `json:"plan"`
+	WorkflowTemplate   *string               `json:"workflow_template"`
+	TotalTokenCount    *int                  `json:"total_token_count"`
+	TotalEstimatedCost *float64              `json:"total_estimated_cost"`
+	CreatedAt          string                `json:"created_at"`
+	UpdatedAt          string                `json:"updated_at"`
+	CompletedAt        *string               `json:"completed_at"`
+	TaskStats          *taskStats            `json:"task_stats,omitempty"`
+	Tasks              []missionTaskResponse `json:"tasks,omitempty"`
 }
 
 type missionTaskResponse struct {
-	ID              string   `json:"id"`
-	MissionID       string   `json:"mission_id"`
-	AssignedAgentID *string  `json:"assigned_agent_id"`
-	AgentName       *string  `json:"agent_name,omitempty"`
-	AgentSlug       *string  `json:"agent_slug,omitempty"`
-	Title           string   `json:"title"`
-	Description     *string  `json:"description"`
-	Status          string   `json:"status"`
-	TaskOrder       int      `json:"task_order"`
-	DependsOn       string   `json:"depends_on"`
-	Iteration       *int     `json:"iteration"`
-	MaxIterations   *int     `json:"max_iterations"`
-	ResultSummary   *string  `json:"result_summary"`
-	OutputPath      *string  `json:"output_path"`
-	ErrorMessage    *string  `json:"error_message"`
-	AssignmentID    *string  `json:"assignment_id"`
-	TokenCount      *int     `json:"token_count"`
-	EstimatedCost   *float64 `json:"estimated_cost"`
-	StartedAt       *string  `json:"started_at"`
-	CompletedAt       *string  `json:"completed_at"`
-	DurationMs        *int     `json:"duration_ms"`
-	CreatedAt         string   `json:"created_at"`
-	UpdatedAt         string   `json:"updated_at"`
-	Confidence        *float64 `json:"confidence"`
-	NeedsReview       bool     `json:"needs_review"`
-	HandoffContext    *string  `json:"handoff_context"`
-	EvaluationStatus  *string  `json:"evaluation_status"`
-	EvaluationNotes   *string  `json:"evaluation_notes"`
-	ApprovalRequired  bool     `json:"approval_required"`
-	ApprovalStatus    *string  `json:"approval_status"`
-	ApprovedBy        *string  `json:"approved_by"`
-	ApprovedAt        *string  `json:"approved_at"`
+	ID               string   `json:"id"`
+	MissionID        string   `json:"mission_id"`
+	AssignedAgentID  *string  `json:"assigned_agent_id"`
+	AgentName        *string  `json:"agent_name,omitempty"`
+	AgentSlug        *string  `json:"agent_slug,omitempty"`
+	Title            string   `json:"title"`
+	Description      *string  `json:"description"`
+	Status           string   `json:"status"`
+	TaskOrder        int      `json:"task_order"`
+	DependsOn        string   `json:"depends_on"`
+	Iteration        *int     `json:"iteration"`
+	MaxIterations    *int     `json:"max_iterations"`
+	ResultSummary    *string  `json:"result_summary"`
+	OutputPath       *string  `json:"output_path"`
+	ErrorMessage     *string  `json:"error_message"`
+	AssignmentID     *string  `json:"assignment_id"`
+	TokenCount       *int     `json:"token_count"`
+	EstimatedCost    *float64 `json:"estimated_cost"`
+	StartedAt        *string  `json:"started_at"`
+	CompletedAt      *string  `json:"completed_at"`
+	DurationMs       *int     `json:"duration_ms"`
+	CreatedAt        string   `json:"created_at"`
+	UpdatedAt        string   `json:"updated_at"`
+	Confidence       *float64 `json:"confidence"`
+	NeedsReview      bool     `json:"needs_review"`
+	HandoffContext   *string  `json:"handoff_context"`
+	EvaluationStatus *string  `json:"evaluation_status"`
+	EvaluationNotes  *string  `json:"evaluation_notes"`
+	ApprovalRequired bool     `json:"approval_required"`
+	ApprovalStatus   *string  `json:"approval_status"`
+	ApprovedBy       *string  `json:"approved_by"`
+	ApprovedAt       *string  `json:"approved_at"`
 }
 
 type taskStats struct {
-	Total     int `json:"total"`
-	Pending   int `json:"pending"`
-	Blocked   int `json:"blocked"`
-	InProgress int `json:"in_progress"`
-	Completed int `json:"completed"`
-	Failed    int `json:"failed"`
+	Total            int `json:"total"`
+	Pending          int `json:"pending"`
+	Blocked          int `json:"blocked"`
+	InProgress       int `json:"in_progress"`
+	Completed        int `json:"completed"`
+	Failed           int `json:"failed"`
 	Skipped          int `json:"skipped"`
 	AwaitingApproval int `json:"awaiting_approval"`
 }
@@ -96,10 +96,10 @@ var validMissionTransitions = map[string][]string{
 	"IN_PROGRESS": {"REVIEW", "FAILED", "CANCELLED"},
 	"REVIEW":      {"COMPLETED", "IN_PROGRESS", "FAILED", "CANCELLED"},
 	// Issue tracker statuses (invisible to MissionEngine).
-	"BACKLOG":   {"TODO", "IN_PROGRESS", "CANCELLED"},
-	"TODO":      {"BACKLOG", "IN_PROGRESS", "CANCELLED"},
-	"DONE":      {"BACKLOG"},
-	"FAILED":    {"BACKLOG", "TODO", "IN_PROGRESS"},
+	"BACKLOG": {"TODO", "IN_PROGRESS", "CANCELLED"},
+	"TODO":    {"BACKLOG", "IN_PROGRESS", "CANCELLED"},
+	"DONE":    {"BACKLOG"},
+	"FAILED":  {"BACKLOG", "TODO", "IN_PROGRESS"},
 }
 
 var validTaskTransitions = map[string][]string{

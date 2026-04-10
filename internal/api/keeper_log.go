@@ -19,23 +19,23 @@ func NewKeeperLogHandler(db *sql.DB, logger *slog.Logger) *KeeperLogHandler {
 }
 
 type keeperLogEntry struct {
-	ID               string  `json:"id"`
-	AgentID          string  `json:"agent_id"`
-	AgentName        string  `json:"agent_name"`
-	CrewID           string  `json:"crew_id"`
-	CredentialID     string  `json:"credential_id"`
-	CredName         string  `json:"credential_name"`
-	Intent           string  `json:"intent"`
-	RequestType      string  `json:"request_type"`
-	Command          *string `json:"command,omitempty"`
-	Decision         *string `json:"decision"`
-	Reason           *string `json:"reason"`
-	RiskScore        *int    `json:"risk_score"`
-	ExitCode         *int    `json:"exit_code,omitempty"`
-	OllamaPrompt     *string `json:"ollama_prompt,omitempty"`
+	ID                string  `json:"id"`
+	AgentID           string  `json:"agent_id"`
+	AgentName         string  `json:"agent_name"`
+	CrewID            string  `json:"crew_id"`
+	CredentialID      string  `json:"credential_id"`
+	CredName          string  `json:"credential_name"`
+	Intent            string  `json:"intent"`
+	RequestType       string  `json:"request_type"`
+	Command           *string `json:"command,omitempty"`
+	Decision          *string `json:"decision"`
+	Reason            *string `json:"reason"`
+	RiskScore         *int    `json:"risk_score"`
+	ExitCode          *int    `json:"exit_code,omitempty"`
+	OllamaPrompt      *string `json:"ollama_prompt,omitempty"`
 	OllamaRawResponse *string `json:"ollama_raw_response,omitempty"`
-	CreatedAt        string  `json:"created_at"`
-	DecidedAt        *string `json:"decided_at"`
+	CreatedAt         string  `json:"created_at"`
+	DecidedAt         *string `json:"decided_at"`
 }
 
 // List returns the most recent keeper requests with agent and credential names.
