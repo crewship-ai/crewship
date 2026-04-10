@@ -74,6 +74,23 @@ func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, ac
 	}
 }
 
+// setIssueLabels replaces the label associations for a mission by deleting
+// existing rows and inserting new ones. Errors are logged but not returned.
+func (h *IssueHandler) setIssueLabels(ctx context.Context, missionID string, labelIDs []string) {
+	if _, err := h.db.ExecContext(ctx,
+		`DELETE FROM mission_labels WHERE mission_id = ?`, missionID); err != nil {
+		h.logger.Error("delete mission labels", "mission_id", missionID, "error", err)
+		return
+	}
+	for _, labelID := range labelIDs {
+		if _, err := h.db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
+			missionID, labelID); err != nil {
+			h.logger.Error("insert mission label", "mission_id", missionID, "error", err)
+		}
+	}
+}
+
 // insertComment inserts a row into mission_comments. Errors are logged but not
 // returned — this is used by best-effort comment flows (e.g. review notes).
 func (h *IssueHandler) insertComment(ctx context.Context, missionID, authorType, authorID, body string) {
@@ -754,17 +771,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Update labels if provided
 	if req.Labels != nil {
-		// Replace all labels: delete existing, insert new
-		if _, err := h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, missionID); err != nil {
-			h.logger.Error("delete issue labels", "error", err)
-		}
-		for _, labelID := range *req.Labels {
-			if _, err := h.db.ExecContext(r.Context(),
-				`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
-				missionID, labelID); err != nil {
-				h.logger.Error("insert issue label", "mission_id", missionID, "error", err)
-			}
-		}
+		h.setIssueLabels(r.Context(), missionID, *req.Labels)
 	}
 
 	// Log activity for significant changes
@@ -1792,16 +1799,7 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 
 		// Update labels if provided
 		if req.Updates.Labels != nil {
-			if _, err := h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, issueID); err != nil {
-				h.logger.Error("bulk update: delete labels", "issue_id", issueID, "error", err)
-			}
-			for _, labelID := range *req.Updates.Labels {
-				if _, err := h.db.ExecContext(r.Context(),
-					`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
-					issueID, labelID); err != nil {
-					h.logger.Error("bulk update: insert label", "issue_id", issueID, "error", err)
-				}
-			}
+			h.setIssueLabels(r.Context(), issueID, *req.Updates.Labels)
 		}
 
 		// Activity log
