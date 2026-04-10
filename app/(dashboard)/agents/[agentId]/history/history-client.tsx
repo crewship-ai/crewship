@@ -8,15 +8,20 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyState } from "@/components/layout/empty-state"
 import { formatDateTime } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
 import type { AuditEvent } from "@/lib/types/agent"
+import { cn } from "@/lib/utils"
 
-const CATEGORY_CONFIG: Record<string, { label: string; icon: typeof Settings; className: string }> = {
-  CONFIG: { label: "CONFIG", icon: Settings, className: "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400" },
-  SKILL: { label: "SKILL", icon: Puzzle, className: "bg-blue-100 text-blue-600 dark:bg-blue-950 dark:text-blue-400" },
-  CRED: { label: "CRED", icon: KeyRound, className: "bg-purple-100 text-purple-600 dark:bg-purple-950 dark:text-purple-400" },
-  CREATED: { label: "CREATED", icon: Plus, className: "bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400" },
+const CATEGORY_CONFIG: Record<
+  string,
+  { label: string; icon: typeof Settings }
+> = {
+  CONFIG: { label: "CONFIG", icon: Settings },
+  SKILL: { label: "SKILL", icon: Puzzle },
+  CRED: { label: "CRED", icon: KeyRound },
+  CREATED: { label: "CREATED", icon: Plus },
 }
 
 function categorizeEvent(event: AuditEvent): keyof typeof CATEGORY_CONFIG {
@@ -85,7 +90,7 @@ export function HistoryPageClient() {
 
   if (error) {
     return (
-      <div className="p-4 md:p-6">
+      <div className="p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
           <p className="text-body">{error}</p>
@@ -96,19 +101,30 @@ export function HistoryPageClient() {
 
   if (events.length === 0) {
     return (
-      <div className="p-4 md:p-6">
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-body font-medium text-muted-foreground">No history yet</p>
-          <p className="text-label text-muted-foreground mt-1">Configuration changes will appear here as a timeline.</p>
+      <div className="p-6 space-y-6 max-w-4xl">
+        <div>
+          <h2 className="text-title font-semibold">History</h2>
+          <p className="text-body text-muted-foreground mt-1">
+            Configuration changes for this agent.
+          </p>
         </div>
+        <EmptyState
+          icon={Inbox}
+          title="No history yet"
+          description="Configuration changes will appear here as a timeline."
+        />
       </div>
     )
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-4xl space-y-0">
-      <p className="text-body text-muted-foreground mb-6">Configuration change history</p>
+    <div className="p-6 space-y-6 max-w-4xl">
+      <div>
+        <h2 className="text-title font-semibold">History</h2>
+        <p className="text-body text-muted-foreground mt-1">
+          Configuration change history ({events.length} event{events.length !== 1 ? "s" : ""})
+        </p>
+      </div>
 
       {/* Timeline */}
       <div className="relative">
@@ -124,28 +140,38 @@ export function HistoryPageClient() {
           return (
             <div key={event.id} className="relative flex gap-4 pb-6">
               <div className="relative z-10 mt-1.5">
-                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
-                  isFirst ? "bg-primary text-primary-foreground" :
-                  category === "CREATED" ? "bg-emerald-500 text-white" :
-                  "bg-muted"
-                }`}>
+                <div
+                  className={cn(
+                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
+                    isFirst
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
                   {isFirst ? (
                     <CheckCircle2 className="h-4 w-4" />
-                  ) : category === "CREATED" ? (
-                    <Plus className="h-4 w-4" />
                   ) : (
                     <Icon className="h-4 w-4" />
                   )}
                 </div>
               </div>
 
-              <div className={`flex-1 border rounded-lg ${isFirst ? "border-primary/30 border-2" : "border-border"}`}>
-                <div className="px-5 py-3 border-b flex items-center justify-between flex-wrap gap-2">
+              <div
+                className={cn(
+                  "flex-1 border rounded-lg bg-card",
+                  isFirst ? "border-primary/40" : "border-border"
+                )}
+              >
+                <div className="px-5 py-3 border-b border-border flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     {isFirst && (
-                      <Badge className="bg-primary/10 text-primary text-micro font-semibold">CURRENT</Badge>
+                      <Badge className="bg-primary/10 text-primary text-micro font-semibold">
+                        CURRENT
+                      </Badge>
                     )}
-                    <Badge variant="outline" className={`${config.className} text-micro`}>{config.label}</Badge>
+                    <Badge variant="outline" className="text-micro">
+                      {config.label}
+                    </Badge>
                     <span className="text-body font-medium">{formatEventTitle(event)}</span>
                   </div>
                   <div className="flex items-center gap-3 text-label text-muted-foreground">
@@ -159,14 +185,14 @@ export function HistoryPageClient() {
                   <div className="px-5 py-3 space-y-2">
                     <div className="text-label text-muted-foreground font-medium">Changes:</div>
                     {Object.entries(event.changes).map(([key, change]) => (
-                      <div key={key} className="font-mono text-xs space-y-1">
+                      <div key={key} className="font-mono text-micro space-y-1">
                         {change.old !== undefined && (
-                          <div className="bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 rounded px-2 py-1">
+                          <div className="rounded border border-destructive/30 bg-destructive/10 text-destructive px-2 py-1">
                             - &quot;{key}&quot;: &quot;{String(change.old)}&quot;
                           </div>
                         )}
                         {change.new !== undefined && (
-                          <div className="bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 rounded px-2 py-1">
+                          <div className="rounded border border-border bg-surface-subtle text-foreground px-2 py-1">
                             + &quot;{key}&quot;: &quot;{String(change.new)}&quot;
                           </div>
                         )}
@@ -179,16 +205,17 @@ export function HistoryPageClient() {
           )
         })}
       </div>
-
-      <p className="text-label text-muted-foreground pt-4">{events.length} event{events.length !== 1 ? "s" : ""} total</p>
     </div>
   )
 }
 
 function HistorySkeleton() {
   return (
-    <div className="p-4 md:p-6 max-w-4xl space-y-6">
-      <Skeleton className="h-5 w-48" />
+    <div className="p-6 space-y-6 max-w-4xl">
+      <div className="space-y-2">
+        <Skeleton className="h-7 w-32" />
+        <Skeleton className="h-4 w-64" />
+      </div>
       {Array.from({ length: 4 }).map((_, i) => (
         <div key={i} className="flex gap-4">
           <Skeleton className="h-10 w-10 rounded-full shrink-0" />

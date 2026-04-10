@@ -1,14 +1,19 @@
 "use client"
 
-import { use, useState, useEffect, useCallback } from "react"
-import { useRouter , useParams} from "next/navigation"
-import { Save, Trash2, Loader2, AlertCircle, CheckCircle2 } from "lucide-react"
+import { useState, useEffect, useCallback } from "react"
+import { useRouter, useParams } from "next/navigation"
+import {
+  Save, Trash2, Loader2, AlertCircle, CheckCircle2,
+  User, Hash, Users, FileText, Briefcase, Shield, Cpu,
+  Wrench, Timer, MessageSquare, Image as ImageIcon,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { SectionCard } from "@/components/ui/section-card"
+import { PropertyRow } from "@/components/layout/property-row"
 import {
   Select,
   SelectContent,
@@ -19,6 +24,7 @@ import {
 import { useWorkspace } from "@/hooks/use-workspace"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
 import { AvatarPicker } from "@/components/avatar-picker"
+import { cn } from "@/lib/utils"
 
 interface AgentDetail {
   id: string
@@ -233,7 +239,7 @@ export function SettingsPageClient() {
 
   if (!agent && error) {
     return (
-      <div className="p-4 sm:p-6">
+      <div className="p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
           <p className="text-body">{error}</p>
@@ -243,36 +249,35 @@ export function SettingsPageClient() {
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
-      <form onSubmit={handleSave} className="space-y-4 sm:space-y-6">
+    <div className="p-6 space-y-6 max-w-3xl">
+      <div>
+        <h2 className="text-title font-semibold">Settings</h2>
+        <p className="text-body text-muted-foreground mt-1">
+          Configure this agent&apos;s identity, runtime, and system prompt.
+        </p>
+      </div>
+
+      <form onSubmit={handleSave} className="space-y-6">
         {/* General */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-default">General</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Agent Name</Label>
-                <Input
-                  id="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="slug">Slug</Label>
-                <Input
-                  id="slug"
-                  value={agent?.slug ?? ""}
-                  disabled
-                  className="font-mono text-sm opacity-60"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="crew_id">Crew</Label>
+        <SectionCard title="General">
+          <div className="space-y-0">
+            <PropertyRow label="Name" icon={User}>
+              <Input
+                id="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
+            </PropertyRow>
+            <PropertyRow label="Slug" icon={Hash}>
+              <Input
+                id="slug"
+                value={agent?.slug ?? ""}
+                disabled
+                className="font-mono text-label opacity-60"
+              />
+            </PropertyRow>
+            <PropertyRow label="Crew" icon={Users}>
               <Select value={crewId} onValueChange={setTeamId}>
                 <SelectTrigger id="crew_id" className="w-full">
                   <SelectValue placeholder="Select a crew" />
@@ -285,86 +290,88 @@ export function SettingsPageClient() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
+            </PropertyRow>
+            <PropertyRow label="Description" icon={FileText}>
               <Textarea
                 id="description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
               />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="role_title">Role Title</Label>
-                <Input
-                  id="role_title"
-                  value={roleTitle}
-                  onChange={(e) => setRoleTitle(e.target.value)}
-                  placeholder="e.g. Senior Developer"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="agent_role">Agent Role</Label>
-                <Select value={agentRole} onValueChange={setAgentRole}>
-                  <SelectTrigger id="agent_role" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="AGENT">Agent</SelectItem>
-                    <SelectItem value="LEAD">Lead</SelectItem>
-                    <SelectItem value="COORDINATOR">Coordinator</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            </PropertyRow>
+            <PropertyRow label="Role title" icon={Briefcase}>
+              <Input
+                id="role_title"
+                value={roleTitle}
+                onChange={(e) => setRoleTitle(e.target.value)}
+                placeholder="e.g. Senior Developer"
+              />
+            </PropertyRow>
+            <PropertyRow label="Agent role" icon={Shield}>
+              <Select value={agentRole} onValueChange={setAgentRole}>
+                <SelectTrigger id="agent_role" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="AGENT">Agent</SelectItem>
+                  <SelectItem value="LEAD">Lead</SelectItem>
+                  <SelectItem value="COORDINATOR">Coordinator</SelectItem>
+                </SelectContent>
+              </Select>
+            </PropertyRow>
             {agentRole === "LEAD" && (
-              <div className="space-y-2">
-                <Label htmlFor="lead_mode">Lead Mode</Label>
-                <Select value={leadMode} onValueChange={setLeadMode}>
-                  <SelectTrigger id="lead_mode" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="passive">Passive</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-label text-muted-foreground">
-                  {leadMode === "passive"
-                    ? "Passive: Lead receives updates but does not autonomously plan tasks. You manage tasks manually."
-                    : "Active: Lead receives crew context and autonomously plans and assigns tasks."}
-                </p>
-              </div>
+              <PropertyRow label="Lead mode" icon={Shield}>
+                <div className="space-y-2">
+                  <Select value={leadMode} onValueChange={setLeadMode}>
+                    <SelectTrigger id="lead_mode" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="passive">Passive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-label text-muted-foreground">
+                    {leadMode === "passive"
+                      ? "Passive: Lead receives updates but does not autonomously plan tasks. You manage tasks manually."
+                      : "Active: Lead receives crew context and autonomously plans and assigns tasks."}
+                  </p>
+                </div>
+              </PropertyRow>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
         {/* Avatar */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-default">Avatar</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <AvatarPicker
-              seed={avatarSeed || agent?.name || ""}
-              style={avatarStyle}
-              onSeedChange={setAvatarSeed}
-              onStyleChange={setAvatarStyle}
-              lockedStyle={!avatarStyle ? agent?.crew?.avatar_style : undefined}
-            />
-          </CardContent>
-        </Card>
+        <SectionCard
+          title={
+            <span className="flex items-center gap-2">
+              <ImageIcon className="h-4 w-4 text-muted-foreground" />
+              Avatar
+            </span>
+          }
+        >
+          <AvatarPicker
+            seed={avatarSeed || agent?.name || ""}
+            style={avatarStyle}
+            onSeedChange={setAvatarSeed}
+            onStyleChange={setAvatarStyle}
+            lockedStyle={!avatarStyle ? agent?.crew?.avatar_style : undefined}
+          />
+        </SectionCard>
 
         {/* Runtime */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-default">Runtime</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        <SectionCard
+          title={
+            <span className="flex items-center gap-2">
+              <Cpu className="h-4 w-4 text-muted-foreground" />
+              Runtime
+            </span>
+          }
+        >
+          <div className="space-y-4">
             <div className="space-y-2">
-              <Label>CLI Adapter</Label>
+              <Label className="text-label">CLI Adapter</Label>
               <div className="grid grid-cols-2 gap-2">
                 {CLI_ADAPTER_KEYS.map((key) => {
                   const cfg = CLI_ADAPTERS[key]
@@ -375,11 +382,12 @@ export function SettingsPageClient() {
                       key={key}
                       type="button"
                       onClick={() => handleAdapterChange(key)}
-                      className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg border p-3 text-left transition-colors",
                         isActive ? "border-primary bg-primary/5" : "border-border hover:bg-muted"
-                      }`}
+                      )}
                     >
-                      <Icon className={`h-5 w-5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
+                      <Icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
                       <div className="min-w-0">
                         <div className="text-body font-medium">{cfg.label}</div>
                         <div className="text-micro text-muted-foreground">{cfg.description}</div>
@@ -389,16 +397,16 @@ export function SettingsPageClient() {
                 })}
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Model</Label>
+
+            <div className="space-y-0">
+              <PropertyRow label="Model" icon={Cpu}>
                 {showCustomModel ? (
                   <div className="flex gap-2">
                     <Input
                       value={llmModel}
                       onChange={(e) => setLlmModel(e.target.value)}
                       placeholder="Enter model name"
-                      className="font-mono text-xs"
+                      className="font-mono text-label"
                     />
                     <Button type="button" variant="outline" size="sm" onClick={() => {
                       setShowCustomModel(false)
@@ -410,12 +418,12 @@ export function SettingsPageClient() {
                   </div>
                 ) : (
                   <Select value={llmModel} onValueChange={handleModelSelect}>
-                    <SelectTrigger className="w-full font-mono text-xs">
+                    <SelectTrigger className="w-full font-mono text-label">
                       <SelectValue placeholder="Select model" />
                     </SelectTrigger>
                     <SelectContent>
                       {(CLI_ADAPTERS[cliAdapter]?.models ?? []).map((m) => (
-                        <SelectItem key={m.value} value={m.value} className="font-mono text-xs">
+                        <SelectItem key={m.value} value={m.value} className="font-mono text-label">
                           {m.label}
                         </SelectItem>
                       ))}
@@ -425,9 +433,8 @@ export function SettingsPageClient() {
                     </SelectContent>
                   </Select>
                 )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="tool_profile">Tool Profile</Label>
+              </PropertyRow>
+              <PropertyRow label="Tool profile" icon={Wrench}>
                 <Select value={toolProfile} onValueChange={setToolProfile}>
                   <SelectTrigger id="tool_profile" className="w-full">
                     <SelectValue />
@@ -439,37 +446,42 @@ export function SettingsPageClient() {
                     <SelectItem value="FULL">Full</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
+              </PropertyRow>
+              <PropertyRow label="Timeout" icon={Timer}>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="timeout"
+                    type="number"
+                    min={30}
+                    max={7200}
+                    value={timeoutSeconds}
+                    onChange={(e) => setTimeoutSeconds(e.target.value)}
+                  />
+                  <span className="text-label text-muted-foreground shrink-0">seconds</span>
+                </div>
+              </PropertyRow>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="timeout">Timeout (seconds)</Label>
-              <Input
-                id="timeout"
-                type="number"
-                min={30}
-                max={7200}
-                value={timeoutSeconds}
-                onChange={(e) => setTimeoutSeconds(e.target.value)}
-              />
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
         {/* System Prompt */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-default">System Prompt</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Textarea
-              id="system_prompt"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="You are a helpful AI assistant that..."
-              rows={6}
-            />
-          </CardContent>
-        </Card>
+        <SectionCard
+          title={
+            <span className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-muted-foreground" />
+              System Prompt
+            </span>
+          }
+          description="Sent as the system message on every run. Keep it focused on behavior and constraints."
+        >
+          <Textarea
+            id="system_prompt"
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            placeholder="You are a helpful AI assistant that..."
+            rows={6}
+          />
+        </SectionCard>
 
         {/* Messages */}
         {error && (
@@ -479,8 +491,8 @@ export function SettingsPageClient() {
           </div>
         )}
         {success && (
-          <div className="flex items-center gap-2 text-emerald-600">
-            <CheckCircle2 className="h-4 w-4" />
+          <div className="flex items-center gap-2 rounded-md border border-border bg-surface-subtle px-3 py-2">
+            <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
             <p className="text-body">{success}</p>
           </div>
         )}
@@ -509,17 +521,18 @@ export function SettingsPageClient() {
 
 function SettingsSkeleton() {
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
+    <div className="p-6 space-y-6 max-w-3xl">
+      <div className="space-y-2">
+        <Skeleton className="h-7 w-32" />
+        <Skeleton className="h-4 w-72" />
+      </div>
       {Array.from({ length: 3 }).map((_, i) => (
-        <Card key={i}>
-          <CardHeader>
-            <Skeleton className="h-5 w-24" />
-          </CardHeader>
-          <CardContent className="space-y-4">
+        <SectionCard key={i} title={<Skeleton className="h-5 w-24" />}>
+          <div className="space-y-4">
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
       ))}
       <div className="flex gap-3">
         <Skeleton className="h-10 w-32" />
