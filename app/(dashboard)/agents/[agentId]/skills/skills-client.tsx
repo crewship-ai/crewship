@@ -3,13 +3,14 @@
 import { useParams } from "next/navigation"
 import { useState, useEffect, useCallback } from "react"
 import {
-  Puzzle, AlertCircle, Inbox, Plus, Trash2, Loader2,
+  Puzzle, AlertCircle, Plus, Trash2, Loader2,
   Blocks, Code, Search, Hammer, Server, MessageCircle, Settings,
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyState } from "@/components/layout/empty-state"
 import {
   Dialog,
   DialogContent,
@@ -66,11 +67,12 @@ interface AgentSkill {
   skill: SkillData
 }
 
-const SOURCE_STYLES: Record<string, { label: string; className: string }> = {
-  BUILTIN: { label: "Built-in", className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
-  BUNDLED: { label: "Bundled", className: "bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400" },
-  CUSTOM: { label: "Custom", className: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400" },
-  MARKETPLACE: { label: "Marketplace", className: "bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400" },
+// Source labels only — visual tone comes from the shared outline Badge variant.
+const SOURCE_LABELS: Record<string, string> = {
+  BUILTIN: "Built-in",
+  BUNDLED: "Bundled",
+  CUSTOM: "Custom",
+  MARKETPLACE: "Marketplace",
 }
 
 const CATEGORY_ICONS: Record<string, React.ElementType> = {
@@ -165,11 +167,14 @@ export function SkillsPageClient() {
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <div className="flex items-center justify-between">
-        <p className="text-body text-muted-foreground">
-          {skills.length} skill{skills.length !== 1 ? "s" : ""} assigned
-        </p>
+    <div className="p-4 sm:p-6 space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-title font-semibold">Skills</h2>
+          <p className="text-body text-muted-foreground">
+            {skills.length} skill{skills.length !== 1 ? "s" : ""} assigned
+          </p>
+        </div>
         <Button size="sm" variant="outline" onClick={() => setDialogOpen(true)} disabled={!workspaceId}>
           <Plus className="h-4 w-4 mr-1" />
           Add Skill
@@ -177,15 +182,15 @@ export function SkillsPageClient() {
       </div>
 
       {skills.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-body font-medium text-muted-foreground">No skills assigned</p>
-          <p className="text-label text-muted-foreground mt-1">Click &quot;Add Skill&quot; to enable agent capabilities.</p>
-        </div>
+        <EmptyState
+          icon={Puzzle}
+          title="No skills assigned"
+          description='Click "Add Skill" to enable agent capabilities.'
+        />
       ) : (
         <div className="grid gap-3">
           {skills.map((agentSkill) => {
-            const sourceCfg = SOURCE_STYLES[agentSkill.skill.source] ?? { label: agentSkill.skill.source, className: "" }
+            const sourceLabel = SOURCE_LABELS[agentSkill.skill.source] ?? agentSkill.skill.source
             return (
               <Card key={agentSkill.id} className="py-0">
                 <CardContent className="p-4 sm:p-5">
@@ -199,11 +204,8 @@ export function SkillsPageClient() {
                         {agentSkill.skill.category && (
                           <Badge variant="outline" className="text-micro">{agentSkill.skill.category.charAt(0) + agentSkill.skill.category.slice(1).toLowerCase()}</Badge>
                         )}
-                        <Badge
-                          variant="secondary"
-                          className={`text-micro ${sourceCfg.className}`}
-                        >
-                          {sourceCfg.label}
+                        <Badge variant="outline" className="text-micro border-border bg-muted/40 text-muted-foreground">
+                          {sourceLabel}
                         </Badge>
                         {!agentSkill.enabled && (
                           <Badge variant="secondary" className="text-micro">Disabled</Badge>
