@@ -507,15 +507,12 @@ func (h *TriageHandler) Process(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if h.hub != nil && matched > 0 {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "triage.processed",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{
+	if matched > 0 {
+		broadcastWorkspaceEvent(h.hub, wsID, "triage.processed",
+			map[string]string{
 				"processed": strconv.Itoa(processed),
 				"matched":   strconv.Itoa(matched),
-			},
-		})
+			})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]int{"processed": processed, "matched": matched})

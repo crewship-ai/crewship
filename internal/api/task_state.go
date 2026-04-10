@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // Restart resets a FAILED/CANCELLED/REVIEW/COMPLETED mission: resets non-completed tasks,
@@ -326,17 +324,11 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	// All steps succeeded — prevent deferred rollback.
 	resumeOK = true
 
-	if h.hub != nil {
-		wsChannel := "workspace:" + wsID
-		broadcastWorkspaceEvent(h.hub, wsID, "mission.updated",
-			map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "IN_PROGRESS"})
-		for _, id := range resetIDs {
-			h.hub.Broadcast(wsChannel, ws.ServerMessage{
-				Type:    "task.updated",
-				Channel: wsChannel,
-				Payload: map[string]string{"id": id, "mission_id": missionID, "status": resetStatusMap[id]},
-			})
-		}
+	broadcastWorkspaceEvent(h.hub, wsID, "mission.updated",
+		map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "IN_PROGRESS"})
+	for _, id := range resetIDs {
+		broadcastWorkspaceEvent(h.hub, wsID, "task.updated",
+			map[string]string{"id": id, "mission_id": missionID, "status": resetStatusMap[id]})
 	}
 
 	h.logger.Info("mission resumed from failure",

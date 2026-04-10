@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // ReportConfidence handles POST /api/v1/internal/report-confidence.
@@ -82,16 +81,11 @@ func (h *QueryHandler) ReportConfidence(w http.ResponseWriter, r *http.Request) 
 					taskID, body.Confidence, body.Reason)
 			} else if cfg.NotifyThreshold > 0 && body.Confidence < cfg.NotifyThreshold {
 				action = "notified"
-				if h.hub != nil {
-					h.hub.Broadcast("workspace:"+resolvedWsID, ws.ServerMessage{
-						Type:    "confidence.low",
-						Channel: "workspace:" + resolvedWsID,
-						Payload: map[string]interface{}{
-							"task_id": taskID, "mission_id": missionID,
-							"confidence": body.Confidence, "reason": body.Reason,
-						},
+				broadcastWorkspaceEvent(h.hub, resolvedWsID, "confidence.low",
+					map[string]interface{}{
+						"task_id": taskID, "mission_id": missionID,
+						"confidence": body.Confidence, "reason": body.Reason,
 					})
-				}
 			}
 		}
 	}
