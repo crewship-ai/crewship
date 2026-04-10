@@ -12,8 +12,33 @@ import (
 // SQLite's legacy `datetime('now')` format (`YYYY-MM-DD HH:MM:SS`) to RFC3339
 // (`YYYY-MM-DDTHH:MM:SSZ`).
 //
-// Why this migration exists
-// -------------------------
+// ⚠️  KNOWN LIMITATION — FOLLOW-UP REQUIRED  ⚠️
+// --------------------------------------------
+// This migration is a ONE-SHOT CLEANUP of existing rows. It does NOT prevent
+// the same bug from being re-introduced on future inserts. The root cause —
+// `DEFAULT (datetime('now'))` on every `*_at` column in migrate.go — is
+// untouched, so any Go code that INSERTs without an explicit timestamp will
+// get a legacy-format row back. The mixed-format sort bug returns for that
+// row immediately.
+//
+// A proper fix is one of:
+//  1. A follow-up migration that recreates every affected table with
+//     `DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))` — ~20 tables, each
+//     needing table recreation because SQLite can't ALTER COLUMN DEFAULT.
+//     Large scope, trigger-based pre-insert normalization might be simpler.
+//  2. An audit of every `INSERT INTO ... (...)` site in the Go code to
+//     guarantee each one passes an explicit `time.Now().UTC().Format(
+//     time.RFC3339)` value for every `*_at` column. Known offenders as of
+//     the audit: `credential_crews`, `issue_counters`, `seed.go` skill
+//     inserts. A few more likely exist and should be found via grep.
+//
+// Neither fix is in scope for this PR — CodeRabbit flagged this exact
+// limitation on review and we kept the backfill as a first step while the
+// forward fix is tracked separately. If you're reading this comment and
+// the follow-up ticket has since been filed, please add its reference here.
+//
+// Why this migration still exists despite the limitation
+// -------------------------------------------------------
 // The schema's CREATE TABLE statements use `DEFAULT (datetime('now'))` which
 // produces the legacy space-separated format. Meanwhile, all Go-side writers
 // (orchestrator, api handlers via `newUpdate`, scheduler, memory, seed code)
@@ -21,23 +46,17 @@ import (
 // mix of both formats in the same column, and because those formats are
 // compared as text by SQLite, a `ORDER BY updated_at DESC` will sort them
 // wrong: the space character (0x20) sorts BEFORE 'T' (0x54), so legacy rows
-// always come after RFC3339 rows regardless of their actual time.
+// always come after RFC3339 rows regardless of their actual time. This
+// migration at least drains the existing legacy pool so the sort bug doesn't
+// manifest on historical data.
 //
 // This migration sweeps every user table's `*_at`-style TEXT columns and
 // rewrites any row whose value is in the legacy format into RFC3339 via
 // `replace(col, ' ', 'T') || 'Z'`. It's dynamic (discovers columns via
 // `pragma_table_info`) so it keeps working as new tables are added, and
 // idempotent (the LIKE filter only matches the exact 19-char legacy pattern),
-// so running it twice is a no-op.
-//
-// What it does NOT do
-// -------------------
-//   - It does NOT change the column DEFAULTs, because that would require
-//     table recreation for every affected table — sizeable scope, better
-//     handled as a dedicated follow-up. Future rows written via DEFAULT will
-//     still be legacy format; they'll need a later fix (either change the
-//     DEFAULTs or ensure every INSERT passes an explicit RFC3339 value).
-//   - It does NOT touch `_migrations.applied_at` or any `sqlite_*` tables.
+// so running it twice (or after the forward fix lands) is a no-op. It does
+// NOT touch `_migrations.applied_at` or any `sqlite_*` tables.
 //
 // Safety
 // ------

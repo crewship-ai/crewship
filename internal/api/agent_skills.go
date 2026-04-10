@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"net/http"
 	"time"
 )
@@ -33,13 +32,14 @@ func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 
@@ -101,13 +101,14 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 
@@ -120,7 +121,7 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := generateCUID()
 
-	_, err := h.db.ExecContext(r.Context(),
+	_, err = h.db.ExecContext(r.Context(),
 		"INSERT INTO agent_skills (id, agent_id, skill_id, config, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)",
 		id, agentID, req.SkillID, req.Config, now)
 	if err != nil {
@@ -145,13 +146,14 @@ func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 

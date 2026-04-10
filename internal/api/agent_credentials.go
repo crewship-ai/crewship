@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"net/http"
 	"time"
 )
@@ -25,13 +24,14 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 
@@ -91,13 +91,14 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	foundAgent, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !foundAgent {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 
@@ -108,20 +109,21 @@ func (h *AgentHandler) AddCredential(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify credential exists in this workspace (single query prevents enumeration)
-	if err := credentialExists(r.Context(), h.db, req.CredentialID, workspaceID); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
-			return
-		}
+	foundCred, err := credentialExists(r.Context(), h.db, req.CredentialID, workspaceID)
+	if err != nil {
 		h.logger.Error("check credential exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !foundCred {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
 		return
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := generateCUID()
 
-	_, err := h.db.ExecContext(r.Context(),
+	_, err = h.db.ExecContext(r.Context(),
 		`INSERT INTO agent_credentials (id, agent_id, credential_id, env_var_name, priority, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		id, agentID, req.CredentialID, req.EnvVarName, req.Priority, now)

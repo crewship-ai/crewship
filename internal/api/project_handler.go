@@ -275,14 +275,14 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	// Verify project exists
-	err := projectExists(r.Context(), h.db, projectID, wsID)
+	found, err := projectExists(r.Context(), h.db, projectID, wsID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Project not found")
-			return
-		}
 		h.logger.Error("get project for update", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !found {
+		writeProblem(w, r, http.StatusNotFound, "Project not found")
 		return
 	}
 
@@ -453,7 +453,13 @@ func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	// Verify project exists
-	if err := projectExists(r.Context(), h.db, projectID, wsID); err != nil {
+	found, err := projectExists(r.Context(), h.db, projectID, wsID)
+	if err != nil {
+		h.logger.Error("project exists check", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Project not found")
 		return
 	}

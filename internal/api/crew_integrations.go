@@ -182,7 +182,13 @@ func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http
 	crewID := r.PathValue("crewId")
 
 	// Verify crew belongs to workspace
-	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	if err != nil {
+		h.logger.Error("crew exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
@@ -316,7 +322,13 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 
 	crewID := r.PathValue("crewId")
 	// Verify crew
-	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	if err != nil {
+		h.logger.Error("crew exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
@@ -367,7 +379,7 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := generateCUID()
 
-	_, err := h.db.ExecContext(r.Context(), `
+	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO crew_mcp_servers (id, crew_id, workspace_mcp_server_id, name, display_name, transport,
 			endpoint, command, args_json, env_json, config_json, icon, enabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,

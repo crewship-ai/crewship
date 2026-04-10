@@ -107,16 +107,18 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify both crews exist in this workspace
-	fromErr := crewExists(r.Context(), h.db, req.FromCrewID, wsID)
-	toErr := crewExists(r.Context(), h.db, req.ToCrewID, wsID)
-	for _, err := range []error{fromErr, toErr} {
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			h.logger.Error("check crew", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-			return
-		}
-	}
+	fromFound, fromErr := crewExists(r.Context(), h.db, req.FromCrewID, wsID)
+	toFound, toErr := crewExists(r.Context(), h.db, req.ToCrewID, wsID)
 	if fromErr != nil || toErr != nil {
+		err := fromErr
+		if err == nil {
+			err = toErr
+		}
+		h.logger.Error("check crew", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !fromFound || !toFound {
 		writeProblem(w, r, http.StatusNotFound, "One or both crews not found in this workspace")
 		return
 	}

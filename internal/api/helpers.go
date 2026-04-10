@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"regexp"
@@ -66,39 +67,76 @@ func sqlPlaceholders(n int) string {
 }
 
 // agentExists checks that an agent with the given ID belongs to the workspace
-// and is not soft-deleted. Returns nil on success, sql.ErrNoRows if not found.
-func agentExists(ctx context.Context, db *sql.DB, agentID, workspaceID string) error {
+// and is not soft-deleted. Returns (true, nil) if the agent exists,
+// (false, nil) if it does not exist, or (false, err) on a real DB failure.
+// Callers must distinguish the two zero-value cases: a false/nil return means
+// "legitimately not found" (map to 404), while a non-nil err means an
+// operational error (map to 500).
+func agentExists(ctx context.Context, db *sql.DB, agentID, workspaceID string) (bool, error) {
 	var id string
-	return db.QueryRowContext(ctx,
+	err := db.QueryRowContext(ctx,
 		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		agentID, workspaceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // crewExists checks that a crew with the given ID belongs to the workspace
-// and is not soft-deleted. Returns nil on success, sql.ErrNoRows if not found.
-func crewExists(ctx context.Context, db *sql.DB, crewID, workspaceID string) error {
+// and is not soft-deleted. Returns (true, nil) if the crew exists,
+// (false, nil) if it does not exist, or (false, err) on a real DB failure.
+// See agentExists for the 404-vs-500 contract.
+func crewExists(ctx context.Context, db *sql.DB, crewID, workspaceID string) (bool, error) {
 	var id string
-	return db.QueryRowContext(ctx,
+	err := db.QueryRowContext(ctx,
 		"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		crewID, workspaceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // projectExists checks that a project with the given ID belongs to the workspace.
-// Returns nil on success, sql.ErrNoRows if not found.
-func projectExists(ctx context.Context, db *sql.DB, projectID, workspaceID string) error {
+// Returns (true, nil) if the project exists, (false, nil) if it does not exist,
+// or (false, err) on a real DB failure. See agentExists for the 404-vs-500 contract.
+func projectExists(ctx context.Context, db *sql.DB, projectID, workspaceID string) (bool, error) {
 	var id int
-	return db.QueryRowContext(ctx,
+	err := db.QueryRowContext(ctx,
 		"SELECT 1 FROM projects WHERE id = ? AND workspace_id = ?",
 		projectID, workspaceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // credentialExists checks that a credential with the given ID belongs to the
-// workspace and is not soft-deleted. Returns nil on success, sql.ErrNoRows if not found.
-func credentialExists(ctx context.Context, db *sql.DB, credentialID, workspaceID string) error {
+// workspace and is not soft-deleted. Returns (true, nil) if the credential
+// exists, (false, nil) if it does not exist, or (false, err) on a real DB
+// failure. See agentExists for the 404-vs-500 contract.
+func credentialExists(ctx context.Context, db *sql.DB, credentialID, workspaceID string) (bool, error) {
 	var id string
-	return db.QueryRowContext(ctx,
+	err := db.QueryRowContext(ctx,
 		"SELECT id FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
 		credentialID, workspaceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // validSlugRe matches safe slug values: lowercase alphanumeric, starting with a letter or digit.

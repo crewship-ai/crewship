@@ -57,7 +57,13 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 	agentID := r.PathValue("agentId")
 
 	// Verify agent
-	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
+		h.logger.Error("agent exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
@@ -122,7 +128,13 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 	}
 
 	agentID := r.PathValue("agentId")
-	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
+		h.logger.Error("agent exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
@@ -201,7 +213,7 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	_, err := h.db.ExecContext(r.Context(), `
+	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope,
 			credential_id, cred_type, cred_header, env_var_name, enabled, config_override_json, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

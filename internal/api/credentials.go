@@ -337,7 +337,13 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Validate all crew IDs
 	for _, cid := range crewIDs {
-		if err := crewExists(r.Context(), h.db, cid, workspaceID); err != nil {
+		crewFound, err := crewExists(r.Context(), h.db, cid, workspaceID)
+		if err != nil {
+			h.logger.Error("crew exists check", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		if !crewFound {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
 			return
 		}
@@ -511,7 +517,13 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := credentialExists(r.Context(), h.db, credID, workspaceID); err != nil {
+	credFound, err := credentialExists(r.Context(), h.db, credID, workspaceID)
+	if err != nil {
+		h.logger.Error("credential exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !credFound {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
 		return
 	}
@@ -547,7 +559,13 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		// Validate all crew IDs
 		for _, cid := range crewIDs {
-			if err := crewExists(r.Context(), h.db, cid, workspaceID); err != nil {
+			ok, err := crewExists(r.Context(), h.db, cid, workspaceID)
+			if err != nil {
+				h.logger.Error("crew exists check", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
+			if !ok {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
 				return
 			}
@@ -563,7 +581,13 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		delete(body, "crew_ids")
 	} else if crewIDVal, ok := body["crew_id"]; ok && crewIDVal != nil {
 		if crewIDStr, ok := crewIDVal.(string); ok && crewIDStr != "" {
-			if err := crewExists(r.Context(), h.db, crewIDStr, workspaceID); err != nil {
+			crewFound, err := crewExists(r.Context(), h.db, crewIDStr, workspaceID)
+			if err != nil {
+				h.logger.Error("crew exists check", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
+			if !crewFound {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid crew_id"})
 				return
 			}

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -157,13 +156,14 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	// When accessed via the public (authenticated) route, validate that the crew
 	// belongs to the caller's workspace to prevent cross-workspace data access.
 	if wsID := WorkspaceIDFromContext(r.Context()); wsID != "" {
-		if err := crewExists(r.Context(), h.db, crewID, wsID); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found in workspace"})
-				return
-			}
+		found, err := crewExists(r.Context(), h.db, crewID, wsID)
+		if err != nil {
 			h.logger.Error("standup workspace validation", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		if !found {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found in workspace"})
 			return
 		}
 	}

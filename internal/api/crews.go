@@ -447,14 +447,14 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify crew exists and belongs to workspace
-	err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
-			return
-		}
 		h.logger.Error("get crew for update", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
 
@@ -706,14 +706,14 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify crew exists and belongs to workspace
-	err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
-			return
-		}
 		h.logger.Error("get crew for delete", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
 
@@ -770,14 +770,14 @@ func (h *CrewHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify crew exists and belongs to workspace
-	err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
-			return
-		}
 		h.logger.Error("get crew for list members", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
 
@@ -844,14 +844,14 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify crew exists and belongs to workspace
-	err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
-			return
-		}
 		h.logger.Error("get crew for add member", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
 
@@ -952,14 +952,14 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify crew exists and belongs to workspace
-	err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
-			return
-		}
 		h.logger.Error("get crew for remove member", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
 
@@ -1007,13 +1007,14 @@ func (h *CrewHandler) ApplyAvatarStyle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := crewExists(r.Context(), h.db, crewID, workspaceID); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
-			return
-		}
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	if err != nil {
 		h.logger.Error("apply avatar style: lookup crew", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
 

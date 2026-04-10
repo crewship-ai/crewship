@@ -47,7 +47,13 @@ func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")
 
 	// Verify project belongs to workspace
-	if err := projectExists(r.Context(), h.db, projectID, wsID); err != nil {
+	found, err := projectExists(r.Context(), h.db, projectID, wsID)
+	if err != nil {
+		h.logger.Error("project exists check", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Project not found")
 		return
 	}
@@ -114,7 +120,13 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")
 
 	// Verify project belongs to workspace
-	if err := projectExists(r.Context(), h.db, projectID, wsID); err != nil {
+	found, err := projectExists(r.Context(), h.db, projectID, wsID)
+	if err != nil {
+		h.logger.Error("project exists check", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Project not found")
 		return
 	}
@@ -149,7 +161,7 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	position := maxPos + 1
 
-	_, err := h.db.ExecContext(r.Context(), `
+	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO milestones (id, project_id, name, description, target_date,
 		    status, position, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,

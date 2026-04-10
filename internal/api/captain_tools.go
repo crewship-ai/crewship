@@ -408,11 +408,12 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 		return "", fmt.Errorf("name and crew_id are required")
 	}
 
-	if err := crewExists(ctx, h.db, crewID, wsID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", fmt.Errorf("crew %q not found in workspace", crewID)
-		}
+	found, err := crewExists(ctx, h.db, crewID, wsID)
+	if err != nil {
 		return "", fmt.Errorf("check crew existence: %w", err)
+	}
+	if !found {
+		return "", fmt.Errorf("crew %q not found in workspace", crewID)
 	}
 
 	slug := strInput(input, "slug")
@@ -449,7 +450,7 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err := h.db.ExecContext(ctx, `
+	_, err = h.db.ExecContext(ctx, `
 		INSERT INTO agents (id, workspace_id, crew_id, name, slug, role_title, agent_role,
 			cli_adapter, tool_profile, system_prompt, timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'CLAUDE_CODE', ?, ?, 1800, 1, ?, ?, ?)`,
@@ -479,15 +480,16 @@ func execCreateMission(ctx context.Context, h *CaptainHandler, wsID, _, role str
 		return "", fmt.Errorf("crew_id and title are required")
 	}
 
-	if err := crewExists(ctx, h.db, crewID, wsID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", fmt.Errorf("crew %q not found", crewID)
-		}
+	found, err := crewExists(ctx, h.db, crewID, wsID)
+	if err != nil {
 		return "", fmt.Errorf("check crew: %w", err)
+	}
+	if !found {
+		return "", fmt.Errorf("crew %q not found", crewID)
 	}
 
 	var leadID string
-	err := h.db.QueryRowContext(ctx,
+	err = h.db.QueryRowContext(ctx,
 		"SELECT id FROM agents WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL LIMIT 1", crewID).Scan(&leadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("no LEAD agent in crew %q", crewID)

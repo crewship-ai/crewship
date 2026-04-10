@@ -183,7 +183,13 @@ func (h *ProposalHandler) Create(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusBadRequest, fmt.Sprintf("missions[%d].crew_id is required", i))
 			return
 		}
-		if err := crewExists(r.Context(), h.db, m.CrewID, wsID); err != nil {
+		found, err := crewExists(r.Context(), h.db, m.CrewID, wsID)
+		if err != nil {
+			h.logger.Error("crew exists check", "error", err)
+			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			return
+		}
+		if !found {
 			writeProblem(w, r, http.StatusBadRequest, fmt.Sprintf("missions[%d].crew_id %q not found", i, m.CrewID))
 			return
 		}

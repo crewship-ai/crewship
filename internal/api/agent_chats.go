@@ -84,18 +84,19 @@ func (h *AgentHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check agent exists
-	if err := agentExists(r.Context(), h.db, agentID, workspaceID); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
+		return
+	}
 
 	// Atomic upsert: insert only if agent is still active (prevents TOCTOU with soft-delete)
-	_, err := h.db.ExecContext(r.Context(),
+	_, err = h.db.ExecContext(r.Context(),
 		`INSERT OR IGNORE INTO chats (id, agent_id, workspace_id, created_by, status)
 		 SELECT ?, ?, ?, ?, 'ACTIVE'
 		 WHERE EXISTS (SELECT 1 FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL)`,
