@@ -56,9 +56,20 @@ func seedNuke(ctx context.Context, client *cli.Client) error {
 			if iss.Identifier == nil {
 				continue
 			}
-			// Transition through valid status path to CANCELLED (only BACKLOG/CANCELLED can be deleted)
+			// Transition through a valid status path from the issue's CURRENT
+			// state to CANCELLED (only BACKLOG/CANCELLED can be deleted).
+			// Using StatusPath("CANCELLED") would always start from BACKLOG,
+			// which for an issue already in TODO/IN_PROGRESS/DONE would emit
+			// a backward transition the server rejects (e.g. IN_PROGRESS→TODO
+			// on its way to BACKLOG→CANCELLED), leaving the issue non-deletable.
 			if iss.Status != "BACKLOG" && iss.Status != "CANCELLED" {
-				for _, status := range seeddata.StatusPath("CANCELLED") {
+				path := seeddata.StatusPathFrom(iss.Status, "CANCELLED")
+				if path == nil {
+					failures = append(failures, fmt.Sprintf("no transition path %s→CANCELLED for %s", iss.Status, *iss.Identifier))
+					fmt.Fprintf(os.Stderr, "  ! nuke: no transition path %s→CANCELLED for %s\n", iss.Status, *iss.Identifier)
+					continue
+				}
+				for _, status := range path {
 					r, err := client.Patch(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier), map[string]string{"status": status})
 					if err != nil {
 						failures = append(failures, fmt.Sprintf("transition %s→%s: %v", *iss.Identifier, status, err))
