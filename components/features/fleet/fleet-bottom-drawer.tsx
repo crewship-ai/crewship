@@ -34,9 +34,15 @@ interface FleetBottomDrawerProps {
   crews: CrewExport[]
   agents: AgentExport[]
   isMobile: boolean
+  /**
+   * Called by child actions (bulk start/stop, etc.) after a successful
+   * mutation so the parent can re-fetch its agent list. Without this,
+   * idleAgents / runningAgents stay stale and duplicate POSTs become easy.
+   */
+  onAgentsChanged?: () => void
 }
 
-export function FleetBottomDrawer({ crews, agents, isMobile }: FleetBottomDrawerProps) {
+export function FleetBottomDrawer({ crews, agents, isMobile, onAgentsChanged }: FleetBottomDrawerProps) {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerTab, setDrawerTab] = useState<"activity" | "bulk" | "export">("activity")
 
@@ -102,7 +108,7 @@ export function FleetBottomDrawer({ crews, agents, isMobile }: FleetBottomDrawer
             <FleetActivityFeed agents={agents} />
           )}
           {drawerTab === "bulk" && (
-            <FleetBulkActions agents={agents} />
+            <FleetBulkActions agents={agents} onSuccessRefresh={onAgentsChanged} />
           )}
           {drawerTab === "export" && (
             <div className="p-4 space-y-3">
@@ -112,8 +118,17 @@ export function FleetBottomDrawer({ crews, agents, isMobile }: FleetBottomDrawer
                   const data = { crews: crews.map((c) => ({ name: c.name, slug: c.slug, color: c.color, icon: c.icon })), agents: agents.map((a) => ({ name: a.name, slug: a.slug, role: a.agent_role, crew_id: a.crew_id, llm_provider: a.llm_provider, llm_model: a.llm_model })) }
                   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
                   const url = URL.createObjectURL(blob)
-                  const a = document.createElement("a"); a.href = url; a.download = "fleet-export.json"; a.click()
-                  URL.revokeObjectURL(url)
+                  // Canonical cross-browser download pattern: append anchor
+                  // to the DOM before click(), remove after, and defer
+                  // revokeObjectURL so Safari/Firefox don't race the
+                  // download initiation against URL teardown.
+                  const a = document.createElement("a")
+                  a.href = url
+                  a.download = "fleet-export.json"
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  setTimeout(() => URL.revokeObjectURL(url), 0)
                 }}>
                   <FileJson className="h-3 w-3" /> Export JSON
                 </Button>
@@ -129,7 +144,13 @@ export function FleetBottomDrawer({ crews, agents, isMobile }: FleetBottomDrawer
 
 // ── Bulk Actions ──
 
-function FleetBulkActions({ agents }: { agents: AgentExport[] }) {
+function FleetBulkActions({
+  agents,
+  onSuccessRefresh,
+}: {
+  agents: AgentExport[]
+  onSuccessRefresh?: () => void
+}) {
   const [running, setRunning] = useState<string | null>(null)
   const [result, setResult] = useState<string | null>(null)
 
@@ -162,7 +183,12 @@ function FleetBulkActions({ agents }: { agents: AgentExport[] }) {
     }
     setResult(`${ok} succeeded, ${fail} failed`)
     setRunning(null)
-  }, [])
+    // Re-fetch parent state so idle/running filters reflect post-action
+    // reality and users cannot accidentally fire the same bulk op twice.
+    if (ok > 0) {
+      onSuccessRefresh?.()
+    }
+  }, [onSuccessRefresh])
 
   return (
     <div className="p-4 space-y-3">

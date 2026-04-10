@@ -249,14 +249,17 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
                 {/* Delete button (custom templates only) */}
                 {!tmpl.is_builtin && (
                   <button
+                    type="button"
+                    aria-label={`Delete template ${tmpl.name}`}
                     className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
                     onClick={async () => {
+                      if (!window.confirm(`Delete template "${tmpl.name}"?`)) return
                       const res = await fetch(`/api/v1/templates/${tmpl.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
                       if (res.ok) { toast.success("Template deleted"); fetchTemplates() }
                       else toast.error("Failed to delete template")
                     }}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 )}
 
@@ -374,7 +377,7 @@ function TemplateEditor({ workspaceId, onClose, onCreated }: TemplateEditorProps
           steps: steps.map((s) => ({
             id: s.id,
             title: s.title,
-            agent_role: s.agent_role || "agent",
+            agent_role: s.agent_role || "AGENT",
             depends_on: s.depends_on,
           })),
         },

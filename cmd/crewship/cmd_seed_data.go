@@ -25,55 +25,107 @@ func seedNuke(ctx context.Context, client *cli.Client) error {
 
 	var failures []string
 
-	// Delete issues — fetch all, cancel, then delete
-	resp, err := client.Get("/api/v1/issues?limit=500")
-	if err != nil {
-		failures = append(failures, fmt.Sprintf("list issues: %v", err))
-	} else {
+	// Delete issues — page through ALL issues, cancel, then delete.
+	// The server caps list limit at 100 per page. Because successful deletes
+	// shift the list under us, we always refetch from the head; the
+	// safetyCap bounds total iterations so a misbehaving API cannot wedge us
+	// in an infinite loop.
+	const (
+		issuePageSize = 100
+		safetyCap     = 10_000
+	)
+	totalDeleted := 0
+	noProgressStreak := 0
+pageLoop:
+	for iter := 0; iter < safetyCap; iter++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		resp, err := client.Get(fmt.Sprintf("/api/v1/issues?limit=%d&offset=0", issuePageSize))
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("list issues: %v", err))
+			break pageLoop
+		}
 		var issues []issueItem
 		if err := cli.ReadJSON(resp, &issues); err != nil {
 			failures = append(failures, fmt.Sprintf("decode issues: %v", err))
-		} else {
-			for _, iss := range issues {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				if iss.Identifier == nil {
-					continue
-				}
-				// Transition through valid status path to CANCELLED (only BACKLOG/CANCELLED can be deleted)
-				if iss.Status != "BACKLOG" && iss.Status != "CANCELLED" {
-					for _, status := range seeddata.StatusPath("CANCELLED") {
-						r, err := client.Patch(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier), map[string]string{"status": status})
-						if err != nil {
-							failures = append(failures, fmt.Sprintf("transition %s→%s: %v", *iss.Identifier, status, err))
-							fmt.Fprintf(os.Stderr, "  ! nuke transition %s→%s: %v\n", *iss.Identifier, status, err)
-							break
-						}
-						if r.StatusCode >= 300 {
-							failures = append(failures, fmt.Sprintf("transition %s→%s: HTTP %d", *iss.Identifier, status, r.StatusCode))
-							fmt.Fprintf(os.Stderr, "  ! nuke transition %s→%s: HTTP %d\n", *iss.Identifier, status, r.StatusCode)
-							r.Body.Close()
-							break
-						}
-						r.Body.Close()
-					}
-				}
-				r, err := client.Delete(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier))
-				if err != nil {
-					failures = append(failures, fmt.Sprintf("delete issue %s: %v", *iss.Identifier, err))
-					fmt.Fprintf(os.Stderr, "  ! delete issue %s: %v\n", *iss.Identifier, err)
-					continue
-				}
-				if r.StatusCode >= 300 {
-					failures = append(failures, fmt.Sprintf("delete issue %s: HTTP %d", *iss.Identifier, r.StatusCode))
-					fmt.Fprintf(os.Stderr, "  ! delete issue %s: HTTP %d\n", *iss.Identifier, r.StatusCode)
-				}
-				r.Body.Close()
+			break pageLoop
+		}
+		if len(issues) == 0 {
+			break pageLoop
+		}
+		deletedThisPage := 0
+		for _, iss := range issues {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-			fmt.Fprintf(os.Stderr, "  Deleted %d issues\n", len(issues))
+			if iss.Identifier == nil {
+				continue
+			}
+			// Transition to a deletable state (BACKLOG or CANCELLED) by
+			// computing a valid path from the issue's CURRENT status.
+			// Prefer CANCELLED; fall back to BACKLOG if CANCELLED is unreachable.
+			if iss.Status != "BACKLOG" && iss.Status != "CANCELLED" {
+				path := seeddata.StatusPathFrom(iss.Status, "CANCELLED")
+				if path == nil {
+					path = seeddata.StatusPathFrom(iss.Status, "BACKLOG")
+				}
+				if path == nil {
+					failures = append(failures, fmt.Sprintf("no status path from %s for %s", iss.Status, *iss.Identifier))
+					fmt.Fprintf(os.Stderr, "  ! nuke %s: no valid transition path from %s\n", *iss.Identifier, iss.Status)
+					continue
+				}
+				transitionFailed := false
+				for _, status := range path {
+					r, err := client.Patch(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier), map[string]string{"status": status})
+					if err != nil {
+						failures = append(failures, fmt.Sprintf("transition %s→%s: %v", *iss.Identifier, status, err))
+						fmt.Fprintf(os.Stderr, "  ! nuke transition %s→%s: %v\n", *iss.Identifier, status, err)
+						transitionFailed = true
+						break
+					}
+					if r.StatusCode >= 300 {
+						failures = append(failures, fmt.Sprintf("transition %s→%s: HTTP %d", *iss.Identifier, status, r.StatusCode))
+						fmt.Fprintf(os.Stderr, "  ! nuke transition %s→%s: HTTP %d\n", *iss.Identifier, status, r.StatusCode)
+						r.Body.Close()
+						transitionFailed = true
+						break
+					}
+					r.Body.Close()
+				}
+				if transitionFailed {
+					continue
+				}
+			}
+			r, err := client.Delete(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier))
+			if err != nil {
+				failures = append(failures, fmt.Sprintf("delete issue %s: %v", *iss.Identifier, err))
+				fmt.Fprintf(os.Stderr, "  ! delete issue %s: %v\n", *iss.Identifier, err)
+				continue
+			}
+			if r.StatusCode >= 300 {
+				failures = append(failures, fmt.Sprintf("delete issue %s: HTTP %d", *iss.Identifier, r.StatusCode))
+				fmt.Fprintf(os.Stderr, "  ! delete issue %s: HTTP %d\n", *iss.Identifier, r.StatusCode)
+			} else {
+				deletedThisPage++
+				totalDeleted++
+			}
+			r.Body.Close()
+		}
+		// If a page returned items but we deleted none of them, we'd loop
+		// forever (e.g. every issue is un-transitionable). Abort after two
+		// consecutive zero-progress iterations.
+		if deletedThisPage == 0 {
+			noProgressStreak++
+			if noProgressStreak >= 2 {
+				fmt.Fprintf(os.Stderr, "  ! nuke issues: no progress after %d unreachable items, giving up\n", len(issues))
+				break pageLoop
+			}
+		} else {
+			noProgressStreak = 0
 		}
 	}
+	fmt.Fprintf(os.Stderr, "  Deleted %d issues\n", totalDeleted)
 
 	// Delete projects
 	if err := nukeList(ctx, client, "/api/v1/projects", "/api/v1/projects/"); err != nil {
@@ -471,7 +523,13 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 	}
 	fmt.Fprintln(os.Stderr, "Seeding integrations...")
 
-	integrationIDs := map[string]string{} // integration name → id
+	// integrationRef tracks both the integration id and the owning crew id,
+	// so we only bind agents to integrations within their own crew.
+	type integrationRef struct {
+		ID     string
+		CrewID string
+	}
+	integrationIDs := map[string]integrationRef{} // integration name → (id, crewID)
 
 	for _, integ := range seeddata.Integrations {
 		if err := ctx.Err(); err != nil {
@@ -512,7 +570,7 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 			// Resolve existing
 			id, err := resolveCrewIntegration(client, crewID, integ.Name)
 			if err == nil {
-				integrationIDs[integ.Name] = id
+				integrationIDs[integ.Name] = integrationRef{ID: id, CrewID: crewID}
 			}
 			fmt.Fprintf(os.Stderr, "  = Integration exists: %s\n", integ.DisplayName)
 			continue
@@ -524,7 +582,7 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		}
 		var created struct{ ID string `json:"id"` }
 		if cli.ReadJSON(resp, &created) == nil {
-			integrationIDs[integ.Name] = created.ID
+			integrationIDs[integ.Name] = integrationRef{ID: created.ID, CrewID: crewID}
 		}
 		fmt.Fprintf(os.Stderr, "  + Integration: %s\n", integ.DisplayName)
 	}
@@ -574,7 +632,14 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		}
 	}
 
-	// Bind agents to integrations
+	// Build a slug → crewSlug lookup so we can scope bindings by crew.
+	agentCrewSlugBySlug := map[string]string{}
+	for _, a := range seeddata.Agents {
+		agentCrewSlugBySlug[a.Slug] = a.CrewSlug
+	}
+
+	// Bind agents to integrations. Integrations are crew-scoped, so only
+	// bind an agent to integrations that live in the agent's own crew.
 	fmt.Fprintln(os.Stderr, "Binding agents to integrations...")
 	for _, agentSlug := range seeddata.AgentBindingSlugs {
 		if err := ctx.Err(); err != nil {
@@ -584,9 +649,22 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		if !ok {
 			continue
 		}
-		for integName, integID := range integrationIDs {
+		agentCrewSlug, ok := agentCrewSlugBySlug[agentSlug]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "  ! agent %q not in seeddata.Agents, skipping bindings\n", agentSlug)
+			continue
+		}
+		agentCrewID, ok := crewIDs[agentCrewSlug]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "  ! crew %q for agent %s not in crewIDs, skipping bindings\n", agentCrewSlug, agentSlug)
+			continue
+		}
+		for integName, integRef := range integrationIDs {
+			if integRef.CrewID != agentCrewID {
+				continue // integration belongs to a different crew
+			}
 			body := map[string]interface{}{
-				"mcp_server_id":    integID,
+				"mcp_server_id":    integRef.ID,
 				"mcp_server_scope": "crew",
 				"cred_type":        "bearer",
 				"enabled":          true,

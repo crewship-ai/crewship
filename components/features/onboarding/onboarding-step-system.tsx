@@ -49,7 +49,12 @@ export function StepSystemCheck({
         </p>
       </div>
 
-      <div className="rounded-lg border p-4">
+      <div
+        className="rounded-lg border p-4"
+        role="status"
+        aria-live="polite"
+        aria-busy={checking}
+      >
         {checking && (
           <div className="flex items-center gap-3">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

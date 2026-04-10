@@ -638,9 +638,7 @@ export function IssueDetailClient() {
               </div>
             </div>
 
-            <Separator />
-
-            {/* ---- Activity section ---- */}
+            {/* ---- Activity section (ActivityFeed renders its own border-t) ---- */}
             {loadingActivity ? (
               <div className="flex items-center justify-center py-4">
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />

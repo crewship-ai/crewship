@@ -338,17 +338,15 @@ export function OrchestrationLayout({
     setSelectedProjectId(null)
   }, [])
 
-  // Mobile back button: close whichever detail view is currently visible so that
-  // showRightPanel ends up false and the overlay sheet actually dismisses.
+  // Mobile back button: clear every layer of detail state so the overlay sheet
+  // actually dismisses (issue + project + misc detail). Clearing only the
+  // innermost layer would leave a stale layer visible after the mobile sheet
+  // swap, keeping showRightPanel truthy.
   const closeMobileDetail = useCallback(() => {
-    if (selectedIssue) {
-      handleIssueClose()
-    } else if (selectedProjectId) {
-      handleProjectClose()
-    } else {
-      handleDetailClose()
-    }
-  }, [selectedIssue, selectedProjectId, handleIssueClose, handleProjectClose, handleDetailClose])
+    handleIssueClose()
+    handleProjectClose()
+    handleDetailClose()
+  }, [handleIssueClose, handleProjectClose, handleDetailClose])
 
   // Sync breadcrumbs to global store (rendered in app-toolbar)
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
@@ -677,10 +675,12 @@ export function OrchestrationLayout({
               >
                 <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.1] shrink-0">
                   <button
+                    type="button"
                     onClick={closeMobileDetail}
+                    aria-label="Close detail panel"
                     className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
                   >
-                    <ChevronLeft className="h-4 w-4" />
+                    <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                   </button>
                   <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Detail</span>
                 </div>

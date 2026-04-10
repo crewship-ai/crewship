@@ -236,12 +236,18 @@ export function FilesPageClient() {
   const [saving, setSaving] = useState(false)
   const editorSaveRef = useRef<(() => void) | null>(null)
   const fileAbortRef = useRef<AbortController | null>(null)
+  const containerAbortRef = useRef<AbortController | null>(null)
+  const gitAbortRef = useRef<AbortController | null>(null)
   const fetchFilesRef = useRef<(() => void) | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useRealtimeChannel(crewId ? `crew:${crewId}` : null)
 
   useEffect(() => {
+    containerAbortRef.current?.abort()
+    containerAbortRef.current = null
+    gitAbortRef.current?.abort()
+    gitAbortRef.current = null
     setActiveFileTab("home")
     setContainerFiles([])
     setContainerLoading(false)
@@ -299,6 +305,8 @@ export function FilesPageClient() {
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
+      containerAbortRef.current?.abort()
+      gitAbortRef.current?.abort()
     }
   }, [])
 
@@ -453,12 +461,27 @@ export function FilesPageClient() {
             onClick={() => {
               setActiveFileTab("container")
               if (containerFiles.length === 0 && !containerLoading && workspaceId) {
+                containerAbortRef.current?.abort()
+                const ac = new AbortController()
+                containerAbortRef.current = ac
                 setContainerLoading(true)
-                fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`)
-                  .then((r) => r.json())
-                  .then((data) => setContainerFiles(Array.isArray(data) ? data : []))
-                  .catch(() => {})
-                  .finally(() => setContainerLoading(false))
+                fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, { signal: ac.signal })
+                  .then((r) => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                    return r.json()
+                  })
+                  .then((data) => {
+                    if (!ac.signal.aborted) {
+                      setContainerFiles(Array.isArray(data) ? data : [])
+                    }
+                  })
+                  .catch((err: unknown) => {
+                    if (err instanceof Error && err.name === "AbortError") return
+                    toast.error("Failed to load container files")
+                  })
+                  .finally(() => {
+                    if (!ac.signal.aborted) setContainerLoading(false)
+                  })
               }
             }}
           >Container</button>
@@ -475,12 +498,27 @@ export function FilesPageClient() {
             onClick={() => {
               setActiveFileTab("git")
               if (gitCommits.length === 0 && !gitLoading && workspaceId) {
+                gitAbortRef.current?.abort()
+                const ac = new AbortController()
+                gitAbortRef.current = ac
                 setGitLoading(true)
-                fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`)
-                  .then((r) => r.json())
-                  .then((data) => setGitCommits(Array.isArray(data) ? data : []))
-                  .catch(() => {})
-                  .finally(() => setGitLoading(false))
+                fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, { signal: ac.signal })
+                  .then((r) => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                    return r.json()
+                  })
+                  .then((data) => {
+                    if (!ac.signal.aborted) {
+                      setGitCommits(Array.isArray(data) ? data : [])
+                    }
+                  })
+                  .catch((err: unknown) => {
+                    if (err instanceof Error && err.name === "AbortError") return
+                    toast.error("Failed to load git log")
+                  })
+                  .finally(() => {
+                    if (!ac.signal.aborted) setGitLoading(false)
+                  })
               }
             }}
           ><GitBranch className="h-3 w-3" /> Git</button>
