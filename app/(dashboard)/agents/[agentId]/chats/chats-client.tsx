@@ -4,19 +4,25 @@ import { useParams } from "next/navigation"
 
 import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
-import { Plus, MessageSquare, AlertCircle, Inbox } from "lucide-react"
+import { Plus, MessageSquare, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { StatusBadge } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyState } from "@/components/layout/empty-state"
 import { formatRelativeTime } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import type { Session } from "@/lib/types/agent"
 
-const STATUS_STYLES: Record<string, string> = {
-  ACTIVE: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
-  COMPLETED: "bg-muted text-muted-foreground",
-  ERROR: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400",
+// Map session status → canonical status id used by StatusBadge.
+function sessionStatusId(status: string): string {
+  switch (status) {
+    case "ACTIVE": return "IN_PROGRESS"
+    case "COMPLETED": return "COMPLETED"
+    case "ERROR": return "FAILED"
+    default: return "PENDING"
+  }
 }
 
 function formatDuration(start: string, end: string | null): string {
@@ -87,10 +93,14 @@ export function SessionsPageClient() {
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-body text-muted-foreground">{sessions.length} session{sessions.length !== 1 ? "s" : ""} total</p>
+    <div className="p-4 sm:p-6 space-y-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <div>
+          <h2 className="text-title font-semibold">Sessions</h2>
+          <p className="text-body text-muted-foreground">
+            {sessions.length} session{sessions.length !== 1 ? "s" : ""} total
+          </p>
+        </div>
         <div className="ml-auto">
           <Button size="sm" className="gap-1.5" asChild>
             <Link href={`/agents/${agentId}/chat`}>
@@ -101,16 +111,16 @@ export function SessionsPageClient() {
       </div>
 
       {sessions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-body font-medium text-muted-foreground">No chats yet</p>
-          <p className="text-label text-muted-foreground mt-1">Start a chat to create the first session.</p>
-        </div>
+        <EmptyState
+          icon={MessageSquare}
+          title="No chats yet"
+          description="Start a chat to create the first session."
+        />
       ) : (
-        <div className="border rounded-lg overflow-x-auto">
+        <div className="border border-border rounded-lg overflow-x-auto bg-card">
           <table className="w-full text-body">
             <thead>
-              <tr className="border-b bg-muted/50 text-label text-muted-foreground uppercase tracking-wide">
+              <tr className="border-b border-border bg-muted/50 text-label text-muted-foreground uppercase tracking-wide">
                 <th className="text-left px-4 sm:px-6 py-3 font-medium">Title</th>
                 <th className="text-left px-4 sm:px-6 py-3 font-medium">Mode</th>
                 <th className="text-left px-4 sm:px-6 py-3 font-medium">Status</th>
@@ -119,7 +129,7 @@ export function SessionsPageClient() {
                 <th className="text-left px-4 sm:px-6 py-3 font-medium hidden md:table-cell">Started</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y divide-border">
               {sessions.map((s) => (
                 <tr key={s.id} className="hover:bg-muted/50">
                   <td className="px-4 sm:px-6 py-3">
@@ -132,13 +142,15 @@ export function SessionsPageClient() {
                     <Badge variant={s.mode === "CHAT" ? "secondary" : "outline"} className="text-label">{s.mode}</Badge>
                   </td>
                   <td className="px-4 sm:px-6 py-3">
-                    <Badge variant="secondary" className={`${STATUS_STYLES[s.status] ?? ""} text-label`}>
-                      {s.status === "ACTIVE" && <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse mr-1" />}
-                      {s.status}
-                    </Badge>
+                    <StatusBadge
+                      status={sessionStatusId(s.status)}
+                      withDot={s.status === "ACTIVE"}
+                      label={s.status}
+                      className="text-label"
+                    />
                   </td>
-                  <td className="px-4 sm:px-6 py-3 font-mono text-xs">{s.message_count}</td>
-                  <td className="px-4 sm:px-6 py-3 font-mono text-xs hidden sm:table-cell">
+                  <td className="px-4 sm:px-6 py-3 font-mono text-label">{s.message_count}</td>
+                  <td className="px-4 sm:px-6 py-3 font-mono text-label hidden sm:table-cell">
                     {formatDuration(s.started_at, s.ended_at)}
                   </td>
                   <td className="px-4 sm:px-6 py-3 text-label text-muted-foreground hidden md:table-cell">

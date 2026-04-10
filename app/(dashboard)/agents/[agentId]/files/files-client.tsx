@@ -11,6 +11,7 @@ import {
   File as FileIcon,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StatusDot } from "@/components/ui/status-badge"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import type { BundledLanguage } from "shiki"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -131,28 +132,30 @@ function isPreviewable(name: string): boolean {
 }
 
 function getFileIcon(name: string, isDir: boolean, isOpen?: boolean) {
-  if (isDir) return isOpen ? <FolderOpen className="h-4 w-4 text-amber-500" /> : <FolderClosed className="h-4 w-4 text-amber-500" />
+  // All file/folder icons render with muted-foreground — semantic distinction
+  // comes from the icon glyph (FileCode, FileJson, Terminal, etc.), not color.
+  const cls = "h-4 w-4 text-muted-foreground"
+  if (isDir) return isOpen ? <FolderOpen className={cls} /> : <FolderClosed className={cls} />
   const ext = name.split(".").pop()?.toLowerCase() ?? ""
   const n = name.toLowerCase()
-  if (n === "dockerfile" || n === "docker-compose.yml") return <Box className="h-4 w-4 text-blue-400" />
-  if (n.startsWith(".git")) return <GitBranch className="h-4 w-4 text-orange-500" />
-  if (n === "makefile") return <Terminal className="h-4 w-4 text-green-600" />
+  if (n === "dockerfile" || n === "docker-compose.yml") return <Box className={cls} />
+  if (n.startsWith(".git")) return <GitBranch className={cls} />
+  if (n === "makefile") return <Terminal className={cls} />
   switch (ext) {
-    case "py": return <FileCode className="h-4 w-4 text-yellow-500" />
-    case "js": case "jsx": return <FileCode className="h-4 w-4 text-yellow-400" />
-    case "ts": case "tsx": return <FileCode className="h-4 w-4 text-blue-500" />
-    case "go": return <FileCode className="h-4 w-4 text-cyan-500" />
-    case "rs": return <FileCode className="h-4 w-4 text-orange-600" />
-    case "json": return <FileJson className="h-4 w-4 text-yellow-600" />
-    case "yaml": case "yml": return <FileJson className="h-4 w-4 text-red-400" />
-    case "md": case "mdx": return <FileText className="h-4 w-4 text-blue-300" />
-    case "txt": return <FileText className="h-4 w-4 text-gray-500" />
-    case "sh": case "bash": return <Terminal className="h-4 w-4 text-green-500" />
-    case "env": return <Settings className="h-4 w-4 text-gray-600" />
-    case "html": return <FileCode className="h-4 w-4 text-orange-500" />
-    case "css": case "scss": return <FileCode className="h-4 w-4 text-blue-400" />
-    case "sql": return <FileCode className="h-4 w-4 text-blue-600" />
-    default: return <FileIcon className="h-4 w-4 text-gray-400" />
+    case "py": case "js": case "jsx": case "ts": case "tsx":
+    case "go": case "rs": case "html": case "css": case "scss":
+    case "sql":
+      return <FileCode className={cls} />
+    case "json": case "yaml": case "yml":
+      return <FileJson className={cls} />
+    case "md": case "mdx": case "txt":
+      return <FileText className={cls} />
+    case "sh": case "bash":
+      return <Terminal className={cls} />
+    case "env":
+      return <Settings className={cls} />
+    default:
+      return <FileIcon className={cls} />
   }
 }
 
@@ -437,8 +440,8 @@ export function FilesPageClient() {
             <span className="text-micro text-muted-foreground bg-muted rounded-full px-1.5">{fileCount}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-micro text-emerald-600">Live</span>
+            <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
+            <span className="text-micro text-muted-foreground">Live</span>
             <RefreshCw className="h-3 w-3 text-muted-foreground cursor-pointer hover:text-foreground ml-1" />
           </div>
         </div>
@@ -492,7 +495,7 @@ export function FilesPageClient() {
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <input
-                  className="w-full h-7 rounded-md border bg-card pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+                  className="w-full h-7 rounded-md border border-border bg-card pl-8 pr-3 text-label outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
                   placeholder="Filter files..."
                   aria-label="Filter files"
                   value={search}
@@ -538,7 +541,7 @@ export function FilesPageClient() {
             ) : (
               <div className="p-2 space-y-0.5">
                 {containerFiles.map((f) => (
-                  <div key={f.path} className="flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-accent">
+                  <div key={f.path} className="flex items-center gap-2 px-2 py-1 rounded text-label hover:bg-accent">
                     {f.is_dir ? <FolderClosed className="h-3.5 w-3.5 text-muted-foreground" /> : <FileText className="h-3.5 w-3.5 text-muted-foreground" />}
                     <span className="truncate flex-1">{f.path}</span>
                     {!f.is_dir && <span className="text-micro text-muted-foreground shrink-0">{fmtSize(f.size)}</span>}
@@ -563,7 +566,7 @@ export function FilesPageClient() {
               <div className="p-2 space-y-1">
                 {gitCommits.map((c) => (
                   <div key={c.hash} className="px-2 py-1.5 rounded hover:bg-accent">
-                    <p className="text-xs font-medium truncate">{c.message}</p>
+                    <p className="text-label font-medium truncate">{c.message}</p>
                     <div className="flex items-center gap-2 text-micro text-muted-foreground mt-0.5">
                       <code className="font-mono">{c.hash.slice(0, 7)}</code>
                       <span>{c.author}</span>
@@ -598,7 +601,7 @@ export function FilesPageClient() {
                 <>
                   <button
                     onClick={handleDiscard}
-                    className="h-6 px-2 flex items-center gap-1 rounded text-xs text-muted-foreground hover:bg-accent"
+                    className="h-6 px-2 flex items-center gap-1 rounded text-label text-muted-foreground hover:bg-accent"
                   >
                     <X className="h-3 w-3" /> Discard
                   </button>
@@ -619,7 +622,7 @@ export function FilesPageClient() {
                     </button>
                   )}
                   <button onClick={handleCopy} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Copy path" aria-label="Copy file path">
-                    {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
+                    {copied ? <Check className="h-3 w-3 text-primary" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
                   </button>
                   <button onClick={handleDownload} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Download" aria-label="Download file">
                     <Download className="h-3 w-3 text-muted-foreground" />
@@ -652,7 +655,7 @@ export function FilesPageClient() {
                 saveRef={editorSaveRef}
               />
             ) : fileContent !== null ? (
-              <div className="h-full overflow-y-auto dark bg-[#24292e]">
+              <div className="h-full overflow-y-auto dark bg-surface-subtle">
                 <CodeBlock code={fileContent} language={getLang(selectedFile.name) as BundledLanguage} showLineNumbers />
               </div>
             ) : fileError ? (
