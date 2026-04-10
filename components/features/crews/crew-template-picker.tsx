@@ -2,6 +2,7 @@
 
 import { Bot, ChevronRight, Loader2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { CrewIcon } from "@/components/ui/crew-icon"
 
 interface TemplateAgent {
   name: string
@@ -49,10 +50,11 @@ export function QuickStartTemplateGrid({ templates, loading, onSelect }: QuickSt
         {templates.map((t) => (
           <button
             key={t.id}
+            type="button"
             onClick={() => onSelect(t)}
             className="flex items-start gap-3 rounded-lg border border-border p-3 text-left transition-all hover:bg-accent hover:border-primary/50 group"
           >
-            <span className="text-2xl">{t.icon || "📦"}</span>
+            <CrewIcon icon={t.icon || "clipboard"} color={t.color} size="sm" />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1">
                 <span className="font-medium text-sm truncate">{t.name}</span>
@@ -96,11 +98,12 @@ export function TemplateGallery({ templates, loading, onSelect }: TemplateGaller
       {templates.map((t) => (
         <button
           key={t.id}
+          type="button"
           onClick={() => onSelect(t)}
           className="flex flex-col items-start gap-2 rounded-lg border border-border p-4 text-left transition-all hover:bg-accent hover:border-primary/50"
         >
           <div className="flex items-center gap-2">
-            <span className="text-2xl">{t.icon || "📦"}</span>
+            <CrewIcon icon={t.icon || "clipboard"} color={t.color} size="sm" />
             <span className="font-semibold">{t.name}</span>
           </div>
           <p className="text-sm text-muted-foreground">{t.description}</p>

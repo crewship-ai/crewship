@@ -1,51 +1,35 @@
 "use client"
 
+import {
+  CircleDashed,
+  Circle,
+  CircleDotDashed,
+  CirclePause,
+  CircleCheck,
+  CircleX,
+} from "lucide-react"
+import { cn } from "@/lib/utils"
 import type { ProjectStatus } from "@/lib/types/mission"
 
-/** SVG icon representing a project lifecycle status (backlog, in-progress, completed, etc.). */
+/**
+ * Icon representing a project lifecycle status. Uses lucide-react icons so
+ * the component obeys the repo-wide "only lucide icons in components/**"
+ * rule; the opacity differences are expressed via Tailwind classes.
+ */
 export function ProjectStatusIcon({ status, className }: { status: ProjectStatus; className?: string }) {
   switch (status) {
     case "backlog":
-      return (
-        <svg className={className} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 3" opacity="0.5" />
-        </svg>
-      )
+      return <CircleDashed className={cn("opacity-50", className)} />
     case "planned":
-      return (
-        <svg className={className} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.6" />
-        </svg>
-      )
+      return <Circle className={cn("opacity-60", className)} />
     case "in_progress":
-      return (
-        <svg className={className} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
-          <path d="M8 2a6 6 0 0 1 6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      )
+      return <CircleDotDashed className={className} />
     case "paused":
-      return (
-        <svg className={className} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
-          <rect x="6" y="5" width="1.5" height="6" rx="0.5" fill="currentColor" opacity="0.6" />
-          <rect x="8.5" y="5" width="1.5" height="6" rx="0.5" fill="currentColor" opacity="0.6" />
-        </svg>
-      )
+      return <CirclePause className={cn("opacity-70", className)} />
     case "completed":
-      return (
-        <svg className={className} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" fill="currentColor" opacity="0.15" stroke="currentColor" strokeWidth="1.5" />
-          <path d="M5.5 8l2 2 3.5-3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )
+      return <CircleCheck className={className} />
     case "cancelled":
-      return (
-        <svg className={className} viewBox="0 0 16 16" fill="none">
-          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
-          <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-      )
+      return <CircleX className={cn("opacity-60", className)} />
     default:
       return null
   }

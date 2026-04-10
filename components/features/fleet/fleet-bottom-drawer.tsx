@@ -55,31 +55,39 @@ export function FleetBottomDrawer({ crews, agents, isMobile }: FleetBottomDrawer
           { id: "activity" as const, label: "Activity", icon: Activity },
           { id: "bulk" as const, label: "Bulk Actions", icon: Layers },
           { id: "export" as const, label: "Export", icon: Download },
-        ]).map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium rounded-t transition-colors",
-              drawerOpen && drawerTab === id
-                ? "text-foreground bg-accent/50"
-                : "text-muted-foreground hover:text-foreground/70",
-            )}
-            onClick={(e) => {
-              e.stopPropagation()
-              setDrawerTab(id)
-              setDrawerOpen(true)
-            }}
-          >
-            <Icon className="h-3 w-3" />
-            {!isMobile && label}
-          </button>
-        ))}
+        ]).map(({ id, label, icon: Icon }) => {
+          const isActive = drawerOpen && drawerTab === id
+          return (
+            <button
+              key={id}
+              type="button"
+              aria-label={`Open ${label} tab`}
+              aria-pressed={isActive}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium rounded-t transition-colors",
+                isActive
+                  ? "text-foreground bg-accent/50"
+                  : "text-muted-foreground hover:text-foreground/70",
+              )}
+              onClick={(e) => {
+                e.stopPropagation()
+                setDrawerTab(id)
+                setDrawerOpen(true)
+              }}
+            >
+              <Icon className="h-3 w-3" />
+              {!isMobile && label}
+            </button>
+          )
+        })}
 
         <div className="ml-auto">
           <Button
             variant="ghost"
             size="icon-xs"
             className="text-muted-foreground/70 hover:text-foreground/70"
+            aria-label={drawerOpen ? "Collapse drawer" : "Expand drawer"}
+            aria-expanded={drawerOpen}
             onClick={(e) => { e.stopPropagation(); setDrawerOpen(!drawerOpen) }}
           >
             {drawerOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
@@ -133,15 +141,23 @@ function FleetBulkActions({ agents }: { agents: AgentExport[] }) {
     setResult(null)
     let ok = 0
     let fail = 0
+    // Per-request timeout — without this a single hung /start or /stop
+    // would freeze the whole batch loop and leave the buttons stuck in
+    // the loading state forever.
+    const REQUEST_TIMEOUT_MS = 30_000
     for (const agent of targets) {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
       try {
         const endpoint = action === "start"
           ? `/api/v1/agents/${agent.id}/start`
           : `/api/v1/agents/${agent.id}/stop`
-        const resp = await fetch(endpoint, { method: "POST" })
+        const resp = await fetch(endpoint, { method: "POST", signal: controller.signal })
         if (resp.ok) ok++; else fail++
       } catch {
         fail++
+      } finally {
+        clearTimeout(timeoutId)
       }
     }
     setResult(`${ok} succeeded, ${fail} failed`)

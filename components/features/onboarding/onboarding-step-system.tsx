@@ -61,7 +61,7 @@ export function StepSystemCheck({
           <div className="flex items-center gap-3">
             <CheckCircle2 className="h-5 w-5 text-emerald-500" />
             <div>
-              <div className="text-sm font-medium text-emerald-700">
+              <div className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
                 {RUNTIME_LABELS[info.runtime] ?? info.runtime} {info.version} detected
               </div>
               <p className="text-xs text-muted-foreground">
@@ -76,7 +76,7 @@ export function StepSystemCheck({
             <div className="flex items-center gap-3">
               <AlertTriangle className="h-5 w-5 text-amber-500" />
               <div>
-                <div className="text-sm font-medium text-amber-700">
+                <div className="text-sm font-medium text-amber-600 dark:text-amber-400">
                   No container runtime found
                 </div>
                 <p className="text-xs text-muted-foreground">

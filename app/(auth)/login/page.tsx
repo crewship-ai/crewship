@@ -26,13 +26,30 @@ function LoginForm() {
   const searchParams = useSearchParams()
   const registered = searchParams.get("registered") === "true"
   const { signIn } = useAuth()
-  const [googleEnabled, setGoogleEnabled] = useState(false)
+  // Track the status discovery as its own state so we can distinguish
+  // "configured and disabled" from "network hiccup" — the previous boolean
+  // collapsed both into "disabled" and surfaced the "set GOOGLE_CLIENT_ID"
+  // copy during transient outages.
+  const [googleStatus, setGoogleStatus] = useState<"loading" | "enabled" | "disabled" | "error">("loading")
 
   useEffect(() => {
-    fetch("/api/v1/auth/google/status")
-      .then((r) => r.json())
-      .then((data) => setGoogleEnabled(data.enabled === true))
-      .catch(() => {})
+    let cancelled = false
+
+    void fetch("/api/v1/auth/google/status")
+      .then(async (r) => {
+        if (!r.ok) throw new Error("google status check failed")
+        const data: { enabled?: boolean } = await r.json()
+        if (!cancelled) {
+          setGoogleStatus(data.enabled === true ? "enabled" : "disabled")
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setGoogleStatus("error")
+      })
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -110,8 +127,16 @@ function LoginForm() {
               type="button"
               variant="outline"
               className="w-full"
-              disabled={!googleEnabled}
-              title={googleEnabled ? "Sign in with your Google account" : "Google sign-in not configured (set GOOGLE_CLIENT_ID)"}
+              disabled={googleStatus !== "enabled"}
+              title={
+                googleStatus === "enabled"
+                  ? "Sign in with your Google account"
+                  : googleStatus === "disabled"
+                    ? "Google sign-in not configured"
+                    : googleStatus === "loading"
+                      ? "Checking Google sign-in availability…"
+                      : "Google sign-in is temporarily unavailable"
+              }
               onClick={() => {
                 window.location.href = "/api/v1/auth/google/redirect"
               }}

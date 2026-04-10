@@ -3,11 +3,41 @@ package main
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
+
+// validateCrewFlags rejects negative resource limits and unknown network modes.
+func validateCrewFlags(memoryMB int, cpus float64, ttl int, ttlSet bool, networkMode string) error {
+	if memoryMB < 0 {
+		return fmt.Errorf("--memory-mb must be >= 0")
+	}
+	if cpus < 0 {
+		return fmt.Errorf("--cpus must be >= 0")
+	}
+	if ttlSet && ttl < 0 {
+		return fmt.Errorf("--ttl must be >= 0")
+	}
+	if networkMode != "" && networkMode != "free" && networkMode != "restricted" {
+		return fmt.Errorf("--network-mode must be one of: free, restricted")
+	}
+	return nil
+}
+
+// sanitizeTerminal strips control characters (e.g. ANSI escapes, OSC links)
+// from untrusted strings before printing them to the terminal. Newlines and
+// tabs are preserved.
+func sanitizeTerminal(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' || !unicode.IsControl(r) {
+			return r
+		}
+		return -1
+	}, s)
+}
 
 var crewCreateCmd = &cobra.Command{
 	Use:   "create",
@@ -39,17 +69,24 @@ var crewCreateCmd = &cobra.Command{
 		if v, _ := flags.GetString("icon"); v != "" {
 			body["icon"] = v
 		}
-		if v, _ := flags.GetInt("memory-mb"); v > 0 {
-			body["container_memory_mb"] = v
+		memoryMB, _ := flags.GetInt("memory-mb")
+		cpus, _ := flags.GetFloat64("cpus")
+		ttl, _ := flags.GetInt("ttl")
+		networkMode, _ := flags.GetString("network-mode")
+		if err := validateCrewFlags(memoryMB, cpus, ttl, flags.Changed("ttl"), networkMode); err != nil {
+			return err
 		}
-		if v, _ := flags.GetFloat64("cpus"); v > 0 {
-			body["container_cpus"] = v
+		if memoryMB > 0 {
+			body["container_memory_mb"] = memoryMB
 		}
-		if v, _ := flags.GetInt("ttl"); v > 0 {
-			body["container_ttl_hours"] = v
+		if cpus > 0 {
+			body["container_cpus"] = cpus
 		}
-		if v, _ := flags.GetString("network-mode"); v != "" {
-			body["network_mode"] = v
+		if ttl > 0 {
+			body["container_ttl_hours"] = ttl
+		}
+		if networkMode != "" {
+			body["network_mode"] = networkMode
 		}
 		if v, _ := flags.GetString("allowed-domains"); v != "" {
 			domains := strings.Split(v, ",")
@@ -105,6 +142,16 @@ var crewUpdateCmd = &cobra.Command{
 
 		body := map[string]interface{}{}
 		flags := cmd.Flags()
+
+		// Validate resource flags up-front so bad input fails fast.
+		memoryMB, _ := flags.GetInt("memory-mb")
+		cpus, _ := flags.GetFloat64("cpus")
+		ttl, _ := flags.GetInt("ttl")
+		networkMode, _ := flags.GetString("network-mode")
+		if err := validateCrewFlags(memoryMB, cpus, ttl, flags.Changed("ttl"), networkMode); err != nil {
+			return err
+		}
+
 		if flags.Changed("name") {
 			v, _ := flags.GetString("name")
 			body["name"] = v
@@ -245,11 +292,15 @@ var crewSuggestCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Suggested crew: %s\n", result.CrewName)
-		fmt.Printf("Description: %s\n\n", result.Description)
+		fmt.Printf("Suggested crew: %s\n", sanitizeTerminal(result.CrewName))
+		fmt.Printf("Description: %s\n\n", sanitizeTerminal(result.Description))
 		fmt.Println("Agents:")
 		for _, a := range result.Agents {
-			fmt.Printf("  - %s (%s, %s)\n", a.Name, a.RoleTitle, a.AgentRole)
+			fmt.Printf("  - %s (%s, %s)\n",
+				sanitizeTerminal(a.Name),
+				sanitizeTerminal(a.RoleTitle),
+				sanitizeTerminal(a.AgentRole),
+			)
 		}
 		return nil
 	},

@@ -35,14 +35,20 @@ export function IssuesToolbarStrip({
 }: IssuesToolbarStripProps) {
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.06] shrink-0">
-      <div className="flex gap-1 bg-white/[0.04] rounded-md p-0.5">
+      <div className="flex gap-1 bg-white/[0.04] rounded-md p-0.5" role="group" aria-label="View mode">
         <button
+          type="button"
+          aria-label="Board view"
+          aria-pressed={issueViewMode === "board"}
           onClick={() => onViewModeChange("board")}
           className={cn("p-1.5 rounded", issueViewMode === "board" ? "bg-white/[0.1] text-foreground" : "text-muted-foreground")}
         >
           <LayoutGrid className="h-3.5 w-3.5" />
         </button>
         <button
+          type="button"
+          aria-label="List view"
+          aria-pressed={issueViewMode === "list"}
           onClick={() => onViewModeChange("list")}
           className={cn("p-1.5 rounded", issueViewMode === "list" ? "bg-white/[0.1] text-foreground" : "text-muted-foreground")}
         >

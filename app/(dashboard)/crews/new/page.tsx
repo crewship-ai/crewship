@@ -15,7 +15,10 @@ import { Badge } from "@/components/ui/badge"
 import { PageHeader } from "@/components/layout/page-header"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { slugify } from "@/lib/utils/slugify"
-import { CREW_COLORS } from "@/lib/colors"
+import { CREW_COLORS, CREW_BG_CLASSES } from "@/lib/colors"
+import { cn } from "@/lib/utils"
+
+type CrewPaletteId = keyof typeof CREW_COLORS
 import { toast } from "sonner"
 import { CrewNameSlugFields } from "@/components/features/crews/crew-name-slug-fields"
 import { CrewAgentPreviewList } from "@/components/features/crews/crew-agent-preview-list"
@@ -84,7 +87,10 @@ export default function NewCrewPage() {
   const [slug, setSlug] = useState("")
   const [slugManual, setSlugManual] = useState(false)
   const [description, setDescription] = useState("")
-  const [color, setColor] = useState(CREW_COLORS.blue)
+  // Crew color is always a palette id — never a raw hex value. Downstream
+  // renderers (CrewIcon, crew-group-node, fleet overviews) all resolve the
+  // id to a Tailwind class, so any freeform hex would break them.
+  const [color, setColor] = useState<CrewPaletteId>("blue")
   const [icon, setIcon] = useState("")
 
   useEffect(() => {
@@ -138,7 +144,10 @@ export default function NewCrewPage() {
     setName(t.name)
     setSlugManual(false)
     setDescription(t.description || "")
-    setColor(t.color || CREW_COLORS.blue)
+    // Only accept known palette ids; anything else falls back to "blue"
+    // so a legacy hex color stored on a template can't leak into state.
+    const templateColor = (t.color && t.color in CREW_COLORS ? t.color : "blue") as CrewPaletteId
+    setColor(templateColor)
     setIcon(t.icon || "")
     setMode("template")
   }
@@ -621,15 +630,39 @@ export default function NewCrewPage() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="color">Color</Label>
-                <div className="flex items-center gap-3">
-                  <Input id="color" type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-9 w-14 cursor-pointer p-1" />
-                  <Input value={color} onChange={(e) => setColor(e.target.value)} placeholder={CREW_COLORS.blue} className="font-mono text-sm" />
+                <Label>Color</Label>
+                <div className="flex items-center gap-2" role="radiogroup" aria-label="Crew color">
+                  {(Object.keys(CREW_COLORS) as CrewPaletteId[]).map((id) => {
+                    const selected = color === id
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        aria-label={id}
+                        onClick={() => setColor(id)}
+                        className={cn(
+                          "h-7 w-7 rounded-md transition-all",
+                          CREW_BG_CLASSES[id],
+                          selected
+                            ? "ring-2 ring-offset-2 ring-offset-background ring-foreground/60 scale-110"
+                            : "hover:scale-105 opacity-80 hover:opacity-100",
+                        )}
+                      />
+                    )
+                  })}
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="icon">Icon (emoji)</Label>
-                <Input id="icon" value={icon} onChange={(e) => setIcon(e.target.value)} placeholder="e.g. 🚀" maxLength={10} />
+                <Label htmlFor="icon">Icon (Lucide name)</Label>
+                <Input
+                  id="icon"
+                  value={icon}
+                  onChange={(e) => setIcon(e.target.value)}
+                  placeholder="e.g. rocket, code, clipboard"
+                  maxLength={40}
+                />
               </div>
             </div>
           </CardContent>

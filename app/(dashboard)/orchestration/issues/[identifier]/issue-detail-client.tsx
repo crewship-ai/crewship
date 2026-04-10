@@ -674,6 +674,12 @@ export function IssueDetailClient() {
       {/* ---- Mobile sidebar (below content on small screens) ---- */}
       <IssueSidebarMobile
         issue={issue}
+        agents={agents}
+        allLabels={allLabels}
+        projects={projects}
+        relations={relations}
+        patchIssue={patchIssue}
+        handleToggleLabel={handleToggleLabel}
         handleAction={handleAction}
         actionLoading={actionLoading}
       />

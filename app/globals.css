@@ -36,7 +36,7 @@
   --sidebar-accent-foreground: oklch(0.5729 0.2337 264.3664);
   --sidebar-border: oklch(1.0000 0 0);
   --sidebar-ring: oklch(0.5784 0.2303 263.8862);
-  --font-sans: Open Sans, ui-sans-serif, sans-serif, system-ui;
+  --font-sans: "Open Sans", ui-sans-serif, sans-serif, system-ui;
   --font-serif: Georgia, serif;
   --font-mono: Menlo, monospace;
   --radius: 1.3rem;
@@ -110,7 +110,7 @@
   --sidebar-accent-foreground: oklch(1.0000 0 0);
   --sidebar-border: oklch(0.6299 0.2557 28.9883);
   --sidebar-ring: oklch(0.6187 0.2067 259.2316);
-  --font-sans: Open Sans, ui-sans-serif, sans-serif, system-ui;
+  --font-sans: "Open Sans", ui-sans-serif, sans-serif, system-ui;
   --font-serif: Georgia, serif;
   --font-mono: Menlo, monospace;
   --radius: 1.3rem;
@@ -338,4 +338,16 @@ body {
 
 .agent-active-dot {
   animation: agent-dot-pulse 2s ease-in-out infinite;
+}
+
+/*
+ * Respect the user's motion preference — infinite pulse animations can
+ * trigger vestibular symptoms. The color/border cue still communicates
+ * "active" without movement.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .agent-active-card,
+  .agent-active-dot {
+    animation: none;
+  }
 }

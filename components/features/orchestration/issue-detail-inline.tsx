@@ -52,6 +52,9 @@ export function IssueDetailInline({
   const [reviewChangesOpen, setReviewChangesOpen] = useState(false)
   const [reviewComment, setReviewComment] = useState("")
 
+  // Workflow transition in-flight guard (prevents double-submit on Start/Stop/Approve/Reopen)
+  const [isTransitioning, setIsTransitioning] = useState<string | null>(null)
+
   // Section collapse state
   const [propertiesOpen, setPropertiesOpen] = useState(true)
   const [labelsOpen, setLabelsOpen] = useState(true)
@@ -278,13 +281,20 @@ export function IssueDetailInline({
         {/* Workflow action buttons */}
         {(issue.status === "BACKLOG" || issue.status === "TODO") && issue.assignee_id && (
           <button
+            disabled={isTransitioning !== null}
             onClick={async () => {
-              const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-              const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/start${qs}`, { method: "POST" })
-              if (res.ok) { toast.success("Issue started"); onUpdated() }
-              else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to start") }
+              if (isTransitioning !== null) return
+              setIsTransitioning("start")
+              try {
+                const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+                const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/start${qs}`, { method: "POST" })
+                if (res.ok) { toast.success("Issue started"); onUpdated() }
+                else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to start") }
+              } finally {
+                setIsTransitioning(null)
+              }
             }}
-            className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors"
+            className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: `${STATUS_COLORS.IN_PROGRESS}18`, color: STATUS_COLORS.IN_PROGRESS }}
           >
             <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg>
@@ -293,13 +303,20 @@ export function IssueDetailInline({
         )}
         {issue.status === "IN_PROGRESS" && (
           <button
+            disabled={isTransitioning !== null}
             onClick={async () => {
-              const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-              const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/stop${qs}`, { method: "POST" })
-              if (res.ok) { toast.success("Issue stopped"); onUpdated() }
-              else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to stop") }
+              if (isTransitioning !== null) return
+              setIsTransitioning("stop")
+              try {
+                const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+                const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/stop${qs}`, { method: "POST" })
+                if (res.ok) { toast.success("Issue stopped"); onUpdated() }
+                else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed to stop") }
+              } finally {
+                setIsTransitioning(null)
+              }
             }}
-            className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors"
+            className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: `${STATUS_COLORS.FAILED}18`, color: STATUS_COLORS.FAILED }}
           >
             <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1"/></svg>
@@ -309,16 +326,23 @@ export function IssueDetailInline({
         {issue.status === "REVIEW" && (
           <>
             <button
+              disabled={isTransitioning !== null}
               onClick={async () => {
-                const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
-                const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
-                  method: "POST", headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ action: "approve" }),
-                })
-                if (res.ok) { toast.success("Issue approved"); onUpdated() }
-                else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed") }
+                if (isTransitioning !== null) return
+                setIsTransitioning("review_approved")
+                try {
+                  const qs = `?workspace_id=${encodeURIComponent(workspaceId)}`
+                  const res = await fetch(`/api/v1/crews/${issue.crew_id}/issues/${issue.identifier}/review${qs}`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "approve" }),
+                  })
+                  if (res.ok) { toast.success("Issue approved"); onUpdated() }
+                  else { const e = await res.json().catch(() => null); toast.error(e?.detail || "Failed") }
+                } finally {
+                  setIsTransitioning(null)
+                }
               }}
-              className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors"
+              className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ backgroundColor: `${STATUS_COLORS.COMPLETED}18`, color: STATUS_COLORS.COMPLETED }}
             >
               &#10003; Approve
@@ -334,8 +358,17 @@ export function IssueDetailInline({
         )}
         {(issue.status === "CANCELLED" || issue.status === "DONE") && (
           <button
-            onClick={() => patchIssue({ status: "BACKLOG" })}
-            className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors"
+            disabled={isTransitioning !== null}
+            onClick={async () => {
+              if (isTransitioning !== null) return
+              setIsTransitioning("reopen")
+              try {
+                await patchIssue({ status: "BACKLOG" })
+              } finally {
+                setIsTransitioning(null)
+              }
+            }}
+            className="flex items-center gap-1 h-6 px-2.5 rounded-md text-[11px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: `${STATUS_COLORS.IN_PROGRESS}18`, color: STATUS_COLORS.IN_PROGRESS }}
           >
             <svg className="h-2.5 w-2.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 8a6 6 0 0 1 10.47-4M14 8a6 6 0 0 1-10.47 4"/><path d="M14 2v4h-4M2 14v-4h4"/></svg>
@@ -855,7 +888,7 @@ export function IssueDetailInline({
                           {issue.project_id && (
                             <button
                               onClick={() => {
-                                patchIssue({ project_id: "" })
+                                patchIssue({ project_id: null })
                                 setProjectPopoverOpen(false)
                               }}
                               className="flex items-center gap-2 w-full px-2 py-1.5 rounded-sm text-left text-[12px] text-red-400/70 hover:bg-red-500/10 transition-colors"

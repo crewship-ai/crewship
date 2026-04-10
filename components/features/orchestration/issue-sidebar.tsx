@@ -62,7 +62,7 @@ export interface IssueSidebarProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function IssueSidebar({
+function IssueSidebarBody({
   issue,
   agents,
   allLabels,
@@ -93,8 +93,7 @@ export function IssueSidebar({
   const currentProject = projects.find((p) => p.id === issue.project_id)
 
   return (
-    <div className="w-[320px] border-l border-border bg-card shrink-0 hidden lg:block">
-      <div className="sticky top-0 p-3 space-y-1 overflow-y-auto max-h-[calc(100vh-53px)]">
+    <div className="space-y-1">
         {/* PROPERTIES */}
         <div className="rounded-lg border border-white/[0.04] bg-[#18171D]">
           <div className="flex items-center px-3 py-2">
@@ -538,87 +537,36 @@ export function IssueSidebar({
             </div>
           )}
         </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Desktop sidebar wrapper
+// ---------------------------------------------------------------------------
+
+export function IssueSidebar(props: IssueSidebarProps) {
+  return (
+    <div className="w-[320px] border-l border-border bg-card shrink-0 hidden lg:block">
+      <div className="sticky top-0 p-3 overflow-y-auto max-h-[calc(100vh-53px)]">
+        <IssueSidebarBody {...props} />
       </div>
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Mobile sidebar (compact inline version for small screens)
+// Mobile sidebar — full editor parity with the desktop sidebar, rendered in a
+// mobile-friendly scrollable container below the main content on small
+// screens. Reuses the exact same popover-based editor sub-tree via
+// IssueSidebarBody so mobile users can edit status, priority, assignee, due
+// date, estimate, labels, and project identically to desktop.
 // ---------------------------------------------------------------------------
 
-export function IssueSidebarMobile({
-  issue,
-  handleAction,
-  actionLoading,
-}: Pick<IssueSidebarProps, "issue" | "handleAction" | "actionLoading">) {
-  const canStart = (issue.status === "BACKLOG" || issue.status === "TODO") && issue.assignee_id
-  const canStop = issue.status === "IN_PROGRESS"
-  const canReview = issue.status === "REVIEW"
-  const assigneeName = issue.assignee_name ?? "Unassigned"
-
+export function IssueSidebarMobile(props: IssueSidebarProps) {
   return (
-    <div className="lg:hidden border-t border-border bg-card p-4 shrink-0">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1.5">
-          <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-          <span className="text-xs">{statusLabel[issue.status] ?? issue.status}</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <PriorityIcon priority={issue.priority ?? "none"} className="h-3.5 w-3.5" />
-          <span className="text-xs">{priorityLabel[issue.priority ?? "none"]}</span>
-        </div>
-        <span className="text-xs text-muted-foreground">{assigneeName}</span>
-        {(issue.labels ?? []).map((label) => (
-          <LabelBadge key={label.id} label={label} />
-        ))}
-        {canStart && (
-          <Button
-            size="sm"
-            className="h-7 text-xs gap-1"
-            onClick={() => handleAction("start")}
-            disabled={actionLoading}
-          >
-            <Play className="h-3 w-3" />
-            Start
-          </Button>
-        )}
-        {canStop && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs gap-1"
-            onClick={() => handleAction("stop")}
-            disabled={actionLoading}
-          >
-            <Square className="h-3 w-3" />
-            Stop
-          </Button>
-        )}
-        {canReview && (
-          <>
-            <Button
-              size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={() => handleAction("review", "approve")}
-              disabled={actionLoading}
-            >
-              <ThumbsUp className="h-3 w-3" />
-              Approve
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs gap-1"
-              onClick={() => handleAction("review", "request_changes")}
-              disabled={actionLoading}
-            >
-              <ThumbsDown className="h-3 w-3" />
-              Changes
-            </Button>
-          </>
-        )}
-      </div>
+    <div className="lg:hidden border-t border-border bg-card p-3 shrink-0">
+      <IssueSidebarBody {...props} />
     </div>
   )
 }
