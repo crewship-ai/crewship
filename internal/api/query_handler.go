@@ -164,7 +164,7 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ensure crew container is running
-	containerID, err := h.orch.GetOrCreateContainer(r.Context(), target.CrewSlug, body.CrewID)
+	containerID, err := h.orch.GetOrCreateContainer(r.Context(), target.CrewSlug, body.CrewID, body.WorkspaceID)
 	if err != nil {
 		h.logger.Error("get container for query", "error", err, "query_id", convID)
 		h.finishQuery(r.Context(), convID, runID, body.ChatID, body.FromSlug, body.TargetSlug, body.WorkspaceID, "",

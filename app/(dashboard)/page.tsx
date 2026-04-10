@@ -570,8 +570,14 @@ export default function DashboardPage() {
         />
         <KpiCard
           label="Cost (24h)"
-          value={formatCost(totalCost24h)}
-          subtitle={runsToday > 0 ? `${runsToday} run${runsToday === 1 ? "" : "s"} today` : "no runs today"}
+          value={totalCost24h > 0 ? formatCost(totalCost24h) : runsToday > 0 ? "—" : "$0.00"}
+          subtitle={
+            runsToday === 0
+              ? "no runs today"
+              : totalCost24h > 0
+                ? `${runsToday} run${runsToday === 1 ? "" : "s"}`
+                : "token tracking not wired"
+          }
         />
         <KpiCard
           label="Success (24h)"
