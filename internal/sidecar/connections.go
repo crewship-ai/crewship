@@ -92,29 +92,7 @@ func (s *Server) handleConnectionSendMessage(w http.ResponseWriter, r *http.Requ
 	}
 
 	bodyJSON, _ := json.Marshal(body)
-
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		s.ipc.BaseURL+"/api/v1/internal/crew-messages", bytes.NewReader(bodyJSON))
-	if err != nil {
-		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Internal-Token", s.ipc.Token)
-
-	resp, err := ipcClient.Do(req)
-	if err != nil {
-		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "crewshipd request failed"})
-		return
-	}
-	defer resp.Body.Close()
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	s.proxyIPCJSON(w, r, http.MethodPost, "/api/v1/internal/crew-messages", "crew message", bodyJSON)
 }
 
 // handleConnectionListMessages handles GET /connections/{crew-slug}/messages
