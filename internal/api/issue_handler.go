@@ -62,6 +62,18 @@ func scanIssue(s interface{ Scan(...interface{}) error }) (issueResponse, error)
 	return issue, err
 }
 
+// logActivity inserts a row into mission_activity. Errors are logged but not
+// returned — activity logging is best-effort and should not fail the caller.
+func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, actorID, action, details string) {
+	actID := generateCUID()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.ExecContext(ctx,
+		`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		actID, missionID, actorType, actorID, action, details, now); err != nil {
+		h.logger.Error("insert mission activity", "action", action, "mission_id", missionID, "error", err)
+	}
+}
+
 // ── Response types ──────────────────────────────────────────────────────────
 
 type issueResponse struct {
@@ -743,33 +755,18 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Log activity for significant changes
 	user := UserFromContext(r.Context())
-	actorType := "user"
 	actorID := user.ID
-	now := time.Now().UTC().Format(time.RFC3339)
 
 	if req.Status != nil {
-		actID := generateCUID()
-		if _, err := h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'status_changed', ?, ?)`,
-			actID, missionID, actorType, actorID, fmt.Sprintf("%s → %s", currentStatus, *req.Status), now); err != nil {
-			h.logger.Error("insert status activity", "mission_id", missionID, "error", err)
-		}
+		h.logActivity(r.Context(), missionID, "user", actorID, "status_changed",
+			fmt.Sprintf("%s → %s", currentStatus, *req.Status))
 	}
 	if req.AssigneeID != nil {
-		actID := generateCUID()
-		if _, err := h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'assignee_changed', ?, ?)`,
-			actID, missionID, actorType, actorID, fmt.Sprintf("assignee_id: %s", *req.AssigneeID), now); err != nil {
-			h.logger.Error("insert assignee activity", "mission_id", missionID, "error", err)
-		}
+		h.logActivity(r.Context(), missionID, "user", actorID, "assignee_changed",
+			fmt.Sprintf("assignee_id: %s", *req.AssigneeID))
 	}
 	if req.Priority != nil {
-		actID := generateCUID()
-		if _, err := h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'priority_changed', ?, ?)`,
-			actID, missionID, actorType, actorID, *req.Priority, now); err != nil {
-			h.logger.Error("insert priority activity", "mission_id", missionID, "error", err)
-		}
+		h.logActivity(r.Context(), missionID, "user", actorID, "priority_changed", *req.Priority)
 	}
 
 	if h.hub != nil {
@@ -1399,12 +1396,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Activity
-		actID := generateCUID()
-		if _, err := h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'review_approved', ?, ?)`,
-			actID, missionID, user.ID, commentBody, now); err != nil {
-			h.logger.Error("insert review activity", "mission_id", missionID, "error", err)
-		}
+		h.logActivity(r.Context(), missionID, "user", user.ID, "review_approved", commentBody)
 
 	} else {
 		// request_changes → revert status to TODO so the assignee can rework
@@ -1444,12 +1436,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Activity
-		actID := generateCUID()
-		if _, err := h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'review_changes_requested', ?, ?)`,
-			actID, missionID, user.ID, commentBody, now); err != nil {
-			h.logger.Error("insert review activity", "mission_id", missionID, "error", err)
-		}
+		h.logActivity(r.Context(), missionID, "user", user.ID, "review_changes_requested", commentBody)
 	}
 
 	if h.hub != nil {
@@ -1861,12 +1848,8 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 
 		// Activity log
 		if req.Updates.Status != nil {
-			actID := generateCUID()
-			if _, err := h.db.ExecContext(r.Context(),
-				`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'status_changed', ?, ?)`,
-				actID, issueID, user.ID, fmt.Sprintf("%s -> %s (bulk)", currentStatus, *req.Updates.Status), now); err != nil {
-				h.logger.Error("bulk update: insert activity", "issue_id", issueID, "error", err)
-			}
+			h.logActivity(r.Context(), issueID, "user", user.ID, "status_changed",
+				fmt.Sprintf("%s -> %s (bulk)", currentStatus, *req.Updates.Status))
 		}
 
 		updated++
