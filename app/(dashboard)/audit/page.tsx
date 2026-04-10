@@ -1,9 +1,10 @@
 "use client"
 
 import { Fragment, useEffect, useState } from "react"
-import { Shield, ChevronRight, Download, Search } from "lucide-react"
-import { PageHeader } from "@/components/layout/page-header"
+import { ChevronRight, Download, Search, Shield } from "lucide-react"
+import { PageShell } from "@/components/layout/page-shell"
 import { EmptyState } from "@/components/layout/empty-state"
+import { FilterBar } from "@/components/layout/filter-bar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -25,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { STATUS_BG_LIGHT } from "@/lib/colors"
 import { cn } from "@/lib/utils"
 
 interface AuditUser {
@@ -64,6 +66,8 @@ const categories = [
   { label: "System", value: "Workspace" },
 ]
 
+const categoryLabels = categories.map((c) => c.label)
+
 const dateRanges = [
   { label: "Last 24 hours", value: "24h" },
   { label: "Last 7 days", value: "7d" },
@@ -81,22 +85,30 @@ function getDateFrom(range: string): string | undefined {
   }
 }
 
-const actionColors: Record<string, string> = {
-  created: "bg-emerald-50 text-emerald-700",
-  started: "bg-emerald-50 text-emerald-700",
-  completed: "bg-emerald-50 text-emerald-700",
-  updated: "bg-blue-50 text-blue-700",
-  rotated: "bg-amber-50 text-amber-700",
-  invited: "bg-blue-50 text-blue-700",
-  deleted: "bg-red-50 text-red-700",
-  failed: "bg-red-50 text-red-700",
+/**
+ * Maps free-form audit action verbs ("user.created", "credential.rotated", …)
+ * onto canonical status keys so every action pill can reuse STATUS_BG_LIGHT
+ * and stay on the centralized palette (no local bg-{color}-50 maps).
+ */
+function actionStatusKey(action: string): string {
+  const a = action.toLowerCase()
+  if (a.includes("deleted") || a.includes("failed") || a.includes("revoked")) {
+    return "FAILED"
+  }
+  if (a.includes("rotated") || a.includes("blocked")) {
+    return "BLOCKED"
+  }
+  if (a.includes("created") || a.includes("started") || a.includes("completed")) {
+    return "COMPLETED"
+  }
+  if (a.includes("updated") || a.includes("invited") || a.includes("changed")) {
+    return "IN_PROGRESS"
+  }
+  return "PENDING"
 }
 
-function getActionColor(action: string): string {
-  for (const [key, cls] of Object.entries(actionColors)) {
-    if (action.includes(key)) return cls
-  }
-  return "bg-muted text-muted-foreground"
+function getActionClasses(action: string): string {
+  return STATUS_BG_LIGHT[actionStatusKey(action)] ?? "bg-muted text-muted-foreground"
 }
 
 export default function AuditPage() {
@@ -152,77 +164,97 @@ export default function AuditPage() {
       )
     : logs
 
-  return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <PageHeader title="Audit Log" description="Track all actions in your workspace" />
+  const activeCategoryLabel =
+    categories.find((c) => c.value === category)?.label ?? "All"
 
-      {error && <p className="text-body text-destructive">{error}</p>}
+  const handleFilter = (label: string) => {
+    const match = categories.find((c) => c.label === label)
+    if (match) setCategory(match.value)
+  }
 
-      {/* Filters */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          {/* Category tabs */}
-          <div className="flex items-center gap-1">
-            {categories.map((cat) => (
-              <Button
-                key={cat.value}
-                variant={category === cat.value ? "default" : "ghost"}
-                size="sm"
-                className="text-label h-7 px-2.5"
-                onClick={() => setCategory(cat.value)}
-              >
-                {cat.label}
-              </Button>
-            ))}
-          </div>
-          <Select value={dateRange} onValueChange={setDateRange}>
-            <SelectTrigger className="w-[150px] h-7 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {dateRanges.map((dr) => (
-                <SelectItem key={dr.value} value={dr.value}>{dr.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              placeholder="Search events..."
-              className="pl-8 h-7 text-xs w-48"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-label"
-            disabled={filteredLogs.length === 0}
-            onClick={() => {
-              const rows = filteredLogs.map((log) => ({
-                timestamp: log.created_at,
-                action: log.action,
-                entity_type: log.entity_type,
-                entity_id: log.entity_id,
-                user: log.user?.full_name ?? log.user?.email ?? "",
-                ip_address: log.ip_address ?? "",
-              }))
-              const header = Object.keys(rows[0] ?? {}).join(",")
-              const csv = [header, ...rows.map((r) => Object.values(r).map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))].join("\n")
-              const blob = new Blob([csv], { type: "text/csv" })
-              const url = URL.createObjectURL(blob)
-              const a = document.createElement("a"); a.href = url; a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`; a.click()
-              URL.revokeObjectURL(url)
-            }}
-          >
-            <Download className="mr-1.5 h-3.5 w-3.5" />
-            Export CSV
-          </Button>
-        </div>
+  const handleExport = () => {
+    if (filteredLogs.length === 0) return
+    const rows = filteredLogs.map((log) => ({
+      timestamp: log.created_at,
+      action: log.action,
+      entity_type: log.entity_type,
+      entity_id: log.entity_id,
+      user: log.user?.full_name ?? log.user?.email ?? "",
+      ip_address: log.ip_address ?? "",
+    }))
+    const header = Object.keys(rows[0] ?? {}).join(",")
+    const csv = [
+      header,
+      ...rows.map((r) =>
+        Object.values(r)
+          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+          .join(","),
+      ),
+    ].join("\n")
+    const blob = new Blob([csv], { type: "text/csv" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const actions = (
+    <div className="flex items-center gap-2">
+      <div className="relative">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+        <Input
+          placeholder="Search events..."
+          className="pl-8 w-48"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
       </div>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={filteredLogs.length === 0}
+        onClick={handleExport}
+      >
+        <Download className="mr-1.5 h-3.5 w-3.5" />
+        Export CSV
+      </Button>
+    </div>
+  )
+
+  const toolbar = (
+    <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center gap-3">
+        <FilterBar
+          filters={categoryLabels}
+          active={activeCategoryLabel}
+          onFilter={handleFilter}
+        />
+        <Select value={dateRange} onValueChange={setDateRange}>
+          <SelectTrigger className="w-[150px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {dateRanges.map((dr) => (
+              <SelectItem key={dr.value} value={dr.value}>
+                {dr.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+
+  return (
+    <PageShell
+      title="Audit Log"
+      description="Track all actions in your workspace"
+      actions={actions}
+      toolbar={toolbar}
+    >
+      {error && <p className="text-body text-destructive">{error}</p>}
 
       {isLoading ? (
         <div className="space-y-2">
@@ -273,14 +305,20 @@ export default function AuditPage() {
                           {log.user?.full_name ?? log.user?.email ?? "System"}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="secondary" className={cn("text-micro", getActionColor(log.action))}>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "border-transparent text-micro",
+                              getActionClasses(log.action),
+                            )}
+                          >
                             {log.action}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-body text-muted-foreground">
                           {log.entity_type}
                           {log.entity_id && (
-                            <span className="ml-1 font-mono text-[10px]">
+                            <span className="ml-1 font-mono text-micro">
                               ({log.entity_id.slice(0, 8)})
                             </span>
                           )}
@@ -290,7 +328,7 @@ export default function AuditPage() {
                         <TableRow key={`${log.id}-detail`} className="bg-primary/5">
                           <TableCell />
                           <TableCell colSpan={4} className="pb-4 pt-1">
-                            <div className="bg-background rounded-md border p-4 max-w-2xl">
+                            <div className="bg-background rounded-md border border-border p-4 max-w-2xl">
                               <div className="grid grid-cols-2 gap-4 text-label mb-3">
                                 <div>
                                   <span className="text-muted-foreground">IP Address</span>
@@ -310,7 +348,7 @@ export default function AuditPage() {
                                   <div className="text-micro font-medium text-muted-foreground uppercase tracking-wider mb-1.5">
                                     Metadata
                                   </div>
-                                  <pre className="bg-muted border rounded p-2.5 text-[11px] font-mono text-muted-foreground overflow-auto max-h-28">
+                                  <pre className="bg-muted border border-border rounded p-2.5 text-micro font-mono text-muted-foreground overflow-auto max-h-28">
                                     {JSON.stringify(log.metadata, null, 2)}
                                   </pre>
                                 </>
@@ -331,6 +369,6 @@ export default function AuditPage() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </PageShell>
   )
 }
