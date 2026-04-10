@@ -86,6 +86,19 @@ func (h *IssueHandler) insertComment(ctx context.Context, missionID, authorType,
 	}
 }
 
+// broadcastIssueEvent sends a workspace-scoped WebSocket event.
+// No-op if the hub is not configured.
+func (h *IssueHandler) broadcastIssueEvent(wsID, eventType string, payload map[string]string) {
+	if h.hub == nil {
+		return
+	}
+	h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
+		Type:    eventType,
+		Channel: "workspace:" + wsID,
+		Payload: payload,
+	})
+}
+
 // ── Response types ──────────────────────────────────────────────────────────
 
 type issueResponse struct {
@@ -511,13 +524,7 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Labels:        []labelResponse{},
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.created",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": id},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.created", map[string]string{"id": id})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -783,13 +790,7 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.logActivity(r.Context(), missionID, "user", actorID, "priority_changed", *req.Priority)
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": missionID},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID})
 
 	// Return updated issue
 	issue, err := scanIssue(h.db.QueryRowContext(r.Context(),
@@ -851,13 +852,7 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.deleted",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"identifier": ident},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.deleted", map[string]string{"identifier": ident})
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1185,13 +1180,7 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:  now,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": missionID},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -1323,13 +1312,7 @@ func (h *IssueHandler) CreateRelation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": sourceID},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": sourceID})
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id, "status": "ok"})
 }
@@ -1439,13 +1422,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		h.logActivity(r.Context(), missionID, "user", user.ID, "review_changes_requested", commentBody)
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": missionID, "identifier": ident},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": req.Action})
 }
@@ -1657,13 +1634,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 7. Broadcast
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.started",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": missionID, "identifier": ident, "status": "IN_PROGRESS"},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.started", map[string]string{"id": missionID, "identifier": ident, "status": "IN_PROGRESS"})
 
 	h.logger.Info("issue started", "identifier", ident, "agent", assigneeID.String)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "IN_PROGRESS", "identifier": ident})
@@ -1722,13 +1693,7 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": missionID, "identifier": ident, "status": "CANCELLED"},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID, "identifier": ident, "status": "CANCELLED"})
 
 	h.logger.Info("issue stopped", "identifier", ident)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "CANCELLED", "identifier": ident})
@@ -1855,12 +1820,8 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 		updated++
 	}
 
-	if h.hub != nil && updated > 0 {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issues.bulk_updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"count": strconv.Itoa(updated)},
-		})
+	if updated > 0 {
+		h.broadcastIssueEvent(wsID, "issues.bulk_updated", map[string]string{"count": strconv.Itoa(updated)})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]int{"updated": updated})
