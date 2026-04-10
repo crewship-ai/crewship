@@ -33,7 +33,7 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
   }
 
   return (
-    <div>
+    <div className="flex flex-col gap-3 md:gap-0">
       {entries.map((e) => {
         const memMB = Math.round(e.memory_used / 1024 / 1024)
         const memLimitMB = Math.round(e.memory_limit / 1024 / 1024)
@@ -42,26 +42,44 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
           e.cpu_percent > 80 ? "hot"
             : e.cpu_percent > 30 ? "running"
             : "idle"
+        const nameLabel = e.crew_slug?.toUpperCase() || e.crew_id.slice(0, 3).toUpperCase()
         return (
           <div
             key={e.container_id}
-            className="grid items-center gap-3 py-2 border-b border-border/60 last:border-b-0"
-            style={{ gridTemplateColumns: "60px 1fr 96px 160px 72px" }}
+            className="md:grid md:items-center md:gap-3 md:py-2.5 md:border-b md:border-border/60 md:last:border-b-0 p-3 rounded-lg border border-border/60 bg-card/60 md:bg-transparent md:p-0 md:rounded-none md:border-x-0 md:border-t-0"
+            style={{
+              gridTemplateColumns: "60px 1fr 86px 156px 74px",
+            }}
           >
+            {/* Desktop: single row, Mobile: header + body */}
             <div className="flex items-center gap-2 text-[11px] font-medium">
               <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: color }} />
-              {e.crew_slug?.toUpperCase() || e.crew_id.slice(0, 3).toUpperCase()}
+              {nameLabel}
+              <StatusPill status={status} className="ml-auto md:hidden" />
             </div>
-            <CpuSparkline history={e.cpu_history ?? []} color={color} />
-            <div className={cn("text-[10px] font-mono tabular-nums", e.cpu_percent > 80 && "text-red-400")}>
+
+            <div className="mt-2 md:mt-0">
+              <CpuSparkline history={e.cpu_history ?? []} color={color} />
+            </div>
+
+            <div className={cn("hidden md:block text-[10px] font-mono tabular-nums", e.cpu_percent > 80 && "text-red-400")}>
               {e.cpu_percent.toFixed(0)}% CPU
             </div>
-            <div className="min-w-0">
+
+            {/* Mobile: inline CPU + mem + pids below sparkline */}
+            <div className="md:hidden flex items-center justify-between gap-3 mt-2 text-[10px] font-mono text-muted-foreground tabular-nums">
+              <span className={cn(e.cpu_percent > 80 && "text-red-400")}>{e.cpu_percent.toFixed(0)}% CPU</span>
+              <span>{memMB} / {memLimitMB} MB</span>
+              <span>{e.pids} PIDs</span>
+            </div>
+
+            {/* Desktop: memory bar column */}
+            <div className="hidden md:block min-w-0">
               <div className="relative h-[3px] rounded-full bg-white/[0.05] overflow-hidden">
                 <div
                   className={cn(
                     "absolute inset-y-0 left-0 rounded-full transition-all",
-                    e.memory_percent > 85 ? "bg-red-400" : "",
+                    e.memory_percent > 85 && "bg-red-400",
                   )}
                   style={{
                     width: `${Math.min(100, e.memory_percent)}%`,
@@ -73,7 +91,8 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
                 {memMB} / {memLimitMB} MB · {e.pids} PIDs
               </div>
             </div>
-            <StatusPill status={status} />
+
+            <StatusPill status={status} className="hidden md:inline-flex" />
           </div>
         )
       })}
@@ -109,14 +128,14 @@ function CpuSparkline({ history, color }: { history: number[]; color: string }) 
   )
 }
 
-function StatusPill({ status }: { status: "hot" | "running" | "idle" }) {
+function StatusPill({ status, className }: { status: "hot" | "running" | "idle"; className?: string }) {
   const cfg = {
     hot: { label: "Hot", cls: "text-red-400 border-red-500/30 bg-red-500/10" },
     running: { label: "Running", cls: "text-blue-400 border-blue-500/30 bg-blue-500/10" },
     idle: { label: "Idle", cls: "text-muted-foreground border-border bg-muted/20" },
   }[status]
   return (
-    <span className={cn("inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[9px] font-semibold uppercase tracking-wide border", cfg.cls)}>
+    <span className={cn("inline-flex items-center justify-center px-2 py-0.5 rounded-md text-[9px] font-semibold uppercase tracking-wide border", cfg.cls, className)}>
       {cfg.label}
     </span>
   )

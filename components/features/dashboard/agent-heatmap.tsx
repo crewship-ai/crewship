@@ -49,7 +49,8 @@ export function AgentHeatmap({ agents, buckets }: AgentHeatmapProps) {
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1 overflow-x-auto">
+      <div className="min-w-[520px]">
       {/* Header row — hour ticks */}
       <div className="grid" style={{ gridTemplateColumns: "72px 1fr" }}>
         <div />
@@ -105,6 +106,7 @@ export function AgentHeatmap({ agents, buckets }: AgentHeatmapProps) {
           <div className="h-2.5 w-2.5 rounded-[2px] bg-blue-500" />
         </div>
         <span>more</span>
+      </div>
       </div>
     </div>
   )

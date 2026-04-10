@@ -13,7 +13,6 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import type { Mission } from "@/lib/types/mission"
 
-import { ActionCenter } from "@/components/features/dashboard/action-center"
 import { KpiCard } from "@/components/features/dashboard/kpi-card"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
 import { StatusDonut, type StatusDonutDatum } from "@/components/features/dashboard/status-donut"
@@ -132,18 +131,6 @@ function formatCost(cost: number): string {
   if (cost === 0) return "$0.00"
   if (cost < 0.01) return "<$0.01"
   return `$${cost.toFixed(2)}`
-}
-
-// Build an N-element fake trend series for KPI sparklines while the
-// /metrics/timeseries endpoint isn't wired for every KPI yet.
-// Deterministic per-label so it doesn't jitter on re-render.
-function mockSparkline(seed: number, length = 24): number[] {
-  const out: number[] = []
-  for (let i = 0; i < length; i++) {
-    const v = Math.sin((i + seed) * 0.4) * 3 + Math.cos(i * 0.2 + seed) * 1.5 + 5
-    out.push(Math.max(0, v))
-  }
-  return out
 }
 
 function formatRelativeShort(iso: string | null | undefined): string {
@@ -312,7 +299,11 @@ export default function DashboardPage() {
   const totalCost24h = metrics?.total_cost_24h ?? 0
   const runsToday = runsData?.stats.today ?? 0
   const runsFailed = runsData?.stats.failed ?? 0
-  const successRate = runsToday > 0 ? Math.round(((runsToday - runsFailed) / runsToday) * 100) : 100
+  // No runs today → "—" rather than a misleading 100% ("100% of 0 = success" is a lie)
+  const successRateDisplay = runsToday > 0
+    ? `${Math.round(((runsToday - runsFailed) / runsToday) * 100)}%`
+    : "—"
+  const successRatePct = runsToday > 0 ? Math.round(((runsToday - runsFailed) / runsToday) * 100) : null
   const missionsInReview = missions.filter((m) => m.status === "REVIEW").length
 
   const openIssues = missions.filter(
@@ -539,13 +530,12 @@ export default function DashboardPage() {
   // ── Render ──────────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div className="p-6 space-y-4">
-        <Skeleton className="h-14 rounded-xl" />
-        <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(6, minmax(0,1fr))" }}>
+      <div className="p-4 md:p-6 space-y-4">
+        <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[112px] rounded-xl" />)}
         </div>
-        <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr" }}>
-          <Skeleton className="h-[260px] rounded-xl" />
+        <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+          <Skeleton className="h-[260px] rounded-xl lg:col-span-2" />
           <Skeleton className="h-[260px] rounded-xl" />
         </div>
         <Skeleton className="h-[200px] rounded-xl" />
@@ -554,70 +544,55 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="p-6 pb-10 space-y-4 bg-background min-h-[calc(100vh-48px)]">
-      {/* ── Action Center ────────────────────────────────────────── */}
-      <ActionCenter
-        escalations={escalationCount}
-        keeperRequests={pendingKeeperCount}
-        missionsInReview={missionsInReview}
-        proposals={0}
-        mentions={0}
-      />
-
-      {/* ── Row 1: 6 KPI cards ───────────────────────────────────── */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(6, minmax(0,1fr))" }}>
+    <div className="p-4 md:p-6 pb-10 space-y-4 bg-background min-h-[calc(100vh-48px)]">
+      {/* ── Row 1: 6 KPI cards ─ responsive 2→3→6 cols ──────────── */}
+      <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         <KpiCard
           label="Agents"
           value={totalAgents}
           subtitle={`${crews.length} crew${crews.length === 1 ? "" : "s"}`}
-          sparklineData={mockSparkline(1)}
-          sparklineColor="rgb(96, 165, 250)"
         />
         <KpiCard
-          label="Running now"
+          label="Running"
           value={runningNow}
           valueColor={runningNow > 0 ? "rgb(52, 211, 153)" : undefined}
-          subtitle={`of ${totalAgents} agents`}
-          sparklineData={mockSparkline(2)}
-          sparklineColor="rgb(52, 211, 153)"
+          subtitle={totalAgents > 0 ? `of ${totalAgents} agents` : undefined}
         />
         <KpiCard
           label="Active missions"
           value={activeMissionCount}
           subtitle={`${metrics?.total_missions ?? 0} total`}
-          sparklineData={mockSparkline(3)}
-          sparklineColor="rgb(167, 139, 250)"
         />
         <KpiCard
           label="Open issues"
           value={openIssues}
-          subtitle={openIssues === 0 ? "nothing open" : `in pipeline`}
-          sparklineData={mockSparkline(4)}
-          sparklineColor="rgb(251, 191, 36)"
+          subtitle={openIssues === 0 ? "nothing open" : "in pipeline"}
         />
         <KpiCard
           label="Cost (24h)"
           value={formatCost(totalCost24h)}
-          subtitle={runsToday > 0 ? `${runsToday} run${runsToday === 1 ? "" : "s"}` : "no runs"}
-          sparklineData={mockSparkline(5)}
-          sparklineColor="rgb(34, 211, 238)"
+          subtitle={runsToday > 0 ? `${runsToday} run${runsToday === 1 ? "" : "s"} today` : "no runs today"}
         />
         <KpiCard
-          label="Success rate"
-          value={`${successRate}%`}
-          valueColor={successRate >= 90 ? "rgb(52, 211, 153)" : successRate >= 70 ? "rgb(251, 191, 36)" : "rgb(248, 113, 113)"}
-          subtitle={runsFailed > 0 ? `${runsFailed} failed today` : "all clean"}
-          sparklineData={mockSparkline(6)}
-          sparklineColor="rgb(52, 211, 153)"
+          label="Success (24h)"
+          value={successRateDisplay}
+          valueColor={
+            successRatePct == null ? undefined
+              : successRatePct >= 90 ? "rgb(52, 211, 153)"
+              : successRatePct >= 70 ? "rgb(251, 191, 36)"
+              : "rgb(248, 113, 113)"
+          }
+          subtitle={runsFailed > 0 ? `${runsFailed} failed` : runsToday > 0 ? "all clean" : "no data"}
         />
       </div>
 
-      {/* ── Row 2: Throughput + Status donut ─────────────────────── */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr" }}>
+      {/* ── Row 2: Throughput (2fr) + Status donut (1fr) ─────────── */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
         <DashboardCard
           title="Issue throughput · 24h · by crew"
           icon={TrendingUp}
           hint={throughputTotal > 0 ? `${throughputTotal} closed` : "awaiting data"}
+          className="lg:col-span-2"
         >
           {throughputData && throughputSeries.length > 0 ? (
             <ThroughputChart buckets={throughputBuckets} series={throughputSeries} height={180} />
@@ -637,12 +612,13 @@ export default function DashboardPage() {
         </DashboardCard>
       </div>
 
-      {/* ── Row 3: Cost burn + Top missions ──────────────────────── */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr" }}>
+      {/* ── Row 3: Cost burn (2fr) + Top missions (1fr) ──────────── */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
         <DashboardCard
           title="Cost burn · 7 days"
           icon={Banknote}
           hint={costTotal > 0 ? `${formatCost(costTotal)} total` : "awaiting data"}
+          className="lg:col-span-2"
         >
           {costData && costSeries.length > 0 ? (
             <CostBurnChart buckets={costBuckets} series={costSeries} height={160} />
@@ -658,14 +634,17 @@ export default function DashboardPage() {
         </DashboardCard>
       </div>
 
-      {/* ── Row 4: Container resources (live) ────────────────────── */}
+      {/* ── Row 4: Container resources (live, full width) ────────── */}
       <DashboardCard title="Container resources · live" icon={Box} hint="via container.stats">
         <ContainerResourcesTile entries={containerEntries} />
       </DashboardCard>
 
-      {/* ── Row 5: Heatmap + Crew radial + Projects ──────────────── */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "1.5fr 1fr 1fr" }}>
-        <DashboardCard title="Agent activity · 24h" icon={Activity} hint="runs per hour">
+      {/* ── Row 5: Heatmap (2fr) + Crew radial (1fr) + Projects (1fr) ──
+          Mobile: each card on its own row.
+          Tablet: heatmap full width, radial+projects side by side.
+          Desktop: 4-col grid with heatmap spanning 2. */}
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
+        <DashboardCard title="Agent activity · 24h" icon={Activity} hint="runs per hour" className="md:col-span-2">
           <AgentHeatmap agents={heatmapAgents} buckets={heatmapBuckets} />
         </DashboardCard>
         <DashboardCard title="Crew health" icon={HeartPulse} hint={`${crews.length} crew${crews.length === 1 ? "" : "s"}`}>
@@ -676,9 +655,9 @@ export default function DashboardPage() {
         </DashboardCard>
       </div>
 
-      {/* ── Row 6: Activity feed + Inbox (2-col after Captain was removed) ── */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr" }}>
-        <DashboardCard title="Live activity" icon={Radio} hint="streaming">
+      {/* ── Row 6: Activity feed (2fr) + Inbox (1fr) ─────────────── */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+        <DashboardCard title="Live activity" icon={Radio} hint="streaming" className="lg:col-span-2">
           <ActivityFeed />
         </DashboardCard>
         <DashboardCard title="Inbox" icon={InboxIcon} hint={`${inboxEntries.length} item${inboxEntries.length === 1 ? "" : "s"}`}>

@@ -46,7 +46,8 @@ export function RecentMissionsTable({ missions }: RecentMissionsTableProps) {
   }
 
   return (
-    <div>
+    <div className="overflow-x-auto -mx-1 px-1">
+      <div className="min-w-[640px]">
       {missions.map((m) => {
         const taskTotal = m.tasks?.length ?? 0
         const taskDone = m.tasks?.filter((t) => t.status === "COMPLETED").length ?? 0
@@ -80,6 +81,7 @@ export function RecentMissionsTable({ missions }: RecentMissionsTableProps) {
           </Link>
         )
       })}
+      </div>
     </div>
   )
 }
