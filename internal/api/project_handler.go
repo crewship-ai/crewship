@@ -213,13 +213,7 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Progress:    0,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "project.created",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": id},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "project.created", map[string]string{"id": id})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -359,13 +353,7 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "project.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": projectID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "project.updated", map[string]string{"id": projectID})
 
 	// Return updated project
 	var p projectResponse
@@ -454,13 +442,7 @@ func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "project.deleted",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": projectID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "project.deleted", map[string]string{"id": projectID})
 
 	w.WriteHeader(http.StatusNoContent)
 }

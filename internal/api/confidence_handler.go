@@ -135,11 +135,5 @@ func (h *QueryHandler) autoEscalateForConfidence(r *http.Request, agentID, crewI
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
-			Type:    "escalation.created",
-			Channel: "workspace:" + workspaceID,
-			Payload: map[string]string{"id": escalationID, "task_id": taskID, "reason": reason},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, workspaceID, "escalation.created", map[string]string{"id": escalationID, "task_id": taskID, "reason": reason})
 }

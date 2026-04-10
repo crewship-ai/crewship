@@ -87,16 +87,9 @@ func (h *IssueHandler) insertComment(ctx context.Context, missionID, authorType,
 }
 
 // broadcastIssueEvent sends a workspace-scoped WebSocket event.
-// No-op if the hub is not configured.
+// Delegates to the package-level helper; kept for call-site brevity.
 func (h *IssueHandler) broadcastIssueEvent(wsID, eventType string, payload map[string]string) {
-	if h.hub == nil {
-		return
-	}
-	h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-		Type:    eventType,
-		Channel: "workspace:" + wsID,
-		Payload: payload,
-	})
+	broadcastWorkspaceEvent(h.hub, wsID, eventType, payload)
 }
 
 // ── Response types ──────────────────────────────────────────────────────────

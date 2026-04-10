@@ -179,13 +179,7 @@ func (h *TriageHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:  now,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "triage_rule.created",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": id},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "triage_rule.created", map[string]string{"id": id})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -307,13 +301,7 @@ func (h *TriageHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "triage_rule.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": ruleID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "triage_rule.updated", map[string]string{"id": ruleID})
 
 	// Return updated rule
 	var tr triageRuleResponse
@@ -367,13 +355,7 @@ func (h *TriageHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "triage_rule.deleted",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": ruleID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "triage_rule.deleted", map[string]string{"id": ruleID})
 
 	w.WriteHeader(http.StatusNoContent)
 }

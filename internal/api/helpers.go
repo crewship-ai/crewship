@@ -10,7 +10,22 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/ws"
 )
+
+// broadcastWorkspaceEvent sends a workspace-scoped WebSocket event. No-op if hub is nil.
+func broadcastWorkspaceEvent(hub *ws.Hub, wsID, eventType string, payload any) {
+	if hub == nil {
+		return
+	}
+	channel := "workspace:" + wsID
+	hub.Broadcast(channel, ws.ServerMessage{
+		Type:    eventType,
+		Channel: channel,
+		Payload: payload,
+	})
+}
 
 // parsePagination reads "limit" and "offset" query params, clamping limit to
 // [1, maxLimit] with the given default, and offset to >= 0.

@@ -175,13 +175,7 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   now,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "milestone.created",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": id, "project_id": projectID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "milestone.created", map[string]string{"id": id, "project_id": projectID})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -259,13 +253,7 @@ func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "milestone.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": milestoneID, "project_id": projectID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "milestone.updated", map[string]string{"id": milestoneID, "project_id": projectID})
 
 	// Return updated milestone
 	var ms milestoneResponse
@@ -362,13 +350,7 @@ func (h *MilestoneHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "milestone.deleted",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": milestoneID, "project_id": projectID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "milestone.deleted", map[string]string{"id": milestoneID, "project_id": projectID})
 
 	w.WriteHeader(http.StatusNoContent)
 }

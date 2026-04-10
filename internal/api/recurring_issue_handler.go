@@ -207,13 +207,7 @@ func (h *RecurringIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:      now,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "recurring_issue.created",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": id},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "recurring_issue.created", map[string]string{"id": id})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -330,13 +324,7 @@ func (h *RecurringIssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "recurring_issue.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": riID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "recurring_issue.updated", map[string]string{"id": riID})
 
 	// Return updated record
 	var ri recurringIssueResponse
@@ -396,13 +384,7 @@ func (h *RecurringIssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "recurring_issue.deleted",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": riID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "recurring_issue.deleted", map[string]string{"id": riID})
 
 	w.WriteHeader(http.StatusNoContent)
 }

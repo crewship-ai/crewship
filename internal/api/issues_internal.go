@@ -281,13 +281,7 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+req.WorkspaceID, ws.ServerMessage{
-			Type:    "issue.created",
-			Channel: "workspace:" + req.WorkspaceID,
-			Payload: map[string]string{"id": id, "identifier": identifier, "title": req.Title},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.created", map[string]string{"id": id, "identifier": identifier, "title": req.Title})
 
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"id":         id,
@@ -383,13 +377,7 @@ func (h *InternalIssueHandler) UpdateStatus(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+req.WorkspaceID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + req.WorkspaceID,
-			Payload: map[string]string{"id": missionID, "identifier": ident},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -445,13 +433,7 @@ func (h *InternalIssueHandler) CreateComment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+req.WorkspaceID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + req.WorkspaceID,
-			Payload: map[string]string{"id": missionID, "identifier": ident},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
 
 	writeJSON(w, http.StatusCreated, commentResponse{
 		ID:         commentID,
