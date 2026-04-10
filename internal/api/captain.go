@@ -169,7 +169,7 @@ func (h *CaptainHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		Message string `json:"message"`
 	}
 	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Message) == "" {
-		writeProblem(w, r, http.StatusBadRequest, "message is required")
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message is required"})
 		return
 	}
 
@@ -197,8 +197,9 @@ func (h *CaptainHandler) chatViaDirect(
 	provider, err := h.getProvider(r, wsID)
 	if err != nil {
 		h.logger.Warn("captain: no LLM provider", "workspace", wsID, "error", err)
-		writeProblem(w, r, http.StatusUnprocessableEntity,
-			"Captain requires an LLM API key. Add one in Settings → Credentials. Supported: Anthropic, OpenAI.")
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+			"error": "Captain requires an LLM API key. Add one in Settings → Credentials. Supported: Anthropic, OpenAI.",
+		})
 		return
 	}
 
