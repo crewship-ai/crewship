@@ -131,19 +131,14 @@ func (sc *StatsCollector) poll(ctx context.Context) {
 			sc.latestMu.Lock()
 			sc.latest[tc.ContainerID] = metrics
 			sc.latestMu.Unlock()
-			if sc.hub != nil {
-				channel := "workspace:" + tc.WorkspaceID
-				sc.hub.Broadcast(channel, ws.ServerMessage{
-					Type: "container.stats", Channel: channel,
-					Payload: map[string]interface{}{
-						"container_id": tc.ContainerID, "crew_id": tc.CrewID,
-						"cpu_percent": metrics.CPUPercent, "memory_used": metrics.MemoryUsed,
-						"memory_limit": metrics.MemoryLimit, "memory_percent": metrics.MemoryPct,
-						"net_rx_bytes": metrics.NetRx, "net_tx_bytes": metrics.NetTx,
-						"pids": metrics.PIDs, "timestamp": metrics.Timestamp,
-					},
+			sc.hub.BroadcastWorkspace(tc.WorkspaceID, "container.stats",
+				map[string]interface{}{
+					"container_id": tc.ContainerID, "crew_id": tc.CrewID,
+					"cpu_percent": metrics.CPUPercent, "memory_used": metrics.MemoryUsed,
+					"memory_limit": metrics.MemoryLimit, "memory_percent": metrics.MemoryPct,
+					"net_rx_bytes": metrics.NetRx, "net_tx_bytes": metrics.NetTx,
+					"pids": metrics.PIDs, "timestamp": metrics.Timestamp,
 				})
-			}
 		}(t)
 	}
 	wg.Wait()

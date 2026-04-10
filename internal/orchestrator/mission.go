@@ -995,15 +995,12 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		})
 
 		// Notify workspace about pending approval for dashboard badge.
-		if taskStatus == "AWAITING_APPROVAL" && e.hub != nil {
-			e.hub.Broadcast("workspace:"+ms.WorkspaceID, ws.ServerMessage{
-				Type:    "approval.required",
-				Channel: "workspace:" + ms.WorkspaceID,
-				Payload: map[string]string{
+		if taskStatus == "AWAITING_APPROVAL" {
+			e.hub.BroadcastWorkspace(ms.WorkspaceID, "approval.required",
+				map[string]string{
 					"task_id":    taskID,
 					"mission_id": missionID,
-				},
-			})
+				})
 		}
 	}
 
@@ -1072,12 +1069,9 @@ func (e *MissionEngine) checkApprovalGate(ctx context.Context, taskID, missionID
 		e.mu.Lock()
 		ms := e.active[missionID]
 		e.mu.Unlock()
-		if ms != nil && e.hub != nil {
-			e.hub.Broadcast("workspace:"+ms.WorkspaceID, ws.ServerMessage{
-				Type:    "confidence.low",
-				Channel: "workspace:" + ms.WorkspaceID,
-				Payload: map[string]string{"task_id": taskID, "mission_id": missionID, "level": "notify"},
-			})
+		if ms != nil {
+			e.hub.BroadcastWorkspace(ms.WorkspaceID, "confidence.low",
+				map[string]string{"task_id": taskID, "mission_id": missionID, "level": "notify"})
 		}
 	}
 
@@ -1137,13 +1131,8 @@ func (e *MissionEngine) ApproveTask(ctx context.Context, taskID, userID string, 
 
 	if ms != nil {
 		e.broadcastTaskStatus(ms, taskID, newStatus)
-		if e.hub != nil {
-			e.hub.Broadcast("workspace:"+ms.WorkspaceID, ws.ServerMessage{
-				Type:    "approval.resolved",
-				Channel: "workspace:" + ms.WorkspaceID,
-				Payload: map[string]string{"task_id": taskID, "mission_id": missionID, "action": approvalStatus},
-			})
-		}
+		e.hub.BroadcastWorkspace(ms.WorkspaceID, "approval.resolved",
+			map[string]string{"task_id": taskID, "mission_id": missionID, "action": approvalStatus})
 		e.checkMissionCompletion(ctx, ms) //nolint:errcheck
 	}
 
@@ -1409,37 +1398,17 @@ func (e *MissionEngine) loadTasks(ctx context.Context, missionID string) ([]Task
 }
 
 func (e *MissionEngine) broadcastTaskStatus(ms *missionState, taskID, status string) {
-	if e.hub == nil {
-		return
-	}
-	e.hub.Broadcast("mission:"+ms.ID, ws.ServerMessage{
-		Type:    "task.status",
-		Channel: "mission:" + ms.ID,
-		Payload: map[string]string{"id": taskID, "status": status},
-	})
-	wsChannel := "workspace:" + ms.WorkspaceID
-	e.hub.Broadcast(wsChannel, ws.ServerMessage{
-		Type:    "task.updated",
-		Channel: wsChannel,
-		Payload: map[string]string{"id": taskID, "mission_id": ms.ID, "status": status},
-	})
+	e.hub.BroadcastChannel("mission", ms.ID, "task.status",
+		map[string]string{"id": taskID, "status": status})
+	e.hub.BroadcastWorkspace(ms.WorkspaceID, "task.updated",
+		map[string]string{"id": taskID, "mission_id": ms.ID, "status": status})
 }
 
 func (e *MissionEngine) broadcastMissionStatus(ms *missionState, status string) {
-	if e.hub == nil {
-		return
-	}
-	e.hub.Broadcast("mission:"+ms.ID, ws.ServerMessage{
-		Type:    "mission.status",
-		Channel: "mission:" + ms.ID,
-		Payload: map[string]string{"id": ms.ID, "title": ms.Title, "status": status},
-	})
-	wsChannel := "workspace:" + ms.WorkspaceID
-	e.hub.Broadcast(wsChannel, ws.ServerMessage{
-		Type:    "mission.updated",
-		Channel: wsChannel,
-		Payload: map[string]string{"id": ms.ID, "crew_id": ms.CrewID, "title": ms.Title, "status": status},
-	})
+	e.hub.BroadcastChannel("mission", ms.ID, "mission.status",
+		map[string]string{"id": ms.ID, "title": ms.Title, "status": status})
+	e.hub.BroadcastWorkspace(ms.WorkspaceID, "mission.updated",
+		map[string]string{"id": ms.ID, "crew_id": ms.CrewID, "title": ms.Title, "status": status})
 }
 
 // countTasks returns the number of tasks in a mission.

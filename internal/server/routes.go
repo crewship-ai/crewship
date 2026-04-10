@@ -18,7 +18,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 func (s *Server) registerRoutes() {
@@ -249,27 +248,21 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Broadcast real-time log events to the workspace channel
-			if s.wsHub != nil {
-				channel := "workspace:" + req.WorkspaceID
-				s.wsHub.Broadcast(channel, ws.ServerMessage{
-					Type:    "agent.log",
-					Channel: channel,
-					Payload: map[string]interface{}{
-						"ts":       event.Timestamp,
-						"level":    "info",
-						"agent":    req.AgentSlug,
-						"agent_id": agentID,
-						"event":    event.Type,
-						"content":  event.Content,
-						"metadata": sanitizeMetadata(func() map[string]interface{} {
-							if m, ok := event.Metadata.(map[string]interface{}); ok {
-								return m
-							}
-							return nil
-						}()),
-					},
+			s.wsHub.BroadcastWorkspace(req.WorkspaceID, "agent.log",
+				map[string]interface{}{
+					"ts":       event.Timestamp,
+					"level":    "info",
+					"agent":    req.AgentSlug,
+					"agent_id": agentID,
+					"event":    event.Type,
+					"content":  event.Content,
+					"metadata": sanitizeMetadata(func() map[string]interface{} {
+						if m, ok := event.Metadata.(map[string]interface{}); ok {
+							return m
+						}
+						return nil
+					}()),
 				})
-			}
 		}
 		if err := s.orchestrator.RunAgent(ctx, runReq, handler); err != nil {
 			s.logger.Error("agent run failed", "agent_id", agentID, "error", err)

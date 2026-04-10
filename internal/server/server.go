@@ -158,12 +158,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// File watcher broadcasts real-time file events to WebSocket clients
 	// on the crew:{crewID} channel.
 	fileWatcher := fileserver.NewWatcher(cfg.Storage.BasePath, logger, func(crewID string, event fileserver.FileEvent) {
-		channel := "crew:" + crewID
-		wsHub.Broadcast(channel, ws.ServerMessage{
-			Type:    "file.event",
-			Channel: channel,
-			Payload: event,
-		})
+		wsHub.BroadcastChannel("crew", crewID, "file.event", event)
 	})
 
 	var statsCollector *StatsCollector

@@ -172,6 +172,25 @@ func (h *Hub) Broadcast(channel string, msg ServerMessage) {
 	h.broadcast <- ChannelMessage{Channel: channel, Data: data}
 }
 
+// BroadcastChannel sends a WebSocket event on the "prefix:id" channel
+// (e.g. "workspace:abc", "crew:xyz", "mission:m_1"). No-op if h is nil.
+func (h *Hub) BroadcastChannel(prefix, id, eventType string, payload any) {
+	if h == nil {
+		return
+	}
+	channel := prefix + ":" + id
+	h.Broadcast(channel, ServerMessage{
+		Type:    eventType,
+		Channel: channel,
+		Payload: payload,
+	})
+}
+
+// BroadcastWorkspace is a shortcut for BroadcastChannel("workspace", wsID, ...).
+func (h *Hub) BroadcastWorkspace(wsID, eventType string, payload any) {
+	h.BroadcastChannel("workspace", wsID, eventType, payload)
+}
+
 // BroadcastExcept sends a message to all channel subscribers except the excluded client.
 func (h *Hub) BroadcastExcept(channel string, exclude *Client, msg ServerMessage) {
 	data, err := json.Marshal(msg)
