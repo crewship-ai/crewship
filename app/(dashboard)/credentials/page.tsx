@@ -6,10 +6,12 @@ import {
   Bot, Lock, Terminal, CheckCircle, AlertTriangle, Clock, XCircle, ExternalLink,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { PageHeader } from "@/components/layout/page-header"
+import { PageShell } from "@/components/layout/page-shell"
 import { EmptyState } from "@/components/layout/empty-state"
+import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StatusBadge } from "@/components/ui/status-badge"
 import {
   Table,
   TableBody,
@@ -23,6 +25,11 @@ import { EditCredentialDialog } from "@/components/features/credentials/edit-cre
 import type { CredentialData } from "@/components/features/credentials/edit-credential-dialog"
 import { formatDate } from "@/lib/time"
 import { useAbilities } from "@/hooks/use-abilities"
+import {
+  CREDENTIAL_TYPE_ICON_COLOR,
+  PROVIDER_ICON_COLOR,
+} from "@/lib/colors"
+import { cn } from "@/lib/utils"
 
 interface Credential {
   id: string
@@ -51,13 +58,17 @@ interface Org {
   name: string
 }
 
-const TYPE_CONFIG = {
-  AI_CLI_TOKEN: { icon: Bot, label: "AI CLI Token", color: "text-violet-600" },
-  API_KEY: { icon: Key, label: "API Key", color: "text-amber-600" },
-  CLI_TOKEN: { icon: Terminal, label: "CLI Token", color: "text-blue-600" },
-  SECRET: { icon: Lock, label: "Secret", color: "text-muted-foreground" },
-  OAUTH2: { icon: ExternalLink, label: "OAuth 2.0", color: "text-emerald-600" },
-} as const
+// Icon + label maps (colors live in lib/colors.ts — CREDENTIAL_TYPE_ICON_COLOR)
+const TYPE_CONFIG: Record<
+  Credential["type"],
+  { icon: React.ElementType; label: string }
+> = {
+  AI_CLI_TOKEN: { icon: Bot, label: "AI CLI Token" },
+  API_KEY: { icon: Key, label: "API Key" },
+  CLI_TOKEN: { icon: Terminal, label: "CLI Token" },
+  SECRET: { icon: Lock, label: "Secret" },
+  OAUTH2: { icon: ExternalLink, label: "OAuth 2.0" },
+}
 
 const PROVIDER_LABELS: Record<string, string> = {
   ANTHROPIC: "Anthropic",
@@ -71,13 +82,33 @@ const PROVIDER_LABELS: Record<string, string> = {
   NONE: "--",
 }
 
-const STATUS_CONFIG = {
-  ACTIVE: { icon: CheckCircle, label: "Active", variant: "default" as const, color: "text-green-600" },
-  RATE_LIMITED: { icon: Clock, label: "Rate Limited", variant: "secondary" as const, color: "text-yellow-600" },
-  EXPIRED: { icon: AlertTriangle, label: "Expired", variant: "destructive" as const, color: "text-orange-600" },
-  REVOKED: { icon: XCircle, label: "Revoked", variant: "destructive" as const, color: "text-red-600" },
-  ERROR: { icon: AlertTriangle, label: "Error", variant: "destructive" as const, color: "text-red-600" },
-  PENDING: { icon: Clock, label: "Pending", variant: "secondary" as const, color: "text-blue-600" },
+// Map raw credential status → canonical status key used by StatusBadge.
+// Falls back to PENDING for anything we don't style explicitly.
+const STATUS_KEY: Record<Credential["status"], string> = {
+  ACTIVE: "COMPLETED",
+  RATE_LIMITED: "BLOCKED",
+  EXPIRED: "FAILED",
+  REVOKED: "FAILED",
+  ERROR: "FAILED",
+  PENDING: "PENDING",
+}
+
+const STATUS_LABEL: Record<Credential["status"], string> = {
+  ACTIVE: "Active",
+  RATE_LIMITED: "Rate Limited",
+  EXPIRED: "Expired",
+  REVOKED: "Revoked",
+  ERROR: "Error",
+  PENDING: "Pending",
+}
+
+const STATUS_ICON: Record<Credential["status"], React.ElementType> = {
+  ACTIVE: CheckCircle,
+  RATE_LIMITED: Clock,
+  EXPIRED: AlertTriangle,
+  REVOKED: XCircle,
+  ERROR: AlertTriangle,
+  PENDING: Clock,
 }
 
 export default function CredentialsPage() {
@@ -166,30 +197,35 @@ export default function CredentialsPage() {
     }
   }
 
+  const headerActions = canManage ? (
+    <Button onClick={() => setAddOpen(true)}>
+      <Plus className="mr-2 h-4 w-4" />
+      Add Credential
+    </Button>
+  ) : null
+
   if (loading) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-        <PageHeader title="Credentials" description="Manage API keys, AI tokens, and secrets" />
+      <PageShell
+        title="Credentials"
+        description="Shared secrets, API keys, and CLI tokens"
+        actions={headerActions}
+      >
         <div className="space-y-3">
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
-      </div>
+      </PageShell>
     )
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <PageHeader title="Credentials" description="Manage API keys, AI tokens, and secrets for your agents">
-        {canManage && (
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Credential
-          </Button>
-        )}
-      </PageHeader>
-
+    <PageShell
+      title="Credentials"
+      description="Shared secrets, API keys, and CLI tokens for your agents"
+      actions={headerActions}
+    >
       {credentials.length === 0 ? (
         <EmptyState
           icon={Key}
@@ -204,7 +240,7 @@ export default function CredentialsPage() {
           )}
         </EmptyState>
       ) : (
-        <div className="rounded-md border">
+        <Card className="overflow-hidden p-0">
           <Table>
             <TableHeader>
               <TableRow>
@@ -221,17 +257,18 @@ export default function CredentialsPage() {
               {credentials.map((cred) => {
                 const typeConfig = TYPE_CONFIG[cred.type]
                 const TypeIcon = typeConfig.icon
-                const statusConfig = STATUS_CONFIG[cred.status]
-                const StatusIcon = statusConfig.icon
+                const typeColor = CREDENTIAL_TYPE_ICON_COLOR[cred.type] ?? "text-muted-foreground"
+                const providerColor = PROVIDER_ICON_COLOR[cred.provider] ?? "text-muted-foreground"
+                const StatusIcon = STATUS_ICON[cred.status]
                 const showStatus = cred.type !== "SECRET"
 
                 return (
                   <TableRow key={cred.id}>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <TypeIcon className={`h-4 w-4 shrink-0 ${typeConfig.color}`} />
+                        <TypeIcon className={cn("h-4 w-4 shrink-0", typeColor)} />
                         <div className="min-w-0">
-                          <p className="font-medium font-mono text-sm">{cred.name}</p>
+                          <p className="font-medium font-mono text-body">{cred.name}</p>
                           {cred.account_label && (
                             <p className="text-label text-muted-foreground">{cred.account_label}</p>
                           )}
@@ -247,16 +284,21 @@ export default function CredentialsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <span className="text-body text-muted-foreground">
+                      <span className={cn("text-body inline-flex items-center gap-1.5", providerColor)}>
                         {PROVIDER_LABELS[cred.provider]}
                       </span>
                     </TableCell>
                     <TableCell>
                       {showStatus ? (
-                        <div className="flex items-center gap-1.5">
-                          <StatusIcon className={`h-3.5 w-3.5 ${statusConfig.color}`} />
-                          <span className="text-label">{statusConfig.label}</span>
-                        </div>
+                        <StatusBadge
+                          status={STATUS_KEY[cred.status]}
+                          label={
+                            <span className="inline-flex items-center gap-1.5">
+                              <StatusIcon className="h-3 w-3" />
+                              {STATUS_LABEL[cred.status]}
+                            </span>
+                          }
+                        />
                       ) : (
                         <span className="text-label text-muted-foreground">--</span>
                       )}
@@ -264,24 +306,24 @@ export default function CredentialsPage() {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         {cred.agent_names?.length > 0 ? (
-                          <span className="text-sm text-muted-foreground" title={cred.agent_names.join(", ")}>
+                          <span className="text-body text-muted-foreground" title={cred.agent_names.join(", ")}>
                             {cred.agent_names.slice(0, 3).join(", ")}
                             {cred.agent_names.length > 3 && ` +${cred.agent_names.length - 3}`}
                           </span>
                         ) : (
-                          <span className="text-sm text-muted-foreground">
+                          <span className="text-body text-muted-foreground">
                             {cred._count_agent_credentials ?? 0} {(cred._count_agent_credentials ?? 0) === 1 ? "agent" : "agents"}
                           </span>
                         )}
                         {cred.mcp_used && (
-                          <Badge variant="outline" className="text-label font-normal text-emerald-600 border-emerald-200">
+                          <Badge variant="outline" className="text-label font-normal">
                             MCP
                           </Badge>
                         )}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="text-muted-foreground">{formatDate(cred.created_at)}</span>
+                      <span className="text-body text-muted-foreground">{formatDate(cred.created_at)}</span>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
@@ -310,7 +352,7 @@ export default function CredentialsPage() {
               })}
             </TableBody>
           </Table>
-        </div>
+        </Card>
       )}
 
       {workspaceId && (
@@ -331,6 +373,6 @@ export default function CredentialsPage() {
           onSuccess={handleRefresh}
         />
       )}
-    </div>
+    </PageShell>
   )
 }
