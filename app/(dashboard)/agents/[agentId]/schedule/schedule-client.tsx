@@ -2,17 +2,21 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { useParams } from "next/navigation"
-import { Loader2, Clock, Save, Calendar } from "lucide-react"
+import { Loader2, Clock, Save, Calendar, MessageSquare, Power, Activity } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
+import { SectionCard } from "@/components/ui/section-card"
+import { StatusBadge } from "@/components/ui/status-badge"
+import { EmptyState } from "@/components/layout/empty-state"
+import { PropertyRow } from "@/components/layout/property-row"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { formatDateTime } from "@/lib/time"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 import { CronExpressionParser } from "cron-parser"
 
 interface ScheduleRun {
@@ -152,161 +156,175 @@ export function SchedulePageClient() {
   }
 
   if (wsLoading || loading) {
-    return (
-      <div className="flex items-center justify-center p-12">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    )
+    return <ScheduleSkeleton />
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 max-w-3xl">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Clock className="h-4 w-4" />
-            Schedule
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          {/* Enable toggle */}
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-sm font-medium">Enable Schedule</Label>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Automatically run this agent on a schedule
-              </p>
+    <div className="p-6 space-y-6 max-w-3xl">
+      <div>
+        <h2 className="text-title font-semibold">Schedule</h2>
+        <p className="text-body text-muted-foreground mt-1">
+          Run this agent automatically on a recurring cron schedule.
+        </p>
+      </div>
+
+      <SectionCard
+        title={
+          <span className="flex items-center gap-2">
+            <Clock className="h-4 w-4 text-muted-foreground" />
+            Trigger
+          </span>
+        }
+      >
+        <div className="space-y-0">
+          <PropertyRow label="Enabled" icon={Power}>
+            <div className="flex items-center justify-between">
+              <span className="text-body text-muted-foreground">
+                Automatically run on schedule
+              </span>
+              <Switch checked={enabled} onCheckedChange={setEnabled} />
             </div>
-            <Switch checked={enabled} onCheckedChange={setEnabled} />
-          </div>
+          </PropertyRow>
 
-          {/* Cron expression */}
-          <div className="space-y-2">
-            <Label htmlFor="cron">Cron Expression</Label>
-            <Input
-              id="cron"
-              value={cronExpr}
-              onChange={(e) => setCronExpr(e.target.value)}
-              placeholder="0 8 * * *"
-              className={`font-mono text-sm ${cronExpr && !cronValid ? "border-red-500" : ""}`}
-            />
-            {cronExpr && !cronValid && (
-              <p className="text-xs text-red-500">Invalid cron expression</p>
-            )}
-            {nextRuns.length > 0 && (
-              <div className="text-xs text-muted-foreground space-y-0.5">
-                <span className="font-medium">Next runs:</span>
-                {nextRuns.map((r, i) => (
-                  <div key={i} className="ml-2 flex items-center gap-1">
-                    <Calendar className="h-3 w-3" /> {r}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <PropertyRow label="Cron" icon={Clock}>
+            <div className="space-y-2">
+              <Input
+                id="cron"
+                value={cronExpr}
+                onChange={(e) => setCronExpr(e.target.value)}
+                placeholder="0 8 * * *"
+                className={cn("font-mono text-label", cronExpr && !cronValid && "border-destructive")}
+              />
+              {cronExpr && !cronValid && (
+                <p className="text-label text-destructive">Invalid cron expression</p>
+              )}
+              {nextRuns.length > 0 && (
+                <div className="text-label text-muted-foreground space-y-0.5">
+                  <span className="font-medium">Next runs:</span>
+                  {nextRuns.map((r, i) => (
+                    <div key={i} className="ml-2 flex items-center gap-1">
+                      <Calendar className="h-3 w-3" /> {r}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </PropertyRow>
 
-          {/* Presets */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Quick presets</Label>
+          <PropertyRow label="Presets">
             <div className="flex flex-wrap gap-1.5">
               {presets.map((p) => (
                 <button
                   key={p.cron}
                   onClick={() => setCronExpr(p.cron)}
-                  className="text-xs px-2.5 py-1 rounded-md border border-border bg-background hover:bg-accent transition-colors"
+                  className="text-label px-2.5 py-1 rounded-md border border-border bg-background hover:bg-accent transition-colors"
                 >
                   {p.label}
                 </button>
               ))}
             </div>
-          </div>
+          </PropertyRow>
 
-          {/* Schedule prompt */}
-          <div className="space-y-2">
-            <Label htmlFor="prompt">Schedule Prompt</Label>
-            <Textarea
-              id="prompt"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="What should the agent do on each scheduled run? e.g. 'Check for new support tickets and summarize them.'"
-              rows={4}
-              className="resize-none"
-            />
-            <p className="text-xs text-muted-foreground">
-              This message is sent to the agent as the user message when the schedule triggers.
-            </p>
-          </div>
+          <PropertyRow label="Prompt" icon={MessageSquare}>
+            <div className="space-y-2">
+              <Label htmlFor="prompt" className="sr-only">Schedule prompt</Label>
+              <Textarea
+                id="prompt"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="What should the agent do on each scheduled run? e.g. 'Check for new support tickets and summarize them.'"
+                rows={4}
+                className="resize-none"
+              />
+              <p className="text-label text-muted-foreground">
+                This message is sent as the user message when the schedule triggers.
+              </p>
+            </div>
+          </PropertyRow>
 
-          {/* Save */}
-          <div className="flex items-center gap-3">
-            <Button onClick={handleSave} disabled={saving} className="gap-2">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save Schedule
-            </Button>
-            {lastRun && (
-              <span className="text-xs text-muted-foreground">
-                Last run: {formatDateTime(lastRun)}
-              </span>
-            )}
-            {nextRun && enabled && (
-              <span className="text-xs text-muted-foreground">
-                Next: {formatDateTime(nextRun)}
-              </span>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+          {lastRun && (
+            <PropertyRow label="Last run" icon={Activity}>
+              <span className="text-body">{formatDateTime(lastRun)}</span>
+            </PropertyRow>
+          )}
+          {nextRun && enabled && (
+            <PropertyRow label="Next run" icon={Calendar}>
+              <span className="text-body">{formatDateTime(nextRun)}</span>
+            </PropertyRow>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 pt-4 mt-2 border-t border-border">
+          <Button onClick={handleSave} disabled={saving} className="gap-2">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save Schedule
+          </Button>
+        </div>
+      </SectionCard>
 
       {/* Recent scheduled runs */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Calendar className="h-4 w-4" />
+      <SectionCard
+        title={
+          <span className="flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-muted-foreground" />
             Recent Scheduled Runs
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {runsLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading...
-            </div>
-          ) : runs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No scheduled runs yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {runs.map((run) => (
-                <div
-                  key={run.id}
-                  className="flex items-center justify-between rounded-lg border border-border p-3"
-                >
-                  <div className="flex items-center gap-3">
-                    <Badge
-                      variant={
-                        run.status === "COMPLETED"
-                          ? "default"
-                          : run.status === "FAILED"
-                          ? "destructive"
-                          : "secondary"
-                      }
-                      className="text-xs"
-                    >
-                      {run.status}
-                    </Badge>
-                    <span className="text-sm text-muted-foreground">
-                      {formatDateTime(run.started_at)}
-                    </span>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {run.metadata && typeof run.metadata === "object" && "duration_ms" in run.metadata
-                      ? formatDuration(run.metadata.duration_ms as number)
-                      : ""}
-                  </div>
+          </span>
+        }
+        bare
+      >
+        {runsLoading ? (
+          <div className="flex items-center gap-2 p-6 text-body text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading...
+          </div>
+        ) : runs.length === 0 ? (
+          <div className="p-6">
+            <EmptyState
+              icon={Calendar}
+              title="No scheduled runs yet"
+              description="Once this schedule triggers, runs will appear here."
+            />
+          </div>
+        ) : (
+          <ul className="divide-y divide-border">
+            {runs.map((run) => (
+              <li
+                key={run.id}
+                className="flex items-center justify-between px-4 sm:px-6 py-3"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <StatusBadge status={run.status} />
+                  <span className="text-body text-muted-foreground truncate">
+                    {formatDateTime(run.started_at)}
+                  </span>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                <div className="text-label text-muted-foreground shrink-0">
+                  {run.metadata && typeof run.metadata === "object" && "duration_ms" in run.metadata
+                    ? formatDuration(run.metadata.duration_ms as number)
+                    : ""}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionCard>
+    </div>
+  )
+}
+
+function ScheduleSkeleton() {
+  return (
+    <div className="p-6 space-y-6 max-w-3xl">
+      <div className="space-y-2">
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-4 w-72" />
+      </div>
+      <SectionCard title={<Skeleton className="h-5 w-24" />}>
+        <div className="space-y-4">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      </SectionCard>
     </div>
   )
 }
