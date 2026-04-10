@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -281,8 +280,8 @@ var issueGetCmd = &cobra.Command{
 		// pollute machine output.
 		desc := derefStr(issue.Description, "")
 		if desc != "" && (f.Format == "" || f.Format == "table") {
-			fmt.Fprintln(os.Stdout)
-			fmt.Fprintf(os.Stdout, "%sDescription:%s\n", cli.Bold, cli.Reset)
+			fmt.Fprintln(f.Writer)
+			fmt.Fprintf(f.Writer, "%sDescription:%s\n", cli.Bold, cli.Reset)
 			f.Markdown(desc)
 		}
 
@@ -301,14 +300,17 @@ var issueGetCmd = &cobra.Command{
 			return nil
 		}
 
-		if len(comments) > 0 {
-			fmt.Fprintln(os.Stdout)
-			fmt.Fprintf(os.Stdout, "%sComments:%s\n", cli.Bold, cli.Reset)
+		// Comments section is human-facing only. JSON/YAML/quiet formats
+		// consume the main issue struct (already serialized by AutoDetail
+		// above) and would break if we appended styled text afterwards.
+		if len(comments) > 0 && (f.Format == "" || f.Format == "table") {
+			fmt.Fprintln(f.Writer)
+			fmt.Fprintf(f.Writer, "%sComments:%s\n", cli.Bold, cli.Reset)
 			for _, c := range comments {
 				author := derefStr(c.Author, "unknown")
 				ts := issueRelativeTime(c.CreatedAt)
-				fmt.Fprintf(os.Stdout, "\n%s@%s%s %s(%s)%s\n", cli.Bold, author, cli.Reset, cli.Dim, ts, cli.Reset)
-				// Render comment body as markdown
+				fmt.Fprintf(f.Writer, "\n%s@%s%s %s(%s)%s\n", cli.Bold, author, cli.Reset, cli.Dim, ts, cli.Reset)
+				// Render comment body as markdown.
 				f.Markdown(c.Body)
 			}
 		}

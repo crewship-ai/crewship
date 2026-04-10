@@ -54,13 +54,20 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      # Install syft for SBOM generation (CRE-122)
+      # Install syft for SBOM generation (CRE-122).
+      # Pin to a specific tag so release artifacts are reproducible across runs.
       - name: Install syft
-        uses: anchore/sbom-action/download-syft@v0
+        uses: anchore/sbom-action/download-syft@v0.20.7
+        with:
+          syft-version: v1.38.0
 
-      # Install cosign for keyless release signing (CRE-122)
+      # Install cosign for keyless release signing (CRE-122).
+      # Pin to a specific action release AND a specific cosign version so
+      # the same git tag always produces the same signature chain.
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v3.10.0
+        with:
+          cosign-release: v2.7.0
 
       - uses: goreleaser/goreleaser-action@v7
         with:
