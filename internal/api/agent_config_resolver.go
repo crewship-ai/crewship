@@ -505,11 +505,9 @@ func (h *InternalHandler) resolveCrewMembers(r *http.Request, data *agentConfigD
 	}
 	if (roleStr == "LEAD" || roleStr == "COORDINATOR") && len(crewMembers) > 0 {
 		memberIdx := make(map[string]int, len(crewMembers))
-		placeholders := make([]string, len(crewMembers))
 		args := make([]interface{}, len(crewMembers))
 		for i, m := range crewMembers {
 			memberIdx[m.ID] = i
-			placeholders[i] = "?"
 			args[i] = m.ID
 		}
 		if igRows, err := h.db.QueryContext(r.Context(), `
@@ -523,7 +521,7 @@ func (h *InternalHandler) resolveCrewMembers(r *http.Request, data *agentConfigD
 			FROM agent_mcp_bindings b
 			LEFT JOIN workspace_mcp_servers ws ON b.mcp_server_id = ws.id AND b.mcp_server_scope = 'workspace' AND ws.deleted_at IS NULL
 			LEFT JOIN crew_mcp_servers cs ON b.mcp_server_id = cs.id AND b.mcp_server_scope = 'crew' AND cs.deleted_at IS NULL
-			WHERE b.agent_id IN (`+strings.Join(placeholders, ",")+`) AND b.enabled = 1`,
+			WHERE b.agent_id IN (`+sqlPlaceholders(len(crewMembers))+`) AND b.enabled = 1`,
 			args...); err == nil {
 			for igRows.Next() {
 				var aid, displayName, serverName string
@@ -744,7 +742,7 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 	}
 
 	// Step 4: Batch credential lookup (avoid N+1)
-	credIDs := make([]string, 0)
+	credIDs := make([]string, 0, len(merged))
 	for _, srv := range merged {
 		if b, ok := agentBindings[srv.id]; ok && b.enabled && b.credID != nil && *b.credID != "" {
 			credIDs = append(credIDs, *b.credID)
@@ -752,14 +750,12 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 	}
 	credTokens := make(map[string]string) // credID -> plaintext
 	if len(credIDs) > 0 {
-		placeholders := make([]string, len(credIDs))
 		args := make([]interface{}, len(credIDs))
 		for i, id := range credIDs {
-			placeholders[i] = "?"
 			args[i] = id
 		}
 		if credRows, err := h.db.QueryContext(r.Context(),
-			"SELECT id, encrypted_value FROM credentials WHERE id IN ("+strings.Join(placeholders, ",")+") AND deleted_at IS NULL",
+			"SELECT id, encrypted_value FROM credentials WHERE id IN ("+sqlPlaceholders(len(credIDs))+") AND deleted_at IS NULL",
 			args...); err == nil {
 			for credRows.Next() {
 				var cid, encVal string

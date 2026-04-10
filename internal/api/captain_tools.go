@@ -165,20 +165,16 @@ func strInput(input map[string]any, key string) string {
 
 func execGetWorkspaceStats(ctx context.Context, h *CaptainHandler, wsID, userID, role string, _ map[string]any) (string, error) {
 	var crews, agents, missions, escalations, proposals int
-	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&crews); err != nil {
-		return "", fmt.Errorf("count crews: %w", err)
-	}
-	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&agents); err != nil {
-		return "", fmt.Errorf("count agents: %w", err)
-	}
-	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'", wsID).Scan(&missions); err != nil {
-		return "", fmt.Errorf("count missions: %w", err)
-	}
-	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM escalations WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&escalations); err != nil {
-		return "", fmt.Errorf("count escalations: %w", err)
-	}
-	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM mission_proposals WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&proposals); err != nil {
-		return "", fmt.Errorf("count proposals: %w", err)
+	err := h.db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL),
+			(SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL),
+			(SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'),
+			(SELECT COUNT(*) FROM escalations WHERE workspace_id = ? AND status = 'PENDING'),
+			(SELECT COUNT(*) FROM mission_proposals WHERE workspace_id = ? AND status = 'PENDING')`,
+		wsID, wsID, wsID, wsID, wsID).Scan(&crews, &agents, &missions, &escalations, &proposals)
+	if err != nil {
+		return "", fmt.Errorf("count workspace stats: %w", err)
 	}
 	return fmt.Sprintf("Workspace stats:\n- Crews: %d\n- Agents: %d\n- Active missions: %d\n- Pending escalations: %d\n- Pending proposals: %d",
 		crews, agents, missions, escalations, proposals), nil
@@ -412,12 +408,11 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 		return "", fmt.Errorf("name and crew_id are required")
 	}
 
-	var exists int
-	if err := h.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", crewID, wsID).Scan(&exists); err != nil {
+	found, err := crewExists(ctx, h.db, crewID, wsID)
+	if err != nil {
 		return "", fmt.Errorf("check crew existence: %w", err)
 	}
-	if exists == 0 {
+	if !found {
 		return "", fmt.Errorf("crew %q not found in workspace", crewID)
 	}
 
@@ -455,7 +450,7 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	_, err := h.db.ExecContext(ctx, `
+	_, err = h.db.ExecContext(ctx, `
 		INSERT INTO agents (id, workspace_id, crew_id, name, slug, role_title, agent_role,
 			cli_adapter, tool_profile, system_prompt, timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, 'CLAUDE_CODE', ?, ?, 1800, 1, ?, ?, ?)`,
@@ -485,17 +480,16 @@ func execCreateMission(ctx context.Context, h *CaptainHandler, wsID, _, role str
 		return "", fmt.Errorf("crew_id and title are required")
 	}
 
-	var exists int
-	if err := h.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", crewID, wsID).Scan(&exists); err != nil {
+	found, err := crewExists(ctx, h.db, crewID, wsID)
+	if err != nil {
 		return "", fmt.Errorf("check crew: %w", err)
 	}
-	if exists == 0 {
+	if !found {
 		return "", fmt.Errorf("crew %q not found", crewID)
 	}
 
 	var leadID string
-	err := h.db.QueryRowContext(ctx,
+	err = h.db.QueryRowContext(ctx,
 		"SELECT id FROM agents WHERE crew_id = ? AND agent_role = 'LEAD' AND deleted_at IS NULL LIMIT 1", crewID).Scan(&leadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("no LEAD agent in crew %q", crewID)

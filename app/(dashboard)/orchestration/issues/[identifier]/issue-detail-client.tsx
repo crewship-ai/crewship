@@ -27,9 +27,14 @@ import { useSession } from "@/hooks/use-auth"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { StatusIcon, statusLabel } from "@/components/features/issues/status-icon"
+import dynamic from "next/dynamic"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
-import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
+
+const TiptapEditor = dynamic(
+  () => import("@/components/features/issues/tiptap-editor").then(m => m.TiptapEditor),
+  { ssr: false },
+)
 import { LabelBadge } from "@/components/features/issues/label-badge"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"

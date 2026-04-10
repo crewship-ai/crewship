@@ -50,15 +50,20 @@ type updateAgentBindingRequest struct {
 // Agent MCP Bindings
 // ==========================================
 
+// ListAgentBindings returns all MCP server bindings for a given agent.
+// GET /api/v1/agents/{agentId}/mcp-bindings
 func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	agentID := r.PathValue("agentId")
 
 	// Verify agent
-	var agentExists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&agentExists); err != nil {
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
+		h.logger.Error("agent exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
@@ -112,6 +117,8 @@ func (h *IntegrationHandler) ListAgentBindings(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, results)
 }
 
+// CreateAgentBinding binds an MCP server to an agent with optional credential and configuration.
+// POST /api/v1/agents/{agentId}/mcp-bindings
 func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -121,10 +128,13 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 	}
 
 	agentID := r.PathValue("agentId")
-	var agentExists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&agentExists); err != nil {
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
+		h.logger.Error("agent exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
@@ -203,7 +213,7 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	_, err := h.db.ExecContext(r.Context(), `
+	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO agent_mcp_bindings (id, agent_id, mcp_server_id, mcp_server_scope,
 			credential_id, cred_type, cred_header, env_var_name, enabled, config_override_json, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -223,6 +233,8 @@ func (h *IntegrationHandler) CreateAgentBinding(w http.ResponseWriter, r *http.R
 	})
 }
 
+// UpdateAgentBinding modifies an existing agent MCP server binding.
+// PATCH /api/v1/agents/{agentId}/mcp-bindings/{bindingId}
 func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -320,6 +332,8 @@ func (h *IntegrationHandler) UpdateAgentBinding(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
+// DeleteAgentBinding removes an MCP server binding from an agent.
+// DELETE /api/v1/agents/{agentId}/mcp-bindings/{bindingId}
 func (h *IntegrationHandler) DeleteAgentBinding(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())

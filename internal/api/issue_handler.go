@@ -28,6 +28,87 @@ func NewIssueHandler(db *sql.DB, hub *ws.Hub, me MissionStarter, logger *slog.Lo
 	return &IssueHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }
 
+// issueSelectColumns is the shared SELECT clause for fetching issues/missions.
+const issueSelectColumns = `
+	SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
+	       m.number, m.identifier, m.title, m.description, m.status,
+	       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
+	       COALESCE(u.full_name, ag.name),
+	       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
+	       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
+	       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
+	       COALESCE(sub_cnt.cnt, 0)
+	FROM missions m
+	LEFT JOIN crews c ON m.crew_id = c.id
+	LEFT JOIN users u ON m.assignee_type = 'user' AND u.id = m.assignee_id
+	LEFT JOIN agents ag ON m.assignee_type = 'agent' AND ag.id = m.assignee_id
+	LEFT JOIN (SELECT parent_issue_id, COUNT(*) AS cnt FROM missions WHERE parent_issue_id IS NOT NULL GROUP BY parent_issue_id) sub_cnt ON sub_cnt.parent_issue_id = m.id`
+
+// scanIssue scans a row into an issueResponse using the standard column order.
+func scanIssue(s interface{ Scan(...interface{}) error }) (issueResponse, error) {
+	var issue issueResponse
+	err := s.Scan(
+		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
+		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
+		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
+		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
+		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
+		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
+		&issue.SubIssuesCount,
+	)
+	if err == nil {
+		issue.Labels = []labelResponse{}
+	}
+	return issue, err
+}
+
+// logActivity inserts a row into mission_activity. Errors are logged but not
+// returned — activity logging is best-effort and should not fail the caller.
+func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, actorID, action, details string) {
+	actID := generateCUID()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.ExecContext(ctx,
+		`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		actID, missionID, actorType, actorID, action, details, now); err != nil {
+		h.logger.Error("insert mission activity", "action", action, "mission_id", missionID, "error", err)
+	}
+}
+
+// setIssueLabels replaces the label associations for a mission by deleting
+// existing rows and inserting new ones. Errors are logged but not returned.
+func (h *IssueHandler) setIssueLabels(ctx context.Context, missionID string, labelIDs []string) {
+	if _, err := h.db.ExecContext(ctx,
+		`DELETE FROM mission_labels WHERE mission_id = ?`, missionID); err != nil {
+		h.logger.Error("delete mission labels", "mission_id", missionID, "error", err)
+		return
+	}
+	for _, labelID := range labelIDs {
+		if _, err := h.db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
+			missionID, labelID); err != nil {
+			h.logger.Error("insert mission label", "mission_id", missionID, "error", err)
+		}
+	}
+}
+
+// insertComment inserts a row into mission_comments. Errors are logged but not
+// returned — this is used by best-effort comment flows (e.g. review notes).
+func (h *IssueHandler) insertComment(ctx context.Context, missionID, authorType, authorID, body string) {
+	commentID := generateCUID()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.ExecContext(ctx,
+		`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		commentID, missionID, authorType, authorID, body, now, now); err != nil {
+		h.logger.Error("insert mission comment", "mission_id", missionID, "error", err)
+	}
+}
+
+// broadcastIssueEvent sends a workspace-scoped WebSocket event.
+// Delegates to the package-level helper; kept for call-site brevity.
+func (h *IssueHandler) broadcastIssueEvent(wsID, eventType string, payload map[string]string) {
+	broadcastWorkspaceEvent(h.hub, wsID, eventType, payload)
+}
+
 // ── Response types ──────────────────────────────────────────────────────────
 
 type issueResponse struct {
@@ -107,33 +188,15 @@ var validIssueTransitions = map[string][]string{
 
 // ── 1. List — GET /api/v1/issues ────────────────────────────────────────────
 
+// List returns a filtered, paginated list of issues in the workspace.
+// GET /api/v1/issues
 func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	// Pagination
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := parsePagination(r, 50, 100)
 
-	query := `
-		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
-		       m.number, m.identifier, m.title, m.description, m.status,
-		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
-		       CASE
-		         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
-		       END,
-		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
-		FROM missions m
-		LEFT JOIN crews c ON m.crew_id = c.id
+	query := issueSelectColumns + `
 		WHERE m.workspace_id = ?`
 	args := []interface{}{wsID}
 
@@ -148,23 +211,19 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Status filter (comma-separated)
 	if statusParam := r.URL.Query().Get("status"); statusParam != "" {
 		statuses := strings.Split(statusParam, ",")
-		placeholders := make([]string, len(statuses))
-		for i, s := range statuses {
-			placeholders[i] = "?"
+		for _, s := range statuses {
 			args = append(args, strings.TrimSpace(s))
 		}
-		query += " AND m.status IN (" + strings.Join(placeholders, ",") + ")"
+		query += " AND m.status IN (" + sqlPlaceholders(len(statuses)) + ")"
 	}
 
 	// Priority filter (comma-separated)
 	if priorityParam := r.URL.Query().Get("priority"); priorityParam != "" {
 		priorities := strings.Split(priorityParam, ",")
-		placeholders := make([]string, len(priorities))
-		for i, p := range priorities {
-			placeholders[i] = "?"
+		for _, p := range priorities {
 			args = append(args, strings.TrimSpace(p))
 		}
-		query += " AND m.priority IN (" + strings.Join(placeholders, ",") + ")"
+		query += " AND m.priority IN (" + sqlPlaceholders(len(priorities)) + ")"
 	}
 
 	// Project filter
@@ -221,21 +280,12 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	var result []issueResponse
 	var issueIDs []string
 	for rows.Next() {
-		var issue issueResponse
-		if err := rows.Scan(
-			&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
-			&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-			&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
-			&issue.DueDate, &issue.SortOrder, &issue.MissionType,
-			&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-			&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
-			&issue.SubIssuesCount,
-		); err != nil {
+		issue, err := scanIssue(rows)
+		if err != nil {
 			h.logger.Error("scan issue", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
-		issue.Labels = []labelResponse{}
 		result = append(result, issue)
 		issueIDs = append(issueIDs, issue.ID)
 	}
@@ -247,17 +297,16 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Batch-load labels
 	if len(issueIDs) > 0 {
-		placeholders := make([]string, len(issueIDs))
 		labelArgs := make([]interface{}, len(issueIDs))
 		for i, id := range issueIDs {
-			placeholders[i] = "?"
 			labelArgs[i] = id
 		}
+		ph := sqlPlaceholders(len(issueIDs))
 		labelQuery := fmt.Sprintf(`
 			SELECT ml.mission_id, l.id, l.name, l.color, l.label_group
 			FROM mission_labels ml
 			JOIN labels l ON ml.label_id = l.id
-			WHERE ml.mission_id IN (%s)`, strings.Join(placeholders, ","))
+			WHERE ml.mission_id IN (%s)`, ph)
 
 		labelRows, err := h.db.QueryContext(r.Context(), labelQuery, labelArgs...)
 		if err != nil {
@@ -286,7 +335,7 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 			SELECT mission_id, COUNT(*)
 			FROM mission_comments
 			WHERE mission_id IN (%s)
-			GROUP BY mission_id`, strings.Join(placeholders, ","))
+			GROUP BY mission_id`, ph)
 
 		commentRows, err := h.db.QueryContext(r.Context(), commentQuery, labelArgs...)
 		if err != nil {
@@ -319,6 +368,8 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // ── 2. Create — POST /api/v1/crews/{crewId}/issues ─────────────────────────
 
+// Create creates a new issue in the workspace with the given title, description, and metadata.
+// POST /api/v1/issues
 func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -483,49 +534,23 @@ func (h *IssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Labels:        []labelResponse{},
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.created",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": id},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.created", map[string]string{"id": id})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
 
 // ── 3. Get — GET /api/v1/crews/{crewId}/issues/{identifier} ────────────────
 
+// Get returns a single issue by ID with full details including labels and sub-issue counts.
+// GET /api/v1/issues/{issueId}
 func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	var issue issueResponse
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
-		       m.number, m.identifier, m.title, m.description, m.status,
-		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
-		       CASE
-		         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
-		       END,
-		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
-		FROM missions m
-		LEFT JOIN crews c ON m.crew_id = c.id
-		WHERE m.identifier = ? AND m.crew_id = ? AND m.workspace_id = ?`,
-		ident, crewID, wsID).Scan(
-		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
-		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
-		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
-		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
-		&issue.SubIssuesCount,
-	)
+	issue, err := scanIssue(h.db.QueryRowContext(r.Context(),
+		issueSelectColumns+` WHERE m.identifier = ? AND m.crew_id = ? AND m.workspace_id = ?`,
+		ident, crewID, wsID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -535,9 +560,6 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-
-	// Load labels
-	issue.Labels = []labelResponse{}
 	labelRows, err := h.db.QueryContext(r.Context(), `
 		SELECT l.id, l.name, l.color, l.label_group
 		FROM mission_labels ml
@@ -558,44 +580,26 @@ func (h *IssueHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Load comment count
-	_ = h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM mission_comments WHERE mission_id = ?`,
-		issue.ID).Scan(&issue.CommentCount)
+		issue.ID).Scan(&issue.CommentCount); err != nil {
+		h.logger.Error("load comment count", "issue_id", issue.ID, "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, issue)
 }
 
 // ── 3b. GetByIdentifier — GET /api/v1/issues/{identifier} (workspace-scoped) ─
 
+// GetByIdentifier resolves an issue by its human-readable identifier (e.g. "CRE-42").
+// GET /api/v1/issues/by-identifier/{identifier}
 func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 	ident := r.PathValue("identifier")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	var issue issueResponse
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
-		       m.number, m.identifier, m.title, m.description, m.status,
-		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
-		       CASE
-		         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
-		       END,
-		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
-		FROM missions m
-		LEFT JOIN crews c ON m.crew_id = c.id
-		WHERE m.identifier = ? AND m.workspace_id = ?`,
-		ident, wsID).Scan(
-		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
-		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
-		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
-		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
-		&issue.SubIssuesCount,
-	)
+	issue, err := scanIssue(h.db.QueryRowContext(r.Context(),
+		issueSelectColumns+` WHERE m.identifier = ? AND m.workspace_id = ?`,
+		ident, wsID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Issue not found")
@@ -622,15 +626,19 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_ = h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM mission_comments WHERE mission_id = ?`,
-		issue.ID).Scan(&issue.CommentCount)
+		issue.ID).Scan(&issue.CommentCount); err != nil {
+		h.logger.Error("load comment count", "issue_id", issue.ID, "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, issue)
 }
 
 // ── 4. Update — PATCH /api/v1/crews/{crewId}/issues/{identifier} ───────────
 
+// Update modifies issue fields such as title, status, priority, assignee, and labels.
+// PATCH /api/v1/issues/{issueId}
 func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -763,87 +771,43 @@ func (h *IssueHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Update labels if provided
 	if req.Labels != nil {
-		// Replace all labels: delete existing, insert new
-		if _, err := h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, missionID); err != nil {
-			h.logger.Error("delete issue labels", "error", err)
-		}
-		for _, labelID := range *req.Labels {
-			_, _ = h.db.ExecContext(r.Context(),
-				`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
-				missionID, labelID)
-		}
+		h.setIssueLabels(r.Context(), missionID, *req.Labels)
 	}
 
 	// Log activity for significant changes
 	user := UserFromContext(r.Context())
-	actorType := "user"
 	actorID := user.ID
-	now := time.Now().UTC().Format(time.RFC3339)
 
 	if req.Status != nil {
-		actID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'status_changed', ?, ?)`,
-			actID, missionID, actorType, actorID, fmt.Sprintf("%s → %s", currentStatus, *req.Status), now)
+		h.logActivity(r.Context(), missionID, "user", actorID, "status_changed",
+			fmt.Sprintf("%s → %s", currentStatus, *req.Status))
 	}
 	if req.AssigneeID != nil {
-		actID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'assignee_changed', ?, ?)`,
-			actID, missionID, actorType, actorID, fmt.Sprintf("assignee_id: %s", *req.AssigneeID), now)
+		h.logActivity(r.Context(), missionID, "user", actorID, "assignee_changed",
+			fmt.Sprintf("assignee_id: %s", *req.AssigneeID))
 	}
 	if req.Priority != nil {
-		actID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, 'priority_changed', ?, ?)`,
-			actID, missionID, actorType, actorID, *req.Priority, now)
+		h.logActivity(r.Context(), missionID, "user", actorID, "priority_changed", *req.Priority)
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": missionID},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID})
 
 	// Return updated issue
-	var issue issueResponse
-	err = h.db.QueryRowContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
-		       m.number, m.identifier, m.title, m.description, m.status,
-		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
-		       CASE
-		         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
-		       END,
-		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
-		FROM missions m
-		LEFT JOIN crews c ON m.crew_id = c.id
-		WHERE m.id = ?`, missionID).Scan(
-		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
-		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
-		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
-		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
-		&issue.SubIssuesCount,
-	)
+	issue, err := scanIssue(h.db.QueryRowContext(r.Context(),
+		issueSelectColumns+` WHERE m.id = ?`, missionID))
 	if err != nil {
 		h.logger.Error("read updated issue", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	issue.Labels = []labelResponse{}
 
 	writeJSON(w, http.StatusOK, issue)
 }
 
 // ── 5. Delete — DELETE /api/v1/crews/{crewId}/issues/{identifier} ───────────
 
+// Delete removes an issue and its associated comments, relations, and label assignments.
+// DELETE /api/v1/issues/{issueId}
 func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -888,19 +852,15 @@ func (h *IssueHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.deleted",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"identifier": ident},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.deleted", map[string]string{"identifier": ident})
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // ── 6. ListLabels — GET /api/v1/labels ──────────────────────────────────────
 
+// ListLabels returns all issue labels defined in the workspace.
+// GET /api/v1/issue-labels
 func (h *IssueHandler) ListLabels(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
@@ -935,6 +895,8 @@ func (h *IssueHandler) ListLabels(w http.ResponseWriter, r *http.Request) {
 
 // ── 7. CreateLabel — POST /api/v1/labels ────────────────────────────────────
 
+// CreateLabel creates a new issue label with a name and color.
+// POST /api/v1/issue-labels
 func (h *IssueHandler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -985,6 +947,8 @@ func (h *IssueHandler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 
 // ── 8. UpdateLabel — PATCH /api/v1/labels/{labelId} ─────────────────────────
 
+// UpdateLabel modifies an existing issue label's name or color.
+// PATCH /api/v1/issue-labels/{labelId}
 func (h *IssueHandler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1054,6 +1018,8 @@ func (h *IssueHandler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 
 // ── 9. DeleteLabel — DELETE /api/v1/labels/{labelId} ────────────────────────
 
+// DeleteLabel removes an issue label and all its assignments.
+// DELETE /api/v1/issue-labels/{labelId}
 func (h *IssueHandler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
@@ -1087,6 +1053,8 @@ func (h *IssueHandler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 
 // ── 10. ListComments — GET /api/v1/crews/{crewId}/issues/{identifier}/comments
 
+// ListComments returns all comments on an issue, ordered chronologically.
+// GET /api/v1/issues/{issueId}/comments
 func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
@@ -1147,6 +1115,8 @@ func (h *IssueHandler) ListComments(w http.ResponseWriter, r *http.Request) {
 
 // ── 11. CreateComment — POST /api/v1/crews/{crewId}/issues/{identifier}/comments
 
+// CreateComment adds a comment to an issue.
+// POST /api/v1/issues/{issueId}/comments
 func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1210,19 +1180,15 @@ func (h *IssueHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:  now,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": missionID},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
 
 // ── 12. ListRelations — GET /api/v1/crews/{crewId}/issues/{identifier}/relations
 
+// ListRelations returns all relations (blocks, is-blocked-by, relates-to) for an issue.
+// GET /api/v1/issues/{issueId}/relations
 func (h *IssueHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
@@ -1277,6 +1243,8 @@ func (h *IssueHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 
 // ── 13. CreateRelation — POST /api/v1/crews/{crewId}/issues/{identifier}/relations
 
+// CreateRelation creates a relation between two issues (e.g. blocks, relates_to).
+// POST /api/v1/issues/{issueId}/relations
 func (h *IssueHandler) CreateRelation(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1344,19 +1312,15 @@ func (h *IssueHandler) CreateRelation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": sourceID},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": sourceID})
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id, "status": "ok"})
 }
 
 // ── Review — POST /api/v1/crews/{crewId}/issues/{identifier}/review ────────
 
+// Review submits a review decision (approve/reject/request_changes) for an issue awaiting review.
+// POST /api/v1/issues/{issueId}/review
 func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1421,19 +1385,11 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		if req.Comment != "" {
 			commentBody = "Approved: " + req.Comment
 		}
-		commentID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'user', ?, ?, ?, ?)`,
-			commentID, missionID, user.ID, commentBody, now, now)
-
-		// Activity
-		actID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'review_approved', ?, ?)`,
-			actID, missionID, user.ID, commentBody, now)
+		h.insertComment(r.Context(), missionID, "user", user.ID, commentBody)
+		h.logActivity(r.Context(), missionID, "user", user.ID, "review_approved", commentBody)
 
 	} else {
-		// request_changes → TODO
+		// request_changes → revert status to TODO so the assignee can rework
 		ub := newUpdate()
 		ub.Set("status", "TODO")
 
@@ -1462,31 +1418,19 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		if req.Comment != "" {
 			commentBody = "Changes requested: " + req.Comment
 		}
-		commentID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'user', ?, ?, ?, ?)`,
-			commentID, missionID, user.ID, commentBody, now, now)
-
-		// Activity
-		actID := generateCUID()
-		_, _ = h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'review_changes_requested', ?, ?)`,
-			actID, missionID, user.ID, commentBody, now)
+		h.insertComment(r.Context(), missionID, "user", user.ID, commentBody)
+		h.logActivity(r.Context(), missionID, "user", user.ID, "review_changes_requested", commentBody)
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": missionID, "identifier": ident},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID, "identifier": ident})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": req.Action})
 }
 
 // ── ListActivity — GET /api/v1/crews/{crewId}/issues/{identifier}/activity
 
+// ListActivity returns the activity history (status changes, comments, assignments) for an issue.
+// GET /api/v1/issues/{issueId}/activity
 func (h *IssueHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
@@ -1503,12 +1447,10 @@ func (h *IssueHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT a.id, a.mission_id, a.actor_type, a.actor_id, a.action, a.details, a.created_at,
-			CASE
-				WHEN a.actor_type = 'user' THEN (SELECT full_name FROM users WHERE id = a.actor_id)
-				WHEN a.actor_type = 'agent' THEN (SELECT name FROM agents WHERE id = a.actor_id)
-				ELSE 'System'
-			END AS actor_name
+			COALESCE(u.full_name, ag.name, 'System')
 		FROM mission_activity a
+		LEFT JOIN users u ON a.actor_type = 'user' AND u.id = a.actor_id
+		LEFT JOIN agents ag ON a.actor_type = 'agent' AND ag.id = a.actor_id
 		WHERE a.mission_id = ?
 		ORDER BY a.created_at DESC
 		LIMIT 50`, missionID)
@@ -1547,6 +1489,8 @@ func (h *IssueHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 
 // ── 14. DeleteRelation — DELETE /api/v1/relations/{relationId}
 
+// DeleteRelation removes a relation between two issues.
+// DELETE /api/v1/issues/{issueId}/relations/{relationId}
 func (h *IssueHandler) DeleteRelation(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1571,6 +1515,8 @@ func (h *IssueHandler) DeleteRelation(w http.ResponseWriter, r *http.Request) {
 
 // ── 15. Start — POST /api/v1/crews/{crewId}/issues/{identifier}/start ──────
 
+// Start transitions an issue to in_progress and dispatches it to the assigned agent as a mission.
+// POST /api/v1/issues/{issueId}/start
 func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1613,7 +1559,9 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	// 3b. Create synthetic chat so assignments can reference it (FK on chat_id)
 	var chatExists int
-	_ = h.db.QueryRowContext(r.Context(), `SELECT 1 FROM chats WHERE id = ?`, missionID).Scan(&chatExists)
+	if err := h.db.QueryRowContext(r.Context(), `SELECT 1 FROM chats WHERE id = ?`, missionID).Scan(&chatExists); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		h.logger.Error("start issue: check chat", "mission_id", missionID, "error", err)
+	}
 	if chatExists == 0 {
 		chatNow := time.Now().UTC().Format(time.RFC3339)
 		_, err = h.db.ExecContext(r.Context(), `
@@ -1629,15 +1577,19 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 	// 4. Reset existing tasks to PENDING or create new one
 	var taskCount int
-	_ = h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mission_tasks WHERE mission_id = ?`, missionID).Scan(&taskCount)
+	if err := h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mission_tasks WHERE mission_id = ?`, missionID).Scan(&taskCount); err != nil {
+		h.logger.Error("start issue: count tasks", "mission_id", missionID, "error", err)
+	}
 	if taskCount > 0 {
 		// Reset existing tasks for re-run
 		resetNow := time.Now().UTC().Format(time.RFC3339)
-		_, _ = h.db.ExecContext(r.Context(), `
+		if _, err := h.db.ExecContext(r.Context(), `
 			UPDATE mission_tasks SET status = 'PENDING', started_at = NULL, completed_at = NULL,
 			duration_ms = NULL, result_summary = NULL, error_message = NULL, assignment_id = NULL,
 			iteration = COALESCE(iteration, 0) + 1, updated_at = ?
-			WHERE mission_id = ?`, resetNow, missionID)
+			WHERE mission_id = ?`, resetNow, missionID); err != nil {
+			h.logger.Error("start issue: reset tasks", "mission_id", missionID, "error", err)
+		}
 	} else {
 		taskID := generateCUID()
 		now := time.Now().UTC().Format(time.RFC3339)
@@ -1682,13 +1634,7 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 7. Broadcast
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.started",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": missionID, "identifier": ident, "status": "IN_PROGRESS"},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.started", map[string]string{"id": missionID, "identifier": ident, "status": "IN_PROGRESS"})
 
 	h.logger.Info("issue started", "identifier", ident, "agent", assigneeID.String)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "IN_PROGRESS", "identifier": ident})
@@ -1696,6 +1642,8 @@ func (h *IssueHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 // ── 16. Stop — POST /api/v1/crews/{crewId}/issues/{identifier}/stop ────────
 
+// Stop cancels the running mission for an issue and returns it to the previous status.
+// POST /api/v1/issues/{issueId}/stop
 func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1729,9 +1677,11 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Cancel running/pending tasks
-	_, _ = h.db.ExecContext(r.Context(), `
+	if _, err := h.db.ExecContext(r.Context(), `
 		UPDATE mission_tasks SET status = 'CANCELLED', updated_at = ? WHERE mission_id = ? AND status IN ('PENDING', 'IN_PROGRESS', 'BLOCKED')`,
-		now, missionID)
+		now, missionID); err != nil {
+		h.logger.Error("stop issue: cancel tasks", "mission_id", missionID, "error", err)
+	}
 
 	// Update issue status → CANCELLED
 	_, err = h.db.ExecContext(r.Context(), `
@@ -1743,13 +1693,7 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issue.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": missionID, "identifier": ident, "status": "CANCELLED"},
-		})
-	}
+	h.broadcastIssueEvent(wsID, "issue.updated", map[string]string{"id": missionID, "identifier": ident, "status": "CANCELLED"})
 
 	h.logger.Info("issue stopped", "identifier", ident)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "CANCELLED", "identifier": ident})
@@ -1757,6 +1701,8 @@ func (h *IssueHandler) Stop(w http.ResponseWriter, r *http.Request) {
 
 // ── 17. BulkUpdate — POST /api/v1/issues/bulk-update ──────────────────────
 
+// BulkUpdate applies the same field changes to multiple issues at once.
+// PATCH /api/v1/issues/bulk
 func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -1853,31 +1799,20 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 
 		// Update labels if provided
 		if req.Updates.Labels != nil {
-			_, _ = h.db.ExecContext(r.Context(), `DELETE FROM mission_labels WHERE mission_id = ?`, issueID)
-			for _, labelID := range *req.Updates.Labels {
-				_, _ = h.db.ExecContext(r.Context(),
-					`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
-					issueID, labelID)
-			}
+			h.setIssueLabels(r.Context(), issueID, *req.Updates.Labels)
 		}
 
 		// Activity log
 		if req.Updates.Status != nil {
-			actID := generateCUID()
-			_, _ = h.db.ExecContext(r.Context(),
-				`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'user', ?, 'status_changed', ?, ?)`,
-				actID, issueID, user.ID, fmt.Sprintf("%s -> %s (bulk)", currentStatus, *req.Updates.Status), now)
+			h.logActivity(r.Context(), issueID, "user", user.ID, "status_changed",
+				fmt.Sprintf("%s -> %s (bulk)", currentStatus, *req.Updates.Status))
 		}
 
 		updated++
 	}
 
-	if h.hub != nil && updated > 0 {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "issues.bulk_updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"count": fmt.Sprintf("%d", updated)},
-		})
+	if updated > 0 {
+		h.broadcastIssueEvent(wsID, "issues.bulk_updated", map[string]string{"count": strconv.Itoa(updated)})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]int{"updated": updated})
@@ -1885,6 +1820,8 @@ func (h *IssueHandler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 
 // ── 18. ListSubIssues — GET /api/v1/crews/{crewId}/issues/{identifier}/subtasks
 
+// ListSubIssues returns all child issues of a given parent issue.
+// GET /api/v1/issues/{issueId}/sub-issues
 func (h *IssueHandler) ListSubIssues(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	ident := r.PathValue("identifier")
@@ -1905,20 +1842,8 @@ func (h *IssueHandler) ListSubIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
-		       m.number, m.identifier, m.title, m.description, m.status,
-		       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
-		       CASE
-		         WHEN m.assignee_type = 'user' THEN (SELECT full_name FROM users WHERE id = m.assignee_id)
-		         WHEN m.assignee_type = 'agent' THEN (SELECT name FROM agents WHERE id = m.assignee_id)
-		       END,
-		       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
-		       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
-		       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
-		       (SELECT COUNT(*) FROM missions sub WHERE sub.parent_issue_id = m.id) AS sub_issues_count
-		FROM missions m
-		LEFT JOIN crews c ON m.crew_id = c.id
+	rows, err := h.db.QueryContext(r.Context(),
+		issueSelectColumns+`
 		WHERE m.parent_issue_id = ?
 		ORDER BY COALESCE(m.sort_order, 0) ASC, m.created_at ASC`, parentID)
 	if err != nil {
@@ -1930,21 +1855,12 @@ func (h *IssueHandler) ListSubIssues(w http.ResponseWriter, r *http.Request) {
 
 	var result []issueResponse
 	for rows.Next() {
-		var issue issueResponse
-		if err := rows.Scan(
-			&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
-			&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
-			&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
-			&issue.DueDate, &issue.SortOrder, &issue.MissionType,
-			&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
-			&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
-			&issue.SubIssuesCount,
-		); err != nil {
+		issue, err := scanIssue(rows)
+		if err != nil {
 			h.logger.Error("scan sub-issue", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
-		issue.Labels = []labelResponse{}
 		result = append(result, issue)
 	}
 	if err := rows.Err(); err != nil {

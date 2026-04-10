@@ -16,34 +16,7 @@ func (s *Server) handleListCrews(w http.ResponseWriter, r *http.Request) {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
 		return
 	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-
-	url := s.ipc.BaseURL + "/api/v1/internal/crews?workspace_id=" + s.ipc.WorkspaceID
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{"error": "failed to create request"})
-		return
-	}
-	req.Header.Set("X-Internal-Token", s.ipc.Token)
-
-	resp, err := ipcClient.Do(req)
-	if err != nil {
-		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "crewshipd request failed"})
-		return
-	}
-	defer resp.Body.Close()
-
-	var result json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		writeJSONResponse(w, http.StatusBadGateway, map[string]string{"error": "invalid response"})
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	w.Write(result)
+	s.proxyToAPI(w, r, http.MethodGet, "/api/v1/internal/crews?workspace_id="+s.ipc.WorkspaceID)
 }
 
 // handleListCrewConnections proxies GET /crew-connections to the crewshipd API.

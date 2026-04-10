@@ -2,6 +2,8 @@ package provider
 
 import "context"
 
+// StateProvider defines the interface for a bucket-based key-value store
+// used for transient runtime state (e.g. agent run progress, container mappings).
 type StateProvider interface {
 	Get(ctx context.Context, bucket, key string) ([]byte, error)
 	Set(ctx context.Context, bucket, key string, value []byte) error

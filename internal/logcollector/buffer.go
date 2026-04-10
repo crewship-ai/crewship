@@ -26,6 +26,8 @@ type OutputBuffer struct {
 	timer *time.Timer
 }
 
+// NewOutputBuffer creates an OutputBuffer that aggregates streaming token
+// fragments before writing them to the given Writer.
 func NewOutputBuffer(w *Writer, crewID, agentID string) *OutputBuffer {
 	return &OutputBuffer{
 		writer:  w,
@@ -54,6 +56,7 @@ func eventLevel(event string) string {
 	}
 }
 
+// Append adds a log entry to the buffer, flushing non-streamed events immediately.
 func (ob *OutputBuffer) Append(entry LogEntry) error {
 	if !isStreamedEvent(entry.Event) {
 		ob.flush()

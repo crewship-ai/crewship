@@ -9,6 +9,10 @@ const SECRET_PATTERNS = [
   /gho_[a-zA-Z0-9]{36}/g,
 ]
 
+/**
+ * Redact known secret patterns (API keys, tokens, private keys) from text.
+ * Preserves the first 8 characters for identification, replacing the rest with "***REDACTED***".
+ */
 export function redactSecrets(text: string): string {
   let result = text
   for (const pattern of SECRET_PATTERNS) {
@@ -17,6 +21,7 @@ export function redactSecrets(text: string): string {
   return result
 }
 
+/** Redact credentials from a URL (username, password, query string) for safe display. */
 export function redactUrl(raw: string): string {
   try {
     const url = new URL(raw)

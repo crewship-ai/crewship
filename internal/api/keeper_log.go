@@ -7,11 +7,13 @@ import (
 	"strconv"
 )
 
+// KeeperLogHandler provides endpoints for querying the Keeper decision audit log.
 type KeeperLogHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewKeeperLogHandler creates a KeeperLogHandler with the given database and logger.
 func NewKeeperLogHandler(db *sql.DB, logger *slog.Logger) *KeeperLogHandler {
 	return &KeeperLogHandler{db: db, logger: logger}
 }

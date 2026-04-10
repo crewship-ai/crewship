@@ -6,6 +6,9 @@ import (
 	"log/slog"
 )
 
+// SeedBundledSkills inserts the default set of bundled skills (Code Reviewer,
+// Web Researcher, Deployment Assistant) into the database, skipping any that
+// already exist.
 func SeedBundledSkills(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	skills := []struct {
 		ID, Name, Slug, DisplayName, Description, Category, Icon, Content string

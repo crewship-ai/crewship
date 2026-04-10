@@ -12,8 +12,14 @@ type Subjects =
   | "Member"
   | "all"
 
+/** CASL ability type parameterized with Crewship actions and subjects. */
 export type AppAbility = PureAbility<[Actions, Subjects]>
 
+/**
+ * Build a CASL ability set for a given workspace role.
+ * OWNER/ADMIN can manage everything; MANAGER can CRUD crews/agents/credentials;
+ * MEMBER/VIEWER have read-only access.
+ */
 export function defineAbilitiesFor(role: OrgRole): AppAbility {
   const { can, build } = new AbilityBuilder<AppAbility>(PureAbility)
 

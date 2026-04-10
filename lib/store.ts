@@ -1,5 +1,6 @@
 import { create } from "zustand"
 
+/** A single breadcrumb entry in the navigation trail. */
 export interface BreadcrumbItem {
   label: string
   onClick?: () => void
@@ -16,6 +17,7 @@ interface AppState {
   setBreadcrumbs: (items: BreadcrumbItem[]) => void
 }
 
+/** Global application state store (Zustand) for workspace context, sidebar, settings, and breadcrumbs. */
 export const useAppStore = create<AppState>((set) => ({
   currentWorkspaceId: null,
   sidebarOpen: true,

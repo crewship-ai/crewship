@@ -14,6 +14,7 @@ type secretsAdapter struct {
 	store *secrets.Store
 }
 
+// Get returns the plaintext value for the given credential ID.
 func (a *secretsAdapter) Get(credentialID string) (string, bool) {
 	cred, found := a.store.Get(credentialID)
 	return cred.PlainValue, found

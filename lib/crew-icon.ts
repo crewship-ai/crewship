@@ -416,7 +416,7 @@ export const CREW_ICONS: CrewIconDef[] = [
   { name: "utensils-crossed", icon: UtensilsCrossed, label: "Dining" },
 ]
 
-export const ALL_CREW_ICON_NAMES: string[] = CREW_ICONS.map((i) => i.name)
+const ALL_CREW_ICON_NAMES: string[] = CREW_ICONS.map((i) => i.name)
 
 const iconByName: Record<string, CrewIconDef> = {}
 for (const i of CREW_ICONS) iconByName[i.name] = i

@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// LogRecord is a structured log entry stored in the ring buffer.
 type LogRecord struct {
 	Time    time.Time         `json:"time"`
 	Level   string            `json:"level"`
@@ -14,6 +15,8 @@ type LogRecord struct {
 	Attrs   map[string]string `json:"attrs,omitempty"`
 }
 
+// RingBuffer is a fixed-capacity circular buffer of LogRecords. When full,
+// new entries overwrite the oldest. All methods are safe for concurrent use.
 type RingBuffer struct {
 	mu      sync.RWMutex
 	entries []LogRecord
@@ -22,13 +25,21 @@ type RingBuffer struct {
 	full    bool
 }
 
+// NewRingBuffer creates a RingBuffer that holds up to capacity log records.
+// Panics if capacity <= 0 — a zero or negative capacity would cause a
+// modulo-by-zero panic inside Append on the first record, and failing fast
+// at construction makes the misconfiguration obvious at startup.
 func NewRingBuffer(capacity int) *RingBuffer {
+	if capacity <= 0 {
+		panic("logging: ring buffer capacity must be > 0")
+	}
 	return &RingBuffer{
 		entries: make([]LogRecord, capacity),
 		cap:     capacity,
 	}
 }
 
+// Append adds a log record to the buffer, overwriting the oldest entry if full.
 func (rb *RingBuffer) Append(record LogRecord) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
@@ -39,6 +50,8 @@ func (rb *RingBuffer) Append(record LogRecord) {
 	}
 }
 
+// Entries returns up to limit log records in chronological order.
+// If limit is 0 or negative, all stored records are returned.
 func (rb *RingBuffer) Entries(limit int) []LogRecord {
 	rb.mu.RLock()
 	defer rb.mu.RUnlock()
@@ -83,14 +96,29 @@ type RingHandler struct {
 	group  string
 }
 
+// NewRingHandler creates a RingHandler that captures records into buffer
+// while forwarding them to the inner handler.
+//
+// Panics if inner or buffer is nil, matching NewRingBuffer's fail-fast style.
+// Enabled dereferences inner and Handle dereferences both — a later runtime
+// panic deep inside a logging call would be much harder to diagnose than a
+// loud failure at construction time.
 func NewRingHandler(inner slog.Handler, buffer *RingBuffer) *RingHandler {
+	if inner == nil {
+		panic("logging: NewRingHandler inner handler must not be nil")
+	}
+	if buffer == nil {
+		panic("logging: NewRingHandler buffer must not be nil")
+	}
 	return &RingHandler{inner: inner, buffer: buffer}
 }
 
+// Enabled reports whether the inner handler is enabled for the given level.
 func (h *RingHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.inner.Enabled(ctx, level)
 }
 
+// Handle captures the log record into the ring buffer and forwards it to the inner handler.
 func (h *RingHandler) Handle(ctx context.Context, r slog.Record) error {
 	attrs := make(map[string]string)
 	for _, a := range h.attrs {
@@ -118,6 +146,7 @@ func (h *RingHandler) Handle(ctx context.Context, r slog.Record) error {
 	return h.inner.Handle(ctx, r)
 }
 
+// WithAttrs returns a new RingHandler with the given attributes appended.
 func (h *RingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	newAttrs := make([]slog.Attr, len(h.attrs), len(h.attrs)+len(attrs))
 	copy(newAttrs, h.attrs)
@@ -130,6 +159,7 @@ func (h *RingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	}
 }
 
+// WithGroup returns a new RingHandler with the given group name applied.
 func (h *RingHandler) WithGroup(name string) slog.Handler {
 	g := h.group
 	if g != "" {

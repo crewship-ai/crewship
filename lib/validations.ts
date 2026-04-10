@@ -1,12 +1,15 @@
 import { z } from "zod"
 
+/** Zod schema for creating a workspace (name + slug). */
 export const createWorkspaceSchema = z.object({
   name: z.string().min(2).max(100),
   slug: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens"),
 })
 
+/** Zod schema for partially updating a workspace. */
 export const updateWorkspaceSchema = createWorkspaceSchema.partial()
 
+/** Zod schema for creating a crew with optional description, color, icon, and container resource limits. */
 export const createCrewSchema = z.object({
   name: z.string().min(2).max(100),
   slug: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens"),
@@ -18,8 +21,10 @@ export const createCrewSchema = z.object({
   container_cpus: z.number().min(0.5).max(16).optional(),
 })
 
+/** Zod schema for partially updating a crew. */
 export const updateCrewSchema = createCrewSchema.partial()
 
+/** Zod schema for creating an agent with CLI adapter, LLM config, role, and resource settings. */
 export const createAgentSchema = z.object({
   name: z.string().min(2).max(100),
   slug: z.string().min(2).max(50).regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens"),
@@ -36,12 +41,19 @@ export const createAgentSchema = z.object({
   tool_profile: z.enum(["MINIMAL", "CODING", "MESSAGING", "FULL"]).default("CODING"),
 })
 
+/** Zod schema for partially updating an agent. */
 export const updateAgentSchema = createAgentSchema.partial()
 
+/** Allowed credential type discriminators. */
 export const credentialTypeValues = ["AI_CLI_TOKEN", "API_KEY", "SECRET"] as const
-export const credentialProviderValues = ["ANTHROPIC", "OPENAI", "GOOGLE", "NONE"] as const
-export const credentialStatusValues = ["ACTIVE", "EXPIRED", "RATE_LIMITED", "REVOKED", "ERROR"] as const
 
+/** Allowed credential provider discriminators. */
+export const credentialProviderValues = ["ANTHROPIC", "OPENAI", "GOOGLE", "NONE"] as const
+
+/**
+ * Zod schema for creating a credential with scope validation.
+ * Enforces that CREW scope requires crew_id, and non-SECRET types require a provider.
+ */
 export const createCredentialSchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(500).optional(),
@@ -75,6 +87,7 @@ export const createCredentialSchema = z.object({
   }
 )
 
+/** Zod schema for inviting a member to a workspace by email with a role. */
 export const inviteMemberSchema = z.object({
   email: z.string().email(),
   role: z.enum(["ADMIN", "MANAGER", "MEMBER", "VIEWER"]).default("MEMBER"),

@@ -13,11 +13,13 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
+// CredentialHandler provides CRUD endpoints for managing encrypted credentials (API keys, tokens, OAuth).
 type CredentialHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewCredentialHandler creates a CredentialHandler with the given database and logger.
 func NewCredentialHandler(db *sql.DB, logger *slog.Logger) *CredentialHandler {
 	return &CredentialHandler{db: db, logger: logger}
 }
@@ -50,14 +52,13 @@ func (h *CredentialHandler) loadAgentNamesBatch(ctx context.Context, credentialI
 	if len(credentialIDs) == 0 {
 		return result
 	}
-	placeholders := make([]string, len(credentialIDs))
+	ph := sqlPlaceholders(len(credentialIDs))
 	args := make([]any, len(credentialIDs))
 	for i, id := range credentialIDs {
-		placeholders[i] = "?"
 		args[i] = id
 	}
 	rows, err := h.db.QueryContext(ctx,
-		"SELECT ac.credential_id, a.name FROM agent_credentials ac JOIN agents a ON a.id = ac.agent_id AND a.deleted_at IS NULL WHERE ac.credential_id IN ("+strings.Join(placeholders, ",")+") ORDER BY a.name",
+		"SELECT ac.credential_id, a.name FROM agent_credentials ac JOIN agents a ON a.id = ac.agent_id AND a.deleted_at IS NULL WHERE ac.credential_id IN ("+ph+") ORDER BY a.name",
 		args...)
 	if err != nil {
 		return result
@@ -81,14 +82,13 @@ func (h *CredentialHandler) loadMCPUsedBatch(ctx context.Context, credentialIDs 
 	if len(credentialIDs) == 0 {
 		return result
 	}
-	placeholders := make([]string, len(credentialIDs))
+	ph := sqlPlaceholders(len(credentialIDs))
 	args := make([]any, len(credentialIDs))
 	for i, id := range credentialIDs {
-		placeholders[i] = "?"
 		args[i] = id
 	}
 	rows, err := h.db.QueryContext(ctx,
-		"SELECT DISTINCT credential_id FROM agent_mcp_bindings WHERE credential_id IN ("+strings.Join(placeholders, ",")+") AND credential_id IS NOT NULL",
+		"SELECT DISTINCT credential_id FROM agent_mcp_bindings WHERE credential_id IN ("+ph+") AND credential_id IS NOT NULL",
 		args...)
 	if err != nil {
 		return result
@@ -136,14 +136,13 @@ func (h *CredentialHandler) loadCrewIDsBatch(ctx context.Context, credentialIDs 
 	if len(credentialIDs) == 0 {
 		return result
 	}
-	placeholders := make([]string, len(credentialIDs))
+	ph := sqlPlaceholders(len(credentialIDs))
 	args := make([]any, len(credentialIDs))
 	for i, id := range credentialIDs {
-		placeholders[i] = "?"
 		args[i] = id
 	}
 	rows, err := h.db.QueryContext(ctx,
-		"SELECT credential_id, crew_id FROM credential_crews WHERE credential_id IN ("+strings.Join(placeholders, ",")+") ORDER BY created_at",
+		"SELECT credential_id, crew_id FROM credential_crews WHERE credential_id IN ("+ph+") ORDER BY created_at",
 		args...)
 	if err != nil {
 		return result
@@ -176,6 +175,8 @@ func (h *CredentialHandler) setCrewIDs(ctx context.Context, tx *sql.Tx, credenti
 	return nil
 }
 
+// List returns all credentials in the workspace (without secret values).
+// GET /api/v1/credentials
 func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
@@ -272,6 +273,8 @@ type createCredentialRequest struct {
 	OAuthScopes       *string `json:"oauth_scopes"`
 }
 
+// Create stores a new encrypted credential in the workspace.
+// POST /api/v1/credentials
 func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -334,11 +337,13 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Validate all crew IDs
 	for _, cid := range crewIDs {
-		var crewExists string
-		err := h.db.QueryRowContext(r.Context(),
-			"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-			cid, workspaceID).Scan(&crewExists)
+		crewFound, err := crewExists(r.Context(), h.db, cid, workspaceID)
 		if err != nil {
+			h.logger.Error("crew exists check", "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		if !crewFound {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
 			return
 		}
@@ -461,6 +466,8 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Get returns a single credential by ID (without the secret value).
+// GET /api/v1/credentials/{credentialId}
 func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -498,6 +505,8 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c)
 }
 
+// Update modifies credential metadata and optionally rotates the encrypted secret value.
+// PATCH /api/v1/credentials/{credentialId}
 func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -508,10 +517,13 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		credID, workspaceID).Scan(&exists); err != nil {
+	credFound, err := credentialExists(r.Context(), h.db, credID, workspaceID)
+	if err != nil {
+		h.logger.Error("credential exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !credFound {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Credential not found"})
 		return
 	}
@@ -547,11 +559,13 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		// Validate all crew IDs
 		for _, cid := range crewIDs {
-			var crewExists string
-			err := h.db.QueryRowContext(r.Context(),
-				"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-				cid, workspaceID).Scan(&crewExists)
+			ok, err := crewExists(r.Context(), h.db, cid, workspaceID)
 			if err != nil {
+				h.logger.Error("crew exists check", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
+			if !ok {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid crew_id: %s", cid)})
 				return
 			}
@@ -567,19 +581,20 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		delete(body, "crew_ids")
 	} else if crewIDVal, ok := body["crew_id"]; ok && crewIDVal != nil {
 		if crewIDStr, ok := crewIDVal.(string); ok && crewIDStr != "" {
-			var crewExists string
-			err := h.db.QueryRowContext(r.Context(),
-				"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-				crewIDStr, workspaceID).Scan(&crewExists)
+			crewFound, err := crewExists(r.Context(), h.db, crewIDStr, workspaceID)
 			if err != nil {
+				h.logger.Error("crew exists check", "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
+			if !crewFound {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid crew_id"})
 				return
 			}
 		}
 	}
 
-	var setClauses []string
-	var args []interface{}
+	ub := newUpdate()
 
 	// Handle value separately (needs encryption)
 	if val, ok := body["value"]; ok {
@@ -590,27 +605,23 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to encrypt credential"})
 				return
 			}
-			setClauses = append(setClauses, "encrypted_value = ?")
-			args = append(args, encrypted)
+			ub.Set("encrypted_value", encrypted)
 			// Reset status when value changes so monitor re-validates
-			setClauses = append(setClauses, "status = ?", "last_error = ?")
-			args = append(args, "ACTIVE", nil)
+			ub.Set("status", "ACTIVE")
+			ub.SetNull("last_error")
 		}
 	}
 
 	for jsonKey, col := range allowed {
 		if val, ok := body[jsonKey]; ok {
-			setClauses = append(setClauses, col+" = ?")
-			args = append(args, val)
+			ub.Set(col, val)
 		}
 	}
 
-	if len(setClauses) == 0 && !updateCrewIDs {
+	if ub.Empty() && !updateCrewIDs {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No fields to update"})
 		return
 	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
 
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -619,11 +630,8 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(setClauses) > 0 {
-		setClauses = append(setClauses, "updated_at = ?")
-		args = append(args, now, credID, workspaceID)
-
-		query := fmt.Sprintf("UPDATE credentials SET %s WHERE id = ? AND workspace_id = ?", strings.Join(setClauses, ", "))
+	if !ub.Empty() {
+		query, args := ub.Build("credentials", "id = ? AND workspace_id = ?", credID, workspaceID)
 		if _, err := tx.ExecContext(r.Context(), query, args...); err != nil {
 			tx.Rollback()
 			h.logger.Error("update credential", "error", err)
@@ -650,6 +658,8 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	h.Get(w, r)
 }
 
+// Delete removes a credential and all its agent assignments.
+// DELETE /api/v1/credentials/{credentialId}
 func (h *CredentialHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	workspaceID := WorkspaceIDFromContext(r.Context())

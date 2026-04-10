@@ -6,11 +6,13 @@ import {
 } from "@/components/icons/provider-icons"
 import type { ComponentType, SVGProps } from "react"
 
+/** A selectable LLM model with display label and API value. */
 export interface ModelOption {
   value: string
   label: string
 }
 
+/** Configuration for a CLI adapter (Claude Code, OpenCode, Codex CLI, Gemini CLI). */
 export interface CLIAdapterConfig {
   label: string
   icon: ComponentType<SVGProps<SVGSVGElement>>
@@ -38,6 +40,7 @@ const GOOGLE_MODELS: ModelOption[] = [
   { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
 ]
 
+/** Registry of all supported CLI adapters with their provider, models, and icon. */
 export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
   CLAUDE_CODE: {
     label: "Claude Code",
@@ -77,16 +80,20 @@ export const CLI_ADAPTERS: Record<string, CLIAdapterConfig> = {
   },
 }
 
+/** All CLI adapter keys (e.g. "CLAUDE_CODE", "OPENCODE"). */
 export const CLI_ADAPTER_KEYS = Object.keys(CLI_ADAPTERS)
 
+/** Look up CLI adapter configuration by key. Returns undefined for unknown adapters. */
 export function getAdapterConfig(key: string): CLIAdapterConfig | undefined {
   return CLI_ADAPTERS[key]
 }
 
+/** Return the list of available LLM models for a given CLI adapter key. */
 export function getModelsForAdapter(key: string): ModelOption[] {
   return CLI_ADAPTERS[key]?.models ?? []
 }
 
+/** Convert a provider key (e.g. "ANTHROPIC") to a human-readable label (e.g. "Anthropic"). */
 export function getProviderLabel(provider: string): string {
   const labels: Record<string, string> = {
     ANTHROPIC: "Anthropic",

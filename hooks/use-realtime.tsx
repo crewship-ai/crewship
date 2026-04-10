@@ -5,12 +5,14 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react"
 import { useWebSocket, type WSMessage, type WSStatus } from "@/hooks/use-websocket"
 import { useWorkspace } from "@/hooks/use-workspace"
 
+/** All supported real-time event types broadcast over the workspace WebSocket channel. */
 export type RealtimeEventType =
   | "run.started"
   | "run.completed"
@@ -32,6 +34,7 @@ export type RealtimeEventType =
   | "file.event"
   | "container.stats"
 
+/** A real-time event received from the WebSocket, with typed payload and timestamp. */
 export interface RealtimeEvent {
   type: RealtimeEventType
   payload: Record<string, any>
@@ -44,8 +47,16 @@ interface RealtimeContextValue {
   status: WSStatus
   subscribe: (eventType: RealtimeEventType, callback: EventCallback) => () => void
   subscribeChannel: (channel: string) => () => void
-  lastEvent: RealtimeEvent | null
 }
+
+const VALID_REALTIME_TYPES: Set<string> = new Set([
+  "run.started", "run.completed", "run.failed",
+  "agent.status", "agent.created", "agent.updated", "agent.deleted",
+  "assignment.updated", "escalation.created",
+  "escalation.resolved", "mission.updated", "task.updated",
+  "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
+  "agent.log", "file.event", "container.stats",
+])
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null)
 
@@ -61,10 +72,13 @@ function getWsUrl(): string {
   return `${proto}//${window.location.host}/ws`
 }
 
+/**
+ * Context provider that manages a single WebSocket connection for real-time events.
+ * Auto-subscribes to the workspace channel and re-subscribes component channels after reconnect.
+ */
 export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   const { workspaceId } = useWorkspace()
   const [token, setToken] = useState<string | null>(null)
-  const [lastEvent, setLastEvent] = useState<RealtimeEvent | null>(null)
   const listenersRef = useRef<Map<string, Set<EventCallback>>>(new Map())
   const activeChannelsRef = useRef<Set<string>>(new Set())
   const statusRef = useRef<string>("disconnected")
@@ -82,15 +96,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
 
   const handleMessage = useCallback(
     (msg: WSMessage) => {
-      const validTypes: Set<string> = new Set([
-        "run.started", "run.completed", "run.failed",
-        "agent.status", "agent.created", "agent.updated", "agent.deleted",
-        "assignment.updated", "escalation.created",
-        "escalation.resolved", "mission.updated", "task.updated",
-        "peer_conversation.updated", "crew.created", "crew.updated", "crew.deleted",
-        "agent.log", "file.event", "container.stats",
-      ])
-      if (!validTypes.has(msg.type)) return
+      if (!VALID_REALTIME_TYPES.has(msg.type)) return
 
       const event: RealtimeEvent = {
         type: msg.type as RealtimeEventType,
@@ -99,12 +105,6 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           : {}),
         timestamp: new Date(),
       }
-      // Skip updating lastEvent for high-frequency log events to avoid
-      // re-rendering all useRealtime() consumers on every log frame.
-      if (msg.type !== "agent.log" && msg.type !== "file.event" && msg.type !== "container.stats") {
-        setLastEvent(event)
-      }
-
       const callbacks = listenersRef.current.get(msg.type)
       if (callbacks) {
         for (const cb of callbacks) {
@@ -165,13 +165,19 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     [],
   )
 
+  const contextValue = useMemo(
+    () => ({ status, subscribe, subscribeChannel }),
+    [status, subscribe, subscribeChannel],
+  )
+
   return (
-    <RealtimeContext.Provider value={{ status, subscribe, subscribeChannel, lastEvent }}>
+    <RealtimeContext.Provider value={contextValue}>
       {children}
     </RealtimeContext.Provider>
   )
 }
 
+/** Access the real-time event system (status, subscribe, subscribeChannel). Must be used within RealtimeProvider. */
 export function useRealtime(): RealtimeContextValue {
   const ctx = useContext(RealtimeContext)
   if (!ctx) {
@@ -198,6 +204,7 @@ export function useRealtimeEvent(
   }, [eventType, subscribe])
 }
 
+/** Subscribe to a WebSocket channel (e.g. "agent:{id}") for the lifetime of the calling component. */
 export function useRealtimeChannel(channel: string | null): void {
   const { subscribeChannel } = useRealtime()
   useEffect(() => {

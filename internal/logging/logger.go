@@ -9,6 +9,8 @@ import (
 
 type ctxKey struct{}
 
+// New creates a structured logger with the given level ("debug", "info", "warn",
+// "error") and format ("json" or "text"), writing to w (defaults to os.Stdout).
 func New(level, format string, w io.Writer) *slog.Logger {
 	if w == nil {
 		w = os.Stdout
@@ -27,10 +29,12 @@ func New(level, format string, w io.Writer) *slog.Logger {
 	return slog.New(handler)
 }
 
+// WithContext returns a new context that carries the given logger.
 func WithContext(ctx context.Context, logger *slog.Logger) context.Context {
 	return context.WithValue(ctx, ctxKey{}, logger)
 }
 
+// FromContext extracts the logger from ctx, or returns slog.Default() if none is set.
 func FromContext(ctx context.Context) *slog.Logger {
 	if l, ok := ctx.Value(ctxKey{}).(*slog.Logger); ok {
 		return l

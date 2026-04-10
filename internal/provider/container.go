@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+// CrewConfig describes the resource requirements and network policy for a
+// crew's container runtime.
 type CrewConfig struct {
 	ID             string
 	Slug           string
@@ -18,6 +20,7 @@ type CrewConfig struct {
 	Image          string   // custom runtime image; empty = provider default
 }
 
+// ExecConfig describes a non-interactive command to execute inside a container.
 type ExecConfig struct {
 	ContainerID string
 	Cmd         []string
@@ -26,17 +29,21 @@ type ExecConfig struct {
 	User        string
 }
 
+// ExecResult holds the exec ID and output stream from a container exec command.
 type ExecResult struct {
 	ExecID string
 	Reader io.ReadCloser
 }
 
+// ContainerStatus reports the current state and uptime of a crew's container.
 type ContainerStatus struct {
 	ID     string
 	State  string // "creating", "running", "idle", "stopped", "error"
 	Uptime string
 }
 
+// ContainerMetrics holds point-in-time resource usage metrics for a container
+// including CPU, memory, network I/O, and process count.
 type ContainerMetrics struct {
 	CPUPercent  float64   `json:"cpu_percent"`
 	MemoryUsed  int64     `json:"memory_used_bytes"`
@@ -48,6 +55,8 @@ type ContainerMetrics struct {
 	Timestamp   time.Time `json:"timestamp"`
 }
 
+// ContainerProvider defines the interface for managing crew container runtimes.
+// Implementations include Docker and Apple Containers.
 type ContainerProvider interface {
 	EnsureCrewRuntime(ctx context.Context, team CrewConfig) (string, error)
 	StopCrewRuntime(ctx context.Context, containerID string) error

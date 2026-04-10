@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"net/http"
 	"time"
 )
@@ -27,20 +26,20 @@ type agentSkillResponse struct {
 	Skill   agentSkillSkillData `json:"skill"`
 }
 
+// ListSkills returns all skills assigned to the specified agent.
+// GET /api/v1/agents/{agentId}/skills
 func (h *AgentHandler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	var exists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&exists); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 
@@ -90,6 +89,8 @@ type addAgentSkillRequest struct {
 	Config  *string `json:"config"`
 }
 
+// AddSkill assigns a skill to an agent.
+// POST /api/v1/agents/{agentId}/skills
 func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -100,16 +101,14 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&exists); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 
@@ -122,7 +121,7 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := generateCUID()
 
-	_, err := h.db.ExecContext(r.Context(),
+	_, err = h.db.ExecContext(r.Context(),
 		"INSERT INTO agent_skills (id, agent_id, skill_id, config, enabled, created_at) VALUES (?, ?, ?, ?, 1, ?)",
 		id, agentID, req.SkillID, req.Config, now)
 	if err != nil {
@@ -134,6 +133,8 @@ func (h *AgentHandler) AddSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
 
+// RemoveSkill unassigns a skill from an agent.
+// DELETE /api/v1/agents/{agentId}/skills/{skillId}
 func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	skillID := r.PathValue("skillId")
@@ -145,16 +146,14 @@ func (h *AgentHandler) RemoveSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&exists); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 

@@ -17,8 +17,10 @@ function uuid(): string {
 
 // --- Turn-based model types ---
 
+/** Discriminator for the content type of a turn part (text, tool call, thinking, etc.). */
 export type TurnPartType = "text" | "thinking" | "tool_call" | "tool_result" | "status" | "error" | "result" | "system_init" | "image"
 
+/** A single content block within a chat turn (e.g. a text fragment, tool call, or thinking block). */
 export interface TurnPart {
   id: string
   type: TurnPartType
@@ -28,6 +30,7 @@ export interface TurnPart {
   timestamp: Date
 }
 
+/** A complete turn in the conversation (user message or multi-part assistant response). */
 export interface ChatTurn {
   id: string
   role: "user" | "assistant" | "system"
@@ -38,10 +41,16 @@ export interface ChatTurn {
 
 // --- Legacy types (kept for history loading compatibility) ---
 
+/** @deprecated Legacy message role; use ChatTurn for new code. */
 export type MessageRole = "user" | "assistant" | "system" | "tool"
+
+/** @deprecated Legacy stream event type; use TurnPartType for new code. */
 export type StreamEventType = "text" | "tool_call" | "tool_result" | "thinking" | "status" | "done" | "error" | "system" | "result" | "image"
+
+/** WebSocket event types for agent-to-agent task assignment lifecycle. */
 export type AssignmentEventType = "assignment_created" | "assignment_running" | "assignment_completed" | "assignment_failed"
 
+/** @deprecated Legacy flat chat message; use ChatTurn/TurnPart for new code. Kept for history loading compatibility. */
 export interface ChatMessage {
   id: string
   role: MessageRole
@@ -114,6 +123,11 @@ function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
   return turns
 }
 
+/**
+ * Full-featured chat hook that manages a WebSocket-based conversation with an agent.
+ * Handles streaming text/thinking/tool events, turn grouping, history loading,
+ * message editing, regeneration, and stop/cancel.
+ */
 export function useChat({ wsUrl, token, sessionId }: UseChatOptions) {
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [isStreaming, setIsStreaming] = useState(false)

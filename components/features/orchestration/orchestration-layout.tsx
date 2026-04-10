@@ -27,7 +27,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { WorkflowGraph, type WorkflowGraphRef } from "@/components/features/orchestration/workflow-graph"
+import dynamic from "next/dynamic"
+import { WorkflowGraph } from "@/components/features/orchestration/workflow-graph"
 import { MissionTimeline } from "@/components/features/orchestration/mission-timeline"
 import { OrchestrationActivity } from "@/components/features/orchestration/orchestration-activity"
 // TemplateGallery removed — workflow templates not needed in orchestration UI yet
@@ -40,7 +41,7 @@ import { UnifiedInbox } from "@/components/features/orchestration/unified-inbox"
 import { ConnectionMap } from "@/components/features/orchestration/connection-map"
 import { ContextDetailPanel, type DetailContext } from "@/components/features/orchestration/context-detail-panel"
 import { A2AMessageStream } from "@/components/features/orchestration/a2a-message-stream"
-import { MissionYamlEditor } from "@/components/features/orchestration/mission-yaml-editor"
+const MissionYamlEditor = dynamic(() => import("@/components/features/orchestration/mission-yaml-editor").then(m => m.MissionYamlEditor), { ssr: false })
 import { DockerOverview } from "@/components/features/orchestration/docker-overview"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import type { Mission, MissionTask, IssueLabel, IssueComment, Project, SavedView } from "@/lib/types/mission"
@@ -128,7 +129,7 @@ function LiveMessagesPanel() {
       </div>
       <div className="flex-1 overflow-y-auto font-mono text-[11px] px-3 py-1">
         {messages.map((msg, i) => (
-          <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02]">
+          <div key={`${msg.ts}-${i}`} className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02]">
             <span className="text-muted-foreground/40 tabular-nums shrink-0 w-[52px]">{msg.ts.slice(11, 19)}</span>
             <span className={cn("shrink-0 text-[10px] px-1 rounded", MSG_TYPE_COLORS[msg.type] || "text-muted-foreground", "bg-white/[0.03]")}>
               {MSG_TYPE_LABELS[msg.type] || msg.type}
@@ -192,7 +193,7 @@ function ExecLogPanel() {
       </div>
       <div className="flex-1 overflow-y-auto font-mono text-[11px] px-3 py-1">
         {logs.map((log, i) => (
-          <div key={i} className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02]">
+          <div key={`${log.ts}-${i}`} className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02]">
             <span className="text-muted-foreground/40 tabular-nums shrink-0 w-[52px]">{log.ts.slice(11, 19)}</span>
             <img src={getAgentAvatarUrl(log.agent)} alt="" className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5" />
             <span className="text-muted-foreground shrink-0 w-[60px] truncate">@{log.agent}</span>
@@ -256,6 +257,21 @@ export interface OrchestrationLayoutProps {
   onMissionCreated: () => void
 }
 
+const ORCH_DRAWER_TABS = [
+  { id: "messages" as const, label: "Messages", icon: MessageSquare },
+  { id: "exec" as const, label: "Exec Log", icon: Terminal },
+  { id: "yaml" as const, label: "YAML", icon: FileCode2 },
+  { id: "docker" as const, label: "Docker", icon: Container },
+]
+
+const ORCH_TABS = [
+  { id: "issues", label: "Issues", icon: CircleDot },
+  { id: "graph", label: "Graph", icon: Workflow },
+  { id: "timeline", label: "Timeline", icon: Clock },
+  { id: "activity", label: "Activity", icon: Activity },
+  { id: "proposals", label: "Approvals", icon: FileText },
+] as const
+
 export function OrchestrationLayout({
   missions,
   crews,
@@ -311,7 +327,7 @@ export function OrchestrationLayout({
   const [activeViewId, setActiveViewId] = useState<string | null>(null)
   const [savedViewsOpen, setSavedViewsOpen] = useState(false)
 
-  const graphRef = useRef<WorkflowGraphRef>(null)
+  // graphRef removed — was unused
 
   // Auto-collapse left panel on mobile
   useEffect(() => {
@@ -582,13 +598,7 @@ export function OrchestrationLayout({
       {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
       <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {/* Tabs */}
-        {([
-          { id: "issues", label: "Issues", icon: CircleDot },
-          { id: "graph", label: "Graph", icon: Workflow },
-          { id: "timeline", label: "Timeline", icon: Clock },
-          { id: "activity", label: "Activity", icon: Activity },
-          { id: "proposals", label: "Approvals", icon: FileText },
-        ] as const).map(({ id, label, icon: Icon }) => (
+        {ORCH_TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
@@ -852,7 +862,6 @@ export function OrchestrationLayout({
           {activeTab === "graph" && (
             <>
               <WorkflowGraph
-                ref={graphRef}
                 missions={filteredMissions}
                 crews={crews}
                 agents={agents}
@@ -1019,12 +1028,7 @@ export function OrchestrationLayout({
               if (!drawerOpen) setDrawerOpen(true)
             }}
           >
-            {([
-              { id: "messages" as const, label: "Messages", icon: MessageSquare },
-              { id: "exec" as const, label: "Exec Log", icon: Terminal },
-              { id: "yaml" as const, label: "YAML", icon: FileCode2 },
-              { id: "docker" as const, label: "Docker", icon: Container },
-            ]).map(({ id, label, icon: Icon }) => (
+            {ORCH_DRAWER_TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 className={cn(

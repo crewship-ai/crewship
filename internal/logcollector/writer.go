@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+// LogEntry represents a single structured log event from an agent run,
+// including the event type, content, and optional tool/token metadata.
 type LogEntry struct {
 	Timestamp time.Time `json:"ts"`
 	Level     string    `json:"level"`
@@ -22,6 +24,8 @@ type LogEntry struct {
 	Metadata  any       `json:"metadata,omitempty"`
 }
 
+// Writer appends structured log entries to per-agent JSONL files organized
+// under basePath/crews/{crewID}/agents/{agentID}/current.jsonl.
 type Writer struct {
 	basePath string
 	logger   *slog.Logger
@@ -29,6 +33,7 @@ type Writer struct {
 	files    map[string]*os.File
 }
 
+// NewWriter creates a Writer that stores agent logs under the given base path.
 func NewWriter(basePath string, logger *slog.Logger) *Writer {
 	return &Writer{
 		basePath: basePath,
@@ -44,6 +49,8 @@ func validateID(s string) error {
 	return nil
 }
 
+// Append writes a log entry to the JSONL file for the given crew and agent,
+// creating the file and directory structure if needed.
 func (w *Writer) Append(crewID, agentID string, entry LogEntry) error {
 	if err := validateID(crewID); err != nil {
 		return fmt.Errorf("invalid crew ID: %w", err)
@@ -89,6 +96,7 @@ func (w *Writer) Append(crewID, agentID string, entry LogEntry) error {
 	return nil
 }
 
+// Flush syncs all open log files to disk.
 func (w *Writer) Flush() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -97,6 +105,7 @@ func (w *Writer) Flush() {
 	}
 }
 
+// Close closes all open log file handles.
 func (w *Writer) Close() {
 	w.mu.Lock()
 	defer w.mu.Unlock()

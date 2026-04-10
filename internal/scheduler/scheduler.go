@@ -19,11 +19,14 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+// Config holds default resource limits applied to scheduled agent runs.
 type Config struct {
 	DefaultMemoryMB int
 	DefaultCPUs     float64
 }
 
+// Scheduler runs agents on cron schedules, managing cron entries and
+// triggering agent runs through the orchestrator.
 type Scheduler struct {
 	c         *cron.Cron
 	db        *sql.DB
@@ -43,6 +46,8 @@ type Scheduler struct {
 	entryMap map[string]cron.EntryID // agentID → cron entry
 }
 
+// New creates a Scheduler that loads cron schedules from the database
+// and triggers agent runs via the orchestrator.
 func New(
 	db *sql.DB,
 	orch *orchestrator.Orchestrator,
@@ -88,6 +93,7 @@ type scheduledAgent struct {
 	Workspace string
 }
 
+// Start loads all enabled schedules from the database and starts the cron engine.
 func (s *Scheduler) Start(ctx context.Context) error {
 	if err := s.loadSchedules(ctx); err != nil {
 		return fmt.Errorf("load schedules: %w", err)
@@ -97,6 +103,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	return nil
 }
 
+// Stop cancels in-flight runs and waits for the cron engine to shut down.
 func (s *Scheduler) Stop() {
 	s.cancel() // signal in-flight triggerAgent goroutines to stop
 	stopCtx := s.c.Stop()

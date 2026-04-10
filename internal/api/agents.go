@@ -20,6 +20,7 @@ type ScheduleUpdater interface {
 	UpdateSchedule(ctx context.Context, agentID, cronExpr, prompt string, enabled bool) error
 }
 
+// AgentHandler provides CRUD endpoints for managing AI agents within a workspace.
 type AgentHandler struct {
 	db               *sql.DB
 	hub              *ws.Hub
@@ -28,24 +29,22 @@ type AgentHandler struct {
 	scheduleUpdater  ScheduleUpdater
 }
 
+// NewAgentHandler creates an AgentHandler with the given database and logger.
 func NewAgentHandler(db *sql.DB, logger *slog.Logger) *AgentHandler {
 	return &AgentHandler{db: db, logger: logger}
 }
 
+// SetHub attaches a WebSocket hub for broadcasting agent events to connected clients.
 func (h *AgentHandler) SetHub(hub *ws.Hub) { h.hub = hub }
 
 func (h *AgentHandler) broadcastAgentEvent(eventType, workspaceID string, payload map[string]string) {
-	if h.hub == nil {
-		return
-	}
-	h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
-		Type:    eventType,
-		Channel: "workspace:" + workspaceID,
-		Payload: payload,
-	})
+	broadcastWorkspaceEvent(h.hub, workspaceID, eventType, payload)
 }
 
+// SetLicense attaches the license for enforcing agent-per-crew limits.
 func (h *AgentHandler) SetLicense(lic *license.License) { h.license = lic }
+
+// SetScheduler attaches a ScheduleUpdater for live-updating agent cron schedules.
 func (h *AgentHandler) SetScheduler(su ScheduleUpdater) { h.scheduleUpdater = su }
 
 // FleetStatus returns lightweight agent counts by status for the toolbar.
@@ -142,6 +141,8 @@ type agentResponse struct {
 	Count           agentCounts    `json:"_count"`
 }
 
+// List returns all non-deleted agents in the workspace with their crew and count metadata.
+// GET /api/v1/agents
 func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
@@ -351,6 +352,8 @@ type createAgentRequest struct {
 	MemoryEnabled  bool    `json:"memory_enabled"`
 }
 
+// Create provisions a new agent in the workspace, optionally assigning it to a crew.
+// POST /api/v1/agents
 func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -535,6 +538,8 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Get returns a single agent by ID with full details including crew info and counts.
+// GET /api/v1/agents/{agentId}
 func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	if agentID == "" {
@@ -589,6 +594,8 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
+// Update modifies agent properties such as name, role, model, system prompt, and schedule.
+// PATCH /api/v1/agents/{agentId}
 func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -599,16 +606,14 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var existing string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&existing); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 
@@ -708,8 +713,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var setClauses []string
-	var args []interface{}
+	ub := newUpdate()
 	for jsonKey, col := range allowed {
 		if val, ok := body[jsonKey]; ok {
 			if col == "memory_enabled" || col == "schedule_enabled" {
@@ -721,21 +725,16 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			setClauses = append(setClauses, col+" = ?")
-			args = append(args, val)
+			ub.Set(col, val)
 		}
 	}
 
-	if len(setClauses) == 0 {
+	if ub.Empty() {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "No fields to update"})
 		return
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	setClauses = append(setClauses, "updated_at = ?")
-	args = append(args, now, agentID, workspaceID)
-
-	query := fmt.Sprintf("UPDATE agents SET %s WHERE id = ? AND workspace_id = ?", strings.Join(setClauses, ", "))
+	query, args := ub.Build("agents", "id = ? AND workspace_id = ?", agentID, workspaceID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
 		h.logger.Error("update agent", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -812,6 +811,8 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	h.broadcastAgentEvent("agent.updated", workspaceID, map[string]string{"id": agentID})
 }
 
+// Delete soft-deletes an agent by setting deleted_at.
+// DELETE /api/v1/agents/{agentId}
 func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -886,7 +887,7 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 		cutoff, cutoff, wsID)
 	if err != nil {
 		h.logger.Error("agent load query", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 	defer rows.Close()
@@ -898,14 +899,14 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 			&e.ActiveTasks, &e.PendingTasks, &e.CompletedToday,
 			&e.TokensUsedToday, &e.TokenBudget); err != nil {
 			h.logger.Error("scan agent load", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
 		result = append(result, e)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (agent load)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 

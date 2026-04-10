@@ -6,10 +6,12 @@ import (
 	"github.com/crewship-ai/crewship/internal/license"
 )
 
+// LicenseHandler provides the license status endpoint.
 type LicenseHandler struct {
 	license *license.License
 }
 
+// NewLicenseHandler creates a LicenseHandler with the given license (may be nil for community edition).
 func NewLicenseHandler(lic *license.License) *LicenseHandler {
 	return &LicenseHandler{license: lic}
 }
@@ -24,6 +26,8 @@ type licenseResponse struct {
 	Features     []string `json:"features"`
 }
 
+// Status returns the current license edition, limits, and enabled features.
+// GET /api/v1/license
 func (h *LicenseHandler) Status(w http.ResponseWriter, r *http.Request) {
 	if h.license == nil {
 		defaults := license.CommunityDefaults()

@@ -18,7 +18,6 @@ import (
 	"github.com/crewship-ai/crewship/internal/logcollector"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 func (s *Server) registerRoutes() {
@@ -249,27 +248,21 @@ func (s *Server) handleAgentStart(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Broadcast real-time log events to the workspace channel
-			if s.wsHub != nil {
-				channel := "workspace:" + req.WorkspaceID
-				s.wsHub.Broadcast(channel, ws.ServerMessage{
-					Type:    "agent.log",
-					Channel: channel,
-					Payload: map[string]interface{}{
-						"ts":       event.Timestamp,
-						"level":    "info",
-						"agent":    req.AgentSlug,
-						"agent_id": agentID,
-						"event":    event.Type,
-						"content":  event.Content,
-						"metadata": sanitizeMetadata(func() map[string]interface{} {
-							if m, ok := event.Metadata.(map[string]interface{}); ok {
-								return m
-							}
-							return nil
-						}()),
-					},
+			s.wsHub.BroadcastWorkspace(req.WorkspaceID, "agent.log",
+				map[string]interface{}{
+					"ts":       event.Timestamp,
+					"level":    "info",
+					"agent":    req.AgentSlug,
+					"agent_id": agentID,
+					"event":    event.Type,
+					"content":  event.Content,
+					"metadata": sanitizeMetadata(func() map[string]interface{} {
+						if m, ok := event.Metadata.(map[string]interface{}); ok {
+							return m
+						}
+						return nil
+					}()),
 				})
-			}
 		}
 		if err := s.orchestrator.RunAgent(ctx, runReq, handler); err != nil {
 			s.logger.Error("agent run failed", "agent_id", agentID, "error", err)
@@ -486,7 +479,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer reader.Close()
 
-	filename := filepath.Base(filePath)
+	filename := sanitizeDownloadFilename(filepath.Base(filePath))
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	if _, err := io.Copy(w, reader); err != nil {
@@ -691,6 +684,22 @@ func (s *Server) handleDebugInfo(w http.ResponseWriter, _ *http.Request) {
 	info["config"] = config
 
 	writeJSON(w, http.StatusOK, info)
+}
+
+func sanitizeDownloadFilename(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range name {
+		if r < 0x20 || r == '"' || r == '\\' || r == 0x7f {
+			b.WriteRune('_')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "download"
+	}
+	return b.String()
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

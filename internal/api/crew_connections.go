@@ -11,11 +11,13 @@ import (
 	"time"
 )
 
+// CrewConnectionHandler manages connections between crews that enable cross-crew communication.
 type CrewConnectionHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewCrewConnectionHandler creates a CrewConnectionHandler with the given database and logger.
 func NewCrewConnectionHandler(db *sql.DB, logger *slog.Logger) *CrewConnectionHandler {
 	return &CrewConnectionHandler{db: db, logger: logger}
 }
@@ -105,23 +107,18 @@ func (h *CrewConnectionHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify both crews exist in this workspace
-	var fromExists, toExists bool
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		req.FromCrewID, wsID).Scan(&fromExists); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		h.logger.Error("check from_crew", "error", err)
+	fromFound, fromErr := crewExists(r.Context(), h.db, req.FromCrewID, wsID)
+	toFound, toErr := crewExists(r.Context(), h.db, req.ToCrewID, wsID)
+	if fromErr != nil || toErr != nil {
+		err := fromErr
+		if err == nil {
+			err = toErr
+		}
+		h.logger.Error("check crew", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		req.ToCrewID, wsID).Scan(&toExists); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		h.logger.Error("check to_crew", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-
-	if !fromExists || !toExists {
+	if !fromFound || !toFound {
 		writeProblem(w, r, http.StatusNotFound, "One or both crews not found in this workspace")
 		return
 	}

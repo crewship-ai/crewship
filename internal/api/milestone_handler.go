@@ -40,15 +40,20 @@ type milestoneResponse struct {
 
 // ── 1. List — GET /api/v1/projects/{projectId}/milestones ─────────────────
 
+// List returns all milestones for a project.
+// GET /api/v1/projects/{projectId}/milestones
 func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	projectID := r.PathValue("projectId")
 
 	// Verify project belongs to workspace
-	var exists int
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM projects WHERE id = ? AND workspace_id = ?`,
-		projectID, wsID).Scan(&exists); err != nil {
+	found, err := projectExists(r.Context(), h.db, projectID, wsID)
+	if err != nil {
+		h.logger.Error("project exists check", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Project not found")
 		return
 	}
@@ -56,9 +61,15 @@ func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT m.id, m.project_id, m.name, m.description, m.target_date,
 		       m.status, m.position, m.created_at, m.updated_at,
-		       (SELECT COUNT(*) FROM missions WHERE milestone_id = m.id AND mission_type = 'issue') AS issue_count,
-		       (SELECT COUNT(*) FROM missions WHERE milestone_id = m.id AND mission_type = 'issue' AND status IN ('DONE','COMPLETED')) AS done_count
+		       COALESCE(ic.issue_count, 0),
+		       COALESCE(ic.done_count, 0)
 		FROM milestones m
+		LEFT JOIN (
+		    SELECT milestone_id,
+		           COUNT(*) AS issue_count,
+		           SUM(CASE WHEN status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END) AS done_count
+		    FROM missions WHERE mission_type = 'issue' GROUP BY milestone_id
+		) ic ON ic.milestone_id = m.id
 		WHERE m.project_id = ?
 		ORDER BY m.position ASC, m.created_at ASC`, projectID)
 	if err != nil {
@@ -96,6 +107,8 @@ func (h *MilestoneHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // ── 2. Create — POST /api/v1/projects/{projectId}/milestones ──────────────
 
+// Create adds a new milestone to a project.
+// POST /api/v1/projects/{projectId}/milestones
 func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -107,10 +120,13 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")
 
 	// Verify project belongs to workspace
-	var exists int
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM projects WHERE id = ? AND workspace_id = ?`,
-		projectID, wsID).Scan(&exists); err != nil {
+	found, err := projectExists(r.Context(), h.db, projectID, wsID)
+	if err != nil {
+		h.logger.Error("project exists check", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Project not found")
 		return
 	}
@@ -135,15 +151,17 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Determine next position
 	var maxPos int
-	_ = h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COALESCE(MAX(position), 0) FROM milestones WHERE project_id = ?`,
-		projectID).Scan(&maxPos)
+		projectID).Scan(&maxPos); err != nil {
+		h.logger.Error("get max milestone position", "project_id", projectID, "error", err)
+	}
 
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 	position := maxPos + 1
 
-	_, err := h.db.ExecContext(r.Context(), `
+	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO milestones (id, project_id, name, description, target_date,
 		    status, position, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -169,19 +187,15 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:   now,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "milestone.created",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": id, "project_id": projectID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "milestone.created", map[string]string{"id": id, "project_id": projectID})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
 
 // ── 3. Update — PATCH /api/v1/milestones/{milestoneId} ────────────────────
 
+// Update modifies a milestone's name, description, target date, or status.
+// PATCH /api/v1/projects/{projectId}/milestones/{milestoneId}
 func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -251,13 +265,7 @@ func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "milestone.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": milestoneID, "project_id": projectID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "milestone.updated", map[string]string{"id": milestoneID, "project_id": projectID})
 
 	// Return updated milestone
 	var ms milestoneResponse
@@ -283,6 +291,8 @@ func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // ── 4. Delete — DELETE /api/v1/milestones/{milestoneId} ───────────────────
 
+// Delete removes a milestone from a project.
+// DELETE /api/v1/projects/{projectId}/milestones/{milestoneId}
 func (h *MilestoneHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
@@ -352,13 +362,7 @@ func (h *MilestoneHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "milestone.deleted",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": milestoneID, "project_id": projectID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "milestone.deleted", map[string]string{"id": milestoneID, "project_id": projectID})
 
 	w.WriteHeader(http.StatusNoContent)
 }

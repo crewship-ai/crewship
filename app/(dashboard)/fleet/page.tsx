@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
@@ -76,15 +76,36 @@ export default function FleetPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // Real-time updates
-  useRealtimeEvent("agent.status", useCallback(() => { fetchData(true) }, [fetchData]))
-  useRealtimeEvent("agent.created", useCallback(() => { fetchData(true) }, [fetchData]))
-  useRealtimeEvent("agent.updated", useCallback(() => { fetchData(true) }, [fetchData]))
-  useRealtimeEvent("agent.deleted", useCallback(() => { fetchData(true) }, [fetchData]))
-  useRealtimeEvent("crew.created", useCallback(() => { fetchData(true) }, [fetchData]))
-  useRealtimeEvent("crew.updated", useCallback(() => { fetchData(true) }, [fetchData]))
-  useRealtimeEvent("crew.deleted", useCallback(() => { fetchData(true) }, [fetchData]))
-  useRealtimeEvent("mission.updated", useCallback(() => { fetchData(true) }, [fetchData]))
+  // Real-time: debounced refetch (prevents burst of 8×3 concurrent fetches)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const debouncedRefetch = useCallback(() => {
+    if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null
+      void fetchData(true)
+    }, 200)
+  }, [fetchData])
+
+  // Clear any pending timer on unmount or when workspace changes,
+  // otherwise a late-firing timeout can overwrite state with data from
+  // the previous workspace.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current)
+        debounceRef.current = null
+      }
+    }
+  }, [workspaceId])
+
+  useRealtimeEvent("agent.status", debouncedRefetch)
+  useRealtimeEvent("agent.created", debouncedRefetch)
+  useRealtimeEvent("agent.updated", debouncedRefetch)
+  useRealtimeEvent("agent.deleted", debouncedRefetch)
+  useRealtimeEvent("crew.created", debouncedRefetch)
+  useRealtimeEvent("crew.updated", debouncedRefetch)
+  useRealtimeEvent("crew.deleted", debouncedRefetch)
+  useRealtimeEvent("mission.updated", debouncedRefetch)
 
   if (loading || wsLoading || !workspaceId) {
     return (

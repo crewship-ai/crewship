@@ -17,22 +17,24 @@ import (
 	"time"
 )
 
+// ProxyHandler proxies requests from the UI to the crewshipd sidecar over the Unix socket.
 type ProxyHandler struct {
-	db         *sql.DB
-	logger     *slog.Logger
-	socketPath string
+	db     *sql.DB
+	logger *slog.Logger
+	client *http.Client
 }
 
+// NewProxyHandler creates a ProxyHandler that communicates with the sidecar via the given Unix socket path.
 func NewProxyHandler(db *sql.DB, logger *slog.Logger, socketPath string) *ProxyHandler {
-	return &ProxyHandler{db: db, logger: logger, socketPath: socketPath}
-}
-
-func (h *ProxyHandler) ipcClient() *http.Client {
-	return &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", h.socketPath)
+	return &ProxyHandler{
+		db:     db,
+		logger: logger,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					return net.Dial("unix", socketPath)
+				},
 			},
 		},
 	}
@@ -43,7 +45,7 @@ func (h *ProxyHandler) ipcGet(ctx context.Context, path string) (*http.Response,
 	if err != nil {
 		return nil, err
 	}
-	return h.ipcClient().Do(req)
+	return h.client.Do(req)
 }
 
 func (h *ProxyHandler) ipcPost(ctx context.Context, path string, body io.Reader) (*http.Response, error) {
@@ -52,7 +54,7 @@ func (h *ProxyHandler) ipcPost(ctx context.Context, path string, body io.Reader)
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return h.ipcClient().Do(req)
+	return h.client.Do(req)
 }
 
 func (h *ProxyHandler) ipcPut(ctx context.Context, path string, body io.Reader) (*http.Response, error) {
@@ -60,7 +62,7 @@ func (h *ProxyHandler) ipcPut(ctx context.Context, path string, body io.Reader) 
 	if err != nil {
 		return nil, err
 	}
-	return h.ipcClient().Do(req)
+	return h.client.Do(req)
 }
 
 func (h *ProxyHandler) proxyJSON(w http.ResponseWriter, resp *http.Response) {
@@ -72,6 +74,7 @@ func (h *ProxyHandler) proxyJSON(w http.ResponseWriter, resp *http.Response) {
 	}
 }
 
+// CrewshipdHealth checks the health of the crewshipd sidecar process.
 func (h *ProxyHandler) CrewshipdHealth(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.ipcGet(r.Context(), "/health")
 	if err != nil {
@@ -81,6 +84,7 @@ func (h *ProxyHandler) CrewshipdHealth(w http.ResponseWriter, r *http.Request) {
 	h.proxyJSON(w, resp)
 }
 
+// AgentDebug returns debug information for a running agent (container state, process info).
 func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -158,6 +162,7 @@ func (h *ProxyHandler) AgentDebug(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, debug)
 }
 
+// AgentFiles lists files in an agent's working directory via the sidecar.
 func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -180,7 +185,12 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 		ipcPath += "&recursive=true"
 	}
 	if subdir := r.URL.Query().Get("subdir"); subdir != "" {
-		ipcPath += "&subdir=" + url.QueryEscape(subdir)
+		cleanSub := filepath.Clean(subdir)
+		if strings.HasPrefix(cleanSub, "..") || filepath.IsAbs(cleanSub) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid subdir path"})
+			return
+		}
+		ipcPath += "&subdir=" + url.QueryEscape(cleanSub)
 	}
 	resp, err := h.ipcGet(r.Context(), ipcPath)
 	if err != nil {
@@ -199,6 +209,7 @@ func (h *ProxyHandler) AgentFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []interface{}{})
 }
 
+// AgentFileDownload streams a file from an agent's working directory.
 func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -248,6 +259,7 @@ func (h *ProxyHandler) AgentFileDownload(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// AgentFileSave uploads and saves a file to an agent's working directory.
 func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -289,14 +301,17 @@ func (h *ProxyHandler) AgentFileSave(w http.ResponseWriter, r *http.Request) {
 	h.proxyJSON(w, resp)
 }
 
+// CrewFiles lists files in a crew's shared directory via the sidecar.
 func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	var exists int
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&exists)
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
+		h.logger.Error("crew exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
@@ -329,6 +344,7 @@ func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []interface{}{})
 }
 
+// CrewFileDownload streams a file from a crew's shared directory.
 func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -337,11 +353,13 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path parameter required"})
 		return
 	}
-	var exists int
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&exists)
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
+		h.logger.Error("crew exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
@@ -371,6 +389,7 @@ func (h *ProxyHandler) CrewFileDownload(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// CrewFileSave uploads and saves a file to a crew's shared directory.
 func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -385,11 +404,13 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "path parameter required"})
 		return
 	}
-	var exists int
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&exists)
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
+		h.logger.Error("crew exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
@@ -407,18 +428,14 @@ func (h *ProxyHandler) CrewFileSave(w http.ResponseWriter, r *http.Request) {
 	h.proxyJSON(w, resp)
 }
 
+// AgentLogs returns collected log entries for a running agent.
 func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	offset := r.URL.Query().Get("offset")
-	if offset == "" {
-		offset = "0"
-	}
-	limit := r.URL.Query().Get("limit")
-	if limit == "" {
-		limit = "100"
-	}
+	limitInt, offsetInt := parsePagination(r, 100, 500)
+	offset := strconv.Itoa(offsetInt)
+	limit := strconv.Itoa(limitInt)
 
 	var crewID sql.NullString
 	var slug string
@@ -452,6 +469,7 @@ func (h *ProxyHandler) AgentLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, []interface{}{})
 }
 
+// AgentStop sends a stop signal to a running agent via the sidecar.
 func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -462,11 +480,13 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists string
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&exists)
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
 	if err != nil {
+		h.logger.Error("agent exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
@@ -491,6 +511,7 @@ func (h *ProxyHandler) AgentStop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"id": agentID, "status": "STOPPED"})
 }
 
+// ChatMessages returns the conversation message history for a chat session.
 func (h *ProxyHandler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 	user := UserFromContext(r.Context())
