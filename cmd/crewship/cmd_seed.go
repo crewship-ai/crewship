@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +12,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
+
+// devDefaultPassword is the fixed admin password used by `crewship seed` when
+// the operator does not pass --password. It deliberately trades secrecy for
+// developer ergonomics — the seed command is only intended for local dev and
+// CI bootstrap, where a stable, memorable login for demo@crewship.ai is more
+// useful than a random hex string nobody can recall. Production deployments
+// MUST pass --password to override.
+const devDefaultPassword = "password123"
 
 var seedCmd = &cobra.Command{
 	Use:   "seed",
@@ -32,7 +38,7 @@ All data is created through the REST API, ensuring business logic
 func init() {
 	seedCmd.Flags().Bool("nuke", false, "Delete all workspace contents before seeding")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
-	seedCmd.Flags().String("password", "", "Admin password for bootstrap (random if omitted)")
+	seedCmd.Flags().String("password", "", "Admin password for bootstrap (defaults to devDefaultPassword)")
 }
 
 func runSeed(cmd *cobra.Command, args []string) error {
@@ -41,14 +47,9 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")
 	password, _ := cmd.Flags().GetString("password")
 	if password == "" {
-		b := make([]byte, 16)
-		if _, err := rand.Read(b); err != nil {
-			// Refuse to bootstrap with an empty/degenerate password —
-			// that would leave the admin account with a guessable secret.
-			return fmt.Errorf("generate admin password: %w", err)
-		}
-		password = hex.EncodeToString(b)
-		fmt.Fprintf(os.Stderr, "  Generated admin password: %s\n", password)
+		password = devDefaultPassword
+		fmt.Fprintf(os.Stderr, "  Using dev default admin password: %s\n", password)
+		fmt.Fprintln(os.Stderr, "  (override with --password for production)")
 	}
 
 	if err := ctx.Err(); err != nil {
