@@ -15,49 +15,53 @@ interface WorkspacesTabProps {
 }
 
 export const WorkspacesTab = React.memo(function WorkspacesTab({ orgs }: WorkspacesTabProps) {
-  return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-body font-medium">All Workspaces</h3>
-        <p className="text-label text-muted-foreground">
-          {orgs.length} workspaces on this instance
-        </p>
+  if (orgs.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-12 text-[11px] text-muted-foreground/60">
+        No workspaces
       </div>
-      <Card className="overflow-hidden p-0">
+    )
+  }
+  return (
+    <div className="space-y-3">
+      <div className="text-[11px] text-muted-foreground font-mono tabular-nums">
+        {orgs.length} workspace{orgs.length === 1 ? "" : "s"} on this instance
+      </div>
+      <Card className="overflow-hidden p-0 rounded-xl border-border/60">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Workspace</TableHead>
-              <TableHead className="text-center">Members</TableHead>
-              <TableHead className="text-center">Agents</TableHead>
-              <TableHead className="text-center">Teams</TableHead>
-              <TableHead>Created</TableHead>
+            <TableRow className="border-border/60">
+              <TableHead className="text-[10px] uppercase tracking-wider h-8">Workspace</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wider h-8 text-center">Members</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wider h-8 text-center">Agents</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wider h-8 text-center">Crews</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wider h-8">Created</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {orgs.map((o) => (
-              <TableRow key={o.id}>
-                <TableCell>
-                  <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground text-label font-bold">
+              <TableRow key={o.id} className="border-border/40 hover:bg-white/[0.02]">
+                <TableCell className="py-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="h-6 w-6 rounded-md bg-primary flex items-center justify-center text-primary-foreground text-[11px] font-semibold">
                       {o.name[0]?.toUpperCase()}
                     </div>
-                    <div>
-                      <div className="text-body font-medium">{o.name}</div>
-                      <div className="text-micro text-muted-foreground font-mono">{o.slug}</div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium truncate">{o.name}</div>
+                      <div className="text-[10px] text-muted-foreground/60 font-mono truncate">{o.slug}</div>
                     </div>
                   </div>
                 </TableCell>
-                <TableCell className="text-center text-label">
+                <TableCell className="text-center text-xs tabular-nums py-2">
                   {o._count_members ?? 0}
                 </TableCell>
-                <TableCell className="text-center text-label">
+                <TableCell className="text-center text-xs tabular-nums py-2">
                   {o._count_agents ?? 0}
                 </TableCell>
-                <TableCell className="text-center text-label">
+                <TableCell className="text-center text-xs tabular-nums py-2">
                   {o._count_crews ?? 0}
                 </TableCell>
-                <TableCell className="text-label text-muted-foreground">
+                <TableCell className="text-[11px] text-muted-foreground py-2">
                   {new Date(o.created_at).toLocaleDateString()}
                 </TableCell>
               </TableRow>

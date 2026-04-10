@@ -65,10 +65,10 @@ export const KeeperTab = React.memo(function KeeperTab({
   onRefresh,
 }: KeeperTabProps) {
   return (
-    <div className="space-y-6">
-      <div className="pb-3 border-b border-border">
-        <h3 className="text-body font-medium">Keeper — Credential Access Control</h3>
-        <p className="text-label text-muted-foreground">
+    <div className="space-y-4">
+      <div className="pb-3 border-b border-border/60">
+        <h3 className="text-body font-medium text-foreground/80">Keeper — Credential Access Control</h3>
+        <p className="text-[11px] text-muted-foreground mt-0.5 max-w-2xl">
           Keeper evaluates credential access requests using a local AI model (Ollama).
           Agents never see raw credentials — Keeper decides ALLOW / DENY / ESCALATE.
         </p>

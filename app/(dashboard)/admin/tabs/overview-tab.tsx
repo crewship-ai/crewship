@@ -42,21 +42,21 @@ export const OverviewTab = React.memo(function OverviewTab({
   ]
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {statCards.map((s) => (
           <StatCard key={s.title} {...s} />
         ))}
       </div>
       <SectionCard title="System Status" description="Core infrastructure health">
-        <div className="space-y-3">
+        <div className="space-y-2">
           {statusRows.map((s) => (
             <div key={s.name} className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <StatusDot status={s.statusKey} />
-                <span className="text-body">{s.name}</span>
+                <span className="text-xs">{s.name}</span>
               </div>
-              <span className="text-label text-muted-foreground">{s.desc}</span>
+              <span className="text-[11px] text-muted-foreground">{s.desc}</span>
             </div>
           ))}
         </div>
