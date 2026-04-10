@@ -27,8 +27,20 @@ func Open(databaseURL string) (*DB, error) {
 	}
 
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		// 0700: the data directory holds the SQLite file plus WAL/SHM sidecars,
+		// which contain encrypted credentials and bcrypt hashes. No other local
+		// user has business reading it.
+		//
+		// os.MkdirAll only applies its mode to directories it CREATES — if
+		// the directory already exists (e.g. an upgrade from an earlier build
+		// that created it at 0755), MkdirAll is a no-op and the loose perms
+		// stick around. Follow up with an explicit Chmod so both fresh
+		// installs and upgrades end up at 0700. Chmod is idempotent.
+		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, fmt.Errorf("create database directory: %w", err)
+		}
+		if err := os.Chmod(dir, 0700); err != nil {
+			return nil, fmt.Errorf("chmod database directory: %w", err)
 		}
 	}
 
@@ -36,7 +48,14 @@ func Open(databaseURL string) (*DB, error) {
 	if strings.Contains(path, "?") {
 		sep = "&"
 	}
-	dsn := path + sep + "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)&_pragma=cache_size(-20000)&_txlock=immediate"
+	dsn := path + sep + "_pragma=busy_timeout(5000)" +
+		"&_pragma=journal_mode(WAL)" +
+		"&_pragma=synchronous(NORMAL)" +
+		"&_pragma=foreign_keys(ON)" +
+		"&_pragma=cache_size(-20000)" +
+		"&_pragma=temp_store(MEMORY)" +
+		"&_pragma=mmap_size(268435456)" +
+		"&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -49,6 +68,25 @@ func Open(databaseURL string) (*DB, error) {
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("ping sqlite: %w", err)
+	}
+
+	// Tighten permissions on the DB file itself (and its WAL/SHM sidecars if
+	// present). Chmod is a no-op if the file already has the desired mode, so
+	// this is safe to run on every boot. We only attempt it when the path
+	// points to a real filesystem entry — in-memory and shared-cache paths
+	// (":memory:", "file::memory:?cache=shared", etc.) are left alone.
+	//
+	// parseDSN only strips "file:"/"//" prefixes, so path may still carry a
+	// query string (e.g. "./foo.db?cache=shared"). Strip it before stat/chmod
+	// or we'd silently skip the chmod on any DSN with parameters.
+	filePath := path
+	if i := strings.IndexByte(filePath, '?'); i >= 0 {
+		filePath = filePath[:i]
+	}
+	if _, statErr := os.Stat(filePath); statErr == nil {
+		_ = os.Chmod(filePath, 0600)
+		_ = os.Chmod(filePath+"-wal", 0600)
+		_ = os.Chmod(filePath+"-shm", 0600)
 	}
 
 	return &DB{DB: db, path: path}, nil
@@ -71,18 +109,3 @@ func parseDSN(dsn string) (string, error) {
 	return dsn, nil
 }
 
-func applyPragmas(db *sql.DB) error {
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA busy_timeout=5000",
-		"PRAGMA synchronous=NORMAL",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA cache_size=-20000",
-	}
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			return fmt.Errorf("%s: %w", p, err)
-		}
-	}
-	return nil
-}

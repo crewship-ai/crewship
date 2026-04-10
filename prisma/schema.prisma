@@ -221,6 +221,7 @@ model Account {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@index([userId], name: "idx_accounts_user")
   @@map("accounts")
 }
 
@@ -232,6 +233,7 @@ model Session {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId], name: "idx_sessions_user")
   @@map("sessions")
 }
 
@@ -316,6 +318,7 @@ model WorkspaceInvitation {
   @@index([workspace_id], name: "idx_invitation_workspace")
   @@index([token], name: "idx_invitation_token")
   @@index([email, workspace_id], name: "idx_invitation_email_workspace")
+  @@index([invited_by], name: "idx_invitation_invited_by")
   @@map("workspace_invitations")
 }
 
@@ -449,6 +452,7 @@ model Assignment {
   @@index([assigned_by_id], name: "idx_assignment_by")
   @@index([assigned_to_id], name: "idx_assignment_to")
   @@index([group_id], name: "idx_assignment_group")
+  @@index([workspace_id], name: "idx_assignment_workspace")
   @@map("assignments")
 }
 
@@ -508,6 +512,7 @@ model Skill {
   @@index([source], name: "idx_skill_source")
   @@index([verification], name: "idx_skill_verification")
   @@index([featured], name: "idx_skill_featured")
+  @@index([author_id], name: "idx_skill_author")
   @@map("skills")
 }
 
@@ -530,6 +535,7 @@ model SkillReview {
 
   @@unique([skill_id, user_id], name: "uq_skill_review_user")
   @@index([skill_id], name: "idx_skill_review_skill")
+  @@index([user_id], name: "idx_skill_review_user")
   @@map("skill_reviews")
 }
 
@@ -549,6 +555,7 @@ model AgentSkill {
   skill Skill @relation(fields: [skill_id], references: [id], onDelete: Cascade)
 
   @@unique([agent_id, skill_id], name: "uq_agent_skill")
+  @@index([skill_id], name: "idx_agent_skill_skill")
   @@map("agent_skills")
 }
 
@@ -590,6 +597,7 @@ model Credential {
   @@index([workspace_id], name: "idx_credential_workspace")
   @@index([crew_id], name: "idx_credential_crew")
   @@index([workspace_id, type, provider], name: "idx_credential_type_provider")
+  @@index([created_by], name: "idx_credential_created_by")
   @@map("credentials")
 }
 
@@ -610,6 +618,7 @@ model AgentCredential {
 
   @@unique([agent_id, credential_id], name: "uq_agent_credential")
   @@index([agent_id, env_var_name], name: "idx_agent_credential_env")
+  @@index([credential_id], name: "idx_agent_credential_cred")
   @@map("agent_credentials")
 }
 
@@ -641,6 +650,7 @@ model Chat {
   @@index([agent_id], name: "idx_chat_agent")
   @@index([workspace_id], name: "idx_chat_workspace")
   @@index([created_at], name: "idx_chat_created")
+  @@index([created_by], name: "idx_chat_created_by")
   @@map("chats")
 }
 
@@ -671,6 +681,8 @@ model AgentRun {
   @@index([agent_id, created_at], name: "idx_run_agent_time")
   @@index([workspace_id], name: "idx_run_workspace")
   @@index([status], name: "idx_run_status")
+  @@index([chat_id], name: "idx_run_chat")
+  @@index([triggered_by], name: "idx_run_triggered_by")
   @@map("agent_runs")
 }
 
@@ -720,6 +732,7 @@ model Subscription {
   workspace Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   plan      Plan      @relation(fields: [plan_id], references: [id])
 
+  @@index([plan_id], name: "idx_subscription_plan")
   @@map("subscriptions")
 }
 
@@ -780,6 +793,7 @@ model FeatureFlagOverride {
   workspace Workspace   @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
   @@unique([flag_id, workspace_id], name: "uq_flag_override")
+  @@index([workspace_id], name: "idx_feature_flag_override_ws")
   @@map("feature_flag_overrides")
 }
 
@@ -801,5 +815,6 @@ model AgentConfigHistory {
 
   @@unique([agent_id, version], name: "uq_config_version")
   @@index([agent_id, created_at], name: "idx_config_history_agent_time")
+  @@index([changed_by], name: "idx_config_history_changed_by")
   @@map("agent_config_history")
 }
