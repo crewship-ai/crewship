@@ -412,13 +412,11 @@ func execCreateAgent(ctx context.Context, h *CaptainHandler, wsID, _, role strin
 		return "", fmt.Errorf("name and crew_id are required")
 	}
 
-	var exists int
-	if err := h.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", crewID, wsID).Scan(&exists); err != nil {
+	if err := crewExists(ctx, h.db, crewID, wsID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("crew %q not found in workspace", crewID)
+		}
 		return "", fmt.Errorf("check crew existence: %w", err)
-	}
-	if exists == 0 {
-		return "", fmt.Errorf("crew %q not found in workspace", crewID)
 	}
 
 	slug := strInput(input, "slug")
@@ -485,13 +483,11 @@ func execCreateMission(ctx context.Context, h *CaptainHandler, wsID, _, role str
 		return "", fmt.Errorf("crew_id and title are required")
 	}
 
-	var exists int
-	if err := h.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL", crewID, wsID).Scan(&exists); err != nil {
+	if err := crewExists(ctx, h.db, crewID, wsID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("crew %q not found", crewID)
+		}
 		return "", fmt.Errorf("check crew: %w", err)
-	}
-	if exists == 0 {
-		return "", fmt.Errorf("crew %q not found", crewID)
 	}
 
 	var leadID string
