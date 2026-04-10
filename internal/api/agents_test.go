@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -311,4 +312,138 @@ func TestBatchCountByAgentID(t *testing.T) {
 func req(t *testing.T) *http.Request {
 	t.Helper()
 	return httptest.NewRequest("GET", "/x", nil)
+}
+
+// TestAgentList_BatchCountFailureReturns500 is a regression for a CodeRabbit
+// finding on PR #132: when one of the three batched COUNT queries fails, the
+// handler used to log-and-continue, returning HTTP 200 with zeroed _count
+// fields — silently masking query/schema regressions. The fix propagates the
+// error and responds 500 like the old single-query path did.
+//
+// Mechanism: we drop the `agent_skills` table AFTER the main agents query is
+// wired up, so the main SELECT still succeeds (agents table intact) but the
+// first batched count query (`SELECT ... FROM agent_skills ...`) hits a
+// "no such table" error.
+func TestAgentList_BatchCountFailureReturns500(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	_, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('c', ?, 'C', 'c')`, wsID)
+	if err != nil {
+		t.Fatalf("insert crew: %v", err)
+	}
+	_, err = db.Exec(`INSERT INTO agents (id, crew_id, workspace_id, name, slug) VALUES ('a1', 'c', ?, 'alice', 'alice')`, wsID)
+	if err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+
+	// Detonate the batch count path without breaking the main query.
+	if _, err := db.Exec("DROP TABLE agent_skills"); err != nil {
+		t.Fatalf("drop agent_skills: %v", err)
+	}
+
+	handler := NewAgentHandler(db, logger)
+	r := httptest.NewRequest("GET", "/api/v1/agents", nil)
+	r = r.WithContext(withWorkspace(r.Context(), wsID, "OWNER"))
+	w := httptest.NewRecorder()
+
+	handler.List(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("got status %d, want 500 (batch count should propagate error, not silently return zeros)", w.Code)
+	}
+}
+
+// TestAgentList_PaginationStableAcrossTies is a structural regression for the
+// CodeRabbit finding that ORDER BY a.created_at DESC alone is not
+// deterministic when multiple rows share a second: tied rows that straddle a
+// page boundary could drop or duplicate across LIMIT/OFFSET pages. The fix
+// adds a.id DESC as a unique tiebreaker.
+//
+// Caveat: in practice SQLite happens to be stable on tied sort keys
+// (rowid-ordered), so this test does NOT fail against the pre-fix code — the
+// SQL spec doesn't guarantee stability but SQLite's implementation does. It's
+// kept as a smoke test: it proves the paginated List flow returns every
+// seeded row exactly once across pages, catches any future rewrite that
+// drops ORDER BY entirely, and documents the expected behavior. The actual
+// correctness of the tiebreaker is enforced by code review of the SQL, not
+// a runtime assertion here.
+func TestAgentList_PaginationStableAcrossTies(t *testing.T) {
+	db := setupTestDB(t)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	_, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('c', ?, 'C', 'c')`, wsID)
+	if err != nil {
+		t.Fatalf("insert crew: %v", err)
+	}
+
+	// 10 agents, all with the same created_at timestamp — this is the
+	// scenario where the old single-key ORDER BY was unstable.
+	const tiedTimestamp = "2026-04-10T12:00:00Z"
+	for i := 0; i < 10; i++ {
+		id := fmt.Sprintf("a%02d", i)
+		_, err := db.Exec(
+			`INSERT INTO agents (id, crew_id, workspace_id, name, slug, created_at)
+			 VALUES (?, 'c', ?, ?, ?, ?)`,
+			id, wsID, id, id, tiedTimestamp)
+		if err != nil {
+			t.Fatalf("insert agent %s: %v", id, err)
+		}
+	}
+
+	handler := NewAgentHandler(db, logger)
+	fetchPage := func(limit, offset int) []string {
+		r := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/agents?limit=%d&offset=%d", limit, offset), nil)
+		r = r.WithContext(withWorkspace(r.Context(), wsID, "OWNER"))
+		w := httptest.NewRecorder()
+		handler.List(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("page (limit=%d offset=%d): status %d body=%s", limit, offset, w.Code, w.Body.String())
+		}
+		var items []agentResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		ids := make([]string, len(items))
+		for i, a := range items {
+			ids[i] = a.ID
+		}
+		return ids
+	}
+
+	// Page through with limit=3 and collect every ID. The test fails if any
+	// ID is missing or appears more than once — exactly the class of bug the
+	// tiebreaker prevents.
+	var collected []string
+	seen := make(map[string]int, 10)
+	for offset := 0; offset < 20; offset += 3 {
+		page := fetchPage(3, offset)
+		if len(page) == 0 {
+			break
+		}
+		collected = append(collected, page...)
+		for _, id := range page {
+			seen[id]++
+		}
+	}
+
+	if len(collected) != 10 {
+		t.Errorf("paginated total = %d, want 10 — rows dropped or duplicated across pages: %v", len(collected), collected)
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Errorf("agent %q appeared %d times across pages (expected 1)", id, n)
+		}
+	}
+	// And every seeded ID must be accounted for.
+	for i := 0; i < 10; i++ {
+		id := fmt.Sprintf("a%02d", i)
+		if seen[id] == 0 {
+			t.Errorf("agent %q missing from paginated results", id)
+		}
+	}
 }

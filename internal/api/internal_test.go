@@ -868,13 +868,18 @@ func TestResolveCoordinatorCrews_SameNameCrews(t *testing.T) {
 		return out
 	}
 
+	// The SQL orders agents deterministically by a.name ASC within each crew,
+	// so both crews' members arrive in a known order: crew-a is [a1=alice,
+	// a3=carol] and crew-b is [a2=bob, a4=dave]. Use strict positional checks
+	// (|| not &&) — the original && form short-circuited if either position
+	// was correct, so a result like [a1, a4] would have passed.
 	gotA := memberIDs(crewA)
 	gotB := memberIDs(crewB)
-	if len(gotA) != 2 || (gotA[0] != "a1" && gotA[1] != "a3") {
-		t.Errorf("crew-a members = %v, want [a1 a3] in some order", gotA)
+	if len(gotA) != 2 || gotA[0] != "a1" || gotA[1] != "a3" {
+		t.Errorf("crew-a members = %v, want [a1 a3]", gotA)
 	}
-	if len(gotB) != 2 || (gotB[0] != "a2" && gotB[1] != "a4") {
-		t.Errorf("crew-b members = %v, want [a2 a4] in some order", gotB)
+	if len(gotB) != 2 || gotB[0] != "a2" || gotB[1] != "a4" {
+		t.Errorf("crew-b members = %v, want [a2 a4]", gotB)
 	}
 }
 

@@ -189,7 +189,10 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count
 		FROM credentials c
 		WHERE c.workspace_id = ? AND c.deleted_at IS NULL
-		ORDER BY c.type ASC, c.created_at DESC
+		-- c.id ASC is the pagination tiebreaker: (type, created_at) alone can
+		-- tie on bulk-imported credentials sharing a second, and ties that
+		-- straddle a page boundary would drop or duplicate rows.
+		ORDER BY c.type ASC, c.created_at DESC, c.id ASC
 		LIMIT ? OFFSET ?
 	`, workspaceID, limit, offset)
 	if err != nil {

@@ -149,7 +149,10 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
 		WHERE c.workspace_id = ? AND c.deleted_at IS NULL
-		ORDER BY c.created_at DESC
+		-- c.id DESC is the pagination tiebreaker: c.created_at is second-precision,
+		-- so timestamp ties are realistic and would otherwise make LIMIT/OFFSET
+		-- windows drop or duplicate rows between pages.
+		ORDER BY c.created_at DESC, c.id DESC
 		LIMIT ? OFFSET ?
 	`, workspaceID, limit, offset)
 	if err != nil {

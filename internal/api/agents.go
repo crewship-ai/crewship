@@ -172,13 +172,17 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 
+	// a.id DESC is the pagination tiebreaker: created_at is stored with
+	// second precision, so ties on busy workspaces are realistic. Without a
+	// unique secondary sort key, LIMIT/OFFSET windows can drop or duplicate
+	// rows between pages when the tied rows straddle a page boundary.
 	if crewID != "" {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+" AND a.crew_id = ? ORDER BY a.created_at DESC LIMIT ? OFFSET ?",
+			listQuery+" AND a.crew_id = ? ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
 			workspaceID, crewID, limit, offset)
 	} else {
 		rows, err = h.db.QueryContext(r.Context(),
-			listQuery+" ORDER BY a.created_at DESC LIMIT ? OFFSET ?",
+			listQuery+" ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
 			workspaceID, limit, offset)
 	}
 
@@ -230,31 +234,47 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			byID[result[i].ID] = &result[i]
 		}
 
-		loadCounts := func(sql string, assign func(*agentResponse, int)) {
-			counts, err := batchCountByAgentID(r.Context(), h.db, sql, ids)
+		// loadCounts returns an error so the handler can fail the whole
+		// request when a batch query fails. The old "log and continue"
+		// shape masked query/schema regressions: a broken GROUP BY would
+		// still return HTTP 200 with zeroed _count fields, and the UI
+		// would quietly show "0 skills" for every agent until someone
+		// eventually noticed. Failing loud is the same behavior the
+		// original single-query List handler had.
+		loadCounts := func(bucket, query string, assign func(*agentResponse, int)) error {
+			counts, err := batchCountByAgentID(r.Context(), h.db, query, ids)
 			if err != nil {
-				h.logger.Error("batch count", "query", sql, "error", err)
-				return
+				return fmt.Errorf("%s batch count: %w", bucket, err)
 			}
 			for id, n := range counts {
 				if a, ok := byID[id]; ok {
 					assign(a, n)
 				}
 			}
+			return nil
 		}
 
-		loadCounts(
-			`SELECT agent_id, COUNT(*) FROM agent_skills WHERE agent_id IN (%s) GROUP BY agent_id`,
-			func(a *agentResponse, n int) { a.Count.Skills = n },
-		)
-		loadCounts(
-			`SELECT agent_id, COUNT(*) FROM agent_credentials WHERE agent_id IN (%s) GROUP BY agent_id`,
-			func(a *agentResponse, n int) { a.Count.Credentials = n },
-		)
-		loadCounts(
-			`SELECT agent_id, COUNT(*) FROM chats WHERE agent_id IN (%s) GROUP BY agent_id`,
-			func(a *agentResponse, n int) { a.Count.Chats = n },
-		)
+		for _, step := range []struct {
+			bucket string
+			query  string
+			assign func(*agentResponse, int)
+		}{
+			{"skills",
+				`SELECT agent_id, COUNT(*) FROM agent_skills WHERE agent_id IN (%s) GROUP BY agent_id`,
+				func(a *agentResponse, n int) { a.Count.Skills = n }},
+			{"credentials",
+				`SELECT agent_id, COUNT(*) FROM agent_credentials WHERE agent_id IN (%s) GROUP BY agent_id`,
+				func(a *agentResponse, n int) { a.Count.Credentials = n }},
+			{"chats",
+				`SELECT agent_id, COUNT(*) FROM chats WHERE agent_id IN (%s) GROUP BY agent_id`,
+				func(a *agentResponse, n int) { a.Count.Chats = n }},
+		} {
+			if err := loadCounts(step.bucket, step.query, step.assign); err != nil {
+				h.logger.Error("batch count", "bucket", step.bucket, "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, result)

@@ -25,8 +25,17 @@ func Open(databaseURL string) (*DB, error) {
 		// 0700: the data directory holds the SQLite file plus WAL/SHM sidecars,
 		// which contain encrypted credentials and bcrypt hashes. No other local
 		// user has business reading it.
+		//
+		// os.MkdirAll only applies its mode to directories it CREATES — if
+		// the directory already exists (e.g. an upgrade from an earlier build
+		// that created it at 0755), MkdirAll is a no-op and the loose perms
+		// stick around. Follow up with an explicit Chmod so both fresh
+		// installs and upgrades end up at 0700. Chmod is idempotent.
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, fmt.Errorf("create database directory: %w", err)
+		}
+		if err := os.Chmod(dir, 0700); err != nil {
+			return nil, fmt.Errorf("chmod database directory: %w", err)
 		}
 	}
 
