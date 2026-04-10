@@ -368,7 +368,7 @@ export function ProjectDetailClient() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3">
         <FolderKanban className="h-10 w-10 text-muted-foreground/30" />
-        <p className="text-sm text-muted-foreground">{error || "Project not found"}</p>
+        <p className="text-body text-muted-foreground">{error || "Project not found"}</p>
         <Button variant="ghost" size="sm" onClick={() => router.push("/orchestration")}>
           <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
           Back to Orchestration
@@ -386,17 +386,17 @@ export function ProjectDetailClient() {
       {/* ================================================================== */}
       {/* Top header bar                                                     */}
       {/* ================================================================== */}
-      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.06] shrink-0 bg-card/50">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/[0.08] shrink-0 bg-card/50">
         {/* Back */}
         <button
           onClick={() => router.push("/orchestration")}
-          className="p-1 rounded hover:bg-white/[0.06] text-muted-foreground/60 hover:text-foreground transition-colors"
+          className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
 
         {/* Breadcrumb */}
-        <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground/60 min-w-0">
+        <div className="flex items-center gap-1.5 text-body text-muted-foreground min-w-0">
           <span className="hover:text-foreground cursor-pointer transition-colors" onClick={() => router.push("/orchestration")}>
             Projects
           </span>
@@ -410,15 +410,15 @@ export function ProjectDetailClient() {
         <button
           onClick={() => setStarred((v) => !v)}
           className={cn(
-            "p-1.5 rounded hover:bg-white/[0.06] transition-colors",
-            starred ? "text-yellow-400" : "text-muted-foreground/40 hover:text-muted-foreground/60",
+            "p-1.5 rounded hover:bg-accent transition-colors",
+            starred ? "text-primary" : "text-muted-foreground hover:text-foreground",
           )}
         >
           <Star className={cn("h-3.5 w-3.5", starred && "fill-current")} />
         </button>
 
         {/* More */}
-        <button className="p-1.5 rounded hover:bg-white/[0.06] text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors">
+        <button className="p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors">
           <MoreHorizontal className="h-3.5 w-3.5" />
         </button>
 
@@ -428,7 +428,7 @@ export function ProjectDetailClient() {
             navigator.clipboard.writeText(window.location.href)
             toast.success("URL copied")
           }}
-          className="p-1.5 rounded hover:bg-white/[0.06] text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors"
+          className="p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
         >
           <Link2 className="h-3.5 w-3.5" />
         </button>
@@ -437,16 +437,16 @@ export function ProjectDetailClient() {
       {/* ================================================================== */}
       {/* Tabs                                                               */}
       {/* ================================================================== */}
-      <div className="flex items-center gap-0 px-4 border-b border-white/[0.06] shrink-0 bg-card/30">
+      <div className="flex items-center gap-0 px-4 border-b border-white/[0.08] shrink-0 bg-card/30">
         {(["overview", "issues", "activity"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
-              "text-[12px] px-3 py-2 border-b-2 transition-colors capitalize",
+              "text-label px-3 py-2 border-b-2 transition-colors capitalize",
               activeTab === tab
-                ? "border-blue-500 text-foreground font-medium"
-                : "border-transparent text-muted-foreground/50 hover:text-muted-foreground/80",
+                ? "border-primary text-foreground font-medium"
+                : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
             {tab}
@@ -496,18 +496,18 @@ export function ProjectDetailClient() {
           )}
 
           {activeTab === "activity" && (
-            <div className="p-8">
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground/40">
+            <div className="p-6">
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <Clock className="h-8 w-8 mb-3" />
-                <p className="text-sm">Activity feed coming soon</p>
-                <p className="text-xs text-muted-foreground/30 mt-1">Project activity and updates will appear here</p>
+                <p className="text-body">Activity feed coming soon</p>
+                <p className="text-label text-muted-foreground/60 mt-1">Project activity and updates will appear here</p>
               </div>
             </div>
           )}
         </div>
 
         {/* ---- Sidebar ---- */}
-        <div className="hidden lg:block w-[360px] border-l border-white/[0.06] overflow-y-auto bg-card/30 shrink-0">
+        <div className="hidden lg:block w-[360px] border-l border-white/[0.08] overflow-y-auto bg-card/30 shrink-0">
           <ProjectSidebar
             project={project}
             stats={stats}
@@ -594,7 +594,7 @@ function OverviewTab({
   const priorityInfo = PRIORITY_OPTIONS.find((p) => p.value === project.priority)
 
   return (
-    <div className="max-w-3xl mx-auto px-8 py-8 space-y-8">
+    <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
       {/* Icon + Title */}
       <div className="flex items-start gap-4">
         <CrewIconPopover
@@ -606,7 +606,7 @@ function OverviewTab({
         <div className="flex-1 min-w-0">
           {editingTitle ? (
             <input
-              className="text-2xl font-bold text-foreground bg-transparent border-b-2 border-blue-500 outline-none w-full pb-1"
+              className="text-display font-bold text-foreground bg-transparent border-b-2 border-primary outline-none w-full pb-1"
               value={titleDraft}
               onChange={(e) => onTitleChange(e.target.value)}
               onBlur={onTitleSave}
@@ -618,7 +618,7 @@ function OverviewTab({
             />
           ) : (
             <h1
-              className="text-2xl font-bold text-foreground cursor-pointer hover:text-blue-400 transition-colors"
+              className="text-display font-bold text-foreground cursor-pointer hover:text-foreground/80 transition-colors"
               onClick={onEditTitle}
             >
               {project.name}
@@ -629,7 +629,7 @@ function OverviewTab({
           {!editingDesc && !project.description && (
             <button
               onClick={onEditDesc}
-              className="text-sm text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors mt-1"
+              className="text-body text-muted-foreground hover:text-foreground transition-colors mt-1"
             >
               Add a short summary...
             </button>
@@ -639,106 +639,106 @@ function OverviewTab({
 
       {/* Properties bar */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/[0.06]">
-          <ProjectStatusIcon status={project.status} className="h-3.5 w-3.5 text-muted-foreground/70" />
-          <span className="text-[12px] text-foreground/80">{statusInfo?.label || project.status}</span>
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-subtle border border-white/[0.08]">
+          <ProjectStatusIcon status={project.status} className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-label text-foreground/80">{statusInfo?.label || project.status}</span>
         </div>
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/[0.06]">
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-subtle border border-white/[0.08]">
           <PriorityIcon priority={project.priority || "none"} className="h-3.5 w-3.5" />
-          <span className="text-[12px] text-foreground/80">{priorityInfo?.label || "No priority"}</span>
+          <span className="text-label text-foreground/80">{priorityInfo?.label || "No priority"}</span>
         </div>
         {project.lead_name && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/[0.06]">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-subtle border border-white/[0.08]">
             {project.lead_id && (
               <img src={getAgentAvatarUrl(project.lead_id)} alt="" className="h-4 w-4 rounded-full" />
             )}
-            <span className="text-[12px] text-foreground/80">{project.lead_name}</span>
+            <span className="text-label text-foreground/80">{project.lead_name}</span>
           </div>
         )}
         {project.target_date && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/[0.06]">
-            <Calendar className="h-3 w-3 text-muted-foreground/50" />
-            <span className="text-[12px] text-foreground/80">{formatShortDate(project.target_date)}</span>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-subtle border border-white/[0.08]">
+            <Calendar className="h-3 w-3 text-muted-foreground" />
+            <span className="text-label text-foreground/80">{formatShortDate(project.target_date)}</span>
           </div>
         )}
         {stats?.crews && stats.crews.length > 0 && stats.crews.map((crew) => (
           <div
             key={crew}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/[0.06]"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-subtle border border-white/[0.08]"
           >
-            <span className="text-[12px] text-foreground/80">{crew}</span>
+            <span className="text-label text-foreground/80">{crew}</span>
           </div>
         ))}
       </div>
 
-      <Separator className="bg-white/[0.06]" />
+      <Separator className="bg-white/[0.08]" />
 
       {/* Resources placeholder */}
       <div>
-        <h3 className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">Resources</h3>
-        <button className="flex items-center gap-2 text-[12px] text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors py-1.5">
+        <h3 className="text-label font-semibold text-muted-foreground uppercase tracking-wider mb-2">Resources</h3>
+        <button className="flex items-center gap-2 text-label text-muted-foreground hover:text-foreground transition-colors py-1.5">
           <Plus className="h-3.5 w-3.5" />
           Add document or link...
         </button>
       </div>
 
-      <Separator className="bg-white/[0.06]" />
+      <Separator className="bg-white/[0.08]" />
 
       {/* Project update placeholder */}
-      <button className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg border border-dashed border-white/[0.1] hover:border-white/[0.2] text-muted-foreground/50 hover:text-muted-foreground/70 transition-colors">
+      <button className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg border border-dashed border-white/[0.12] hover:border-white/[0.2] text-muted-foreground hover:text-foreground transition-colors">
         <Pencil className="h-3.5 w-3.5" />
-        <span className="text-[13px]">Write first project update</span>
+        <span className="text-body">Write first project update</span>
       </button>
 
-      <Separator className="bg-white/[0.06]" />
+      <Separator className="bg-white/[0.08]" />
 
       {/* Description */}
       <div>
-        <h3 className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-3">Description</h3>
+        <h3 className="text-label font-semibold text-muted-foreground uppercase tracking-wider mb-3">Description</h3>
         {editingDesc ? (
           <div className="space-y-2">
             <textarea
-              className="w-full min-h-[120px] bg-white/[0.03] border border-white/[0.1] rounded-md px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/40 outline-none focus:border-blue-500/50 resize-y"
+              className="w-full min-h-[120px] bg-surface-subtle border border-white/[0.12] rounded-md px-3 py-2 text-body text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 resize-y"
               value={descDraft}
               onChange={(e) => onDescChange(e.target.value)}
               placeholder="Describe the project..."
               autoFocus
             />
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="default" onClick={onDescSave} className="text-xs h-7">
+              <Button size="sm" variant="default" onClick={onDescSave} className="text-label h-7">
                 Save
               </Button>
-              <Button size="sm" variant="ghost" onClick={onDescCancel} className="text-xs h-7">
+              <Button size="sm" variant="ghost" onClick={onDescCancel} className="text-label h-7">
                 Cancel
               </Button>
             </div>
           </div>
         ) : project.description ? (
           <div
-            className="cursor-pointer hover:bg-white/[0.02] rounded-md p-2 -m-2 transition-colors"
+            className="cursor-pointer hover:bg-accent/40 rounded-md p-2 -m-2 transition-colors"
             onClick={onEditDesc}
           >
-            <MarkdownContent className="text-sm">{project.description}</MarkdownContent>
+            <MarkdownContent className="text-body">{project.description}</MarkdownContent>
           </div>
         ) : (
           <button
             onClick={onEditDesc}
-            className="text-sm text-muted-foreground/40 hover:text-muted-foreground/60 transition-colors"
+            className="text-body text-muted-foreground hover:text-foreground transition-colors"
           >
             Add description...
           </button>
         )}
       </div>
 
-      <Separator className="bg-white/[0.06]" />
+      <Separator className="bg-white/[0.08]" />
 
       {/* Milestones overview */}
       <div>
-        <h3 className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-3">
+        <h3 className="text-label font-semibold text-muted-foreground uppercase tracking-wider mb-3">
           Milestones {milestones.length > 0 && `(${milestones.length})`}
         </h3>
         {milestones.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground/40">No milestones yet. Add one from the sidebar.</p>
+          <p className="text-label text-muted-foreground">No milestones yet. Add one from the sidebar.</p>
         ) : (
           <div className="space-y-2">
             {milestones.map((m) => {
@@ -748,18 +748,21 @@ function OverviewTab({
               return (
                 <div key={m.id} className="flex items-center gap-3">
                   <div className="flex-1 min-w-0">
-                    <span className="text-[12px] text-foreground/80 font-medium">{m.name}</span>
+                    <span className="text-label text-foreground/80 font-medium">{m.name}</span>
                     <div className="flex items-center gap-2 mt-0.5">
                       {m.target_date && (
-                        <span className="text-[10px] text-muted-foreground/50">
+                        <span className="text-micro text-muted-foreground">
                           {new Date(m.target_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                         </span>
                       )}
-                      <span className="text-[10px] text-muted-foreground/50">{m.done_count ?? 0}/{m.issue_count ?? 0} done</span>
+                      <span className="text-micro text-muted-foreground">{m.done_count ?? 0}/{m.issue_count ?? 0} done</span>
                     </div>
                   </div>
-                  <div className="w-16 h-1 bg-white/[0.06] rounded-full overflow-hidden">
-                    <div className="h-full bg-green-500/70 rounded-full transition-all" style={{ width: `${progress}%` }} />
+                  <div className="w-16 h-1 bg-white/[0.08] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full transition-all"
+                      style={{ width: `${progress}%` }}
+                    />
                   </div>
                 </div>
               )
@@ -794,9 +797,9 @@ function IssuesTab({
 
   if (issues.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground/40">
+      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
         <FolderKanban className="h-8 w-8 mb-3" />
-        <p className="text-sm">No issues in this project</p>
+        <p className="text-body">No issues in this project</p>
       </div>
     )
   }
@@ -805,12 +808,12 @@ function IssuesTab({
     <div className="p-4">
       <table className="w-full text-left">
         <thead>
-          <tr className="border-b border-white/[0.06]">
-            <th className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider py-2 px-3 w-[80px]">ID</th>
-            <th className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider py-2 px-3">Title</th>
-            <th className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider py-2 px-3 w-[100px]">Status</th>
-            <th className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider py-2 px-3 w-[90px]">Priority</th>
-            <th className="text-[10px] font-medium text-muted-foreground/50 uppercase tracking-wider py-2 px-3 w-[120px]">Assignee</th>
+          <tr className="border-b border-white/[0.08]">
+            <th className="text-micro font-medium text-muted-foreground uppercase tracking-wider py-2 px-3 w-[80px]">ID</th>
+            <th className="text-micro font-medium text-muted-foreground uppercase tracking-wider py-2 px-3">Title</th>
+            <th className="text-micro font-medium text-muted-foreground uppercase tracking-wider py-2 px-3 w-[100px]">Status</th>
+            <th className="text-micro font-medium text-muted-foreground uppercase tracking-wider py-2 px-3 w-[90px]">Priority</th>
+            <th className="text-micro font-medium text-muted-foreground uppercase tracking-wider py-2 px-3 w-[120px]">Assignee</th>
           </tr>
         </thead>
         <tbody>
@@ -828,24 +831,24 @@ function IssuesTab({
                   router.push(`/orchestration/issues/${issue.identifier}`)
                 }
               }}
-              className="border-b border-white/[0.03] hover:bg-white/[0.03] transition-colors cursor-pointer focus:outline-none focus:bg-white/[0.04]"
+              className="border-b border-white/[0.04] hover:bg-accent/40 transition-colors cursor-pointer focus:outline-none focus:bg-accent/60"
             >
               <td className="py-2 px-3">
-                <span className="text-[11px] font-mono text-muted-foreground/60">{issue.identifier || "--"}</span>
+                <span className="text-label font-mono text-muted-foreground">{issue.identifier || "--"}</span>
               </td>
               <td className="py-2 px-3">
-                <span className="text-[12px] text-foreground/80 truncate">{issue.title}</span>
+                <span className="text-label text-foreground/80 truncate">{issue.title}</span>
               </td>
               <td className="py-2 px-3">
                 <div className="flex items-center gap-1.5">
                   <StatusIcon status={issue.status} className="h-3.5 w-3.5" />
-                  <span className="text-[11px] text-muted-foreground/60">{statusLabel[issue.status] || issue.status}</span>
+                  <span className="text-label text-muted-foreground">{statusLabel[issue.status] || issue.status}</span>
                 </div>
               </td>
               <td className="py-2 px-3">
                 <div className="flex items-center gap-1.5">
                   <PriorityIcon priority={issue.priority || "none"} className="h-3.5 w-3.5" />
-                  <span className="text-[11px] text-muted-foreground/60">{priorityLabel[issue.priority || "none"]}</span>
+                  <span className="text-label text-muted-foreground">{priorityLabel[issue.priority || "none"]}</span>
                 </div>
               </td>
               <td className="py-2 px-3">
@@ -858,10 +861,10 @@ function IssuesTab({
                         className="h-4 w-4 rounded-full"
                       />
                     )}
-                    <span className="text-[11px] text-muted-foreground/60 truncate">{issue.assignee_name}</span>
+                    <span className="text-label text-muted-foreground truncate">{issue.assignee_name}</span>
                   </div>
                 ) : (
-                  <span className="text-[11px] text-muted-foreground/30">--</span>
+                  <span className="text-label text-muted-foreground/60">--</span>
                 )}
               </td>
             </tr>
