@@ -52,14 +52,13 @@ func (h *CredentialHandler) loadAgentNamesBatch(ctx context.Context, credentialI
 	if len(credentialIDs) == 0 {
 		return result
 	}
-	placeholders := make([]string, len(credentialIDs))
+	ph := sqlPlaceholders(len(credentialIDs))
 	args := make([]any, len(credentialIDs))
 	for i, id := range credentialIDs {
-		placeholders[i] = "?"
 		args[i] = id
 	}
 	rows, err := h.db.QueryContext(ctx,
-		"SELECT ac.credential_id, a.name FROM agent_credentials ac JOIN agents a ON a.id = ac.agent_id AND a.deleted_at IS NULL WHERE ac.credential_id IN ("+strings.Join(placeholders, ",")+") ORDER BY a.name",
+		"SELECT ac.credential_id, a.name FROM agent_credentials ac JOIN agents a ON a.id = ac.agent_id AND a.deleted_at IS NULL WHERE ac.credential_id IN ("+ph+") ORDER BY a.name",
 		args...)
 	if err != nil {
 		return result
@@ -83,14 +82,13 @@ func (h *CredentialHandler) loadMCPUsedBatch(ctx context.Context, credentialIDs 
 	if len(credentialIDs) == 0 {
 		return result
 	}
-	placeholders := make([]string, len(credentialIDs))
+	ph := sqlPlaceholders(len(credentialIDs))
 	args := make([]any, len(credentialIDs))
 	for i, id := range credentialIDs {
-		placeholders[i] = "?"
 		args[i] = id
 	}
 	rows, err := h.db.QueryContext(ctx,
-		"SELECT DISTINCT credential_id FROM agent_mcp_bindings WHERE credential_id IN ("+strings.Join(placeholders, ",")+") AND credential_id IS NOT NULL",
+		"SELECT DISTINCT credential_id FROM agent_mcp_bindings WHERE credential_id IN ("+ph+") AND credential_id IS NOT NULL",
 		args...)
 	if err != nil {
 		return result
@@ -138,14 +136,13 @@ func (h *CredentialHandler) loadCrewIDsBatch(ctx context.Context, credentialIDs 
 	if len(credentialIDs) == 0 {
 		return result
 	}
-	placeholders := make([]string, len(credentialIDs))
+	ph := sqlPlaceholders(len(credentialIDs))
 	args := make([]any, len(credentialIDs))
 	for i, id := range credentialIDs {
-		placeholders[i] = "?"
 		args[i] = id
 	}
 	rows, err := h.db.QueryContext(ctx,
-		"SELECT credential_id, crew_id FROM credential_crews WHERE credential_id IN ("+strings.Join(placeholders, ",")+") ORDER BY created_at",
+		"SELECT credential_id, crew_id FROM credential_crews WHERE credential_id IN ("+ph+") ORDER BY created_at",
 		args...)
 	if err != nil {
 		return result

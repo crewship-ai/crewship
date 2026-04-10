@@ -71,15 +71,13 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	status := "PENDING"
 	if len(req.DependsOn) > 0 {
 		// Validate all dependency IDs exist in one batch query
-		placeholders := make([]string, len(req.DependsOn))
 		args := make([]interface{}, 0, len(req.DependsOn)+1)
 		args = append(args, missionID)
-		for i, depID := range req.DependsOn {
-			placeholders[i] = "?"
+		for _, depID := range req.DependsOn {
 			args = append(args, depID)
 		}
 		depRows, depErr := h.db.QueryContext(r.Context(),
-			`SELECT id, status FROM mission_tasks WHERE mission_id = ? AND id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+			`SELECT id, status FROM mission_tasks WHERE mission_id = ? AND id IN (`+sqlPlaceholders(len(req.DependsOn))+`)`, args...)
 		if depErr != nil {
 			h.logger.Error("lookup dependency tasks", "error", depErr)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")

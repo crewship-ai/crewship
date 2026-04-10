@@ -26,6 +26,16 @@ func parsePagination(r *http.Request, defaultLimit, maxLimit int) (limit, offset
 	return
 }
 
+// sqlPlaceholders returns a comma-separated string of n "?" placeholders
+// for use in SQL IN clauses (e.g. "?,?,?").
+func sqlPlaceholders(n int) string {
+	p := make([]string, n)
+	for i := range p {
+		p[i] = "?"
+	}
+	return strings.Join(p, ",")
+}
+
 // agentExists checks that an agent with the given ID belongs to the workspace
 // and is not soft-deleted. Returns nil on success, sql.ErrNoRows if not found.
 func agentExists(ctx context.Context, db *sql.DB, agentID, workspaceID string) error {

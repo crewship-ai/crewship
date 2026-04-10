@@ -164,23 +164,19 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Status filter (comma-separated)
 	if statusParam := r.URL.Query().Get("status"); statusParam != "" {
 		statuses := strings.Split(statusParam, ",")
-		placeholders := make([]string, len(statuses))
-		for i, s := range statuses {
-			placeholders[i] = "?"
+		for _, s := range statuses {
 			args = append(args, strings.TrimSpace(s))
 		}
-		query += " AND m.status IN (" + strings.Join(placeholders, ",") + ")"
+		query += " AND m.status IN (" + sqlPlaceholders(len(statuses)) + ")"
 	}
 
 	// Priority filter (comma-separated)
 	if priorityParam := r.URL.Query().Get("priority"); priorityParam != "" {
 		priorities := strings.Split(priorityParam, ",")
-		placeholders := make([]string, len(priorities))
-		for i, p := range priorities {
-			placeholders[i] = "?"
+		for _, p := range priorities {
 			args = append(args, strings.TrimSpace(p))
 		}
-		query += " AND m.priority IN (" + strings.Join(placeholders, ",") + ")"
+		query += " AND m.priority IN (" + sqlPlaceholders(len(priorities)) + ")"
 	}
 
 	// Project filter
@@ -254,17 +250,16 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Batch-load labels
 	if len(issueIDs) > 0 {
-		placeholders := make([]string, len(issueIDs))
 		labelArgs := make([]interface{}, len(issueIDs))
 		for i, id := range issueIDs {
-			placeholders[i] = "?"
 			labelArgs[i] = id
 		}
+		ph := sqlPlaceholders(len(issueIDs))
 		labelQuery := fmt.Sprintf(`
 			SELECT ml.mission_id, l.id, l.name, l.color, l.label_group
 			FROM mission_labels ml
 			JOIN labels l ON ml.label_id = l.id
-			WHERE ml.mission_id IN (%s)`, strings.Join(placeholders, ","))
+			WHERE ml.mission_id IN (%s)`, ph)
 
 		labelRows, err := h.db.QueryContext(r.Context(), labelQuery, labelArgs...)
 		if err != nil {
@@ -293,7 +288,7 @@ func (h *IssueHandler) List(w http.ResponseWriter, r *http.Request) {
 			SELECT mission_id, COUNT(*)
 			FROM mission_comments
 			WHERE mission_id IN (%s)
-			GROUP BY mission_id`, strings.Join(placeholders, ","))
+			GROUP BY mission_id`, ph)
 
 		commentRows, err := h.db.QueryContext(r.Context(), commentQuery, labelArgs...)
 		if err != nil {

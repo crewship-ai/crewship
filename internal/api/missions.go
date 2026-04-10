@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -199,16 +198,14 @@ func (h *MissionHandler) getBatchTaskStats(r *http.Request, missionIDs []string)
 		return map[string]*taskStats{}, nil
 	}
 
-	placeholders := make([]string, len(missionIDs))
 	args := make([]interface{}, len(missionIDs))
 	for i, id := range missionIDs {
-		placeholders[i] = "?"
 		args[i] = id
 	}
 
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT mission_id, status, COUNT(*) FROM mission_tasks WHERE mission_id IN (`+
-			strings.Join(placeholders, ",")+`) GROUP BY mission_id, status`, args...)
+			sqlPlaceholders(len(missionIDs))+`) GROUP BY mission_id, status`, args...)
 	if err != nil {
 		return nil, err
 	}

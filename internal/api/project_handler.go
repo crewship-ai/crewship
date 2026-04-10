@@ -77,12 +77,10 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Status filter
 	if statusParam := r.URL.Query().Get("status"); statusParam != "" {
 		statuses := strings.Split(statusParam, ",")
-		placeholders := make([]string, len(statuses))
-		for i, s := range statuses {
-			placeholders[i] = "?"
+		for _, s := range statuses {
 			args = append(args, strings.TrimSpace(s))
 		}
-		query += " AND p.status IN (" + strings.Join(placeholders, ",") + ")"
+		query += " AND p.status IN (" + sqlPlaceholders(len(statuses)) + ")"
 	}
 
 	// Sort

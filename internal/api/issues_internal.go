@@ -53,12 +53,10 @@ func (h *InternalIssueHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if status := r.URL.Query().Get("status"); status != "" {
 		vals := strings.Split(status, ",")
-		placeholders := make([]string, len(vals))
-		for i, v := range vals {
-			placeholders[i] = "?"
+		for _, v := range vals {
 			args = append(args, strings.TrimSpace(v))
 		}
-		query += " AND m.status IN (" + strings.Join(placeholders, ",") + ")"
+		query += " AND m.status IN (" + sqlPlaceholders(len(vals)) + ")"
 	}
 	if assignee := r.URL.Query().Get("assignee_id"); assignee != "" {
 		query += " AND m.assignee_id = ?"
