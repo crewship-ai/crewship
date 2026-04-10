@@ -98,20 +98,8 @@ func (s *Server) handleConnectionSendMessage(w http.ResponseWriter, r *http.Requ
 // handleConnectionListMessages handles GET /connections/{crew-slug}/messages
 // Returns messages between this crew and the target crew.
 func (s *Server) handleConnectionListMessages(w http.ResponseWriter, r *http.Request) {
-	if s.ipc == nil {
-		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
-		return
-	}
-
-	slug := extractConnectionSlug(r.URL.Path)
-	if slug == "" {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "missing crew slug in path"})
-		return
-	}
-
-	targetCrewID, err := s.resolveCrewIDBySlug(r.Context(), slug)
-	if err != nil || targetCrewID == "" {
-		writeJSONResponse(w, http.StatusNotFound, map[string]string{"error": "target crew not found"})
+	targetCrewID, ok := s.resolveConnectionTarget(w, r)
+	if !ok {
 		return
 	}
 
@@ -130,20 +118,8 @@ func (s *Server) handleConnectionListMessages(w http.ResponseWriter, r *http.Req
 // handleConnectionReadFiles handles GET /connections/{crew-slug}/files
 // Reads files from the target crew's shared directory.
 func (s *Server) handleConnectionReadFiles(w http.ResponseWriter, r *http.Request) {
-	if s.ipc == nil {
-		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
-		return
-	}
-
-	slug := extractConnectionSlug(r.URL.Path)
-	if slug == "" {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "missing crew slug in path"})
-		return
-	}
-
-	targetCrewID, err := s.resolveCrewIDBySlug(r.Context(), slug)
-	if err != nil || targetCrewID == "" {
-		writeJSONResponse(w, http.StatusNotFound, map[string]string{"error": "target crew not found"})
+	targetCrewID, ok := s.resolveConnectionTarget(w, r)
+	if !ok {
 		return
 	}
 
@@ -185,20 +161,8 @@ func (s *Server) handleConnectionReadFiles(w http.ResponseWriter, r *http.Reques
 // handleConnectionWriteFiles handles POST /connections/{crew-slug}/files
 // Uploads a file to the target crew's shared incoming directory.
 func (s *Server) handleConnectionWriteFiles(w http.ResponseWriter, r *http.Request) {
-	if s.ipc == nil {
-		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
-		return
-	}
-
-	slug := extractConnectionSlug(r.URL.Path)
-	if slug == "" {
-		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "missing crew slug in path"})
-		return
-	}
-
-	targetCrewID, err := s.resolveCrewIDBySlug(r.Context(), slug)
-	if err != nil || targetCrewID == "" {
-		writeJSONResponse(w, http.StatusNotFound, map[string]string{"error": "target crew not found"})
+	targetCrewID, ok := s.resolveConnectionTarget(w, r)
+	if !ok {
 		return
 	}
 
@@ -272,6 +236,27 @@ func extractConnectionSlug(path string) string {
 		return ""
 	}
 	return parts[1]
+}
+
+// resolveConnectionTarget validates ipc config, extracts the crew slug from
+// the URL path, and resolves it to a target crew ID. Writes the appropriate
+// error response and returns ("", false) on any failure.
+func (s *Server) resolveConnectionTarget(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if s.ipc == nil {
+		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
+		return "", false
+	}
+	slug := extractConnectionSlug(r.URL.Path)
+	if slug == "" {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{"error": "missing crew slug in path"})
+		return "", false
+	}
+	targetCrewID, err := s.resolveCrewIDBySlug(r.Context(), slug)
+	if err != nil || targetCrewID == "" {
+		writeJSONResponse(w, http.StatusNotFound, map[string]string{"error": "target crew not found"})
+		return "", false
+	}
+	return targetCrewID, true
 }
 
 // resolveCrewIDBySlug calls the crewshipd internal API to find a crew ID by slug.
