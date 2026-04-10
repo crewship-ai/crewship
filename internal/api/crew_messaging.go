@@ -437,7 +437,9 @@ func (h *CrewMessagingHandler) resolveWorkspaceID(ctx context.Context, crewID st
 		return ""
 	}
 	var wsID string
-	h.db.QueryRowContext(ctx, "SELECT workspace_id FROM crews WHERE id = ?", crewID).Scan(&wsID)
+	if err := h.db.QueryRowContext(ctx, "SELECT workspace_id FROM crews WHERE id = ?", crewID).Scan(&wsID); err != nil {
+		h.logger.Error("resolve workspace_id for crew", "crew_id", crewID, "error", err)
+	}
 	return wsID
 }
 

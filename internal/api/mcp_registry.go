@@ -298,7 +298,9 @@ func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var total int
-	h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM mcp_registry_servers").Scan(&total)
+	if err := h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM mcp_registry_servers").Scan(&total); err != nil {
+		h.logger.Error("count mcp registry servers", "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"servers": servers,
