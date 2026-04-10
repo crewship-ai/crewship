@@ -14,7 +14,8 @@ import {
 import { motion, AnimatePresence } from "motion/react"
 import { toast } from "sonner"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/layout/empty-state"
 import { AnimatedNumber } from "@/components/ui/animated-number"
@@ -86,17 +87,17 @@ function Row({
     <div
       className={cn(
         "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
-        border && "border-b border-white/[0.04] last:border-b-0",
+        border && "border-b border-border/40 last:border-b-0",
       )}
     >
       <div className="shrink-0">
         {typeof label === "string" ? (
-          <div className="text-[13px] text-foreground">{label}</div>
+          <div className="text-body text-foreground">{label}</div>
         ) : (
           label
         )}
         {description && (
-          <div className="text-[11px] text-muted-foreground/30 mt-0.5">
+          <div className="text-label text-muted-foreground mt-0.5">
             {description}
           </div>
         )}
@@ -288,10 +289,10 @@ export function CrewsContainersSection({
   if (crews.length === 0) {
     return (
       <div className="space-y-5">
-        <div className="text-[11px] font-semibold text-muted-foreground/40 uppercase tracking-wider">
+        <div className="text-micro font-semibold text-muted-foreground uppercase tracking-wider">
           Overview
         </div>
-        <Card className="border-white/[0.06]">
+        <Card>
           <CardContent className="p-0">
             <div className="p-8">
               <EmptyState
@@ -310,23 +311,23 @@ export function CrewsContainersSection({
     <div className="space-y-6">
       {/* Overview section */}
       <div>
-        <div className="text-[11px] font-semibold text-muted-foreground/40 uppercase tracking-wider mb-2">
+        <div className="text-micro font-semibold text-muted-foreground uppercase tracking-wider mb-2">
           Overview
         </div>
-        <Card className="border-white/[0.06]">
+        <Card>
           <CardContent className="p-0">
             <Row label="Crews">
-              <span className="text-[13px] font-mono tabular-nums text-foreground">
+              <span className="text-body font-mono tabular-nums text-foreground">
                 <AnimatedNumber value={crews.length} />
               </span>
             </Row>
             <Row label="Agents">
-              <span className="text-[13px] font-mono tabular-nums text-foreground">
+              <span className="text-body font-mono tabular-nums text-foreground">
                 <AnimatedNumber value={totalAgents} />
               </span>
             </Row>
             <Row label="Containers" border={false}>
-              <span className="text-[13px] font-mono tabular-nums text-foreground">
+              <span className="text-body font-mono tabular-nums text-foreground">
                 <AnimatedNumber value={crews.length} />
               </span>
             </Row>
@@ -337,27 +338,27 @@ export function CrewsContainersSection({
       {/* Crews accordion section */}
       <div>
         <div className="flex items-center justify-between gap-4 mb-2">
-          <div className="text-[11px] font-semibold text-muted-foreground/40 uppercase tracking-wider">
+          <div className="text-micro font-semibold text-muted-foreground uppercase tracking-wider">
             Crews
           </div>
           {crews.length >= 5 && (
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground/30" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
               <Input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search crews..."
-                className="h-7 w-[180px] pl-7 text-[11px] bg-white/[0.03] border-white/[0.08] placeholder:text-muted-foreground/25"
+                className="h-7 w-[180px] pl-7 text-label"
               />
             </div>
           )}
         </div>
 
-        <Card className="border-white/[0.06]">
+        <Card>
           <CardContent className="p-0">
             {filteredCrews.length === 0 ? (
-              <div className="px-5 py-8 text-center text-[12px] text-muted-foreground/30">
-                No crews matching "{search}"
+              <div className="px-5 py-8 text-center text-label text-muted-foreground">
+                No crews matching &quot;{search}&quot;
               </div>
             ) : (
               filteredCrews.map((crew, index) => {
@@ -383,43 +384,36 @@ export function CrewsContainersSection({
                         setExpandedId(isExpanded ? null : crew.id)
                       }
                       className={cn(
-                        "flex items-center gap-3 w-full px-5 py-3 text-left transition-colors hover:bg-white/[0.02]",
-                        !isLast && !isExpanded && "border-b border-white/[0.04]",
-                        isExpanded && "border-b border-white/[0.04]",
+                        "flex items-center gap-3 w-full px-5 py-3 text-left transition-colors hover:bg-muted/40",
+                        !isLast && !isExpanded && "border-b border-border/40",
+                        isExpanded && "border-b border-border/40",
                       )}
                     >
                       <motion.div
                         animate={{ rotate: isExpanded ? 90 : 0 }}
                         transition={{ duration: 0.15 }}
                       >
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/30" />
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                       </motion.div>
                       <div
-                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        className="h-2.5 w-2.5 rounded-full shrink-0"
                         style={{ backgroundColor: resolvedColor }}
                       />
-                      <span className="text-[13px] text-foreground font-medium truncate">
+                      <span className="text-body text-foreground font-medium truncate">
                         {crew.name}
                       </span>
-                      <span className="text-[11px] text-muted-foreground/25 font-mono truncate">
+                      <span className="text-label text-muted-foreground font-mono truncate">
                         {crew.slug}
                       </span>
                       <div className="flex items-center gap-2 ml-auto shrink-0">
-                        <div className="flex items-center gap-1 text-[11px] text-muted-foreground/30 font-mono tabular-nums">
+                        <div className="flex items-center gap-1 text-label text-muted-foreground font-mono tabular-nums">
                           <Users className="h-3 w-3" />
                           {crew._count?.agents ?? 0}
                         </div>
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "text-[9px] font-medium",
-                            (crew.status ?? "active") === "active"
-                              ? "border-emerald-500/30 text-emerald-400"
-                              : "border-white/[0.08] text-muted-foreground/50",
-                          )}
-                        >
-                          {crew.status ?? "active"}
-                        </Badge>
+                        <StatusBadge
+                          status={(crew.status ?? "active") === "active" ? "COMPLETED" : "PENDING"}
+                          label={crew.status ?? "active"}
+                        />
                       </div>
                     </button>
 
@@ -435,8 +429,8 @@ export function CrewsContainersSection({
                         >
                           <div
                             className={cn(
-                              "bg-white/[0.01] pl-10",
-                              !isLast && "border-b border-white/[0.04]",
+                              "bg-surface-subtle pl-10",
+                              !isLast && "border-b border-border/40",
                             )}
                           >
                             {/* Memory */}
@@ -451,7 +445,7 @@ export function CrewsContainersSection({
                               >
                                 <SelectTrigger
                                   size="sm"
-                                  className="w-[120px] h-8 bg-white/[0.03] border-white/[0.08] text-[12px]"
+                                  className="w-[120px] h-8 text-label"
                                 >
                                   <SelectValue />
                                 </SelectTrigger>
@@ -460,7 +454,7 @@ export function CrewsContainersSection({
                                     <SelectItem
                                       key={opt.value}
                                       value={opt.value}
-                                      className="text-[12px]"
+                                      className="text-label"
                                     >
                                       {opt.label}
                                     </SelectItem>
@@ -481,7 +475,7 @@ export function CrewsContainersSection({
                               >
                                 <SelectTrigger
                                   size="sm"
-                                  className="w-[120px] h-8 bg-white/[0.03] border-white/[0.08] text-[12px]"
+                                  className="w-[120px] h-8 text-label"
                                 >
                                   <SelectValue />
                                 </SelectTrigger>
@@ -490,7 +484,7 @@ export function CrewsContainersSection({
                                     <SelectItem
                                       key={opt.value}
                                       value={opt.value}
-                                      className="text-[12px]"
+                                      className="text-label"
                                     >
                                       {opt.label}
                                     </SelectItem>
@@ -507,7 +501,7 @@ export function CrewsContainersSection({
                                 hasChanges
                               }
                             >
-                              <div className="flex gap-0 rounded-md overflow-hidden border border-white/[0.08]">
+                              <div className="flex gap-0 rounded-md overflow-hidden border border-border">
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -517,10 +511,10 @@ export function CrewsContainersSection({
                                     })
                                   }}
                                   className={cn(
-                                    "flex items-center justify-center gap-1.5 h-7 px-3 text-[11px] font-medium transition-colors",
+                                    "flex items-center justify-center gap-1.5 h-7 px-3 text-label font-medium transition-colors border-r border-border",
                                     draft.network_mode === "free"
-                                      ? "bg-emerald-500/15 text-emerald-400 border-r border-emerald-500/25"
-                                      : "bg-white/[0.02] text-muted-foreground/50 border-r border-white/[0.06] hover:bg-white/[0.04]",
+                                      ? "bg-accent text-foreground"
+                                      : "bg-transparent text-muted-foreground hover:bg-muted/60",
                                   )}
                                 >
                                   <Globe className="h-3 w-3" />
@@ -535,10 +529,10 @@ export function CrewsContainersSection({
                                     })
                                   }}
                                   className={cn(
-                                    "flex items-center justify-center gap-1.5 h-7 px-3 text-[11px] font-medium transition-colors",
+                                    "flex items-center justify-center gap-1.5 h-7 px-3 text-label font-medium transition-colors",
                                     draft.network_mode === "restricted"
-                                      ? "bg-amber-500/15 text-amber-400"
-                                      : "bg-white/[0.02] text-muted-foreground/50 hover:bg-white/[0.04]",
+                                      ? "bg-accent text-foreground"
+                                      : "bg-transparent text-muted-foreground hover:bg-muted/60",
                                   )}
                                 >
                                   <Shield className="h-3 w-3" />
@@ -564,14 +558,14 @@ export function CrewsContainersSection({
                                     className={cn(
                                       "flex items-start justify-between gap-4 px-5 py-3.5",
                                       hasChanges &&
-                                        "border-b border-white/[0.04]",
+                                        "border-b border-border/40",
                                     )}
                                   >
                                     <div className="shrink-0 pt-1.5">
-                                      <div className="text-[13px] text-foreground">
+                                      <div className="text-body text-foreground">
                                         Allowed domains
                                       </div>
-                                      <div className="text-[11px] text-muted-foreground/30 mt-0.5">
+                                      <div className="text-label text-muted-foreground mt-0.5">
                                         Comma-separated
                                       </div>
                                     </div>
@@ -584,7 +578,7 @@ export function CrewsContainersSection({
                                       }
                                       placeholder="github.com, api.openai.com, registry.npmjs.org"
                                       rows={2}
-                                      className="w-[280px] resize-none rounded-md bg-white/[0.03] border border-white/[0.08] text-[12px] text-foreground placeholder:text-muted-foreground/30 px-2.5 py-2 focus:outline-none focus:border-white/[0.15] transition-colors"
+                                      className="w-[280px] resize-none rounded-md bg-background border border-border text-label text-foreground placeholder:text-muted-foreground px-2.5 py-2 focus:outline-none focus:border-ring transition-colors"
                                     />
                                   </div>
                                 </motion.div>
@@ -603,51 +597,51 @@ export function CrewsContainersSection({
                                 >
                                   <div className="flex items-center justify-between gap-4 px-5 py-3.5">
                                     <div className="flex items-center gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                      <span className="text-[11px] text-muted-foreground/40">
+                                      <StatusDot status="BLOCKED" />
+                                      <span className="text-label text-muted-foreground">
                                         Unsaved changes
                                       </span>
                                     </div>
                                     <div className="flex items-center gap-2">
                                       {resourceChanged && (
-                                        <button
+                                        <Button
                                           type="button"
+                                          size="sm"
                                           disabled={savingResources[crew.id]}
                                           onClick={(e) => {
                                             e.stopPropagation()
                                             saveResources(crew)
                                           }}
-                                          className="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-[4px] text-[11px] font-medium bg-blue-500/15 border border-blue-500/35 text-blue-400 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
                                         >
                                           {savingResources[crew.id] ? (
-                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                            <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                                           ) : (
-                                            <Save className="h-3 w-3" />
+                                            <Save className="mr-1.5 h-3 w-3" />
                                           )}
                                           {savingResources[crew.id]
                                             ? "Saving..."
                                             : "Save Resources"}
-                                        </button>
+                                        </Button>
                                       )}
                                       {networkChanged && (
-                                        <button
+                                        <Button
                                           type="button"
+                                          size="sm"
                                           disabled={savingNetwork[crew.id]}
                                           onClick={(e) => {
                                             e.stopPropagation()
                                             saveNetwork(crew)
                                           }}
-                                          className="inline-flex items-center gap-1.5 h-[26px] px-2.5 rounded-[4px] text-[11px] font-medium bg-blue-500/15 border border-blue-500/35 text-blue-400 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
                                         >
                                           {savingNetwork[crew.id] ? (
-                                            <Loader2 className="h-3 w-3 animate-spin" />
+                                            <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                                           ) : (
-                                            <Save className="h-3 w-3" />
+                                            <Save className="mr-1.5 h-3 w-3" />
                                           )}
                                           {savingNetwork[crew.id]
                                             ? "Saving..."
                                             : "Save Network"}
-                                        </button>
+                                        </Button>
                                       )}
                                     </div>
                                   </div>

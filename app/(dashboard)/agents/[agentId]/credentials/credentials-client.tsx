@@ -5,12 +5,16 @@ import { useParams } from "next/navigation"
 import { useState, useEffect, useCallback } from "react"
 import { ShieldCheck, AlertCircle, Inbox, Plus, Trash2, Loader2, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { SectionCard } from "@/components/ui/section-card"
+import { StatusBadge } from "@/components/ui/status-badge"
+import { EmptyState } from "@/components/layout/empty-state"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { PROVIDER_ICONS } from "@/components/icons/provider-icons"
 import { AssignCredentialDialog } from "@/components/features/credentials/assign-credential-dialog"
+import { PROVIDER_ICON_COLOR, CREDENTIAL_TYPE_ICON_COLOR } from "@/lib/colors"
+import { cn } from "@/lib/utils"
 
 interface AgentCredential {
   id: string
@@ -84,7 +88,7 @@ export function CredentialsPageClient() {
 
   if (error) {
     return (
-      <div className="p-4 sm:p-6">
+      <div className="p-6">
         <div className="flex items-center gap-3">
           <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
           <p className="text-body text-destructive flex-1">{error}</p>
@@ -98,14 +102,17 @@ export function CredentialsPageClient() {
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+    <div className="p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-          <p className="text-body text-muted-foreground">
-            {credentials.length} credential{credentials.length !== 1 ? "s" : ""} assigned · AES-256-GCM encrypted
-          </p>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-title font-semibold">Credentials</h2>
+          <div className="flex items-center gap-2 mt-1">
+            <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
+            <p className="text-body text-muted-foreground">
+              {credentials.length} credential{credentials.length !== 1 ? "s" : ""} assigned · AES-256-GCM encrypted
+            </p>
+          </div>
         </div>
         <Button size="sm" className="gap-1.5" onClick={() => setAssignOpen(true)}>
           <Plus className="h-4 w-4" />
@@ -114,63 +121,67 @@ export function CredentialsPageClient() {
       </div>
 
       {credentials.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Inbox className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-body font-medium text-muted-foreground">No credentials assigned</p>
-          <p className="text-label text-muted-foreground mt-1">Assign credentials so the agent can access external services.</p>
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title="No credentials assigned"
+          description="Assign credentials so the agent can access external services."
+        >
+          <Button size="sm" className="gap-1.5 mt-4" onClick={() => setAssignOpen(true)}>
+            <Plus className="h-4 w-4" />
+            Assign Credential
+          </Button>
+        </EmptyState>
       ) : (
-        <div className="border rounded-lg overflow-x-auto">
-          <table className="w-full text-body">
-            <thead>
-              <tr className="border-b bg-muted/50 text-label text-muted-foreground uppercase tracking-wide">
-                <th className="text-left px-4 sm:px-6 py-3 font-medium">Name</th>
-                <th className="text-left px-4 sm:px-6 py-3 font-medium">Env Variable</th>
-                <th className="text-left px-4 sm:px-6 py-3 font-medium">Priority</th>
-                <th className="text-left px-4 sm:px-6 py-3 font-medium hidden sm:table-cell">Scope</th>
-                <th className="text-right px-4 sm:px-6 py-3 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {credentials.map((c) => (
-                <tr key={c.id} className="hover:bg-muted/50">
-                  <td className="px-4 sm:px-6 py-3">
-                    <div className="flex items-center gap-2">
-                      {(() => {
-                        const Icon = PROVIDER_ICONS[c.credential_provider]
-                        return Icon ? <Icon className="h-4 w-4 shrink-0 text-muted-foreground" /> : null
-                      })()}
-                      <span className="font-medium">{c.credential_name}</span>
+        <SectionCard bare>
+          <ul className="divide-y divide-border">
+            {credentials.map((c) => {
+              const Icon = PROVIDER_ICONS[c.credential_provider]
+              const providerClass = PROVIDER_ICON_COLOR[c.credential_provider] ?? "text-muted-foreground"
+              const typeClass = CREDENTIAL_TYPE_ICON_COLOR[c.credential_type] ?? "text-muted-foreground"
+              return (
+                <li
+                  key={c.id}
+                  className="flex items-center gap-4 px-4 sm:px-6 py-3 hover:bg-muted/40 transition-colors"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted/60">
+                    {Icon ? (
+                      <Icon className={cn("h-4 w-4", providerClass)} />
+                    ) : (
+                      <ShieldCheck className={cn("h-4 w-4", providerClass)} />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-body font-medium truncate">{c.credential_name}</span>
+                      <StatusBadge status={c.credential_status} className="text-micro" />
                     </div>
-                  </td>
-                  <td className="px-4 sm:px-6 py-3 font-mono text-xs">{c.env_var_name}</td>
-                  <td className="px-4 sm:px-6 py-3 text-center font-mono text-xs">{c.priority}</td>
-                  <td className="px-4 sm:px-6 py-3 hidden sm:table-cell">
-                    <Badge variant="secondary" className="text-label">
-                      {c.credential_type}
-                    </Badge>
-                  </td>
-                  <td className="px-4 sm:px-6 py-3 text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Remove ${c.credential_name}`}
-                      className="h-8 w-8 text-destructive hover:text-destructive"
-                      onClick={() => handleRemove(c.id)}
-                      disabled={removingId === c.id}
-                    >
-                      {removingId === c.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    <div className="flex items-center gap-3 mt-0.5 text-label text-muted-foreground">
+                      <code className="font-mono text-micro">{c.env_var_name}</code>
+                      <span aria-hidden>·</span>
+                      <span className={cn("text-micro font-medium", typeClass)}>{c.credential_type}</span>
+                      <span aria-hidden>·</span>
+                      <span className="text-micro">priority {c.priority}</span>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Remove ${c.credential_name}`}
+                    className="h-8 w-8 text-destructive hover:text-destructive"
+                    onClick={() => handleRemove(c.id)}
+                    disabled={removingId === c.id}
+                  >
+                    {removingId === c.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </Button>
+                </li>
+              )
+            })}
+          </ul>
+        </SectionCard>
       )}
 
       {/* Info */}
@@ -193,18 +204,25 @@ export function CredentialsPageClient() {
 
 function CredentialsSkeleton() {
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <Skeleton className="h-5 w-64" />
-      <div className="border rounded-lg">
-        <div className="border-b bg-muted/50 px-4 sm:px-6 py-3">
-          <Skeleton className="h-4 w-full max-w-md" />
-        </div>
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="px-4 sm:px-6 py-3 border-b last:border-b-0">
-            <Skeleton className="h-5 w-full" />
-          </div>
-        ))}
+    <div className="p-6 space-y-6">
+      <div className="space-y-2">
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-4 w-64" />
       </div>
+      <SectionCard bare>
+        <div className="divide-y divide-border">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-4 px-4 sm:px-6 py-3">
+              <Skeleton className="h-9 w-9 rounded-lg" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-48" />
+                <Skeleton className="h-3 w-64" />
+              </div>
+              <Skeleton className="h-8 w-8 rounded" />
+            </div>
+          ))}
+        </div>
+      </SectionCard>
     </div>
   )
 }

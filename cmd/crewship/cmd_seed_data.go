@@ -25,56 +25,30 @@ func seedNuke(ctx context.Context, client *cli.Client) error {
 
 	var failures []string
 
-	// Delete issues — page through ALL issues, cancel, then delete.
-	// The server caps list limit at 100 per page. Because successful deletes
-	// shift the list under us, we walk the pages with a mutable offset, but
-	// reset back to offset=0 whenever a delete succeeds (since the remaining
-	// rows have shifted). "Blocked" issues — ones we could not transition or
-	// delete — are remembered by ID so we skip them on subsequent passes and
-	// can still advance past them. Termination: a complete pass over every
-	// page yielded zero deletes (every remaining row is blocked), or we hit
-	// the safety cap.
-	const (
-		issuePageSize = 100
-		safetyCap     = 10_000
-	)
+	// Delete issues — paginate through the full result set. A single
+	// limit=500 request would leave any issue past the first page behind
+	// and block later project/crew deletion.
+	const pageLimit = 500
 	totalDeleted := 0
-	blocked := map[string]bool{}
 	offset := 0
-	deletedInCurrentSweep := 0
-	sawRowsInCurrentSweep := false
-pageLoop:
-	for iter := 0; iter < safetyCap; iter++ {
+	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		resp, err := client.Get(fmt.Sprintf("/api/v1/issues?limit=%d&offset=%d", issuePageSize, offset))
+		resp, err := client.Get(fmt.Sprintf("/api/v1/issues?limit=%d&offset=%d", pageLimit, offset))
 		if err != nil {
-			failures = append(failures, fmt.Sprintf("list issues: %v", err))
-			break pageLoop
+			failures = append(failures, fmt.Sprintf("list issues (offset=%d): %v", offset, err))
+			break
 		}
 		var issues []issueItem
 		if err := cli.ReadJSON(resp, &issues); err != nil {
-			failures = append(failures, fmt.Sprintf("decode issues: %v", err))
-			break pageLoop
+			failures = append(failures, fmt.Sprintf("decode issues (offset=%d): %v", offset, err))
+			break
 		}
 		if len(issues) == 0 {
-			// End of pages. If we saw no rows and deleted nothing, we're
-			// done. If we saw rows but they were all blocked, also done.
-			if !sawRowsInCurrentSweep || deletedInCurrentSweep == 0 {
-				if sawRowsInCurrentSweep && deletedInCurrentSweep == 0 {
-					fmt.Fprintf(os.Stderr, "  ! nuke issues: %d issue(s) could not be transitioned/deleted, giving up\n", len(blocked))
-				}
-				break pageLoop
-			}
-			// Completed a sweep with progress; start another from offset 0.
-			offset = 0
-			deletedInCurrentSweep = 0
-			sawRowsInCurrentSweep = false
-			continue
+			break
 		}
-		sawRowsInCurrentSweep = true
-		deletedThisPage := 0
+		deletedOnPage := 0
 		for _, iss := range issues {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -82,71 +56,63 @@ pageLoop:
 			if iss.Identifier == nil {
 				continue
 			}
-			if blocked[iss.ID] {
-				continue
-			}
-			// Transition to a deletable state (BACKLOG or CANCELLED) by
-			// computing a valid path from the issue's CURRENT status.
-			// Prefer CANCELLED; fall back to BACKLOG if CANCELLED is unreachable.
+			// Transition through a valid status path from the issue's CURRENT
+			// state to CANCELLED (only BACKLOG/CANCELLED can be deleted).
+			// Using StatusPath("CANCELLED") would always start from BACKLOG,
+			// which for an issue already in TODO/IN_PROGRESS/DONE would emit
+			// a backward transition the server rejects (e.g. IN_PROGRESS→TODO
+			// on its way to BACKLOG→CANCELLED), leaving the issue non-deletable.
 			if iss.Status != "BACKLOG" && iss.Status != "CANCELLED" {
 				path := seeddata.StatusPathFrom(iss.Status, "CANCELLED")
 				if path == nil {
-					path = seeddata.StatusPathFrom(iss.Status, "BACKLOG")
-				}
-				if path == nil {
-					failures = append(failures, fmt.Sprintf("no status path from %s for %s", iss.Status, *iss.Identifier))
-					fmt.Fprintf(os.Stderr, "  ! nuke %s: no valid transition path from %s\n", *iss.Identifier, iss.Status)
-					blocked[iss.ID] = true
+					failures = append(failures, fmt.Sprintf("no transition path %s→CANCELLED for %s", iss.Status, *iss.Identifier))
+					fmt.Fprintf(os.Stderr, "  ! nuke: no transition path %s→CANCELLED for %s\n", iss.Status, *iss.Identifier)
 					continue
 				}
-				transitionFailed := false
 				for _, status := range path {
 					r, err := client.Patch(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier), map[string]string{"status": status})
 					if err != nil {
 						failures = append(failures, fmt.Sprintf("transition %s→%s: %v", *iss.Identifier, status, err))
 						fmt.Fprintf(os.Stderr, "  ! nuke transition %s→%s: %v\n", *iss.Identifier, status, err)
-						transitionFailed = true
 						break
 					}
 					if r.StatusCode >= 300 {
 						failures = append(failures, fmt.Sprintf("transition %s→%s: HTTP %d", *iss.Identifier, status, r.StatusCode))
 						fmt.Fprintf(os.Stderr, "  ! nuke transition %s→%s: HTTP %d\n", *iss.Identifier, status, r.StatusCode)
 						r.Body.Close()
-						transitionFailed = true
 						break
 					}
 					r.Body.Close()
-				}
-				if transitionFailed {
-					blocked[iss.ID] = true
-					continue
 				}
 			}
 			r, err := client.Delete(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier))
 			if err != nil {
 				failures = append(failures, fmt.Sprintf("delete issue %s: %v", *iss.Identifier, err))
 				fmt.Fprintf(os.Stderr, "  ! delete issue %s: %v\n", *iss.Identifier, err)
-				blocked[iss.ID] = true
 				continue
 			}
 			if r.StatusCode >= 300 {
 				failures = append(failures, fmt.Sprintf("delete issue %s: HTTP %d", *iss.Identifier, r.StatusCode))
 				fmt.Fprintf(os.Stderr, "  ! delete issue %s: HTTP %d\n", *iss.Identifier, r.StatusCode)
-				blocked[iss.ID] = true
-			} else {
-				deletedThisPage++
-				totalDeleted++
-				deletedInCurrentSweep++
+				r.Body.Close()
+				continue
 			}
 			r.Body.Close()
+			totalDeleted++
+			deletedOnPage++
 		}
-		// If we deleted anything on this page the earlier rows shifted under
-		// us — refetch from the head. Otherwise advance to the next page so
-		// we don't stall on a page of blocked items.
-		if deletedThisPage > 0 {
-			offset = 0
-		} else {
-			offset += len(issues)
+		// End conditions:
+		// - Partial page (fewer than pageLimit rows) → nothing left to scan.
+		// - Full page but zero deletions → every row is undeletable; advance
+		//   offset past them so we don't re-fetch the same 500 rows forever.
+		// - Full page with deletions → the rows we removed shifted the
+		//   result set, so the next page starts at the same offset (0).
+		if len(issues) < pageLimit {
+			break
+		}
+		if deletedOnPage == 0 {
+			fmt.Fprintf(os.Stderr, "  ! nuke: page at offset=%d had no deletable issues, advancing\n", offset)
+			offset += pageLimit
 		}
 	}
 	fmt.Fprintf(os.Stderr, "  Deleted %d issues\n", totalDeleted)
@@ -270,6 +236,7 @@ func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[stri
 	}
 	fmt.Fprintln(os.Stderr, "Creating crews...")
 	ids := map[string]string{} // slug → id
+	linked := 0
 
 	for _, c := range seeddata.Crews {
 		if err := ctx.Err(); err != nil {
@@ -288,19 +255,29 @@ func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[stri
 		ids[c.Slug] = id
 		fmt.Fprintf(os.Stderr, "  + Crew: %s (%s)\n", c.Name, id[:8])
 
-		// Add current user as crew member
+		// Add current user as crew member. Treat 409 Conflict as idempotent
+		// (already a member); surface every other failure so the summary line
+		// below doesn't over-report.
 		if userID != "" {
 			r, err := client.Post(
 				fmt.Sprintf("/api/v1/crews/%s/members", id),
 				map[string]string{"user_id": userID},
 			)
-			if err == nil {
-				r.Body.Close()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ! Link user to crew %s: %v\n", c.Slug, err)
+				continue
 			}
+			if r.StatusCode >= 400 && r.StatusCode != http.StatusConflict {
+				fmt.Fprintf(os.Stderr, "  ! Link user to crew %s: HTTP %d\n", c.Slug, r.StatusCode)
+				r.Body.Close()
+				continue
+			}
+			r.Body.Close()
+			linked++
 		}
 	}
 	if userID != "" {
-		fmt.Fprintf(os.Stderr, "  Linked user to %d crews\n", len(ids))
+		fmt.Fprintf(os.Stderr, "  Linked user to %d/%d crews\n", linked, len(ids))
 	}
 	return ids, nil
 }
@@ -408,7 +385,9 @@ func seedSkills(ctx context.Context, client *cli.Client, agentIDs map[string]str
 		fmt.Fprintf(os.Stderr, "  + Skill: %s\n", s.Name)
 	}
 
-	// Assign skills to agents
+	// Assign skills to agents. Treat 409 Conflict as idempotent (already
+	// assigned); surface every other non-2xx so the per-agent summary below
+	// only lists skills that were actually linked.
 	fmt.Fprintln(os.Stderr, "Assigning skills...")
 	for agentSlug, skillSlugs := range seeddata.SkillAssignments {
 		if err := ctx.Err(); err != nil {
@@ -418,6 +397,7 @@ func seedSkills(ctx context.Context, client *cli.Client, agentIDs map[string]str
 		if !ok {
 			continue
 		}
+		assigned := make([]string, 0, len(skillSlugs))
 		for _, skillSlug := range skillSlugs {
 			skillID, ok := skillIDs[skillSlug]
 			if !ok {
@@ -432,12 +412,21 @@ func seedSkills(ctx context.Context, client *cli.Client, agentIDs map[string]str
 				fmt.Fprintf(os.Stderr, "  ! Assign %s→%s: %v\n", agentSlug, skillSlug, err)
 				continue
 			}
+			status := resp.StatusCode
 			resp.Body.Close()
-			if resp.StatusCode == http.StatusConflict {
-				continue // already assigned
+			if status == http.StatusConflict {
+				assigned = append(assigned, skillSlug) // already assigned — still a valid end-state
+				continue
 			}
+			if status >= 400 {
+				fmt.Fprintf(os.Stderr, "  ! Assign %s→%s: HTTP %d\n", agentSlug, skillSlug, status)
+				continue
+			}
+			assigned = append(assigned, skillSlug)
 		}
-		fmt.Fprintf(os.Stderr, "  + %s: %s\n", agentSlug, strings.Join(skillSlugs, ", "))
+		if len(assigned) > 0 {
+			fmt.Fprintf(os.Stderr, "  + %s: %s\n", agentSlug, strings.Join(assigned, ", "))
+		}
 	}
 	return nil
 }
@@ -465,35 +454,56 @@ func seedCredentials(ctx context.Context, client *cli.Client, agentIDs map[strin
 		return fmt.Errorf("anthropic credential: %w", err)
 	}
 
-	// Assign to all agents
-	for _, agentID := range agentIDs {
+	// Assign to all agents. Treat 409 Conflict as idempotent; surface other
+	// failures so the summary line reflects only successful assignments.
+	assigned := 0
+	for slug, agentID := range agentIDs {
 		resp, err := client.Post(
 			fmt.Sprintf("/api/v1/agents/%s/credentials", agentID),
 			map[string]string{"credential_id": anthroID, "env_var_name": anthro.EnvVarName},
 		)
-		if err == nil {
-			resp.Body.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ! Assign credential to agent %s: %v\n", slug, err)
+			continue
 		}
+		status := resp.StatusCode
+		resp.Body.Close()
+		if status >= 400 && status != http.StatusConflict {
+			fmt.Fprintf(os.Stderr, "  ! Assign credential to agent %s: HTTP %d\n", slug, status)
+			continue
+		}
+		assigned++
 	}
-	fmt.Fprintf(os.Stderr, "  + Assigned %s to %d agents\n", anthro.Name, len(agentIDs))
+	fmt.Fprintf(os.Stderr, "  + Assigned %s to %d/%d agents\n", anthro.Name, assigned, len(agentIDs))
 
-	// Google credential (optional)
+	// Google credential (optional). Same idempotent/surface-failure pattern
+	// as the Anthropic assignment above — treat 409 as already linked,
+	// report only genuinely successful assignments in the summary.
 	googleCred := seeddata.ResolveGoogleCredential()
 	if googleCred != nil {
 		googleID, err := seedOneCredential(client, *googleCred)
 		if err != nil {
 			cli.PrintWarning("Google credential: " + err.Error())
 		} else {
-			for _, agentID := range agentIDs {
+			googleAssigned := 0
+			for slug, agentID := range agentIDs {
 				resp, err := client.Post(
 					fmt.Sprintf("/api/v1/agents/%s/credentials", agentID),
 					map[string]string{"credential_id": googleID, "env_var_name": googleCred.EnvVarName},
 				)
-				if err == nil {
-					resp.Body.Close()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "  ! Assign Google credential to agent %s: %v\n", slug, err)
+					continue
 				}
+				status := resp.StatusCode
+				resp.Body.Close()
+				if status >= 400 && status != http.StatusConflict {
+					fmt.Fprintf(os.Stderr, "  ! Assign Google credential to agent %s: HTTP %d\n", slug, status)
+					continue
+				}
+				googleAssigned++
 			}
-			fmt.Fprintf(os.Stderr, "  + Assigned %s to %d agents\n", googleCred.Name, len(agentIDs))
+			fmt.Fprintf(os.Stderr, "  + Assigned %s to %d/%d agents\n", googleCred.Name, googleAssigned, len(agentIDs))
 		}
 	} else {
 		fmt.Fprintln(os.Stderr, "  Skipping Google credential (set SEED_GOOGLE_EMAIL + SEED_GOOGLE_PASSWORD)")
@@ -529,7 +539,9 @@ func seedOneCredential(client *cli.Client, cred seeddata.CredentialDef) (string,
 	if err := cli.CheckError(resp); err != nil {
 		return "", err
 	}
-	var created struct{ ID string `json:"id"` }
+	var created struct {
+		ID string `json:"id"`
+	}
 	if err := cli.ReadJSON(resp, &created); err != nil {
 		return "", err
 	}
@@ -547,15 +559,18 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 	}
 	fmt.Fprintln(os.Stderr, "Seeding integrations...")
 
-	// integrationRef tracks both the integration id and the owning crew id,
-	// so we only bind agents to integrations within their own crew.
-	type integrationRef struct {
-		ID     string
-		CrewID string
+	// Crew-scoped integration map: crewID → (integration name → id).
+	// A flat name→id map would silently collide when two crews share an
+	// integration name (which is legal — names are unique per crew, not per
+	// workspace) and would also let the binding loop wire agents up to
+	// integrations that belong to other crews.
+	integrationIDs := map[string]map[string]string{}
+	addIntegration := func(crewID, name, id string) {
+		if integrationIDs[crewID] == nil {
+			integrationIDs[crewID] = map[string]string{}
+		}
+		integrationIDs[crewID][name] = id
 	}
-	// Keyed by crewID first, then integration name, so two crews can each
-	// seed an integration with the same name without overwriting each other.
-	integrationIDs := map[string]map[string]integrationRef{} // crewID → (name → ref)
 
 	for _, integ := range seeddata.Integrations {
 		if err := ctx.Err(); err != nil {
@@ -593,14 +608,16 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		}
 		if resp.StatusCode == http.StatusConflict {
 			resp.Body.Close()
-			// Resolve existing
+			// Resolve existing — only treat the conflict as recovered if the
+			// follow-up lookup actually returns an ID. Otherwise integrationIDs
+			// is left without an entry and later binding code will silently
+			// skip this integration, so we surface it as a failure instead.
 			id, err := resolveCrewIntegration(client, crewID, integ.Name)
-			if err == nil {
-				if integrationIDs[crewID] == nil {
-					integrationIDs[crewID] = map[string]integrationRef{}
-				}
-				integrationIDs[crewID][integ.Name] = integrationRef{ID: id, CrewID: crewID}
+			if err != nil || id == "" {
+				fmt.Fprintf(os.Stderr, "  ! Integration %s: 409 conflict but lookup failed: %v\n", integ.Name, err)
+				continue
 			}
+			addIntegration(crewID, integ.Name, id)
 			fmt.Fprintf(os.Stderr, "  = Integration exists: %s\n", integ.DisplayName)
 			continue
 		}
@@ -609,13 +626,21 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 			fmt.Fprintf(os.Stderr, "  ! Integration %s: HTTP %d\n", integ.Name, resp.StatusCode)
 			continue
 		}
-		var created struct{ ID string `json:"id"` }
-		if cli.ReadJSON(resp, &created) == nil {
-			if integrationIDs[crewID] == nil {
-				integrationIDs[crewID] = map[string]integrationRef{}
-			}
-			integrationIDs[crewID][integ.Name] = integrationRef{ID: created.ID, CrewID: crewID}
+		var created struct {
+			ID string `json:"id"`
 		}
+		// Report parse failures — otherwise the integration exists server-side
+		// but isn't tracked in integrationIDs, so the bindings loop below
+		// silently skips it while the success line still prints.
+		if err := cli.ReadJSON(resp, &created); err != nil {
+			fmt.Fprintf(os.Stderr, "  ! Integration %s: parse response: %v\n", integ.Name, err)
+			continue
+		}
+		if created.ID == "" {
+			fmt.Fprintf(os.Stderr, "  ! Integration %s: response missing id\n", integ.Name)
+			continue
+		}
+		addIntegration(crewID, integ.Name, created.ID)
 		fmt.Fprintf(os.Stderr, "  + Integration: %s\n", integ.DisplayName)
 	}
 
@@ -643,36 +668,66 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		}
 		if resp.StatusCode == http.StatusConflict {
 			resp.Body.Close()
-			id, _ := resolveByName(client, "/api/v1/credentials", oc.CredName)
-			if id != "" {
-				oauthCredIDs[oc.IntegrationName] = id
+			// Same caveat as the integration conflict above: a 409 is only
+			// a recovered state if we actually find the existing credential.
+			// Otherwise bindings below would silently miss the credential_id,
+			// so surface the failure explicitly.
+			id, err := resolveByName(client, "/api/v1/credentials", oc.CredName)
+			if err != nil || id == "" {
+				fmt.Fprintf(os.Stderr, "  ! OAuth credential %s: 409 conflict but lookup failed: %v\n", oc.CredName, err)
+				continue
 			}
+			oauthCredIDs[oc.IntegrationName] = id
 			continue
 		}
 		if resp.StatusCode >= 400 {
+			fmt.Fprintf(os.Stderr, "  ! OAuth credential %s: HTTP %d\n", oc.CredName, resp.StatusCode)
 			resp.Body.Close()
 			continue
 		}
-		var created struct{ ID string `json:"id"` }
-		if cli.ReadJSON(resp, &created) == nil {
-			oauthCredIDs[oc.IntegrationName] = created.ID
-			status := "ACTIVE"
-			if oc.AccessToken == "" {
-				status = "PENDING"
-			}
-			fmt.Fprintf(os.Stderr, "  + OAuth credential: %s (%s)\n", oc.CredName, status)
+		var created struct {
+			ID string `json:"id"`
+		}
+		// Mirror the integration-create parse-failure handling above so
+		// OAuth provisioning is debuggable on its own: surface ReadJSON
+		// errors and skip tracking instead of silently leaving
+		// oauthCredIDs without an entry for this integration.
+		if err := cli.ReadJSON(resp, &created); err != nil {
+			fmt.Fprintf(os.Stderr, "  ! OAuth credential %s: parse response: %v\n", oc.CredName, err)
+			continue
+		}
+		if created.ID == "" {
+			fmt.Fprintf(os.Stderr, "  ! OAuth credential %s: response missing id\n", oc.CredName)
+			continue
+		}
+		oauthCredIDs[oc.IntegrationName] = created.ID
+		status := "ACTIVE"
+		if oc.AccessToken == "" {
+			status = "PENDING"
+		}
+		fmt.Fprintf(os.Stderr, "  + OAuth credential: %s (%s)\n", oc.CredName, status)
+	}
+
+	// Bind agents to integrations. Treat 409 Conflict as idempotent; surface
+	// every other failure so the summary line doesn't claim successful
+	// bindings that never happened.
+	//
+	// Bindings are scoped to the agent's own crew — otherwise an agent in
+	// crew A could end up bound to an integration provisioned for crew B,
+	// which is both a scope leak and a server-side permission error waiting
+	// to happen. Build a slug → crewID lookup from the static seed data so
+	// we can resolve each agent's crew without an extra API round-trip.
+	agentCrewIDBySlug := map[string]string{}
+	for _, a := range seeddata.Agents {
+		if cid, ok := crewIDs[a.CrewSlug]; ok {
+			agentCrewIDBySlug[a.Slug] = cid
 		}
 	}
 
-	// Build a slug → crewSlug lookup so we can scope bindings by crew.
-	agentCrewSlugBySlug := map[string]string{}
-	for _, a := range seeddata.Agents {
-		agentCrewSlugBySlug[a.Slug] = a.CrewSlug
-	}
-
-	// Bind agents to integrations. Integrations are crew-scoped, so only
-	// bind an agent to integrations that live in the agent's own crew.
 	fmt.Fprintln(os.Stderr, "Binding agents to integrations...")
+	boundAgents := 0
+	totalBindings := 0
+	successBindings := 0
 	for _, agentSlug := range seeddata.AgentBindingSlugs {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -681,19 +736,16 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 		if !ok {
 			continue
 		}
-		agentCrewSlug, ok := agentCrewSlugBySlug[agentSlug]
+		crewID, ok := agentCrewIDBySlug[agentSlug]
 		if !ok {
-			fmt.Fprintf(os.Stderr, "  ! agent %q not in seeddata.Agents, skipping bindings\n", agentSlug)
+			fmt.Fprintf(os.Stderr, "  ! Bind %s: crew not found, skipping\n", agentSlug)
 			continue
 		}
-		agentCrewID, ok := crewIDs[agentCrewSlug]
-		if !ok {
-			fmt.Fprintf(os.Stderr, "  ! crew %q for agent %s not in crewIDs, skipping bindings\n", agentCrewSlug, agentSlug)
-			continue
-		}
-		for integName, integRef := range integrationIDs[agentCrewID] {
+		perAgentSuccess := 0
+		for integName, integID := range integrationIDs[crewID] {
+			totalBindings++
 			body := map[string]interface{}{
-				"mcp_server_id":    integRef.ID,
+				"mcp_server_id":    integID,
 				"mcp_server_scope": "crew",
 				"cred_type":        "bearer",
 				"enabled":          true,
@@ -705,17 +757,25 @@ func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs
 				fmt.Sprintf("/api/v1/agents/%s/integrations", agentID),
 				body,
 			)
-			if err == nil {
-				resp.Body.Close()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ! Bind %s→%s: %v\n", agentSlug, integName, err)
+				continue
 			}
+			status := resp.StatusCode
+			resp.Body.Close()
+			if status >= 400 && status != http.StatusConflict {
+				fmt.Fprintf(os.Stderr, "  ! Bind %s→%s: HTTP %d\n", agentSlug, integName, status)
+				continue
+			}
+			successBindings++
+			perAgentSuccess++
+		}
+		if perAgentSuccess > 0 {
+			boundAgents++
 		}
 	}
-	totalIntegrations := 0
-	for _, perCrew := range integrationIDs {
-		totalIntegrations += len(perCrew)
-	}
-	if totalIntegrations > 0 {
-		fmt.Fprintf(os.Stderr, "  + Bound %d agents to %d integrations\n", len(seeddata.AgentBindingSlugs), totalIntegrations)
+	if totalBindings > 0 {
+		fmt.Fprintf(os.Stderr, "  + Bound %d agents, %d/%d bindings succeeded\n", boundAgents, successBindings, totalBindings)
 	}
 
 	return nil
@@ -801,7 +861,9 @@ func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[s
 			resp.Body.Close()
 			return fmt.Errorf("project %s: HTTP %d: %s", p.Name, resp.StatusCode, strings.TrimSpace(string(body)))
 		}
-		var created struct{ ID string `json:"id"` }
+		var created struct {
+			ID string `json:"id"`
+		}
 		if cli.ReadJSON(resp, &created) == nil {
 			projectIDs[p.Name] = created.ID
 			fmt.Fprintf(os.Stderr, "  + Project: %s\n", p.Name)

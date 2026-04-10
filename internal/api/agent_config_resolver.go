@@ -11,17 +11,17 @@ import (
 
 // agentConfigData holds the intermediate state during agent config resolution.
 type agentConfigData struct {
-	agentID   string
-	agentSlug string
-	agentName string
-	roleTitle sql.NullString
-	agentRole sql.NullString
-	cliAdapter   string
-	toolProfile  string
-	wsID         string
-	systemPrompt sql.NullString
-	llmModel     sql.NullString
-	timeoutSecs  int
+	agentID       string
+	agentSlug     string
+	agentName     string
+	roleTitle     sql.NullString
+	agentRole     sql.NullString
+	cliAdapter    string
+	toolProfile   string
+	wsID          string
+	systemPrompt  sql.NullString
+	llmModel      sql.NullString
+	timeoutSecs   int
 	memoryEnabled bool
 
 	crewID             sql.NullString
@@ -57,9 +57,9 @@ type crewMemberEntry struct {
 
 // crewInfoEntry describes a crew and its agents (used for COORDINATOR context).
 type crewInfoEntry struct {
-	ID      string           `json:"id"`
-	Name    string           `json:"name"`
-	Slug    string           `json:"slug"`
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Slug    string            `json:"slug"`
 	Members []crewMemberEntry `json:"members"`
 }
 
@@ -81,7 +81,7 @@ type mcpServerEntry struct {
 
 // mcpServerRow is a raw DB row for an MCP server definition.
 type mcpServerRow struct {
-	id, name, displayName, transport string
+	id, name, displayName, transport     string
 	endpoint, command, argsJSON, envJSON *string
 }
 
@@ -193,27 +193,27 @@ func (h *InternalHandler) resolveAgentConfig(w http.ResponseWriter, r *http.Requ
 	}
 
 	resp := map[string]interface{}{
-		"agent_id":             agentID,
-		"agent_slug":           data.agentSlug,
-		"agent_role":           roleStr,
-		"crew_id":              crewIDStr,
-		"crew_slug":            crewSlugStr,
-		"container_id":         "",
-		"cli_adapter":          data.cliAdapter,
-		"llm_model":            llmModelStr,
-		"system_prompt":        sysPrompt,
-		"tool_profile":         data.toolProfile,
-		"credentials":          creds,
-		"timeout_seconds":      data.timeoutSecs,
-		"workspace_id":         data.wsID,
-		"memory_enabled":       data.memoryEnabled,
-		"crew_members":         crewMembers,
-		"network_mode":         networkMode,
-		"allowed_domains":      allowedDomains,
-		"memory_mb":            memoryMB,
-		"cpus":                 cpus,
-		"ttl_hours":            ttlHours,
-		"mcp_servers":          mcpServers,
+		"agent_id":              agentID,
+		"agent_slug":            data.agentSlug,
+		"agent_role":            roleStr,
+		"crew_id":               crewIDStr,
+		"crew_slug":             crewSlugStr,
+		"container_id":          "",
+		"cli_adapter":           data.cliAdapter,
+		"llm_model":             llmModelStr,
+		"system_prompt":         sysPrompt,
+		"tool_profile":          data.toolProfile,
+		"credentials":           creds,
+		"timeout_seconds":       data.timeoutSecs,
+		"workspace_id":          data.wsID,
+		"memory_enabled":        data.memoryEnabled,
+		"crew_members":          crewMembers,
+		"network_mode":          networkMode,
+		"allowed_domains":       allowedDomains,
+		"memory_mb":             memoryMB,
+		"cpus":                  cpus,
+		"ttl_hours":             ttlHours,
+		"mcp_servers":           mcpServers,
 		"crew_mcp_config_json":  data.crewMCPConfigJSON.String,
 		"agent_mcp_config_json": data.agentMCPConfigJSON.String,
 	}

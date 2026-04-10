@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Bot, Plus, AlertCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { PageHeader } from "@/components/layout/page-header"
+import { PageShell } from "@/components/layout/page-shell"
 import { EmptyState } from "@/components/layout/empty-state"
 import { FilterBar } from "@/components/layout/filter-bar"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -105,18 +105,20 @@ export default function AgentsPage() {
       : agents.filter((a) => a.status === activeFilter.toUpperCase())
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 sm:space-y-8">
-      <PageHeader title="Agents" description="Manage your AI virtual employees">
-        {abilities.can("create", "Agent") && (
+    <PageShell
+      title="Agents"
+      description="Manage your AI virtual employees"
+      actions={
+        abilities.can("create", "Agent") && (
           <Button asChild>
             <Link href="/agents/new">
               <Plus className="mr-2 h-4 w-4" />
               New Agent
             </Link>
           </Button>
-        )}
-      </PageHeader>
-
+        )
+      }
+    >
       <FilterBar
         filters={["All", "Running", "Idle", "Error", "Stopped"]}
         active={activeFilter}
@@ -131,7 +133,7 @@ export default function AgentsPage() {
       )}
 
       {isLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-[160px] rounded-[var(--radius)]" />
           ))}
@@ -160,12 +162,12 @@ export default function AgentsPage() {
           )}
         </EmptyState>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredAgents.map((agent) => (
             <AgentCard key={agent.id} agent={agent} />
           ))}
         </div>
       )}
-    </div>
+    </PageShell>
   )
 }

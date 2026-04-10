@@ -353,22 +353,24 @@ export function OrchestrationLayout({
         }
       } catch {}
     }
-    await fetchProjects()
+    fetchProjects()
   }, [fetchIssues, fetchProjects, selectedIssue?.crew_id, selectedIssue?.identifier, workspaceId])
 
   const handleProjectClose = useCallback(() => {
     setSelectedProjectId(null)
   }, [])
 
-  // Mobile back button: clear every layer of detail state so the overlay sheet
-  // actually dismisses (issue + project + misc detail). Clearing only the
-  // innermost layer would leave a stale layer visible after the mobile sheet
-  // swap, keeping showRightPanel truthy.
+  // Mobile back button: close whichever detail view is currently visible so that
+  // showRightPanel ends up false and the overlay sheet actually dismisses.
   const closeMobileDetail = useCallback(() => {
-    handleIssueClose()
-    handleProjectClose()
-    handleDetailClose()
-  }, [handleIssueClose, handleProjectClose, handleDetailClose])
+    if (selectedIssue) {
+      handleIssueClose()
+    } else if (selectedProjectId) {
+      handleProjectClose()
+    } else {
+      handleDetailClose()
+    }
+  }, [selectedIssue, selectedProjectId, handleIssueClose, handleProjectClose, handleDetailClose])
 
   // Sync breadcrumbs to global store (rendered in app-toolbar)
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
@@ -578,11 +580,9 @@ export function OrchestrationLayout({
                   if (viewType) setIssueViewMode(viewType)
 
                   // Clearing the selected view ("All Issues"): reset filters to
-                  // the same defaults used when the page initialises. Only the
-                  // saved-view-driven filters are reset — an explicit project
-                  // selection (`selectedProjectId`) is preserved.
+                  // the same defaults used when the page initialises.
                   if (id === null) {
-                    setFilterProjectId(null)
+                    setSelectedProjectId(null)
                     setFilterCrewId(null)
                     setFilterAgentId(null)
                     setIssueSearch("")
@@ -595,25 +595,12 @@ export function OrchestrationLayout({
                   // is clearly mappable and ignore anything else.
                   const view = savedViews.find((v) => v.id === id)
                   if (!view) return
-
-                  // Reset all filter state BEFORE parsing. If the new view's
-                  // filters_json is malformed we fall through the catch block
-                  // without applying anything, and without this reset the
-                  // previously active view's filters would stick around and
-                  // produce stale results under the newly selected view id.
-                  setFilterProjectId(null)
-                  setFilterCrewId(null)
-                  setFilterAgentId(null)
-                  setIssueSearch("")
-
                   try {
                     const parsed: Record<string, unknown> = view.filters_json
                       ? JSON.parse(view.filters_json)
                       : {}
                     const projectId = parsed.project_id ?? parsed.projectId
-                    // Apply to filter-only state so the project detail panel
-                    // does not open when loading a saved view.
-                    setFilterProjectId(
+                    setSelectedProjectId(
                       typeof projectId === "string" ? projectId : null,
                     )
                     const crewId = parsed.crew_id ?? parsed.crewId
@@ -628,7 +615,7 @@ export function OrchestrationLayout({
                     // TODO: wire up status/label/priority filters and
                     // sort_json once the issue list supports them.
                   } catch {
-                    /* keep cleared defaults when filters_json is malformed */
+                    /* ignore malformed filters_json */
                   }
                 }}
               />
@@ -705,9 +692,7 @@ export function OrchestrationLayout({
               >
                 <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.1] shrink-0">
                   <button
-                    type="button"
                     onClick={closeMobileDetail}
-                    aria-label="Close detail panel"
                     className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
                   >
                     <ChevronLeft className="h-4 w-4" aria-hidden="true" />

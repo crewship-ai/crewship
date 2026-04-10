@@ -47,16 +47,16 @@ interface SettingsNavProps {
 
 export function SettingsNav({ activeTab, onTabChange, workspaceName }: SettingsNavProps) {
   return (
-    <div className="w-[220px] shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col">
-      <nav className="flex-1 overflow-y-auto px-2 pt-3 pb-4">
+    <aside className="w-[220px] shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col">
+      <nav className="flex-1 overflow-y-auto px-2 pt-3 pb-4" aria-label="Settings sections">
         {sections.map((section) => (
           <div key={section.label} className="mb-1">
             <div className="flex items-center gap-2 px-2 pt-3 pb-1.5">
-              <span className="text-[11px] font-medium text-sidebar-foreground/40">
+              <span className="text-micro font-medium text-sidebar-foreground/60 uppercase tracking-wider">
                 {section.label}
               </span>
               {section.label === "Workspace" && workspaceName && (
-                <span className="text-[10px] text-sidebar-foreground/20 truncate">
+                <span className="text-micro text-sidebar-foreground/40 truncate">
                   {workspaceName}
                 </span>
               )}
@@ -67,20 +67,21 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName }: SettingsN
                 <button
                   key={item.key}
                   onClick={() => onTabChange(item.key)}
+                  aria-current={isActive ? "page" : undefined}
                   className={cn(
-                    "flex items-center gap-2 w-full px-2 py-[5px] rounded-md text-[13px] transition-colors",
+                    "flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-label transition-colors",
                     isActive
                       ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                       : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/50",
                   )}
                 >
-                  <item.icon className={cn("h-[14px] w-[14px] shrink-0", isActive ? "opacity-100" : "opacity-50")} />
+                  <item.icon className={cn("h-3.5 w-3.5 shrink-0", isActive ? "opacity-100" : "opacity-60")} />
                   <span className="truncate">{item.label}</span>
                   {item.badge === "P2" && (
-                    <span className="ml-auto text-[9px] text-sidebar-foreground/20 shrink-0">P2</span>
+                    <span className="ml-auto text-micro text-sidebar-foreground/40 shrink-0">P2</span>
                   )}
                   {item.badge === "OWNER" && (
-                    <span className="ml-auto text-[9px] text-amber-500/60 shrink-0">Owner</span>
+                    <span className="ml-auto text-micro text-sidebar-foreground/60 shrink-0">Owner</span>
                   )}
                 </button>
               )
@@ -88,6 +89,6 @@ export function SettingsNav({ activeTab, onTabChange, workspaceName }: SettingsN
           </div>
         ))}
       </nav>
-    </div>
+    </aside>
   )
 }

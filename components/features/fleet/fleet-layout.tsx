@@ -86,8 +86,9 @@ const FLEET_TABS = [
   { id: "health" as const, label: "Health", icon: HeartPulse },
 ]
 
-// FLEET_BOTTOM_TABS was removed when the bottom drawer was extracted into
-// `<FleetBottomDrawer>` — the tab list now lives inside that component.
+// FLEET_BOTTOM_TABS lives inside fleet-bottom-drawer.tsx now (extracted
+// during the drawer component split). The top-level layout only renders
+// <FleetBottomDrawer> and does not need the tab list here.
 
 export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }: FleetLayoutProps) {
   const isMobile = useIsMobile()
@@ -143,7 +144,7 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
   return (
     <div className="flex flex-col h-[calc(100vh-48px)] bg-background">
       {/* Toolbar: tabs | actions */}
-      <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-border px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {/* Left: tabs */}
         <div className="flex items-stretch">
           {FLEET_TABS.map(({ id, label, icon: Icon }) => (
@@ -151,9 +152,9 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
               key={id}
               onClick={() => setActiveTab(id)}
               className={cn(
-                "flex items-center gap-1.5 px-3 text-[12px] font-medium border-b-2 transition-all duration-100 relative top-px",
+                "flex items-center gap-1.5 px-3 text-label font-medium border-b-2 transition-all duration-100 relative top-px",
                 activeTab === id
-                  ? "border-blue-400 text-blue-400"
+                  ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground/80",
               )}
             >
@@ -165,13 +166,13 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
 
         {/* Right: actions */}
         <div className="flex items-center gap-1.5 ml-auto shrink-0">
-          <Button size="sm" className="h-[22px] px-2 text-[11.5px] font-medium gap-1" asChild>
+          <Button size="sm" className="h-[22px] px-2 text-label font-medium gap-1" asChild>
             <Link href="/crews/new">
               <Plus className="h-3 w-3" />
               Crew
             </Link>
           </Button>
-          <Button variant="outline" size="sm" className="h-[22px] px-2 text-[11.5px] font-medium gap-1 bg-white/[0.04] border-white/[0.1]" asChild>
+          <Button variant="outline" size="sm" className="h-[22px] px-2 text-label font-medium gap-1 bg-muted border-border" asChild>
             <Link href="/agents/new">
               <Plus className="h-3 w-3" />
               Agent
@@ -195,7 +196,7 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
           <>
             {leftCollapsed && (
               <button
-                className="absolute top-2 left-2 z-20 h-8 w-8 min-h-[44px] min-w-[44px] rounded-md bg-card border border-white/[0.1] flex items-center justify-center text-muted-foreground hover:text-foreground"
+                className="absolute top-2 left-2 z-20 h-8 w-8 min-h-[44px] min-w-[44px] rounded-md bg-card border border-border flex items-center justify-center text-muted-foreground hover:text-foreground"
                 onClick={() => setLeftCollapsed(false)}
               >
                 <PanelLeftOpen className="h-3.5 w-3.5" />
@@ -302,10 +303,10 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
               >
                 <div className="text-center">
                   <Share2 className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-[13px] font-medium">Crew Connections</p>
-                  <p className="text-[11px] text-muted-foreground/40 mt-1">
+                  <p className="text-body font-medium">Crew Connections</p>
+                  <p className="text-micro text-muted-foreground/40 mt-1">
                     Configure inter-crew communication in{" "}
-                    <Link href="/orchestration" className="text-blue-400 hover:underline">Orchestration</Link>
+                    <Link href="/orchestration" className="text-primary hover:underline">Orchestration</Link>
                   </p>
                 </div>
               </motion.div>
@@ -337,14 +338,14 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
                 exit={{ x: "100%" }}
                 transition={{ type: "spring", damping: 25, stiffness: 300 }}
               >
-                <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.1] shrink-0">
+                <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
                   <button
                     onClick={handleAgentClose}
                     className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
                   >
                     <ChevronLeft className="h-4 w-4" />
                   </button>
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Agent Detail</span>
+                  <span className="text-label font-semibold text-muted-foreground uppercase tracking-wider">Agent Detail</span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   <FleetAgentDetail agent={selectedAgent} workspaceId={workspaceId} onClose={handleAgentClose} />

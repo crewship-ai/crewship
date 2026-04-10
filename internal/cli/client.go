@@ -18,6 +18,10 @@ type Client struct {
 	WorkspaceID string
 	HTTPClient  *http.Client
 	Verbose     bool
+	// ctx is bound to every request issued by Do. Defaults to
+	// context.Background(); use WithContext to attach a cancellable
+	// context (e.g., for graceful shutdown via Ctrl-C).
+	ctx context.Context
 	// resolvedWorkspaceID caches the resolved CUID after first lookup
 	resolvedWorkspaceID string
 }
@@ -29,10 +33,24 @@ func NewClient(baseURL, token, workspaceID string) *Client {
 		BaseURL:     baseURL,
 		Token:       token,
 		WorkspaceID: workspaceID,
+		ctx:         context.Background(),
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// WithContext returns a shallow copy of the client whose outgoing requests
+// are bound to ctx. A nil ctx falls back to context.Background().
+// Use this from command entrypoints so Ctrl-C interrupts in-flight HTTP
+// calls instead of waiting for the 30 s client timeout.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	clone := *c
+	clone.ctx = ctx
+	return &clone
 }
 
 // Do sends an HTTP request with the configured auth token and workspace ID.
@@ -61,7 +79,11 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 		}
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), method, u.String(), bodyReader)
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -96,7 +118,7 @@ func (c *Client) GetWorkspaceID() string {
 		return c.WorkspaceID
 	}
 	// Resolve slug to ID by calling workspaces list (without workspace_id param)
-	id, err := c.resolveWorkspaceSlug(c.WorkspaceID)
+	id, err := c.resolveWorkspaceSlug(c.ctx, c.WorkspaceID)
 	if err != nil {
 		// Fall back to using the slug directly
 		return c.WorkspaceID
@@ -105,12 +127,15 @@ func (c *Client) GetWorkspaceID() string {
 	return id
 }
 
-func (c *Client) resolveWorkspaceSlug(slug string) (string, error) {
+func (c *Client) resolveWorkspaceSlug(ctx context.Context, slug string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	u, err := url.Parse(c.BaseURL + "/api/v1/workspaces")
 	if err != nil {
 		return "", fmt.Errorf("parse workspace URL: %w", err)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), "GET", u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
 		return "", fmt.Errorf("create workspace request: %w", err)
 	}

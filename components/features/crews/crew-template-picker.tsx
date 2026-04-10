@@ -24,6 +24,29 @@ interface CrewTemplate {
   is_builtin: boolean
 }
 
+// Crew templates stored in the DB can carry a palette ID ("blue") or a
+// legacy hex string ("#3b82f6") in their `color` field. CrewIcon expects a
+// palette ID — anything else silently falls back to the first palette entry,
+// which looks like a bug. Normalize up-front so we pass a clean palette ID
+// (or null to let CrewIcon pick the default) into the component.
+const CREW_PALETTE_IDS = new Set([
+  "blue", "emerald", "violet", "amber", "rose", "cyan", "lime", "fuchsia",
+])
+function normalizeTemplateColor(color: string | null | undefined): string | null {
+  if (!color) return null
+  return CREW_PALETTE_IDS.has(color) ? color : null
+}
+
+// CrewIcon expects a lucide icon name (`clipboard`, `rocket`, `code`, …).
+// Legacy template rows in the DB may carry emoji or other free-form strings;
+// enforce the lucide naming contract (kebab-case ASCII) and fall back to the
+// canonical default so the icon never breaks.
+const LUCIDE_ICON_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/i
+function normalizeTemplateIcon(icon: string | null | undefined): string {
+  if (!icon) return "clipboard"
+  return LUCIDE_ICON_NAME_RE.test(icon) ? icon : "clipboard"
+}
+
 // ── Quick-start template grid (shown on the mode chooser screen) ──────────
 
 interface QuickStartTemplateGridProps {
@@ -35,7 +58,11 @@ interface QuickStartTemplateGridProps {
 export function QuickStartTemplateGrid({ templates, loading, onSelect }: QuickStartTemplateGridProps) {
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex items-center gap-2 text-sm text-muted-foreground"
+      >
         <Loader2 className="h-4 w-4 animate-spin" /> Loading templates...
       </div>
     )
@@ -54,7 +81,7 @@ export function QuickStartTemplateGrid({ templates, loading, onSelect }: QuickSt
             onClick={() => onSelect(t)}
             className="flex items-start gap-3 rounded-lg border border-border p-3 text-left transition-all hover:bg-accent hover:border-primary/50 group"
           >
-            <CrewIcon icon={t.icon || "clipboard"} color={t.color} size="sm" />
+            <CrewIcon icon={normalizeTemplateIcon(t.icon)} color={normalizeTemplateColor(t.color)} size="sm" />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1">
                 <span className="font-medium text-sm truncate">{t.name}</span>
@@ -87,7 +114,11 @@ interface TemplateGalleryProps {
 export function TemplateGallery({ templates, loading, onSelect }: TemplateGalleryProps) {
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex items-center gap-2 text-sm text-muted-foreground py-8"
+      >
         <Loader2 className="h-4 w-4 animate-spin" /> Loading templates...
       </div>
     )
@@ -103,7 +134,7 @@ export function TemplateGallery({ templates, loading, onSelect }: TemplateGaller
           className="flex flex-col items-start gap-2 rounded-lg border border-border p-4 text-left transition-all hover:bg-accent hover:border-primary/50"
         >
           <div className="flex items-center gap-2">
-            <CrewIcon icon={t.icon || "clipboard"} color={t.color} size="sm" />
+            <CrewIcon icon={normalizeTemplateIcon(t.icon)} color={normalizeTemplateColor(t.color)} size="sm" />
             <span className="font-semibold">{t.name}</span>
           </div>
           <p className="text-sm text-muted-foreground">{t.description}</p>
