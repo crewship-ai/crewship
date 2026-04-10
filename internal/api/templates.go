@@ -159,6 +159,30 @@ func (h *TemplateHandler) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
 }
 
+// checkTemplateModifiable verifies the template exists in the workspace and is
+// not a builtin template. Writes the appropriate error response on failure.
+// Returns true if the template is modifiable, false if the handler should return.
+func (h *TemplateHandler) checkTemplateModifiable(w http.ResponseWriter, r *http.Request, templateID, wsID, action string) bool {
+	var isBuiltin bool
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT is_builtin FROM workflow_templates WHERE id = ? AND workspace_id = ?`,
+		templateID, wsID).Scan(&isBuiltin)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeProblem(w, r, http.StatusNotFound, "Template not found")
+			return false
+		}
+		h.logger.Error("check template", "error", err, "action", action)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return false
+	}
+	if isBuiltin {
+		writeProblem(w, r, http.StatusForbidden, "Cannot "+action+" builtin templates")
+		return false
+	}
+	return true
+}
+
 // Update handles PATCH /api/v1/templates/{templateId}
 func (h *TemplateHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
@@ -183,21 +207,7 @@ func (h *TemplateHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check template exists and is not builtin
-	var isBuiltin bool
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT is_builtin FROM workflow_templates WHERE id = ? AND workspace_id = ?`,
-		templateID, wsID).Scan(&isBuiltin)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Template not found")
-			return
-		}
-		h.logger.Error("check template", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if isBuiltin {
-		writeProblem(w, r, http.StatusForbidden, "Cannot modify builtin templates")
+	if !h.checkTemplateModifiable(w, r, templateID, wsID, "modify") {
 		return
 	}
 
@@ -259,21 +269,7 @@ func (h *TemplateHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	templateID := r.PathValue("templateId")
 
-	var isBuiltin bool
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT is_builtin FROM workflow_templates WHERE id = ? AND workspace_id = ?`,
-		templateID, wsID).Scan(&isBuiltin)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Template not found")
-			return
-		}
-		h.logger.Error("check template for delete", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
-		return
-	}
-	if isBuiltin {
-		writeProblem(w, r, http.StatusForbidden, "Cannot delete builtin templates")
+	if !h.checkTemplateModifiable(w, r, templateID, wsID, "delete") {
 		return
 	}
 
