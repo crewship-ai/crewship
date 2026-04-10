@@ -179,6 +179,8 @@ func (h *CredentialHandler) setCrewIDs(ctx context.Context, tx *sql.Tx, credenti
 func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
+	limit, offset := parseListPagination(r, 100, 500)
+
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.name, c.description, c.type, c.provider, c.status,
 			c.scope, c.crew_id, c.account_label, c.account_email,
@@ -188,7 +190,8 @@ func (h *CredentialHandler) List(w http.ResponseWriter, r *http.Request) {
 		FROM credentials c
 		WHERE c.workspace_id = ? AND c.deleted_at IS NULL
 		ORDER BY c.type ASC, c.created_at DESC
-	`, workspaceID)
+		LIMIT ? OFFSET ?
+	`, workspaceID, limit, offset)
 	if err != nil {
 		h.logger.Error("list credentials", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})

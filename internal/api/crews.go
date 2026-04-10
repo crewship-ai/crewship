@@ -138,6 +138,8 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limit, offset := parseListPagination(r, 100, 500)
+
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
@@ -148,7 +150,8 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		FROM crews c
 		WHERE c.workspace_id = ? AND c.deleted_at IS NULL
 		ORDER BY c.created_at DESC
-	`, workspaceID)
+		LIMIT ? OFFSET ?
+	`, workspaceID, limit, offset)
 	if err != nil {
 		h.logger.Error("list crews", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
