@@ -68,7 +68,13 @@ function TriggersTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      // Don't leave the tab stuck on a spinner when no workspace is
+      // selected — clear loading and fall through to the empty state.
+      setLoading(false)
+      setAgent(null)
+      return
+    }
     setLoading(true)
     fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
       .then((r) => r.json())
@@ -78,6 +84,7 @@ function TriggersTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
   }, [agentId, workspaceId])
 
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  if (!workspaceId) return <div className="p-4 text-label text-muted-foreground">Select a workspace to view triggers.</div>
   if (!agent) return <div className="p-4 text-label text-muted-foreground">Unable to load agent</div>
 
   const webhookUrl = agent.crew_id && agent.slug
@@ -175,7 +182,12 @@ function SharedContextTab({ agentId, workspaceId }: { agentId: string; workspace
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setLoading(false)
+      setAgent(null)
+      setCrew(null)
+      return
+    }
     setLoading(true)
     fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
       .then((r) => r.json())
@@ -193,6 +205,7 @@ function SharedContextTab({ agentId, workspaceId }: { agentId: string; workspace
   }, [agentId, workspaceId])
 
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  if (!workspaceId) return <div className="p-4 text-label text-muted-foreground">Select a workspace to view context.</div>
   if (!agent) return <div className="p-4 text-label text-muted-foreground">Unable to load agent</div>
 
   return (
@@ -271,7 +284,13 @@ function TeamChatTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setLoading(false)
+      setMessages([])
+      setCrewId(null)
+      setAgentSlug(null)
+      return
+    }
     setLoading(true)
     fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
       .then((r) => r.json())

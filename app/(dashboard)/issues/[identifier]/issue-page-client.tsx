@@ -111,19 +111,25 @@ export function IssuePageClient() {
 
   const patchIssue = async (field: string, value: string | null) => {
     if (!issue || !workspaceId) return
-    const res = await fetch(
-      `/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier!)}?workspace_id=${encodeURIComponent(workspaceId)}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: value }),
+    try {
+      const res = await fetch(
+        `/api/v1/crews/${encodeURIComponent(issue.crew_id)}/issues/${encodeURIComponent(issue.identifier!)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [field]: value }),
+        }
+      )
+      if (res.ok) {
+        fetchIssue()
+      } else {
+        const err = await res.json().catch(() => null)
+        toast.error(err?.detail || "Failed to update")
       }
-    )
-    if (res.ok) {
-      fetchIssue()
-    } else {
-      const err = await res.json().catch(() => null)
-      toast.error(err?.detail || "Failed to update")
+    } catch {
+      // Network/transport failures — inline onChange handlers call patchIssue
+      // directly, so we must never return a rejected promise.
+      toast.error("Failed to update — network error")
     }
   }
 

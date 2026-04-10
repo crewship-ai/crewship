@@ -24,6 +24,19 @@ interface CrewTemplate {
   is_builtin: boolean
 }
 
+// Crew templates stored in the DB can carry a palette ID ("blue") or a
+// legacy hex string ("#3b82f6") in their `color` field. CrewIcon expects a
+// palette ID — anything else silently falls back to the first palette entry,
+// which looks like a bug. Normalize up-front so we pass a clean palette ID
+// (or null to let CrewIcon pick the default) into the component.
+const CREW_PALETTE_IDS = new Set([
+  "blue", "emerald", "violet", "amber", "rose", "cyan", "lime", "fuchsia",
+])
+function normalizeTemplateColor(color: string | null | undefined): string | null {
+  if (!color) return null
+  return CREW_PALETTE_IDS.has(color) ? color : null
+}
+
 // ── Quick-start template grid (shown on the mode chooser screen) ──────────
 
 interface QuickStartTemplateGridProps {
@@ -54,7 +67,7 @@ export function QuickStartTemplateGrid({ templates, loading, onSelect }: QuickSt
             onClick={() => onSelect(t)}
             className="flex items-start gap-3 rounded-lg border border-border p-3 text-left transition-all hover:bg-accent hover:border-primary/50 group"
           >
-            <CrewIcon icon={t.icon || "clipboard"} color={t.color} size="sm" />
+            <CrewIcon icon={t.icon || "clipboard"} color={normalizeTemplateColor(t.color)} size="sm" />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1">
                 <span className="font-medium text-sm truncate">{t.name}</span>
@@ -103,7 +116,7 @@ export function TemplateGallery({ templates, loading, onSelect }: TemplateGaller
           className="flex flex-col items-start gap-2 rounded-lg border border-border p-4 text-left transition-all hover:bg-accent hover:border-primary/50"
         >
           <div className="flex items-center gap-2">
-            <CrewIcon icon={t.icon || "clipboard"} color={t.color} size="sm" />
+            <CrewIcon icon={t.icon || "clipboard"} color={normalizeTemplateColor(t.color)} size="sm" />
             <span className="font-semibold">{t.name}</span>
           </div>
           <p className="text-sm text-muted-foreground">{t.description}</p>

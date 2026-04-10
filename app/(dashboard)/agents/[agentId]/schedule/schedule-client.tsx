@@ -286,24 +286,36 @@ export function SchedulePageClient() {
           </div>
         ) : (
           <ul className="divide-y divide-border">
-            {runs.map((run) => (
-              <li
-                key={run.id}
-                className="flex items-center justify-between px-4 sm:px-6 py-3"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <StatusBadge status={run.status} />
-                  <span className="text-body text-muted-foreground truncate">
-                    {formatDateTime(run.started_at)}
-                  </span>
-                </div>
-                <div className="text-label text-muted-foreground shrink-0">
-                  {run.metadata && typeof run.metadata === "object" && "duration_ms" in run.metadata
-                    ? formatDuration(run.metadata.duration_ms as number)
-                    : ""}
-                </div>
-              </li>
-            ))}
+            {runs.map((run) => {
+              // Normalize backend run status to canonical StatusBadge keys.
+              // Unknown states fall through to PENDING so styling stays consistent.
+              const badgeStatus =
+                run.status === "FAILED" || run.status === "ERROR" || run.status === "TIMEOUT"
+                  ? "FAILED"
+                  : run.status === "COMPLETED" || run.status === "SUCCESS"
+                    ? "COMPLETED"
+                    : run.status === "RUNNING" || run.status === "IN_PROGRESS"
+                      ? "IN_PROGRESS"
+                      : "PENDING"
+              return (
+                <li
+                  key={run.id}
+                  className="flex items-center justify-between px-4 sm:px-6 py-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <StatusBadge status={badgeStatus} label={run.status} />
+                    <span className="text-body text-muted-foreground truncate">
+                      {formatDateTime(run.started_at)}
+                    </span>
+                  </div>
+                  <div className="text-label text-muted-foreground shrink-0">
+                    {run.metadata && typeof run.metadata === "object" && "duration_ms" in run.metadata
+                      ? formatDuration(run.metadata.duration_ms as number)
+                      : ""}
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         )}
       </SectionCard>

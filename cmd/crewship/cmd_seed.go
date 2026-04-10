@@ -42,7 +42,11 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	password, _ := cmd.Flags().GetString("password")
 	if password == "" {
 		b := make([]byte, 16)
-		_, _ = rand.Read(b)
+		if _, err := rand.Read(b); err != nil {
+			// Refuse to bootstrap with an empty/degenerate password —
+			// that would leave the admin account with a guessable secret.
+			return fmt.Errorf("generate admin password: %w", err)
+		}
 		password = hex.EncodeToString(b)
 		fmt.Fprintf(os.Stderr, "  Generated admin password: %s\n", password)
 	}
@@ -136,8 +140,10 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 	fmt.Fprintln(os.Stderr, "Bootstrapping...")
 	server := cli.ResolveServer(flagServer, cliCfg)
 
-	// Try bootstrap (works only on empty DB)
-	unauthClient := cli.NewClient(server, "", "")
+	// Try bootstrap (works only on empty DB). Bind ctx so Ctrl-C can
+	// interrupt the in-flight HTTP call instead of blocking on the
+	// 30 s client timeout.
+	unauthClient := cli.NewClient(server, "", "").WithContext(ctx)
 	resp, err := unauthClient.Post("/api/v1/bootstrap", map[string]string{
 		"email":     "demo@crewship.ai",
 		"full_name": "Demo User",
@@ -168,7 +174,7 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 
 		fmt.Fprintf(os.Stderr, "  Bootstrapped admin: demo@crewship.ai\n")
 		fmt.Fprintf(os.Stderr, "  Workspace: %s\n", result.WorkspaceID)
-		return cli.NewClient(server, result.CLIToken, result.WorkspaceID), result.UserID, nil
+		return cli.NewClient(server, result.CLIToken, result.WorkspaceID).WithContext(ctx), result.UserID, nil
 	}
 	// Only fall through to auth for 409 (already initialized).
 	// Other errors are real failures.
@@ -193,7 +199,7 @@ func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, e
 	fmt.Fprintf(os.Stderr, "  Using existing auth\n")
 
 	// Resolve user ID from CLI token validation
-	client := newAPIClient()
+	client := newAPIClient().WithContext(ctx)
 	userID := resolveCurrentUserID(client)
 	return client, userID, nil
 }

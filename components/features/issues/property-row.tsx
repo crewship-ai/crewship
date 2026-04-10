@@ -60,9 +60,15 @@ export function PropertyRow({
       {label && (
         <span className="text-[11px] text-muted-foreground w-[72px] shrink-0">{label}</span>
       )}
-      <span className="flex-1 flex items-center gap-[5px] justify-end text-[11.5px] text-foreground/80 min-w-0 truncate">
+      {/*
+        Block container so callers can render arbitrary children (icons,
+        badges, nested flex wrappers) without HTML-invalid block-in-span
+        nesting. `min-w-0 truncate` still clips overflow for the common
+        case of plain-text values.
+      */}
+      <div className="flex-1 flex items-center gap-[5px] justify-end text-[11.5px] text-foreground/80 min-w-0 truncate">
         {children}
-      </span>
+      </div>
     </div>
   )
 }

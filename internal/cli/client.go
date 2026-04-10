@@ -17,6 +17,10 @@ type Client struct {
 	WorkspaceID string
 	HTTPClient  *http.Client
 	Verbose     bool
+	// ctx is bound to every request issued by Do. Defaults to
+	// context.Background(); use WithContext to attach a cancellable
+	// context (e.g., for graceful shutdown via Ctrl-C).
+	ctx context.Context
 	// resolvedWorkspaceID caches the resolved CUID after first lookup
 	resolvedWorkspaceID string
 }
@@ -26,10 +30,24 @@ func NewClient(baseURL, token, workspaceID string) *Client {
 		BaseURL:     baseURL,
 		Token:       token,
 		WorkspaceID: workspaceID,
+		ctx:         context.Background(),
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// WithContext returns a shallow copy of the client whose outgoing requests
+// are bound to ctx. A nil ctx falls back to context.Background().
+// Use this from command entrypoints so Ctrl-C interrupts in-flight HTTP
+// calls instead of waiting for the 30 s client timeout.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	clone := *c
+	clone.ctx = ctx
+	return &clone
 }
 
 func (c *Client) Do(method, path string, body interface{}) (*http.Response, error) {
@@ -57,7 +75,11 @@ func (c *Client) Do(method, path string, body interface{}) (*http.Response, erro
 		}
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), method, u.String(), bodyReader)
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
