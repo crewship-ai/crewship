@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from "react"
 import { Check, X, ChevronsUpDown, Loader2 } from "lucide-react"
-import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
@@ -16,24 +15,7 @@ import {
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { Button } from "@/components/ui/button"
 import { LANGUAGES } from "@/lib/languages"
-import { cn } from "@/lib/utils"
-
-function Row({ label, description, children, border = true }: {
-  label: React.ReactNode
-  description?: string
-  children: React.ReactNode
-  border?: boolean
-}) {
-  return (
-    <div className={cn("flex items-center justify-between gap-4 px-4 py-2.5", border && "border-b border-border/40 last:border-b-0")}>
-      <div className="shrink-0">
-        <div className="text-body text-foreground">{label}</div>
-        {description && <div className="text-label text-muted-foreground mt-0.5">{description}</div>}
-      </div>
-      <div className="flex items-center gap-2 min-w-0 justify-end">{children}</div>
-    </div>
-  )
-}
+import { SettingsCard, SettingsRow, SettingsDangerCard } from "../shared"
 
 interface GeneralSectionProps {
   workspaceId: string
@@ -137,176 +119,178 @@ export function GeneralSection({
   const selectedLang = formLanguage ? LANGUAGES.find((l) => l.name === formLanguage) : null
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* ── Identity ── */}
-      <div>
-        <h3 className="text-body font-medium text-foreground/80 mb-3">Identity</h3>
-        <Card>
-          <CardContent className="p-0">
-            <form onSubmit={handleSave}>
-              <Row label="Workspace name">
-                <Input
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  placeholder="My Company"
-                  className="h-7 text-label w-48"
-                />
-              </Row>
-              <Row label="Slug">
-                <Input
-                  value={formSlug}
-                  onChange={(e) => setFormSlug(e.target.value)}
-                  placeholder="my-company"
-                  className="h-7 text-label w-48 font-mono"
-                />
-              </Row>
-              {(isDirty || saveStatus !== "idle") && (
-                <div className="flex items-center justify-end gap-3 px-5 py-3 border-b border-border/40">
-                  {saveStatus === "error" && saveError && (
-                    <span className="text-label text-destructive mr-auto">{saveError}</span>
-                  )}
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={saveStatus === "saving"}
-                  >
-                    {saveStatus === "saving" ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : saveStatus === "success" ? <Check className="mr-1.5 h-3 w-3" /> : null}
-                    {saveStatus === "saving" ? "Saving..." : saveStatus === "success" ? "Saved" : "Save Changes"}
-                  </Button>
-                </div>
+      <SettingsCard title="Identity" description="Your workspace name, slug, and default agent language">
+        <form onSubmit={handleSave}>
+          <SettingsRow label="Workspace name">
+            <Input
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
+              placeholder="My Company"
+              className="h-7 text-xs w-48"
+            />
+          </SettingsRow>
+          <SettingsRow label="Slug" description="Used in URLs and CLI commands">
+            <Input
+              value={formSlug}
+              onChange={(e) => setFormSlug(e.target.value)}
+              placeholder="my-company"
+              className="h-7 text-xs w-48 font-mono"
+            />
+          </SettingsRow>
+          {(isDirty || saveStatus !== "idle") && (
+            <div className="flex items-center justify-end gap-3 px-4 py-2 border-b border-border/40">
+              {saveStatus === "error" && saveError && (
+                <span className="text-[11px] text-destructive mr-auto">{saveError}</span>
               )}
-            </form>
-            <Row label="Agent language" description="Agents will respond in this language" border={false}>
-              <Popover open={langOpen} onOpenChange={setLangOpen}>
-                <PopoverTrigger asChild>
-                  <button
-                    className="inline-flex items-center justify-between w-48 h-8 px-3 rounded-md bg-background border border-border text-body text-foreground hover:border-ring transition-colors disabled:opacity-50"
-                    disabled={langSaving}
-                  >
-                    {selectedLang ? (
-                      <span className="truncate">{selectedLang.flag} {selectedLang.name}</span>
-                    ) : (
-                      <span className="text-muted-foreground">Select language...</span>
+              <Button
+                type="submit"
+                size="sm"
+                className="h-7 px-2.5 text-xs"
+                disabled={saveStatus === "saving"}
+              >
+                {saveStatus === "saving" ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : saveStatus === "success" ? <Check className="mr-1.5 h-3 w-3" /> : null}
+                {saveStatus === "saving" ? "Saving…" : saveStatus === "success" ? "Saved" : "Save changes"}
+              </Button>
+            </div>
+          )}
+        </form>
+        <SettingsRow label="Agent language" description="Agents will respond in this language" border={false}>
+          <Popover open={langOpen} onOpenChange={setLangOpen}>
+            <PopoverTrigger asChild>
+              <button
+                className="inline-flex items-center justify-between w-48 h-7 px-2.5 rounded-md bg-background border border-border text-xs text-foreground hover:border-ring transition-colors disabled:opacity-50"
+                disabled={langSaving}
+              >
+                {selectedLang ? (
+                  <span className="truncate">{selectedLang.flag} {selectedLang.name}</span>
+                ) : (
+                  <span className="text-muted-foreground">Select language…</span>
+                )}
+                <ChevronsUpDown className="h-3 w-3 text-muted-foreground ml-2 shrink-0" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 p-0" align="end">
+              <Command filter={(value, search) => {
+                const lang = LANGUAGES.find((l) => l.name === value)
+                if (!lang) return 0
+                const s = search.toLowerCase()
+                return (lang.name.toLowerCase().includes(s) || lang.native.toLowerCase().includes(s) || lang.code.toLowerCase().includes(s)) ? 1 : 0
+              }}>
+                <CommandInput placeholder="Search language…" />
+                <CommandList>
+                  <CommandEmpty>No language found.</CommandEmpty>
+                  <CommandGroup>
+                    {formLanguage && (
+                      <CommandItem value="__clear__" onSelect={() => handleLanguageChange(null)}>
+                        <X className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-muted-foreground text-xs">Clear</span>
+                      </CommandItem>
                     )}
-                    <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground ml-2 shrink-0" />
-                  </button>
-                </PopoverTrigger>
-                <PopoverContent className="w-64 p-0" align="end">
-                  <Command filter={(value, search) => {
-                    const lang = LANGUAGES.find((l) => l.name === value)
-                    if (!lang) return 0
-                    const s = search.toLowerCase()
-                    return (lang.name.toLowerCase().includes(s) || lang.native.toLowerCase().includes(s) || lang.code.toLowerCase().includes(s)) ? 1 : 0
-                  }}>
-                    <CommandInput placeholder="Search language..." />
-                    <CommandList>
-                      <CommandEmpty>No language found.</CommandEmpty>
-                      <CommandGroup>
-                        {formLanguage && (
-                          <CommandItem value="__clear__" onSelect={() => handleLanguageChange(null)}>
-                            <X className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-muted-foreground">Clear</span>
-                          </CommandItem>
-                        )}
-                        {LANGUAGES.map((lang) => (
-                          <CommandItem key={lang.code} value={lang.name} onSelect={() => handleLanguageChange(lang.name)}>
-                            <span className="mr-2">{lang.flag}</span>
-                            <span>{lang.name}</span>
-                            <span className="ml-auto text-label text-muted-foreground">{lang.native}</span>
-                            {formLanguage === lang.name && <Check className="ml-1 h-3.5 w-3.5 text-primary" />}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
-            </Row>
-          </CardContent>
-        </Card>
-      </div>
+                    {LANGUAGES.map((lang) => (
+                      <CommandItem key={lang.code} value={lang.name} onSelect={() => handleLanguageChange(lang.name)} className="text-xs">
+                        <span className="mr-2">{lang.flag}</span>
+                        <span>{lang.name}</span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">{lang.native}</span>
+                        {formLanguage === lang.name && <Check className="ml-1 h-3 w-3 text-primary" />}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        </SettingsRow>
+      </SettingsCard>
 
       {/* ── Usage ── */}
-      <div>
-        <h3 className="text-body font-medium text-foreground/80 mb-3">Usage</h3>
-        <Card>
-          <CardContent className="p-0">
-            <Row label={
-              <span className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                Agents
-              </span>
-            }>
-              <span className="text-body font-mono font-semibold text-foreground tabular-nums">
-                <AnimatedNumber value={agentCount} />
-              </span>
-            </Row>
-            <Row label={
-              <span className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                Crews
-              </span>
-            }>
-              <span className="text-body font-mono font-semibold text-foreground tabular-nums">
-                <AnimatedNumber value={crewCount} />
-              </span>
-            </Row>
-            <Row label={
-              <span className="flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-                Members
-              </span>
-            } border={false}>
-              <span className="text-body font-mono font-semibold text-foreground tabular-nums">
-                <AnimatedNumber value={memberCount} />
-              </span>
-            </Row>
-          </CardContent>
-        </Card>
-      </div>
+      <SettingsCard title="Usage" description="Resource counts for this workspace">
+        <SettingsRow
+          label={
+            <span className="inline-flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
+              Agents
+            </span>
+          }
+        >
+          <span className="text-xs font-mono font-semibold text-foreground tabular-nums">
+            <AnimatedNumber value={agentCount} />
+          </span>
+        </SettingsRow>
+        <SettingsRow
+          label={
+            <span className="inline-flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              Crews
+            </span>
+          }
+        >
+          <span className="text-xs font-mono font-semibold text-foreground tabular-nums">
+            <AnimatedNumber value={crewCount} />
+          </span>
+        </SettingsRow>
+        <SettingsRow
+          label={
+            <span className="inline-flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-violet-400" />
+              Members
+            </span> as unknown as string
+          }
+          border={false}
+        >
+          <span className="text-xs font-mono font-semibold text-foreground tabular-nums">
+            <AnimatedNumber value={memberCount} />
+          </span>
+        </SettingsRow>
+      </SettingsCard>
 
       {/* ── Danger Zone ── */}
       {role === "OWNER" && (
-        <div>
-          <h3 className="text-body font-medium text-foreground/80 mb-3">Danger Zone</h3>
-          <Card className="border-destructive/30">
-            <CardContent className="p-0">
-              {deleteError && (
-                <div className="px-5 py-2 border-b border-destructive/20">
-                  <span className="text-label text-destructive">{deleteError}</span>
-                </div>
-              )}
-              <Row label="Delete workspace" description="Permanently delete all crews, agents, and data" border={false}>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="destructive" size="sm">
-                      Delete Workspace
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete Workspace</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will permanently delete all crews, agents, credentials, and data. This cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={handleDelete}
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                        disabled={isDeleting}
-                      >
-                        {isDeleting && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
-                        {isDeleting ? "Deleting..." : "Delete Workspace"}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </Row>
-            </CardContent>
-          </Card>
-        </div>
+        <SettingsDangerCard
+          title="Danger zone"
+          description="Irreversible actions that affect the whole workspace"
+        >
+          {deleteError && (
+            <div className="px-4 py-2 border-b border-destructive/20">
+              <span className="text-[11px] text-destructive">{deleteError}</span>
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+            <div className="min-w-0 shrink-0">
+              <div className="text-xs text-foreground">Delete workspace</div>
+              <div className="text-[11px] text-muted-foreground/80 mt-0.5">
+                Permanently delete all crews, agents, and data
+              </div>
+            </div>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="sm" className="h-7 px-2.5 text-xs">
+                  Delete workspace
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="text-sm">Delete workspace</AlertDialogTitle>
+                  <AlertDialogDescription className="text-xs">
+                    This will permanently delete all crews, agents, credentials, and data. This cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="h-7 text-xs">Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDelete}
+                    className="h-7 text-xs bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    disabled={isDeleting}
+                  >
+                    {isDeleting && <Loader2 className="h-3 w-3 animate-spin mr-1.5" />}
+                    {isDeleting ? "Deleting…" : "Delete workspace"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+        </SettingsDangerCard>
       )}
     </div>
   )
