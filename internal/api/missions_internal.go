@@ -117,13 +117,8 @@ func (h *InternalMissionHandler) Create(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("crew:"+req.CrewID, ws.ServerMessage{
-			Type:    "mission.created",
-			Channel: "crew:" + req.CrewID,
-			Payload: map[string]string{"id": id, "title": req.Title},
-		})
-	}
+	broadcastChannelEvent(h.hub, "crew", req.CrewID, "mission.created",
+		map[string]string{"id": id, "title": req.Title})
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
 		"id":       id,

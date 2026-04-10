@@ -14,17 +14,23 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
-// broadcastWorkspaceEvent sends a workspace-scoped WebSocket event. No-op if hub is nil.
-func broadcastWorkspaceEvent(hub *ws.Hub, wsID, eventType string, payload any) {
+// broadcastChannelEvent sends a WebSocket event on the "prefix:id" channel
+// (e.g. "workspace:abc", "crew:xyz", "mission:m_1", "session:c_1"). No-op if hub is nil.
+func broadcastChannelEvent(hub *ws.Hub, prefix, id, eventType string, payload any) {
 	if hub == nil {
 		return
 	}
-	channel := "workspace:" + wsID
+	channel := prefix + ":" + id
 	hub.Broadcast(channel, ws.ServerMessage{
 		Type:    eventType,
 		Channel: channel,
 		Payload: payload,
 	})
+}
+
+// broadcastWorkspaceEvent sends a workspace-scoped WebSocket event. No-op if hub is nil.
+func broadcastWorkspaceEvent(hub *ws.Hub, wsID, eventType string, payload any) {
+	broadcastChannelEvent(hub, "workspace", wsID, eventType, payload)
 }
 
 // parsePagination reads "limit" and "offset" query params, clamping limit to

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // blockedTask holds a BLOCKED task's ID and its parsed dependency list.
@@ -111,19 +109,10 @@ func (h *MissionHandler) unblockDependentTasks(r *http.Request, missionID, compl
 			h.logger.Error("unblock task failed", "task_id", bt.id, "error", err)
 			continue
 		}
-		if h.hub != nil {
-			h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
-				Type:    "task.status",
-				Channel: "mission:" + missionID,
-				Payload: map[string]string{"id": bt.id, "status": "PENDING"},
-			})
-			wsChannel := "workspace:" + wsID
-			h.hub.Broadcast(wsChannel, ws.ServerMessage{
-				Type:    "task.updated",
-				Channel: wsChannel,
-				Payload: map[string]string{"id": bt.id, "mission_id": missionID, "status": "PENDING"},
-			})
-		}
+		broadcastChannelEvent(h.hub, "mission", missionID, "task.status",
+			map[string]string{"id": bt.id, "status": "PENDING"})
+		broadcastWorkspaceEvent(h.hub, wsID, "task.updated",
+			map[string]string{"id": bt.id, "mission_id": missionID, "status": "PENDING"})
 	}
 }
 

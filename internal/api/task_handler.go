@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // CreateTask handles POST /api/v1/crews/{crewId}/missions/{missionId}/tasks
@@ -138,19 +136,10 @@ func (h *MissionHandler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:       now,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
-			Type:    "task.created",
-			Channel: "mission:" + missionID,
-			Payload: map[string]string{"id": id, "title": req.Title, "status": status},
-		})
-		wsChannel := "workspace:" + wsID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "task.updated",
-			Channel: wsChannel,
-			Payload: map[string]string{"id": id, "mission_id": missionID, "status": status},
-		})
-	}
+	broadcastChannelEvent(h.hub, "mission", missionID, "task.created",
+		map[string]string{"id": id, "title": req.Title, "status": status})
+	broadcastWorkspaceEvent(h.hub, wsID, "task.updated",
+		map[string]string{"id": id, "mission_id": missionID, "status": status})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -441,19 +430,11 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil && req.Status != nil {
-		h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
-			Type:    "task.status",
-			Channel: "mission:" + missionID,
-			Payload: map[string]string{"id": taskID, "status": *req.Status},
-		})
-		// Broadcast to workspace for dashboard visibility
-		wsChannel := "workspace:" + wsID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "task.updated",
-			Channel: wsChannel,
-			Payload: map[string]string{"id": taskID, "mission_id": missionID, "status": *req.Status},
-		})
+	if req.Status != nil {
+		broadcastChannelEvent(h.hub, "mission", missionID, "task.status",
+			map[string]string{"id": taskID, "status": *req.Status})
+		broadcastWorkspaceEvent(h.hub, wsID, "task.updated",
+			map[string]string{"id": taskID, "mission_id": missionID, "status": *req.Status})
 	}
 
 	writeJSON(w, http.StatusOK, t)

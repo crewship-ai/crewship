@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // missionSelectColumns is the shared SELECT clause for fetching missions with agent info.
@@ -136,13 +134,8 @@ func (h *MissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:        now,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("crew:"+crewID, ws.ServerMessage{
-			Type:    "mission.created",
-			Channel: "crew:" + crewID,
-			Payload: map[string]string{"id": id, "title": req.Title},
-		})
-	}
+	broadcastChannelEvent(h.hub, "crew", crewID, "mission.created",
+		map[string]string{"id": id, "title": req.Title})
 	broadcastWorkspaceEvent(h.hub, wsID, "mission.updated",
 		map[string]string{"id": id, "crew_id": crewID, "status": "PLANNING"})
 
@@ -441,19 +434,12 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil && req.Status != nil {
-		h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
-			Type:    "mission.status",
-			Channel: "mission:" + missionID,
-			Payload: map[string]string{"id": missionID, "status": *req.Status},
-		})
+	if req.Status != nil {
+		broadcastChannelEvent(h.hub, "mission", missionID, "mission.status",
+			map[string]string{"id": missionID, "status": *req.Status})
 		// Broadcast to workspace for dashboard visibility
-		wsChannel := "workspace:" + m.WorkspaceID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "mission.updated",
-			Channel: wsChannel,
-			Payload: map[string]string{"id": missionID, "crew_id": crewID, "status": *req.Status},
-		})
+		broadcastWorkspaceEvent(h.hub, m.WorkspaceID, "mission.updated",
+			map[string]string{"id": missionID, "crew_id": crewID, "status": *req.Status})
 	}
 
 	writeJSON(w, http.StatusOK, m)
@@ -584,13 +570,8 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
-			Type:    "mission.updated",
-			Channel: "mission:" + missionID,
-			Payload: map[string]interface{}{"id": missionID, "status": "IN_PROGRESS"},
-		})
-	}
+	broadcastChannelEvent(h.hub, "mission", missionID, "mission.updated",
+		map[string]interface{}{"id": missionID, "status": "IN_PROGRESS"})
 	broadcastWorkspaceEvent(h.hub, wsID, "mission.updated",
 		map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "IN_PROGRESS"})
 

@@ -143,17 +143,12 @@ func (h *QueryHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Broadcast event
-	if h.hub != nil {
-		h.hub.Broadcast("session:"+body.ChatID, ws.ServerMessage{
-			Type:    "peer_query_running",
-			Channel: "session:" + body.ChatID,
-			Payload: map[string]string{
-				"id":     convID,
-				"from":   body.FromSlug,
-				"target": body.TargetSlug,
-			},
+	broadcastChannelEvent(h.hub, "session", body.ChatID, "peer_query_running",
+		map[string]string{
+			"id":     convID,
+			"from":   body.FromSlug,
+			"target": body.TargetSlug,
 		})
-	}
 
 	h.logger.Info("peer query started",
 		"query_id", convID,
@@ -293,38 +288,27 @@ func (h *QueryHandler) finishQuery(
 	}
 
 	// Broadcast completion
-	if h.hub != nil {
-		eventType := "peer_query_completed"
-		payload := map[string]string{
-			"id":     convID,
-			"from":   fromSlug,
-			"target": targetSlug,
-		}
-		if errMsg != "" {
-			eventType = "peer_query_failed"
-			payload["error"] = errMsg
-		} else {
-			payload["response"] = result
-		}
-		h.hub.Broadcast("session:"+chatID, ws.ServerMessage{
-			Type:    eventType,
-			Channel: "session:" + chatID,
-			Payload: payload,
-		})
-		// Broadcast to workspace for global visibility
-		if workspaceID != "" {
-			wsChannel := "workspace:" + workspaceID
-			h.hub.Broadcast(wsChannel, ws.ServerMessage{
-				Type:    "peer_conversation.updated",
-				Channel: wsChannel,
-				Payload: map[string]string{
-					"id":     convID,
-					"from":   fromSlug,
-					"target": targetSlug,
-					"status": status,
-				},
+	eventType := "peer_query_completed"
+	payload := map[string]string{
+		"id":     convID,
+		"from":   fromSlug,
+		"target": targetSlug,
+	}
+	if errMsg != "" {
+		eventType = "peer_query_failed"
+		payload["error"] = errMsg
+	} else {
+		payload["response"] = result
+	}
+	broadcastChannelEvent(h.hub, "session", chatID, eventType, payload)
+	if workspaceID != "" {
+		broadcastWorkspaceEvent(h.hub, workspaceID, "peer_conversation.updated",
+			map[string]string{
+				"id":     convID,
+				"from":   fromSlug,
+				"target": targetSlug,
+				"status": status,
 			})
-		}
 	}
 
 	h.logger.Info("peer query finished", "query_id", convID, "status", status, "duration_ms", durationMs)
