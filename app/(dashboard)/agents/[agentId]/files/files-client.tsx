@@ -242,6 +242,14 @@ export function FilesPageClient() {
   useRealtimeChannel(crewId ? `crew:${crewId}` : null)
 
   useEffect(() => {
+    setActiveFileTab("home")
+    setContainerFiles([])
+    setContainerLoading(false)
+    setGitCommits([])
+    setGitLoading(false)
+  }, [agentId, workspaceId])
+
+  useEffect(() => {
     if (wsLoading) return
     if (!workspaceId) { setLoading(false); setError("No workspace selected"); return }
     fileAbortRef.current?.abort()

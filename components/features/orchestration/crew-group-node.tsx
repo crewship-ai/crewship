@@ -8,7 +8,10 @@ import { CREW_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 
 function resolveColor(color: string | null): string {
   if (!color) return CREW_COLOR_DEFAULT
-  return CREW_COLORS[color] || color
+  // Enforce palette-only: unknown IDs (including raw hex values) fall back
+  // to the default rather than being passed through, so the palette
+  // convention is never bypassed at the render site.
+  return CREW_COLORS[color] || CREW_COLOR_DEFAULT
 }
 
 export interface CrewGroupData {

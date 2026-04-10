@@ -23,6 +23,13 @@ export function StepCredential({
   }
   const providerLabel = providerLabels[llmProvider] || llmProvider
 
+  const providerPlaceholders: Record<string, string> = {
+    ANTHROPIC: "sk-ant-...",
+    OPENAI: "sk-...",
+    GOOGLE: "AIza...",
+  }
+  const placeholder = providerPlaceholders[llmProvider] || "Enter API key"
+
   return (
     <div className="space-y-4">
       <div className="space-y-1">
@@ -48,7 +55,7 @@ export function StepCredential({
           type="password"
           value={credentialValue}
           onChange={(e) => onCredentialValueChange(e.target.value)}
-          placeholder={`sk-ant-...`}
+          placeholder={placeholder}
         />
       </div>
     </div>

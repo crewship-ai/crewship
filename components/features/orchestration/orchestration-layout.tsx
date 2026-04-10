@@ -338,6 +338,18 @@ export function OrchestrationLayout({
     setSelectedProjectId(null)
   }, [])
 
+  // Mobile back button: close whichever detail view is currently visible so that
+  // showRightPanel ends up false and the overlay sheet actually dismisses.
+  const closeMobileDetail = useCallback(() => {
+    if (selectedIssue) {
+      handleIssueClose()
+    } else if (selectedProjectId) {
+      handleProjectClose()
+    } else {
+      handleDetailClose()
+    }
+  }, [selectedIssue, selectedProjectId, handleIssueClose, handleProjectClose, handleDetailClose])
+
   // Sync breadcrumbs to global store (rendered in app-toolbar)
   const setBreadcrumbs = useAppStore((s) => s.setBreadcrumbs)
   useEffect(() => {
@@ -550,6 +562,45 @@ export function OrchestrationLayout({
                 onActiveViewChange={(id, viewType) => {
                   setActiveViewId(id)
                   if (viewType) setIssueViewMode(viewType)
+
+                  // Clearing the selected view ("All Issues"): reset filters to
+                  // the same defaults used when the page initialises.
+                  if (id === null) {
+                    setSelectedProjectId(null)
+                    setFilterCrewId(null)
+                    setFilterAgentId(null)
+                    setIssueSearch("")
+                    return
+                  }
+
+                  // Look up the saved view and apply any filter fields that
+                  // map onto the state consumed by `filteredIssues`. The
+                  // `filters_json` payload schema is flexible; we apply what
+                  // is clearly mappable and ignore anything else.
+                  const view = savedViews.find((v) => v.id === id)
+                  if (!view) return
+                  try {
+                    const parsed: Record<string, unknown> = view.filters_json
+                      ? JSON.parse(view.filters_json)
+                      : {}
+                    const projectId = parsed.project_id ?? parsed.projectId
+                    setSelectedProjectId(
+                      typeof projectId === "string" ? projectId : null,
+                    )
+                    const crewId = parsed.crew_id ?? parsed.crewId
+                    setFilterCrewId(typeof crewId === "string" ? crewId : null)
+                    const agentId =
+                      parsed.assignee_id ?? parsed.assigneeId ?? parsed.agent_id
+                    setFilterAgentId(
+                      typeof agentId === "string" ? agentId : null,
+                    )
+                    const search = parsed.search ?? parsed.query
+                    setIssueSearch(typeof search === "string" ? search : "")
+                    // TODO: wire up status/label/priority filters and
+                    // sort_json once the issue list supports them.
+                  } catch {
+                    /* ignore malformed filters_json */
+                  }
                 }}
               />
               {/* Board or List view */}
@@ -626,7 +677,7 @@ export function OrchestrationLayout({
               >
                 <div className="flex items-center gap-2 px-3 py-2 border-b border-white/[0.1] shrink-0">
                   <button
-                    onClick={handleDetailClose}
+                    onClick={closeMobileDetail}
                     className="h-8 w-8 min-h-[44px] min-w-[44px] flex items-center justify-center text-muted-foreground hover:text-foreground"
                   >
                     <ChevronLeft className="h-4 w-4" />

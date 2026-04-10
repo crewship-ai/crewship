@@ -39,6 +39,7 @@ export function RightPanelContent({
   if (selectedIssue) {
     return (
       <IssueDetailInline
+        key={selectedIssue.id}
         issue={selectedIssue}
         comments={issueComments}
         labels={issueLabels}
@@ -52,6 +53,7 @@ export function RightPanelContent({
   if (selectedProject) {
     return (
       <ProjectDetailInline
+        key={selectedProject.id}
         project={selectedProject}
         workspaceId={workspaceId}
         onClose={onProjectClose}

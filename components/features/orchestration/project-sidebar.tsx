@@ -37,6 +37,17 @@ import type {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Parse a date-only string ("YYYY-MM-DD") into a local Date at midnight.
+ * `new Date("2026-04-10")` is interpreted as UTC and shifts the day back
+ * in negative-offset timezones; this parser stays in the local zone so
+ * the calendar UI displays the correct day.
+ */
+function parseDateOnly(value: string): Date {
+  const [year, month, day] = value.split("-").map(Number)
+  return new Date(year, month - 1, day)
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -275,7 +286,7 @@ export function ProjectSidebar({
               <PopoverContent className="w-auto p-0" align="end">
                 <Calendar
                   mode="single"
-                  selected={project.start_date ? new Date(project.start_date) : undefined}
+                  selected={project.start_date ? parseDateOnly(project.start_date) : undefined}
                   onSelect={(date) => {
                     if (date) {
                       const v = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
@@ -310,7 +321,7 @@ export function ProjectSidebar({
               <PopoverContent className="w-auto p-0" align="end">
                 <Calendar
                   mode="single"
-                  selected={project.target_date ? new Date(project.target_date) : undefined}
+                  selected={project.target_date ? parseDateOnly(project.target_date) : undefined}
                   onSelect={(date) => {
                     if (date) {
                       const v = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
@@ -441,7 +452,7 @@ export function ProjectSidebar({
                   {m.target_date && (
                     <span className="text-[10px] text-muted-foreground/50">
                       <Clock className="h-2.5 w-2.5 inline mr-0.5" />
-                      {new Date(m.target_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      {parseDateOnly(m.target_date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                     </span>
                   )}
                   <span className="text-[10px] text-muted-foreground/50 ml-auto">

@@ -340,7 +340,9 @@ function TemplateEditor({ workspaceId, onClose, onCreated }: TemplateEditorProps
   const [saving, setSaving] = useState(false)
 
   const addStep = () => {
-    const id = `step-${steps.length + 1}`
+    const nextNumber =
+      Math.max(0, ...steps.map((s) => Number(s.id.replace(/^step-/, "")) || 0)) + 1
+    const id = `step-${nextNumber}`
     const prev = steps[steps.length - 1]
     setSteps([...steps, { id, title: "", agent_role: "", depends_on: prev ? [prev.id] : [] }])
   }

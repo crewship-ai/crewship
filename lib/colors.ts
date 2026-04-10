@@ -88,6 +88,35 @@ export function resolveCrewColor(color: string | null | undefined): string {
   return (color && CREW_COLORS[color]) || CREW_COLOR_DEFAULT
 }
 
+/**
+ * Tailwind bg utility classes per crew palette ID.
+ * Keep these in sync with CREW_COLORS above — they are used wherever inline
+ * style backgrounds would otherwise be needed, so the Tailwind-only rule and
+ * the palette-ID convention are both enforced at the render site.
+ */
+export const CREW_BG_CLASSES: Record<string, string> = {
+  blue: "bg-blue-500",
+  emerald: "bg-emerald-500",
+  violet: "bg-violet-500",
+  amber: "bg-amber-500",
+  rose: "bg-rose-500",
+  cyan: "bg-cyan-500",
+  lime: "bg-lime-500",
+  fuchsia: "bg-fuchsia-500",
+}
+
+/** Default bg class used when a crew color is missing or not in the palette. */
+export const CREW_BG_DEFAULT = "bg-slate-500"
+
+/**
+ * Resolves a crew palette ID to a Tailwind bg class. Prefer this over
+ * `style={{ backgroundColor: resolveCrewColor(...) }}` so components stay
+ * Tailwind-only and raw hex values never leak to consumers.
+ */
+export function getCrewBgClass(color: string | null | undefined): string {
+  return (color && CREW_BG_CLASSES[color]) || CREW_BG_DEFAULT
+}
+
 // ── Edge color palette (graph connections) ──
 
 export const EDGE_COLOR_PALETTE = [

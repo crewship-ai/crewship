@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -35,6 +36,7 @@ func init() {
 }
 
 func runSeed(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
 	nuke, _ := cmd.Flags().GetBool("nuke")
 	skipIssues, _ := cmd.Flags().GetBool("skip-issues")
 	password, _ := cmd.Flags().GetString("password")
@@ -45,49 +47,74 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "  Generated admin password: %s\n", password)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// ── Phase 1: Bootstrap / Auth ──
-	client, userID, err := seedBootstrap(password)
+	client, userID, err := seedBootstrap(ctx, password)
 	if err != nil {
 		return err
 	}
 
 	// ── Phase 0: Nuke (after auth, before seed) ──
 	if nuke {
-		if err := seedNuke(client); err != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := seedNuke(ctx, client); err != nil {
 			return err
 		}
 	}
 
 	// ── Phase 2: Crews + Member links ──
-	crewIDs, err := seedCrews(client, userID)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	crewIDs, err := seedCrews(ctx, client, userID)
 	if err != nil {
 		return err
 	}
 
 	// ── Phase 3: Agents ──
-	agentIDs, err := seedAgents(client, crewIDs)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	agentIDs, err := seedAgents(ctx, client, crewIDs)
 	if err != nil {
 		return err
 	}
 
 	// ── Phase 4–5: Skills + Assignments ──
-	if err := seedSkills(client, agentIDs); err != nil {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := seedSkills(ctx, client, agentIDs); err != nil {
 		return err
 	}
 
 	// ── Phase 6–7: Credentials + Assignments ──
-	if err := seedCredentials(client, agentIDs); err != nil {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := seedCredentials(ctx, client, agentIDs); err != nil {
 		return err
 	}
 
 	// ── Phase 8–9: Integrations + Bindings ──
-	if err := seedIntegrations(client, crewIDs, agentIDs); err != nil {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := seedIntegrations(ctx, client, crewIDs, agentIDs); err != nil {
 		return err
 	}
 
 	// ── Phase 10: Issues ──
 	if !skipIssues {
-		if err := seedIssues(client, crewIDs, agentIDs); err != nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := seedIssues(ctx, client, crewIDs, agentIDs); err != nil {
 			return err
 		}
 	}
@@ -102,7 +129,10 @@ func runSeed(cmd *cobra.Command, args []string) error {
 // Phase 1: Bootstrap
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedBootstrap(password string) (*cli.Client, string, error) {
+func seedBootstrap(ctx context.Context, password string) (*cli.Client, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 	fmt.Fprintln(os.Stderr, "Bootstrapping...")
 	server := cli.ResolveServer(flagServer, cliCfg)
 

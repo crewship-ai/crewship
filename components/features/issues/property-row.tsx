@@ -18,6 +18,8 @@ export function SectionHeader({
   return (
     <div className="group/sh flex items-center px-2 py-1.5">
       <button
+        type="button"
+        aria-expanded={open}
         onClick={onToggle}
         className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/80 hover:text-muted-foreground transition-colors"
       >
@@ -25,7 +27,13 @@ export function SectionHeader({
         {title}
       </button>
       <div className="flex-1" />
-      <div className="opacity-0 group-hover/sh:opacity-100 transition-opacity">
+      {/*
+        Hide the action slot with `invisible` instead of `opacity-0` — the
+        latter leaves child buttons in the tab order, so keyboard users can
+        focus an invisible control. `group-focus-within` keeps the action
+        reachable once focus lands on it.
+      */}
+      <div className="invisible opacity-0 transition-opacity group-hover/sh:visible group-hover/sh:opacity-100 group-focus-within/sh:visible group-focus-within/sh:opacity-100">
         {action}
       </div>
     </div>

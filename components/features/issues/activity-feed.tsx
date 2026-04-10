@@ -1,28 +1,37 @@
 "use client"
 
+import {
+  Star,
+  CircleX,
+  PieChart,
+  UserRoundCheck,
+  MessageSquareWarning,
+  ChartColumn,
+  Circle,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 import { timeAgo } from "@/lib/time"
 import type { IssueActivity } from "@/lib/types/mission"
 
-/** Renders an inline SVG icon representing the given activity action type. */
+/** Renders a lucide icon representing the given activity action type. */
 export function ActivityIcon({ action }: { action: string }) {
   const size = "h-3.5 w-3.5 shrink-0 mt-0.5"
   switch (action) {
     case "task_completed":
     case "review_approved":
-      return <svg className={cn(size, "text-green-500")} viewBox="0 0 16 16"><polygon points="8,2 10,6 14,6 11,9 12,14 8,11 4,14 5,9 2,6 6,6" fill="currentColor"/></svg>
+      return <Star className={cn(size, "text-green-500")} />
     case "task_failed":
-      return <svg className={cn(size, "text-red-500")} viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="currentColor"/><path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>
+      return <CircleX className={cn(size, "text-red-500")} />
     case "status_changed":
-      return <svg className={cn(size, "text-amber-500")} viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" fill="none"/><path d="M8 2.5A5.5 5.5 0 0 0 8 13.5V2.5z" fill="currentColor"/></svg>
+      return <PieChart className={cn(size, "text-amber-500")} />
     case "assignee_changed":
-      return <svg className={cn(size, "text-green-500")} viewBox="0 0 16 16"><polygon points="8,2 10,6 14,6 11,9 12,14 8,11 4,14 5,9 2,6 6,6" fill="currentColor"/></svg>
+      return <UserRoundCheck className={cn(size, "text-green-500")} />
     case "review_changes_requested":
-      return <svg className={cn(size, "text-red-500")} viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="currentColor"/><path d="M6 6h4M6 10h4" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>
+      return <MessageSquareWarning className={cn(size, "text-red-500")} />
     case "priority_changed":
-      return <svg className={cn(size, "text-blue-400")} viewBox="0 0 16 16"><rect x="1.5" y="8" width="3" height="6" rx="1" fill="currentColor"/><rect x="6.5" y="5" width="3" height="9" rx="1" fill="currentColor"/><rect x="11.5" y="2" width="3" height="12" rx="1" fill="currentColor"/></svg>
+      return <ChartColumn className={cn(size, "text-blue-400")} />
     default:
-      return <div className={cn("w-3.5 h-3.5 rounded-full bg-muted-foreground/20 shrink-0 mt-0.5")} />
+      return <Circle className={cn(size, "text-muted-foreground/40")} />
   }
 }
 

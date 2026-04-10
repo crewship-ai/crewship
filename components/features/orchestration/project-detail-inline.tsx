@@ -58,7 +58,20 @@ export function ProjectsListView({ projects, onRefresh: _onRefresh, workspaceId:
         </thead>
         <tbody>
           {sorted.map((p) => (
-            <tr key={p.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors cursor-pointer" onClick={() => onProjectClick?.(p.id)}>
+            <tr
+              key={p.id}
+              className="border-b border-white/[0.04] hover:bg-white/[0.02] focus:bg-white/[0.04] focus:outline-none transition-colors cursor-pointer"
+              tabIndex={0}
+              role="button"
+              aria-label={`Open project ${p.name}`}
+              onClick={() => onProjectClick?.(p.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  onProjectClick?.(p.id)
+                }
+              }}
+            >
               {/* Name */}
               <td className="py-2 px-3">
                 <div className="flex items-center gap-2">

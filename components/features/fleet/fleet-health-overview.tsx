@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { Bot } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { getCrewDotColor } from "@/lib/crew-icon"
+import { getCrewBgClass } from "@/lib/colors"
 
 interface CrewData {
   id: string
@@ -87,15 +87,24 @@ export function HealthOverview({ crews, agents }: HealthOverviewProps) {
 
             return (
               <div key={crew.id} className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-white/[0.04]">
-                <div
-                  className="h-3 w-3 rounded-sm shrink-0"
-                  style={{ backgroundColor: getCrewDotColor(crew.color) }}
-                />
+                <div className={cn("h-3 w-3 rounded-sm shrink-0", getCrewBgClass(crew.color))} />
                 <span className="text-[12px] font-medium flex-1">{crew.name}</span>
                 <span className="text-[10px] text-muted-foreground tabular-nums">{total} agents</span>
                 {running > 0 && <span className="text-[10px] text-emerald-400 tabular-nums">{running} up</span>}
                 {error > 0 && <span className="text-[10px] text-red-400 tabular-nums">{error} err</span>}
-                <div className="w-12 h-1 bg-white/[0.08] overflow-hidden rounded-full">
+                <div
+                  role="progressbar"
+                  aria-valuenow={healthPct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${crew.name} health ${healthPct}%`}
+                  className="w-12 h-1 bg-white/[0.08] overflow-hidden rounded-full"
+                >
+                  {/*
+                    Dynamic progress width — no Tailwind utility class can
+                    express a runtime percentage, so this inline style is
+                    unavoidable. The color is Tailwind (bg-red-400/bg-emerald-400).
+                  */}
                   <div
                     className={cn("h-full rounded-full transition-all", error > 0 ? "bg-red-400" : "bg-emerald-400")}
                     style={{ width: `${healthPct}%` }}

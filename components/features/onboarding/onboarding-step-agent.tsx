@@ -80,6 +80,7 @@ export function StepAgent({
               <button
                 key={key}
                 type="button"
+                aria-pressed={isActive}
                 onClick={() => handleAdapterChange(key)}
                 className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
                   isActive ? "border-primary bg-primary/5" : "border-border hover:bg-muted"

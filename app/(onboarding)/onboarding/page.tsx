@@ -161,7 +161,8 @@ export default function OnboardingPage() {
 
       const data = await res.json()
       router.push(`/agents/${data.agent_id}/chat`)
-    } catch {
+    } catch (err) {
+      console.error("Onboarding setup failed:", err)
       setError("Network error. Please try again.")
       setSubmitting(false)
     }

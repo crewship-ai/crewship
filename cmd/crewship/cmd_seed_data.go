@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -15,15 +17,27 @@ import (
 // Phase 0: Nuke
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedNuke(client *cli.Client) error {
+func seedNuke(ctx context.Context, client *cli.Client) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	fmt.Fprintln(os.Stderr, "Nuking workspace contents...")
+
+	var failures []string
 
 	// Delete issues — fetch all, cancel, then delete
 	resp, err := client.Get("/api/v1/issues?limit=500")
-	if err == nil {
+	if err != nil {
+		failures = append(failures, fmt.Sprintf("list issues: %v", err))
+	} else {
 		var issues []issueItem
-		if cli.ReadJSON(resp, &issues) == nil {
+		if err := cli.ReadJSON(resp, &issues); err != nil {
+			failures = append(failures, fmt.Sprintf("decode issues: %v", err))
+		} else {
 			for _, iss := range issues {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				if iss.Identifier == nil {
 					continue
 				}
@@ -32,10 +46,12 @@ func seedNuke(client *cli.Client) error {
 					for _, status := range seeddata.StatusPath("CANCELLED") {
 						r, err := client.Patch(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier), map[string]string{"status": status})
 						if err != nil {
+							failures = append(failures, fmt.Sprintf("transition %s→%s: %v", *iss.Identifier, status, err))
 							fmt.Fprintf(os.Stderr, "  ! nuke transition %s→%s: %v\n", *iss.Identifier, status, err)
 							break
 						}
-						if r.StatusCode >= 400 {
+						if r.StatusCode >= 300 {
+							failures = append(failures, fmt.Sprintf("transition %s→%s: HTTP %d", *iss.Identifier, status, r.StatusCode))
 							fmt.Fprintf(os.Stderr, "  ! nuke transition %s→%s: HTTP %d\n", *iss.Identifier, status, r.StatusCode)
 							r.Body.Close()
 							break
@@ -43,83 +59,146 @@ func seedNuke(client *cli.Client) error {
 						r.Body.Close()
 					}
 				}
-				r, _ := client.Delete(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier))
-				if r != nil {
-					r.Body.Close()
+				r, err := client.Delete(fmt.Sprintf("/api/v1/crews/%s/issues/%s", iss.CrewID, *iss.Identifier))
+				if err != nil {
+					failures = append(failures, fmt.Sprintf("delete issue %s: %v", *iss.Identifier, err))
+					fmt.Fprintf(os.Stderr, "  ! delete issue %s: %v\n", *iss.Identifier, err)
+					continue
 				}
+				if r.StatusCode >= 300 {
+					failures = append(failures, fmt.Sprintf("delete issue %s: HTTP %d", *iss.Identifier, r.StatusCode))
+					fmt.Fprintf(os.Stderr, "  ! delete issue %s: HTTP %d\n", *iss.Identifier, r.StatusCode)
+				}
+				r.Body.Close()
 			}
 			fmt.Fprintf(os.Stderr, "  Deleted %d issues\n", len(issues))
 		}
 	}
 
 	// Delete projects
-	nukeList(client, "/api/v1/projects", "/api/v1/projects/")
+	if err := nukeList(ctx, client, "/api/v1/projects", "/api/v1/projects/"); err != nil {
+		failures = append(failures, fmt.Sprintf("projects: %v", err))
+	}
 
 	// Delete labels
-	nukeList(client, "/api/v1/labels", "/api/v1/labels/")
+	if err := nukeList(ctx, client, "/api/v1/labels", "/api/v1/labels/"); err != nil {
+		failures = append(failures, fmt.Sprintf("labels: %v", err))
+	}
 
 	// Delete agents (this also removes bindings, credential assignments, skill assignments)
-	nukeList(client, "/api/v1/agents", "/api/v1/agents/")
+	if err := nukeList(ctx, client, "/api/v1/agents", "/api/v1/agents/"); err != nil {
+		failures = append(failures, fmt.Sprintf("agents: %v", err))
+	}
 
 	// Delete credentials
-	nukeList(client, "/api/v1/credentials", "/api/v1/credentials/")
+	if err := nukeList(ctx, client, "/api/v1/credentials", "/api/v1/credentials/"); err != nil {
+		failures = append(failures, fmt.Sprintf("credentials: %v", err))
+	}
 
 	// Delete integrations
-	nukeCrewIntegrations(client)
+	if err := nukeCrewIntegrations(ctx, client); err != nil {
+		failures = append(failures, fmt.Sprintf("integrations: %v", err))
+	}
 
 	// Delete crews
-	nukeList(client, "/api/v1/crews", "/api/v1/crews/")
+	if err := nukeList(ctx, client, "/api/v1/crews", "/api/v1/crews/"); err != nil {
+		failures = append(failures, fmt.Sprintf("crews: %v", err))
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("workspace cleanup had %d failures: %s", len(failures), strings.Join(failures, "; "))
+	}
 
 	cli.PrintSuccess("Workspace contents cleaned")
 	return nil
 }
 
-func nukeList(client *cli.Client, listPath, deletePrefix string) {
+func nukeList(ctx context.Context, client *cli.Client, listPath, deletePrefix string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	resp, err := client.Get(listPath)
 	if err != nil {
-		return
+		return fmt.Errorf("GET %s: %w", listPath, err)
 	}
 	var items []struct {
 		ID string `json:"id"`
 	}
-	if cli.ReadJSON(resp, &items) == nil {
-		for _, item := range items {
-			r, _ := client.Delete(deletePrefix + item.ID)
-			if r != nil {
-				r.Body.Close()
-			}
-		}
+	if err := cli.ReadJSON(resp, &items); err != nil {
+		return fmt.Errorf("decode %s: %w", listPath, err)
 	}
+	var failures []string
+	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		r, err := client.Delete(deletePrefix + item.ID)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("DELETE %s%s: %v", deletePrefix, item.ID, err))
+			continue
+		}
+		if r.StatusCode >= 300 {
+			failures = append(failures, fmt.Sprintf("DELETE %s%s: HTTP %d", deletePrefix, item.ID, r.StatusCode))
+		}
+		r.Body.Close()
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%d delete failures: %s", len(failures), strings.Join(failures, "; "))
+	}
+	return nil
 }
 
-func nukeCrewIntegrations(client *cli.Client) {
+func nukeCrewIntegrations(ctx context.Context, client *cli.Client) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	resp, err := client.Get("/api/v1/integrations/crews")
 	if err != nil {
-		return
+		return fmt.Errorf("GET /api/v1/integrations/crews: %w", err)
 	}
 	var items []struct {
 		ID     string `json:"id"`
 		CrewID string `json:"crew_id"`
 	}
-	if cli.ReadJSON(resp, &items) == nil {
-		for _, item := range items {
-			r, _ := client.Delete(fmt.Sprintf("/api/v1/crews/%s/integrations/%s", item.CrewID, item.ID))
-			if r != nil {
-				r.Body.Close()
-			}
-		}
+	if err := cli.ReadJSON(resp, &items); err != nil {
+		return fmt.Errorf("decode integrations: %w", err)
 	}
+	var failures []string
+	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		r, err := client.Delete(fmt.Sprintf("/api/v1/crews/%s/integrations/%s", item.CrewID, item.ID))
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("DELETE crew %s integration %s: %v", item.CrewID, item.ID, err))
+			continue
+		}
+		if r.StatusCode >= 300 {
+			failures = append(failures, fmt.Sprintf("DELETE crew %s integration %s: HTTP %d", item.CrewID, item.ID, r.StatusCode))
+		}
+		r.Body.Close()
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%d delete failures: %s", len(failures), strings.Join(failures, "; "))
+	}
+	return nil
 }
 
 // ════════════════════════════════════════════════════════════════════════════
 // Phase 2: Crews
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedCrews(client *cli.Client, userID string) (map[string]string, error) {
+func seedCrews(ctx context.Context, client *cli.Client, userID string) (map[string]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	fmt.Fprintln(os.Stderr, "Creating crews...")
 	ids := map[string]string{} // slug → id
 
 	for _, c := range seeddata.Crews {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		body := map[string]string{
 			"name":  c.Name,
 			"slug":  c.Slug,
@@ -154,11 +233,17 @@ func seedCrews(client *cli.Client, userID string) (map[string]string, error) {
 // Phase 3: Agents
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedAgents(client *cli.Client, crewIDs map[string]string) (map[string]string, error) {
+func seedAgents(ctx context.Context, client *cli.Client, crewIDs map[string]string) (map[string]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	fmt.Fprintln(os.Stderr, "Creating agents...")
 	ids := map[string]string{} // slug → id
 
 	for _, a := range seeddata.Agents {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		crewID, ok := crewIDs[a.CrewSlug]
 		if !ok {
 			fmt.Fprintf(os.Stderr, "  ! Crew %q not found, skipping agent %s\n", a.CrewSlug, a.Name)
@@ -193,7 +278,10 @@ func seedAgents(client *cli.Client, crewIDs map[string]string) (map[string]strin
 // Phase 4–5: Skills + Assignments
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedSkills(client *cli.Client, agentIDs map[string]string) error {
+func seedSkills(ctx context.Context, client *cli.Client, agentIDs map[string]string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	fmt.Fprintln(os.Stderr, "Seeding skills...")
 
 	// Fetch existing skills (bundled ones are auto-seeded on server startup)
@@ -213,6 +301,9 @@ func seedSkills(client *cli.Client, agentIDs map[string]string) error {
 
 	// Create missing skills via import endpoint (SKILL.md format)
 	for _, s := range seeddata.Skills {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if _, exists := skillIDs[s.Slug]; exists {
 			fmt.Fprintf(os.Stderr, "  = Skill exists: %s\n", s.Name)
 			continue
@@ -244,6 +335,9 @@ func seedSkills(client *cli.Client, agentIDs map[string]string) error {
 	// Assign skills to agents
 	fmt.Fprintln(os.Stderr, "Assigning skills...")
 	for agentSlug, skillSlugs := range seeddata.SkillAssignments {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		agentID, ok := agentIDs[agentSlug]
 		if !ok {
 			continue
@@ -276,7 +370,10 @@ func seedSkills(client *cli.Client, agentIDs map[string]string) error {
 // Phase 6–7: Credentials + Assignments
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedCredentials(client *cli.Client, agentIDs map[string]string) error {
+func seedCredentials(ctx context.Context, client *cli.Client, agentIDs map[string]string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	fmt.Fprintln(os.Stderr, "Seeding credentials...")
 
 	anthro := seeddata.ResolveAnthropicCredential()
@@ -368,12 +465,18 @@ func seedOneCredential(client *cli.Client, cred seeddata.CredentialDef) (string,
 // Phase 8–9: Integrations + Bindings
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedIntegrations(client *cli.Client, crewIDs, agentIDs map[string]string) error {
+func seedIntegrations(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[string]string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	fmt.Fprintln(os.Stderr, "Seeding integrations...")
 
 	integrationIDs := map[string]string{} // integration name → id
 
 	for _, integ := range seeddata.Integrations {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		crewID, ok := crewIDs[integ.CrewSlug]
 		if !ok {
 			fmt.Fprintf(os.Stderr, "  ! Crew %q not found for integration %s\n", integ.CrewSlug, integ.Name)
@@ -430,6 +533,9 @@ func seedIntegrations(client *cli.Client, crewIDs, agentIDs map[string]string) e
 	oauthCreds := seeddata.ResolveOAuthCredentials()
 	oauthCredIDs := map[string]string{} // cred name → id
 	for _, oc := range oauthCreds {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		body := map[string]interface{}{
 			"name":                oc.CredName,
 			"type":                "OAUTH2",
@@ -471,6 +577,9 @@ func seedIntegrations(client *cli.Client, crewIDs, agentIDs map[string]string) e
 	// Bind agents to integrations
 	fmt.Fprintln(os.Stderr, "Binding agents to integrations...")
 	for _, agentSlug := range seeddata.AgentBindingSlugs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		agentID, ok := agentIDs[agentSlug]
 		if !ok {
 			continue
@@ -525,10 +634,16 @@ func resolveCrewIntegration(client *cli.Client, crewID, name string) (string, er
 // Phase 10: Issues
 // ════════════════════════════════════════════════════════════════════════════
 
-func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
+func seedIssues(ctx context.Context, client *cli.Client, crewIDs, agentIDs map[string]string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Create labels
 	fmt.Fprintln(os.Stderr, "Creating labels...")
 	for _, l := range seeddata.Labels {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		resp, err := client.Post("/api/v1/labels", l)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  ! Label %s: %v\n", l.Name, err)
@@ -544,6 +659,9 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 	fmt.Fprintln(os.Stderr, "Creating projects...")
 	projectIDs := map[string]string{} // name → id
 	for _, p := range seeddata.Projects {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		resp, err := client.Post("/api/v1/projects", map[string]interface{}{
 			"name":     p.Name,
 			"color":    p.Color,
@@ -552,20 +670,25 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 			"priority": p.Priority,
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "  ! Project %s: %v\n", p.Name, err)
-			continue
+			return fmt.Errorf("project %s: %w", p.Name, err)
 		}
-		if resp.StatusCode >= 400 {
+		// 409 Conflict → resolve existing.
+		if resp.StatusCode == http.StatusConflict {
 			resp.Body.Close()
-			// Resolve existing project by name (same pattern as credentials)
 			existingID, err := resolveByName(client, "/api/v1/projects", p.Name)
 			if err == nil && existingID != "" {
 				projectIDs[p.Name] = existingID
 				fmt.Fprintf(os.Stderr, "  = Project exists: %s\n", p.Name)
 			} else {
-				fmt.Fprintf(os.Stderr, "  ! Project %s: HTTP %d (could not resolve existing)\n", p.Name, resp.StatusCode)
+				return fmt.Errorf("project %s: conflict but existing record could not be resolved", p.Name)
 			}
 			continue
+		}
+		// Any other non-2xx is a real failure.
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return fmt.Errorf("project %s: HTTP %d: %s", p.Name, resp.StatusCode, strings.TrimSpace(string(body)))
 		}
 		var created struct{ ID string `json:"id"` }
 		if cli.ReadJSON(resp, &created) == nil {
@@ -574,15 +697,20 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 		}
 	}
 
-	// Create issues — track identifiers and crew IDs for relations
+	// Create issues — track identifiers and crew IDs for relations.
+	// Keyed by stable seed key (def.Title) so relations don't break when
+	// individual creations fail and shift positional indexes.
 	fmt.Fprintln(os.Stderr, "Creating issues...")
 	type createdIssue struct {
 		Identifier string
 		CrewID     string
 	}
-	createdIssues := make([]createdIssue, 0, len(seeddata.Issues))
+	issueByKey := map[string]createdIssue{}
 
 	for _, def := range seeddata.Issues {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		crewID, ok := crewIDs[def.CrewSlug]
 		if !ok {
 			fmt.Fprintf(os.Stderr, "  ! Crew %q not found, skipping: %s\n", def.CrewSlug, def.Title)
@@ -622,7 +750,7 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 			ident = *created.Identifier
 		}
 		if ident != "" {
-			createdIssues = append(createdIssues, createdIssue{Identifier: ident, CrewID: crewID})
+			issueByKey[def.Title] = createdIssue{Identifier: ident, CrewID: crewID}
 		}
 		fmt.Fprintf(os.Stderr, "  + %s: %s (%s)\n", ident, truncate(def.Title, 50), def.Priority)
 
@@ -678,38 +806,38 @@ func seedIssues(client *cli.Client, crewIDs, agentIDs map[string]string) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	// Create relations between issues using tracked identifiers
+	// Create relations between issues using stable seed keys (issue titles).
+	// If a referenced issue failed to create, the relation is skipped instead
+	// of being wired to the wrong target.
 	fmt.Fprintln(os.Stderr, "Creating relations...")
-	if len(createdIssues) >= 6 {
-		type relDef struct {
-			source, target, rtype string
+	type relDef struct {
+		sourceKey, targetKey, rtype string
+	}
+	rels := []relDef{
+		{"Ping google.com 5 times and save results", "Check HTTP status of 5 popular websites", "blocks"},
+		{"Ping google.com 5 times and save results", "Create a directory tree with sample files", "relates_to"},
+		{"Trace DNS resolution for 3 domains", "Measure download speed with a 1MB test file", "relates_to"},
+		{"Generate a CSV report with random data", "Create a directory tree with sample files", "blocked_by"},
+	}
+	for _, rd := range rels {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		rels := []relDef{
-			{createdIssues[0].Identifier, createdIssues[1].Identifier, "blocks"},
-			{createdIssues[0].Identifier, createdIssues[4].Identifier, "relates_to"},
-			{createdIssues[2].Identifier, createdIssues[3].Identifier, "relates_to"},
-			{createdIssues[5].Identifier, createdIssues[4].Identifier, "blocked_by"},
+		src, srcOK := issueByKey[rd.sourceKey]
+		tgt, tgtOK := issueByKey[rd.targetKey]
+		if !srcOK || !tgtOK {
+			fmt.Fprintf(os.Stderr, "  ! relation skipped (missing endpoint): %s %s %s\n", rd.sourceKey, rd.rtype, rd.targetKey)
+			continue
 		}
-		// Build identifier→crewID lookup from tracked data
-		issueCrew := map[string]string{}
-		for _, ci := range createdIssues {
-			issueCrew[ci.Identifier] = ci.CrewID
-		}
-		for _, rd := range rels {
-			srcCrewID := issueCrew[rd.source]
-			if srcCrewID == "" {
-				continue
+		r, err := client.Post(
+			fmt.Sprintf("/api/v1/crews/%s/issues/%s/relations", src.CrewID, src.Identifier),
+			map[string]string{"target_identifier": tgt.Identifier, "relation_type": rd.rtype},
+		)
+		if err == nil {
+			if r.StatusCode < 400 {
+				fmt.Fprintf(os.Stderr, "  + %s %s %s\n", src.Identifier, rd.rtype, tgt.Identifier)
 			}
-			r, err := client.Post(
-				fmt.Sprintf("/api/v1/crews/%s/issues/%s/relations", srcCrewID, rd.source),
-				map[string]string{"target_identifier": rd.target, "relation_type": rd.rtype},
-			)
-			if err == nil {
-				if r.StatusCode < 400 {
-					fmt.Fprintf(os.Stderr, "  + %s %s %s\n", rd.source, rd.rtype, rd.target)
-				}
-				r.Body.Close()
-			}
+			r.Body.Close()
 		}
 	}
 

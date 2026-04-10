@@ -2,7 +2,7 @@
 
 import { Bot } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { getCrewDotColor } from "@/lib/crew-icon"
+import { getCrewBgClass } from "@/lib/colors"
 
 interface CrewData {
   id: string
@@ -54,8 +54,10 @@ export function AllCrewsOverview({ crews, agents, onCrewSelect, onAgentSelect }:
             >
               <div className="flex items-start gap-3">
                 <div
-                  className="h-8 w-8 rounded-lg flex items-center justify-center text-white text-[12px] font-bold shrink-0"
-                  style={{ backgroundColor: getCrewDotColor(crew.color) }}
+                  className={cn(
+                    "h-8 w-8 rounded-lg flex items-center justify-center text-white text-[12px] font-bold shrink-0",
+                    getCrewBgClass(crew.color),
+                  )}
                 >
                   {crew.name.charAt(0)}
                 </div>

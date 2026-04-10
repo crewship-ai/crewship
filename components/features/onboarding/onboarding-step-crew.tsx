@@ -32,6 +32,7 @@ export function StepCrew({
           <button
             key={t.name}
             type="button"
+            aria-pressed={crewName === t.name}
             onClick={() => onCrewNameChange(t.name)}
             className={`flex items-start gap-2 rounded-lg border p-3 text-left transition-colors hover:bg-accent ${
               crewName === t.name ? "border-primary bg-primary/5" : "border-border"
