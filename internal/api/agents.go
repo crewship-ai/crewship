@@ -35,14 +35,7 @@ func NewAgentHandler(db *sql.DB, logger *slog.Logger) *AgentHandler {
 func (h *AgentHandler) SetHub(hub *ws.Hub) { h.hub = hub }
 
 func (h *AgentHandler) broadcastAgentEvent(eventType, workspaceID string, payload map[string]string) {
-	if h.hub == nil {
-		return
-	}
-	h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
-		Type:    eventType,
-		Channel: "workspace:" + workspaceID,
-		Payload: payload,
-	})
+	broadcastWorkspaceEvent(h.hub, workspaceID, eventType, payload)
 }
 
 // SetLicense attaches the license for enforcing agent-per-crew limits.

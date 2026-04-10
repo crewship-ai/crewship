@@ -27,15 +27,7 @@ func NewIntegrationHandler(db *sql.DB, logger *slog.Logger) *IntegrationHandler 
 func (h *IntegrationHandler) SetHub(hub *ws.Hub) { h.hub = hub }
 
 func (h *IntegrationHandler) broadcastEvent(eventType, workspaceID string, payload map[string]string) {
-	if h.hub == nil {
-		return
-	}
-	channel := "workspace:" + workspaceID
-	h.hub.Broadcast(channel, ws.ServerMessage{
-		Type:    eventType,
-		Channel: channel,
-		Payload: payload,
-	})
+	broadcastWorkspaceEvent(h.hub, workspaceID, eventType, payload)
 }
 
 // --- Response types ---
