@@ -118,7 +118,7 @@ func (c *Client) GetWorkspaceID() string {
 		return c.WorkspaceID
 	}
 	// Resolve slug to ID by calling workspaces list (without workspace_id param)
-	id, err := c.resolveWorkspaceSlug(c.WorkspaceID)
+	id, err := c.resolveWorkspaceSlug(c.ctx, c.WorkspaceID)
 	if err != nil {
 		// Fall back to using the slug directly
 		return c.WorkspaceID
@@ -127,12 +127,15 @@ func (c *Client) GetWorkspaceID() string {
 	return id
 }
 
-func (c *Client) resolveWorkspaceSlug(slug string) (string, error) {
+func (c *Client) resolveWorkspaceSlug(ctx context.Context, slug string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	u, err := url.Parse(c.BaseURL + "/api/v1/workspaces")
 	if err != nil {
 		return "", fmt.Errorf("parse workspace URL: %w", err)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), "GET", u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
 		return "", fmt.Errorf("create workspace request: %w", err)
 	}

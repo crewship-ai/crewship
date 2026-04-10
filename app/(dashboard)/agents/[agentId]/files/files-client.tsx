@@ -230,8 +230,10 @@ export function FilesPageClient() {
   const [activeFileTab, setActiveFileTab] = useState<"home" | "container" | "git">("home")
   const [containerFiles, setContainerFiles] = useState<FileEntry[]>([])
   const [containerLoading, setContainerLoading] = useState(false)
+  const [containerError, setContainerError] = useState<string | null>(null)
   const [gitCommits, setGitCommits] = useState<{ hash: string; message: string; author: string; date: string }[]>([])
   const [gitLoading, setGitLoading] = useState(false)
+  const [gitError, setGitError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [copied, setCopied] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -309,6 +311,20 @@ export function FilesPageClient() {
       gitAbortRef.current?.abort()
     }
   }, [])
+
+  // Reset per-tab caches + abort in-flight fetches on agent/workspace switch
+  // so the previous agent's container files or git log can't bleed into the
+  // new selection. The onClick handlers below re-fetch lazily.
+  useEffect(() => {
+    containerAbortRef.current?.abort()
+    gitAbortRef.current?.abort()
+    setContainerFiles([])
+    setContainerLoading(false)
+    setContainerError(null)
+    setGitCommits([])
+    setGitLoading(false)
+    setGitError(null)
+  }, [agentId, workspaceId])
 
   const fetchSubdir = useCallback(async (dirPath: string) => {
     if (!workspaceId) return
@@ -461,12 +477,31 @@ export function FilesPageClient() {
             onClick={() => {
               setActiveFileTab("container")
               if (containerFiles.length === 0 && !containerLoading && workspaceId) {
+                containerAbortRef.current?.abort()
+                const ac = new AbortController()
+                containerAbortRef.current = ac
+                setContainerError(null)
                 setContainerLoading(true)
-                fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`)
-                  .then((r) => r.json())
-                  .then((data) => setContainerFiles(Array.isArray(data) ? data : []))
-                  .catch(() => {})
-                  .finally(() => setContainerLoading(false))
+                fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, {
+                  signal: ac.signal,
+                })
+                  .then((r) => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                    return r.json()
+                  })
+                  .then((data) => {
+                    if (ac.signal.aborted) return
+                    setContainerFiles(Array.isArray(data) ? data : [])
+                  })
+                  .catch((err) => {
+                    if (err instanceof DOMException && err.name === "AbortError") return
+                    console.error("failed to load container files", err)
+                    setContainerFiles([])
+                    setContainerError("Failed to load container files")
+                  })
+                  .finally(() => {
+                    if (!ac.signal.aborted) setContainerLoading(false)
+                  })
               }
             }}
           >Container</button>
@@ -483,12 +518,31 @@ export function FilesPageClient() {
             onClick={() => {
               setActiveFileTab("git")
               if (gitCommits.length === 0 && !gitLoading && workspaceId) {
+                gitAbortRef.current?.abort()
+                const ac = new AbortController()
+                gitAbortRef.current = ac
+                setGitError(null)
                 setGitLoading(true)
-                fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`)
-                  .then((r) => r.json())
-                  .then((data) => setGitCommits(Array.isArray(data) ? data : []))
-                  .catch(() => {})
-                  .finally(() => setGitLoading(false))
+                fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, {
+                  signal: ac.signal,
+                })
+                  .then((r) => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                    return r.json()
+                  })
+                  .then((data) => {
+                    if (ac.signal.aborted) return
+                    setGitCommits(Array.isArray(data) ? data : [])
+                  })
+                  .catch((err) => {
+                    if (err instanceof DOMException && err.name === "AbortError") return
+                    console.error("failed to load git log", err)
+                    setGitCommits([])
+                    setGitError("Failed to load git log")
+                  })
+                  .finally(() => {
+                    if (!ac.signal.aborted) setGitLoading(false)
+                  })
               }
             }}
           ><GitBranch className="h-3 w-3" /> Git</button>
@@ -537,6 +591,12 @@ export function FilesPageClient() {
           <div className="flex-1 overflow-y-auto">
             {containerLoading ? (
               <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : containerError ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
+                <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" />
+                <p className="text-body font-medium text-destructive">{containerError}</p>
+                <p className="text-label text-muted-foreground mt-1">Check that the container is running and try again.</p>
+              </div>
             ) : containerFiles.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
                 <Inbox className="h-10 w-10 text-muted-foreground/40 mb-3" />
@@ -561,6 +621,12 @@ export function FilesPageClient() {
           <div className="flex-1 overflow-y-auto">
             {gitLoading ? (
               <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : gitError ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
+                <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" />
+                <p className="text-body font-medium text-destructive">{gitError}</p>
+                <p className="text-label text-muted-foreground mt-1">The agent workspace may be unreachable.</p>
+              </div>
             ) : gitCommits.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
                 <GitBranch className="h-10 w-10 text-muted-foreground/40 mb-3" />
