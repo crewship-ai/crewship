@@ -12,8 +12,8 @@ func TestBuildEnvVarsSidecar_SecretExclusion(t *testing.T) {
 	cases := []struct {
 		name        string
 		req         AgentRunRequest
-		forbidNames []string // env var names that must NOT appear
-		forbidVals  []string // values that must NOT appear
+		forbidNames []string          // env var names that must NOT appear
+		forbidVals  []string          // values that must NOT appear
 		requireEnv  map[string]string // env var name → expected value (must be present)
 	}{
 		{

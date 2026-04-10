@@ -61,7 +61,7 @@ func (h *InternalHandler) resolveSkillsBlock(r *http.Request, creds []mcpCredEnt
 		}
 
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("<skill name=%q category=%q>\n", displayName, category))
+		fmt.Fprintf(&sb, "<skill name=%q category=%q>\n", displayName, category)
 		if len(credLines) > 0 {
 			sb.WriteString("Credentials:\n")
 			for _, cl := range credLines {
@@ -275,16 +275,16 @@ func (h *InternalHandler) buildKeeperBlock(agentSlug string, creds []mcpCredEntr
 	keeperBlock.WriteString("You do NOT have these credentials in your environment. To access them:\n\n")
 	keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/request \\\n")
 	keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
-	keeperBlock.WriteString(fmt.Sprintf("    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why you need it>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug))
+	fmt.Fprintf(&keeperBlock, "    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why you need it>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug)
 	keeperBlock.WriteString("The Keeper (AI gatekeeper) will evaluate your request and respond with ALLOW or DENY.\n")
 	keeperBlock.WriteString("If ALLOW, the response contains the credential value. If DENY, do NOT retry \u2014 explain to the user why access was denied.\n\n")
 	keeperBlock.WriteString("To execute a command with a credential (without seeing the value):\n")
 	keeperBlock.WriteString("  curl -s -X POST http://localhost:9119/keeper/execute \\\n")
 	keeperBlock.WriteString("    -H \"Content-Type: application/json\" \\\n")
-	keeperBlock.WriteString(fmt.Sprintf("    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why>\",\"command\":\"<shell command>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug))
+	fmt.Fprintf(&keeperBlock, "    -d '{\"credential_name\":\"<NAME>\",\"intent\":\"<why>\",\"command\":\"<shell command>\",\"agent_slug\":\"%s\"}'\n\n", agentSlug)
 	keeperBlock.WriteString("Keeper-guarded credentials available to you:\n")
 	for _, name := range secretCreds {
-		keeperBlock.WriteString(fmt.Sprintf("  - %s\n", name))
+		fmt.Fprintf(&keeperBlock, "  - %s\n", name)
 	}
 	keeperBlock.WriteString("[END CREDENTIAL ACCESS CONTROL]")
 	return keeperBlock.String()

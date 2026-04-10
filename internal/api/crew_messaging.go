@@ -146,7 +146,7 @@ func (h *CrewMessagingHandler) ListMessages(w http.ResponseWriter, r *http.Reque
 		limit = 50
 	}
 
-	since := r.URL.Query().Get("since")     // RFC3339 timestamp
+	since := r.URL.Query().Get("since")             // RFC3339 timestamp
 	peerCrewID := r.URL.Query().Get("peer_crew_id") // optional: filter to specific peer
 
 	var query string
@@ -249,9 +249,10 @@ func (h *CrewMessagingHandler) ReadFile(w http.ResponseWriter, r *http.Request) 
 	absPath, pathErr := h.resolveCrewSharedPath(targetCrewID, filePath, false)
 	if pathErr != "" {
 		status := http.StatusBadRequest
-		if pathErr == "file not found" {
+		switch pathErr {
+		case "file not found":
 			status = http.StatusNotFound
-		} else if pathErr == "internal error" {
+		case "internal error":
 			status = http.StatusInternalServerError
 		}
 		writeJSON(w, status, map[string]string{"error": pathErr})

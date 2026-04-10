@@ -43,9 +43,9 @@ type SetupResult struct {
 
 // OnboardingService handles the business logic for user onboarding.
 type OnboardingService struct {
-	db       *sql.DB
-	logger   *slog.Logger
-	idFunc   func() string
+	db     *sql.DB
+	logger *slog.Logger
+	idFunc func() string
 }
 
 // NewOnboardingService creates a new OnboardingService.

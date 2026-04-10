@@ -64,9 +64,9 @@ var captainChatCmd = &cobra.Command{
 			var errBody map[string]interface{}
 			json.NewDecoder(resp.Body).Decode(&errBody)
 			if detail, ok := errBody["detail"].(string); ok {
-				return fmt.Errorf("Captain error: %s", detail)
+				return fmt.Errorf("captain error: %s", detail)
 			}
-			return fmt.Errorf("Captain error: HTTP %d", resp.StatusCode)
+			return fmt.Errorf("captain error: HTTP %d", resp.StatusCode)
 		}
 
 		fmt.Printf("%sCaptain:%s ", cli.Bold, cli.Reset)
@@ -119,13 +119,13 @@ var captainContextCmd = &cobra.Command{
 		}
 
 		var ctx struct {
-			Phase            int    `json:"onboarding_phase"`
-			Crews            int    `json:"crews"`
-			Agents           int    `json:"agents"`
-			ActiveMissions   int    `json:"active_missions"`
-			PendingEscalations int  `json:"pending_escalations"`
-			PendingProposals int    `json:"pending_proposals"`
-			WorkspaceID      string `json:"workspace_id"`
+			Phase              int    `json:"onboarding_phase"`
+			Crews              int    `json:"crews"`
+			Agents             int    `json:"agents"`
+			ActiveMissions     int    `json:"active_missions"`
+			PendingEscalations int    `json:"pending_escalations"`
+			PendingProposals   int    `json:"pending_proposals"`
+			WorkspaceID        string `json:"workspace_id"`
 		}
 		if err := cli.ReadJSON(resp, &ctx); err != nil {
 			return err

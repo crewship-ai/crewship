@@ -7,9 +7,9 @@ import (
 
 // MemberIntegration represents an MCP integration available to a crew member.
 type MemberIntegration struct {
-	Name        string   // display name, e.g. "Gmail"
-	ServerName  string   // machine name, e.g. "gmail"
-	Tools       []string // tool names discovered from MCP server, e.g. ["gmail_send", "gmail_search"]
+	Name       string   // display name, e.g. "Gmail"
+	ServerName string   // machine name, e.g. "gmail"
+	Tools      []string // tool names discovered from MCP server, e.g. ["gmail_send", "gmail_search"]
 }
 
 // CrewMember represents a fellow crew member visible to a lead agent.
@@ -37,12 +37,12 @@ func BuildLeadContext(members []CrewMember) string {
 
 	for _, m := range members {
 		if m.RoleTitle != "" {
-			b.WriteString(fmt.Sprintf("- %s (@%s, %s)", m.Name, m.Slug, m.RoleTitle))
+			fmt.Fprintf(&b, "- %s (@%s, %s)", m.Name, m.Slug, m.RoleTitle)
 		} else {
-			b.WriteString(fmt.Sprintf("- %s (@%s)", m.Name, m.Slug))
+			fmt.Fprintf(&b, "- %s (@%s)", m.Name, m.Slug)
 		}
 		if m.Description != "" {
-			b.WriteString(fmt.Sprintf(": %s", m.Description))
+			fmt.Fprintf(&b, ": %s", m.Description)
 		}
 		b.WriteString("\n")
 		if len(m.Integrations) > 0 {
@@ -54,7 +54,7 @@ func BuildLeadContext(members []CrewMember) string {
 					parts = append(parts, ig.Name)
 				}
 			}
-			b.WriteString(fmt.Sprintf("  Integrations: %s\n", strings.Join(parts, ", ")))
+			fmt.Fprintf(&b, "  Integrations: %s\n", strings.Join(parts, ", "))
 		}
 	}
 
@@ -146,20 +146,20 @@ func BuildCoordinatorContext(crews []CrewInfo, activeMissions []MissionSummary) 
 	b.WriteString("submit proposals for human approval, and monitor cross-crew progress.\n\n")
 
 	for _, c := range crews {
-		b.WriteString(fmt.Sprintf("## Crew: %s (@%s)\n", c.Name, c.Slug))
+		fmt.Fprintf(&b, "## Crew: %s (@%s)\n", c.Name, c.Slug)
 		if len(c.Members) == 0 {
 			b.WriteString("  (no agents)\n")
 		}
 		for _, m := range c.Members {
 			if m.RoleTitle != "" {
-				b.WriteString(fmt.Sprintf("  - %s (@%s, %s)", m.Name, m.Slug, m.RoleTitle))
+				fmt.Fprintf(&b, "  - %s (@%s, %s)", m.Name, m.Slug, m.RoleTitle)
 			} else {
-				b.WriteString(fmt.Sprintf("  - %s (@%s)", m.Name, m.Slug))
+				fmt.Fprintf(&b, "  - %s (@%s)", m.Name, m.Slug)
 			}
 			if m.Description != "" {
-				b.WriteString(fmt.Sprintf(": %s", m.Description))
+				fmt.Fprintf(&b, ": %s", m.Description)
 			}
-			b.WriteString(fmt.Sprintf(" [crew_id=%s]\n", c.ID))
+			fmt.Fprintf(&b, " [crew_id=%s]\n", c.ID)
 		}
 		b.WriteString("\n")
 	}
@@ -168,7 +168,7 @@ func BuildCoordinatorContext(crews []CrewInfo, activeMissions []MissionSummary) 
 	if len(activeMissions) > 0 {
 		b.WriteString("ACTIVE MISSIONS:\n")
 		for _, m := range activeMissions {
-			b.WriteString(fmt.Sprintf("  [%s] %s (crew: @%s, id: %s)\n", m.Status, m.Title, m.CrewSlug, m.ID))
+			fmt.Fprintf(&b, "  [%s] %s (crew: @%s, id: %s)\n", m.Status, m.Title, m.CrewSlug, m.ID)
 		}
 		b.WriteString("\n")
 	}

@@ -103,7 +103,7 @@ I am Jarmila, a Czech-speaking AI assistant.
 	}
 
 	// Search for "Czech"
-	results, err := engine.Search(context.Background(),"Czech", 10)
+	results, err := engine.Search(context.Background(), "Czech", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ I am Jarmila, a Czech-speaking AI assistant.
 	}
 
 	// Search for "pagination"
-	results, err = engine.Search(context.Background(),"pagination", 10)
+	results, err = engine.Search(context.Background(), "pagination", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ I am Jarmila, a Czech-speaking AI assistant.
 	}
 
 	// Search for something that doesn't exist
-	results, err = engine.Search(context.Background(),"kubernetes", 10)
+	results, err = engine.Search(context.Background(), "kubernetes", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestSearchLimit(t *testing.T) {
 	}
 
 	// Search with limit of 3
-	results, err := engine.Search(context.Background(),"testing", 3)
+	results, err := engine.Search(context.Background(), "testing", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestSearchDisabled(t *testing.T) {
 	}
 	defer engine.Close()
 
-	_, err = engine.Search(context.Background(),"anything", 10)
+	_, err = engine.Search(context.Background(), "anything", 10)
 	if err == nil {
 		t.Error("expected error when search is disabled")
 	}
@@ -276,7 +276,7 @@ func TestReindexClearsOldIndex(t *testing.T) {
 	}
 
 	// Verify it's indexed
-	results, _ := engine.Search(context.Background(),"old content", 10)
+	results, _ := engine.Search(context.Background(), "old content", 10)
 	if len(results) == 0 {
 		t.Fatal("expected results for 'old content'")
 	}
@@ -289,13 +289,13 @@ func TestReindexClearsOldIndex(t *testing.T) {
 	}
 
 	// Old content should be gone
-	results, _ = engine.Search(context.Background(),"old content", 10)
+	results, _ = engine.Search(context.Background(), "old content", 10)
 	if len(results) != 0 {
 		t.Error("old content should be gone after reindex")
 	}
 
 	// New content should be present
-	results, _ = engine.Search(context.Background(),"new content", 10)
+	results, _ = engine.Search(context.Background(), "new content", 10)
 	if len(results) == 0 {
 		t.Error("expected results for 'new content'")
 	}
@@ -322,11 +322,11 @@ func TestReindexWithDailyLogs(t *testing.T) {
 	}
 
 	// Search across files
-	results, _ := engine.Search(context.Background(),"pagination", 10)
+	results, _ := engine.Search(context.Background(), "pagination", 10)
 	if len(results) == 0 {
 		t.Error("expected to find 'pagination' in daily log")
 	}
-	results, _ = engine.Search(context.Background(),"Jarmila", 10)
+	results, _ = engine.Search(context.Background(), "Jarmila", 10)
 	if len(results) == 0 {
 		t.Error("expected to find 'Jarmila' in AGENT.md")
 	}
@@ -372,7 +372,7 @@ func TestEngineClose(t *testing.T) {
 	}
 
 	// After close, operations should fail
-	_, err = engine.Search(context.Background(),"test", 10)
+	_, err = engine.Search(context.Background(), "test", 10)
 	if err == nil {
 		t.Error("expected error after Close()")
 	}
@@ -389,7 +389,7 @@ func TestConcurrentSearchAndReindex(t *testing.T) {
 	go func() {
 		defer close(done)
 		for i := 0; i < 10; i++ {
-			engine.Search(context.Background(),"concurrent", 5)
+			engine.Search(context.Background(), "concurrent", 5)
 		}
 	}()
 
@@ -408,13 +408,13 @@ func TestSearchSpecialCharacters(t *testing.T) {
 	engine.Reindex()
 
 	// These shouldn't cause FTS5 syntax errors
-	results, err := engine.Search(context.Background(),"test@example.com", 10)
+	results, err := engine.Search(context.Background(), "test@example.com", 10)
 	if err != nil {
 		t.Fatalf("search with @ failed: %v", err)
 	}
 	_ = results // may or may not match depending on tokenizer
 
-	results, err = engine.Search(context.Background(),"/usr/local", 10)
+	results, err = engine.Search(context.Background(), "/usr/local", 10)
 	if err != nil {
 		t.Fatalf("search with / failed: %v", err)
 	}

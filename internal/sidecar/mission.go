@@ -13,15 +13,15 @@ type missionCreateRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
 	Plan        string `json:"plan,omitempty"`
-	CrewID      string `json:"crew_id,omitempty"`      // Required for COORDINATOR (no default crew)
+	CrewID      string `json:"crew_id,omitempty"` // Required for COORDINATOR (no default crew)
 	Tasks       []struct {
-		Title           string   `json:"title"`
-		Description     string   `json:"description,omitempty"`
-		AssignedTo      string   `json:"assigned_to"`       // Slug (same crew only)
-		AssignedToID    string   `json:"assigned_to_id"`    // Agent ID (cross-crew)
-		TaskOrder       int      `json:"task_order"`
-		DependsOn       []string `json:"depends_on,omitempty"`
-		MaxIterations   *int     `json:"max_iterations,omitempty"`
+		Title         string   `json:"title"`
+		Description   string   `json:"description,omitempty"`
+		AssignedTo    string   `json:"assigned_to"`    // Slug (same crew only)
+		AssignedToID  string   `json:"assigned_to_id"` // Agent ID (cross-crew)
+		TaskOrder     int      `json:"task_order"`
+		DependsOn     []string `json:"depends_on,omitempty"`
+		MaxIterations *int     `json:"max_iterations,omitempty"`
 	} `json:"tasks,omitempty"`
 }
 
@@ -61,9 +61,9 @@ func (s *Server) handleMissionCreate(w http.ResponseWriter, r *http.Request) {
 	var tasks []internalTask
 	for _, t := range req.Tasks {
 		it := internalTask{
-			Title:     t.Title,
-			TaskOrder: t.TaskOrder,
-			DependsOn: t.DependsOn,
+			Title:         t.Title,
+			TaskOrder:     t.TaskOrder,
+			DependsOn:     t.DependsOn,
 			MaxIterations: t.MaxIterations,
 		}
 		if t.Description != "" {

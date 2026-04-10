@@ -210,8 +210,8 @@ Question: %s`, body.FromSlug, body.Question)
 		Credentials:     creds,
 		TimeoutSecs:     target.TimeoutSeconds,
 		MemoryEnabled:   target.MemoryEnabled,
-		SkipSidecar:     true,  // Sidecar already running on 9119 in this container
-		SkipConvHistory: true,  // Fresh context for peer queries
+		SkipSidecar:     true, // Sidecar already running on 9119 in this container
+		SkipConvHistory: true, // Fresh context for peer queries
 	}
 
 	if err := h.orch.RunAgentForAssignment(r.Context(), req, handler); err != nil {
@@ -353,18 +353,18 @@ func (h *QueryHandler) ListPeerConversations(w http.ResponseWriter, r *http.Requ
 	limit, offset := parsePagination(r, 50, 100)
 
 	type peerConvItem struct {
-		ID           string  `json:"id"`
-		FromName     string  `json:"from_name"`
-		FromSlug     string  `json:"from_slug"`
-		ToName       string  `json:"to_name"`
-		ToSlug       string  `json:"to_slug"`
-		Question     string  `json:"question"`
-		Response     *string `json:"response"`
-		Status       string  `json:"status"`
-		DurationMs   *int    `json:"duration_ms"`
-		Escalated    bool    `json:"escalated"`
-		CreatedAt    string  `json:"created_at"`
-		FinishedAt   *string `json:"finished_at"`
+		ID         string  `json:"id"`
+		FromName   string  `json:"from_name"`
+		FromSlug   string  `json:"from_slug"`
+		ToName     string  `json:"to_name"`
+		ToSlug     string  `json:"to_slug"`
+		Question   string  `json:"question"`
+		Response   *string `json:"response"`
+		Status     string  `json:"status"`
+		DurationMs *int    `json:"duration_ms"`
+		Escalated  bool    `json:"escalated"`
+		CreatedAt  string  `json:"created_at"`
+		FinishedAt *string `json:"finished_at"`
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `

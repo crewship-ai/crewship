@@ -26,12 +26,12 @@ func BuildPeerContext(members []CrewMember, selfSlug string) string {
 
 	for _, m := range others {
 		if m.RoleTitle != "" {
-			b.WriteString(fmt.Sprintf("- %s (@%s, %s)", m.Name, m.Slug, m.RoleTitle))
+			fmt.Fprintf(&b, "- %s (@%s, %s)", m.Name, m.Slug, m.RoleTitle)
 		} else {
-			b.WriteString(fmt.Sprintf("- %s (@%s)", m.Name, m.Slug))
+			fmt.Fprintf(&b, "- %s (@%s)", m.Name, m.Slug)
 		}
 		if m.Description != "" {
-			b.WriteString(fmt.Sprintf(": %s", m.Description))
+			fmt.Fprintf(&b, ": %s", m.Description)
 		}
 		b.WriteString("\n")
 	}

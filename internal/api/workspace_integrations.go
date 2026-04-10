@@ -33,22 +33,22 @@ func (h *IntegrationHandler) broadcastEvent(eventType, workspaceID string, paylo
 // --- Response types ---
 
 type workspaceMCPServerResponse struct {
-	ID               string  `json:"id"`
-	WorkspaceID      string  `json:"workspace_id"`
-	Name             string  `json:"name"`
-	DisplayName      string  `json:"display_name"`
-	Transport        string  `json:"transport"`
-	Endpoint         *string `json:"endpoint"`
-	Command          *string `json:"command"`
-	ArgsJSON         *string `json:"args_json"`
-	EnvJSON          *string `json:"env_json"`
-	ConfigJSON       *string `json:"config_json"`
-	Icon             *string `json:"icon"`
-	Enabled          bool    `json:"enabled"`
-	CreatedAt        string  `json:"created_at"`
-	UpdatedAt        string  `json:"updated_at"`
-	AgentBindCount   int     `json:"agent_binding_count"`
-	CrewServerCount  int     `json:"crew_server_count"`
+	ID              string  `json:"id"`
+	WorkspaceID     string  `json:"workspace_id"`
+	Name            string  `json:"name"`
+	DisplayName     string  `json:"display_name"`
+	Transport       string  `json:"transport"`
+	Endpoint        *string `json:"endpoint"`
+	Command         *string `json:"command"`
+	ArgsJSON        *string `json:"args_json"`
+	EnvJSON         *string `json:"env_json"`
+	ConfigJSON      *string `json:"config_json"`
+	Icon            *string `json:"icon"`
+	Enabled         bool    `json:"enabled"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
+	AgentBindCount  int     `json:"agent_binding_count"`
+	CrewServerCount int     `json:"crew_server_count"`
 }
 
 // --- Request types ---

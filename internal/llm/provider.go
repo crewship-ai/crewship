@@ -12,11 +12,11 @@ const (
 
 // Message is a single chat message in a conversation.
 type Message struct {
-	Role       string      `json:"role"`
-	Content    string      `json:"content,omitempty"`
-	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID string      `json:"tool_call_id,omitempty"`
-	ToolName   string      `json:"tool_name,omitempty"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolName   string     `json:"tool_name,omitempty"`
 }
 
 // ToolCall represents a tool invocation requested by the model.
@@ -47,9 +47,9 @@ type Request struct {
 type StopReason string
 
 const (
-	StopEndTurn  StopReason = "end_turn"
-	StopToolUse  StopReason = "tool_use"
-	StopMaxToks  StopReason = "max_tokens"
+	StopEndTurn StopReason = "end_turn"
+	StopToolUse StopReason = "tool_use"
+	StopMaxToks StopReason = "max_tokens"
 )
 
 // Response holds a completion response.
@@ -63,8 +63,8 @@ type Response struct {
 
 // StreamEvent is emitted during streaming.
 type StreamEvent struct {
-	Type    string `json:"type"` // "text", "tool_call", "done", "error"
-	Content string `json:"content,omitempty"`
+	Type     string    `json:"type"` // "text", "tool_call", "done", "error"
+	Content  string    `json:"content,omitempty"`
 	ToolCall *ToolCall `json:"tool_call,omitempty"`
 	Response *Response `json:"response,omitempty"` // set when Type == "done"
 }
