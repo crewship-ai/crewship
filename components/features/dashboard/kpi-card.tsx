@@ -35,24 +35,24 @@ export function KpiCard({
       : "text-muted-foreground"
 
   return (
-    <div className="relative flex flex-col gap-0.5 min-h-[96px] px-3 py-2.5 rounded-lg border border-border/60 bg-card overflow-hidden">
-      <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+    <div className="relative flex flex-col gap-1 min-h-[112px] px-4 py-3.5 rounded-xl border border-border/60 bg-card overflow-hidden">
+      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
         {label}
       </div>
       <div
-        className="text-[22px] font-semibold leading-tight tabular-nums"
+        className="text-[28px] font-semibold leading-none tabular-nums mt-0.5"
         style={valueColor ? { color: valueColor } : undefined}
       >
         {value}
       </div>
       {deltaLabel && (
-        <div className={cn("text-[10px]", deltaClass)}>
+        <div className={cn("text-[11px] mt-0.5", deltaClass)}>
           {deltaArrow && <span className="mr-0.5">{deltaArrow}</span>}
           {deltaLabel}
         </div>
       )}
       {subtitle && !deltaLabel && (
-        <div className="text-[10px] text-muted-foreground">{subtitle}</div>
+        <div className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</div>
       )}
 
       {sparklineData && sparklineData.length >= 2 && (
@@ -63,8 +63,8 @@ export function KpiCard({
 }
 
 function Sparkline({ data, color }: { data: number[]; color: string }) {
-  const width = 84
-  const height = 32
+  const width = 100
+  const height = 36
   const max = Math.max(...data)
   const min = Math.min(...data)
   const range = max - min || 1
@@ -80,7 +80,7 @@ function Sparkline({ data, color }: { data: number[]; color: string }) {
 
   return (
     <svg
-      className="absolute right-1.5 bottom-1.5 pointer-events-none"
+      className="absolute right-3 bottom-3 pointer-events-none"
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}

@@ -2,13 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Search } from "lucide-react"
 import Link from "next/link"
+import {
+  TrendingUp, Target, Banknote, Gem, Box, Activity, HeartPulse,
+  FolderOpen, Radio, Inbox as InboxIcon, ListChecks,
+} from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { useRealtime, useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
-import { cn } from "@/lib/utils"
+import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import type { Mission } from "@/lib/types/mission"
 
 import { ActionCenter } from "@/components/features/dashboard/action-center"
@@ -24,7 +26,6 @@ import { CrewRadial, type CrewHealthEntry } from "@/components/features/dashboar
 import { ProjectProgress, type ProjectProgressEntry } from "@/components/features/dashboard/project-progress"
 import { ActivityFeed } from "@/components/features/dashboard/activity-feed"
 import { InboxTile, type InboxEntry } from "@/components/features/dashboard/inbox-tile"
-import { CaptainTile } from "@/components/features/dashboard/captain-tile"
 import { RecentMissionsTable } from "@/components/features/dashboard/recent-missions-table"
 
 // ── Types for API responses we consume ────────────────────────────────
@@ -159,7 +160,6 @@ function formatRelativeShort(iso: string | null | undefined): string {
 export default function DashboardPage() {
   const router = useRouter()
   const { workspaceId, loading: wsLoading } = useWorkspace()
-  const { status: wsStatus } = useRealtime()
 
   // ── Core data state ────────────────────────────────────────────────
   const [agents, setAgents] = useState<AgentSummary[]>([])
@@ -539,66 +539,22 @@ export default function DashboardPage() {
   // ── Render ──────────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div className="p-3 space-y-3">
-        <Skeleton className="h-9 rounded-lg" />
-        <Skeleton className="h-12 rounded-lg" />
-        <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(6, minmax(0,1fr))" }}>
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[96px] rounded-lg" />)}
+      <div className="p-6 space-y-4">
+        <Skeleton className="h-14 rounded-xl" />
+        <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(6, minmax(0,1fr))" }}>
+          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[112px] rounded-xl" />)}
         </div>
-        <div className="grid gap-2.5" style={{ gridTemplateColumns: "2fr 1fr" }}>
-          <Skeleton className="h-[240px] rounded-lg" />
-          <Skeleton className="h-[240px] rounded-lg" />
+        <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr" }}>
+          <Skeleton className="h-[260px] rounded-xl" />
+          <Skeleton className="h-[260px] rounded-xl" />
         </div>
-        <Skeleton className="h-[200px] rounded-lg" />
+        <Skeleton className="h-[200px] rounded-xl" />
       </div>
     )
   }
 
   return (
-    <div className="p-3 pb-8 space-y-3 bg-background min-h-[calc(100vh-48px)]">
-      {/* ── Toolbar ───────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 h-9 px-2 sm:px-3 rounded-lg border border-border bg-card">
-        <span className="text-[12px] font-medium text-foreground/80 px-1.5">🗺 Overview</span>
-        <span className="flex-1" />
-        <div className="hidden md:flex items-center gap-1.5 h-[26px] px-2 bg-white/[0.04] border border-border rounded-md text-[11px] text-muted-foreground min-w-[220px]">
-          <Search className="h-3 w-3" />
-          <span>Search agents, missions, issues…</span>
-          <kbd className="ml-auto text-[9px] font-mono bg-white/[0.06] border border-border rounded px-1 py-0.5">⌘K</kbd>
-        </div>
-        <Link
-          href="/captain"
-          className="inline-flex items-center gap-1.5 h-[26px] px-2.5 text-[11px] font-medium rounded-md border border-border bg-white/[0.03] hover:bg-white/[0.06] text-foreground/80 transition-colors"
-        >
-          ⌁ Ask Captain
-        </Link>
-        <div
-          title={
-            wsStatus === "connected" ? "Live — realtime updates active"
-              : wsStatus === "connecting" ? "Connecting to realtime…"
-              : "Realtime disconnected"
-          }
-          className={cn(
-            "inline-flex items-center gap-1.5 h-[26px] px-2 rounded-md text-[10px] font-semibold uppercase tracking-wide border",
-            wsStatus === "connected" ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-              : wsStatus === "connecting" ? "text-amber-400 border-amber-500/30 bg-amber-500/10"
-              : "text-red-400 border-red-500/30 bg-red-500/10",
-          )}
-        >
-          <span className="relative flex h-1.5 w-1.5">
-            {wsStatus === "connected" && (
-              <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
-            )}
-            <span className={cn(
-              "relative inline-flex h-1.5 w-1.5 rounded-full",
-              wsStatus === "connected" && "bg-emerald-400",
-              wsStatus === "connecting" && "bg-amber-400",
-              wsStatus !== "connected" && wsStatus !== "connecting" && "bg-red-400",
-            )} />
-          </span>
-          {wsStatus === "connected" ? "Live" : wsStatus === "connecting" ? "Connecting" : "Offline"}
-        </div>
-      </div>
-
+    <div className="p-6 pb-10 space-y-4 bg-background min-h-[calc(100vh-48px)]">
       {/* ── Action Center ────────────────────────────────────────── */}
       <ActionCenter
         escalations={escalationCount}
@@ -609,7 +565,7 @@ export default function DashboardPage() {
       />
 
       {/* ── Row 1: 6 KPI cards ───────────────────────────────────── */}
-      <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(6, minmax(0,1fr))" }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(6, minmax(0,1fr))" }}>
         <KpiCard
           label="Agents"
           value={totalAgents}
@@ -657,9 +613,10 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Row 2: Throughput + Status donut ─────────────────────── */}
-      <div className="grid gap-2.5" style={{ gridTemplateColumns: "2fr 1fr" }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr" }}>
         <DashboardCard
-          title="📈 Issue throughput · 24h · by crew"
+          title="Issue throughput · 24h · by crew"
+          icon={TrendingUp}
           hint={throughputTotal > 0 ? `${throughputTotal} closed` : "awaiting data"}
         >
           {throughputData && throughputSeries.length > 0 ? (
@@ -671,7 +628,7 @@ export default function DashboardPage() {
           )}
         </DashboardCard>
 
-        <DashboardCard title="🎯 Mission status" hint={`${missions.length} total`}>
+        <DashboardCard title="Mission status" icon={Target} hint={`${missions.length} total`}>
           {donutData.length > 0 ? (
             <StatusDonut data={donutData} />
           ) : (
@@ -681,9 +638,10 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Row 3: Cost burn + Top missions ──────────────────────── */}
-      <div className="grid gap-2.5" style={{ gridTemplateColumns: "2fr 1fr" }}>
+      <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr" }}>
         <DashboardCard
-          title="💸 Cost burn · 7 days"
+          title="Cost burn · 7 days"
+          icon={Banknote}
           hint={costTotal > 0 ? `${formatCost(costTotal)} total` : "awaiting data"}
         >
           {costData && costSeries.length > 0 ? (
@@ -695,45 +653,43 @@ export default function DashboardPage() {
           )}
         </DashboardCard>
 
-        <DashboardCard title="💎 Top cost missions" hint={`top ${topMissions.length}`}>
+        <DashboardCard title="Top cost missions" icon={Gem} hint={`top ${topMissions.length}`}>
           <TopMissionsChart missions={topMissions} />
         </DashboardCard>
       </div>
 
       {/* ── Row 4: Container resources (live) ────────────────────── */}
-      <DashboardCard title="🐳 Container resources · live" hint="via container.stats">
+      <DashboardCard title="Container resources · live" icon={Box} hint="via container.stats">
         <ContainerResourcesTile entries={containerEntries} />
       </DashboardCard>
 
       {/* ── Row 5: Heatmap + Crew radial + Projects ──────────────── */}
-      <div className="grid gap-2.5" style={{ gridTemplateColumns: "1.5fr 1fr 1fr" }}>
-        <DashboardCard title="🔥 Agent activity · 24h" hint="runs per hour">
+      <div className="grid gap-4" style={{ gridTemplateColumns: "1.5fr 1fr 1fr" }}>
+        <DashboardCard title="Agent activity · 24h" icon={Activity} hint="runs per hour">
           <AgentHeatmap agents={heatmapAgents} buckets={heatmapBuckets} />
         </DashboardCard>
-        <DashboardCard title="🛟 Crew health" hint={`${crews.length} crew${crews.length === 1 ? "" : "s"}`}>
+        <DashboardCard title="Crew health" icon={HeartPulse} hint={`${crews.length} crew${crews.length === 1 ? "" : "s"}`}>
           <CrewRadial crews={crewHealth} />
         </DashboardCard>
-        <DashboardCard title="📁 Active projects" hint={`${projects.length} project${projects.length === 1 ? "" : "s"}`}>
+        <DashboardCard title="Active projects" icon={FolderOpen} hint={`${projects.length} project${projects.length === 1 ? "" : "s"}`}>
           <ProjectProgress projects={projectEntries} />
         </DashboardCard>
       </div>
 
-      {/* ── Row 6: Activity feed + Inbox + Captain ───────────────── */}
-      <div className="grid gap-2.5" style={{ gridTemplateColumns: "1.5fr 1fr 1fr" }}>
-        <DashboardCard title="📡 Live activity" hint="streaming">
+      {/* ── Row 6: Activity feed + Inbox (2-col after Captain was removed) ── */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr" }}>
+        <DashboardCard title="Live activity" icon={Radio} hint="streaming">
           <ActivityFeed />
         </DashboardCard>
-        <DashboardCard title="📬 Inbox" hint={`${inboxEntries.length} item${inboxEntries.length === 1 ? "" : "s"}`}>
+        <DashboardCard title="Inbox" icon={InboxIcon} hint={`${inboxEntries.length} item${inboxEntries.length === 1 ? "" : "s"}`}>
           <InboxTile entries={inboxEntries} />
-        </DashboardCard>
-        <DashboardCard title="⌁ Captain" hint="workspace AI">
-          <CaptainTile />
         </DashboardCard>
       </div>
 
       {/* ── Row 7: Recent missions table ─────────────────────────── */}
       <DashboardCard
-        title="🗂 Recent missions"
+        title="Recent missions"
+        icon={ListChecks}
         action={<Link href="/orchestration" className="text-[10px] hover:text-foreground">Orchestration →</Link>}
       >
         <RecentMissionsTable missions={recentMissions} />
