@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -181,6 +183,115 @@ func TestMigrateMemoryConfigColumn(t *testing.T) {
 	}
 	if memCfg == nil || *memCfg != `{"max_size_mb": 10}` {
 		t.Errorf("unexpected memory_config: %v", memCfg)
+	}
+}
+
+// TestMigrateVersionCollision guards the collision check in Migrate(): if the
+// _migrations table already has a different name recorded for the version the
+// code is about to apply, the runner must fail loudly instead of silently
+// skipping. This prevents the classic two-branch-merge schema divergence
+// (both PRs claim the same version number with different SQL).
+func TestMigrateVersionCollision(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open("file:" + filepath.Join(dir, "collision.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// First pass: apply everything normally.
+	if err := Migrate(context.Background(), db.DB, logger); err != nil {
+		t.Fatalf("initial Migrate: %v", err)
+	}
+
+	// Tamper with _migrations as if a sibling PR had been merged first with
+	// a different name for the same version. Pick the latest version because
+	// it's the one the real-world collision would hit.
+	var latest int
+	if err := db.QueryRow("SELECT MAX(version) FROM _migrations").Scan(&latest); err != nil {
+		t.Fatalf("query max version: %v", err)
+	}
+	if _, err := db.Exec("UPDATE _migrations SET name = ? WHERE version = ?",
+		"sibling_pr_claimed_this_slot", latest); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+
+	// Re-run: must fail with a collision error naming both sides.
+	err = Migrate(context.Background(), db.DB, logger)
+	if err == nil {
+		t.Fatal("expected collision error, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "collision") {
+		t.Errorf("error message missing 'collision': %q", msg)
+	}
+	if !strings.Contains(msg, "sibling_pr_claimed_this_slot") {
+		t.Errorf("error message missing applied name: %q", msg)
+	}
+}
+
+// TestMigrateIdempotentWithMatchingNames is the happy-path counterpart: when
+// the _migrations entry matches the code's migration definition, re-running
+// must succeed silently. Regression guard for over-eager collision checks.
+func TestMigrateIdempotentWithMatchingNames(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open("file:" + filepath.Join(dir, "idempotent.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	if err := Migrate(context.Background(), db.DB, logger); err != nil {
+		t.Fatalf("first Migrate: %v", err)
+	}
+	if err := Migrate(context.Background(), db.DB, logger); err != nil {
+		t.Fatalf("second Migrate (should be no-op): %v", err)
+	}
+}
+
+// TestOpenChmodsDBFile verifies the file-permission tightening applied during
+// Open(). The data directory and the DB file (plus WAL/SHM if they exist) must
+// be owner-only after opening.
+func TestOpenChmodsDBFile(t *testing.T) {
+	// chmod behavior is POSIX-specific. Skip on non-POSIX.
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod semantics differ on Windows")
+	}
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "perms.db")
+
+	db, err := Open("file:" + dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Force a write so the WAL file gets materialized.
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS t (x INTEGER); INSERT INTO t VALUES (1);"); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	mode := func(p string) os.FileMode {
+		fi, err := os.Stat(p)
+		if err != nil {
+			return 0
+		}
+		return fi.Mode().Perm()
+	}
+
+	if got := mode(dbPath); got != 0o600 {
+		t.Errorf("db file mode = %o, want 0600", got)
+	}
+	// The WAL file may or may not be present depending on timing; only assert
+	// when it actually exists.
+	if _, err := os.Stat(dbPath + "-wal"); err == nil {
+		if got := mode(dbPath + "-wal"); got != 0o600 {
+			t.Errorf("wal file mode = %o, want 0600", got)
+		}
 	}
 }
 
