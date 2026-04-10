@@ -13,7 +13,16 @@ type DBChannelAuthorizer struct {
 
 // NewDBChannelAuthorizer creates a channel authorizer backed by workspace
 // membership queries against the given database.
+//
+// Panics if db is nil: a nil DB handle is a startup-time misconfiguration, and
+// failing fast here gives the operator a loud signal instead of a delayed nil
+// dereference the first time a client tries to subscribe. CanSubscribe also
+// keeps a defensive nil check so a synthetically constructed zero value still
+// fails closed rather than panicking on the auth path.
 func NewDBChannelAuthorizer(db *sql.DB) *DBChannelAuthorizer {
+	if db == nil {
+		panic("ws: NewDBChannelAuthorizer called with nil *sql.DB")
+	}
 	return &DBChannelAuthorizer{db: db}
 }
 

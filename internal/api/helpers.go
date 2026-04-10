@@ -35,11 +35,19 @@ func broadcastWorkspaceEvent(hub *ws.Hub, wsID, eventType string, payload any) {
 
 // parsePagination reads "limit" and "offset" query params, clamping limit to
 // [1, maxLimit] with the given default, and offset to >= 0.
+//
+// Unparseable, missing, or non-positive limits fall back to defaultLimit.
+// Limits larger than maxLimit are clamped DOWN to maxLimit (not reset to
+// defaultLimit) — otherwise a request for ?limit=1000 against
+// (defaultLimit=20, maxLimit=100) would silently return 20 instead of 100 and
+// shift pagination windows in surprising ways.
 func parsePagination(r *http.Request, defaultLimit, maxLimit int) (limit, offset int) {
 	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
-	if limit <= 0 || limit > maxLimit {
+	if limit <= 0 {
 		limit = defaultLimit
+	} else if limit > maxLimit {
+		limit = maxLimit
 	}
 	if offset < 0 {
 		offset = 0

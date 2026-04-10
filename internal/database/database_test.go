@@ -220,3 +220,149 @@ func TestMigrateInsertAndQuery(t *testing.T) {
 		t.Errorf("member count = %d, want 1", count)
 	}
 }
+
+// TestMigrationBackfillLegacyTimestamps is a regression for a CodeRabbit
+// finding on PR #130: the codebase writes timestamps via time.RFC3339 but
+// the schema DEFAULTs use SQLite's `datetime('now')` which produces the
+// legacy `YYYY-MM-DD HH:MM:SS` format. Rows created by relying on the
+// DEFAULT end up in a different format than rows written by app code, and
+// text-based ORDER BY sorts them wrong (' ' < 'T'). The backfill migration
+// normalizes all legacy rows to RFC3339 in place.
+//
+// The test exercises three properties: (1) legacy rows are converted,
+// (2) already-RFC3339 rows are left alone, (3) the migration is idempotent
+// (running it twice is a no-op).
+func TestMigrationBackfillLegacyTimestamps(t *testing.T) {
+	dir := t.TempDir()
+	db, err := Open("file:" + filepath.Join(dir, "backfill.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	if err := Migrate(context.Background(), db.DB, logger); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// At this point all migrations (including 44) have already run. Insert
+	// synthetic legacy-format rows AFTER the fact to simulate data that was
+	// created before the backfill ever ran, then re-run the migration body
+	// directly against the DB to test its logic in isolation.
+	_, err = db.Exec(`INSERT INTO users (id, email, created_at, updated_at) VALUES
+		('u-legacy', 'legacy@example.com', '2026-04-10 12:34:56', '2026-04-10 13:00:00'),
+		('u-rfc3339', 'rfc@example.com',  '2026-04-10T12:34:56Z', '2026-04-10T13:00:00Z')`)
+	if err != nil {
+		t.Fatalf("seed users: %v", err)
+	}
+
+	// Run the backfill directly via a fresh transaction (migration 44 is
+	// already recorded, so we can't re-run through Migrate).
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := migrationBackfillLegacyTimestamps(context.Background(), tx, logger); err != nil {
+		tx.Rollback()
+		t.Fatalf("backfill: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	// Legacy row is now RFC3339.
+	var legacyCreated, legacyUpdated string
+	err = db.QueryRow(`SELECT created_at, updated_at FROM users WHERE id = 'u-legacy'`).Scan(&legacyCreated, &legacyUpdated)
+	if err != nil {
+		t.Fatalf("read legacy: %v", err)
+	}
+	if legacyCreated != "2026-04-10T12:34:56Z" {
+		t.Errorf("legacy created_at = %q, want 2026-04-10T12:34:56Z", legacyCreated)
+	}
+	if legacyUpdated != "2026-04-10T13:00:00Z" {
+		t.Errorf("legacy updated_at = %q, want 2026-04-10T13:00:00Z", legacyUpdated)
+	}
+
+	// RFC3339 row was NOT touched (idempotency property 1: already-normalized
+	// rows stay exactly as they were, no spurious 'Z' appended).
+	var rfcCreated, rfcUpdated string
+	err = db.QueryRow(`SELECT created_at, updated_at FROM users WHERE id = 'u-rfc3339'`).Scan(&rfcCreated, &rfcUpdated)
+	if err != nil {
+		t.Fatalf("read rfc3339: %v", err)
+	}
+	if rfcCreated != "2026-04-10T12:34:56Z" {
+		t.Errorf("rfc3339 created_at corrupted: %q", rfcCreated)
+	}
+	if rfcUpdated != "2026-04-10T13:00:00Z" {
+		t.Errorf("rfc3339 updated_at corrupted: %q", rfcUpdated)
+	}
+
+	// Run the backfill a second time — it must be a pure no-op.
+	tx2, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin tx2: %v", err)
+	}
+	if err := migrationBackfillLegacyTimestamps(context.Background(), tx2, logger); err != nil {
+		tx2.Rollback()
+		t.Fatalf("second backfill: %v", err)
+	}
+	if err := tx2.Commit(); err != nil {
+		t.Fatalf("commit2: %v", err)
+	}
+
+	var legacyCreatedAfter string
+	if err := db.QueryRow(`SELECT created_at FROM users WHERE id = 'u-legacy'`).Scan(&legacyCreatedAfter); err != nil {
+		t.Fatalf("read after second run: %v", err)
+	}
+	if legacyCreatedAfter != legacyCreated {
+		t.Errorf("second run mutated row: %q -> %q", legacyCreated, legacyCreatedAfter)
+	}
+}
+
+// TestIsSafeIdent guards the conservative identifier filter used by the
+// backfill migration. If this ever starts accepting funky characters we
+// could wind up interpolating user-supplied garbage into dynamic SQL.
+func TestIsSafeIdent(t *testing.T) {
+	valid := []string{"users", "workspace_members", "A", "ab12", "_test"}
+	invalid := []string{"", "1users", "users;DROP", "user's", "user name", "user-name", "users.col"}
+
+	// "_test" starts with underscore but letter rules allow underscore as a
+	// valid leading char; we're not filtering _-prefixed tables here (that's
+	// done separately in the sqlite_master query).
+	for _, s := range valid {
+		if !isSafeIdent(s) {
+			t.Errorf("isSafeIdent(%q) = false, want true", s)
+		}
+	}
+	for _, s := range invalid {
+		if isSafeIdent(s) {
+			t.Errorf("isSafeIdent(%q) = true, want false", s)
+		}
+	}
+}
+
+// TestIsTimestampColumnName guards the column-name heuristic. Adjust with
+// care: loosening it risks the backfill touching a non-timestamp column that
+// happens to contain a date-shaped string; tightening it risks missing real
+// timestamp columns added by future migrations.
+func TestIsTimestampColumnName(t *testing.T) {
+	timestamps := []string{
+		"created_at", "updated_at", "deleted_at", "started_at",
+		"ended_at", "finished_at", "completed_at", "last_used_at",
+		"token_expires_at", "resolved_at", "expires",
+	}
+	others := []string{
+		"id", "name", "email", "password", "description", "expires_in",
+		"at_most", "created", // "created" without _at suffix
+	}
+	for _, n := range timestamps {
+		if !isTimestampColumnName(n) {
+			t.Errorf("isTimestampColumnName(%q) = false, want true", n)
+		}
+	}
+	for _, n := range others {
+		if isTimestampColumnName(n) {
+			t.Errorf("isTimestampColumnName(%q) = true, want false", n)
+		}
+	}
+}

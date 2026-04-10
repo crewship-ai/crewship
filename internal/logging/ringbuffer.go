@@ -98,7 +98,18 @@ type RingHandler struct {
 
 // NewRingHandler creates a RingHandler that captures records into buffer
 // while forwarding them to the inner handler.
+//
+// Panics if inner or buffer is nil, matching NewRingBuffer's fail-fast style.
+// Enabled dereferences inner and Handle dereferences both — a later runtime
+// panic deep inside a logging call would be much harder to diagnose than a
+// loud failure at construction time.
 func NewRingHandler(inner slog.Handler, buffer *RingBuffer) *RingHandler {
+	if inner == nil {
+		panic("logging: NewRingHandler inner handler must not be nil")
+	}
+	if buffer == nil {
+		panic("logging: NewRingHandler buffer must not be nil")
+	}
 	return &RingHandler{inner: inner, buffer: buffer}
 }
 
