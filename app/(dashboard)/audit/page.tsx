@@ -108,7 +108,13 @@ export default function AuditPage() {
 
   const fetchLogs = useCallback(
     async (opts?: { silent?: boolean }) => {
-      if (!workspaceId) return
+      if (!workspaceId) {
+        // Clear loading flags so the empty-state / "select workspace" UI can
+        // render instead of an infinite skeleton once wsLoading flips false.
+        setLoading(false)
+        setRefreshing(false)
+        return
+      }
       const silent = opts?.silent ?? false
       if (silent) setRefreshing(true)
       else setLoading(true)
@@ -304,11 +310,8 @@ export default function AuditPage() {
         </div>
       ) : (
         <div className="rounded-xl border border-border/60 bg-card overflow-hidden">
-          {/* Header row */}
-          <div
-            className="hidden md:grid items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 border-b border-border/60"
-            style={{ gridTemplateColumns: "16px 140px minmax(0,1fr) minmax(0,1.4fr) minmax(0,1.2fr)" }}
-          >
+          {/* Header row — md and up only */}
+          <div className="hidden md:grid md:grid-cols-[16px_140px_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1.2fr)] items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 border-b border-border/60">
             <div />
             <div>Time</div>
             <div>User</div>
@@ -316,7 +319,7 @@ export default function AuditPage() {
             <div>Entity</div>
           </div>
 
-          {/* Rows */}
+          {/* Rows — mobile: stacked column; md+: 5-col grid */}
           <div>
             {filteredLogs.map((log) => {
               const isExpanded = expandedId === log.id
@@ -326,17 +329,14 @@ export default function AuditPage() {
                     type="button"
                     onClick={() => setExpandedId(isExpanded ? null : log.id)}
                     className={cn(
-                      "grid items-center gap-3 w-full px-4 py-2 text-left transition-colors border-b border-border/40 last:border-b-0",
+                      "flex flex-col gap-1 md:grid md:grid-cols-[16px_140px_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1.2fr)] md:items-center md:gap-3 w-full px-4 py-2.5 text-left transition-colors border-b border-border/40 last:border-b-0",
                       "hover:bg-white/[0.02]",
                       isExpanded && "bg-white/[0.03]",
                     )}
-                    style={{
-                      gridTemplateColumns: "16px 140px minmax(0,1fr) minmax(0,1.4fr) minmax(0,1.2fr)",
-                    }}
                   >
                     <ChevronRight
                       className={cn(
-                        "h-3 w-3 text-muted-foreground/60 transition-transform",
+                        "hidden md:block h-3 w-3 text-muted-foreground/60 transition-transform",
                         isExpanded && "rotate-90 text-foreground",
                       )}
                     />
@@ -344,6 +344,7 @@ export default function AuditPage() {
                       {new Date(log.created_at).toLocaleString()}
                     </div>
                     <div className="text-xs text-foreground/80 truncate">
+                      <span className="md:hidden text-[10px] text-muted-foreground/60 mr-1">User:</span>
                       {log.user?.full_name ?? log.user?.email ?? (
                         <span className="text-muted-foreground/60">System</span>
                       )}
@@ -359,6 +360,7 @@ export default function AuditPage() {
                       </span>
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
+                      <span className="md:hidden text-[10px] text-muted-foreground/60 mr-1">Entity:</span>
                       {log.entity_type}
                       {log.entity_id && (
                         <span className="ml-1 font-mono text-[10px] text-muted-foreground/60">

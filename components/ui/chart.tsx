@@ -76,13 +76,15 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
     return null
   }
 
-  return (
-    <style
-      dangerouslySetInnerHTML={{
-        __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
+  // Escape the chart id before embedding it in a CSS attribute selector.
+  // Without this a caller-supplied id like `foo] .secret { color: red;` would
+  // break out of the selector and let arbitrary CSS rules through.
+  const safeChartId = CSS.escape(id)
+
+  const cssText = Object.entries(THEMES)
+    .map(
+      ([theme, prefix]) => `
+${prefix} [data-chart="${safeChartId}"] {
 ${colorConfig
   .map(([key, itemConfig]) => {
     const color =
@@ -94,11 +96,10 @@ ${colorConfig
   .join("\n")}
 }
 `
-          )
-          .join("\n"),
-      }}
-    />
-  )
+    )
+    .join("\n")
+
+  return <style>{cssText}</style>
 }
 
 const ChartTooltip = RechartsPrimitive.Tooltip
@@ -202,6 +203,17 @@ function ChartTooltipContent({
           return (
             <div
               key={item.dataKey}
+              // Setting `--color-bg`/`--color-border` on the row lets the
+              // indicator below consume them via Tailwind `bg-(--color-bg)` /
+              // `border-(--color-border)` classes. Runtime payload colors have
+              // no compile-time Tailwind class alternative, so the CSS var
+              // funnel lives on the parent instead of the indicator itself.
+              style={
+                {
+                  "--color-bg": indicatorColor,
+                  "--color-border": indicatorColor,
+                } as React.CSSProperties
+              }
               className={cn(
                 "[&>svg]:text-muted-foreground flex w-full flex-wrap items-stretch gap-2 [&>svg]:h-2.5 [&>svg]:w-2.5",
                 indicator === "dot" && "items-center"
@@ -226,12 +238,6 @@ function ChartTooltipContent({
                             "my-0.5": nestLabel && indicator === "dashed",
                           }
                         )}
-                        style={
-                          {
-                            "--color-bg": indicatorColor,
-                            "--color-border": indicatorColor,
-                          } as React.CSSProperties
-                        }
                       />
                     )
                   )}
@@ -301,6 +307,9 @@ function ChartLegendContent({
         return (
           <div
             key={item.value}
+            // Lift the payload color to a CSS var on the legend row so the
+            // swatch below can stay Tailwind-only via `bg-(--legend-color)`.
+            style={{ "--legend-color": item.color } as React.CSSProperties}
             className={cn(
               "[&>svg]:text-muted-foreground flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3"
             )}
@@ -308,10 +317,7 @@ function ChartLegendContent({
             {itemConfig?.icon && !hideIcon ? (
               <itemConfig.icon />
             ) : (
-              <div
-                className="h-2 w-2 shrink-0 rounded-[2px]"
-                style={{ backgroundColor: item.color }}
-              />
+              <div className="h-2 w-2 shrink-0 rounded-[2px] bg-(--legend-color)" />
             )}
             {itemConfig?.label}
           </div>
