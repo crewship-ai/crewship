@@ -54,6 +54,7 @@ type AgentRunRequest struct {
 	MCPServers         []MCPServerConfig // Resolved MCP server configs for this agent
 	CrewMCPConfigJSON  string            // Raw crew .mcp.json (merged with agent's at runtime)
 	AgentMCPConfigJSON string            // Raw agent .mcp.json additions
+	PreferredLanguage  string            // Workspace language (e.g. "Czech", "English")
 }
 
 // MCPServerConfig is a resolved MCP server ready for sidecar injection.
@@ -308,6 +309,11 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 		if memoryCtx != "" {
 			req.SystemPrompt = req.SystemPrompt + "\n\n" + memoryCtx
 		}
+	}
+
+	// Inject workspace language preference so agents respond in the right language
+	if req.PreferredLanguage != "" {
+		req.SystemPrompt = req.SystemPrompt + "\n\n[LANGUAGE]\nAlways respond and write comments in " + req.PreferredLanguage + ". All your output, summaries, and handoff descriptions must be in " + req.PreferredLanguage + ".\n[END LANGUAGE]"
 	}
 
 	o.logger.Info("system prompt assembled",

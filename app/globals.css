@@ -36,7 +36,7 @@
   --sidebar-accent-foreground: oklch(0.5729 0.2337 264.3664);
   --sidebar-border: oklch(1.0000 0 0);
   --sidebar-ring: oklch(0.5784 0.2303 263.8862);
-  --font-sans: Open Sans, sans-serif;
+  --font-sans: "Open Sans", ui-sans-serif, sans-serif, system-ui;
   --font-serif: Georgia, serif;
   --font-mono: Menlo, monospace;
   --radius: 1.3rem;
@@ -55,7 +55,7 @@
   --shadow-xl: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00), -50px 8px 10px -51px hsl(222.7751 100% 59.0196% / 0.00);
   --shadow-2xl: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00);
   --tracking-normal: 0em;
-  --spacing: 0.25rem;
+  --spacing: 0.23rem;
 
   /* ── Typography scale (single source of truth) ──
      Change these values to globally resize all UI text.
@@ -78,39 +78,39 @@
 }
 
 .dark {
-  --background: oklch(0.2085 0.0118 292.99);
+  --background: oklch(0.2085 0.0118 292.9883);
   --foreground: oklch(1.0000 0 0);
-  --card: oklch(0.2597 0.0112 293.25);
+  --card: oklch(0.2597 0.0112 293.2523);
   --card-foreground: oklch(0.8853 0 0);
-  --popover: oklch(0 0 0);
+  --popover: oklch(0.2085 0.0118 292.9883);
   --popover-foreground: oklch(1.0000 0 0);
-  --primary: oklch(0.5683 0.2366 264.2478);
+  --primary: oklch(0.6230 0.2140 259.8150);
   --primary-foreground: oklch(1.0000 0 0);
   --secondary: oklch(1.0000 0 0);
-  --secondary-foreground: oklch(0.1994 0.0470 270.6494);
+  --secondary-foreground: oklch(0.2085 0.0118 292.9883);
   --muted: oklch(0.2090 0 0);
   --muted-foreground: oklch(0.5953 0.0215 276.1101);
-  --accent: oklch(0.1880 0.0868 261.9799);
-  --accent-foreground: oklch(0.5683 0.2366 264.2478);
+  --accent: oklch(0.3255 0.0108 300.9584);
+  --accent-foreground: oklch(1.0000 0 0);
   --destructive: oklch(0.7058 0.1918 39.5760);
   --destructive-foreground: oklch(1.0000 0 0);
-  --border: oklch(0.2746 0.0130 279.0717);
-  --input: oklch(0.2697 0.0888 269.7716);
-  --ring: oklch(0.5784 0.2303 263.8862);
+  --border: oklch(0.3323 0.0105 293.4709);
+  --input: oklch(0.4266 0.0082 295.2222);
+  --ring: oklch(0.6187 0.2067 259.2316);
   --chart-1: oklch(0.5729 0.2337 264.3664);
   --chart-2: oklch(0.7677 0.1312 194.1427);
   --chart-3: oklch(0.9649 0.1962 111.4216);
   --chart-4: oklch(0.8439 0.1679 169.5646);
   --chart-5: oklch(0.6411 0.2446 28.5713);
-  --sidebar: oklch(0.2597 0.0112 293.25);
-  --sidebar-foreground: oklch(0.8853 0 0);
-  --sidebar-primary: oklch(0.5784 0.2303 263.8862);
-  --sidebar-primary-foreground: oklch(1.0000 0 0);
-  --sidebar-accent: oklch(0.1880 0.0868 261.9799);
-  --sidebar-accent-foreground: oklch(0.5683 0.2366 264.2478);
-  --sidebar-border: oklch(0.3706 0.0642 269.1117);
-  --sidebar-ring: oklch(0.5784 0.2303 263.8862);
-  --font-sans: Open Sans, sans-serif;
+  --sidebar: oklch(0.2597 0.0112 293.2523);
+  --sidebar-foreground: oklch(1.0000 0 0);
+  --sidebar-primary: oklch(1.0000 0 0);
+  --sidebar-primary-foreground: oklch(0.2085 0.0118 292.9883);
+  --sidebar-accent: oklch(0.3284 0.0105 293.4619);
+  --sidebar-accent-foreground: oklch(1.0000 0 0);
+  --sidebar-border: oklch(0.6299 0.2557 28.9883);
+  --sidebar-ring: oklch(0.6187 0.2067 259.2316);
+  --font-sans: "Open Sans", ui-sans-serif, sans-serif, system-ui;
   --font-serif: Georgia, serif;
   --font-mono: Menlo, monospace;
   --radius: 1.3rem;
@@ -318,4 +318,35 @@ body {
 @keyframes edgeFlowSlow {
   from { stroke-dashoffset: 20; }
   to { stroke-dashoffset: 0; }
+}
+
+/* Active agent indicators — pulsing glow for IN_PROGRESS issues */
+@keyframes agent-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.12); }
+  50% { box-shadow: 0 0 12px 2px rgba(59, 130, 246, 0.22); }
+}
+
+@keyframes agent-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.4); }
+}
+
+.agent-active-card {
+  animation: agent-pulse 2.5s ease-in-out infinite;
+}
+
+.agent-active-dot {
+  animation: agent-dot-pulse 2s ease-in-out infinite;
+}
+
+/*
+ * Respect the user's motion preference — infinite pulse animations can
+ * trigger vestibular symptoms. The color/border cue still communicates
+ * "active" without movement.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .agent-active-card,
+  .agent-active-dot {
+    animation: none;
+  }
 }

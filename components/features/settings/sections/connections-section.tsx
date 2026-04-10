@@ -12,6 +12,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/layout/empty-state"
 import { cn } from "@/lib/utils"
+import { resolveCrewColor } from "@/lib/colors"
 import { toast } from "sonner"
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -42,16 +43,6 @@ interface ConnectionsSectionProps {
 
 // ─── Constants ──────────────────────────────────────────────────────
 
-const crewColorMap: Record<string, string> = {
-  blue: "#3b82f6",
-  emerald: "#10b981",
-  violet: "#8b5cf6",
-  amber: "#f59e0b",
-  rose: "#f43f5e",
-  cyan: "#06b6d4",
-  lime: "#84cc16",
-  fuchsia: "#d946ef",
-}
 
 // ─── Row ────────────────────────────────────────────────────────────
 
@@ -80,7 +71,7 @@ function Row({ label, description, children, border = true }: {
 // ─── Crew dot ───────────────────────────────────────────────────────
 
 function CrewDot({ color }: { color?: string | null }) {
-  const hex = crewColorMap[color ?? ""] ?? "#6b7280"
+  const hex = resolveCrewColor(color)
   return (
     <span
       className="inline-block size-2 rounded-full shrink-0"

@@ -179,6 +179,18 @@ export interface Project {
 }
 
 /** A time-bound milestone within a project, used to track delivery phases. */
+
+/** Aggregated statistics for a project's issues. */
+export interface ProjectStats {
+  total_issues: number
+  completed_issues: number
+  by_status: Record<string, number>
+  by_assignee: { agent_id: string; agent_name: string; total: number; completed: number }[]
+  by_label: { label_name: string; color: string; count: number }[]
+  crews: string[]
+}
+
+/** A milestone within a project, used to group issues by target date. */
 export interface Milestone {
   id: string
   project_id: string

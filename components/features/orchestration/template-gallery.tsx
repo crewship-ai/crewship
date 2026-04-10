@@ -2,15 +2,23 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { toast } from "sonner"
 import {
   LayoutTemplate,
   ArrowRight,
   GitBranch,
   Repeat,
   GitMerge,
-  Wrench,
+  Plus,
+  X,
+  Loader2,
+  Trash2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { CREW_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 import type { WorkflowTemplate, TemplateDefinition } from "@/lib/types/template"
 
 interface TemplateGalleryProps {
@@ -25,9 +33,9 @@ const iconMap: Record<string, React.ElementType> = {
 }
 
 const stepColors = {
-  default: { fill: "#3b82f6", border: "#2563eb", text: "#93c5fd" },
-  loop: { fill: "#10b981", border: "#059669", text: "#6ee7b7" },
-  lead: { fill: "#8b5cf6", border: "#7c3aed", text: "#c4b5fd" },
+  default: { fill: CREW_COLORS.blue, border: "#2563eb", text: "#93c5fd" },
+  loop: { fill: CREW_COLORS.emerald, border: "#059669", text: "#6ee7b7" },
+  lead: { fill: CREW_COLORS.violet, border: "#7c3aed", text: "#c4b5fd" },
 }
 
 function TemplateMiniGraph({ steps }: { steps: TemplateDefinition["steps"] }) {
@@ -76,7 +84,7 @@ function TemplateMiniGraph({ steps }: { steps: TemplateDefinition["steps"] }) {
     <svg width="100%" height={svgH} viewBox={`0 0 ${svgW} ${svgH}`} className="overflow-visible">
       <defs>
         <marker id="tmpl-arrow" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto">
-          <path d="M0,0 L6,2 L0,4" fill="#3b82f6" opacity="0.6" />
+          <path d="M0,0 L6,2 L0,4" fill={CREW_COLORS.blue} opacity="0.6" />
         </marker>
       </defs>
 
@@ -96,7 +104,7 @@ function TemplateMiniGraph({ steps }: { steps: TemplateDefinition["steps"] }) {
               key={`e-${depId}-${step.id}`}
               d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`}
               fill="none"
-              stroke="#3b82f6"
+              stroke={CREW_COLORS.blue}
               strokeWidth={1.5}
               strokeDasharray="4 3"
               strokeOpacity={0.4}
@@ -158,6 +166,7 @@ function TemplateMiniGraph({ steps }: { steps: TemplateDefinition["steps"] }) {
 export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([])
   const [loading, setLoading] = useState(true)
+  const [editorOpen, setEditorOpen] = useState(false)
 
   const fetchTemplates = useCallback(async () => {
     try {
@@ -191,23 +200,23 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
 
   return (
     <div className="space-y-5">
-      {/* Phase 2 banner */}
-      <div className="flex items-center gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3">
-        <Wrench className="h-4 w-4 shrink-0 text-amber-500" />
-        <p className="text-sm text-amber-200/80">
-          Workflow templates are <span className="font-medium text-amber-200">read-only previews</span>. Custom template editor coming in Phase 2.
-        </p>
-      </div>
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           {templates.length} template{templates.length !== 1 ? "s" : ""} available
         </p>
-        <Badge variant="outline" className="text-xs text-muted-foreground">
-          Coming soon
-        </Badge>
+        <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={() => setEditorOpen(true)}>
+          <Plus className="h-3 w-3" /> New Template
+        </Button>
       </div>
+
+      {editorOpen && (
+        <TemplateEditor
+          workspaceId={workspaceId}
+          onClose={() => setEditorOpen(false)}
+          onCreated={() => { setEditorOpen(false); fetchTemplates() }}
+        />
+      )}
 
       {/* Grid */}
       {templates.length === 0 ? (
@@ -237,13 +246,30 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
                   "hover:scale-[1.01]"
                 )}
               >
+                {/* Delete button (custom templates only) */}
+                {!tmpl.is_builtin && (
+                  <button
+                    type="button"
+                    aria-label={`Delete template ${tmpl.name}`}
+                    className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+                    onClick={async () => {
+                      if (!window.confirm(`Delete template "${tmpl.name}"?`)) return
+                      const res = await fetch(`/api/v1/templates/${tmpl.id}?workspace_id=${workspaceId}`, { method: "DELETE" })
+                      if (res.ok) { toast.success("Template deleted"); fetchTemplates() }
+                      else toast.error("Failed to delete template")
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                )}
+
                 {/* Header */}
                 <div className="flex items-center gap-2.5 mb-3">
                   <div
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                    style={{ backgroundColor: (tmpl.color || "#6b7280") + "18" }}
+                    style={{ backgroundColor: (tmpl.color || CREW_COLOR_DEFAULT) + "18" }}
                   >
-                    <Icon className="h-4 w-4" style={{ color: tmpl.color || "#6b7280" }} />
+                    <Icon className="h-4 w-4" style={{ color: tmpl.color || CREW_COLOR_DEFAULT }} />
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">
@@ -289,6 +315,158 @@ export function TemplateGallery({ workspaceId }: TemplateGalleryProps) {
           })}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Template Editor ──
+
+interface TemplateEditorProps {
+  workspaceId: string
+  onClose: () => void
+  onCreated: () => void
+}
+
+interface StepDraft {
+  id: string
+  title: string
+  agent_role: string
+  depends_on: string[]
+}
+
+function TemplateEditor({ workspaceId, onClose, onCreated }: TemplateEditorProps) {
+  const [name, setName] = useState("")
+  const [description, setDescription] = useState("")
+  const [steps, setSteps] = useState<StepDraft[]>([
+    { id: "step-1", title: "", agent_role: "", depends_on: [] },
+  ])
+  const [saving, setSaving] = useState(false)
+
+  const addStep = () => {
+    const nextNumber =
+      Math.max(0, ...steps.map((s) => Number(s.id.replace(/^step-/, "")) || 0)) + 1
+    const id = `step-${nextNumber}`
+    const prev = steps[steps.length - 1]
+    setSteps([...steps, { id, title: "", agent_role: "", depends_on: prev ? [prev.id] : [] }])
+  }
+
+  const removeStep = (idx: number) => {
+    const removed = steps[idx]
+    setSteps(steps.filter((_, i) => i !== idx).map((s) => ({
+      ...s,
+      depends_on: s.depends_on.filter((d) => d !== removed.id),
+    })))
+  }
+
+  const updateStep = (idx: number, field: keyof StepDraft, value: string | string[]) => {
+    setSteps(steps.map((s, i) => i === idx ? { ...s, [field]: value } : s))
+  }
+
+  const handleSave = async () => {
+    if (!name.trim()) { toast.error("Template name is required"); return }
+    if (steps.some((s) => !s.title.trim())) { toast.error("All steps need a title"); return }
+
+    setSaving(true)
+    try {
+      const body = {
+        name: name.trim(),
+        description: description.trim() || null,
+        template_json: {
+          name: name.trim(),
+          description: description.trim(),
+          steps: steps.map((s) => ({
+            id: s.id,
+            title: s.title,
+            agent_role: s.agent_role || "AGENT",
+            depends_on: s.depends_on,
+          })),
+        },
+      }
+      const res = await fetch(`/api/v1/templates?workspace_id=${workspaceId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (res.ok) {
+        toast.success("Template created")
+        onCreated()
+      } else {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error || "Failed to create template")
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium">New Workflow Template</p>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close editor"
+          className="p-1 rounded hover:bg-accent text-muted-foreground"
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <Label className="text-xs">Name</Label>
+          <Input className="h-8 text-sm" placeholder="e.g. Code Review Pipeline" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Description</Label>
+          <Input className="h-8 text-sm" placeholder="Optional description" value={description} onChange={(e) => setDescription(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">Steps</Label>
+          <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={addStep}>
+            <Plus className="h-3 w-3" /> Add Step
+          </Button>
+        </div>
+        {steps.map((step, idx) => (
+          <div key={step.id} className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 border border-border/50">
+            <span className="text-micro text-muted-foreground w-5 shrink-0 text-center">{idx + 1}</span>
+            <Input
+              className="h-7 text-xs flex-1"
+              placeholder="Step title"
+              value={step.title}
+              onChange={(e) => updateStep(idx, "title", e.target.value)}
+            />
+            <Input
+              className="h-7 text-xs w-24"
+              placeholder="Role"
+              value={step.agent_role}
+              onChange={(e) => updateStep(idx, "agent_role", e.target.value)}
+            />
+            {steps.length > 1 && (
+              <button
+                type="button"
+                aria-label={`Remove step ${idx + 1}`}
+                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                onClick={() => removeStep(idx)}
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onClose}>Cancel</Button>
+        <Button size="sm" className="h-7 text-xs gap-1.5" onClick={handleSave} disabled={saving}>
+          {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+          Create Template
+        </Button>
+      </div>
     </div>
   )
 }

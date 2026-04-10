@@ -22,6 +22,7 @@ import { useWorkspace } from "@/hooks/use-workspace"
 import { useTick } from "@/hooks/use-tick"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
+import { formatRelativeTime } from "@/lib/time"
 import { getCrewDotColor } from "@/lib/crew-icon"
 import type { Mission } from "@/lib/types/mission"
 
@@ -104,17 +105,6 @@ function formatCost(cost: number): string {
   if (cost === 0) return "$0.00"
   if (cost < 0.01) return "<$0.01"
   return `$${cost.toFixed(2)}`
-}
-
-function formatTimeAgo(ts: string): string {
-  const seconds = Math.floor((Date.now() - new Date(ts).getTime()) / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
 }
 
 export default function DashboardPage() {
@@ -525,7 +515,7 @@ export default function DashboardPage() {
                       </TableCell>
                       <TableCell>
                         <span className="text-body text-muted-foreground">
-                          {formatTimeAgo(mission.updated_at)}
+                          {formatRelativeTime(mission.updated_at)}
                           {duration !== null && (
                             <span className="text-label ml-1">({formatDuration(duration)})</span>
                           )}
@@ -644,7 +634,7 @@ export default function DashboardPage() {
                           <div className="flex items-center gap-1.5">
                             {RunIcon && <RunIcon className="h-3.5 w-3.5 text-muted-foreground" />}
                             <span className="text-body text-muted-foreground">
-                              {runCfg!.label} {formatTimeAgo(lastRun.started_at ?? lastRun.created_at)}
+                              {runCfg!.label} {formatRelativeTime(lastRun.started_at ?? lastRun.created_at)}
                             </span>
                           </div>
                         ) : (

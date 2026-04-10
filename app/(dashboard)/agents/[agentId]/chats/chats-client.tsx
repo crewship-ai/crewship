@@ -8,18 +8,10 @@ import { Plus, MessageSquare, AlertCircle, Inbox } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { formatRelativeTime } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
-
-interface Session {
-  id: string
-  title: string | null
-  mode: string
-  status: string
-  message_count: number
-  started_at: string
-  ended_at: string | null
-}
+import type { Session } from "@/lib/types/agent"
 
 const STATUS_STYLES: Record<string, string> = {
   ACTIVE: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
@@ -39,17 +31,6 @@ function formatDuration(start: string, end: string | null): string {
     return remaining > 0 ? `${hours}h ${remaining}m` : `${hours}h`
   }
   return `${minutes}m`
-}
-
-function formatRelativeTime(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return "Just now"
-  if (minutes < 60) return `${minutes} min ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return days === 1 ? "Yesterday" : `${days}d ago`
 }
 
 export function SessionsPageClient() {

@@ -18,29 +18,12 @@ import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useRealtimeEvent, useRealtimeChannel } from "@/hooks/use-realtime"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+import type { FileEntry, TreeNode } from "@/lib/types/agent"
 
 const FileEditor = dynamic(() => import("@/components/features/files/file-editor").then((m) => ({ default: m.FileEditor })), {
   ssr: false,
   loading: () => <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>,
 })
-
-interface FileEntry {
-  path: string
-  name: string
-  size: number
-  is_dir: boolean
-  mod_time: string
-}
-
-interface TreeNode {
-  path: string
-  name: string
-  size: number
-  is_dir: boolean
-  mod_time: string
-  children: TreeNode[]
-  childrenLoaded?: boolean
-}
 
 function sortNodes(nodes: TreeNode[]) {
   nodes.sort((a, b) => {
@@ -241,6 +224,21 @@ export function FilesPageClient() {
   const [loadingContent, setLoadingContent] = useState(false)
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set())
+  const [activeFileTab, setActiveFileTab] = useState<"home" | "container" | "git">("home")
+  const [containerFiles, setContainerFiles] = useState<FileEntry[]>([])
+  const [containerLoading, setContainerLoading] = useState(false)
+  // containerLoaded / containerError disambiguate "not yet fetched",
+  // "loaded successfully (possibly empty)", and "fetch failed". Without
+  // these, the tab falls back to treating length-0 as "not loaded" — so a
+  // real empty container would re-fetch on every tab click, and a failed
+  // fetch would show the same "No container files" empty state as a
+  // successful empty response, hiding the error entirely.
+  const [containerLoaded, setContainerLoaded] = useState(false)
+  const [containerError, setContainerError] = useState<string | null>(null)
+  const [gitCommits, setGitCommits] = useState<{ hash: string; message: string; author: string; date: string }[]>([])
+  const [gitLoading, setGitLoading] = useState(false)
+  const [gitLoaded, setGitLoaded] = useState(false)
+  const [gitError, setGitError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [copied, setCopied] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -248,10 +246,29 @@ export function FilesPageClient() {
   const [saving, setSaving] = useState(false)
   const editorSaveRef = useRef<(() => void) | null>(null)
   const fileAbortRef = useRef<AbortController | null>(null)
+  const containerAbortRef = useRef<AbortController | null>(null)
+  const gitAbortRef = useRef<AbortController | null>(null)
   const fetchFilesRef = useRef<(() => void) | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useRealtimeChannel(crewId ? `crew:${crewId}` : null)
+
+  useEffect(() => {
+    containerAbortRef.current?.abort()
+    containerAbortRef.current = null
+    gitAbortRef.current?.abort()
+    gitAbortRef.current = null
+    setActiveFileTab("home")
+    setContainerFiles([])
+    setContainerLoading(false)
+    setContainerLoaded(false)
+    setContainerError(null)
+    setGitCommits([])
+    setGitLoading(false)
+    setGitLoaded(false)
+    setGitError(null)
+    setSearch("")
+  }, [agentId, workspaceId])
 
   useEffect(() => {
     if (wsLoading) return
@@ -303,6 +320,9 @@ export function FilesPageClient() {
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
+      fileAbortRef.current?.abort()
+      containerAbortRef.current?.abort()
+      gitAbortRef.current?.abort()
     }
   }, [])
 
@@ -448,8 +468,54 @@ export function FilesPageClient() {
         </div>
 
         <div className="flex items-center gap-1 border-b shrink-0 px-3 py-1.5">
-          <button className="px-2.5 py-1 text-micro font-medium rounded-md bg-accent text-foreground">Agent Home</button>
-          <button className="px-2.5 py-1 text-micro text-muted-foreground/40 rounded-md cursor-not-allowed" title="Coming soon">Container</button>
+          <button
+            className={cn("px-2.5 py-1 text-micro font-medium rounded-md", activeFileTab === "home" ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent")}
+            onClick={() => setActiveFileTab("home")}
+          >Agent Home</button>
+          <button
+            disabled={!crewId}
+            className={cn(
+              "px-2.5 py-1 text-micro rounded-md",
+              activeFileTab === "container" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent",
+              !crewId && "opacity-50 cursor-not-allowed hover:bg-transparent",
+            )}
+            title={crewId ? "Browse container filesystem" : "No crew assigned"}
+            onClick={() => {
+              if (!crewId) return
+              setActiveFileTab("container")
+              // Only fetch if we haven't fetched yet AND aren't currently
+              // fetching. If a previous attempt failed, containerError is
+              // set and the user can click Retry from the error UI to
+              // re-attempt — we do NOT auto-retry on tab click because
+              // repeated clicks would spam a broken backend.
+              if (!containerLoaded && !containerLoading && !containerError && workspaceId) {
+                containerAbortRef.current?.abort()
+                const ac = new AbortController()
+                containerAbortRef.current = ac
+                setContainerLoading(true)
+                setContainerError(null)
+                fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, { signal: ac.signal })
+                  .then((r) => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                    return r.json()
+                  })
+                  .then((data) => {
+                    if (!ac.signal.aborted) {
+                      setContainerFiles(Array.isArray(data) ? data : [])
+                      setContainerLoaded(true)
+                    }
+                  })
+                  .catch((err: unknown) => {
+                    if (err instanceof Error && err.name === "AbortError") return
+                    setContainerError(err instanceof Error ? err.message : "Failed to load container files")
+                    toast.error("Failed to load container files")
+                  })
+                  .finally(() => {
+                    if (!ac.signal.aborted) setContainerLoading(false)
+                  })
+              }
+            }}
+          >Container</button>
           <button
             className={cn(
               "px-2.5 py-1 text-micro rounded-md",
@@ -458,45 +524,227 @@ export function FilesPageClient() {
             title={crewId ? "Browse all crew files" : "No crew assigned"}
             onClick={() => crewId && router.push(`/crews/${crewId}/files`)}
           >Crew</button>
-          <button className="px-2.5 py-1 text-micro text-muted-foreground/40 rounded-md cursor-not-allowed flex items-center gap-1" title="Coming soon">
-            <GitBranch className="h-3 w-3" /> Git
-          </button>
+          <button
+            disabled={!crewId}
+            className={cn(
+              "px-2.5 py-1 text-micro rounded-md flex items-center gap-1",
+              activeFileTab === "git" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent",
+              !crewId && "opacity-50 cursor-not-allowed hover:bg-transparent",
+            )}
+            title={crewId ? "View git history" : "No crew assigned"}
+            onClick={() => {
+              if (!crewId) return
+              setActiveFileTab("git")
+              // See containerLoaded/containerError comment above — same
+              // three-state logic (not-loaded / loaded / error) avoids
+              // re-fetching on every tab click and surfaces failures.
+              if (!gitLoaded && !gitLoading && !gitError && workspaceId) {
+                gitAbortRef.current?.abort()
+                const ac = new AbortController()
+                gitAbortRef.current = ac
+                setGitLoading(true)
+                setGitError(null)
+                fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, { signal: ac.signal })
+                  .then((r) => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                    return r.json()
+                  })
+                  .then((data) => {
+                    if (!ac.signal.aborted) {
+                      setGitCommits(Array.isArray(data) ? data : [])
+                      setGitLoaded(true)
+                    }
+                  })
+                  .catch((err: unknown) => {
+                    if (err instanceof Error && err.name === "AbortError") return
+                    setGitError(err instanceof Error ? err.message : "Failed to load git log")
+                    toast.error("Failed to load git log")
+                  })
+                  .finally(() => {
+                    if (!ac.signal.aborted) setGitLoading(false)
+                  })
+              }
+            }}
+          ><GitBranch className="h-3 w-3" /> Git</button>
         </div>
 
-        <div className="px-3 py-2 shrink-0">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <input
-              className="w-full h-7 rounded-md border bg-card pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
-              placeholder="Filter files..."
-              aria-label="Filter files"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-        </div>
+        {activeFileTab === "home" && (
+          <>
+            <div className="px-3 py-2 shrink-0">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <input
+                  className="w-full h-7 rounded-md border bg-card pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+                  placeholder="Filter files..."
+                  aria-label="Filter files"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+            </div>
 
-        {tree.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
-            <Inbox className="h-10 w-10 text-muted-foreground/40 mb-3" />
-            <p className="text-body font-medium text-muted-foreground">No files yet</p>
-            <p className="text-label text-muted-foreground mt-1">Files created by the agent will appear here.</p>
-          </div>
-        ) : (
+            {tree.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4">
+                <Inbox className="h-10 w-10 text-muted-foreground/40 mb-3" />
+                <p className="text-body font-medium text-muted-foreground">No files yet</p>
+                <p className="text-label text-muted-foreground mt-1">Files created by the agent will appear here.</p>
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto">
+                {filteredTree.map((node) => (
+                  <TreeNodeRow key={node.path} node={node} depth={0} selectedPath={selectedPath} expandedPaths={expandedPaths} loadingDirs={loadingDirs} onSelect={openFile} onToggle={toggleFolder} />
+                ))}
+                {filteredTree.length === 0 && search && (
+                  <p className="px-4 py-8 text-label text-muted-foreground text-center">No files matching &ldquo;{search}&rdquo;</p>
+                )}
+              </div>
+            )}
+
+            <div className="px-3 py-2 border-t text-micro text-muted-foreground flex items-center justify-between shrink-0">
+              <span>{fileCount} file{fileCount !== 1 ? "s" : ""}, {dirCount} folder{dirCount !== 1 ? "s" : ""} · {fmtSize(totalBytes)}</span>
+              <span>/output/</span>
+            </div>
+          </>
+        )}
+
+        {activeFileTab === "container" && (
           <div className="flex-1 overflow-y-auto">
-            {filteredTree.map((node) => (
-              <TreeNodeRow key={node.path} node={node} depth={0} selectedPath={selectedPath} expandedPaths={expandedPaths} loadingDirs={loadingDirs} onSelect={openFile} onToggle={toggleFolder} />
-            ))}
-            {filteredTree.length === 0 && search && (
-              <p className="px-4 py-8 text-label text-muted-foreground text-center">No files matching &ldquo;{search}&rdquo;</p>
+            {containerLoading ? (
+              <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : containerError ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12" role="alert">
+                <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" aria-hidden="true" />
+                <p className="text-body font-medium text-destructive">Failed to load container files</p>
+                <p className="text-label text-muted-foreground mt-1 mb-3">{containerError}</p>
+                <button
+                  type="button"
+                  className="text-label text-primary hover:underline"
+                  onClick={() => {
+                    // Clear the error and the loaded flag so the tab's
+                    // onClick handler will re-issue the fetch on next click,
+                    // OR refetch immediately here.
+                    setContainerError(null)
+                    setContainerLoaded(false)
+                    if (!workspaceId) return
+                    containerAbortRef.current?.abort()
+                    const ac = new AbortController()
+                    containerAbortRef.current = ac
+                    setContainerLoading(true)
+                    fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, { signal: ac.signal })
+                      .then((r) => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                        return r.json()
+                      })
+                      .then((data) => {
+                        if (!ac.signal.aborted) {
+                          setContainerFiles(Array.isArray(data) ? data : [])
+                          setContainerLoaded(true)
+                        }
+                      })
+                      .catch((err: unknown) => {
+                        if (err instanceof Error && err.name === "AbortError") return
+                        setContainerError(err instanceof Error ? err.message : "Failed to load container files")
+                      })
+                      .finally(() => {
+                        if (!ac.signal.aborted) setContainerLoading(false)
+                      })
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : !containerLoaded ? (
+              // First-paint guard: the effect will set loading → loaded on
+              // first tab click. Show nothing to avoid flashing the empty
+              // state before the fetch even starts.
+              null
+            ) : containerFiles.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
+                <Inbox className="h-10 w-10 text-muted-foreground/40 mb-3" />
+                <p className="text-body font-medium text-muted-foreground">No container files</p>
+                <p className="text-label text-muted-foreground mt-1">Start the container to browse its filesystem.</p>
+              </div>
+            ) : (
+              <div className="p-2 space-y-0.5">
+                {containerFiles.map((f) => (
+                  <div key={f.path} className="flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-accent">
+                    {f.is_dir ? <FolderClosed className="h-3.5 w-3.5 text-muted-foreground" /> : <FileText className="h-3.5 w-3.5 text-muted-foreground" />}
+                    <span className="truncate flex-1">{f.path}</span>
+                    {!f.is_dir && <span className="text-micro text-muted-foreground shrink-0">{fmtSize(f.size)}</span>}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}
 
-        <div className="px-3 py-2 border-t text-micro text-muted-foreground flex items-center justify-between shrink-0">
-          <span>{fileCount} file{fileCount !== 1 ? "s" : ""}, {dirCount} folder{dirCount !== 1 ? "s" : ""} · {fmtSize(totalBytes)}</span>
-          <span>/output/</span>
-        </div>
+        {activeFileTab === "git" && (
+          <div className="flex-1 overflow-y-auto">
+            {gitLoading ? (
+              <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : gitError ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12" role="alert">
+                <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" aria-hidden="true" />
+                <p className="text-body font-medium text-destructive">Failed to load git history</p>
+                <p className="text-label text-muted-foreground mt-1 mb-3">{gitError}</p>
+                <button
+                  type="button"
+                  className="text-label text-primary hover:underline"
+                  onClick={() => {
+                    setGitError(null)
+                    setGitLoaded(false)
+                    if (!workspaceId) return
+                    gitAbortRef.current?.abort()
+                    const ac = new AbortController()
+                    gitAbortRef.current = ac
+                    setGitLoading(true)
+                    fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, { signal: ac.signal })
+                      .then((r) => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                        return r.json()
+                      })
+                      .then((data) => {
+                        if (!ac.signal.aborted) {
+                          setGitCommits(Array.isArray(data) ? data : [])
+                          setGitLoaded(true)
+                        }
+                      })
+                      .catch((err: unknown) => {
+                        if (err instanceof Error && err.name === "AbortError") return
+                        setGitError(err instanceof Error ? err.message : "Failed to load git log")
+                      })
+                      .finally(() => {
+                        if (!ac.signal.aborted) setGitLoading(false)
+                      })
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : !gitLoaded ? (
+              null
+            ) : gitCommits.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
+                <GitBranch className="h-10 w-10 text-muted-foreground/40 mb-3" />
+                <p className="text-body font-medium text-muted-foreground">No git history</p>
+                <p className="text-label text-muted-foreground mt-1">No git repository found in this agent&apos;s workspace.</p>
+              </div>
+            ) : (
+              <div className="p-2 space-y-1">
+                {gitCommits.map((c) => (
+                  <div key={c.hash} className="px-2 py-1.5 rounded hover:bg-accent">
+                    <p className="text-xs font-medium truncate">{c.message}</p>
+                    <div className="flex items-center gap-2 text-micro text-muted-foreground mt-0.5">
+                      <code className="font-mono">{c.hash.slice(0, 7)}</code>
+                      <span>{c.author}</span>
+                      <span>{new Date(c.date).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Right: File preview/editor or empty state ── */}

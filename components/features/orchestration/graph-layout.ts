@@ -3,6 +3,8 @@
  * Extracted for testability — no React or ReactFlow dependencies.
  */
 
+import { STATUS_COLORS, EDGE_COLOR_PALETTE } from "@/lib/colors"
+
 // --- Constants ---
 
 export const LAYOUT = {
@@ -18,23 +20,9 @@ export const LAYOUT = {
   COLLAPSED_HEIGHT: 50,
 } as const
 
-export const statusColors: Record<string, string> = {
-  COMPLETED: "#22c55e",
-  IN_PROGRESS: "#3b82f6",
-  FAILED: "#ef4444",
-  BLOCKED: "#f59e0b",
-  PENDING: "#64748b",
-  PLANNING: "#8b5cf6",
-  REVIEW: "#a855f7",
-  CANCELLED: "#6b7280",
-  SKIPPED: "#6b7280",
-  AWAITING_APPROVAL: "#8b5cf6",
-}
+export const statusColors = STATUS_COLORS
 
-export const edgeColorPalette = [
-  "#06b6d4", "#3b82f6", "#8b5cf6", "#22c55e",
-  "#f59e0b", "#ec4899", "#14b8a6", "#6366f1",
-]
+export const edgeColorPalette = EDGE_COLOR_PALETTE
 
 // --- Pure functions ---
 

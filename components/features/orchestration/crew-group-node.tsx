@@ -4,22 +4,14 @@ import { memo, type CSSProperties } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import { ChevronDown, ChevronRight, Users } from "lucide-react"
 import { CrewIcon } from "@/components/ui/crew-icon"
-
-// Palette matching crew colors from the system
-export const crewColorMap: Record<string, string> = {
-  blue: "#3b82f6",
-  emerald: "#10b981",
-  violet: "#8b5cf6",
-  amber: "#f59e0b",
-  rose: "#f43f5e",
-  cyan: "#06b6d4",
-  lime: "#84cc16",
-  fuchsia: "#d946ef",
-}
+import { CREW_COLORS, CREW_COLOR_DEFAULT } from "@/lib/colors"
 
 function resolveColor(color: string | null): string {
-  if (!color) return "#64748b"
-  return crewColorMap[color] || color
+  if (!color) return CREW_COLOR_DEFAULT
+  // Enforce palette-only: unknown IDs (including raw hex values) fall back
+  // to the default rather than being passed through, so the palette
+  // convention is never bypassed at the render site.
+  return CREW_COLORS[color] || CREW_COLOR_DEFAULT
 }
 
 export interface CrewGroupData {
