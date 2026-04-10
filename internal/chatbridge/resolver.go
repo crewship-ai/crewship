@@ -18,6 +18,8 @@ import (
 // ErrNoWebhookSecret is returned when an agent has no webhook secret configured.
 var ErrNoWebhookSecret = errors.New("no webhook secret configured")
 
+// IPCResolver implements ChatResolver by making HTTP calls to the internal API
+// endpoints, authenticated with X-Internal-Token headers.
 type IPCResolver struct {
 	baseURL       string
 	internalToken string
@@ -25,6 +27,7 @@ type IPCResolver struct {
 	logger        *slog.Logger
 }
 
+// NewIPCResolver creates an IPCResolver that calls the internal API at the given URL.
 func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCResolver {
 	return &IPCResolver{
 		baseURL:       nextjsURL,
@@ -118,6 +121,7 @@ type credentialResponse struct {
 	Type     string `json:"type"`
 }
 
+// CreateChatRequest holds the parameters for creating a new chat session.
 type CreateChatRequest struct {
 	ChatID string `json:"chat_id"`
 	AgentID   string `json:"agent_id"`
@@ -126,6 +130,7 @@ type CreateChatRequest struct {
 	Title     string `json:"title,omitempty"`
 }
 
+// CreateChat creates a new chat session via the internal API.
 func (r *IPCResolver) CreateChat(ctx context.Context, req CreateChatRequest) error {
 	url := fmt.Sprintf("%s/api/v1/internal/chats", r.baseURL)
 
@@ -155,6 +160,7 @@ func (r *IPCResolver) CreateChat(ctx context.Context, req CreateChatRequest) err
 	return nil
 }
 
+// CreateRun records a new agent run via the internal API.
 func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/runs", r.baseURL)
 	payload := map[string]interface{}{
@@ -183,6 +189,7 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 	return nil
 }
 
+// UpdateRun updates a run's status, exit code, and metadata via the internal API.
 func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/runs/%s", r.baseURL, url.PathEscape(runID))
 	payload := map[string]interface{}{"status": status}
@@ -214,6 +221,7 @@ func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitC
 	return nil
 }
 
+// IncrementMessageCount increments the message count for a chat session.
 func (r *IPCResolver) IncrementMessageCount(ctx context.Context, chatID string, delta int) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/message-count", r.baseURL, url.PathEscape(chatID))
 	body, _ := json.Marshal(map[string]int{"delta": delta})
@@ -234,6 +242,7 @@ func (r *IPCResolver) IncrementMessageCount(ctx context.Context, chatID string, 
 	return nil
 }
 
+// UpdateChatTitle updates the display title of a chat session.
 func (r *IPCResolver) UpdateChatTitle(ctx context.Context, chatID, title string) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/title", r.baseURL, url.PathEscape(chatID))
 	body, _ := json.Marshal(map[string]string{"title": title})
@@ -254,16 +263,19 @@ func (r *IPCResolver) UpdateChatTitle(ctx context.Context, chatID, title string)
 	return nil
 }
 
+// ResolveChat resolves a chat ID to the full agent configuration via the internal API.
 func (r *IPCResolver) ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error) {
 	resolveURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/resolve", r.baseURL, url.PathEscape(chatID))
 	return r.resolve(ctx, resolveURL)
 }
 
+// ResolveAgent resolves an agent ID to its configuration via the internal API.
 func (r *IPCResolver) ResolveAgent(ctx context.Context, agentID string) (*ChatInfo, error) {
 	resolveURL := fmt.Sprintf("%s/api/v1/internal/agents/%s/resolve", r.baseURL, url.PathEscape(agentID))
 	return r.resolve(ctx, resolveURL)
 }
 
+// GetWebhookSecret retrieves the webhook secret for an agent via the internal API.
 func (r *IPCResolver) GetWebhookSecret(ctx context.Context, agentID string) (string, error) {
 	u := fmt.Sprintf("%s/api/v1/internal/agents/%s/webhook-secret", r.baseURL, url.PathEscape(agentID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

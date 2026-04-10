@@ -6,15 +6,19 @@ import (
 	"net/http"
 )
 
+// AdminHandler provides owner-only administrative endpoints for workspace statistics and user management.
 type AdminHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewAdminHandler creates an AdminHandler with the given database and logger.
 func NewAdminHandler(db *sql.DB, logger *slog.Logger) *AdminHandler {
 	return &AdminHandler{db: db, logger: logger}
 }
 
+// Stats returns aggregate counts (workspaces, users, agents, running) for the current workspace.
+// GET /api/v1/admin/stats — requires OWNER role.
 func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" {
@@ -53,6 +57,8 @@ func (h *AdminHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s)
 }
 
+// ListUsers returns all members of the current workspace with their user details.
+// GET /api/v1/admin/users — requires OWNER role.
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" {
@@ -125,6 +131,8 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// ListWorkspaces returns the current workspace with member, agent, and crew counts.
+// GET /api/v1/admin/workspaces — requires OWNER role.
 func (h *AdminHandler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if role != "OWNER" {

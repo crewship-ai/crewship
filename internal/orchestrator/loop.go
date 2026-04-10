@@ -20,6 +20,7 @@ type LoopController struct {
 	logger *slog.Logger
 }
 
+// NewLoopController creates a LoopController for managing task retry logic.
 func NewLoopController(db *sql.DB, pw *ProgressWriter, logger *slog.Logger) *LoopController {
 	return &LoopController{db: db, pw: pw, logger: logger}
 }

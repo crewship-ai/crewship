@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import {
   X, CheckCircle2, XCircle, Clock, AlertTriangle, ArrowRight,
   GitBranch, Users, Box, ChevronDown, ChevronRight, RotateCcw,
@@ -85,9 +85,13 @@ function TaskDetail({ task, mission, allTasks, onAction }: {
   task: MissionTask; mission: Mission; allTasks: MissionTask[]
   onAction?: (action: "edit" | "retry" | "skip", taskId: string, missionId: string) => void
 }) {
-  const deps = parseDependsOn(task.depends_on)
-  const blockedBy = deps.map(id => allTasks.find(t => t.id === id)).filter(Boolean) as MissionTask[]
-  const blocks = allTasks.filter(t => parseDependsOn(t.depends_on).includes(task.id))
+  const { blockedBy, blocks } = useMemo(() => {
+    const deps = parseDependsOn(task.depends_on)
+    return {
+      blockedBy: deps.map(id => allTasks.find(t => t.id === id)).filter(Boolean) as MissionTask[],
+      blocks: allTasks.filter(t => parseDependsOn(t.depends_on).includes(task.id)),
+    }
+  }, [task.id, task.depends_on, allTasks])
   const budgetPct = task.token_budget != null && task.token_budget > 0 && task.tokens_used != null ? Math.min(100, Math.round((task.tokens_used / task.token_budget) * 100)) : null
 
   return (

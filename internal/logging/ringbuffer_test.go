@@ -8,6 +8,86 @@ import (
 	"time"
 )
 
+// TestNewRingBuffer_PanicsOnBadCapacity is a regression for the CodeRabbit
+// finding that capacity<=0 would cause a later modulo-by-zero panic inside
+// Append; the constructor should fail fast instead.
+func TestNewRingBuffer_PanicsOnBadCapacity(t *testing.T) {
+	for _, cap := range []int{0, -1, -100} {
+		cap := cap
+		t.Run("cap="+itoa(cap), func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Errorf("expected panic for capacity=%d", cap)
+				}
+			}()
+			_ = NewRingBuffer(cap)
+		})
+	}
+}
+
+// TestNewRingHandler_PanicsOnNilArgs is a regression for the CodeRabbit
+// finding that NewRingHandler accepted nil inner/buffer and then panicked
+// later inside Enabled / Handle. Fail fast at construction.
+func TestNewRingHandler_PanicsOnNilArgs(t *testing.T) {
+	rb := NewRingBuffer(4)
+	inner := slog.NewTextHandler(bytes.NewBuffer(nil), nil)
+
+	t.Run("nil inner", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic on nil inner")
+			}
+		}()
+		_ = NewRingHandler(nil, rb)
+	})
+
+	t.Run("nil buffer", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic on nil buffer")
+			}
+		}()
+		_ = NewRingHandler(inner, nil)
+	})
+
+	// Sanity: valid args must NOT panic.
+	t.Run("happy path", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("unexpected panic: %v", r)
+			}
+		}()
+		h := NewRingHandler(inner, rb)
+		if h == nil {
+			t.Error("got nil handler")
+		}
+	})
+}
+
+// itoa is a tiny local helper to avoid pulling in strconv just for subtest
+// names; keeps the test file's imports minimal.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}
+
 func TestRingBufferAppendAndEntries(t *testing.T) {
 	rb := NewRingBuffer(5)
 

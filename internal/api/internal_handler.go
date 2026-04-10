@@ -34,6 +34,7 @@ func buildEthosBlock(agentRole string) string {
 	return "[CREWSHIP ETHOS]\n" + roleText
 }
 
+// WriteAuditLog records an action in the audit_logs table. It is safe to call from any goroutine.
 func WriteAuditLog(ctx context.Context, db *sql.DB, action, entityType, entityID, userID, workspaceID string, metadata map[string]interface{}) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	metaJSON := "{}"

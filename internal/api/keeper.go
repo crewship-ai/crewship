@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -53,6 +54,8 @@ type KeeperBroadcaster interface {
 	BroadcastKeeperEvent(workspaceID string, event map[string]any)
 }
 
+// KeeperHandler handles credential access requests forwarded by the sidecar.
+// It evaluates gatekeeper policies and returns allow/deny decisions.
 type KeeperHandler struct {
 	db            *sql.DB
 	logger        *slog.Logger
@@ -64,6 +67,7 @@ type KeeperHandler struct {
 	conversations ConversationReader
 }
 
+// NewKeeperHandler creates a KeeperHandler with the given gatekeeper evaluator and internal token.
 func NewKeeperHandler(db *sql.DB, internalToken string, gk gatekeeper.Evaluator, logger *slog.Logger) *KeeperHandler {
 	return &KeeperHandler{
 		db:            db,
@@ -322,12 +326,47 @@ var envVarNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 // could be used for credential exfiltration or command injection.
 // It parses the command carefully: content inside single quotes is safe,
 // everything else is checked against the dangerous pattern list.
+// interpreterPattern matches commands that invoke a shell or scripting language
+// interpreter with inline code. An attacker can bypass the metachar filter by
+// wrapping a payload inside single quotes passed to "bash -c '...|...'".
+var interpreterPattern = regexp.MustCompile(`(?i)\b(bash|dash|zsh|ksh|sh|python[0-9.]*|python3|perl|ruby|node|deno|bun)\b\s+(-[ceE]|--eval)\b`)
+
+// scriptToolPattern matches tools with built-in shell execution capabilities.
+// awk: system(), getline with pipe — executes arbitrary commands
+// sed: the /e flag executes the pattern space as a shell command (GNU sed)
+// These bypass the metachar filter since payloads are inside single quotes.
+var scriptToolPattern = regexp.MustCompile(`(?i)\b([gmnp]?awk|sed)\b`)
+
 func containsDangerousShellChars(cmd string) bool {
-	// Newline and carriage return are shell command separators that bypass
-	// the metachar check if not caught first.
-	if strings.ContainsAny(cmd, "\n\r") {
+	// Reject any non-printable control characters (except space and tab which
+	// are legitimate in shell commands). This catches \n, \r, vertical tab,
+	// form feed, and critically Unicode line/paragraph separators (U+2028,
+	// U+2029) that some shells treat as line breaks.
+	for _, r := range cmd {
+		if r == ' ' || r == '\t' {
+			continue
+		}
+		// Block C0 controls (0x00–0x1F), DEL (0x7F), C1 controls (0x80–0x9F),
+		// Unicode line separator (U+2028), paragraph separator (U+2029).
+		if r <= 0x1F || r == 0x7F || (r >= 0x80 && r <= 0x9F) || r == 0x2028 || r == 0x2029 {
+			return true
+		}
+	}
+
+	// Block interpreter re-invocation: "bash -c '...|...'" bypasses the
+	// single-quote-aware metachar check below because content inside quotes
+	// is treated as literal, but the invoked interpreter re-parses it.
+	if interpreterPattern.MatchString(cmd) {
 		return true
 	}
+
+	// Block awk/gawk/nawk/mawk: awk scripts can call system() or use
+	// getline with pipe, executing arbitrary shell commands within
+	// single-quoted script arguments that bypass our metachar check.
+	if scriptToolPattern.MatchString(cmd) {
+		return true
+	}
+
 	// Simple approach: check outside single-quoted strings
 	// Split by single quotes — odd-indexed segments are inside quotes
 	parts := strings.Split(cmd, "'")
@@ -657,6 +696,14 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		if urlEnc != plainValue {
 			_ = s.AddPattern("keeper-secret", regexp.QuoteMeta(urlEnc))
 		}
+		// Hex-encoded variant (catches `xxd -p`, `od -An -tx1` output)
+		hexEnc := hex.EncodeToString([]byte(plainValue))
+		_ = s.AddPattern("keeper-secret", regexp.QuoteMeta(hexEnc))
+		// Reversed string (catches `rev` exfiltration)
+		reversed := reverseString(plainValue)
+		if reversed != plainValue {
+			_ = s.AddPattern("keeper-secret", regexp.QuoteMeta(reversed))
+		}
 	}
 	scrubbedOutput := s.Scrub(string(rawOutput))
 
@@ -738,6 +785,14 @@ func (h *KeeperHandler) GetRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, row)
+}
+
+func reverseString(s string) string {
+	runes := []rune(s)
+	for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+		runes[i], runes[j] = runes[j], runes[i]
+	}
+	return string(runes)
 }
 
 func nullIfEmpty(s string) *string {

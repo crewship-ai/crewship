@@ -47,6 +47,7 @@ func normalizeDomain(raw string) string {
 	return s
 }
 
+// CrewHandler provides CRUD endpoints for managing crews (teams of agents) within a workspace.
 type CrewHandler struct {
 	db         *sql.DB
 	hub        *ws.Hub
@@ -55,25 +56,22 @@ type CrewHandler struct {
 	socketPath string
 }
 
+// NewCrewHandler creates a CrewHandler with the given database and logger.
 func NewCrewHandler(db *sql.DB, logger *slog.Logger) *CrewHandler {
 	return &CrewHandler{db: db, logger: logger}
 }
 
+// SetHub attaches a WebSocket hub for broadcasting crew events.
 func (h *CrewHandler) SetHub(hub *ws.Hub) { h.hub = hub }
 
 func (h *CrewHandler) broadcastCrewEvent(eventType, workspaceID string, payload map[string]string) {
-	if h.hub == nil {
-		return
-	}
-	h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
-		Type:    eventType,
-		Channel: "workspace:" + workspaceID,
-		Payload: payload,
-	})
+	broadcastWorkspaceEvent(h.hub, workspaceID, eventType, payload)
 }
 
+// SetLicense attaches the license for enforcing crew count limits.
 func (h *CrewHandler) SetLicense(lic *license.License) { h.license = lic }
 
+// SetSocketPath sets the Unix socket path used to restart crew containers via IPC.
 func (h *CrewHandler) SetSocketPath(path string) { h.socketPath = path }
 
 // restartCrewContainer stops the crew container via IPC so it gets recreated
@@ -169,6 +167,8 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limit, offset := parseListPagination(r, 100, 500)
+
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT c.id, c.workspace_id, c.name, c.slug, c.description, c.color, c.icon, c.avatar_style,
 			c.container_memory_mb, c.container_cpus, c.container_ttl_hours, c.network_mode, c.allowed_domains,
@@ -178,8 +178,12 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 			(SELECT COUNT(*) FROM crew_members WHERE crew_id = c.id) AS member_count
 		FROM crews c
 		WHERE c.workspace_id = ? AND c.deleted_at IS NULL
-		ORDER BY c.created_at DESC
-	`, workspaceID)
+		-- c.id DESC is the pagination tiebreaker: c.created_at is second-precision,
+		-- so timestamp ties are realistic and would otherwise make LIMIT/OFFSET
+		-- windows drop or duplicate rows between pages.
+		ORDER BY c.created_at DESC, c.id DESC
+		LIMIT ? OFFSET ?
+	`, workspaceID, limit, offset)
 	if err != nil {
 		h.logger.Error("list crews", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -380,6 +384,8 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Get returns a single crew by ID with full details.
+// GET /api/v1/crews/{crewId}
 func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	crewID := r.PathValue("crewId")
@@ -435,17 +441,14 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify crew exists and belongs to workspace
-	var existingID string
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&existingID)
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
-			return
-		}
 		h.logger.Error("get crew for update", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
 
@@ -660,6 +663,8 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Delete soft-deletes a crew and all its associated agents.
+// DELETE /api/v1/crews/{crewId}
 func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -676,17 +681,14 @@ func (h *CrewHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify crew exists and belongs to workspace
-	var existingID string
-	err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&existingID)
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
-			return
-		}
 		h.logger.Error("get crew for delete", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
 

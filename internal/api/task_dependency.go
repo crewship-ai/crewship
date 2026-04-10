@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // blockedTask holds a BLOCKED task's ID and its parsed dependency list.
@@ -57,15 +55,34 @@ func (h *MissionHandler) findUnblockableTasks(ctx context.Context, missionID, fi
 		candidates = append(candidates, blockedTask{id: id, deps: deps})
 	}
 
-	// Check if ALL dependencies are now completed
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// Batch-fetch all task statuses for this mission in one query
+	statusRows, err := h.db.QueryContext(ctx,
+		`SELECT id, status FROM mission_tasks WHERE mission_id = ?`, missionID)
+	if err != nil {
+		h.logger.Error("query task statuses", "error", err)
+		return nil
+	}
+	defer statusRows.Close()
+
+	statusMap := make(map[string]string)
+	for statusRows.Next() {
+		var id, st string
+		if err := statusRows.Scan(&id, &st); err != nil {
+			continue
+		}
+		statusMap[id] = st
+	}
+
+	// Check if ALL dependencies are now completed using the pre-fetched map
 	var result []blockedTask
 	for _, bt := range candidates {
 		allDone := true
 		for _, dep := range bt.deps {
-			var depStatus string
-			err := h.db.QueryRowContext(ctx,
-				`SELECT status FROM mission_tasks WHERE id = ?`, dep).Scan(&depStatus)
-			if err != nil || depStatus != "COMPLETED" {
+			if statusMap[dep] != "COMPLETED" {
 				allDone = false
 				break
 			}
@@ -92,19 +109,10 @@ func (h *MissionHandler) unblockDependentTasks(r *http.Request, missionID, compl
 			h.logger.Error("unblock task failed", "task_id", bt.id, "error", err)
 			continue
 		}
-		if h.hub != nil {
-			h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
-				Type:    "task.status",
-				Channel: "mission:" + missionID,
-				Payload: map[string]string{"id": bt.id, "status": "PENDING"},
-			})
-			wsChannel := "workspace:" + wsID
-			h.hub.Broadcast(wsChannel, ws.ServerMessage{
-				Type:    "task.updated",
-				Channel: wsChannel,
-				Payload: map[string]string{"id": bt.id, "mission_id": missionID, "status": "PENDING"},
-			})
-		}
+		broadcastChannelEvent(h.hub, "mission", missionID, "task.status",
+			map[string]string{"id": bt.id, "status": "PENDING"})
+		broadcastWorkspaceEvent(h.hub, wsID, "task.updated",
+			map[string]string{"id": bt.id, "mission_id": missionID, "status": "PENDING"})
 	}
 }
 

@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import Link from "next/link"
 import { Cpu, Key, Clock, AlertCircle, Pause } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
@@ -60,7 +61,7 @@ const statusConfig: Record<string, { label: string; className: string; icon?: Re
   },
 }
 
-export function AgentCard({ agent }: { agent: AgentData }) {
+export const AgentCard = memo(function AgentCard({ agent }: { agent: AgentData }) {
   const status = statusConfig[agent.status] ?? statusConfig.IDLE
   const StatusIcon = status.icon
 
@@ -130,4 +131,4 @@ export function AgentCard({ agent }: { agent: AgentData }) {
       </Card>
     </Link>
   )
-}
+})

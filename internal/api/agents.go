@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/license"
@@ -17,32 +20,31 @@ type ScheduleUpdater interface {
 	UpdateSchedule(ctx context.Context, agentID, cronExpr, prompt string, enabled bool) error
 }
 
+// AgentHandler provides CRUD endpoints for managing AI agents within a workspace.
 type AgentHandler struct {
-	db               *sql.DB
-	hub              *ws.Hub
-	logger           *slog.Logger
-	license          *license.License
-	scheduleUpdater  ScheduleUpdater
+	db              *sql.DB
+	hub             *ws.Hub
+	logger          *slog.Logger
+	license         *license.License
+	scheduleUpdater ScheduleUpdater
 }
 
+// NewAgentHandler creates an AgentHandler with the given database and logger.
 func NewAgentHandler(db *sql.DB, logger *slog.Logger) *AgentHandler {
 	return &AgentHandler{db: db, logger: logger}
 }
 
+// SetHub attaches a WebSocket hub for broadcasting agent events to connected clients.
 func (h *AgentHandler) SetHub(hub *ws.Hub) { h.hub = hub }
 
 func (h *AgentHandler) broadcastAgentEvent(eventType, workspaceID string, payload map[string]string) {
-	if h.hub == nil {
-		return
-	}
-	h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
-		Type:    eventType,
-		Channel: "workspace:" + workspaceID,
-		Payload: payload,
-	})
+	broadcastWorkspaceEvent(h.hub, workspaceID, eventType, payload)
 }
 
+// SetLicense attaches the license for enforcing agent-per-crew limits.
 func (h *AgentHandler) SetLicense(lic *license.License) { h.license = lic }
+
+// SetScheduler attaches a ScheduleUpdater for live-updating agent cron schedules.
 func (h *AgentHandler) SetScheduler(su ScheduleUpdater) { h.scheduleUpdater = su }
 
 // FleetStatus returns lightweight agent counts by status for the toolbar.
@@ -139,6 +141,8 @@ type agentResponse struct {
 	Count           agentCounts    `json:"_count"`
 }
 
+// List returns all non-deleted agents in the workspace with their crew and count metadata.
+// GET /api/v1/agents
 func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
@@ -147,7 +151,11 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	crewID := r.URL.Query().Get("crew_id")
+	limit, offset := parseListPagination(r, 100, 500)
 
+	// Main query: no more per-row scalar COUNT subqueries. Those are batched
+	// below in three GROUP BY queries keyed by agent_id so the cost is O(1)
+	// extra round-trips instead of O(N) per-row scans.
 	const listQuery = `
 		SELECT a.id, a.crew_id, a.workspace_id, a.name, a.slug, a.description, a.role_title,
 			a.agent_role, a.lead_mode, a.status, a.cli_adapter, a.llm_provider, a.llm_model,
@@ -156,10 +164,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			a.schedule_cron, a.schedule_prompt, a.schedule_enabled, a.schedule_last_run, a.schedule_next_run,
 			a.mcp_config_json,
 			a.created_at, a.updated_at,
-			c.name, c.slug, c.color, c.avatar_style,
-			(SELECT COUNT(*) FROM agent_skills WHERE agent_id = a.id),
-			(SELECT COUNT(*) FROM agent_credentials WHERE agent_id = a.id),
-			(SELECT COUNT(*) FROM chats WHERE agent_id = a.id)
+			c.name, c.slug, c.color, c.avatar_style
 		FROM agents a
 		LEFT JOIN crews c ON c.id = a.crew_id
 		WHERE a.workspace_id = ? AND a.deleted_at IS NULL
@@ -168,10 +173,18 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	var rows *sql.Rows
 	var err error
 
+	// a.id DESC is the pagination tiebreaker: created_at is stored with
+	// second precision, so ties on busy workspaces are realistic. Without a
+	// unique secondary sort key, LIMIT/OFFSET windows can drop or duplicate
+	// rows between pages when the tied rows straddle a page boundary.
 	if crewID != "" {
-		rows, err = h.db.QueryContext(r.Context(), listQuery+" AND a.crew_id = ? ORDER BY a.created_at DESC", workspaceID, crewID)
+		rows, err = h.db.QueryContext(r.Context(),
+			listQuery+" AND a.crew_id = ? ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
+			workspaceID, crewID, limit, offset)
 	} else {
-		rows, err = h.db.QueryContext(r.Context(), listQuery+" ORDER BY a.created_at DESC", workspaceID)
+		rows, err = h.db.QueryContext(r.Context(),
+			listQuery+" ORDER BY a.created_at DESC, a.id DESC LIMIT ? OFFSET ?",
+			workspaceID, limit, offset)
 	}
 
 	if err != nil {
@@ -181,7 +194,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var result []agentResponse
+	result := make([]agentResponse, 0, limit)
 	for rows.Next() {
 		var a agentResponse
 		var memEnabled, schedEnabled int
@@ -193,8 +206,7 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 			&a.ScheduleCron, &a.SchedulePrompt, &schedEnabled, &a.ScheduleLastRun, &a.ScheduleNextRun,
 			&a.MCPConfigJSON,
 			&a.CreatedAt, &a.UpdatedAt,
-			&crewName, &crewSlug, &crewColor, &crewAvatarStyle,
-			&a.Count.Skills, &a.Count.Credentials, &a.Count.Chats); err != nil {
+			&crewName, &crewSlug, &crewColor, &crewAvatarStyle); err != nil {
 			h.logger.Error("scan agent", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
@@ -212,11 +224,113 @@ func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if result == nil {
-		result = []agentResponse{}
+	// Batch-load the three count buckets in one round-trip each.
+	if len(result) > 0 {
+		ids := make([]string, len(result))
+		for i, a := range result {
+			ids[i] = a.ID
+		}
+		byID := make(map[string]*agentResponse, len(result))
+		for i := range result {
+			byID[result[i].ID] = &result[i]
+		}
+
+		// loadCounts returns an error so the handler can fail the whole
+		// request when a batch query fails. The old "log and continue"
+		// shape masked query/schema regressions: a broken GROUP BY would
+		// still return HTTP 200 with zeroed _count fields, and the UI
+		// would quietly show "0 skills" for every agent until someone
+		// eventually noticed. Failing loud is the same behavior the
+		// original single-query List handler had.
+		loadCounts := func(bucket, query string, assign func(*agentResponse, int)) error {
+			counts, err := batchCountByAgentID(r.Context(), h.db, query, ids)
+			if err != nil {
+				return fmt.Errorf("%s batch count: %w", bucket, err)
+			}
+			for id, n := range counts {
+				if a, ok := byID[id]; ok {
+					assign(a, n)
+				}
+			}
+			return nil
+		}
+
+		for _, step := range []struct {
+			bucket string
+			query  string
+			assign func(*agentResponse, int)
+		}{
+			{"skills",
+				`SELECT agent_id, COUNT(*) FROM agent_skills WHERE agent_id IN (%s) GROUP BY agent_id`,
+				func(a *agentResponse, n int) { a.Count.Skills = n }},
+			{"credentials",
+				`SELECT agent_id, COUNT(*) FROM agent_credentials WHERE agent_id IN (%s) GROUP BY agent_id`,
+				func(a *agentResponse, n int) { a.Count.Credentials = n }},
+			{"chats",
+				`SELECT agent_id, COUNT(*) FROM chats WHERE agent_id IN (%s) GROUP BY agent_id`,
+				func(a *agentResponse, n int) { a.Count.Chats = n }},
+		} {
+			if err := loadCounts(step.bucket, step.query, step.assign); err != nil {
+				h.logger.Error("batch count", "bucket", step.bucket, "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+				return
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// batchCountByAgentID runs a "SELECT agent_id, COUNT(*) ... WHERE agent_id IN (?) GROUP BY agent_id"
+// query with a placeholder list matching len(ids) and returns the id->count map.
+// The caller passes the template with a single "%s" where the placeholder list goes.
+func batchCountByAgentID(ctx context.Context, db *sql.DB, tmpl string, ids []string) (map[string]int, error) {
+	if len(ids) == 0 {
+		return map[string]int{}, nil
+	}
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	query := fmt.Sprintf(tmpl, placeholders)
+
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string]int, len(ids))
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
+}
+
+// parseListPagination pulls standard ?limit=&offset= params, clamping to sane
+// bounds. defaultLimit is used when unspecified; maxLimit caps what clients
+// can request. Shared helper for list endpoints.
+func parseListPagination(r *http.Request, defaultLimit, maxLimit int) (int, int) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
 }
 
 type createAgentRequest struct {
@@ -238,6 +352,8 @@ type createAgentRequest struct {
 	MemoryEnabled  bool    `json:"memory_enabled"`
 }
 
+// Create provisions a new agent in the workspace, optionally assigning it to a crew.
+// POST /api/v1/agents
 func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -422,6 +538,8 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Get returns a single agent by ID with full details including crew info and counts.
+// GET /api/v1/agents/{agentId}
 func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	if agentID == "" {
@@ -476,6 +594,8 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
+// Update modifies agent properties such as name, role, model, system prompt, and schedule.
+// PATCH /api/v1/agents/{agentId}
 func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -486,16 +606,14 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var existing string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		agentID, workspaceID).Scan(&existing); err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
-			return
-		}
+	found, err := agentExists(r.Context(), h.db, agentID, workspaceID)
+	if err != nil {
 		h.logger.Error("check agent exists", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Agent not found"})
 		return
 	}
 
@@ -508,7 +626,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	allowed := map[string]string{
 		"name": "name", "slug": "slug", "description": "description",
 		"role_title": "role_title", "agent_role": "agent_role",
-		"lead_mode": "lead_mode",
+		"lead_mode":   "lead_mode",
 		"cli_adapter": "cli_adapter", "llm_provider": "llm_provider",
 		"llm_model": "llm_model", "system_prompt": "system_prompt",
 		"avatar_seed": "avatar_seed", "avatar_style": "avatar_style",
@@ -516,7 +634,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"memory_enabled": "memory_enabled", "cli_tools": "cli_tools", "crew_id": "crew_id",
 		"schedule_cron": "schedule_cron", "schedule_prompt": "schedule_prompt",
 		"schedule_enabled": "schedule_enabled",
-		"mcp_config_json": "mcp_config_json",
+		"mcp_config_json":  "mcp_config_json",
 	}
 
 	// Validate slug format if being updated
@@ -693,6 +811,8 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	h.broadcastAgentEvent("agent.updated", workspaceID, map[string]string{"id": agentID})
 }
 
+// Delete soft-deletes an agent by setting deleted_at.
+// DELETE /api/v1/agents/{agentId}
 func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
@@ -767,7 +887,7 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 		cutoff, cutoff, wsID)
 	if err != nil {
 		h.logger.Error("agent load query", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 	defer rows.Close()
@@ -779,14 +899,14 @@ func (h *AgentHandler) Load(w http.ResponseWriter, r *http.Request) {
 			&e.ActiveTasks, &e.PendingTasks, &e.CompletedToday,
 			&e.TokensUsedToday, &e.TokenBudget); err != nil {
 			h.logger.Error("scan agent load", "error", err)
-			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 			return
 		}
 		result = append(result, e)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (agent load)", "error", err)
-		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}
 

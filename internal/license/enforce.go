@@ -95,6 +95,7 @@ type LimitError struct {
 	Edition  Edition
 }
 
+// Error returns a human-readable message describing which license limit was exceeded.
 func (e *LimitError) Error() string {
 	return fmt.Sprintf(
 		"license limit reached: %d/%d %s (%s edition). Upgrade your license for higher limits.",

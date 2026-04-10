@@ -5,10 +5,12 @@
 
 const SECRET_RE = /(?:sk-[a-zA-Z0-9_-]{10,}|ghp_[a-zA-Z0-9]{36,}|gho_[a-zA-Z0-9]{36,}|xoxb-[a-zA-Z0-9-]+|AIza[a-zA-Z0-9_-]{35}|eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]+)/g
 
+/** Replace known secret patterns (API keys, tokens) with `***` to prevent accidental exposure in logs. */
 export function redactSecrets(s: string): string {
   return s.replace(SECRET_RE, "***")
 }
 
+/** Format an ISO timestamp as "YYYY-MM-DD HH:MM:SS" for log display. Falls back to raw string on parse failure. */
 export function formatLogTime(ts: string): string {
   try {
     const d = new Date(ts)
@@ -18,12 +20,14 @@ export function formatLogTime(ts: string): string {
   }
 }
 
+/** Tailwind CSS color classes for log severity levels. */
 export const LEVEL_COLORS: Record<string, string> = {
   INFO: "text-neutral-500",
   WARN: "text-amber-500",
   ERROR: "text-red-500",
 }
 
+/** Tailwind CSS color classes for agent event types in the log viewer. */
 export const EVENT_COLORS: Record<string, string> = {
   status: "text-yellow-400",
   thinking: "text-neutral-500",
@@ -38,6 +42,7 @@ export const EVENT_COLORS: Record<string, string> = {
   image: "text-pink-400",
 }
 
+/** A structured log entry from an agent, with event type and optional metadata. */
 export interface LogEntry {
   ts: string
   level: string

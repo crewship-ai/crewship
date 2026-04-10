@@ -106,6 +106,11 @@ func (h *InternalHandler) resolveCoordinatorCrews(r *http.Request, data *agentCo
 			h.logger.Error("scan crew for coordinator", "error", err)
 			continue
 		}
+		// Initialize Members as a non-nil empty slice so crews with zero
+		// agents serialize as `"members": []` not `"members": null`.
+		// Frontend consumers expect an array; the test
+		// TestResolveCoordinatorCrews_EmptyCrew pins this contract.
+		ci.Members = []crewMemberEntry{}
 		agentRows, err := h.db.QueryContext(r.Context(), `
 			SELECT a.id, a.name, a.slug, COALESCE(a.role_title, ''), COALESCE(a.description, ''), a.status,
 			       COALESCE((SELECT c.id FROM chats c WHERE c.agent_id = a.id AND c.status = 'ACTIVE' ORDER BY c.created_at DESC LIMIT 1), '')

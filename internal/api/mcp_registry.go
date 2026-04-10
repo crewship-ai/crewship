@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -84,7 +83,7 @@ func SyncMCPRegistry(ctx context.Context, db *sql.DB, logger *slog.Logger) error
 		return fmt.Errorf("parse registry response: %w", err)
 	}
 
-	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	now := time.Now().UTC().Format(time.RFC3339)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin sync transaction: %w", err)
@@ -276,7 +275,7 @@ const registrySelectCols = `id, name, display_name, description, icon, transport
 
 // List handles GET /api/v1/mcp-registry — returns paginated list.
 func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset := parsePagination(r)
+	limit, offset := parsePagination(r, 50, 200)
 
 	rows, err := h.db.QueryContext(r.Context(),
 		fmt.Sprintf(`SELECT %s FROM mcp_registry_servers ORDER BY name ASC LIMIT ? OFFSET ?`, registrySelectCols),
@@ -288,7 +287,7 @@ func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	servers := make([]mcpRegistryServerRow, 0)
+	servers := make([]mcpRegistryServerRow, 0, limit)
 	for rows.Next() {
 		s, err := scanRegistryRow(rows)
 		if err != nil {
@@ -299,7 +298,9 @@ func (h *MCPRegistryHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var total int
-	h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM mcp_registry_servers").Scan(&total)
+	if err := h.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM mcp_registry_servers").Scan(&total); err != nil {
+		h.logger.Error("count mcp registry servers", "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"servers": servers,
@@ -317,7 +318,7 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, offset := parsePagination(r)
+	limit, offset := parsePagination(r, 50, 200)
 	pattern := "%" + q + "%"
 
 	rows, err := h.db.QueryContext(r.Context(),
@@ -337,7 +338,7 @@ func (h *MCPRegistryHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	servers := make([]mcpRegistryServerRow, 0)
+	servers := make([]mcpRegistryServerRow, 0, limit)
 	for rows.Next() {
 		s, err := scanRegistryRow(rows)
 		if err != nil {
@@ -400,18 +401,3 @@ func (h *MCPRegistryHandler) Sync(w http.ResponseWriter, r *http.Request) {
 }
 
 // parsePagination extracts limit and offset from query params with defaults.
-func parsePagination(r *http.Request) (int, int) {
-	limit := 50
-	offset := 0
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
-			limit = n
-		}
-	}
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
-	return limit, offset
-}

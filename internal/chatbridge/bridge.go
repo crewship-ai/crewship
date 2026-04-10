@@ -17,6 +17,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// ChatResolver provides the data layer for the chat bridge, resolving chat
+// sessions to agent configurations and managing run lifecycle records.
 type ChatResolver interface {
 	CreateChat(ctx context.Context, req CreateChatRequest) error
 	ResolveChat(ctx context.Context, chatID string) (*ChatInfo, error)
@@ -28,6 +30,8 @@ type ChatResolver interface {
 	UpdateChatTitle(ctx context.Context, chatID, title string) error
 }
 
+// ChatInfo holds the resolved configuration for a chat session, including
+// agent identity, crew context, credentials, and resource settings.
 type ChatInfo struct {
 	AgentID        string
 	AgentSlug      string
@@ -56,6 +60,8 @@ type ChatInfo struct {
 	AgentMCPConfigJSON string
 }
 
+// Bridge connects the WebSocket chat interface to the orchestrator, resolving
+// sessions, managing containers, persisting conversations, and streaming events.
 type Bridge struct {
 	orch      *orchestrator.Orchestrator
 	container provider.ContainerProvider
@@ -71,11 +77,13 @@ type Bridge struct {
 	containerCache map[string]string
 }
 
+// BridgeConfig holds default resource limits for containers created by the bridge.
 type BridgeConfig struct {
 	DefaultMemoryMB int
 	DefaultCPUs     float64
 }
 
+// New creates a Bridge that connects WebSocket chat to the orchestrator.
 func New(
 	orch *orchestrator.Orchestrator,
 	container provider.ContainerProvider,
@@ -118,6 +126,9 @@ func generateMsgID() string {
 	return fmt.Sprintf("msg_%d_%s", time.Now().UnixNano(), hex.EncodeToString(b))
 }
 
+// HandleChatMessage processes an incoming chat message by resolving the session,
+// ensuring the container is running, persisting the message, and streaming the
+// agent's response back to the client.
 func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content string, streamFn func(ws.ChatEvent)) error {
 	b.logger.Debug("HandleChatMessage", "chat_id", chatID, "content_len", len(content))
 	if err := b.convStore.Append(ctx, chatID, conversation.Message{

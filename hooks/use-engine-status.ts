@@ -2,10 +2,15 @@
 
 import { useEffect, useRef, useState } from "react"
 
+/** Connection status of the crewshipd backend engine. */
 export type EngineStatus = "connected" | "disconnected" | "checking"
 
 const POLL_INTERVAL = 10_000
 
+/**
+ * Poll the crewshipd health endpoint every 10 seconds and report connection status + uptime.
+ * Used by the toolbar to show engine connectivity.
+ */
 export function useEngineStatus(workspaceId: string | null) {
   const [status, setStatus] = useState<EngineStatus>("checking")
   const [uptime, setUptime] = useState<string | null>(null)

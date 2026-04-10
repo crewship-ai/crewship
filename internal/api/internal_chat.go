@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// CreateChat creates a new chat session record on behalf of the sidecar.
+// POST /api/v1/internal/chats
 func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ChatID      string  `json:"chat_id"`
@@ -44,6 +46,8 @@ func (h *InternalHandler) CreateChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"id": body.ChatID, "status": "created"})
 }
 
+// ResolveChat looks up a chat's agent and returns the full agent configuration.
+// GET /api/v1/internal/chats/{chatId}/resolve
 func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 
@@ -62,11 +66,15 @@ func (h *InternalHandler) ResolveChat(w http.ResponseWriter, r *http.Request) {
 	h.resolveAgentConfig(w, r, agentID)
 }
 
+// ResolveAgent returns the full configuration for a given agent ID.
+// GET /api/v1/internal/agents/{agentId}/resolve
 func (h *InternalHandler) ResolveAgent(w http.ResponseWriter, r *http.Request) {
 	agentID := r.PathValue("agentId")
 	h.resolveAgentConfig(w, r, agentID)
 }
 
+// IncrementMessageCount increases the message_count on a chat by the given delta.
+// POST /api/v1/internal/chats/{chatId}/messages
 func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 	var body struct {
@@ -87,6 +95,8 @@ func (h *InternalHandler) IncrementMessageCount(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]string{"id": chatID})
 }
 
+// UpdateChatTitle sets the title on a chat if it has not been set yet.
+// PATCH /api/v1/internal/chats/{chatId}/title
 func (h *InternalHandler) UpdateChatTitle(w http.ResponseWriter, r *http.Request) {
 	chatID := r.PathValue("chatId")
 	var body struct {

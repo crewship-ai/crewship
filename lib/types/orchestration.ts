@@ -1,3 +1,4 @@
+/** Lightweight crew representation used in lists and dropdowns. */
 export interface CrewSummary {
   id: string
   name: string
@@ -7,6 +8,7 @@ export interface CrewSummary {
   _count?: { agents: number }
 }
 
+/** Lightweight agent representation used in lists, with optional crew context. */
 export interface AgentSummary {
   id: string
   name: string
@@ -20,6 +22,7 @@ export interface AgentSummary {
   crew: { name: string; slug: string; color: string | null; avatar_style?: string | null } | null
 }
 
+/** A connection between two crews allowing inter-crew agent communication. */
 export interface CrewConnection {
   id: string
   from_crew_id: string

@@ -1,5 +1,6 @@
 "use client"
 
+import { useCallback, useMemo } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { IssueCard } from "./issue-card"
 import { StatusIcon, statusLabel, statusColor } from "./status-icon"
@@ -19,10 +20,31 @@ const SECONDARY_STATUSES: MissionStatus[] = ["FAILED", "CANCELLED", "DUPLICATE"]
 
 export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedIssueId }: IssuesBoardViewProps) {
   const hasIssues = issues.length > 0
-  const secondaryIssues = issues.filter((i) =>
-    SECONDARY_STATUSES.includes(i.status)
+
+  // Pre-compute per-status issue lists once instead of filtering per column per render
+  const issuesByStatus = useMemo(() => {
+    const map: Record<string, Mission[]> = {}
+    for (const status of [...MAIN_STATUSES, ...SECONDARY_STATUSES]) {
+      map[status] = []
+    }
+    for (const issue of issues) {
+      if (map[issue.status]) {
+        map[issue.status].push(issue)
+      }
+    }
+    return map
+  }, [issues])
+
+  const secondaryIssues = useMemo(
+    () => issues.filter((i) => SECONDARY_STATUSES.includes(i.status)),
+    [issues],
   )
   const showSecondary = secondaryIssues.length > 0
+
+  const handleIssueClick = useCallback(
+    (issue: Mission) => onIssueClick(issue),
+    [onIssueClick],
+  )
 
   if (!hasIssues) {
     return (
@@ -51,7 +73,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
       {/* Main columns */}
       <div className="flex gap-4 flex-1 overflow-x-auto pb-2">
         {MAIN_STATUSES.map((status) => {
-          const colIssues = issues.filter((i) => i.status === status)
+          const colIssues = issuesByStatus[status] || []
           return (
             <div key={status} className="flex flex-col min-w-[280px] w-[280px] shrink-0">
               <div className="flex items-center gap-2 px-1 pb-3">
@@ -84,7 +106,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
                         >
                           <IssueCard
                             issue={issue}
-                            onClick={() => onIssueClick(issue)}
+                            onClick={() => handleIssueClick(issue)}
                           />
                         </div>
                       )
@@ -101,7 +123,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
       {showSecondary && (
         <div className="flex gap-4 border-t pt-3">
           {SECONDARY_STATUSES.map((status) => {
-            const colIssues = issues.filter((i) => i.status === status)
+            const colIssues = issuesByStatus[status] || []
             if (colIssues.length === 0) return null
             return (
               <div key={status} className="flex-1">
@@ -119,7 +141,7 @@ export function IssuesBoardView({ issues, onIssueClick, onCreateClick, selectedI
                     const isDimmed = selectedIssueId != null && issue.id !== selectedIssueId
                     return (
                       <div key={issue.id} className={cn("w-[240px] shrink-0 transition-all duration-200", isDimmed && "opacity-40")}>
-                        <IssueCard issue={issue} onClick={() => onIssueClick(issue)} />
+                        <IssueCard issue={issue} onClick={() => handleIssueClick(issue)} />
                       </div>
                     )
                   })}

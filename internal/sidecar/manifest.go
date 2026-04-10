@@ -21,12 +21,14 @@ type CrewManifest struct {
 	SetupCommands []string            `json:"setup_commands"`
 }
 
+// ManifestPackages lists packages installed in the container by package manager.
 type ManifestPackages struct {
 	Apt []string `json:"apt"`
 	Npm []string `json:"npm"`
 	Pip []string `json:"pip"`
 }
 
+// ManifestCredEntry records a credential assigned to an agent in the manifest.
 type ManifestCredEntry struct {
 	Name  string `json:"name"`
 	Agent string `json:"agent"`
