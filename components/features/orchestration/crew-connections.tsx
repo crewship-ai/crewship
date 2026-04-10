@@ -12,6 +12,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/layout/empty-state"
 import { cn } from "@/lib/utils"
+import { resolveCrewColor } from "@/lib/colors"
 import { toast } from "sonner"
 
 interface Crew {
@@ -38,13 +39,8 @@ interface CrewConnectionsProps {
   workspaceId: string
 }
 
-const crewColorMap: Record<string, string> = {
-  blue: "#3b82f6", emerald: "#10b981", violet: "#8b5cf6", amber: "#f59e0b",
-  rose: "#f43f5e", cyan: "#06b6d4", lime: "#84cc16", fuchsia: "#d946ef",
-}
-
 function CrewBadge({ name, slug, color }: { name: string; slug: string; color?: string | null }) {
-  const resolved = (color && crewColorMap[color]) || "#64748b"
+  const resolved = resolveCrewColor(color)
   return (
     <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-accent/50 border border-border">
       <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: resolved }} />

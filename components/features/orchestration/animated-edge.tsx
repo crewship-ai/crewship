@@ -2,6 +2,7 @@
 
 import { memo, useId } from "react"
 import { type EdgeProps, getBezierPath } from "@xyflow/react"
+import { STATUS_COLORS, GRAPH_CHROME } from "@/lib/colors"
 
 interface AnimatedEdgeData {
   color?: string
@@ -27,7 +28,7 @@ function AnimatedEdgeInner({
   data,
 }: EdgeProps) {
   const edgeData = data as AnimatedEdgeData | undefined
-  const color = edgeData?.color || "#3b82f6"
+  const color = edgeData?.color || STATUS_COLORS.IN_PROGRESS
   const active = edgeData?.active ?? false
   const dimmed = edgeData?.dimmed ?? false
   const uid = useId()
@@ -42,7 +43,7 @@ function AnimatedEdgeInner({
       <path
         d={edgePath}
         fill="none"
-        stroke="#334155"
+        stroke={GRAPH_CHROME.dimmedEdge}
         strokeWidth={1}
         strokeOpacity={0.1}
       />

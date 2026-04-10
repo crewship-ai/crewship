@@ -235,24 +235,63 @@ This helps us know what agents can use.`,
 }
 
 // StatusPath returns the sequence of status transitions needed to reach
-// target from BACKLOG.
+// target from BACKLOG. It delegates to StatusPathFrom so that seed creation
+// and nuke cleanup share the same DAG defined in validIssueTransitions.
 func StatusPath(target string) []string {
-	switch target {
-	case "TODO":
-		return []string{"TODO"}
-	case "IN_PROGRESS":
-		return []string{"TODO", "IN_PROGRESS"}
-	case "REVIEW":
-		return []string{"TODO", "IN_PROGRESS", "REVIEW"}
-	case "DONE":
-		return []string{"TODO", "IN_PROGRESS", "REVIEW", "DONE"}
-	case "FAILED":
-		return []string{"TODO", "IN_PROGRESS", "FAILED"}
-	case "CANCELLED":
-		return []string{"TODO", "CANCELLED"}
-	case "DUPLICATE":
-		return []string{"TODO", "DUPLICATE"}
-	default:
+	return StatusPathFrom("BACKLOG", target)
+}
+
+// validIssueTransitions mirrors the server-side issue status DAG defined in
+// internal/api/issue_handler.go. Keep in sync.
+var validIssueTransitions = map[string][]string{
+	"BACKLOG":     {"TODO", "IN_PROGRESS", "CANCELLED"},
+	"TODO":        {"IN_PROGRESS", "BACKLOG", "CANCELLED"},
+	"IN_PROGRESS": {"REVIEW", "DONE", "FAILED", "CANCELLED", "TODO"},
+	"REVIEW":      {"DONE", "TODO", "IN_PROGRESS", "FAILED", "CANCELLED"},
+	"DONE":        {"BACKLOG"},
+	"FAILED":      {"BACKLOG", "TODO", "IN_PROGRESS"},
+	"CANCELLED":   {"BACKLOG", "TODO"},
+	"DUPLICATE":   {},
+}
+
+// StatusPathFrom returns the shortest sequence of status transitions needed
+// to move an issue from current to target, using the server-side issue
+// status DAG. The returned slice does NOT include current and DOES include
+// target as its final element. If current == target, returns an empty
+// non-nil slice. Returns nil when no valid path exists.
+func StatusPathFrom(current, target string) []string {
+	if current == target {
+		return []string{}
+	}
+	if _, ok := validIssueTransitions[current]; !ok {
 		return nil
 	}
+	if _, ok := validIssueTransitions[target]; !ok {
+		return nil
+	}
+	// BFS over the transition graph.
+	type node struct {
+		status string
+		path   []string
+	}
+	visited := map[string]bool{current: true}
+	queue := []node{{status: current, path: nil}}
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		for _, next := range validIssueTransitions[n.status] {
+			if visited[next] {
+				continue
+			}
+			visited[next] = true
+			nextPath := make([]string, len(n.path)+1)
+			copy(nextPath, n.path)
+			nextPath[len(n.path)] = next
+			if next == target {
+				return nextPath
+			}
+			queue = append(queue, node{status: next, path: nextPath})
+		}
+	}
+	return nil
 }

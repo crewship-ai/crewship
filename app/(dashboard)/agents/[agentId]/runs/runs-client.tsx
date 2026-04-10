@@ -5,17 +5,10 @@ import { useState, useEffect, useCallback } from "react"
 import { AlertCircle, Inbox } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { formatRelativeTime } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
-
-interface AgentRun {
-  id: string
-  status: string
-  trigger_type: string
-  started_at: string | null
-  finished_at: string | null
-  error_message: string | null
-}
+import type { AgentRun } from "@/lib/types/agent"
 
 const STATUS_STYLES: Record<string, { class: string; pulse: boolean }> = {
   PENDING: { class: "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400", pulse: false },
@@ -57,18 +50,6 @@ function LiveDuration({ startedAt }: { startedAt: string }) {
     return () => clearInterval(id)
   }, [])
   return <>{formatDuration(startedAt, null)}</>
-}
-
-function formatRelativeTime(dateStr: string | null): string {
-  if (!dateStr) return "—"
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return "Just now"
-  if (minutes < 60) return `${minutes} min ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return days === 1 ? "Yesterday" : `${days}d ago`
 }
 
 export function RunsPageClient() {
@@ -169,7 +150,7 @@ export function RunsPageClient() {
                           : formatDuration(r.started_at, r.finished_at)}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-label text-muted-foreground hidden sm:table-cell">
-                        {formatRelativeTime(r.started_at)}
+                        {r.started_at ? formatRelativeTime(r.started_at) : "—"}
                       </td>
                       <td className="px-4 sm:px-6 py-3 hidden md:table-cell">
                         {r.status === "FAILED" && r.error_message && (

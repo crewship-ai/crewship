@@ -28,7 +28,8 @@ import { useAgentActivity } from "@/hooks/use-agent-activity"
 import { AgentNode } from "./agent-node"
 import { AgentCardNode } from "./agent-card-node"
 import { AnimatedEdge } from "./animated-edge"
-import { CrewGroupNode, crewColorMap } from "./crew-group-node"
+import { CrewGroupNode } from "./crew-group-node"
+import { STATUS_COLORS, EDGE_COLOR_PALETTE, CREW_COLORS, CREW_COLOR_DEFAULT, GRAPH_CHROME } from "@/lib/colors"
 import { PermissionEdge, getPermissionMarkers } from "./permission-edge"
 
 export interface WorkflowGraphRef {
@@ -54,28 +55,11 @@ const edgeTypes: EdgeTypes = {
   permission: PermissionEdge,
 }
 
-const statusColors: Record<string, string> = {
-  COMPLETED: "#22c55e",
-  IN_PROGRESS: "#3b82f6",
-  FAILED: "#ef4444",
-  BLOCKED: "#f59e0b",
-  PENDING: "#64748b",
-  PLANNING: "#8b5cf6",
-  REVIEW: "#a855f7",
-  CANCELLED: "#6b7280",
-  SKIPPED: "#6b7280",
-}
-
-const edgeColorPalette = [
-  "#06b6d4", "#3b82f6", "#8b5cf6", "#22c55e",
-  "#f59e0b", "#ec4899", "#14b8a6", "#6366f1",
-]
-
 function pickEdgeColor(sourceId: string, targetId: string): string {
   let h = 0
   const key = sourceId + targetId
   for (let i = 0; i < key.length; i++) h = ((h << 5) - h + key.charCodeAt(i)) | 0
-  return edgeColorPalette[Math.abs(h) % edgeColorPalette.length]
+  return EDGE_COLOR_PALETTE[Math.abs(h) % EDGE_COLOR_PALETTE.length]
 }
 
 // Safe parser for depends_on — handles null, non-array, malformed JSON
@@ -426,8 +410,8 @@ function buildGraphData(input: BuildInput): { nodes: Node[]; edges: Edge[] } {
     if (!visibleNodeIds.has(dep.source) || !visibleNodeIds.has(dep.target)) continue
     const isActive = dep.task.status === "IN_PROGRESS"
     const edgeColor = dep.crossCrew
-      ? "#a855f7"
-      : isActive ? statusColors.IN_PROGRESS : pickEdgeColor(dep.source, dep.target)
+      ? STATUS_COLORS.REVIEW
+      : isActive ? STATUS_COLORS.IN_PROGRESS : pickEdgeColor(dep.source, dep.target)
 
     edges.push({
       id: `e-${dep.crossCrew ? "x-" : ""}${dep.source}-${dep.target}`,
@@ -484,7 +468,7 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
 
   for (const mission of activeMissions) {
     const tasks = mission.tasks || []
-    const accent = statusColors[mission.status] || "#64748b"
+    const accent = STATUS_COLORS[mission.status] || CREW_COLOR_DEFAULT
     const totalTokens = tasks.reduce((sum, t) => sum + (t.token_count || 0), 0)
     const statusLabel =
       tasks.length === 0 && (mission.status === "PLANNING" || mission.status === "IN_PROGRESS")
@@ -505,7 +489,7 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
         padding: "12px 20px",
         fontSize: "14px",
         fontWeight: 700,
-        color: "#e2e8f0",
+        color: GRAPH_CHROME.missionLabel,
         width: 220,
         boxShadow: `0 0 20px ${accent}15`,
       },
@@ -591,7 +575,7 @@ function buildFlatGraphData(missions: Mission[]): { nodes: Node[]; edges: Edge[]
         const taskDeps = deps.get(task.id) || []
         for (const depId of taskDeps) {
           const isActive = task.status === "IN_PROGRESS"
-          const edgeColor = isActive ? statusColors.IN_PROGRESS : pickEdgeColor(depId, task.id)
+          const edgeColor = isActive ? STATUS_COLORS.IN_PROGRESS : pickEdgeColor(depId, task.id)
           edges.push({
             id: `e-${depId}-${task.id}`,
             source: depId,
@@ -892,11 +876,11 @@ function WorkflowGraphInner(
             nodeColor={(n) => {
               if (n.id.startsWith("crew-")) {
                 const paletteName = (n.data as Record<string, unknown>)?.color as string | null
-                if (paletteName) return crewColorMap[paletteName] || paletteName
-                return "#1e2332"
+                if (paletteName) return CREW_COLORS[paletteName] || paletteName
+                return GRAPH_CHROME.minimapNode
               }
-              if (n.id.startsWith("mission-")) return "#1e2332"
-              return statusColors[(n.data?.status as string) || "PENDING"] || "#64748b"
+              if (n.id.startsWith("mission-")) return GRAPH_CHROME.minimapNode
+              return STATUS_COLORS[(n.data?.status as string) || "PENDING"] || CREW_COLOR_DEFAULT
             }}
             maskColor="rgba(10, 12, 16, 0.85)"
             className="!bg-card !border-border !rounded-lg"

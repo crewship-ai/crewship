@@ -8,17 +8,9 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
+import { formatDateTime } from "@/lib/time"
 import { useWorkspace } from "@/hooks/use-workspace"
-
-interface AuditEvent {
-  id: string
-  action: string
-  entity_type: string
-  entity_id: string
-  changes: Record<string, { old?: string; new?: string }> | null
-  user_name: string | null
-  created_at: string
-}
+import type { AuditEvent } from "@/lib/types/agent"
 
 const CATEGORY_CONFIG: Record<string, { label: string; icon: typeof Settings; className: string }> = {
   CONFIG: { label: "CONFIG", icon: Settings, className: "bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400" },
@@ -45,12 +37,6 @@ function formatEventTitle(event: AuditEvent): string {
   }
   if (action === "delete") return "Deleted"
   return event.action.replace(/_/g, " ")
-}
-
-function formatDate(dateStr: string): string {
-  const d = new Date(dateStr)
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) +
-    " " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
 }
 
 /** Agent configuration change history timeline. */
@@ -164,7 +150,7 @@ export function HistoryPageClient() {
                   </div>
                   <div className="flex items-center gap-3 text-label text-muted-foreground">
                     {event.user_name && <span>{event.user_name}</span>}
-                    <span>{formatDate(event.created_at)}</span>
+                    <span>{formatDateTime(event.created_at)}</span>
                   </div>
                 </div>
 

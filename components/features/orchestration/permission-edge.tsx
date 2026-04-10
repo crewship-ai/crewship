@@ -7,6 +7,7 @@ import {
   EdgeLabelRenderer,
   MarkerType,
 } from "@xyflow/react"
+import { DIRECTION_COLORS, GRAPH_CHROME } from "@/lib/colors"
 
 interface PermissionEdgeData {
   direction: "bidirectional" | "unidirectional"
@@ -35,7 +36,7 @@ function PermissionEdgeInner({
     targetY,
   })
 
-  const color = isBidirectional ? "#06b6d4" : "#f59e0b"
+  const color = isBidirectional ? DIRECTION_COLORS.bidirectional : DIRECTION_COLORS.unidirectional
   const label = isBidirectional ? "↔" : "→"
 
   if (dimmed) {
@@ -44,7 +45,7 @@ function PermissionEdgeInner({
         id={id}
         d={edgePath}
         fill="none"
-        stroke="#334155"
+        stroke={GRAPH_CHROME.dimmedEdge}
         strokeWidth={1}
         strokeOpacity={0.1}
       />
@@ -114,7 +115,7 @@ function PermissionEdgeInner({
 
 // Marker definitions for permission edges
 export function getPermissionMarkers(direction: "bidirectional" | "unidirectional") {
-  const color = direction === "bidirectional" ? "#06b6d4" : "#f59e0b"
+  const color = direction === "bidirectional" ? DIRECTION_COLORS.bidirectional : DIRECTION_COLORS.unidirectional
   const end = {
     type: MarkerType.ArrowClosed,
     color,

@@ -150,13 +150,13 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create assignment record in PENDING state
+	// Create assignment record in PENDING state (group_id = chat_id for mission linkage)
 	assignmentID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = h.db.ExecContext(r.Context(), `
-		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
-	`, assignmentID, body.WorkspaceID, body.ChatID, assignedByID, target.ID, body.Task, now)
+		INSERT INTO assignments (id, workspace_id, chat_id, assigned_by_id, assigned_to_id, task, status, group_id, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
+	`, assignmentID, body.WorkspaceID, body.ChatID, assignedByID, target.ID, body.Task, body.ChatID, now)
 	if err != nil {
 		h.logger.Error("create assignment", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -176,6 +176,45 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"target", body.TargetSlug,
 		"crew_id", body.CrewID,
 	)
+
+	// Post comment, update assignee, and log activity on the linked issue
+	var missionExists int
+	_ = h.db.QueryRowContext(r.Context(), `SELECT 1 FROM missions WHERE id = ?`, body.ChatID).Scan(&missionExists)
+	if missionExists == 1 {
+		var assignerName string
+		_ = h.db.QueryRowContext(r.Context(), `SELECT name FROM agents WHERE id = ?`, assignedByID).Scan(&assignerName)
+		if assignerName == "" { assignerName = "Lead" }
+
+		taskPreview := body.Task
+		if len(taskPreview) > 300 { taskPreview = taskPreview[:300] + "..." }
+
+		// Comment
+		commentID := generateCUID()
+		commentBody := fmt.Sprintf("**%s assigned work to %s**\n\n%s", assignerName, target.Name, taskPreview)
+		_, _ = h.db.ExecContext(r.Context(),
+			`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
+			commentID, body.ChatID, assignedByID, commentBody, now, now)
+
+		// Update assignee on the issue to the target agent
+		_, _ = h.db.ExecContext(r.Context(),
+			`UPDATE missions SET assignee_id = ?, assignee_type = 'agent', updated_at = ? WHERE id = ?`,
+			target.ID, now, body.ChatID)
+
+		// Activity
+		activityID := generateCUID()
+		_, _ = h.db.ExecContext(r.Context(),
+			`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
+			activityID, body.ChatID, assignedByID, "assignee_changed",
+			fmt.Sprintf("%s assigned to %s (@%s)", assignerName, target.Name, target.Slug), now)
+
+		// Broadcast update
+		if h.hub != nil {
+			h.hub.Broadcast("workspace:"+body.WorkspaceID, ws.ServerMessage{
+				Type: "issue.updated", Channel: "workspace:" + body.WorkspaceID,
+				Payload: map[string]string{"id": body.ChatID, "assignee": target.Slug},
+			})
+		}
+	}
 
 	// Run the sub-agent asynchronously
 	go h.runAssignment(context.Background(), assignmentID, body, target, creds)
@@ -332,6 +371,13 @@ func (h *AssignmentHandler) runAssignment(
 		SkipConvHistory: true,
 	}
 
+	// Load workspace language preference
+	var lang string
+	_ = h.db.QueryRowContext(ctx,
+		`SELECT COALESCE(preferred_language, '') FROM workspaces WHERE id = ?`,
+		body.WorkspaceID).Scan(&lang)
+	req.PreferredLanguage = lang
+
 	if err := h.orch.RunAgentForAssignment(ctx, req, handler); err != nil {
 		h.logger.Error("assignment execution failed", "error", err, "assignment_id", assignmentID)
 		h.finishAssignment(ctx, assignmentID, runID, body.ChatID, body.TargetSlug, body.WorkspaceID, "",
@@ -399,6 +445,65 @@ func (h *AssignmentHandler) finishAssignment(
 		if err := h.missionCallback.OnAssignmentCompleted(ctx, assignmentID, status, result, errMsg); err != nil {
 			h.logger.Error("mission callback failed", "error", err, "assignment_id", assignmentID)
 		}
+	}
+
+	// Post completion comment for assignments linked to a mission (via group_id or chat_id).
+	// This covers sub-agent assignments from sidecar /assign and lead planning assignments.
+	// Unique to feat/code-quality (commit 686c6c2) — main does not post these comments.
+	{
+		var groupID sql.NullString
+		var agentID string
+		_ = h.db.QueryRowContext(ctx,
+			`SELECT COALESCE(group_id, chat_id), assigned_to_id FROM assignments WHERE id = ?`,
+			assignmentID).Scan(&groupID, &agentID)
+		if groupID.Valid && groupID.String != "" {
+			var missionExists, hasLinkedTask int
+			_ = h.db.QueryRowContext(ctx, `SELECT 1 FROM missions WHERE id = ?`, groupID.String).Scan(&missionExists)
+			_ = h.db.QueryRowContext(ctx, `SELECT 1 FROM mission_tasks WHERE assignment_id = ?`, assignmentID).Scan(&hasLinkedTask)
+
+			// Only post if this is mission-linked and NOT already handled by OnAssignmentCompleted (which handles mission_tasks)
+			if missionExists == 1 && hasLinkedTask == 0 {
+				var agentName string
+				_ = h.db.QueryRowContext(ctx, `SELECT name FROM agents WHERE id = ?`, agentID).Scan(&agentName)
+
+				var commentBody string
+				if errMsg != "" {
+					commentBody = fmt.Sprintf("**%s encountered an issue.** Error: %s", agentName, errMsg)
+				} else if result != "" {
+					handoff := orchestrator.ParseHandoff(result)
+					if handoff.Parsed && handoff.Summary != "" {
+						commentBody = fmt.Sprintf("**%s completed their work** (confidence: %s)\n\n%s", agentName, handoff.Confidence, handoff.Summary)
+						if handoff.Artifacts != "" {
+							commentBody += "\n\n**Artifacts:** " + handoff.Artifacts
+						}
+					} else {
+						summary := result
+						if len(summary) > 500 {
+							summary = summary[:500] + "..."
+						}
+						commentBody = fmt.Sprintf("**%s completed their work**\n\n%s", agentName, summary)
+					}
+				}
+				if commentBody != "" {
+					cid := generateCUID()
+					_, _ = h.db.ExecContext(ctx,
+						`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
+						cid, groupID.String, agentID, commentBody, now, now)
+					aid := generateCUID()
+					action := "task_completed"
+					if errMsg != "" {
+						action = "task_failed"
+					}
+					_, _ = h.db.ExecContext(ctx,
+						`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
+						aid, groupID.String, agentID, action, fmt.Sprintf("%s finished work", agentName), now)
+				}
+			}
+		}
+	}
+
+	if h.hub == nil {
+		return
 	}
 
 	if errMsg != "" {

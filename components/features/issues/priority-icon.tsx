@@ -1,6 +1,7 @@
 "use client"
 
 import { cn } from "@/lib/utils"
+import { PRIORITY_COLORS } from "@/lib/colors"
 import type { IssuePriority } from "@/lib/types/mission"
 
 export const priorityLabel: Record<IssuePriority, string> = {
@@ -32,7 +33,7 @@ export function PriorityIcon({ priority, className }: PriorityIconProps) {
     case "urgent":
       return (
         <svg viewBox="0 0 16 16" className={cls}>
-          <rect x="1" y="1" width="14" height="14" rx="2" fill="#FC7840" />
+          <rect x="1" y="1" width="14" height="14" rx="2" fill={PRIORITY_COLORS.urgent} />
           <path
             d="M8 3.5v5M8 11v1"
             stroke="white"
@@ -44,23 +45,23 @@ export function PriorityIcon({ priority, className }: PriorityIconProps) {
     case "high":
       return (
         <svg viewBox="0 0 16 16" className={cls}>
-          <rect x="1.5" y="8" width="3" height="6" rx="1" fill="#FC7840" />
-          <rect x="6.5" y="5" width="3" height="9" rx="1" fill="#FC7840" />
-          <rect x="11.5" y="2" width="3" height="12" rx="1" fill="#FC7840" />
+          <rect x="1.5" y="8" width="3" height="6" rx="1" fill={PRIORITY_COLORS.urgent} />
+          <rect x="6.5" y="5" width="3" height="9" rx="1" fill={PRIORITY_COLORS.urgent} />
+          <rect x="11.5" y="2" width="3" height="12" rx="1" fill={PRIORITY_COLORS.urgent} />
         </svg>
       )
     case "medium":
       return (
         <svg viewBox="0 0 16 16" className={cls}>
-          <rect x="1.5" y="8" width="3" height="6" rx="1" fill="#EAB308" />
-          <rect x="6.5" y="5" width="3" height="9" rx="1" fill="#EAB308" />
+          <rect x="1.5" y="8" width="3" height="6" rx="1" fill={PRIORITY_COLORS.medium} />
+          <rect x="6.5" y="5" width="3" height="9" rx="1" fill={PRIORITY_COLORS.medium} />
           <rect
             x="11.5"
             y="2"
             width="3"
             height="12"
             rx="1"
-            fill="#EAB308"
+            fill={PRIORITY_COLORS.medium}
             opacity="0.2"
           />
         </svg>
@@ -68,14 +69,14 @@ export function PriorityIcon({ priority, className }: PriorityIconProps) {
     case "low":
       return (
         <svg viewBox="0 0 16 16" className={cls}>
-          <rect x="1.5" y="8" width="3" height="6" rx="1" fill="#3B82F6" />
+          <rect x="1.5" y="8" width="3" height="6" rx="1" fill={PRIORITY_COLORS.low} />
           <rect
             x="6.5"
             y="5"
             width="3"
             height="9"
             rx="1"
-            fill="#3B82F6"
+            fill={PRIORITY_COLORS.low}
             opacity="0.2"
           />
           <rect
@@ -84,7 +85,7 @@ export function PriorityIcon({ priority, className }: PriorityIconProps) {
             width="3"
             height="12"
             rx="1"
-            fill="#3B82F6"
+            fill={PRIORITY_COLORS.low}
             opacity="0.2"
           />
         </svg>

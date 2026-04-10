@@ -13,58 +13,7 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
-
-interface ServiceLogEntry {
-  time: string
-  level: string
-  msg: string
-  attrs?: Record<string, string>
-}
-
-interface AgentLogEntry {
-  ts: string
-  level: string
-  agent: string
-  event: string
-  content?: string
-  metadata?: Record<string, unknown>
-}
-
-interface DebugData {
-  agent: {
-    id: string
-    name: string
-    cli_adapter: string
-    db_status: string
-  }
-  crewshipd_reachable: boolean
-  crewshipd: {
-    status?: string
-    uptime?: string
-    uptime_secs?: number
-    connections?: number
-    started_at?: string
-    providers?: Record<string, string>
-    container_available?: boolean
-    storage_available?: boolean
-    state_available?: boolean
-    llm_proxy_enabled?: boolean
-    config?: Record<string, unknown>
-    error?: string
-  }
-  runtime: {
-    agent_id?: string
-    status: string
-    started_at?: string
-    container_id?: string
-    exec_id?: string
-    last_activity?: string
-    credential_id?: string
-    session_id?: string
-  }
-  service_logs: ServiceLogEntry[]
-  agent_logs: AgentLogEntry[]
-}
+import type { DebugData } from "@/lib/types/agent"
 
 type LogTab = "service" | "agent"
 

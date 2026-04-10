@@ -25,7 +25,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT, slug TEXT);
 		CREATE TABLE crews (id TEXT PRIMARY KEY, workspace_id TEXT, name TEXT, slug TEXT, escalation_config TEXT);
 		CREATE TABLE agents (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, name TEXT, slug TEXT,
-			agent_role TEXT DEFAULT 'AGENT', deleted_at TEXT);
+			agent_role TEXT DEFAULT 'AGENT', lead_mode TEXT DEFAULT 'active', deleted_at TEXT);
 		CREATE TABLE missions (id TEXT PRIMARY KEY, workspace_id TEXT, crew_id TEXT, lead_agent_id TEXT,
 			trace_id TEXT UNIQUE, title TEXT, description TEXT, status TEXT DEFAULT 'PLANNING',
 			plan TEXT, workflow_template TEXT, total_token_count INTEGER, total_estimated_cost REAL,

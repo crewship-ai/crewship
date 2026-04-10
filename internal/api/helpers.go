@@ -147,12 +147,14 @@ func validSlugFormat(slug string) bool {
 	return validSlugRe.MatchString(slug)
 }
 
+// writeJSON serializes v as JSON and writes it to the response with the given HTTP status code.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
 }
 
+// readJSON decodes the request body (up to 1 MB) into v.
 func readJSON(r *http.Request, v interface{}) error {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
 	if err != nil {
@@ -168,6 +170,7 @@ type updateBuilder struct {
 	args []any
 }
 
+// newUpdate creates an updateBuilder pre-populated with an updated_at clause.
 func newUpdate() *updateBuilder {
 	now := time.Now().UTC().Format(time.RFC3339)
 	return &updateBuilder{
@@ -198,6 +201,8 @@ func (u *updateBuilder) Empty() bool {
 	return len(u.sets) <= 1
 }
 
+// canRole returns true if the given workspace role is allowed to perform all of the specified actions.
+// Supported actions: "create" (OWNER/ADMIN/MANAGER), "manage" (OWNER/ADMIN), "read" (any role).
 func canRole(role string, actions ...string) bool {
 	for _, action := range actions {
 		switch action {

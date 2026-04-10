@@ -399,6 +399,10 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.TokenExpires, secLevel, credStatus, user.ID, now, now)
 	if err != nil {
 		tx.Rollback()
+		if strings.Contains(err.Error(), "UNIQUE") {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "Credential with this name already exists"})
+			return
+		}
 		h.logger.Error("insert credential", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return

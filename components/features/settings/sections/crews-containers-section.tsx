@@ -27,17 +27,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
+import { resolveCrewColor } from "@/lib/colors"
 
-const crewColorMap: Record<string, string> = {
-  blue: "#3b82f6",
-  emerald: "#10b981",
-  violet: "#8b5cf6",
-  amber: "#f59e0b",
-  rose: "#f43f5e",
-  cyan: "#06b6d4",
-  lime: "#84cc16",
-  fuchsia: "#d946ef",
-}
 
 const MEMORY_OPTIONS = [
   { value: "512", label: "512 MB" },
@@ -371,7 +362,7 @@ export function CrewsContainersSection({
             ) : (
               filteredCrews.map((crew, index) => {
                 const resolvedColor =
-                  (crew.color && crewColorMap[crew.color]) || "#64748b"
+                  resolveCrewColor(crew.color)
                 const draft = drafts[crew.id]
                 const isExpanded = expandedId === crew.id
                 const resourceChanged = draft

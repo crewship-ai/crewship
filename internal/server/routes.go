@@ -38,6 +38,8 @@ func (s *Server) registerIPCRoutes() {
 	s.ipcMux.HandleFunc("POST /crews/{id}/container/stop", s.handleContainerStop)
 	s.ipcMux.HandleFunc("GET /agents/{id}/logs", s.handleAgentLogs)
 	s.ipcMux.HandleFunc("GET /crews/{id}/stats", s.handleCrewStats)
+	s.ipcMux.HandleFunc("GET /crews/{id}/container-files", s.handleContainerFileList)
+	s.ipcMux.HandleFunc("GET /crews/{id}/git-log", s.handleContainerGitLog)
 	s.ipcMux.HandleFunc("GET /crews/{id}/files", s.handleFileList)
 	s.ipcMux.HandleFunc("GET /crews/{id}/files/download", s.handleFileDownload)
 	s.ipcMux.HandleFunc("PUT /crews/{id}/files/save", s.handleFileSave)
@@ -56,10 +58,45 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleReadyz(w http.ResponseWriter, _ *http.Request) {
-	// TODO: check Docker connectivity, bbolt state, etc.
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status": "ready",
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	checks := map[string]string{}
+
+	// Database
+	if s.db != nil {
+		if err := s.db.PingContext(ctx); err != nil {
+			checks["db"] = err.Error()
+		} else {
+			checks["db"] = "ok"
+		}
+	}
+
+	// State store (bbolt) — lightweight read on a non-existent bucket is safe
+	if s.state != nil {
+		if _, err := s.state.List(ctx, "readyz"); err != nil {
+			checks["state"] = err.Error()
+		} else {
+			checks["state"] = "ok"
+		}
+	}
+
+	allOK := true
+	for _, v := range checks {
+		if v != "ok" {
+			allOK = false
+			break
+		}
+	}
+
+	status := http.StatusOK
+	if !allOK {
+		status = http.StatusServiceUnavailable
+	}
+	writeJSON(w, status, map[string]interface{}{
+		"status": allOK,
+		"checks": checks,
 	})
 }
 
@@ -769,4 +806,156 @@ func sanitizeMetadata(raw any) map[string]interface{} {
 	return safe
 }
 
+// handleContainerFileList runs `find` inside a crew's container and returns the file tree.
+func (s *Server) handleContainerFileList(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("id")
+	subdir := r.URL.Query().Get("subdir")
 
+	if s.container == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "container provider not configured"})
+		return
+	}
+
+	var slug string
+	if s.db != nil {
+		_ = s.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", crewID).Scan(&slug)
+	}
+	if slug == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+		return
+	}
+
+	containerName := s.container.CrewContainerName(slug)
+	targetDir := "/home"
+	if subdir != "" {
+		cleaned := filepath.Clean(subdir)
+		if strings.HasPrefix(cleaned, "..") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid subdir"})
+			return
+		}
+		targetDir = filepath.Join("/home", cleaned)
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	result, err := s.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerName,
+		Cmd:         []string{"find", targetDir, "-maxdepth", "3", "-printf", "%y %s %T@ %p\\n"},
+		User:        "1001:1001",
+	})
+	if err != nil {
+		s.logger.Error("container file list exec failed", "crew_id", crewID, "error", err)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": []interface{}{}})
+		return
+	}
+	defer result.Reader.Close()
+
+	output, _ := io.ReadAll(io.LimitReader(result.Reader, 512*1024)) // 512KB cap
+
+	type fileEntry struct {
+		Path  string `json:"path"`
+		Name  string `json:"name"`
+		Size  int64  `json:"size"`
+		IsDir bool   `json:"is_dir"`
+	}
+	var files []fileEntry
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, " ", 4)
+		if len(parts) < 4 {
+			continue
+		}
+		ftype := parts[0]
+		var size int64
+		fmt.Sscanf(parts[1], "%d", &size)
+		fpath := parts[3]
+		name := filepath.Base(fpath)
+		if name == "." || name == ".." {
+			continue
+		}
+		files = append(files, fileEntry{
+			Path:  fpath,
+			Name:  name,
+			Size:  size,
+			IsDir: ftype == "d",
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "files": files})
+}
+
+// handleContainerGitLog runs `git log` inside a crew's container and returns recent commits.
+func (s *Server) handleContainerGitLog(w http.ResponseWriter, r *http.Request) {
+	crewID := r.PathValue("id")
+	agentSlug := r.URL.Query().Get("agent_slug")
+
+	if s.container == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "container provider not configured"})
+		return
+	}
+
+	var slug string
+	if s.db != nil {
+		_ = s.db.QueryRowContext(r.Context(), "SELECT slug FROM crews WHERE id = ?", crewID).Scan(&slug)
+	}
+	if slug == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found"})
+		return
+	}
+
+	containerName := s.container.CrewContainerName(slug)
+	workDir := "/home"
+	if agentSlug != "" {
+		clean := filepath.Base(agentSlug)
+		if clean != "." && clean != ".." && !strings.ContainsAny(clean, `/\`) {
+			workDir = filepath.Join("/output", clean)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	result, err := s.container.Exec(ctx, provider.ExecConfig{
+		ContainerID: containerName,
+		Cmd:         []string{"git", "log", "--oneline", "-20", "--format=%H|%s|%an|%aI"},
+		WorkingDir:  workDir,
+		User:        "1001:1001",
+	})
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "commits": []interface{}{}, "error": "git not available"})
+		return
+	}
+	defer result.Reader.Close()
+
+	output, _ := io.ReadAll(io.LimitReader(result.Reader, 64*1024))
+
+	type gitCommit struct {
+		Hash    string `json:"hash"`
+		Message string `json:"message"`
+		Author  string `json:"author"`
+		Date    string `json:"date"`
+	}
+	var commits []gitCommit
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 4)
+		if len(parts) < 4 {
+			continue
+		}
+		commits = append(commits, gitCommit{
+			Hash:    parts[0],
+			Message: parts[1],
+			Author:  parts[2],
+			Date:    parts[3],
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"crew_id": crewID, "commits": commits})
+}
