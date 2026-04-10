@@ -77,9 +77,15 @@ function TriggersTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
     }
     setLoading(true)
     fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
       .then((data) => setAgent(data))
-      .catch(() => {})
+      .catch((err) => {
+        console.error("TriggersTab: failed to load agent", err)
+        setAgent(null)
+      })
       .finally(() => setLoading(false))
   }, [agentId, workspaceId])
 
@@ -202,16 +208,26 @@ function SharedContextTab({ agentId, workspaceId }: { agentId: string; workspace
     // block only fires once BOTH have resolved/rejected — otherwise the
     // crew section "pops in" after the spinner clears.
     fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`agent fetch HTTP ${r.status}`)
+        return r.json()
+      })
       .then((data: AgentContextInfo) => {
         setAgent(data)
         if (data.crew_id) {
           return fetch(`/api/v1/crews/${data.crew_id}?workspace_id=${workspaceId}`)
-            .then((r) => r.json())
+            .then((r) => {
+              if (!r.ok) throw new Error(`crew fetch HTTP ${r.status}`)
+              return r.json()
+            })
             .then((c) => setCrew(c))
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error("SharedContextTab: failed to load", err)
+        setAgent(null)
+        setCrew(null)
+      })
       .finally(() => setLoading(false))
   }, [agentId, workspaceId])
 
@@ -304,13 +320,24 @@ function TeamChatTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
     }
     setLoading(true)
     fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`agent fetch HTTP ${r.status}`)
+        return r.json()
+      })
       .then((agent) => {
+        // Defensive shape check — if the API returns an unexpected payload
+        // (e.g. an error object), don't try to read .slug / .crew_id off it.
+        if (!agent || typeof agent !== "object" || typeof agent.slug !== "string") {
+          throw new Error("agent response malformed")
+        }
         setAgentSlug(agent.slug)
-        setCrewId(agent.crew_id)
+        setCrewId(agent.crew_id ?? null)
         if (agent.crew_id) {
           return fetch(`/api/v1/crews/${agent.crew_id}/peer-conversations?workspace_id=${workspaceId}`)
-            .then((r) => r.json())
+            .then((r) => {
+              if (!r.ok) throw new Error(`peer-conversations fetch HTTP ${r.status}`)
+              return r.json()
+            })
             .then((data) => {
               const all = Array.isArray(data) ? data : []
               // Filter to conversations involving this agent
@@ -318,7 +345,12 @@ function TeamChatTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
             })
         }
       })
-      .catch(() => {})
+      .catch((err) => {
+        console.error("TeamChatTab: failed to load", err)
+        setAgentSlug(null)
+        setCrewId(null)
+        setMessages([])
+      })
       .finally(() => setLoading(false))
   }, [agentId, workspaceId])
 
