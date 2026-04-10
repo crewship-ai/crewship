@@ -10,6 +10,7 @@ import {
   Activity, ScrollText, Zap, Key, Plug, Clock, Settings, Bug, History, X, TerminalSquare,
 } from "lucide-react"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { StatusDot } from "@/components/ui/status-badge"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 
@@ -29,6 +30,17 @@ const tabs = [
   { label: "History", href: "/history", icon: History },
 ]
 
+// Map agent status string → canonical status identifier for StatusDot.
+function mapAgentStatus(status: string | undefined): string {
+  switch (status) {
+    case "RUNNING": return "IN_PROGRESS"
+    case "ERROR": return "FAILED"
+    case "STOPPED": return "CANCELLED"
+    case "IDLE":
+    default: return "PENDING"
+  }
+}
+
 interface AgentTabsProps {
   agentId: string
 }
@@ -47,22 +59,21 @@ export function AgentDesktopRail({ agentId }: { agentId: string }) {
 
   if (isMobile) return null
 
-  const statusDot = agent?.status === "RUNNING" ? "bg-emerald-500 animate-pulse"
-    : agent?.status === "ERROR" ? "bg-red-500"
-    : "bg-gray-400"
+  const canonicalStatus = mapAgentStatus(agent?.status)
+  const isLive = agent?.status === "RUNNING"
 
   return (
     <div
       className={cn(
-        "bg-background border-r flex flex-col shrink-0 h-full transition-all duration-200 overflow-hidden",
+        "bg-background border-r border-border flex flex-col shrink-0 h-full transition-all duration-200 overflow-hidden",
         expanded ? "w-44" : "w-12"
       )}
       onMouseEnter={() => setExpanded(true)}
       onMouseLeave={() => setExpanded(false)}
     >
-      {/* Agent avatar -- height matches session sidebar header */}
+      {/* Agent avatar — height matches session sidebar header */}
       <div className={cn(
-        "flex items-center border-b shrink-0 h-[41px]",
+        "flex items-center border-b border-border shrink-0 h-[41px]",
         expanded ? "gap-2.5 px-3" : "justify-center"
       )}>
         {agent ? (
@@ -76,16 +87,16 @@ export function AgentDesktopRail({ agentId }: { agentId: string }) {
         )}
         {expanded && agent && (
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-semibold truncate">{agent.name}</div>
+            <div className="text-label font-semibold truncate">{agent.name}</div>
             <div className="flex items-center gap-1 mt-0.5">
-              <span className={cn("h-1.5 w-1.5 rounded-full", statusDot)} />
-              <span className="text-micro text-muted-foreground">{agent.status}</span>
+              <StatusDot status={canonicalStatus} live={isLive} className="h-1.5 w-1.5" />
+              <span className="text-micro text-muted-foreground truncate">{agent.status}</span>
             </div>
           </div>
         )}
       </div>
 
-      {/* Navigation items */}
+      {/* Navigation items — icon toolbar pattern */}
       <div className="flex-1 overflow-y-auto py-1">
         {tabs.map((tab) => {
           const tabPath = tab.href ? `${basePath}${tab.href}` : basePath
@@ -100,9 +111,9 @@ export function AgentDesktopRail({ agentId }: { agentId: string }) {
               title={!expanded ? tab.label : undefined}
               className={cn(
                 "w-full flex items-center transition-colors",
-                expanded ? "gap-2.5 px-3 py-2 text-xs font-medium" : "justify-center py-2.5",
+                expanded ? "gap-2.5 px-3 py-2 text-label font-medium" : "justify-center py-2.5",
                 isActive
-                  ? "bg-accent text-primary"
+                  ? "bg-accent text-foreground"
                   : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
               )}
             >
@@ -132,21 +143,21 @@ export function AgentMobileTabsBar({ agentId }: { agentId: string }) {
 
   return (
     <>
-      <div className="flex items-center bg-card border-t border-b shrink-0">
+      <div className="flex items-center bg-card border-t border-b border-border shrink-0">
         <button
           className="h-10 flex items-center gap-2 px-3 hover:bg-accent shrink-0 text-muted-foreground"
           onClick={() => setAgentMenuOpen(true)}
           aria-label="Agent pages"
         >
           <LayoutGrid className="h-4 w-4" />
-          <span className="text-xs font-medium">Pages</span>
+          <span className="text-label font-medium">Pages</span>
         </button>
       </div>
 
       <Sheet open={agentMenuOpen} onOpenChange={setAgentMenuOpen}>
         <SheetContent side="bottom" showCloseButton={false} className="rounded-t-2xl max-h-[85vh] p-0">
           <div className="w-12 h-1.5 rounded-full bg-border mx-auto mt-3 mb-1" />
-          <SheetHeader className="px-4 py-2.5 border-b">
+          <SheetHeader className="px-4 py-2.5 border-b border-border">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 {agent && (
@@ -156,7 +167,7 @@ export function AgentMobileTabsBar({ agentId }: { agentId: string }) {
                     className="h-7 w-7 rounded-lg shrink-0"
                   />
                 )}
-                <SheetTitle className="text-xs">{agent?.name ?? "Agent"}</SheetTitle>
+                <SheetTitle className="text-label">{agent?.name ?? "Agent"}</SheetTitle>
               </div>
               <button onClick={() => setAgentMenuOpen(false)} className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent shrink-0">
                 <X className="h-3.5 w-3.5" />
@@ -175,7 +186,7 @@ export function AgentMobileTabsBar({ agentId }: { agentId: string }) {
                   href={tabPath}
                   onClick={() => setAgentMenuOpen(false)}
                   className={cn(
-                    "w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors",
+                    "w-full flex items-center gap-3 px-4 py-2.5 text-body transition-colors",
                     isActive
                       ? "bg-accent text-foreground font-medium"
                       : "text-muted-foreground hover:text-foreground hover:bg-accent/50"

@@ -2,8 +2,11 @@
 
 import { useParams } from "next/navigation"
 import { useState, useEffect, useCallback, useRef } from "react"
-import { Download, AlertCircle, Inbox, Search, Pause, Play } from "lucide-react"
+import { Download, AlertCircle, ScrollText, Search, Pause, Play } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { EmptyState } from "@/components/layout/empty-state"
+import { cn } from "@/lib/utils"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 
@@ -134,35 +137,36 @@ export function LogsPageClient() {
 
   if (error) {
     return (
-      <div className="p-4 md:p-6">
+      <div className="p-4 sm:p-6">
         <div className="flex items-center gap-2 text-destructive">
           <AlertCircle className="h-5 w-5" />
-          <p className="text-sm">{error}</p>
+          <p className="text-body">{error}</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Log controls -- dark bar */}
-      <div className="bg-neutral-900 dark:bg-neutral-950 border-b border-neutral-700 px-4 md:px-6 py-2 flex flex-wrap items-center gap-3 shrink-0">
+    <div className="flex flex-col h-full p-4 sm:p-6 gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-title font-semibold">Logs</h2>
+      </div>
+
+      {/* Log controls */}
+      <div className="bg-card border border-border rounded-t-lg px-4 py-2 flex flex-wrap items-center gap-3 shrink-0">
         <div className="flex items-center gap-1">
-          <span className="text-xs text-neutral-400 mr-1">Level:</span>
+          <span className="text-label text-muted-foreground mr-1">Level:</span>
           {LEVELS.map((lvl) => (
             <button
               key={lvl}
               aria-pressed={filter === lvl}
               aria-label={`Filter by ${lvl}`}
-              className={`px-2 py-0.5 rounded text-xs transition-colors ${
+              className={cn(
+                "px-2 py-0.5 rounded text-label transition-colors",
                 filter === lvl
-                  ? "bg-neutral-700 text-white font-medium"
-                  : lvl === "WARN"
-                    ? "text-amber-500 hover:bg-neutral-700"
-                    : lvl === "ERROR"
-                      ? "text-red-500 hover:bg-neutral-700"
-                      : "text-neutral-400 hover:text-white hover:bg-neutral-700"
-              }`}
+                  ? "bg-accent text-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+              )}
               onClick={() => setFilter(lvl)}
             >
               {lvl}
@@ -172,67 +176,67 @@ export function LogsPageClient() {
 
         {/* Search */}
         <div className="relative flex-1 max-w-xs ml-2">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-neutral-500" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
             aria-label="Search logs"
             type="text"
             placeholder="Search logs..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-neutral-800 border border-neutral-700 rounded text-white placeholder-neutral-500 focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full pl-8 pr-3 py-1.5 text-label bg-background border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
 
         <div className="ml-auto flex items-center gap-2">
           {autoRefresh && (
-            <div className="flex items-center gap-1.5 text-xs text-[#4ECDC4]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#4ECDC4] animate-pulse" />
-              Auto-scroll ON
+            <div className="flex items-center gap-1.5 text-label text-primary">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+              Streaming
             </div>
           )}
-          <button
-            className={`px-2 py-1 rounded text-xs transition-colors ${
-              autoRefresh ? "bg-primary text-white" : "bg-neutral-700 text-neutral-300 hover:text-white"
-            }`}
+          <Button
+            size="sm"
+            variant={autoRefresh ? "default" : "outline"}
+            className="h-7 gap-1"
             onClick={() => setAutoRefresh(!autoRefresh)}
           >
             {autoRefresh ? (
-              <span className="flex items-center gap-1"><Pause className="h-3 w-3" /> Pause</span>
+              <><Pause className="h-3 w-3" /> Pause</>
             ) : (
-              <span className="flex items-center gap-1"><Play className="h-3 w-3" /> Stream</span>
+              <><Play className="h-3 w-3" /> Stream</>
             )}
-          </button>
-          <button
-            className="px-2 py-1 rounded text-xs bg-neutral-700 text-neutral-300 hover:text-white flex items-center gap-1"
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1"
             onClick={handleDownload}
           >
             <Download className="h-3 w-3" /> Download
-          </button>
+          </Button>
         </div>
       </div>
 
-      {/* Log viewer -- dark terminal */}
+      {/* Log viewer */}
       {filtered.length === 0 ? (
-        <div className="flex-1 bg-neutral-950 flex flex-col items-center justify-center text-center">
-          <Inbox className="h-10 w-10 text-neutral-600 mb-3" />
-          <p className="text-sm font-medium text-neutral-400">
-            {logs.length === 0 ? "No logs yet" : "No matching logs"}
-          </p>
-          <p className="text-xs text-neutral-500 mt-1">
-            {logs.length === 0 ? "Logs will appear here when the agent runs." : "Try a different filter."}
-          </p>
+        <div className="flex-1 border border-t-0 border-border rounded-b-lg bg-surface-subtle flex items-center justify-center">
+          <EmptyState
+            icon={ScrollText}
+            title={logs.length === 0 ? "No logs yet" : "No matching logs"}
+            description={logs.length === 0 ? "Logs will appear here when the agent runs." : "Try a different filter."}
+          />
         </div>
       ) : (
         <div
           ref={logContainerRef}
-          className="flex-1 bg-neutral-950 overflow-y-auto px-4 md:px-6 py-4 font-mono text-xs leading-6"
+          className="flex-1 bg-surface-subtle border border-t-0 border-border rounded-b-lg overflow-y-auto px-4 py-4 font-mono text-label leading-6"
         >
           {filtered.map((log, i) => {
             const level = log.level.toUpperCase()
-            const levelColor = LEVEL_COLORS[level] ?? "text-neutral-500"
-            const eventColor = EVENT_COLORS[log.event] ?? "text-neutral-400"
-            const contentColor = level === "ERROR" ? "text-red-300" :
-              level === "WARN" ? "text-amber-300" : "text-neutral-300"
+            const levelColor = LEVEL_COLORS[level] ?? "text-muted-foreground"
+            const eventColor = EVENT_COLORS[log.event] ?? "text-muted-foreground"
+            const contentColor = level === "ERROR" ? "text-destructive"
+              : level === "WARN" ? "text-foreground" : "text-foreground/90"
 
             let extraInfo = ""
             if (log.event === "result" && log.metadata) {
@@ -293,26 +297,26 @@ export function LogsPageClient() {
             }
 
             return (
-              <div key={i} className="flex gap-0 hover:bg-neutral-900/50">
-                <span className="text-neutral-600 shrink-0">{formatLogTime(log.ts)}</span>
+              <div key={i} className="flex gap-0 hover:bg-muted/40">
+                <span className="text-muted-foreground shrink-0">{formatLogTime(log.ts)}</span>
                 <span className={`${levelColor} mx-2 shrink-0`}>[{level.toLowerCase()}]</span>
                 <span className={`${eventColor} mr-2 shrink-0`}>{log.event}</span>
                 <span className={contentColor}>{log.content ?? ""}</span>
-                {extraInfo && <span className="text-neutral-500 ml-1">{extraInfo}</span>}
+                {extraInfo && <span className="text-muted-foreground ml-1">{extraInfo}</span>}
               </div>
             )
           })}
           {autoRefresh && (
             <div className="mt-2">
-              <span className="inline-block w-2 h-4 bg-[#4ECDC4] animate-pulse align-middle" />
+              <span className="inline-block w-2 h-4 bg-primary animate-pulse align-middle" />
             </div>
           )}
         </div>
       )}
 
       {/* Log status bar */}
-      <div className="bg-neutral-900 dark:bg-neutral-950 border-t border-neutral-700 px-4 md:px-6 py-2 flex items-center shrink-0">
-        <span className="ml-auto text-xs text-neutral-600">
+      <div className="bg-card border border-t-0 border-border rounded-b-lg px-4 py-2 flex items-center shrink-0 -mt-4">
+        <span className="ml-auto text-micro text-muted-foreground">
           {filtered.length} entr{filtered.length !== 1 ? "ies" : "y"}
           {filter !== "ALL" ? ` (${filter})` : ""}
         </span>
@@ -323,19 +327,20 @@ export function LogsPageClient() {
 
 function LogsSkeleton() {
   return (
-    <div className="flex flex-col h-full">
-      <div className="bg-neutral-900 px-4 md:px-6 py-2 flex items-center gap-2">
+    <div className="flex flex-col h-full p-4 sm:p-6 gap-4">
+      <Skeleton className="h-6 w-32" />
+      <div className="bg-card border border-border rounded-t-lg px-4 py-2 flex items-center gap-2">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-6 w-14 bg-neutral-800" />
+          <Skeleton key={i} className="h-6 w-14" />
         ))}
         <div className="ml-auto flex gap-1">
-          <Skeleton className="h-6 w-20 bg-neutral-800" />
-          <Skeleton className="h-6 w-20 bg-neutral-800" />
+          <Skeleton className="h-6 w-20" />
+          <Skeleton className="h-6 w-20" />
         </div>
       </div>
-      <div className="flex-1 bg-neutral-950 p-4 space-y-2">
+      <div className="flex-1 bg-surface-subtle border border-t-0 border-border rounded-b-lg p-4 space-y-2 -mt-4">
         {Array.from({ length: 12 }).map((_, i) => (
-          <Skeleton key={i} className={`h-5 bg-neutral-900 ${["w-3/4", "w-2/3", "w-4/5", "w-3/5", "w-2/3", "w-[70%]", "w-4/5", "w-3/5", "w-[65%]", "w-3/4", "w-2/3", "w-4/5"][i]}`} />
+          <Skeleton key={i} className={`h-5 ${["w-3/4", "w-2/3", "w-4/5", "w-3/5", "w-2/3", "w-[70%]", "w-4/5", "w-3/5", "w-[65%]", "w-3/4", "w-2/3", "w-4/5"][i]}`} />
         ))}
       </div>
     </div>

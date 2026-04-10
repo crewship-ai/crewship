@@ -10,12 +10,13 @@ import {
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AnimatedNumber } from "@/components/ui/animated-number"
 import { FlashHighlight } from "@/components/ui/flash-highlight"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useWorkspace } from "@/hooks/use-workspace"
-import { getCrewDotColor } from "@/lib/crew-icon"
+import { getCrewBgClass } from "@/lib/colors"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import { CLI_ADAPTERS } from "@/lib/cli-adapters"
 import { timeAgo, formatDuration, formatTimeout } from "@/lib/time"
@@ -149,7 +150,8 @@ export function AgentOverviewPageClient() {
   const activeChats = recentChats.filter((c) => c.status === "ACTIVE").length
 
   return (
-    <div className="p-4 sm:p-6 space-y-5">
+    <div className="p-4 sm:p-6 space-y-6">
+      <h2 className="text-title font-semibold">Overview</h2>
       {/* Stats Row — 5 columns */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         <StatMiniCard
@@ -223,7 +225,7 @@ export function AgentOverviewPageClient() {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Tools</span>
-                  <Badge variant="secondary" className="text-xs">{agent.tool_profile}</Badge>
+                  <Badge variant="secondary" className="text-micro">{agent.tool_profile}</Badge>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Timeout</span>
@@ -251,10 +253,7 @@ export function AgentOverviewPageClient() {
                   <div className="flex items-center justify-between">
                     <span className="text-muted-foreground">Crew</span>
                     <Link href={`/crews/${agent.crew_id}`} className="flex items-center gap-1.5 hover:underline" aria-label={`Go to ${agent.crew.name} crew`}>
-                      <span
-                        className="h-2 w-2 rounded-full"
-                        style={{ backgroundColor: getCrewDotColor(agent.crew.color) }}
-                      />
+                      <span className={`h-2 w-2 rounded-full ${getCrewBgClass(agent.crew.color)}`} />
                       {agent.crew.name}
                     </Link>
                   </div>
@@ -265,7 +264,7 @@ export function AgentOverviewPageClient() {
                     <Brain className="h-3.5 w-3.5 text-muted-foreground" />
                     <Badge
                       variant="secondary"
-                      className={`text-xs ${agent.memory_enabled ? "status-success" : ""}`}
+                      className={`text-micro ${agent.memory_enabled ? "status-success" : ""}`}
                     >
                       {agent.memory_enabled ? "On" : "Off"}
                     </Badge>
@@ -289,7 +288,7 @@ export function AgentOverviewPageClient() {
                   <ScrollText className="h-4 w-4 text-muted-foreground" />
                   <span className="text-micro font-semibold uppercase tracking-wider text-muted-foreground">System Prompt</span>
                 </div>
-                <div className="bg-muted/50 rounded-lg p-3 font-mono text-xs leading-relaxed max-h-64 overflow-y-auto whitespace-pre-wrap">
+                <div className="bg-surface-subtle border border-border/60 rounded-lg p-3 font-mono text-label leading-relaxed max-h-64 overflow-y-auto whitespace-pre-wrap">
                   {agent.system_prompt}
                 </div>
               </CardContent>
@@ -332,10 +331,7 @@ export function AgentOverviewPageClient() {
                         </div>
                       </div>
                       {chat.status === "ACTIVE" ? (
-                        <Badge variant="secondary" className="text-micro status-success gap-1 shrink-0">
-                          <span className="h-1 w-1 rounded-full bg-emerald-500" />
-                          active
-                        </Badge>
+                        <StatusBadge status="IN_PROGRESS" withDot label="active" className="text-micro shrink-0" />
                       ) : (
                         <Badge variant="secondary" className="text-micro shrink-0">done</Badge>
                       )}
@@ -372,6 +368,7 @@ export function AgentOverviewPageClient() {
                     const rawDur = run.metadata?.duration_api_ms
                     const durationMs = typeof rawDur === "number" && isFinite(rawDur) ? rawDur : undefined
                     const runTs = run.started_at || run.created_at
+                    const canonicalStatus = isError ? "FAILED" : isSuccess ? "COMPLETED" : "PENDING"
                     return (
                       <div
                         key={run.id}
@@ -397,9 +394,8 @@ export function AgentOverviewPageClient() {
                             </div>
                           </div>
                         </div>
-                        <span className={`text-micro font-medium shrink-0 ${
-                          isError ? "text-red-600" : isSuccess ? "text-emerald-600" : "text-muted-foreground"
-                        }`}>
+                        <span className="text-micro font-medium shrink-0 inline-flex items-center gap-1.5 text-muted-foreground">
+                          <StatusDot status={canonicalStatus} className="h-1.5 w-1.5" />
                           {run.status.toLowerCase()}
                         </span>
                       </div>
