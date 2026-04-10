@@ -1,27 +1,13 @@
 import React from "react"
-import {
-  RefreshCw, Radio, Shield, CheckCircle2, XCircle, AlertTriangle,
-} from "lucide-react"
-import { Card } from "@/components/ui/card"
-import { SectionCard } from "@/components/ui/section-card"
-import { StatCard } from "@/components/layout/stat-card"
+import { RefreshCw, Radio, Shield } from "lucide-react"
 import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
+  Sheet, SheetContent, SheetHeader, SheetTitle,
 } from "@/components/ui/sheet"
+import { KpiCard } from "@/components/features/dashboard/kpi-card"
+import { SettingsCard, SettingsRow } from "@/components/features/settings/shared"
 import { cn } from "@/lib/utils"
 import { redactSecrets, redactUrl } from "../utils"
 import type { KeeperStatus, KeeperLogEntry } from "../types"
@@ -41,16 +27,11 @@ interface KeeperTabProps {
 // Map keeper decisions → canonical StatusBadge keys
 function decisionStatusKey(decision: string | null | undefined): string {
   switch (decision) {
-    case "ALLOW":
-      return "COMPLETED"
-    case "DENY":
-      return "FAILED"
-    case "ESCALATE":
-      return "BLOCKED"
-    case "PENDING":
-      return "IN_PROGRESS"
-    default:
-      return "PENDING"
+    case "ALLOW":    return "COMPLETED"
+    case "DENY":     return "FAILED"
+    case "ESCALATE": return "BLOCKED"
+    case "PENDING":  return "IN_PROGRESS"
+    default:         return "PENDING"
   }
 }
 
@@ -65,407 +46,336 @@ export const KeeperTab = React.memo(function KeeperTab({
   onRefresh,
 }: KeeperTabProps) {
   return (
-    <div className="space-y-4">
-      <div className="pb-3 border-b border-border/60">
-        <h3 className="text-body font-medium text-foreground/80">Keeper — Credential Access Control</h3>
-        <p className="text-[11px] text-muted-foreground mt-0.5 max-w-2xl">
+    <div className="space-y-5">
+      {/* ── Intro ── */}
+      <div>
+        <h3 className="text-body font-medium text-foreground/80 leading-none">
+          Keeper — credential access control
+        </h3>
+        <p className="text-[11px] text-muted-foreground mt-1 leading-snug max-w-2xl">
           Keeper evaluates credential access requests using a local AI model (Ollama).
-          Agents never see raw credentials — Keeper decides ALLOW / DENY / ESCALATE.
+          Agents never see raw credentials — Keeper decides ALLOW, DENY, or ESCALATE.
         </p>
       </div>
 
-      {keeperLoading && <Skeleton className="h-[200px] rounded-xl" />}
+      {keeperLoading && <Skeleton className="h-[240px] rounded-xl" />}
 
       {!keeperLoading && keeperStatus && (
         <>
-          {/* Status card */}
-          <SectionCard title="System Status" description="Keeper subsystem health">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <StatusDot status={keeperStatus.enabled ? "COMPLETED" : "BLOCKED"} />
-                  <span className="text-body">Keeper</span>
-                </div>
-                <span className="text-label text-muted-foreground">
-                  {keeperStatus.enabled ? "Enabled" : "Disabled"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <StatusDot
-                    status={keeperStatus.gatekeeper_configured ? "COMPLETED" : "FAILED"}
-                  />
-                  <span className="text-body">Gatekeeper</span>
-                </div>
-                <span className="text-label text-muted-foreground">
-                  {keeperStatus.gatekeeper_configured ? "Configured" : "Not configured"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <StatusDot status={keeperStatus.ollama_online ? "COMPLETED" : "FAILED"} />
-                  <span className="text-body">Ollama LLM</span>
-                </div>
-                <span className="text-label text-muted-foreground">
-                  {keeperStatus.ollama_online
-                    ? `Online — ${keeperStatus.model}`
-                    : keeperStatus.enabled
-                      ? "Offline"
-                      : "Not configured"}
-                </span>
-              </div>
-            </div>
-
+          {/* ── System status card ── */}
+          <SettingsCard
+            title="System status"
+            description="Keeper subsystem health"
+            actions={
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2.5 text-xs"
+                onClick={onRefresh}
+                disabled={keeperLoading}
+              >
+                <RefreshCw className={cn("mr-1.5 h-3 w-3", keeperLoading && "animate-spin")} />
+                Refresh
+              </Button>
+            }
+          >
+            <SettingsRow label="Keeper">
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <StatusDot status={keeperStatus.enabled ? "COMPLETED" : "BLOCKED"} />
+                {keeperStatus.enabled ? "Enabled" : "Disabled"}
+              </span>
+            </SettingsRow>
+            <SettingsRow label="Gatekeeper">
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <StatusDot status={keeperStatus.gatekeeper_configured ? "COMPLETED" : "FAILED"} />
+                {keeperStatus.gatekeeper_configured ? "Configured" : "Not configured"}
+              </span>
+            </SettingsRow>
+            <SettingsRow label="Ollama LLM" border={keeperStatus.enabled}>
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <StatusDot status={keeperStatus.ollama_online ? "COMPLETED" : "FAILED"} />
+                {keeperStatus.ollama_online
+                  ? `Online · ${keeperStatus.model}`
+                  : keeperStatus.enabled ? "Offline" : "Not configured"}
+              </span>
+            </SettingsRow>
             {keeperStatus.enabled && (
-              <div className="mt-4 pt-3 border-t border-border text-label text-muted-foreground space-y-1">
-                <div>
-                  Ollama URL:{" "}
-                  <span className="font-mono">{redactUrl(keeperStatus.ollama_url)}</span>
-                </div>
-                <div>
-                  Model: <span className="font-mono">{keeperStatus.model}</span>
-                </div>
-              </div>
+              <>
+                <SettingsRow label="Ollama URL">
+                  <span className="text-[11px] font-mono text-muted-foreground truncate">
+                    {redactUrl(keeperStatus.ollama_url)}
+                  </span>
+                </SettingsRow>
+                <SettingsRow label="Model" border={false}>
+                  <span className="text-[11px] font-mono text-muted-foreground">
+                    {keeperStatus.model}
+                  </span>
+                </SettingsRow>
+              </>
             )}
-
             {!keeperStatus.enabled && (
-              <div className="mt-4 pt-3 border-t border-border">
-                <p className="text-label text-muted-foreground">
+              <div className="px-4 py-2.5 bg-amber-500/[0.04] border-t border-amber-500/20">
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
                   To enable Keeper, set{" "}
-                  <code className="bg-muted px-1 py-0.5 rounded text-micro">
+                  <code className="bg-muted/60 border border-border/60 px-1 py-0.5 rounded text-[10px] font-mono">
                     KEEPER_OLLAMA_URL=http://localhost:11434
                   </code>{" "}
                   in your{" "}
-                  <code className="bg-muted px-1 py-0.5 rounded text-micro">.env.local</code> and
-                  restart the server.
+                  <code className="bg-muted/60 border border-border/60 px-1 py-0.5 rounded text-[10px] font-mono">
+                    .env.local
+                  </code>{" "}
+                  and restart the server.
                 </p>
               </div>
             )}
+          </SettingsCard>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onRefresh}
-              disabled={keeperLoading}
-              className="mt-4"
-            >
-              <RefreshCw className={cn("mr-2 h-3.5 w-3.5", keeperLoading && "animate-spin")} />
-              Refresh
-            </Button>
-          </SectionCard>
-
-          {/* Stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard
-              title="Total Requests"
+          {/* ── Decision stats KPIs ── */}
+          <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+            <KpiCard
+              label="Total requests"
               value={keeperStatus.total_requests}
               subtitle="lifetime"
-              icon={Shield}
             />
-            <StatCard
-              title="Allowed"
+            <KpiCard
+              label="Allowed"
               value={keeperStatus.allow_count}
+              valueColor="rgb(52, 211, 153)"
               subtitle="decisions"
-              icon={CheckCircle2}
             />
-            <StatCard
-              title="Denied"
+            <KpiCard
+              label="Denied"
               value={keeperStatus.deny_count}
+              valueColor={keeperStatus.deny_count > 0 ? "rgb(248, 113, 113)" : undefined}
               subtitle="decisions"
-              icon={XCircle}
             />
-            <StatCard
-              title="Escalated"
+            <KpiCard
+              label="Escalated"
               value={keeperStatus.escalate_count}
+              valueColor={keeperStatus.escalate_count > 0 ? "rgb(251, 191, 36)" : undefined}
               subtitle="to human"
-              icon={AlertTriangle}
             />
           </div>
 
-          {/* Live keeper events */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Radio
-                className={cn(
-                  "h-3.5 w-3.5",
-                  keeperWsStatus === "connected" ? "text-foreground" : "text-muted-foreground"
-                )}
-              />
-              <h4 className="text-label font-medium">Live Activity</h4>
-              <StatusBadge
-                status={
-                  keeperWsStatus === "connected"
-                    ? "COMPLETED"
-                    : keeperWsStatus === "connecting"
-                      ? "IN_PROGRESS"
-                      : "PENDING"
-                }
-                label={
-                  keeperWsStatus === "connected"
-                    ? "Streaming"
-                    : keeperWsStatus === "connecting"
-                      ? "Connecting..."
-                      : "Disconnected"
-                }
-              />
-            </div>
-            <Card className="p-3 max-h-[240px] overflow-y-auto">
-              {keeperLiveEvents.length === 0 ? (
-                <div className="text-center text-label text-muted-foreground py-6">
-                  Waiting for keeper events... Send a credential request from an agent to see it
-                  here in real time.
+          {/* ── Live activity stream ── */}
+          <SettingsCard
+            title="Live activity"
+            description="Real-time keeper decisions as they happen"
+            actions={
+              <span className={cn(
+                "inline-flex items-center gap-1.5 h-6 px-2 rounded-md text-[10px] font-semibold uppercase tracking-wide border",
+                keeperWsStatus === "connected"
+                  ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+                  : keeperWsStatus === "connecting"
+                    ? "text-amber-400 border-amber-500/30 bg-amber-500/10"
+                    : "text-muted-foreground border-border bg-muted/20",
+              )}>
+                <Radio className="h-2.5 w-2.5" />
+                {keeperWsStatus === "connected" ? "Streaming" : keeperWsStatus === "connecting" ? "Connecting" : "Disconnected"}
+              </span>
+            }
+          >
+            {keeperLiveEvents.length === 0 ? (
+              <div className="flex items-center justify-center py-10 text-center">
+                <div className="text-[11px] text-muted-foreground/60 max-w-sm">
+                  Waiting for keeper events. Send a credential request from an agent to see it here in real time.
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  {keeperLiveEvents.map((evt) => (
-                    <div
-                      key={evt.request_id}
-                      className="flex items-start gap-2 py-1.5 border-b border-border last:border-0"
-                    >
-                      <StatusBadge
-                        status={decisionStatusKey(evt.decision)}
-                        label={evt.decision ?? "PENDING"}
-                        className="shrink-0 mt-0.5"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-label">
-                          <span className="font-medium">{evt.agent_name}</span>
-                          <span className="text-muted-foreground"> requested </span>
-                          <span className="font-mono text-micro">{evt.credential_name}</span>
-                          {evt.request_type === "execute" && (
-                            <span className="ml-1 text-micro text-muted-foreground">(exec)</span>
-                          )}
-                        </div>
-                        <div className="text-micro text-muted-foreground truncate">
-                          {evt.intent}
-                        </div>
-                        {evt.reason && (
-                          <div className="text-micro text-muted-foreground/70 truncate italic">
-                            {evt.reason}
-                          </div>
+              </div>
+            ) : (
+              <div className="max-h-[260px] overflow-y-auto">
+                {keeperLiveEvents.map((evt, i) => (
+                  <div
+                    key={evt.request_id}
+                    className={cn(
+                      "flex items-start gap-2.5 px-4 py-2.5",
+                      i < keeperLiveEvents.length - 1 && "border-b border-border/40",
+                    )}
+                  >
+                    <StatusBadge
+                      status={decisionStatusKey(evt.decision)}
+                      label={evt.decision ?? "PENDING"}
+                      className="shrink-0 mt-0.5 text-[10px]"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs leading-tight">
+                        <span className="font-medium">{evt.agent_name}</span>
+                        <span className="text-muted-foreground"> requested </span>
+                        <span className="font-mono text-[11px]">{evt.credential_name}</span>
+                        {evt.request_type === "execute" && (
+                          <span className="ml-1 text-[10px] text-muted-foreground">(exec)</span>
                         )}
                       </div>
-                      <div className="text-micro text-muted-foreground shrink-0">
-                        {evt.risk_score}/10
+                      <div className="text-[10px] text-muted-foreground truncate mt-0.5">
+                        {evt.intent}
                       </div>
+                      {evt.reason && (
+                        <div className="text-[10px] text-muted-foreground/70 truncate italic mt-0.5">
+                          {evt.reason}
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    <div className="text-[10px] font-mono text-muted-foreground shrink-0 tabular-nums">
+                      {evt.risk_score}/10
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SettingsCard>
+
+          {/* ── Recent requests table ── */}
+          <SettingsCard
+            title="Recent requests"
+            description={
+              keeperLog.length === 0
+                ? "No keeper requests yet"
+                : `${keeperLog.length} most recent request${keeperLog.length === 1 ? "" : "s"}`
+            }
+          >
+            {keeperLog.length === 0 ? (
+              <div className="flex items-center justify-center py-10 text-[11px] text-muted-foreground/60">
+                No keeper requests yet
+              </div>
+            ) : (
+              <>
+                {/* Desktop header */}
+                <div
+                  className="hidden md:grid items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 border-b border-border/60"
+                  style={{ gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1.4fr) 70px 90px 60px 120px" }}
+                >
+                  <div>Agent</div>
+                  <div>Credential</div>
+                  <div>Type</div>
+                  <div>Decision</div>
+                  <div className="text-right">Risk</div>
+                  <div>Time</div>
                 </div>
-              )}
-            </Card>
-          </div>
+                {/* Rows */}
+                {keeperLog.map((entry, idx) => (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    onClick={() => onSelectKeeperEntry(entry)}
+                    className={cn(
+                      "grid items-center gap-3 w-full px-4 py-2 text-left hover:bg-white/[0.02] transition-colors",
+                      idx < keeperLog.length - 1 && "border-b border-border/40",
+                    )}
+                    style={{ gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1.4fr) 70px 90px 60px 120px" }}
+                  >
+                    <div className="text-xs font-medium truncate">{entry.agent_name}</div>
+                    <div className="text-[11px] text-muted-foreground font-mono truncate">
+                      {entry.credential_name}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {entry.request_type === "execute" ? "Execute" : "Access"}
+                    </div>
+                    <div>
+                      <StatusBadge
+                        status={decisionStatusKey(entry.decision)}
+                        label={entry.decision ?? "PENDING"}
+                        className="text-[10px]"
+                      />
+                    </div>
+                    <div className="text-[11px] text-muted-foreground font-mono text-right tabular-nums">
+                      {entry.risk_score != null ? `${entry.risk_score}/10` : "—"}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground font-mono truncate">
+                      {new Date(entry.created_at).toLocaleString()}
+                    </div>
+                  </button>
+                ))}
+              </>
+            )}
+          </SettingsCard>
 
-          {/* Request log */}
-          <div className="space-y-3">
-            <h4 className="text-label font-medium">Recent Requests</h4>
-            <Card className="overflow-hidden p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Agent</TableHead>
-                    <TableHead>Credential</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Decision</TableHead>
-                    <TableHead>Risk</TableHead>
-                    <TableHead>Time</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {keeperLog.length === 0 && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={6}
-                        className="text-center text-label text-muted-foreground py-8"
-                      >
-                        No keeper requests yet
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {keeperLog.map((entry) => (
-                    <TableRow
-                      key={entry.id}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => onSelectKeeperEntry(entry)}
-                    >
-                      <TableCell className="text-body font-medium">{entry.agent_name}</TableCell>
-                      <TableCell className="text-body text-muted-foreground">
-                        {entry.credential_name}
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-label text-muted-foreground">
-                          {entry.request_type === "execute" ? "Execute" : "Access"}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge
-                          status={decisionStatusKey(entry.decision)}
-                          label={entry.decision ?? "PENDING"}
-                        />
-                      </TableCell>
-                      <TableCell className="text-body text-muted-foreground">
-                        {entry.risk_score != null ? `${entry.risk_score}/10` : "—"}
-                      </TableCell>
-                      <TableCell className="text-body text-muted-foreground">
-                        {new Date(entry.created_at).toLocaleString()}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
-          </div>
-
-          {/* Keeper request detail sheet */}
+          {/* ── Detail sheet ── */}
           <Sheet
             open={!!selectedKeeperEntry}
-            onOpenChange={(open) => {
-              if (!open) onSelectKeeperEntry(null)
-            }}
+            onOpenChange={(open) => { if (!open) onSelectKeeperEntry(null) }}
           >
             <SheetContent side="right" className="sm:max-w-2xl w-full overflow-y-auto">
               <SheetHeader>
-                <SheetTitle className="flex items-center gap-2 text-body">
-                  <Shield className="h-4 w-4" />
-                  Keeper Decision Detail
+                <SheetTitle className="flex items-center gap-2 text-sm">
+                  <Shield className="h-3.5 w-3.5" />
+                  Keeper decision detail
                 </SheetTitle>
               </SheetHeader>
               {selectedKeeperEntry && (
-                <div className="space-y-5 px-1">
-                  {/* Summary */}
+                <div className="space-y-4 px-1 mt-4">
+                  {/* Summary grid */}
                   <div className="grid grid-cols-2 gap-3">
+                    <DetailField label="Agent" value={selectedKeeperEntry.agent_name} />
+                    <DetailField label="Credential" value={selectedKeeperEntry.credential_name} mono />
                     <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium">
-                        Agent
-                      </div>
-                      <div className="text-body font-medium mt-0.5">
-                        {selectedKeeperEntry.agent_name}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium">
-                        Credential
-                      </div>
-                      <div className="text-body font-mono mt-0.5">
-                        {selectedKeeperEntry.credential_name}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium">
-                        Decision
-                      </div>
+                      <FieldLabel>Decision</FieldLabel>
                       <StatusBadge
                         status={decisionStatusKey(selectedKeeperEntry.decision)}
                         label={selectedKeeperEntry.decision ?? "PENDING"}
-                        className="mt-0.5"
+                        className="mt-1 text-[10px]"
                       />
                     </div>
-                    <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium">
-                        Risk Score
-                      </div>
-                      <div className="text-body font-medium mt-0.5">
-                        {selectedKeeperEntry.risk_score != null
-                          ? `${selectedKeeperEntry.risk_score}/10`
-                          : "—"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium">
-                        Type
-                      </div>
-                      <div className="text-body mt-0.5">
-                        {selectedKeeperEntry.request_type === "execute" ? "Execute" : "Access"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium">
-                        Time
-                      </div>
-                      <div className="text-body text-muted-foreground mt-0.5">
-                        {new Date(selectedKeeperEntry.created_at).toLocaleString()}
-                      </div>
-                    </div>
+                    <DetailField
+                      label="Risk score"
+                      value={selectedKeeperEntry.risk_score != null ? `${selectedKeeperEntry.risk_score}/10` : "—"}
+                    />
+                    <DetailField
+                      label="Type"
+                      value={selectedKeeperEntry.request_type === "execute" ? "Execute" : "Access"}
+                    />
+                    <DetailField
+                      label="Time"
+                      value={new Date(selectedKeeperEntry.created_at).toLocaleString()}
+                    />
                   </div>
 
-                  {/* Intent */}
-                  <div>
-                    <div className="text-micro text-muted-foreground uppercase font-medium mb-1">
-                      Intent
-                    </div>
-                    <div className="text-body bg-muted/50 rounded-md p-3">
+                  <DetailBlock label="Intent">
+                    <div className="text-[11px] bg-muted/40 border border-border/60 rounded-md p-2.5">
                       {redactSecrets(selectedKeeperEntry.intent)}
                     </div>
-                  </div>
+                  </DetailBlock>
 
-                  {/* Reason */}
                   {selectedKeeperEntry.reason && (
-                    <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium mb-1">
-                        Reason
-                      </div>
-                      <div className="text-body bg-muted/50 rounded-md p-3">
+                    <DetailBlock label="Reason">
+                      <div className="text-[11px] bg-muted/40 border border-border/60 rounded-md p-2.5">
                         {redactSecrets(selectedKeeperEntry.reason)}
                       </div>
-                    </div>
+                    </DetailBlock>
                   )}
 
-                  {/* Command (execute requests) */}
                   {selectedKeeperEntry.command && (
-                    <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium mb-1">
-                        Command
-                      </div>
-                      <pre className="text-micro bg-muted/80 rounded-md p-3 overflow-x-auto font-mono">
+                    <DetailBlock label="Command">
+                      <pre className="text-[10px] bg-muted/60 border border-border/60 rounded-md p-2.5 overflow-x-auto font-mono">
                         {redactSecrets(selectedKeeperEntry.command)}
                       </pre>
-                    </div>
+                    </DetailBlock>
                   )}
 
-                  {/* Ollama Prompt */}
-                  {selectedKeeperEntry.ollama_prompt ? (
-                    <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium mb-1">
-                        Ollama Prompt (sent to LLM)
-                      </div>
-                      <pre className="text-micro bg-muted/80 rounded-md p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">
+                  <DetailBlock label="Ollama prompt">
+                    {selectedKeeperEntry.ollama_prompt ? (
+                      <pre className="text-[10px] bg-muted/60 border border-border/60 rounded-md p-2.5 overflow-x-auto whitespace-pre-wrap font-mono max-h-[240px] overflow-y-auto">
                         {redactSecrets(selectedKeeperEntry.ollama_prompt)}
                       </pre>
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium mb-1">
-                        Ollama Prompt
-                      </div>
-                      <div className="text-body text-muted-foreground italic bg-muted/50 rounded-md p-3">
+                    ) : (
+                      <div className="text-[11px] text-muted-foreground italic bg-muted/40 border border-border/60 rounded-md p-2.5">
                         Not available (L1 auto-allow or pre-observability request)
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </DetailBlock>
 
-                  {/* Ollama Raw Response */}
-                  {selectedKeeperEntry.ollama_raw_response ? (
-                    <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium mb-1">
-                        Ollama Raw Response
-                      </div>
-                      <pre className="text-micro bg-muted/80 rounded-md p-3 overflow-x-auto whitespace-pre-wrap font-mono max-h-[300px] overflow-y-auto">
+                  <DetailBlock label="Ollama raw response">
+                    {selectedKeeperEntry.ollama_raw_response ? (
+                      <pre className="text-[10px] bg-muted/60 border border-border/60 rounded-md p-2.5 overflow-x-auto whitespace-pre-wrap font-mono max-h-[240px] overflow-y-auto">
                         {redactSecrets(selectedKeeperEntry.ollama_raw_response)}
                       </pre>
-                    </div>
-                  ) : (
-                    <div>
-                      <div className="text-micro text-muted-foreground uppercase font-medium mb-1">
-                        Ollama Raw Response
-                      </div>
-                      <div className="text-body text-muted-foreground italic bg-muted/50 rounded-md p-3">
+                    ) : (
+                      <div className="text-[11px] text-muted-foreground italic bg-muted/40 border border-border/60 rounded-md p-2.5">
                         Not available (L1 auto-allow or pre-observability request)
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </DetailBlock>
 
-                  {/* Request ID */}
-                  <div className="pt-3 border-t border-border">
-                    <div className="text-micro text-muted-foreground">
+                  <div className="pt-3 border-t border-border/60">
+                    <div className="text-[10px] text-muted-foreground/60">
                       Request ID:{" "}
                       <span className="font-mono">{selectedKeeperEntry.id}</span>
                     </div>
@@ -479,3 +389,33 @@ export const KeeperTab = React.memo(function KeeperTab({
     </div>
   )
 })
+
+// ── Helpers ─────────────────────────────────────────────────────────
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider">
+      {children}
+    </div>
+  )
+}
+
+function DetailField({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <div className={cn("text-xs text-foreground/80 mt-1 truncate", mono && "font-mono")}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function DetailBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <div className="mt-1">{children}</div>
+    </div>
+  )
+}

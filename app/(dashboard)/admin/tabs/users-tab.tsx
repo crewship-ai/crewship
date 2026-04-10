@@ -1,14 +1,6 @@
 import React from "react"
-import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { SettingsCard } from "@/components/features/settings/shared"
 import type { AdminUser } from "../types"
 
 interface UsersTabProps {
@@ -16,55 +8,62 @@ interface UsersTabProps {
 }
 
 export const UsersTab = React.memo(function UsersTab({ users }: UsersTabProps) {
-  if (users.length === 0) {
-    return (
-      <div className="flex items-center justify-center py-12 text-[11px] text-muted-foreground/60">
-        No users
-      </div>
-    )
-  }
   return (
-    <div className="space-y-3">
-      <div className="text-[11px] text-muted-foreground font-mono tabular-nums">
-        {users.length} user{users.length === 1 ? "" : "s"} across all workspaces
-      </div>
-      <Card className="overflow-hidden p-0 rounded-xl border-border/60">
-        <Table>
-          <TableHeader>
-            <TableRow className="border-border/60">
-              <TableHead className="text-[10px] uppercase tracking-wider h-8">User</TableHead>
-              <TableHead className="text-[10px] uppercase tracking-wider h-8">Workspace</TableHead>
-              <TableHead className="text-[10px] uppercase tracking-wider h-8">Role</TableHead>
-              <TableHead className="text-[10px] uppercase tracking-wider h-8">Joined</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.map((u) => (
-              <TableRow key={u.id} className="border-border/40 hover:bg-white/[0.02]">
-                <TableCell className="py-2">
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium truncate">{u.full_name ?? "—"}</div>
-                    <div className="text-[10px] text-muted-foreground/60 truncate">{u.email}</div>
-                  </div>
-                </TableCell>
-                <TableCell className="text-[11px] text-muted-foreground py-2">
-                  {u.workspace?.name ?? "—"}
-                </TableCell>
-                <TableCell className="py-2">
-                  {u.role && (
-                    <Badge variant="outline" className="text-[10px] font-medium">
-                      {u.role}
-                    </Badge>
-                  )}
-                </TableCell>
-                <TableCell className="text-[11px] text-muted-foreground py-2">
-                  {new Date(u.created_at).toLocaleDateString()}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Card>
-    </div>
+    <SettingsCard
+      title="All users"
+      description={
+        users.length === 0
+          ? "No users"
+          : `${users.length} user${users.length === 1 ? "" : "s"} across all workspaces`
+      }
+    >
+      {users.length === 0 ? (
+        <div className="flex items-center justify-center py-10 text-[11px] text-muted-foreground/60">
+          No users
+        </div>
+      ) : (
+        <>
+          {/* Desktop header */}
+          <div
+            className="hidden md:grid items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 border-b border-border/60"
+            style={{ gridTemplateColumns: "minmax(0,1.6fr) minmax(0,1fr) 80px minmax(0,0.9fr)" }}
+          >
+            <div>User</div>
+            <div>Workspace</div>
+            <div>Role</div>
+            <div>Joined</div>
+          </div>
+          {/* Rows */}
+          {users.map((u, idx) => (
+            <div
+              key={u.id}
+              className={
+                "grid items-center gap-3 px-4 py-2 hover:bg-white/[0.02] " +
+                (idx < users.length - 1 ? "border-b border-border/40" : "")
+              }
+              style={{ gridTemplateColumns: "minmax(0,1.6fr) minmax(0,1fr) 80px minmax(0,0.9fr)" }}
+            >
+              <div className="min-w-0">
+                <div className="text-xs font-medium truncate">{u.full_name ?? "—"}</div>
+                <div className="text-[10px] text-muted-foreground/60 truncate">{u.email}</div>
+              </div>
+              <div className="text-[11px] text-muted-foreground truncate">
+                {u.workspace?.name ?? "—"}
+              </div>
+              <div>
+                {u.role && (
+                  <Badge variant="outline" className="text-[10px] font-medium">
+                    {u.role}
+                  </Badge>
+                )}
+              </div>
+              <div className="text-[11px] text-muted-foreground font-mono">
+                {new Date(u.created_at).toLocaleDateString()}
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </SettingsCard>
   )
 })
