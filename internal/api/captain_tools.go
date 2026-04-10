@@ -165,20 +165,16 @@ func strInput(input map[string]any, key string) string {
 
 func execGetWorkspaceStats(ctx context.Context, h *CaptainHandler, wsID, userID, role string, _ map[string]any) (string, error) {
 	var crews, agents, missions, escalations, proposals int
-	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&crews); err != nil {
-		return "", fmt.Errorf("count crews: %w", err)
-	}
-	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL", wsID).Scan(&agents); err != nil {
-		return "", fmt.Errorf("count agents: %w", err)
-	}
-	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'", wsID).Scan(&missions); err != nil {
-		return "", fmt.Errorf("count missions: %w", err)
-	}
-	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM escalations WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&escalations); err != nil {
-		return "", fmt.Errorf("count escalations: %w", err)
-	}
-	if err := h.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM mission_proposals WHERE workspace_id = ? AND status = 'PENDING'", wsID).Scan(&proposals); err != nil {
-		return "", fmt.Errorf("count proposals: %w", err)
+	err := h.db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM crews WHERE workspace_id = ? AND deleted_at IS NULL),
+			(SELECT COUNT(*) FROM agents WHERE workspace_id = ? AND deleted_at IS NULL),
+			(SELECT COUNT(*) FROM missions WHERE workspace_id = ? AND status = 'IN_PROGRESS'),
+			(SELECT COUNT(*) FROM escalations WHERE workspace_id = ? AND status = 'PENDING'),
+			(SELECT COUNT(*) FROM mission_proposals WHERE workspace_id = ? AND status = 'PENDING')`,
+		wsID, wsID, wsID, wsID, wsID).Scan(&crews, &agents, &missions, &escalations, &proposals)
+	if err != nil {
+		return "", fmt.Errorf("count workspace stats: %w", err)
 	}
 	return fmt.Sprintf("Workspace stats:\n- Crews: %d\n- Agents: %d\n- Active missions: %d\n- Pending escalations: %d\n- Pending proposals: %d",
 		crews, agents, missions, escalations, proposals), nil
