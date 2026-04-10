@@ -8,7 +8,6 @@ import {
   Terminal,
   Users,
   ChevronRight,
-  ChevronDown,
   Bot,
   Check,
   Trash2,
@@ -24,12 +23,12 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { PageShell } from "@/components/layout/page-shell"
-import { EmptyState } from "@/components/layout/empty-state"
 import { SectionCard } from "@/components/ui/section-card"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { KpiCard } from "@/components/features/dashboard/kpi-card"
+import { SettingsCard } from "@/components/features/settings/shared"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -731,26 +730,49 @@ export default function IntegrationsPage() {
         setRegistryOpen(true)
       }}
       trigger={
-        <Button>
-          <Plus className="mr-2 h-4 w-4" />
+        <Button size="sm" className="h-7 px-2.5 text-xs">
+          <Plus className="mr-1.5 h-3 w-3" />
           Add MCP Server
         </Button>
       }
     />
   ) : null
 
+  // Computed KPIs from the already-loaded servers list — no extra API calls.
+  const connectedCount = servers.filter((s) => s.auth_status === "connected").length
+  const needsAttentionCount = servers.filter(
+    (s) => s.auth_status === "missing" || s.auth_status === "expired",
+  ).length
+  const totalBindings = servers.reduce((a, s) => a + (s.agent_binding_count ?? 0), 0)
+  const httpCount = servers.filter((s) => s.transport === "streamable-http").length
+  const stdioCount = servers.filter((s) => s.transport !== "streamable-http").length
+
+  // Helper: relative time ("2h ago", "3d ago")
+  const formatRel = (iso: string): string => {
+    const diff = Date.now() - new Date(iso).getTime()
+    const min = Math.floor(diff / 60000)
+    if (min < 1) return "just now"
+    if (min < 60) return `${min}m ago`
+    const h = Math.floor(min / 60)
+    if (h < 24) return `${h}h ago`
+    return `${Math.floor(h / 24)}d ago`
+  }
+
   if (wsLoading || loading) {
     return (
-      <PageShell
-        title="Integrations"
-        description="MCP server connections for your workspace"
-        actions={headerActions}
-      >
-        <div className="space-y-3">
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
+      <div className="p-4 md:p-6 space-y-4 bg-background min-h-[calc(100vh-48px)]">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Plug className="h-3.5 w-3.5 text-foreground/50" />
+            <h1 className="text-body font-medium text-foreground/80">Integrations</h1>
+          </div>
+          {headerActions}
         </div>
-      </PageShell>
+        <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[112px] rounded-xl" />)}
+        </div>
+        <Skeleton className="h-[200px] rounded-xl" />
+      </div>
     )
   }
 
@@ -759,103 +781,172 @@ export default function IntegrationsPage() {
   // -------------------------------------------------------------------------
 
   return (
-    <PageShell
-      title="Integrations"
-      description="MCP server connections for your workspace"
-      actions={headerActions}
-    >
+    <div className="p-4 md:p-6 pb-10 space-y-4 bg-background min-h-[calc(100vh-48px)]">
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Plug className="h-3.5 w-3.5 text-foreground/50" />
+          <h1 className="text-body font-medium text-foreground/80">Integrations</h1>
+          <span className="text-[10px] font-mono text-muted-foreground/60">
+            {servers.length === 0
+              ? "no MCP servers"
+              : `${servers.length} MCP server${servers.length === 1 ? "" : "s"}`}
+          </span>
+        </div>
+        {headerActions}
+      </div>
+
+      {/* ── KPI strip ──────────────────────────────────────────── */}
+      <div className="grid gap-4 grid-cols-2 sm:grid-cols-4">
+        <KpiCard
+          label="Total"
+          value={servers.length}
+          subtitle={
+            servers.length === 0
+              ? "no integrations"
+              : `${httpCount} HTTP · ${stdioCount} stdio`
+          }
+        />
+        <KpiCard
+          label="Connected"
+          value={connectedCount}
+          valueColor={connectedCount > 0 ? "rgb(52, 211, 153)" : undefined}
+          subtitle={
+            servers.length === 0
+              ? "—"
+              : `of ${servers.length} server${servers.length === 1 ? "" : "s"}`
+          }
+        />
+        <KpiCard
+          label="Needs attention"
+          value={needsAttentionCount}
+          valueColor={needsAttentionCount > 0 ? "rgb(248, 113, 113)" : undefined}
+          subtitle={needsAttentionCount > 0 ? "missing or expired" : "all healthy"}
+        />
+        <KpiCard
+          label="Agent bindings"
+          value={totalBindings}
+          subtitle={totalBindings === 0 ? "no agents bound" : `across ${servers.length} server${servers.length === 1 ? "" : "s"}`}
+        />
+      </div>
+
+      {/* ── Servers list ───────────────────────────────────────── */}
       {servers.length === 0 ? (
-        <EmptyState
-          icon={Plug}
-          title="No integrations yet"
-          description="Connect MCP servers to give your agents access to external tools and services."
+        <SettingsCard
+          title="MCP servers"
+          description="Connect MCP servers to give your agents access to external tools and services"
         >
-          {canManage && (
-            <TemplatePopover
-              open={emptyPopoverOpen}
-              onOpenChange={setEmptyPopoverOpen}
-              onSelect={handleAddServer}
-              onBrowseRegistry={() => {
-                setEmptyPopoverOpen(false)
-                setRegistryOpen(true)
-              }}
-              trigger={
-                <Button className="mt-4">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add First MCP Server
-                </Button>
-              }
-            />
-          )}
-        </EmptyState>
+          <div className="flex flex-col items-center justify-center py-12 text-center">
+            <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
+              <Plug className="h-4 w-4 text-muted-foreground/60" />
+            </div>
+            <div className="text-sm font-medium text-foreground/80">No integrations yet</div>
+            <div className="text-[11px] text-muted-foreground mt-0.5 max-w-sm">
+              MCP servers expose tools (GitHub, Slack, databases, browsers) that your agents can call during tasks.
+            </div>
+            {canManage && (
+              <div className="mt-4">
+                <TemplatePopover
+                  open={emptyPopoverOpen}
+                  onOpenChange={setEmptyPopoverOpen}
+                  onSelect={handleAddServer}
+                  onBrowseRegistry={() => {
+                    setEmptyPopoverOpen(false)
+                    setRegistryOpen(true)
+                  }}
+                  trigger={
+                    <Button size="sm" className="h-7 px-2.5 text-xs">
+                      <Plus className="mr-1.5 h-3 w-3" />
+                      Add first MCP server
+                    </Button>
+                  }
+                />
+              </div>
+            )}
+          </div>
+        </SettingsCard>
       ) : (
-        <Card className="overflow-hidden p-0 divide-y divide-border">
-          {servers.map((server) => {
+        <SettingsCard
+          title="Connected MCP servers"
+          description={
+            needsAttentionCount > 0
+              ? `${connectedCount} connected · ${needsAttentionCount} need attention · ${totalBindings} agent binding${totalBindings === 1 ? "" : "s"}`
+              : `${connectedCount} of ${servers.length} connected · ${totalBindings} agent binding${totalBindings === 1 ? "" : "s"}`
+          }
+        >
+          {servers.map((server, idx) => {
             const isExpanded = expandedId === server.id
             const agents = crewAgents[server.crew_id] ?? []
-
+            const isLast = idx === servers.length - 1
             return (
-              <div key={server.id}>
+              <div key={server.id} className={!isLast && !isExpanded ? "border-b border-border/40" : ""}>
                 {/* Collapsed header row */}
                 <button
                   type="button"
-                  className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+                  className={cn(
+                    "flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors",
+                    isExpanded ? "bg-white/[0.03]" : "hover:bg-white/[0.02]",
+                  )}
                   onClick={() => setExpandedId(isExpanded ? null : server.id)}
                   aria-expanded={isExpanded}
                   aria-label={`${server.display_name || server.name} integration`}
                 >
-                  <span className="shrink-0 text-muted-foreground">
-                    {isExpanded ? (
-                      <ChevronDown className="h-4 w-4" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4" />
+                  <ChevronRight
+                    className={cn(
+                      "h-3 w-3 text-muted-foreground/60 shrink-0 transition-transform",
+                      isExpanded && "rotate-90 text-foreground",
                     )}
-                  </span>
+                  />
 
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <Plug className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0">
-                      <p className="font-medium text-body truncate">
-                        {server.display_name || server.name}
-                      </p>
-                      <p className="text-label text-muted-foreground truncate">
-                        {subtitleFor(server)}
-                      </p>
+                  {/* Transport icon */}
+                  {server.transport === "streamable-http" ? (
+                    <Globe className="h-3 w-3 text-muted-foreground/60 shrink-0" />
+                  ) : (
+                    <Terminal className="h-3 w-3 text-muted-foreground/60 shrink-0" />
+                  )}
+
+                  {/* Name + subtitle */}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-medium text-foreground/90 truncate">
+                      {server.display_name || server.name}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground/70 truncate font-mono">
+                      {subtitleFor(server)}
                     </div>
                   </div>
 
-                  {/* Crew badge */}
-                  <Badge variant="outline" className="text-label font-normal shrink-0">
-                    <Users className="mr-1 h-3 w-3" />
+                  {/* Crew pill */}
+                  <Badge variant="outline" className="text-[10px] font-medium h-5 px-1.5 shrink-0 gap-1">
+                    <Users className="h-2.5 w-2.5" />
                     {server.crew_name}
                   </Badge>
 
-                  {/* Transport */}
-                  <span className="hidden sm:flex items-center gap-1.5 text-label text-muted-foreground shrink-0">
-                    {server.transport === "streamable-http" ? (
-                      <Globe className="h-3 w-3" />
-                    ) : (
-                      <Terminal className="h-3 w-3" />
-                    )}
-                    {server.transport === "streamable-http" ? "HTTP" : "Stdio"}
+                  {/* Agent binding count */}
+                  {server.agent_binding_count > 0 && (
+                    <span className="hidden md:inline-flex items-center gap-1 text-[10px] text-muted-foreground shrink-0 font-mono tabular-nums">
+                      <Bot className="h-2.5 w-2.5" />
+                      {server.agent_binding_count}
+                    </span>
+                  )}
+
+                  {/* Updated relative time */}
+                  <span className="hidden lg:inline text-[10px] text-muted-foreground/60 font-mono shrink-0 w-[54px] text-right">
+                    {formatRel(server.updated_at)}
                   </span>
 
-                  {/* Auth status indicator */}
+                  {/* Auth status badge */}
                   {server.auth_status === "missing" && (
-                    <StatusBadge status="FAILED" label="No credential" className="shrink-0" />
+                    <StatusBadge status="FAILED" label="No credential" className="shrink-0 text-[10px]" />
                   )}
                   {server.auth_status === "expired" && (
-                    <StatusBadge status="BLOCKED" label="Expired" className="shrink-0" />
+                    <StatusBadge status="BLOCKED" label="Expired" className="shrink-0 text-[10px]" />
                   )}
                   {server.auth_status === "connected" && (
-                    <StatusBadge status="COMPLETED" label="Connected" className="shrink-0" />
+                    <StatusBadge status="COMPLETED" label="Connected" className="shrink-0 text-[10px]" />
                   )}
-
-                  {/* Agent count */}
-                  {server.agent_binding_count > 0 && (
-                    <span className="hidden sm:flex items-center gap-1 text-label text-muted-foreground shrink-0">
-                      <Bot className="h-3 w-3" />
-                      {server.agent_binding_count}
+                  {server.auth_status === "none" && (
+                    <span className="text-[10px] text-muted-foreground/50 shrink-0 uppercase tracking-wide">
+                      No auth
                     </span>
                   )}
                 </button>
@@ -884,7 +975,7 @@ export default function IntegrationsPage() {
               </div>
             )
           })}
-        </Card>
+        </SettingsCard>
       )}
 
       {/* Registry browser dialog */}
@@ -893,7 +984,7 @@ export default function IntegrationsPage() {
         onOpenChange={setRegistryOpen}
         onAdd={handleRegistryAdd}
       />
-    </PageShell>
+    </div>
   )
 }
 
