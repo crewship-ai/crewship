@@ -371,6 +371,11 @@ func (h *InternalHandler) loadAgentSystemPrompt(r *http.Request, data *agentConf
 	return strings.Join(promptParts, "\n\n"), nil
 }
 
+// NOTE: resolveSkillsBlock, resolveCoordinatorCrews, resolveCrewMembers,
+// and the MCP resolver helpers have been split out of this file during the
+// feat/code-quality file-splits refactor. See agent_config_env.go and
+// agent_config_mcp.go for their current homes. The old inline bodies that
+// used to live here were removed during the merge from origin/main.
 // resolveOAuthAccessTokens ensures OAUTH2 credentials include their access tokens
 // so the orchestrator can write tokens.json.
 func (h *InternalHandler) resolveOAuthAccessTokens(r *http.Request, creds []mcpCredEntry) []mcpCredEntry {
