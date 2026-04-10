@@ -68,9 +68,11 @@ func TestCredentialMonitor_OnChange(t *testing.T) {
 	// Manually mark status to simulate a change
 	pool.MarkStatus("c1", StatusRateLimited)
 
+	// Sync barrier: acquire/release the mutex so any pending callback goroutine
+	// observes this happens-before point. Changes won't be triggered by
+	// MarkStatus directly -- only by checkOne. This test validates callback wiring.
 	mu.Lock()
-	// Changes won't be triggered by MarkStatus directly -- only by checkOne
-	// This test validates the callback wiring
+	_ = changes // ensure compiler keeps `changes` live across the barrier
 	mu.Unlock()
 
 	if monitor.onChange == nil {

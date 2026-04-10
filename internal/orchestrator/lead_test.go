@@ -7,11 +7,11 @@ import (
 
 func TestBuildLeadContext(t *testing.T) {
 	tests := []struct {
-		name           string
-		members        []CrewMember
-		wantEmpty      bool
-		wantContains   []string
-		wantNotContain []string
+		name            string
+		members         []CrewMember
+		wantEmpty       bool
+		wantContains    []string
+		wantNotContain  []string
 		wantMemberLines int
 	}{
 		{

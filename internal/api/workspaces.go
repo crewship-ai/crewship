@@ -363,12 +363,12 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 type memberResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	UserID      string  `json:"user_id"`
-	Role        string  `json:"role"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	ID          string      `json:"id"`
+	WorkspaceID string      `json:"workspace_id"`
+	UserID      string      `json:"user_id"`
+	Role        string      `json:"role"`
+	CreatedAt   string      `json:"created_at"`
+	UpdatedAt   string      `json:"updated_at"`
 	User        *memberUser `json:"user,omitempty"`
 }
 

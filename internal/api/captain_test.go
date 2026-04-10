@@ -6,20 +6,6 @@ import (
 	"testing"
 )
 
-// helper — seeds a credential for the workspace
-func seedTestCredential(t *testing.T, db interface {
-	Exec(string, ...interface{}) (interface{ RowsAffected() (int64, error) }, error)
-}, wsID string) {
-	t.Helper()
-	_, err := db.Exec(
-		`INSERT INTO credentials (id, workspace_id, name, type, status) VALUES ('cred1', ?, 'Anthropic', 'API_KEY', 'ACTIVE')`,
-		wsID,
-	)
-	if err != nil {
-		t.Fatalf("insert credential: %v", err)
-	}
-}
-
 // TestDetectLanguageFromMessage — unit tests for Czech detection heuristic.
 func TestDetectLanguageFromMessage(t *testing.T) {
 	tests := []struct {

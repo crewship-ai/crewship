@@ -19,12 +19,12 @@ func TestGatekeeper_L1AutoAllow_RequiresMinimumIntent(t *testing.T) {
 		intent      string
 		expectAllow bool
 	}{
-		{"x", false},                                 // single char — too short
-		{"asdf", false},                              // 4 chars — too short
-		{"         ", false},                         // whitespace only
-		{"123456789", false},                         // 9 chars — one short of threshold
-		{"1234567890", true},                         // exactly 10 chars — allowed
-		{"I need to deploy the npm package", true},   // meaningful intent — allowed
+		{"x", false},                                    // single char — too short
+		{"asdf", false},                                 // 4 chars — too short
+		{"         ", false},                            // whitespace only
+		{"123456789", false},                            // 9 chars — one short of threshold
+		{"1234567890", true},                            // exactly 10 chars — allowed
+		{"I need to deploy the npm package", true},      // meaningful intent — allowed
 		{"Deploy service to staging environment", true}, // long meaningful intent
 	}
 

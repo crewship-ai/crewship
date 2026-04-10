@@ -287,7 +287,6 @@ func TestCascadeResolution_TwoAgentsSameServerDifferentCreds(t *testing.T) {
 	seedCredential(t, db, "cred-pepa", wsID, "pepa-gmail")
 	seedCredential(t, db, "cred-franta", wsID, "franta-gmail")
 
-
 	// Create workspace Gmail integration
 	req := makeReq(t, "POST", "/api/v1/integrations", map[string]string{
 		"name": "gmail", "display_name": "Gmail", "transport": "streamable-http",
@@ -379,7 +378,7 @@ func TestCascadeResolution_CrewOverridesWorkspace(t *testing.T) {
 	// Create crew Gmail override with different endpoint
 	req = makeReq(t, "POST", "/api/v1/crews/crew1/integrations", map[string]interface{}{
 		"name": "gmail", "display_name": "Crew Gmail", "transport": "streamable-http",
-		"endpoint": "https://crew.example.com/gmail",
+		"endpoint":                "https://crew.example.com/gmail",
 		"workspace_mcp_server_id": wsGmail.ID,
 	}, wsID, "MANAGER")
 	req.SetPathValue("crewId", "crew1")

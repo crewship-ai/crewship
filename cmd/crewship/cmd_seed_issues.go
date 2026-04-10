@@ -50,7 +50,9 @@ Requires crews with LEAD agents to already exist.`,
 			// Delete projects
 			resp, err = client.Get("/api/v1/projects")
 			if err == nil {
-				var projects []struct{ ID string `json:"id"` }
+				var projects []struct {
+					ID string `json:"id"`
+				}
 				if cli.ReadJSON(resp, &projects) == nil {
 					for _, p := range projects {
 						_, _ = client.Delete("/api/v1/projects/" + p.ID)
@@ -60,7 +62,9 @@ Requires crews with LEAD agents to already exist.`,
 			// Delete labels
 			resp, err = client.Get("/api/v1/labels")
 			if err == nil {
-				var labels []struct{ ID string `json:"id"` }
+				var labels []struct {
+					ID string `json:"id"`
+				}
 				if cli.ReadJSON(resp, &labels) == nil {
 					for _, l := range labels {
 						_, _ = client.Delete("/api/v1/labels/" + l.ID)
@@ -104,10 +108,12 @@ Requires crews with LEAD agents to already exist.`,
 			return err
 		}
 		type agentInfo struct {
-			ID     string `json:"id"`
-			Slug   string `json:"slug"`
-			Role   string `json:"agent_role"`
-			Crew   *struct{ Slug string `json:"slug"` } `json:"crew"`
+			ID   string `json:"id"`
+			Slug string `json:"slug"`
+			Role string `json:"agent_role"`
+			Crew *struct {
+				Slug string `json:"slug"`
+			} `json:"crew"`
 		}
 		var allAgents []agentInfo
 		if err := cli.ReadJSON(resp, &allAgents); err != nil {
@@ -221,7 +227,7 @@ Requires crews with LEAD agents to already exist.`,
 			desc        string
 			priority    string
 			project     string
-			assignee    string // agent slug
+			assignee    string   // agent slug
 			labels      []string // label names — will be resolved to IDs
 			targetState string
 			comment     string

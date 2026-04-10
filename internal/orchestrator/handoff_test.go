@@ -4,15 +4,15 @@ import "testing"
 
 func TestParseHandoff(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      string
-		wantParsed bool
+		name           string
+		input          string
+		wantParsed     bool
 		wantSummary    string
 		wantConfidence string
 		wantArtifacts  string
 	}{
 		{
-			name:       "valid handoff block",
+			name: "valid handoff block",
 			input: `Some agent output here...
 ---HANDOFF---
 summary: Implemented the login API endpoint with JWT auth
@@ -30,7 +30,7 @@ artifacts: internal/api/auth.go, internal/api/auth_test.go
 			wantParsed: false,
 		},
 		{
-			name:       "handoff with low confidence",
+			name: "handoff with low confidence",
 			input: `Done.
 ---HANDOFF---
 summary: Attempted the task but ran into issues with the API

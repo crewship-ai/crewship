@@ -40,31 +40,31 @@ func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCRe
 }
 
 type chatResolveResponse struct {
-	AgentID        string               `json:"agent_id"`
-	AgentSlug      string               `json:"agent_slug"`
-	AgentRole      string               `json:"agent_role"`
-	CrewID         string               `json:"crew_id"`
-	CrewSlug       string               `json:"crew_slug"`
-	ContainerID    string               `json:"container_id"`
-	CLIAdapter     string               `json:"cli_adapter"`
-	LLMModel       string               `json:"llm_model"`
-	SystemPrompt   string               `json:"system_prompt"`
-	ToolProfile    string               `json:"tool_profile"`
-	Credentials    []credentialResponse `json:"credentials"`
-	TimeoutSecs    int                  `json:"timeout_seconds"`
-	WorkspaceID    string               `json:"workspace_id"`
-	MemoryEnabled  bool                 `json:"memory_enabled"`
-	CrewMembers    []crewMemberResponse `json:"crew_members"`
-	AllCrews       []crewInfoResponse      `json:"all_crews,omitempty"`
-	ActiveMissions []missionSummaryResponse `json:"active_missions,omitempty"`
-	NetworkMode    string                  `json:"network_mode"`
-	AllowedDomains []string                `json:"allowed_domains"`
-	MemoryMB       int                     `json:"memory_mb"`
-	CPUs           float64                 `json:"cpus"`
-	TTLHours       int                     `json:"ttl_hours"`
-	MCPServers         []mcpServerResponse `json:"mcp_servers,omitempty"`
-	CrewMCPConfigJSON  string              `json:"crew_mcp_config_json"`
-	AgentMCPConfigJSON string              `json:"agent_mcp_config_json"`
+	AgentID            string                   `json:"agent_id"`
+	AgentSlug          string                   `json:"agent_slug"`
+	AgentRole          string                   `json:"agent_role"`
+	CrewID             string                   `json:"crew_id"`
+	CrewSlug           string                   `json:"crew_slug"`
+	ContainerID        string                   `json:"container_id"`
+	CLIAdapter         string                   `json:"cli_adapter"`
+	LLMModel           string                   `json:"llm_model"`
+	SystemPrompt       string                   `json:"system_prompt"`
+	ToolProfile        string                   `json:"tool_profile"`
+	Credentials        []credentialResponse     `json:"credentials"`
+	TimeoutSecs        int                      `json:"timeout_seconds"`
+	WorkspaceID        string                   `json:"workspace_id"`
+	MemoryEnabled      bool                     `json:"memory_enabled"`
+	CrewMembers        []crewMemberResponse     `json:"crew_members"`
+	AllCrews           []crewInfoResponse       `json:"all_crews,omitempty"`
+	ActiveMissions     []missionSummaryResponse `json:"active_missions,omitempty"`
+	NetworkMode        string                   `json:"network_mode"`
+	AllowedDomains     []string                 `json:"allowed_domains"`
+	MemoryMB           int                      `json:"memory_mb"`
+	CPUs               float64                  `json:"cpus"`
+	TTLHours           int                      `json:"ttl_hours"`
+	MCPServers         []mcpServerResponse      `json:"mcp_servers,omitempty"`
+	CrewMCPConfigJSON  string                   `json:"crew_mcp_config_json"`
+	AgentMCPConfigJSON string                   `json:"agent_mcp_config_json"`
 }
 
 type mcpServerResponse struct {
@@ -76,10 +76,10 @@ type mcpServerResponse struct {
 	Command     string            `json:"command,omitempty"`
 	Args        []string          `json:"args,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
-	CredToken    string            `json:"cred_token,omitempty"`
-	CredType     string            `json:"cred_type,omitempty"`
-	CredHeader   string            `json:"cred_header,omitempty"`
-	EnvVarName   string            `json:"env_var_name,omitempty"`
+	CredToken   string            `json:"cred_token,omitempty"`
+	CredType    string            `json:"cred_type,omitempty"`
+	CredHeader  string            `json:"cred_header,omitempty"`
+	EnvVarName  string            `json:"env_var_name,omitempty"`
 }
 
 type crewInfoResponse struct {
@@ -103,14 +103,14 @@ type memberIntegrationResponse struct {
 }
 
 type crewMemberResponse struct {
-	ID           string                       `json:"id"`
-	Name         string                       `json:"name"`
-	Slug         string                       `json:"slug"`
-	RoleTitle    string                       `json:"role_title"`
-	Description  string                       `json:"description"`
-	Status       string                       `json:"status"`
-	ChatID       string                       `json:"chat_id,omitempty"`
-	Integrations []memberIntegrationResponse  `json:"integrations,omitempty"`
+	ID           string                      `json:"id"`
+	Name         string                      `json:"name"`
+	Slug         string                      `json:"slug"`
+	RoleTitle    string                      `json:"role_title"`
+	Description  string                      `json:"description"`
+	Status       string                      `json:"status"`
+	ChatID       string                      `json:"chat_id,omitempty"`
+	Integrations []memberIntegrationResponse `json:"integrations,omitempty"`
 }
 
 type credentialResponse struct {
@@ -123,11 +123,11 @@ type credentialResponse struct {
 
 // CreateChatRequest holds the parameters for creating a new chat session.
 type CreateChatRequest struct {
-	ChatID string `json:"chat_id"`
-	AgentID   string `json:"agent_id"`
-	WorkspaceID     string `json:"workspace_id"`
-	UserID    string `json:"user_id,omitempty"`
-	Title     string `json:"title,omitempty"`
+	ChatID      string `json:"chat_id"`
+	AgentID     string `json:"agent_id"`
+	WorkspaceID string `json:"workspace_id"`
+	UserID      string `json:"user_id,omitempty"`
+	Title       string `json:"title,omitempty"`
 }
 
 // CreateChat creates a new chat session via the internal API.
@@ -438,28 +438,28 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 	}
 
 	return &ChatInfo{
-		AgentID:        data.AgentID,
-		AgentSlug:      data.AgentSlug,
-		AgentRole:      data.AgentRole,
-		CrewID:         data.CrewID,
-		CrewSlug:       data.CrewSlug,
-		ContainerID:    data.ContainerID,
-		CLIAdapter:     data.CLIAdapter,
-		LLMModel:       data.LLMModel,
-		SystemPrompt:   data.SystemPrompt,
-		ToolProfile:    data.ToolProfile,
-		Credentials:    creds,
-		TimeoutSecs:    data.TimeoutSecs,
-		WorkspaceID:    data.WorkspaceID,
-		MemoryEnabled:  data.MemoryEnabled,
-		CrewMembers:    crewMembers,
-		AllCrews:       allCrews,
-		ActiveMissions: activeMissions,
-		NetworkMode:    networkMode,
-		AllowedDomains: allowedDomains,
-		MemoryMB:       data.MemoryMB,
-		CPUs:           data.CPUs,
-		TTLHours:       data.TTLHours,
+		AgentID:            data.AgentID,
+		AgentSlug:          data.AgentSlug,
+		AgentRole:          data.AgentRole,
+		CrewID:             data.CrewID,
+		CrewSlug:           data.CrewSlug,
+		ContainerID:        data.ContainerID,
+		CLIAdapter:         data.CLIAdapter,
+		LLMModel:           data.LLMModel,
+		SystemPrompt:       data.SystemPrompt,
+		ToolProfile:        data.ToolProfile,
+		Credentials:        creds,
+		TimeoutSecs:        data.TimeoutSecs,
+		WorkspaceID:        data.WorkspaceID,
+		MemoryEnabled:      data.MemoryEnabled,
+		CrewMembers:        crewMembers,
+		AllCrews:           allCrews,
+		ActiveMissions:     activeMissions,
+		NetworkMode:        networkMode,
+		AllowedDomains:     allowedDomains,
+		MemoryMB:           data.MemoryMB,
+		CPUs:               data.CPUs,
+		TTLHours:           data.TTLHours,
 		MCPServers:         mcpServers,
 		CrewMCPConfigJSON:  data.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: data.AgentMCPConfigJSON,

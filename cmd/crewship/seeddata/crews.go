@@ -2,8 +2,8 @@ package seeddata
 
 // CrewDef defines a crew to seed.
 type CrewDef struct {
-	Name string
-	Slug string
+	Name  string
+	Slug  string
 	Color string
 	Icon  string
 }

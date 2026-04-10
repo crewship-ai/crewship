@@ -6,10 +6,10 @@ import "time"
 type Decision string
 
 const (
-	DecisionAllow   Decision = "ALLOW"
-	DecisionDeny    Decision = "DENY"
+	DecisionAllow    Decision = "ALLOW"
+	DecisionDeny     Decision = "DENY"
 	DecisionEscalate Decision = "ESCALATE"
-	DecisionPending Decision = "PENDING"
+	DecisionPending  Decision = "PENDING"
 )
 
 // SecurityLevel classifies how sensitive a credential is.
@@ -28,16 +28,16 @@ const (
 
 // Request is a credential access request from an agent, forwarded via the sidecar.
 type Request struct {
-	ID                 string    `json:"id"`
-	RequestingAgentID  string    `json:"requesting_agent_id"`
-	RequestingCrewID   string    `json:"requesting_crew_id"`
-	CredentialID       string    `json:"credential_id"`
-	CredentialName     string    `json:"credential_name"`
-	SecurityLevel      SecurityLevel `json:"security_level"`
-	TaskID             string    `json:"task_id,omitempty"`
-	Intent             string    `json:"intent"`
-	WorkspaceID        string    `json:"workspace_id"`
-	CreatedAt          time.Time `json:"created_at"`
+	ID                string        `json:"id"`
+	RequestingAgentID string        `json:"requesting_agent_id"`
+	RequestingCrewID  string        `json:"requesting_crew_id"`
+	CredentialID      string        `json:"credential_id"`
+	CredentialName    string        `json:"credential_name"`
+	SecurityLevel     SecurityLevel `json:"security_level"`
+	TaskID            string        `json:"task_id,omitempty"`
+	Intent            string        `json:"intent"`
+	WorkspaceID       string        `json:"workspace_id"`
+	CreatedAt         time.Time     `json:"created_at"`
 }
 
 // RequestResult is the outcome returned to the sidecar / agent.

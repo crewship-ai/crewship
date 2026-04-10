@@ -14,23 +14,23 @@ import (
 // --- Response types ---
 
 type crewMCPServerResponse struct {
-	ID                    string  `json:"id"`
-	CrewID                string  `json:"crew_id"`
-	WorkspaceMCPServerID  *string `json:"workspace_mcp_server_id"`
-	Name                  string  `json:"name"`
-	DisplayName           string  `json:"display_name"`
-	Transport             string  `json:"transport"`
-	Endpoint              *string `json:"endpoint"`
-	Command               *string `json:"command"`
-	ArgsJSON              *string `json:"args_json"`
-	EnvJSON               *string `json:"env_json"`
-	ConfigJSON            *string `json:"config_json"`
-	Icon                  *string `json:"icon"`
-	Enabled               bool    `json:"enabled"`
-	CreatedAt             string  `json:"created_at"`
-	UpdatedAt             string  `json:"updated_at"`
-	AgentBindCount        int     `json:"agent_binding_count"`
-	AuthStatus            string  `json:"auth_status"` // "connected", "missing", "expired", "none"
+	ID                   string  `json:"id"`
+	CrewID               string  `json:"crew_id"`
+	WorkspaceMCPServerID *string `json:"workspace_mcp_server_id"`
+	Name                 string  `json:"name"`
+	DisplayName          string  `json:"display_name"`
+	Transport            string  `json:"transport"`
+	Endpoint             *string `json:"endpoint"`
+	Command              *string `json:"command"`
+	ArgsJSON             *string `json:"args_json"`
+	EnvJSON              *string `json:"env_json"`
+	ConfigJSON           *string `json:"config_json"`
+	Icon                 *string `json:"icon"`
+	Enabled              bool    `json:"enabled"`
+	CreatedAt            string  `json:"created_at"`
+	UpdatedAt            string  `json:"updated_at"`
+	AgentBindCount       int     `json:"agent_binding_count"`
+	AuthStatus           string  `json:"auth_status"` // "connected", "missing", "expired", "none"
 }
 
 type crewIntegrationOverview struct {

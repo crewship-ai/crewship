@@ -445,13 +445,6 @@ func parseDependsOn(raw string) ([]string, error) {
 	return deps, nil
 }
 
-func derefStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
 func generateID() string {
 	b := make([]byte, 8)
 	if _, err := crand.Read(b); err != nil {

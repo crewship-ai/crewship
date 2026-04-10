@@ -94,9 +94,7 @@ func signLicense() {
 
 	if *features != "" {
 		var featureList []string
-		for _, f := range splitAndTrim(*features) {
-			featureList = append(featureList, f)
-		}
+		featureList = append(featureList, splitAndTrim(*features)...)
 		claims.Features = featureList
 	}
 

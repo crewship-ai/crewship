@@ -37,8 +37,8 @@ type EvalRequest struct {
 // Falls back to a strict deny-all policy if the LLM is unavailable.
 type Gatekeeper struct {
 	provider llm.Provider
-	model     string // model name to use for requests
-	logger    *slog.Logger
+	model    string // model name to use for requests
+	logger   *slog.Logger
 }
 
 // New creates a Gatekeeper that uses an LLM provider for decisions.

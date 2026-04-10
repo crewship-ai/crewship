@@ -35,8 +35,8 @@ func (m *mockState) Set(_ context.Context, bucket, key string, value []byte) err
 	m.data[bucket][key] = value
 	return nil
 }
-func (m *mockState) Delete(_ context.Context, _, _ string) error                  { return nil }
-func (m *mockState) List(_ context.Context, _ string) (map[string][]byte, error)  { return nil, nil }
+func (m *mockState) Delete(_ context.Context, _, _ string) error                 { return nil }
+func (m *mockState) List(_ context.Context, _ string) (map[string][]byte, error) { return nil, nil }
 func (m *mockState) ListByPrefix(_ context.Context, _, _ string) (map[string][]byte, error) {
 	return nil, nil
 }
@@ -48,7 +48,7 @@ type mockContainer struct{}
 func (m *mockContainer) EnsureCrewRuntime(_ context.Context, cfg provider.CrewConfig) (string, error) {
 	return "container-" + cfg.ID, nil
 }
-func (m *mockContainer) StopCrewRuntime(_ context.Context, _ string) error { return nil }
+func (m *mockContainer) StopCrewRuntime(_ context.Context, _ string) error   { return nil }
 func (m *mockContainer) RemoveCrewRuntime(_ context.Context, _ string) error { return nil }
 func (m *mockContainer) ContainerStatus(_ context.Context, id string) (*provider.ContainerStatus, error) {
 	return &provider.ContainerStatus{ID: id, State: "running", Uptime: "1h"}, nil

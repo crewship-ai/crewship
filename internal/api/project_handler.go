@@ -476,12 +476,12 @@ func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		Count     int    `json:"count"`
 	}
 	type statsResponse struct {
-		TotalIssues    int            `json:"total_issues"`
-		CompletedIssues int           `json:"completed_issues"`
-		ByStatus       map[string]int `json:"by_status"`
-		ByAssignee     []assigneeStat `json:"by_assignee"`
-		ByLabel        []labelStat    `json:"by_label"`
-		Crews          []string       `json:"crews"`
+		TotalIssues     int            `json:"total_issues"`
+		CompletedIssues int            `json:"completed_issues"`
+		ByStatus        map[string]int `json:"by_status"`
+		ByAssignee      []assigneeStat `json:"by_assignee"`
+		ByLabel         []labelStat    `json:"by_label"`
+		Crews           []string       `json:"crews"`
 	}
 
 	var resp statsResponse

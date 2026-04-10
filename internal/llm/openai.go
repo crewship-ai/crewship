@@ -282,7 +282,7 @@ func (o *OpenAI) parseSSEStream(r io.Reader, handler func(StreamEvent) error) (*
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
-					Content   string           `json:"content"`
+					Content   string `json:"content"`
 					ToolCalls []struct {
 						Index    int    `json:"index"`
 						ID       string `json:"id"`
