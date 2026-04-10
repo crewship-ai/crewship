@@ -928,6 +928,13 @@ func TestResolveCoordinatorCrews_EmptyCrew(t *testing.T) {
 	if empty == nil || full == nil {
 		t.Fatalf("missing crew entries: %+v", crews)
 	}
+	// The resolver contract (see comment on the empty crew branch) is that
+	// Members is always a non-nil empty slice for empty crews so the JSON
+	// output is `[]` not `null`. `len == 0` alone accepts both nil and empty,
+	// so we pin the non-nil property explicitly here.
+	if empty.Members == nil {
+		t.Error("empty crew Members = nil, want non-nil empty slice")
+	}
 	if len(empty.Members) != 0 {
 		t.Errorf("empty crew Members = %v, want empty", empty.Members)
 	}

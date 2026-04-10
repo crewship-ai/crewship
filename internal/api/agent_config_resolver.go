@@ -600,10 +600,16 @@ func (h *InternalHandler) resolveCoordinatorCrews(r *http.Request, data *agentCo
 		}
 
 		if crewID != currentCrewID {
+			// Members is deliberately initialized as a non-nil empty slice so
+			// crews with zero members serialize as `"members": []` in JSON
+			// (not `"members": null`). The frontend consumers consistently
+			// expect an array; matching that contract here avoids a null
+			// check on every caller.
 			allCrews = append(allCrews, crewInfoEntry{
-				ID:   crewID,
-				Name: crewName,
-				Slug: crewSlug,
+				ID:      crewID,
+				Name:    crewName,
+				Slug:    crewSlug,
+				Members: []crewMemberEntry{},
 			})
 			currentCrewID = crewID
 		}
