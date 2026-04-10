@@ -164,11 +164,13 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var running, today, failed int
+	// COALESCE(..., 0) is required: when the workspace has no rows at all,
+	// SUM(CASE ...) returns NULL and Scan into int would fail.
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT
-			SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END),
-			SUM(CASE WHEN date(created_at) = date('now') THEN 1 ELSE 0 END),
-			SUM(CASE WHEN status = 'FAILED' AND date(created_at) = date('now') THEN 1 ELSE 0 END)
+			COALESCE(SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN date(created_at) = date('now') THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'FAILED' AND date(created_at) = date('now') THEN 1 ELSE 0 END), 0)
 		FROM agent_runs WHERE workspace_id = ?`, workspaceID).Scan(&running, &today, &failed); err != nil {
 		h.logger.Error("count run stats", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})

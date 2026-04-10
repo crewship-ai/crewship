@@ -24,11 +24,24 @@ export function usePendingEscalations(workspaceId: string | null): number {
   useEffect(() => { refresh() }, [refresh])
 
   // Real-time: debounced refresh when escalations change
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const debouncedRefresh = useCallback(() => {
-    clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => refresh(), 150)
+    if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null
+      void refresh()
+    }, 150)
   }, [refresh])
+
+  // Clear any pending timer on unmount / workspace change.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current)
+        debounceRef.current = null
+      }
+    }
+  }, [workspaceId])
 
   useRealtimeEvent("escalation.created", debouncedRefresh)
   useRealtimeEvent("escalation.resolved", debouncedRefresh)

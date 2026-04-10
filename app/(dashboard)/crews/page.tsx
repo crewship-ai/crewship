@@ -80,11 +80,25 @@ export default function CrewsPage() {
   }, [workspaceId, wsLoading, fetchCrews])
 
   // Real-time: debounced refetch on crew/agent events
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const debouncedRefetch = useCallback(() => {
-    clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => fetchCrews(true), 150)
+    if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null
+      void fetchCrews(true)
+    }, 150)
   }, [fetchCrews])
+
+  // Clear any pending timer on unmount / workspace change so a late
+  // timeout cannot overwrite state with data from a previous workspace.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current)
+        debounceRef.current = null
+      }
+    }
+  }, [workspaceId])
 
   useRealtimeEvent("agent.status", debouncedRefetch)
   useRealtimeEvent("crew.created", debouncedRefetch)

@@ -72,11 +72,25 @@ export default function AgentsPage() {
   }, [workspaceId, wsLoading, fetchAgents])
 
   // Real-time: debounced refetch on agent events (prevents burst of 4 concurrent fetches)
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const debouncedRefetch = useCallback(() => {
-    clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => fetchAgents(true), 150)
+    if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null
+      void fetchAgents(true)
+    }, 150)
   }, [fetchAgents])
+
+  // Clear any pending timer on unmount / workspace change so a late
+  // timeout cannot overwrite state with data from a previous workspace.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current)
+        debounceRef.current = null
+      }
+    }
+  }, [workspaceId])
 
   useRealtimeEvent("agent.status", debouncedRefetch)
   useRealtimeEvent("agent.created", debouncedRefetch)

@@ -31,11 +31,25 @@ export function useFleetStatus(workspaceId: string | null): FleetStatus | null {
   useEffect(() => { refresh() }, [refresh])
 
   // Real-time: debounced refresh on agent lifecycle events
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const debouncedRefresh = useCallback(() => {
-    clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => refresh(), 150)
+    if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null
+      void refresh()
+    }, 150)
   }, [refresh])
+
+  // Clear any pending timer on unmount / workspace change to avoid
+  // stale setStatus after the component is gone.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current)
+        debounceRef.current = null
+      }
+    }
+  }, [workspaceId])
 
   useRealtimeEvent("agent.status", debouncedRefresh)
   useRealtimeEvent("agent.created", debouncedRefresh)

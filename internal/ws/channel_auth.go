@@ -19,7 +19,14 @@ func NewDBChannelAuthorizer(db *sql.DB) *DBChannelAuthorizer {
 
 // CanSubscribe returns true if the user is allowed to subscribe to the given channel.
 // Channel format: "type:id" (e.g., "workspace:abc123", "session:xyz456").
+// Fails closed (returns false) if the authorizer, its DB handle, or the
+// userID are missing — we never want an unauthenticated or misconfigured
+// path to accidentally grant access, and we want panics in the membership
+// helpers to be impossible.
 func (a *DBChannelAuthorizer) CanSubscribe(ctx context.Context, userID, channel string) bool {
+	if a == nil || a.db == nil || userID == "" {
+		return false
+	}
 	parts := strings.SplitN(channel, ":", 2)
 	if len(parts) != 2 || parts[1] == "" {
 		return false

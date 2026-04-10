@@ -604,11 +604,12 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 			COUNT(*) FILTER (WHERE status IN ('IN_PROGRESS', 'PLANNING', 'REVIEW'))
 		FROM missions WHERE workspace_id = ?`, wsID).Scan(&m.TotalMissions, &m.ActiveMissions)
 	if err != nil {
-		// SQLite doesn't support FILTER — fallback to CASE
+		// SQLite doesn't support FILTER — fallback to CASE.
+		// COALESCE needed because SUM returns NULL for empty workspaces.
 		err = h.db.QueryRowContext(r.Context(), `
 			SELECT
 				COUNT(*),
-				SUM(CASE WHEN status IN ('IN_PROGRESS', 'PLANNING', 'REVIEW') THEN 1 ELSE 0 END)
+				COALESCE(SUM(CASE WHEN status IN ('IN_PROGRESS', 'PLANNING', 'REVIEW') THEN 1 ELSE 0 END), 0)
 			FROM missions WHERE workspace_id = ?`, wsID).Scan(&m.TotalMissions, &m.ActiveMissions)
 		if err != nil {
 			h.logger.Error("mission metrics: totals", "error", err)
@@ -617,11 +618,12 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 24h mission counts (completed_at for COMPLETED, updated_at for FAILED since failed missions may lack completed_at)
+	// 24h mission counts (completed_at for COMPLETED, updated_at for FAILED since failed missions may lack completed_at).
+	// COALESCE needed because SUM returns NULL for empty workspaces.
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT
-			SUM(CASE WHEN status = 'COMPLETED' AND completed_at >= ? THEN 1 ELSE 0 END),
-			SUM(CASE WHEN status = 'FAILED' AND updated_at >= ? THEN 1 ELSE 0 END)
+			COALESCE(SUM(CASE WHEN status = 'COMPLETED' AND completed_at >= ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'FAILED' AND updated_at >= ? THEN 1 ELSE 0 END), 0)
 		FROM missions WHERE workspace_id = ?`,
 		cutoff, cutoff, wsID).Scan(&m.Completed24h, &m.Failed24h); err != nil {
 		h.logger.Warn("mission metrics: 24h mission counts query failed", "error", err)
@@ -650,11 +652,11 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("mission metrics: avg completion time query failed", "error", err)
 	}
 
-	// 24h task stats
+	// 24h task stats — COALESCE needed because SUM returns NULL for workspaces with no tasks.
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT
-			SUM(CASE WHEN mt.status = 'COMPLETED' AND mt.completed_at >= ? THEN 1 ELSE 0 END),
-			SUM(CASE WHEN mt.status = 'FAILED' AND mt.updated_at >= ? THEN 1 ELSE 0 END)
+			COALESCE(SUM(CASE WHEN mt.status = 'COMPLETED' AND mt.completed_at >= ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN mt.status = 'FAILED' AND mt.updated_at >= ? THEN 1 ELSE 0 END), 0)
 		FROM mission_tasks mt
 		JOIN missions m ON m.id = mt.mission_id
 		WHERE m.workspace_id = ?`,

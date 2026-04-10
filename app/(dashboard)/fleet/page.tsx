@@ -77,11 +77,26 @@ export default function FleetPage() {
   useEffect(() => { fetchData() }, [fetchData])
 
   // Real-time: debounced refetch (prevents burst of 8×3 concurrent fetches)
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const debouncedRefetch = useCallback(() => {
-    clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => fetchData(true), 200)
+    if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null
+      void fetchData(true)
+    }, 200)
   }, [fetchData])
+
+  // Clear any pending timer on unmount or when workspace changes,
+  // otherwise a late-firing timeout can overwrite state with data from
+  // the previous workspace.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current)
+        debounceRef.current = null
+      }
+    }
+  }, [workspaceId])
 
   useRealtimeEvent("agent.status", debouncedRefetch)
   useRealtimeEvent("agent.created", debouncedRefetch)

@@ -26,7 +26,13 @@ type RingBuffer struct {
 }
 
 // NewRingBuffer creates a RingBuffer that holds up to capacity log records.
+// Panics if capacity <= 0 — a zero or negative capacity would cause a
+// modulo-by-zero panic inside Append on the first record, and failing fast
+// at construction makes the misconfiguration obvious at startup.
 func NewRingBuffer(capacity int) *RingBuffer {
+	if capacity <= 0 {
+		panic("logging: ring buffer capacity must be > 0")
+	}
 	return &RingBuffer{
 		entries: make([]LogRecord, capacity),
 		cap:     capacity,

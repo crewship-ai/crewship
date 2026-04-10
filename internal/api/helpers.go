@@ -15,12 +15,21 @@ import (
 )
 
 // broadcastChannelEvent is an api-package shortcut to hub.BroadcastChannel.
+// No-op if hub is nil (e.g. when the API is initialized without a WebSocket hub
+// in tests or headless tooling), so call sites don't need their own nil guard.
 func broadcastChannelEvent(hub *ws.Hub, prefix, id, eventType string, payload any) {
+	if hub == nil {
+		return
+	}
 	hub.BroadcastChannel(prefix, id, eventType, payload)
 }
 
 // broadcastWorkspaceEvent is an api-package shortcut to hub.BroadcastWorkspace.
+// No-op if hub is nil — see broadcastChannelEvent.
 func broadcastWorkspaceEvent(hub *ws.Hub, wsID, eventType string, payload any) {
+	if hub == nil {
+		return
+	}
 	hub.BroadcastWorkspace(wsID, eventType, payload)
 }
 
