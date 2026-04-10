@@ -1203,6 +1203,7 @@ function ExpandedPanel({
                   <button
                     key={a.id}
                     type="button"
+                    aria-pressed={hasAccess}
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-label transition-colors",
                       hasAccess
@@ -1406,8 +1407,10 @@ function ExpandedPanel({
         />
       )}
 
-      {/* Section 4: Environment Variables (hidden for HTTP servers that use OAuth) */}
-      {!(server.transport === "streamable-http" && server.endpoint) && <SectionCard surface="subtle" className="p-4 space-y-4">
+      {/* Section 4: Environment Variables
+          Hidden only for HTTP servers that actually use OAuth. Non-OAuth
+          streamable-http servers still need API keys or other env-based auth. */}
+      {!(transport === "streamable-http" && (server.auth_status !== "none" || oauthDiscovered)) && <SectionCard surface="subtle" className="p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-body font-medium">
             <KeyRound className="h-4 w-4 text-muted-foreground" />
