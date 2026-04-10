@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useMemo, useCallback } from "react"
+import { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { Users, Plus, Search, RotateCcw, ArrowUpDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -79,11 +79,31 @@ export default function CrewsPage() {
     fetchCrews()
   }, [workspaceId, wsLoading, fetchCrews])
 
-  // Real-time: refetch crews when agent/crew changes occur
-  useRealtimeEvent("agent.status", useCallback(() => { fetchCrews(true) }, [fetchCrews]))
-  useRealtimeEvent("crew.created", useCallback(() => { fetchCrews(true) }, [fetchCrews]))
-  useRealtimeEvent("crew.updated", useCallback(() => { fetchCrews(true) }, [fetchCrews]))
-  useRealtimeEvent("crew.deleted", useCallback(() => { fetchCrews(true) }, [fetchCrews]))
+  // Real-time: debounced refetch on crew/agent events
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const debouncedRefetch = useCallback(() => {
+    if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null
+      void fetchCrews(true)
+    }, 150)
+  }, [fetchCrews])
+
+  // Clear any pending timer on unmount / workspace change so a late
+  // timeout cannot overwrite state with data from a previous workspace.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current)
+        debounceRef.current = null
+      }
+    }
+  }, [workspaceId])
+
+  useRealtimeEvent("agent.status", debouncedRefetch)
+  useRealtimeEvent("crew.created", debouncedRefetch)
+  useRealtimeEvent("crew.updated", debouncedRefetch)
+  useRealtimeEvent("crew.deleted", debouncedRefetch)
 
   const filteredAndSorted = useMemo(() => {
     let result = crews

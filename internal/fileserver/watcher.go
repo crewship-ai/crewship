@@ -12,6 +12,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// FileEvent represents a filesystem change in a crew's output directory.
 type FileEvent struct {
 	Event     string    `json:"event"`
 	Path      string    `json:"path"`
@@ -20,14 +21,18 @@ type FileEvent struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
+// EventHandler is called when a filesystem change is detected in a watched directory.
 type EventHandler func(crewID string, event FileEvent)
 
+// Watcher monitors crew output directories for file changes and invokes
+// the handler callback on each event.
 type Watcher struct {
 	basePath string
 	logger   *slog.Logger
 	handler  EventHandler
 }
 
+// NewWatcher creates a Watcher that monitors directories under basePath.
 func NewWatcher(basePath string, logger *slog.Logger, handler EventHandler) *Watcher {
 	return &Watcher{
 		basePath: basePath,
@@ -41,6 +46,8 @@ func NewWatcher(basePath string, logger *slog.Logger, handler EventHandler) *Wat
 // explicit cleanup intent without needing to know the internal lifecycle.
 func (w *Watcher) Close() {}
 
+// Watch starts watching the output directory for a crew, invoking the handler
+// on file changes. The watcher runs until ctx is cancelled.
 func (w *Watcher) Watch(ctx context.Context, crewID string) error {
 	if crewID == "" || filepath.IsAbs(crewID) || strings.Contains(crewID, "..") {
 		return fmt.Errorf("invalid crew ID: %q", crewID)

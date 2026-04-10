@@ -5,6 +5,7 @@ import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
 import { WebLinksAddon } from "@xterm/addon-web-links"
 
+/** Connection status for the WebSocket-based terminal session. */
 export type TerminalStatus = "connecting" | "connected" | "disconnected" | "error"
 
 interface UseTerminalOptions {
@@ -22,6 +23,10 @@ interface UseTerminalResult {
   disconnect: () => void
 }
 
+/**
+ * Manages an xterm.js terminal instance connected to a crew container via WebSocket.
+ * Supports shell and attach modes, auto-resize, and binary data streaming.
+ */
 export function useTerminal(options: UseTerminalOptions): UseTerminalResult {
   const { containerRef, crewId, crewSlug, mode = "shell", agentSlug, enabled = true, key = 0 } = options
   const [status, setStatus] = useState<TerminalStatus>("disconnected")

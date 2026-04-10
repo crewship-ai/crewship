@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -17,6 +18,7 @@ var (
 	ErrInvalidToken = errors.New("invalid token")
 )
 
+// Claims represents the decoded payload of a NextAuth v5 JWE session token.
 type Claims struct {
 	ID    string `json:"id"`
 	Name  string `json:"name,omitempty"`
@@ -26,6 +28,8 @@ type Claims struct {
 	Jti   string `json:"jti"`
 }
 
+// JWTValidator decrypts and validates NextAuth v5 JWE session tokens using
+// an HKDF-derived encryption key.
 type JWTValidator struct {
 	encryptionKey []byte
 }
@@ -65,7 +69,7 @@ func (v *JWTValidator) Validate(tokenStr string) (*Claims, error) {
 		return nil, fmt.Errorf("%w: unmarshal: %v", ErrInvalidToken, err)
 	}
 
-	if claims.Exp > 0 && time.Now().Unix() > claims.Exp+15 {
+	if claims.Exp > 0 && time.Now().Unix() > claims.Exp+5 {
 		return nil, ErrTokenExpired
 	}
 
@@ -85,7 +89,7 @@ func (v *JWTValidator) CreateToken(claims *Claims) (string, error) {
 		claims.Exp = time.Now().Add(30 * 24 * time.Hour).Unix()
 	}
 	if claims.Jti == "" {
-		claims.Jti = fmt.Sprintf("%d", time.Now().UnixNano())
+		claims.Jti = strconv.FormatInt(time.Now().UnixNano(), 10)
 	}
 
 	payload, err := json.Marshal(claims)

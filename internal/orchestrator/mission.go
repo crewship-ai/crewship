@@ -34,7 +34,7 @@ type DispatchRequest struct {
 	Task         string
 	TraceID      string // mission trace ID for end-to-end observability
 	MissionID    string
-	LeadPlanning bool   // when true, dispatch as LEAD with sidecar (for task planning phase)
+	LeadPlanning bool // when true, dispatch as LEAD with sidecar (for task planning phase)
 }
 
 // MissionEngine manages the lifecycle of missions and their tasks.
@@ -69,7 +69,7 @@ type EscalationConfig struct {
 }
 
 const (
-	circuitBreakerThreshold = 3     // consecutive failures before tripping
+	circuitBreakerThreshold = 3 // consecutive failures before tripping
 	maxResultSummaryLen     = 8000
 	maxBriefTotalLen        = 32000 // total brief size cap (bytes) to avoid LLM token budget issues
 	maxDepOutputLen         = 4000  // per-dependency output truncation
@@ -140,7 +140,8 @@ type missionState struct {
 	planningDispatched bool // true after lead planning dispatch (prevents re-dispatch)
 }
 
-// NewMissionEngine creates a MissionEngine with the given dependencies.
+// NewMissionEngine creates a MissionEngine that coordinates multi-agent mission
+// execution, dispatching tasks to agents and tracking progress.
 func NewMissionEngine(db *sql.DB, orch *Orchestrator, hub *ws.Hub, logger *slog.Logger) *MissionEngine {
 	pw := NewProgressWriter()
 	return &MissionEngine{
@@ -358,10 +359,6 @@ func (e *MissionEngine) runMissionLoop(ctx context.Context, ms *missionState) {
 	}
 }
 
-
-
-
-
 func (e *MissionEngine) updateTaskStatus(ctx context.Context, ms *missionState, taskID, status, errMsg string) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	query := `UPDATE mission_tasks SET status = ?, updated_at = ?`
@@ -416,37 +413,17 @@ func (e *MissionEngine) loadTasks(ctx context.Context, missionID string) ([]Task
 }
 
 func (e *MissionEngine) broadcastTaskStatus(ms *missionState, taskID, status string) {
-	if e.hub == nil {
-		return
-	}
-	e.hub.Broadcast("mission:"+ms.ID, ws.ServerMessage{
-		Type:    "task.status",
-		Channel: "mission:" + ms.ID,
-		Payload: map[string]string{"id": taskID, "status": status},
-	})
-	wsChannel := "workspace:" + ms.WorkspaceID
-	e.hub.Broadcast(wsChannel, ws.ServerMessage{
-		Type:    "task.updated",
-		Channel: wsChannel,
-		Payload: map[string]string{"id": taskID, "mission_id": ms.ID, "status": status},
-	})
+	e.hub.BroadcastChannel("mission", ms.ID, "task.status",
+		map[string]string{"id": taskID, "status": status})
+	e.hub.BroadcastWorkspace(ms.WorkspaceID, "task.updated",
+		map[string]string{"id": taskID, "mission_id": ms.ID, "status": status})
 }
 
 func (e *MissionEngine) broadcastMissionStatus(ms *missionState, status string) {
-	if e.hub == nil {
-		return
-	}
-	e.hub.Broadcast("mission:"+ms.ID, ws.ServerMessage{
-		Type:    "mission.status",
-		Channel: "mission:" + ms.ID,
-		Payload: map[string]string{"id": ms.ID, "title": ms.Title, "status": status},
-	})
-	wsChannel := "workspace:" + ms.WorkspaceID
-	e.hub.Broadcast(wsChannel, ws.ServerMessage{
-		Type:    "mission.updated",
-		Channel: wsChannel,
-		Payload: map[string]string{"id": ms.ID, "crew_id": ms.CrewID, "title": ms.Title, "status": status},
-	})
+	e.hub.BroadcastChannel("mission", ms.ID, "mission.status",
+		map[string]string{"id": ms.ID, "title": ms.Title, "status": status})
+	e.hub.BroadcastWorkspace(ms.WorkspaceID, "mission.updated",
+		map[string]string{"id": ms.ID, "crew_id": ms.CrewID, "title": ms.Title, "status": status})
 }
 
 // countTasks returns the number of tasks in a mission.

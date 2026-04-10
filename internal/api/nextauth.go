@@ -24,6 +24,7 @@ type NextAuthHandler struct {
 	validator *auth.JWTValidator
 }
 
+// NewNextAuthHandler creates a NextAuthHandler for compatibility with the next-auth client SDK.
 func NewNextAuthHandler(db *sql.DB, logger *slog.Logger, validator *auth.JWTValidator) *NextAuthHandler {
 	return &NextAuthHandler{db: db, logger: logger, validator: validator}
 }

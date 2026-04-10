@@ -49,8 +49,8 @@ type projectResponse struct {
 	Progress   int `json:"progress"`
 }
 
-// ── 1. List — GET /api/v1/projects ─────────────────────────────────────────
-
+// List returns all projects in the workspace with issue counts and milestone stats.
+// GET /api/v1/projects
 func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
@@ -58,26 +58,29 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 		SELECT p.id, p.workspace_id, p.name, p.slug,
 		       p.description, p.icon, p.color, p.status, p.priority, p.health,
 		       p.lead_type, p.lead_id,
-		       CASE
-		         WHEN p.lead_type = 'user' THEN (SELECT full_name FROM users WHERE id = p.lead_id)
-		         WHEN p.lead_type = 'agent' THEN (SELECT name FROM agents WHERE id = p.lead_id)
-		       END,
+		       COALESCE(u.full_name, ag.name),
 		       p.start_date, p.target_date, p.created_at, p.updated_at,
-		       (SELECT COUNT(*) FROM missions WHERE project_id = p.id AND mission_type = 'issue') AS issue_count,
-		       (SELECT COUNT(*) FROM missions WHERE project_id = p.id AND mission_type = 'issue' AND status IN ('DONE','COMPLETED')) AS done_count
+		       COALESCE(ic.issue_count, 0),
+		       COALESCE(ic.done_count, 0)
 		FROM projects p
+		LEFT JOIN users u ON p.lead_type = 'user' AND u.id = p.lead_id
+		LEFT JOIN agents ag ON p.lead_type = 'agent' AND ag.id = p.lead_id
+		LEFT JOIN (
+		    SELECT project_id,
+		           COUNT(*) AS issue_count,
+		           SUM(CASE WHEN status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END) AS done_count
+		    FROM missions WHERE mission_type = 'issue' GROUP BY project_id
+		) ic ON ic.project_id = p.id
 		WHERE p.workspace_id = ?`
 	args := []interface{}{wsID}
 
 	// Status filter
 	if statusParam := r.URL.Query().Get("status"); statusParam != "" {
 		statuses := strings.Split(statusParam, ",")
-		placeholders := make([]string, len(statuses))
-		for i, s := range statuses {
-			placeholders[i] = "?"
+		for _, s := range statuses {
 			args = append(args, strings.TrimSpace(s))
 		}
-		query += " AND p.status IN (" + strings.Join(placeholders, ",") + ")"
+		query += " AND p.status IN (" + sqlPlaceholders(len(statuses)) + ")"
 	}
 
 	// Sort
@@ -129,8 +132,8 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// ── 2. Create — POST /api/v1/projects ──────────────────────────────────────
-
+// Create provisions a new project in the workspace with the given name, slug, and metadata.
+// POST /api/v1/projects
 func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -210,19 +213,13 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Progress:    0,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "project.created",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": id},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "project.created", map[string]string{"id": id})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// ── 3. Get — GET /api/v1/projects/{projectId} ─────────────────────────────
-
+// Get returns a single project by ID with full details.
+// GET /api/v1/projects/{projectId}
 func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectId")
 	wsID := WorkspaceIDFromContext(r.Context())
@@ -265,8 +262,8 @@ func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
-// ── 4. Update — PATCH /api/v1/projects/{projectId} ────────────────────────
-
+// Update modifies project properties such as name, description, status, and priority.
+// PATCH /api/v1/projects/{projectId}
 func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "create") {
@@ -278,17 +275,14 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	// Verify project exists
-	var existingID string
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id FROM projects WHERE id = ? AND workspace_id = ?`,
-		projectID, wsID).Scan(&existingID)
+	found, err := projectExists(r.Context(), h.db, projectID, wsID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Project not found")
-			return
-		}
 		h.logger.Error("get project for update", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !found {
+		writeProblem(w, r, http.StatusNotFound, "Project not found")
 		return
 	}
 
@@ -359,13 +353,7 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "project.updated",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": projectID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "project.updated", map[string]string{"id": projectID})
 
 	// Return updated project
 	var p projectResponse
@@ -400,8 +388,8 @@ func (h *ProjectHandler) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
-// ── 5. Delete — DELETE /api/v1/projects/{projectId} ────────────────────────
-
+// Delete removes a project and unlinks all its associated issues.
+// DELETE /api/v1/projects/{projectId}
 func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	if !canRole(role, "manage") {
@@ -454,13 +442,7 @@ func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    "project.deleted",
-			Channel: "workspace:" + wsID,
-			Payload: map[string]string{"id": projectID},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "project.deleted", map[string]string{"id": projectID})
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -471,9 +453,13 @@ func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	// Verify project exists
-	var exists int
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT 1 FROM projects WHERE id = ? AND workspace_id = ?`, projectID, wsID).Scan(&exists); err != nil {
+	found, err := projectExists(r.Context(), h.db, projectID, wsID)
+	if err != nil {
+		h.logger.Error("project exists check", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+	if !found {
 		writeProblem(w, r, http.StatusNotFound, "Project not found")
 		return
 	}
@@ -504,11 +490,15 @@ func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	resp.ByLabel = []labelStat{}
 	resp.Crews = []string{}
 
-	// Total + completed
-	_ = h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM missions WHERE project_id = ? AND mission_type = 'issue'`, projectID).Scan(&resp.TotalIssues)
-	_ = h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM missions WHERE project_id = ? AND mission_type = 'issue' AND status IN ('DONE','COMPLETED')`, projectID).Scan(&resp.CompletedIssues)
+	// Total + completed in one query.
+	// COALESCE needed because SUM returns NULL for projects with no issues.
+	if err := h.db.QueryRowContext(r.Context(), `
+		SELECT COUNT(*),
+		       COALESCE(SUM(CASE WHEN status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END), 0)
+		FROM missions WHERE project_id = ? AND mission_type = 'issue'`,
+		projectID).Scan(&resp.TotalIssues, &resp.CompletedIssues); err != nil {
+		h.logger.Error("load project stats counts", "project_id", projectID, "error", err)
+	}
 
 	// By status
 	statusRows, err := h.db.QueryContext(r.Context(),

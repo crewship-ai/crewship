@@ -9,14 +9,18 @@ import (
 	"strings"
 )
 
+// Reader reads structured log entries from per-agent JSONL files.
 type Reader struct {
 	basePath string
 }
 
+// NewReader creates a Reader that reads agent logs from the given base path.
 func NewReader(basePath string) *Reader {
 	return &Reader{basePath: basePath}
 }
 
+// ReadAgentLogs returns log entries for the given crew and agent, with optional
+// pagination via offset and limit (0 means no limit).
 func (r *Reader) ReadAgentLogs(crewID, agentID string, offset, limit int) ([]LogEntry, error) {
 	if err := validatePathSegment(crewID); err != nil {
 		return nil, fmt.Errorf("invalid crew ID: %w", err)
@@ -35,7 +39,13 @@ func validatePathSegment(s string) error {
 	return nil
 }
 
+// ReadSessionMessages reads all log entries for a specific session from a JSONL file.
+// sessionID is validated as a single path segment (no separators, no ".."),
+// matching ReadAgentLogs, to prevent path traversal out of basePath.
 func (r *Reader) ReadSessionMessages(basePath, sessionID string) ([]LogEntry, error) {
+	if err := validatePathSegment(sessionID); err != nil {
+		return nil, fmt.Errorf("invalid session ID: %w", err)
+	}
 	path := filepath.Join(basePath, sessionID+".jsonl")
 	return readJSONL(path, 0, 0)
 }

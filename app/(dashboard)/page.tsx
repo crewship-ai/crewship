@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText, AlertCircle, Pause, Target, Coins, Loader2, Square, ChevronRight, CheckCircle2, CircleDot } from "lucide-react"
 import { BotIcon as AnimatedBot } from "@/components/ui/bot"
@@ -234,16 +234,22 @@ export default function DashboardPage() {
     fetchData()
   }, [workspaceId, onboardingChecked, fetchData])
 
-  // Real-time: refetch dashboard data when agent/run events arrive
-  useRealtimeEvent("run.started", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("run.completed", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("run.failed", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("agent.status", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("mission.updated", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("task.updated", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("escalation.created", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("agent.created", useCallback(() => { fetchData(false) }, [fetchData]))
-  useRealtimeEvent("agent.deleted", useCallback(() => { fetchData(false) }, [fetchData]))
+  // Real-time: debounced refetch on dashboard events (prevents burst of 9 concurrent fetches)
+  const dashDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const debouncedFetchData = useCallback(() => {
+    clearTimeout(dashDebounceRef.current)
+    dashDebounceRef.current = setTimeout(() => fetchData(false), 200)
+  }, [fetchData])
+
+  useRealtimeEvent("run.started", debouncedFetchData)
+  useRealtimeEvent("run.completed", debouncedFetchData)
+  useRealtimeEvent("run.failed", debouncedFetchData)
+  useRealtimeEvent("agent.status", debouncedFetchData)
+  useRealtimeEvent("mission.updated", debouncedFetchData)
+  useRealtimeEvent("task.updated", debouncedFetchData)
+  useRealtimeEvent("escalation.created", debouncedFetchData)
+  useRealtimeEvent("agent.created", debouncedFetchData)
+  useRealtimeEvent("agent.deleted", debouncedFetchData)
 
   useRealtimeEvent("container.stats", useCallback((event: RealtimeEvent) => {
     const p = event.payload
@@ -274,48 +280,56 @@ export default function DashboardPage() {
   const totalMissionCount = metrics?.total_missions ?? 0
 
   // Recent missions sorted by activity
-  const recentMissions = [...missions]
-    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-    .slice(0, 10)
+  const recentMissions = useMemo(() =>
+    [...missions]
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, 10),
+    [missions],
+  )
 
   // Build agent → last run map (keep most recent per agent)
-  const agentLastRun = new Map<string, RunEntry>()
-  for (const run of runsData?.data ?? []) {
-    const existing = agentLastRun.get(run.agent_id)
-    if (!existing) {
-      agentLastRun.set(run.agent_id, run)
-      continue
+  const agentLastRun = useMemo(() => {
+    const map = new Map<string, RunEntry>()
+    for (const run of runsData?.data ?? []) {
+      const existing = map.get(run.agent_id)
+      if (!existing) {
+        map.set(run.agent_id, run)
+        continue
+      }
+      const tsExisting = new Date(existing.started_at ?? existing.created_at).getTime()
+      const tsNew = new Date(run.started_at ?? run.created_at).getTime()
+      if (tsNew > tsExisting) map.set(run.agent_id, run)
     }
-    const tsExisting = new Date(existing.started_at ?? existing.created_at).getTime()
-    const tsNew = new Date(run.started_at ?? run.created_at).getTime()
-    if (tsNew > tsExisting) agentLastRun.set(run.agent_id, run)
-  }
+    return map
+  }, [runsData])
 
   // Filter agents
-  const filteredAgents =
+  const filteredAgents = useMemo(() =>
     activeFilter === "all"
       ? agents
-      : agents.filter((a) => a.status === activeFilter.toUpperCase())
+      : agents.filter((a) => a.status === activeFilter.toUpperCase()),
+    [agents, activeFilter],
+  )
 
   // Sort: RUNNING first, then by last activity (newest first), no activity last
-  const sortedAgents = [...filteredAgents].sort((a, b) => {
-    // Running agents first
-    if (a.status === "RUNNING" && b.status !== "RUNNING") return -1
-    if (b.status === "RUNNING" && a.status !== "RUNNING") return 1
+  const sortedAgents = useMemo(() =>
+    [...filteredAgents].sort((a, b) => {
+      if (a.status === "RUNNING" && b.status !== "RUNNING") return -1
+      if (b.status === "RUNNING" && a.status !== "RUNNING") return 1
 
-    const runA = agentLastRun.get(a.id)
-    const runB = agentLastRun.get(b.id)
+      const runA = agentLastRun.get(a.id)
+      const runB = agentLastRun.get(b.id)
 
-    // Agents with activity before those without
-    if (runA && !runB) return -1
-    if (runB && !runA) return 1
-    if (!runA && !runB) return 0
+      if (runA && !runB) return -1
+      if (runB && !runA) return 1
+      if (!runA && !runB) return 0
 
-    // Both have runs — sort by most recent
-    const tsA = new Date(runA!.started_at ?? runA!.created_at).getTime()
-    const tsB = new Date(runB!.started_at ?? runB!.created_at).getTime()
-    return tsB - tsA
-  })
+      const tsA = new Date(runA!.started_at ?? runA!.created_at).getTime()
+      const tsB = new Date(runB!.started_at ?? runB!.created_at).getTime()
+      return tsB - tsA
+    }),
+    [filteredAgents, agentLastRun],
+  )
 
   if (error) {
     return (

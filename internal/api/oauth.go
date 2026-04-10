@@ -89,16 +89,19 @@ var OAuthProviders = map[string]OAuthProvider{
 	},
 }
 
+// OAuthHandler manages OAuth credential flows including authorization, callback, and token exchange.
 type OAuthHandler struct {
 	db     *sql.DB
 	hub    *ws.Hub
 	logger *slog.Logger
 }
 
+// NewOAuthHandler creates an OAuthHandler with the given database and logger.
 func NewOAuthHandler(db *sql.DB, logger *slog.Logger) *OAuthHandler {
 	return &OAuthHandler{db: db, logger: logger}
 }
 
+// SetHub attaches a WebSocket hub for broadcasting OAuth completion events to the UI.
 func (h *OAuthHandler) SetHub(hub *ws.Hub) { h.hub = hub }
 
 // oauthCredConfig holds the decrypted OAuth configuration for a credential.
@@ -669,7 +672,8 @@ func (h *OAuthHandler) Discover(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Could not discover OAuth endpoints: " + err.Error()})
+		h.logger.Warn("OAuth discovery failed", "error", err)
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Could not discover OAuth endpoints for this issuer"})
 		return
 	}
 

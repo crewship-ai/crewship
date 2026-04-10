@@ -14,10 +14,14 @@ import (
 
 var _ provider.StorageProvider = (*Provider)(nil)
 
+// Provider implements StorageProvider using the local filesystem. All paths
+// are resolved relative to basePath with symlink-aware path traversal protection.
 type Provider struct {
 	basePath string
 }
 
+// New creates a local filesystem Provider rooted at basePath, creating the
+// directory if it does not exist.
 func New(basePath string) (*Provider, error) {
 	if err := os.MkdirAll(basePath, 0750); err != nil {
 		return nil, fmt.Errorf("create base dir %s: %w", basePath, err)
@@ -46,6 +50,7 @@ func (p *Provider) resolve(path string) (string, error) {
 	return full, nil
 }
 
+// Read opens the file at the given path for reading.
 func (p *Provider) Read(_ context.Context, path string) (io.ReadCloser, error) {
 	full, err := p.resolve(path)
 	if err != nil {
@@ -58,6 +63,7 @@ func (p *Provider) Read(_ context.Context, path string) (io.ReadCloser, error) {
 	return f, nil
 }
 
+// Write creates or overwrites the file at path with content from r.
 func (p *Provider) Write(_ context.Context, path string, r io.Reader) error {
 	full, err := p.resolve(path)
 	if err != nil {
@@ -77,6 +83,7 @@ func (p *Provider) Write(_ context.Context, path string, r io.Reader) error {
 	return nil
 }
 
+// List returns file entries in the given directory (non-recursive).
 func (p *Provider) List(_ context.Context, dir string) ([]provider.FileInfo, error) {
 	full, err := p.resolve(dir)
 	if err != nil {
@@ -109,6 +116,7 @@ func (p *Provider) List(_ context.Context, dir string) ([]provider.FileInfo, err
 	return files, nil
 }
 
+// ListRecursive walks the directory tree and returns all file entries.
 func (p *Provider) ListRecursive(_ context.Context, dir string) ([]provider.FileInfo, error) {
 	full, err := p.resolve(dir)
 	if err != nil {
@@ -149,6 +157,7 @@ func (p *Provider) ListRecursive(_ context.Context, dir string) ([]provider.File
 	return files, nil
 }
 
+// Delete removes the file or directory at path (recursively if a directory).
 func (p *Provider) Delete(_ context.Context, path string) error {
 	full, err := p.resolve(path)
 	if err != nil {
@@ -157,6 +166,7 @@ func (p *Provider) Delete(_ context.Context, path string) error {
 	return os.RemoveAll(full)
 }
 
+// Exists reports whether a file or directory exists at the given path.
 func (p *Provider) Exists(_ context.Context, path string) (bool, error) {
 	full, err := p.resolve(path)
 	if err != nil {
@@ -172,6 +182,7 @@ func (p *Provider) Exists(_ context.Context, path string) (bool, error) {
 	return true, nil
 }
 
+// EnsureDir creates the directory at path if it does not already exist.
 func (p *Provider) EnsureDir(_ context.Context, path string) error {
 	full, err := p.resolve(path)
 	if err != nil {
@@ -180,6 +191,8 @@ func (p *Provider) EnsureDir(_ context.Context, path string) error {
 	return os.MkdirAll(full, 0750)
 }
 
+// Watch starts watching the directory tree for filesystem changes, sending
+// events to the provided channel until ctx is cancelled.
 func (p *Provider) Watch(ctx context.Context, dir string, events chan<- provider.FileEvent) error {
 	full, err := p.resolve(dir)
 	if err != nil {

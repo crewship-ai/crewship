@@ -16,15 +16,18 @@ import (
 
 var errNoActiveAnthropicCredential = errors.New("no active Anthropic credential in workspace")
 
+// CrewAIHandler uses an LLM to suggest crew compositions based on a natural-language description.
 type CrewAIHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewCrewAIHandler creates a CrewAIHandler with the given database and logger.
 func NewCrewAIHandler(db *sql.DB, logger *slog.Logger) *CrewAIHandler {
 	return &CrewAIHandler{db: db, logger: logger}
 }
 
+// AISuggestedAgent represents a single agent suggested by the AI crew designer.
 type AISuggestedAgent struct {
 	Name         string `json:"name"`
 	Slug         string `json:"slug"`
@@ -33,6 +36,7 @@ type AISuggestedAgent struct {
 	SystemPrompt string `json:"system_prompt"`
 }
 
+// AISuggestResponse contains the AI-generated crew design with name, description, and suggested agents.
 type AISuggestResponse struct {
 	CrewName    string             `json:"crew_name"`
 	CrewSlug    string             `json:"crew_slug"`

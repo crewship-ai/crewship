@@ -1,3 +1,4 @@
+/** High-level platform statistics shown on the admin overview dashboard. */
 export interface Stats {
   workspaces: number
   users: number
@@ -5,6 +6,7 @@ export interface Stats {
   running: number
 }
 
+/** A workspace (organization) as seen in the admin panel, with member/agent/crew counts. */
 export interface AdminOrg {
   id: string
   name: string
@@ -15,6 +17,7 @@ export interface AdminOrg {
   _count_crews: number
 }
 
+/** A user record as displayed in the admin users table. */
 export interface AdminUser {
   id: string
   email: string
@@ -24,6 +27,7 @@ export interface AdminUser {
   role: string | null
 }
 
+/** Runtime status of the Keeper (Ollama-based credential gatekeeper) subsystem. */
 export interface KeeperStatus {
   enabled: boolean
   ollama_url: string
@@ -36,6 +40,7 @@ export interface KeeperStatus {
   escalate_count: number
 }
 
+/** An audit log entry from the Keeper, recording a credential access decision (allow/deny/escalate). */
 export interface KeeperLogEntry {
   id: string
   agent_id: string
@@ -56,6 +61,7 @@ export interface KeeperLogEntry {
   decided_at: string | null
 }
 
+/** Active tab identifier for the admin panel navigation. */
 export type TabKey =
   | "overview" | "logs" | "workspaces" | "users"
   | "providers" | "resources" | "networking" | "backups"

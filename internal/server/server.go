@@ -30,6 +30,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// Server is the main crewship process, wiring together the HTTP server, IPC
+// listener, WebSocket hub, orchestrator, scheduler, and all supporting services.
 type Server struct {
 	httpServer    *http.Server
 	ipcServer     *http.Server
@@ -62,6 +64,7 @@ type Server struct {
 	runCancel       context.CancelFunc
 }
 
+// Deps holds the external dependencies injected into the server at startup.
 type Deps struct {
 	Container provider.ContainerProvider
 	Storage   provider.StorageProvider
@@ -72,6 +75,7 @@ type Deps struct {
 	License   *license.License
 }
 
+// Close releases resources held by the dependencies (e.g. state provider).
 func (d *Deps) Close() {
 	if d == nil {
 		return
@@ -81,6 +85,8 @@ func (d *Deps) Close() {
 	}
 }
 
+// New creates and configures a Server with all subsystems (HTTP, IPC, WebSocket,
+// orchestrator, scheduler, stats collector, etc.) wired together.
 func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	mux := http.NewServeMux()
 	ipcMux := http.NewServeMux()
@@ -152,12 +158,7 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// File watcher broadcasts real-time file events to WebSocket clients
 	// on the crew:{crewID} channel.
 	fileWatcher := fileserver.NewWatcher(cfg.Storage.BasePath, logger, func(crewID string, event fileserver.FileEvent) {
-		channel := "crew:" + crewID
-		wsHub.Broadcast(channel, ws.ServerMessage{
-			Type:    "file.event",
-			Channel: channel,
-			Payload: event,
-		})
+		wsHub.BroadcastChannel("crew", crewID, "file.event", event)
 	})
 
 	var statsCollector *StatsCollector
@@ -357,38 +358,48 @@ func (s *Server) combinedHandler() http.Handler {
 	})
 }
 
+// SetChatHandler sets the handler for WebSocket chat messages.
 func (s *Server) SetChatHandler(handler ws.ChatHandler) {
 	s.wsHub.SetChatHandler(handler)
 }
 
+// SetChannelAuthorizer sets the authorizer for WebSocket channel subscriptions.
 func (s *Server) SetChannelAuthorizer(auth ws.ChannelAuthorizer) {
 	s.wsHub.SetChannelAuthorizer(auth)
 }
 
+// Orchestrator returns the server's orchestrator instance.
 func (s *Server) Orchestrator() *orchestrator.Orchestrator {
 	return s.orchestrator
 }
 
+// MissionEngine returns the server's mission engine instance.
 func (s *Server) MissionEngine() *orchestrator.MissionEngine {
 	return s.missionEngine
 }
 
+// TokenPool returns the LLM proxy token pool for credential rotation.
 func (s *Server) TokenPool() *llmproxy.TokenPool {
 	return s.tokenPool
 }
 
+// ConversationStore returns the conversation persistence store.
 func (s *Server) ConversationStore() *conversation.Store {
 	return s.convStore
 }
 
+// LogWriter returns the agent log writer.
 func (s *Server) LogWriter() *logcollector.Writer {
 	return s.logWriter
 }
 
+// APIRouter returns the API router for registering additional routes.
 func (s *Server) APIRouter() *goapi.Router {
 	return s.apiRouter
 }
 
+// Start launches the HTTP server, IPC listener, WebSocket hub, scheduler,
+// stats collector, and all background goroutines. It blocks until ctx is done.
 func (s *Server) Start(ctx context.Context) error {
 	s.startedAt = time.Now()
 
@@ -441,6 +452,8 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 }
 
+// Shutdown gracefully stops all server subsystems, draining connections and
+// flushing logs before returning.
 func (s *Server) Shutdown() error {
 	s.logger.Info("shutting down servers")
 
@@ -511,6 +524,7 @@ type convStoreAdapter struct {
 	store *conversation.Store
 }
 
+// Read adapts conversation.Store.Read to the api.ConversationReader interface.
 func (a *convStoreAdapter) Read(ctx context.Context, sessionID string, offset, limit int) ([]goapi.ConversationMessage, error) {
 	msgs, err := a.store.Read(ctx, sessionID, offset, limit)
 	if err != nil {

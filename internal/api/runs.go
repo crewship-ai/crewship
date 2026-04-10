@@ -3,18 +3,19 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
 )
 
+// RunHandler provides endpoints for listing and querying agent execution runs.
 type RunHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewRunHandler creates a RunHandler with the given database and logger.
 func NewRunHandler(db *sql.DB, logger *slog.Logger) *RunHandler {
 	return &RunHandler{db: db, logger: logger}
 }
@@ -57,6 +58,8 @@ type pagination struct {
 	TotalPages int `json:"total_pages"`
 }
 
+// List returns a paginated list of agent runs in the workspace with stats and optional filters.
+// GET /api/v1/runs
 func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
@@ -116,7 +119,8 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 		countArgs = append(countArgs, tag)
 	}
 
-	query += fmt.Sprintf(" ORDER BY r.created_at DESC LIMIT %d OFFSET %d", limit, offset)
+	query += " ORDER BY r.created_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
 
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
@@ -160,21 +164,15 @@ func (h *RunHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var running, today, failed int
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND status = 'RUNNING'", workspaceID).Scan(&running); err != nil {
-		h.logger.Error("count running runs", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND date(created_at) = date('now')", workspaceID).Scan(&today); err != nil {
-		h.logger.Error("count today runs", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
-		return
-	}
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT COUNT(*) FROM agent_runs WHERE workspace_id = ? AND status = 'FAILED' AND date(created_at) = date('now')", workspaceID).Scan(&failed); err != nil {
-		h.logger.Error("count failed runs", "error", err)
+	// COALESCE(..., 0) is required: when the workspace has no rows at all,
+	// SUM(CASE ...) returns NULL and Scan into int would fail.
+	if err := h.db.QueryRowContext(r.Context(), `
+		SELECT
+			COALESCE(SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN date(created_at) = date('now') THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'FAILED' AND date(created_at) = date('now') THEN 1 ELSE 0 END), 0)
+		FROM agent_runs WHERE workspace_id = ?`, workspaceID).Scan(&running, &today, &failed); err != nil {
+		h.logger.Error("count run stats", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
 		return
 	}

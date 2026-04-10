@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // Restart resets a FAILED/CANCELLED/REVIEW/COMPLETED mission: resets non-completed tasks,
@@ -95,14 +93,8 @@ func (h *MissionHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	// may already be COMPLETED (they were not reset). Unblock those now.
 	h.unblockCompletedDeps(r, missionID)
 
-	if h.hub != nil {
-		wsChannel := "workspace:" + wsID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "mission.updated",
-			Channel: wsChannel,
-			Payload: map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "PLANNING"},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "mission.updated",
+		map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "PLANNING"})
 
 	writeJSON(w, http.StatusOK, map[string]string{"id": missionID, "status": "PLANNING"})
 }
@@ -332,20 +324,11 @@ func (h *MissionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 	// All steps succeeded — prevent deferred rollback.
 	resumeOK = true
 
-	if h.hub != nil {
-		wsChannel := "workspace:" + wsID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "mission.updated",
-			Channel: wsChannel,
-			Payload: map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "IN_PROGRESS"},
-		})
-		for _, id := range resetIDs {
-			h.hub.Broadcast(wsChannel, ws.ServerMessage{
-				Type:    "task.updated",
-				Channel: wsChannel,
-				Payload: map[string]string{"id": id, "mission_id": missionID, "status": resetStatusMap[id]},
-			})
-		}
+	broadcastWorkspaceEvent(h.hub, wsID, "mission.updated",
+		map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "IN_PROGRESS"})
+	for _, id := range resetIDs {
+		broadcastWorkspaceEvent(h.hub, wsID, "task.updated",
+			map[string]string{"id": id, "mission_id": missionID, "status": resetStatusMap[id]})
 	}
 
 	h.logger.Info("mission resumed from failure",
@@ -489,14 +472,8 @@ func (h *MissionHandler) Clone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.hub != nil {
-		wsChannel := "workspace:" + wsID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "mission.created",
-			Channel: wsChannel,
-			Payload: map[string]interface{}{"id": newMissionID, "crew_id": crewID, "status": "PLANNING"},
-		})
-	}
+	broadcastWorkspaceEvent(h.hub, wsID, "mission.created",
+		map[string]interface{}{"id": newMissionID, "crew_id": crewID, "status": "PLANNING"})
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": newMissionID, "status": "PLANNING"})
 }

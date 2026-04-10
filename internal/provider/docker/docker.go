@@ -267,6 +267,7 @@ func (p *Provider) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
+// CrewContainerName returns the container name for a crew based on its slug and the configured prefix.
 func (p *Provider) CrewContainerName(slug string) string {
 	prefix := p.cfg.ContainerPrefix
 	if prefix == "" {
@@ -619,6 +620,7 @@ func (p *Provider) ContainerStatus(ctx context.Context, containerID string) (*pr
 	}, nil
 }
 
+// ContainerStats returns CPU and memory usage metrics for a running container.
 func (p *Provider) ContainerStats(ctx context.Context, containerID string) (*provider.ContainerMetrics, error) {
 	resp, err := p.client.ContainerStats(ctx, containerID, false)
 	if err != nil {

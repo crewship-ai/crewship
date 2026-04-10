@@ -12,6 +12,7 @@ type MCPAuditHandler struct {
 	logger *slog.Logger
 }
 
+// NewMCPAuditHandler creates an MCPAuditHandler with the given database and logger.
 func NewMCPAuditHandler(db *sql.DB, logger *slog.Logger) *MCPAuditHandler {
 	return &MCPAuditHandler{db: db, logger: logger}
 }

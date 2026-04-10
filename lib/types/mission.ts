@@ -1,4 +1,4 @@
-/** Possible lifecycle states for a mission or issue. */
+/** Lifecycle status of a mission, from backlog through completion or cancellation. */
 export type MissionStatus =
   | "BACKLOG"
   | "TODO"
@@ -11,12 +11,13 @@ export type MissionStatus =
   | "CANCELLED"
   | "DUPLICATE"
 
-/** Priority level for issues, from urgent to none. */
+/** Priority level for issues in the issue tracker, modeled after Linear. */
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none"
-/** How the mission was created: manually as an issue, via orchestration, on schedule, or hired. */
+
+/** Discriminator for how a mission was created. */
 export type MissionType = "issue" | "orchestration" | "scheduled" | "hired"
 
-/** Possible states for an individual task within a mission. */
+/** Lifecycle status of an individual task within a mission. */
 export type MissionTaskStatus =
   | "PENDING"
   | "BLOCKED"
@@ -26,7 +27,7 @@ export type MissionTaskStatus =
   | "SKIPPED"
   | "AWAITING_APPROVAL"
 
-/** Aggregated task count breakdown by status for a mission. */
+/** Aggregate counts of task statuses within a mission. */
 export interface TaskStats {
   total: number
   pending: number
@@ -38,12 +39,13 @@ export interface TaskStats {
   awaiting_approval: number
 }
 
-/** Estimated complexity level for a task. */
+/** Estimated complexity level of a task, used for workload planning. */
 export type TaskComplexity = "SIMPLE" | "MEDIUM" | "COMPLEX"
-/** Result of an automated evaluation check on a task. */
+
+/** Whether a task's output has passed automated evaluation. */
 export type EvaluationStatus = "PENDING" | "PASSED" | "FAILED"
 
-/** A single task assigned to an agent within a mission. */
+/** A single task within a mission, assigned to an agent with tracking for iterations, cost, and approval. */
 export interface MissionTask {
   id: string
   mission_id: string
@@ -88,10 +90,10 @@ export interface MissionTask {
   labels: string | null
 }
 
-/** Workflow execution pattern for multi-task missions. */
+/** Execution pattern for multi-task missions: sequential chain, parallel fan-out, or orchestrator-managed. */
 export type MissionPattern = "CHAIN" | "PARALLEL" | "ORCHESTRATOR"
 
-/** A mission (issue) in the system, including tasks and issue tracker metadata. */
+/** A mission (or issue) representing a unit of work assigned to a crew of agents. */
 export interface Mission {
   id: string
   workspace_id: string
@@ -138,7 +140,7 @@ export interface Mission {
   comment_count?: number
 }
 
-/** A colored label that can be applied to issues. */
+/** A color-coded label that can be attached to issues for categorization. */
 export interface IssueLabel {
   id: string
   name: string
@@ -148,10 +150,11 @@ export interface IssueLabel {
 
 /** Lifecycle status of a project. */
 export type ProjectStatus = "backlog" | "planned" | "in_progress" | "paused" | "completed" | "cancelled"
-/** Health indicator for project progress. */
+
+/** Health indicator for project progress relative to timeline. */
 export type ProjectHealth = "on_track" | "at_risk" | "off_track"
 
-/** A project that groups related issues together. */
+/** A project that groups related issues/missions with progress tracking. */
 export interface Project {
   id: string
   workspace_id: string
@@ -174,6 +177,8 @@ export interface Project {
   done_count: number
   progress: number
 }
+
+/** A time-bound milestone within a project, used to track delivery phases. */
 
 /** Aggregated statistics for a project's issues. */
 export interface ProjectStats {
@@ -200,7 +205,7 @@ export interface Milestone {
   updated_at: string
 }
 
-/** An in-app notification about an action on an entity. */
+/** An in-app notification triggered by user, agent, or system actions. */
 export interface Notification {
   id: string
   actor_type: "user" | "agent" | "system"
@@ -214,7 +219,7 @@ export interface Notification {
   created_at: string
 }
 
-/** A user-saved filter/sort/view configuration for the issue tracker. */
+/** A saved filter/sort configuration for the issue tracker (board or list view). */
 export interface SavedView {
   id: string
   name: string
@@ -226,7 +231,7 @@ export interface SavedView {
   created_at: string
 }
 
-/** A cron-scheduled template that automatically creates issues. */
+/** A cron-scheduled template for automatically creating recurring issues. */
 export interface RecurringIssue {
   id: string
   crew_id: string
@@ -246,7 +251,7 @@ export interface RecurringIssue {
   created_at: string
 }
 
-/** An auto-triage rule that assigns properties to matching new issues. */
+/** An auto-triage rule that matches incoming issues by pattern and assigns crew/priority/labels. */
 export interface TriageRule {
   id: string
   name: string
@@ -263,10 +268,10 @@ export interface TriageRule {
   created_at: string
 }
 
-/** Type of relationship between two issues. */
+/** Type of dependency or relationship between two issues. */
 export type RelationType = "blocks" | "blocked_by" | "relates_to" | "duplicate_of"
 
-/** A directional relationship link between two issues. */
+/** A directional relationship between two issues (e.g., "blocks", "duplicate_of"). */
 export interface IssueRelation {
   id: string
   source_id: string
@@ -278,7 +283,7 @@ export interface IssueRelation {
   created_at: string
 }
 
-/** An audit-trail entry recording a change or action on an issue. */
+/** An audit-trail entry for changes made to an issue (status changes, assignments, etc.). */
 export interface IssueActivity {
   id: string
   mission_id: string
@@ -290,7 +295,7 @@ export interface IssueActivity {
   created_at: string
 }
 
-/** A user or agent comment on an issue. */
+/** A comment on an issue, authored by a user or agent. */
 export interface IssueComment {
   id: string
   mission_id: string

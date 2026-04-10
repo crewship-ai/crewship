@@ -117,6 +117,7 @@ type DCRRequest struct {
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method,omitempty"`
 }
 
+// DCRResponse holds the client credentials returned by an RFC 7591 Dynamic Client Registration endpoint.
 type DCRResponse struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret,omitempty"`

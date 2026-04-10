@@ -30,16 +30,20 @@ func resolveLLMProvider(provider string) llmProviderInfo {
 	}
 }
 
+// OnboardingHandler guides new users through workspace setup (runtime detection, crew creation).
 type OnboardingHandler struct {
 	db     *sql.DB
 	svc    *services.OnboardingService
 	logger *slog.Logger
 }
 
+// NewOnboardingHandler creates an OnboardingHandler with the given dependencies.
 func NewOnboardingHandler(db *sql.DB, svc *services.OnboardingService, logger *slog.Logger) *OnboardingHandler {
 	return &OnboardingHandler{db: db, svc: svc, logger: logger}
 }
 
+// Status returns whether the current user has completed onboarding.
+// GET /api/v1/onboarding/status
 func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -84,6 +88,8 @@ func (h *OnboardingHandler) Status(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Complete marks onboarding as finished for the current user.
+// POST /api/v1/onboarding/complete
 func (h *OnboardingHandler) Complete(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -137,6 +143,8 @@ func makeSlug(name string) string {
 	return s
 }
 
+// Setup handles the onboarding wizard submission (crew creation, agent provisioning, credential setup).
+// POST /api/v1/onboarding/setup
 func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {

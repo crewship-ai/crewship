@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+// WebhookPayload is the JSON body received from an external webhook call,
+// containing the event type, source identifier, and arbitrary data.
 type WebhookPayload struct {
 	Event  string    `json:"event"`
 	Source string    `json:"source"`
@@ -16,16 +18,22 @@ type WebhookPayload struct {
 	RecvAt time.Time `json:"received_at"`
 }
 
+// SecretLookup retrieves the expected webhook secret for a given crew and agent pair.
 type SecretLookup func(ctx context.Context, crewID, agentID string) (string, error)
 
+// TriggerFunc is called after a webhook is validated, passing the crew/agent IDs
+// and parsed payload to initiate an agent run.
 type TriggerFunc func(ctx context.Context, crewID, agentID string, payload WebhookPayload) error
 
+// Handler is an HTTP handler that validates incoming webhook requests using
+// a shared secret and triggers agent runs on success.
 type Handler struct {
 	logger       *slog.Logger
 	lookupSecret SecretLookup
 	trigger      TriggerFunc
 }
 
+// NewHandler creates a webhook Handler with the given secret lookup and trigger functions.
 func NewHandler(logger *slog.Logger, lookup SecretLookup, trigger TriggerFunc) *Handler {
 	return &Handler{
 		logger:       logger,
@@ -34,6 +42,8 @@ func NewHandler(logger *slog.Logger, lookup SecretLookup, trigger TriggerFunc) *
 	}
 }
 
+// ServeHTTP handles incoming webhook POST requests by validating the
+// X-Webhook-Secret header, parsing the JSON body, and triggering the agent run.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

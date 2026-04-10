@@ -18,6 +18,7 @@ type mcpCredEntry struct {
 	Type     string `json:"type"`
 }
 
+// InternalHandler provides endpoints called by the sidecar over the Unix socket using X-Internal-Token auth.
 type InternalHandler struct {
 	db            *sql.DB
 	logger        *slog.Logger
@@ -26,14 +27,17 @@ type InternalHandler struct {
 	hub           *ws.Hub
 }
 
+// NewInternalHandler creates an InternalHandler with the given database, internal token, and logger.
 func NewInternalHandler(db *sql.DB, internalToken string, logger *slog.Logger) *InternalHandler {
 	return &InternalHandler{db: db, internalToken: internalToken, logger: logger}
 }
 
+// SetHub attaches a WebSocket hub for broadcasting events from internal endpoints.
 func (h *InternalHandler) SetHub(hub *ws.Hub) {
 	h.hub = hub
 }
 
+// SetKeeperEnabled toggles whether Keeper is advertised as enabled in the agent config.
 func (h *InternalHandler) SetKeeperEnabled(enabled bool) {
 	h.keeperEnabled.Store(enabled)
 }
@@ -44,7 +48,18 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := r.Header.Get("X-Internal-Token")
-		if h.internalToken == "" || token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(h.internalToken)) != 1 {
+		// Always run constant-time comparison to avoid timing sidechannels.
+		// Pad empty strings to a fixed sentinel so the comparison still runs
+		// in constant time even when token or internalToken is empty.
+		expected := h.internalToken
+		if expected == "" {
+			expected = "\x00empty-sentinel\x00"
+		}
+		actual := token
+		if actual == "" {
+			actual = "\x00different-sentinel\x00"
+		}
+		if subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) != 1 {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
 			return
 		}

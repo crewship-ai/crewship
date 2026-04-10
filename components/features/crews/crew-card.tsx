@@ -1,5 +1,6 @@
 "use client"
 
+import { memo } from "react"
 import Link from "next/link"
 import { Bot, Users } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
@@ -44,7 +45,7 @@ function CrewHealthIndicator({ summary }: { summary: AgentStatusSummary }) {
   )
 }
 
-export function CrewCard({ crew }: { crew: CrewData }) {
+export const CrewCard = memo(function CrewCard({ crew }: { crew: CrewData }) {
   return (
     <Link
       href={`/crews/${crew.id}`}
@@ -81,4 +82,4 @@ export function CrewCard({ crew }: { crew: CrewData }) {
       </Card>
     </Link>
   )
-}
+})

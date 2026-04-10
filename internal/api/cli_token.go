@@ -14,15 +14,19 @@ import (
 
 const cliTokenPrefix = "crewship_cli_"
 
+// CLITokenHandler provides endpoints for creating, listing, validating, and revoking CLI authentication tokens.
 type CLITokenHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
 }
 
+// NewCLITokenHandler creates a CLITokenHandler with the given database and logger.
 func NewCLITokenHandler(db *sql.DB, logger *slog.Logger) *CLITokenHandler {
 	return &CLITokenHandler{db: db, logger: logger}
 }
 
+// Create generates a new CLI token for the authenticated user and returns the plaintext token.
+// POST /api/v1/cli-tokens — the token is only returned once; only the SHA-256 hash is stored.
 func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -73,6 +77,8 @@ func (h *CLITokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Validate confirms the current CLI token is valid and returns the associated user info.
+// POST /api/v1/cli-tokens/validate
 func (h *CLITokenHandler) Validate(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -87,6 +93,8 @@ func (h *CLITokenHandler) Validate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// List returns all CLI tokens for the authenticated user (without the plaintext token values).
+// GET /api/v1/cli-tokens
 func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -130,6 +138,8 @@ func (h *CLITokenHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"data": tokens})
 }
 
+// Revoke marks a CLI token as revoked so it can no longer be used for authentication.
+// DELETE /api/v1/cli-tokens/{tokenId}
 func (h *CLITokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {

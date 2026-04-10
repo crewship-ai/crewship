@@ -1,3 +1,4 @@
+/** A supported language with ISO code, flag emoji, and localized name. */
 export interface Language {
   code: string
   flag: string
@@ -5,6 +6,7 @@ export interface Language {
   native: string
 }
 
+/** All supported languages for agent system prompt localization. */
 export const LANGUAGES: Language[] = [
   { code: "af", flag: "\u{1F1FF}\u{1F1E6}", name: "Afrikaans", native: "Afrikaans" },
   { code: "ar", flag: "\u{1F1F8}\u{1F1E6}", name: "Arabic", native: "\u0627\u0644\u0639\u0631\u0628\u064A\u0629" },

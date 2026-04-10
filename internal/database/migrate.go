@@ -8,6 +8,9 @@ import (
 	"log/slog"
 )
 
+// Migrate applies all pending schema migrations to the database in order.
+// Migrations are tracked in the _migrations table to ensure idempotency.
+// This is the sole mechanism for schema changes; Prisma is not used for migrations.
 func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS _migrations (
 		version INTEGER PRIMARY KEY,
@@ -18,9 +21,21 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	}
 
 	for _, m := range migrations {
-		var exists bool
-		err := db.QueryRowContext(ctx, "SELECT 1 FROM _migrations WHERE version = ?", m.version).Scan(&exists)
+		var appliedName string
+		err := db.QueryRowContext(ctx, "SELECT name FROM _migrations WHERE version = ?", m.version).Scan(&appliedName)
 		if err == nil {
+			// Version already applied. Guard against the classic two-branch-merge
+			// collision: both PRs claim the same version number with different SQL.
+			// If names disagree, the DB has one migration applied while the code
+			// expects another, and silently continuing would leave prod and dev
+			// on diverged schemas.
+			if appliedName != m.name {
+				return fmt.Errorf(
+					"migration version %d collision: database has %q applied, code expects %q — "+
+						"rename the new migration to the next free version",
+					m.version, appliedName, m.name,
+				)
+			}
 			continue
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -34,9 +49,20 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 			return fmt.Errorf("begin migration %d (%s): %w", m.version, m.name, err)
 		}
 
-		if _, err := tx.ExecContext(ctx, m.sql); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("migration %d (%s): %w", m.version, m.name, err)
+		// Migrations are either a static SQL string or a Go function — not
+		// both. SQL migrations cover the vast majority; fn migrations exist
+		// for the rare case where we need to discover schema state at apply
+		// time (e.g. iterate pragma_table_info to find legacy columns).
+		if m.fn != nil {
+			if err := m.fn(ctx, tx, logger); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.name, err)
+			}
+		} else {
+			if _, err := tx.ExecContext(ctx, m.sql); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.name, err)
+			}
 		}
 
 		if _, err := tx.ExecContext(ctx, "INSERT INTO _migrations (version, name) VALUES (?, ?)", m.version, m.name); err != nil {
@@ -56,51 +82,66 @@ type migration struct {
 	version int
 	name    string
 	sql     string
+	// fn, if set, runs instead of sql. Receives the migration's transaction
+	// so its work commits atomically with the _migrations row.
+	fn func(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error
 }
 
 var migrations = []migration{
-	{1, "init", migrationInit},
-	{2, "add_onboarding_completed", migrationAddOnboardingCompleted},
-	{3, "add_memory_config", migrationAddMemoryConfig},
-	{4, "add_lead_mode", migrationAddLeadMode},
-	{5, "add_preferred_language", migrationAddPreferredLanguage},
-	{6, "add_peer_conversations", migrationAddPeerConversations},
-	{7, "add_escalations", migrationAddEscalations},
-	{8, "add_missions", migrationAddMissions},
-	{9, "add_keeper", migrationAddKeeper},
-	{10, "add_keeper_execute", migrationAddKeeperExecute},
-	{11, "add_keeper_observability", migrationAddKeeperObservability},
-	{12, "add_cli_tokens", migrationAddCLITokens},
-	{13, "add_chat_agent_status_index", migrationAddChatAgentStatusIndex},
-	{14, "add_agent_avatar_seed", migrationAddAgentAvatarSeed},
-	{15, "add_avatar_style", migrationAddAvatarStyle},
-	{16, "add_agent_cli_tools", migrationAddAgentCLITools},
-	{17, "add_credential_crews", migrationAddCredentialCrews},
-	{18, "add_crew_network_policy", migrationAddCrewNetworkPolicy},
-	{19, "add_workflow_templates", migrationAddWorkflowTemplates},
-	{20, "add_crew_connections", migrationAddCrewConnections},
-	{21, "add_mission_proposals", migrationAddMissionProposals},
-	{22, "add_escalation_type_and_resolve", migrationAddEscalationTypeAndResolve},
-	{23, "add_crew_templates", migrationAddCrewTemplates},
-	{24, "add_agent_schedule", migrationAddAgentSchedule},
-	{25, "add_captain_chats", migrationAddCaptainChats},
-	{26, "add_crew_templates_workspace_id", migrationAddCrewTemplatesWorkspaceID},
-	{27, "add_escalation_action", migrationAddEscalationAction},
-	{28, "add_task_scaling_and_handoff", migrationAddTaskScalingAndHandoff},
-	{29, "add_mcp_gateway", migrationAddMCPGateway},
-	{30, "fix_mcp_gateway_constraints", migrationFixMCPGatewayConstraints},
-	{31, "add_mcp_binding_env_var", migrationAddMCPBindingEnvVar},
-	{32, "add_oauth_credentials", migrationAddOAuthCredentials},
-	{33, "add_mcp_config_json", migrationAddMCPConfigJSON},
-	{34, "add_approval_gates", migrationAddApprovalGates},
-	{35, "add_pkce_code_verifier", migrationAddPKCECodeVerifier},
-	{36, "add_mcp_registry_cache", migrationAddMCPRegistryCache},
-	{37, "add_crew_messaging_and_audit", migrationAddCrewMessagingAndAudit},
-	{38, "add_issue_tracker", migrationAddIssueTracker},
-	{39, "add_issue_relations", migrationAddIssueRelations},
-	{40, "add_projects", migrationAddProjects},
-	{41, "add_issue_activity", migrationAddIssueActivity},
-	{42, "add_phase2_features", migrationAddPhase2Features},
+	{version: 1, name: "init", sql: migrationInit},
+	{version: 2, name: "add_onboarding_completed", sql: migrationAddOnboardingCompleted},
+	{version: 3, name: "add_memory_config", sql: migrationAddMemoryConfig},
+	{version: 4, name: "add_lead_mode", sql: migrationAddLeadMode},
+	{version: 5, name: "add_preferred_language", sql: migrationAddPreferredLanguage},
+	{version: 6, name: "add_peer_conversations", sql: migrationAddPeerConversations},
+	{version: 7, name: "add_escalations", sql: migrationAddEscalations},
+	{version: 8, name: "add_missions", sql: migrationAddMissions},
+	{version: 9, name: "add_keeper", sql: migrationAddKeeper},
+	{version: 10, name: "add_keeper_execute", sql: migrationAddKeeperExecute},
+	{version: 11, name: "add_keeper_observability", sql: migrationAddKeeperObservability},
+	{version: 12, name: "add_cli_tokens", sql: migrationAddCLITokens},
+	{version: 13, name: "add_chat_agent_status_index", sql: migrationAddChatAgentStatusIndex},
+	{version: 14, name: "add_agent_avatar_seed", sql: migrationAddAgentAvatarSeed},
+	{version: 15, name: "add_avatar_style", sql: migrationAddAvatarStyle},
+	{version: 16, name: "add_agent_cli_tools", sql: migrationAddAgentCLITools},
+	{version: 17, name: "add_credential_crews", sql: migrationAddCredentialCrews},
+	{version: 18, name: "add_crew_network_policy", sql: migrationAddCrewNetworkPolicy},
+	{version: 19, name: "add_workflow_templates", sql: migrationAddWorkflowTemplates},
+	{version: 20, name: "add_crew_connections", sql: migrationAddCrewConnections},
+	{version: 21, name: "add_mission_proposals", sql: migrationAddMissionProposals},
+	{version: 22, name: "add_escalation_type_and_resolve", sql: migrationAddEscalationTypeAndResolve},
+	{version: 23, name: "add_crew_templates", sql: migrationAddCrewTemplates},
+	{version: 24, name: "add_agent_schedule", sql: migrationAddAgentSchedule},
+	{version: 25, name: "add_captain_chats", sql: migrationAddCaptainChats},
+	{version: 26, name: "add_crew_templates_workspace_id", sql: migrationAddCrewTemplatesWorkspaceID},
+	{version: 27, name: "add_escalation_action", sql: migrationAddEscalationAction},
+	{version: 28, name: "add_task_scaling_and_handoff", sql: migrationAddTaskScalingAndHandoff},
+	{version: 29, name: "add_mcp_gateway", sql: migrationAddMCPGateway},
+	{version: 30, name: "fix_mcp_gateway_constraints", sql: migrationFixMCPGatewayConstraints},
+	{version: 31, name: "add_mcp_binding_env_var", sql: migrationAddMCPBindingEnvVar},
+	{version: 32, name: "add_oauth_credentials", sql: migrationAddOAuthCredentials},
+	{version: 33, name: "add_mcp_config_json", sql: migrationAddMCPConfigJSON},
+	{version: 34, name: "add_approval_gates", sql: migrationAddApprovalGates},
+	{version: 35, name: "add_pkce_code_verifier", sql: migrationAddPKCECodeVerifier},
+	{version: 36, name: "add_mcp_registry_cache", sql: migrationAddMCPRegistryCache},
+	{version: 37, name: "add_crew_messaging_and_audit", sql: migrationAddCrewMessagingAndAudit},
+	{version: 38, name: "add_issue_tracker", sql: migrationAddIssueTracker},
+	{version: 39, name: "add_issue_relations", sql: migrationAddIssueRelations},
+	{version: 40, name: "add_projects", sql: migrationAddProjects},
+	{version: 41, name: "add_issue_activity", sql: migrationAddIssueActivity},
+	{version: 42, name: "add_phase2_features", sql: migrationAddPhase2Features},
+	// add_fk_indexes landed at version 43 via PR #132 on main; kept at 43
+	// here since main already records that slot.
+	{version: 43, name: "add_fk_indexes", sql: migrationAddFKIndexes},
+	// add_performance_indexes and backfill_legacy_timestamps originated on
+	// feat/performance at versions 43 and 44 respectively. They collided
+	// with main's version 43 during the merge and were renumbered to 44/45
+	// — the collision-check in Migrate would have failed loudly on startup
+	// otherwise. Both renumberings are safe: the migrations are idempotent
+	// (CREATE INDEX IF NOT EXISTS for the indexes; LIKE-gated UPDATEs for
+	// the backfill) and don't depend on each other.
+	{version: 44, name: "add_performance_indexes", sql: migrationAddPerformanceIndexes},
+	{version: 45, name: "backfill_legacy_timestamps", fn: migrationBackfillLegacyTimestamps},
 }
 
 const migrationAddKeeperObservability = `
@@ -1147,6 +1188,56 @@ CREATE INDEX IF NOT EXISTS idx_mcp_registry_name ON mcp_registry_servers(name);
 CREATE INDEX IF NOT EXISTS idx_mcp_registry_category ON mcp_registry_servers(category);
 `
 
+const migrationAddFKIndexes = `
+-- Foreign-key and hot-column indexes missed by earlier migrations.
+-- All additive; safe to re-run via IF NOT EXISTS.
+
+-- NextAuth FKs: scanned on every session/account lookup
+CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(userId);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(userId);
+
+-- Workspace invitations: who invited whom
+CREATE INDEX IF NOT EXISTS idx_invitation_invited_by ON workspace_invitations(invited_by);
+
+-- Chats: created_by FK (existing idx_chat_agent / idx_chat_workspace don't cover this)
+CREATE INDEX IF NOT EXISTS idx_chat_created_by ON chats(created_by);
+
+-- Assignments: pagination query in assignments.go joins via workspace_id
+CREATE INDEX IF NOT EXISTS idx_assignment_workspace ON assignments(workspace_id);
+
+-- Skill authorship & reviews
+CREATE INDEX IF NOT EXISTS idx_skill_author ON skills(author_id);
+CREATE INDEX IF NOT EXISTS idx_skill_review_user ON skill_reviews(user_id);
+
+-- agent_skills: UNIQUE(agent_id, skill_id) covers agent_id lookups but NOT skill_id
+CREATE INDEX IF NOT EXISTS idx_agent_skill_skill ON agent_skills(skill_id);
+
+-- agent_credentials: UNIQUE + idx_agent_credential_env lead with agent_id; credential_id is uncovered
+CREATE INDEX IF NOT EXISTS idx_agent_credential_cred ON agent_credentials(credential_id);
+
+-- credentials.created_by: audit / ownership lookups
+CREATE INDEX IF NOT EXISTS idx_credential_created_by ON credentials(created_by);
+
+-- subscriptions: no secondary indexes at all
+CREATE INDEX IF NOT EXISTS idx_subscription_plan ON subscriptions(plan_id);
+
+-- feature_flag_overrides: UNIQUE(flag_id, workspace_id) covers flag_id but NOT workspace_id
+CREATE INDEX IF NOT EXISTS idx_feature_flag_override_ws ON feature_flag_overrides(workspace_id);
+
+-- agent_config_history.changed_by
+CREATE INDEX IF NOT EXISTS idx_config_history_changed_by ON agent_config_history(changed_by);
+
+-- agent_runs: chat_id and triggered_by FKs
+CREATE INDEX IF NOT EXISTS idx_run_chat ON agent_runs(chat_id);
+CREATE INDEX IF NOT EXISTS idx_run_triggered_by ON agent_runs(triggered_by);
+
+-- mission_tasks.assignment_id
+CREATE INDEX IF NOT EXISTS idx_mission_task_assignment ON mission_tasks(assignment_id);
+
+-- mission_proposals.proposed_by_id
+CREATE INDEX IF NOT EXISTS idx_mission_proposal_proposer ON mission_proposals(proposed_by_id);
+`
+
 const migrationAddIssueTracker = `
 -- Extend missions with issue-tracker fields (Linear-like).
 ALTER TABLE missions ADD COLUMN number INTEGER;
@@ -1387,4 +1478,21 @@ CREATE TABLE IF NOT EXISTS triage_rules (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_triage_rules_ws ON triage_rules(workspace_id, enabled);
+`
+
+const migrationAddPerformanceIndexes = `
+-- Index for issue list filtering by assignee
+CREATE INDEX IF NOT EXISTS idx_mission_assignee ON missions(assignee_id) WHERE assignee_id IS NOT NULL;
+
+-- Compound index for the most common issue list filter pattern
+CREATE INDEX IF NOT EXISTS idx_mission_ws_type_status ON missions(workspace_id, mission_type, status);
+
+-- Index for sub-issue counting (parent_issue_id already indexed by idx_mission_parent, but compound helps)
+CREATE INDEX IF NOT EXISTS idx_mission_parent_ws ON missions(parent_issue_id, workspace_id) WHERE parent_issue_id IS NOT NULL;
+
+-- Index for notification entity lookups
+CREATE INDEX IF NOT EXISTS idx_notifications_entity ON notifications(entity_type, entity_id);
+
+-- Index for recurring issues workspace filtering
+CREATE INDEX IF NOT EXISTS idx_recurring_issues_ws ON recurring_issues(workspace_id);
 `

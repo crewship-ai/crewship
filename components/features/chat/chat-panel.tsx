@@ -57,6 +57,8 @@ const defaultSuggestions = [
   "Run a quick task",
 ]
 
+const noopFileClick = () => {}
+
 /** Chat panel with split view: conversation on the left, tabbed panel on the right. */
 export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobilePanel }: ChatPanelProps) {
   const { workspaceId } = useWorkspace()
@@ -254,7 +256,7 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
                     key={turn.id}
                     turn={turn}
                     onCopy={handleCopy}
-                    onFileClick={() => {}}
+                    onFileClick={noopFileClick}
                     isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
                     onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
                   />
@@ -332,7 +334,7 @@ export function ChatPanel({ agentId, sessionId, agentName, initialInput, mobileP
                     key={turn.id}
                     turn={turn}
                     onCopy={handleCopy}
-                    onFileClick={() => {}}
+                    onFileClick={noopFileClick}
                     isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
                     onRegenerate={turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateLastTurn : undefined}
                   />
