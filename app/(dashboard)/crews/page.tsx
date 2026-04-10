@@ -4,7 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from "react"
 import { Users, Plus, Search, RotateCcw, ArrowUpDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { PageHeader } from "@/components/layout/page-header"
+import { PageShell } from "@/components/layout/page-shell"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CrewCard } from "@/components/features/crews/crew-card"
@@ -115,18 +115,20 @@ export default function CrewsPage() {
   const isLoading = wsLoading || loading
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 sm:space-y-8">
-      <PageHeader title="Crews" description="Organize agents into departments">
-        {abilities.can("create", "Crew") && (
+    <PageShell
+      title="Crews"
+      description="Organize agents into departments"
+      actions={
+        abilities.can("create", "Crew") && (
           <Button asChild>
             <Link href="/crews/new">
               <Plus className="mr-2 h-4 w-4" />
               New Crew
             </Link>
           </Button>
-        )}
-      </PageHeader>
-
+        )
+      }
+    >
       {error && (
         <div className="flex items-center gap-3">
           <p className="text-body text-destructive flex-1">{error}</p>
@@ -169,7 +171,7 @@ export default function CrewsPage() {
       )}
 
       {isLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-[140px] rounded-xl" />
           ))}
@@ -196,7 +198,7 @@ export default function CrewsPage() {
           description="No crews match your search. Try a different query."
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredAndSorted.map((crew) => (
             <CrewCard key={crew.id} crew={crew} />
           ))}
@@ -209,6 +211,6 @@ export default function CrewsPage() {
           <CrewActivityFeed workspaceId={workspaceId} />
         </>
       )}
-    </div>
+    </PageShell>
   )
 }
