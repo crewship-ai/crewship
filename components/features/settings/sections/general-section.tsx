@@ -14,6 +14,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { AnimatedNumber } from "@/components/ui/animated-number"
+import { Button } from "@/components/ui/button"
 import { LANGUAGES } from "@/lib/languages"
 import { cn } from "@/lib/utils"
 
@@ -24,10 +25,10 @@ function Row({ label, description, children, border = true }: {
   border?: boolean
 }) {
   return (
-    <div className={cn("flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]", border && "border-b border-white/[0.04] last:border-b-0")}>
+    <div className={cn("flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]", border && "border-b border-border/40 last:border-b-0")}>
       <div className="shrink-0">
-        <div className="text-[13px] text-foreground">{label}</div>
-        {description && <div className="text-[11px] text-muted-foreground/30 mt-0.5">{description}</div>}
+        <div className="text-body text-foreground">{label}</div>
+        {description && <div className="text-label text-muted-foreground mt-0.5">{description}</div>}
       </div>
       <div className="flex items-center gap-2 min-w-0 justify-end">{children}</div>
     </div>
@@ -139,8 +140,8 @@ export function GeneralSection({
     <div className="space-y-6">
       {/* ── Identity ── */}
       <div>
-        <h3 className="text-[14px] font-medium text-foreground mb-3">Identity</h3>
-        <Card className="border-white/[0.06]">
+        <h3 className="text-heading font-medium text-foreground mb-3">Identity</h3>
+        <Card>
           <CardContent className="p-0">
             <form onSubmit={handleSave}>
               <Row label="Workspace name">
@@ -148,7 +149,7 @@ export function GeneralSection({
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
                   placeholder="My Company"
-                  className="h-8 bg-white/[0.03] border-white/[0.08] text-[13px] w-48"
+                  className="h-8 text-body w-48"
                 />
               </Row>
               <Row label="Slug">
@@ -156,22 +157,22 @@ export function GeneralSection({
                   value={formSlug}
                   onChange={(e) => setFormSlug(e.target.value)}
                   placeholder="my-company"
-                  className="h-8 bg-white/[0.03] border-white/[0.08] text-[13px] w-48 font-mono"
+                  className="h-8 text-body w-48 font-mono"
                 />
               </Row>
               {(isDirty || saveStatus !== "idle") && (
-                <div className={cn("flex items-center justify-end gap-3 px-5 py-3 border-b border-white/[0.04]")}>
+                <div className="flex items-center justify-end gap-3 px-5 py-3 border-b border-border/40">
                   {saveStatus === "error" && saveError && (
-                    <span className="text-[11px] text-red-400 mr-auto">{saveError}</span>
+                    <span className="text-label text-destructive mr-auto">{saveError}</span>
                   )}
-                  <button
+                  <Button
                     type="submit"
+                    size="sm"
                     disabled={saveStatus === "saving"}
-                    className="inline-flex items-center gap-1.5 h-[28px] px-3 rounded-[4px] text-[11.5px] font-medium bg-blue-500/15 border border-blue-500/35 text-blue-400 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
                   >
-                    {saveStatus === "saving" ? <Loader2 className="h-3 w-3 animate-spin" /> : saveStatus === "success" ? <Check className="h-3 w-3" /> : null}
+                    {saveStatus === "saving" ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : saveStatus === "success" ? <Check className="mr-1.5 h-3 w-3" /> : null}
                     {saveStatus === "saving" ? "Saving..." : saveStatus === "success" ? "Saved" : "Save Changes"}
-                  </button>
+                  </Button>
                 </div>
               )}
             </form>
@@ -179,15 +180,15 @@ export function GeneralSection({
               <Popover open={langOpen} onOpenChange={setLangOpen}>
                 <PopoverTrigger asChild>
                   <button
-                    className="inline-flex items-center justify-between w-48 h-8 px-3 rounded-md bg-white/[0.03] border border-white/[0.08] text-[13px] text-foreground hover:border-white/[0.15] transition-colors disabled:opacity-50"
+                    className="inline-flex items-center justify-between w-48 h-8 px-3 rounded-md bg-background border border-border text-body text-foreground hover:border-ring transition-colors disabled:opacity-50"
                     disabled={langSaving}
                   >
                     {selectedLang ? (
                       <span className="truncate">{selectedLang.flag} {selectedLang.name}</span>
                     ) : (
-                      <span className="text-muted-foreground/40">Select language...</span>
+                      <span className="text-muted-foreground">Select language...</span>
                     )}
-                    <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground/40 ml-2 shrink-0" />
+                    <ChevronsUpDown className="h-3.5 w-3.5 text-muted-foreground ml-2 shrink-0" />
                   </button>
                 </PopoverTrigger>
                 <PopoverContent className="w-64 p-0" align="end">
@@ -211,7 +212,7 @@ export function GeneralSection({
                           <CommandItem key={lang.code} value={lang.name} onSelect={() => handleLanguageChange(lang.name)}>
                             <span className="mr-2">{lang.flag}</span>
                             <span>{lang.name}</span>
-                            <span className="ml-auto text-xs text-muted-foreground">{lang.native}</span>
+                            <span className="ml-auto text-label text-muted-foreground">{lang.native}</span>
                             {formLanguage === lang.name && <Check className="ml-1 h-3.5 w-3.5 text-primary" />}
                           </CommandItem>
                         ))}
@@ -227,36 +228,36 @@ export function GeneralSection({
 
       {/* ── Usage ── */}
       <div>
-        <h3 className="text-[14px] font-medium text-foreground mb-3">Usage</h3>
-        <Card className="border-white/[0.06]">
+        <h3 className="text-heading font-medium text-foreground mb-3">Usage</h3>
+        <Card>
           <CardContent className="p-0">
             <Row label={
               <span className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                 Agents
               </span>
             }>
-              <span className="text-[15px] font-mono font-semibold text-foreground tabular-nums">
+              <span className="text-body font-mono font-semibold text-foreground tabular-nums">
                 <AnimatedNumber value={agentCount} />
               </span>
             </Row>
             <Row label={
               <span className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                 Crews
               </span>
             }>
-              <span className="text-[15px] font-mono font-semibold text-foreground tabular-nums">
+              <span className="text-body font-mono font-semibold text-foreground tabular-nums">
                 <AnimatedNumber value={crewCount} />
               </span>
             </Row>
             <Row label={
               <span className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
+                <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                 Members
               </span>
             } border={false}>
-              <span className="text-[15px] font-mono font-semibold text-foreground tabular-nums">
+              <span className="text-body font-mono font-semibold text-foreground tabular-nums">
                 <AnimatedNumber value={memberCount} />
               </span>
             </Row>
@@ -267,20 +268,20 @@ export function GeneralSection({
       {/* ── Danger Zone ── */}
       {role === "OWNER" && (
         <div>
-          <h3 className="text-[14px] font-medium text-foreground mb-3">Danger Zone</h3>
-          <Card className="border-red-500/15">
+          <h3 className="text-heading font-medium text-foreground mb-3">Danger Zone</h3>
+          <Card className="border-destructive/30">
             <CardContent className="p-0">
               {deleteError && (
-                <div className="px-5 py-2 border-b border-red-500/10">
-                  <span className="text-[11px] text-red-400">{deleteError}</span>
+                <div className="px-5 py-2 border-b border-destructive/20">
+                  <span className="text-label text-destructive">{deleteError}</span>
                 </div>
               )}
               <Row label="Delete workspace" description="Permanently delete all crews, agents, and data" border={false}>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <button className="inline-flex items-center gap-1.5 h-[28px] px-3 rounded-[4px] text-[11.5px] font-medium bg-red-500/10 border border-red-500/25 text-red-400/70 hover:bg-red-500/20 hover:text-red-400 transition-colors">
+                    <Button variant="destructive" size="sm">
                       Delete Workspace
-                    </button>
+                    </Button>
                   </AlertDialogTrigger>
                   <AlertDialogContent>
                     <AlertDialogHeader>

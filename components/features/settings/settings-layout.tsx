@@ -126,8 +126,8 @@ export function SettingsLayout() {
 
     if (error) {
       return (
-        <div className="bg-card border border-red-500/20 rounded-lg p-6">
-          <p className="text-[13px] text-red-400">{error}</p>
+        <div className="bg-card border border-destructive/40 rounded-lg p-6">
+          <p className="text-body text-destructive">{error}</p>
         </div>
       )
     }
@@ -227,7 +227,7 @@ export function SettingsLayout() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 gap-1.5 text-muted-foreground"
+                  className="h-8 gap-1.5 text-muted-foreground text-label"
                   onClick={() => setMobileNavOpen(true)}
                 >
                   <Menu className="h-4 w-4" />

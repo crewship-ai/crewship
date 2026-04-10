@@ -46,18 +46,14 @@ interface MembersSectionProps {
 // Constants
 // ---------------------------------------------------------------------------
 
+// Role badges all use the subtle muted treatment — differentiation comes
+// from the label itself, not the color, matching orchestration's style.
 const roleCls: Record<string, string> = {
-  OWNER: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  ADMIN: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  MANAGER: "bg-teal-500/20 text-teal-400 border-teal-500/30",
-  MEMBER: "bg-white/[0.06] text-muted-foreground border-white/[0.08]",
-  VIEWER: "bg-white/[0.06] text-muted-foreground border-white/[0.08]",
-}
-
-const roleColors: Record<string, string> = {
-  Owner: "text-amber-400",
-  Admin: "text-blue-400",
-  Manager: "text-teal-400",
+  OWNER: "bg-muted text-foreground border-border",
+  ADMIN: "bg-muted text-foreground border-border",
+  MANAGER: "bg-muted text-foreground border-border",
+  MEMBER: "bg-muted text-muted-foreground border-border",
+  VIEWER: "bg-muted text-muted-foreground border-border",
 }
 
 const roleSummaries: { role: string; summary: string }[] = [
@@ -109,12 +105,12 @@ function Row({ label, description, children, border = true }: {
   return (
     <div className={cn(
       "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
-      border && "border-b border-white/[0.04] last:border-b-0",
+      border && "border-b border-border/40 last:border-b-0",
     )}>
       {label ? (
         <div className="shrink-0">
-          <div className="text-[13px] text-foreground">{label}</div>
-          {description && <div className="text-[11px] text-muted-foreground/30 mt-0.5">{description}</div>}
+          <div className="text-body text-foreground">{label}</div>
+          {description && <div className="text-label text-muted-foreground mt-0.5">{description}</div>}
         </div>
       ) : (
         <div className="min-w-0 flex-1" />
@@ -169,8 +165,8 @@ export function MembersSection({
         {/* Section title above card */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
-            <h4 className="text-[13px] font-medium text-foreground">Members</h4>
-            <span className="font-mono text-[11px] text-muted-foreground/40 tabular-nums">
+            <h4 className="text-heading font-medium text-foreground">Members</h4>
+            <span className="font-mono text-label text-muted-foreground tabular-nums">
               {members.length}
             </span>
           </div>
@@ -180,7 +176,7 @@ export function MembersSection({
         </div>
 
         {/* Members card */}
-        <div className="bg-card border border-white/[0.06] rounded-lg">
+        <div className="bg-card border border-border rounded-lg">
           {members.map((member, idx) => {
             const isSelf = currentUserId === member.user.id
             const isOwner = member.role === "OWNER"
@@ -191,22 +187,22 @@ export function MembersSection({
                 key={member.id}
                 className={cn(
                   "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
-                  !isLast && "border-b border-white/[0.04]",
+                  !isLast && "border-b border-border/40",
                 )}
               >
                 {/* Left: avatar + name + email */}
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/80">
-                    <span className="text-[8px] font-semibold text-primary-foreground leading-none">
+                    <span className="text-micro font-semibold text-primary-foreground leading-none">
                       {initials(member.user.full_name, member.user.email)}
                     </span>
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[13px] text-foreground truncate">
+                    <div className="text-body text-foreground truncate">
                       {member.user.full_name ?? member.user.email}
                     </div>
                     {member.user.full_name && (
-                      <div className="text-[11px] text-muted-foreground/30 font-mono truncate mt-0.5">
+                      <div className="text-label text-muted-foreground font-mono truncate mt-0.5">
                         {member.user.email}
                       </div>
                     )}
@@ -218,13 +214,13 @@ export function MembersSection({
                   <Badge
                     variant="outline"
                     className={cn(
-                      "text-[10px] font-medium",
+                      "text-micro font-medium",
                       roleCls[member.role] ?? "",
                     )}
                   >
                     {member.role}
                   </Badge>
-                  <span className="text-[11px] text-muted-foreground/40 font-mono tabular-nums w-[52px] text-right">
+                  <span className="text-label text-muted-foreground font-mono tabular-nums w-[52px] text-right">
                     {relativeTime(member.created_at)}
                   </span>
                   <div className="w-7 flex justify-center">
@@ -234,7 +230,7 @@ export function MembersSection({
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 text-muted-foreground/20 hover:text-red-400 hover:bg-red-500/10"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                             disabled={removingId === member.id}
                           >
                             <Trash2 className="h-3.5 w-3.5" />
@@ -287,28 +283,23 @@ export function MembersSection({
                 animate={{ rotate: rolesOpen ? 90 : 0 }}
                 transition={{ duration: 0.15 }}
               >
-                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/40" />
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               </motion.div>
-              <h4 className="text-[13px] font-medium text-muted-foreground/60 group-hover:text-muted-foreground transition-colors">
+              <h4 className="text-heading font-medium text-muted-foreground group-hover:text-foreground transition-colors">
                 Roles &amp; Permissions
               </h4>
             </button>
           </CollapsibleTrigger>
 
           <CollapsibleContent>
-            <div className="bg-card border border-white/[0.06] rounded-lg">
+            <div className="bg-card border border-border rounded-lg">
               {roleSummaries.map((item, idx) => (
                 <Row
                   key={item.role}
                   label={item.role}
                   border={idx < roleSummaries.length - 1}
                 >
-                  <span
-                    className={cn(
-                      "text-[12px] font-mono",
-                      roleColors[item.role] ?? "text-muted-foreground/40",
-                    )}
-                  >
+                  <span className="text-label font-mono text-muted-foreground">
                     {item.summary}
                   </span>
                 </Row>
