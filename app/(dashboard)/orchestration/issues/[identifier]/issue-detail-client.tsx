@@ -366,7 +366,7 @@ export function IssueDetailClient() {
           <Skeleton className="h-4 w-48" />
         </div>
         <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 p-8 space-y-6">
+          <div className="flex-1 p-6 space-y-6">
             <Skeleton className="h-8 w-3/4" />
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-2/3" />
@@ -417,7 +417,7 @@ export function IssueDetailClient() {
           <ArrowLeft className="h-4 w-4" />
         </Button>
 
-        <nav className="flex items-center gap-1 text-sm text-muted-foreground min-w-0">
+        <nav className="flex items-center gap-1 text-body text-muted-foreground min-w-0">
           <button
             className="hover:text-foreground transition-colors"
             onClick={() => router.push("/orchestration")}
@@ -433,7 +433,7 @@ export function IssueDetailClient() {
         {issue.crew_name && (
           <Badge
             variant="outline"
-            className="ml-2 text-[10px] px-1.5 py-0 border-border text-muted-foreground"
+            className="ml-2 text-micro px-1.5 py-0 border-border text-muted-foreground"
           >
             {issue.crew_name}
           </Badge>
@@ -461,7 +461,7 @@ export function IssueDetailClient() {
       <div className="flex flex-1 overflow-hidden">
         {/* ---- Left: main content ---- */}
         <ScrollArea className="flex-1">
-          <div className="max-w-3xl mx-auto px-8 py-8 space-y-8">
+          <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
             {/* Title */}
             <div>
               {editingTitle ? (
@@ -469,7 +469,7 @@ export function IssueDetailClient() {
                   <Input
                     value={titleDraft}
                     onChange={(e) => setTitleDraft(e.target.value)}
-                    className="text-xl font-semibold bg-accent border-border h-10"
+                    className="text-title font-semibold bg-accent border-border h-10"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleSaveTitle()
                       if (e.key === "Escape") setEditingTitle(false)
@@ -502,7 +502,7 @@ export function IssueDetailClient() {
                 </div>
               ) : (
                 <h1
-                  className="text-xl font-semibold text-foreground leading-tight cursor-pointer hover:text-foreground/80 transition-colors group flex items-center gap-2"
+                  className="text-title font-semibold text-foreground leading-tight cursor-pointer hover:text-foreground/80 transition-colors group flex items-center gap-2"
                   onClick={() => {
                     setTitleDraft(issue.title)
                     setEditingTitle(true)
@@ -513,7 +513,7 @@ export function IssueDetailClient() {
                 </h1>
               )}
               {issue.identifier && (
-                <p className="text-xs text-muted-foreground font-mono mt-1">
+                <p className="text-label text-muted-foreground font-mono mt-1">
                   {issue.identifier}
                 </p>
               )}
@@ -540,11 +540,11 @@ export function IssueDetailClient() {
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4 text-muted-foreground/60" />
-                <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                <h2 className="text-label font-semibold text-muted-foreground uppercase tracking-wider">
                   Comments
                 </h2>
                 {comments.length > 0 && (
-                  <span className="text-xs text-muted-foreground/50">
+                  <span className="text-label text-muted-foreground/50">
                     ({comments.length})
                   </span>
                 )}
@@ -555,7 +555,7 @@ export function IssueDetailClient() {
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 </div>
               ) : comments.length === 0 ? (
-                <p className="text-xs text-muted-foreground/50 py-3">
+                <p className="text-label text-muted-foreground/50 py-3">
                   No comments yet. Be the first to comment.
                 </p>
               ) : (
@@ -571,7 +571,7 @@ export function IssueDetailClient() {
                             className="h-7 w-7 rounded-full"
                           />
                         ) : (
-                          <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary">
+                          <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-label font-medium text-primary">
                             {(comment.author_name ?? "U").charAt(0).toUpperCase()}
                           </div>
                         )}
@@ -580,10 +580,10 @@ export function IssueDetailClient() {
                       {/* Content */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-baseline gap-2 mb-1">
-                          <span className="text-[13px] font-medium text-foreground">
+                          <span className="text-body font-medium text-foreground">
                             {comment.author_name ?? "Unknown"}
                           </span>
-                          <span className="text-[11px] text-muted-foreground/50">
+                          <span className="text-label text-muted-foreground/60">
                             {timeAgo(comment.created_at)}
                           </span>
                         </div>
@@ -599,7 +599,7 @@ export function IssueDetailClient() {
               {/* New comment input */}
               <div className="flex gap-3 pt-2">
                 <div className="shrink-0 mt-1">
-                  <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary">
+                  <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center text-label font-medium text-primary">
                     {(session?.user?.name ?? session?.user?.email ?? "U").charAt(0).toUpperCase()}
                   </div>
                 </div>
@@ -609,7 +609,7 @@ export function IssueDetailClient() {
                     value={newComment}
                     onChange={(e) => setNewComment(e.target.value)}
                     placeholder="Write a comment..."
-                    className="min-h-[72px] text-[13px] bg-card border-border resize-none"
+                    className="min-h-[72px] text-body bg-card border-border resize-none"
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                         handleSubmitComment()
@@ -617,12 +617,12 @@ export function IssueDetailClient() {
                     }}
                   />
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] text-muted-foreground/40">
+                    <span className="text-label text-muted-foreground/50">
                       {isMac() ? "Cmd" : "Ctrl"}+Enter to send
                     </span>
                     <Button
                       size="sm"
-                      className="h-7 text-xs gap-1.5"
+                      className="h-7 text-label gap-1.5"
                       onClick={handleSubmitComment}
                       disabled={submittingComment || !newComment.trim()}
                     >
@@ -650,7 +650,7 @@ export function IssueDetailClient() {
             )}
 
             {/* Footer metadata */}
-            <div className="text-[11px] text-muted-foreground/40 font-mono space-y-0.5 pt-4">
+            <div className="text-label text-muted-foreground/60 font-mono space-y-0.5 pt-4">
               <div>Created {formatDate(issue.created_at)}</div>
               <div>Updated {formatDate(issue.updated_at)}</div>
             </div>
