@@ -227,8 +227,18 @@ export function FilesPageClient() {
   const [activeFileTab, setActiveFileTab] = useState<"home" | "container" | "git">("home")
   const [containerFiles, setContainerFiles] = useState<FileEntry[]>([])
   const [containerLoading, setContainerLoading] = useState(false)
+  // containerLoaded / containerError disambiguate "not yet fetched",
+  // "loaded successfully (possibly empty)", and "fetch failed". Without
+  // these, the tab falls back to treating length-0 as "not loaded" — so a
+  // real empty container would re-fetch on every tab click, and a failed
+  // fetch would show the same "No container files" empty state as a
+  // successful empty response, hiding the error entirely.
+  const [containerLoaded, setContainerLoaded] = useState(false)
+  const [containerError, setContainerError] = useState<string | null>(null)
   const [gitCommits, setGitCommits] = useState<{ hash: string; message: string; author: string; date: string }[]>([])
   const [gitLoading, setGitLoading] = useState(false)
+  const [gitLoaded, setGitLoaded] = useState(false)
+  const [gitError, setGitError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [copied, setCopied] = useState(false)
   const [editMode, setEditMode] = useState(false)
@@ -251,8 +261,12 @@ export function FilesPageClient() {
     setActiveFileTab("home")
     setContainerFiles([])
     setContainerLoading(false)
+    setContainerLoaded(false)
+    setContainerError(null)
     setGitCommits([])
     setGitLoading(false)
+    setGitLoaded(false)
+    setGitError(null)
     setSearch("")
   }, [agentId, workspaceId])
 
@@ -469,11 +483,17 @@ export function FilesPageClient() {
             onClick={() => {
               if (!crewId) return
               setActiveFileTab("container")
-              if (containerFiles.length === 0 && !containerLoading && workspaceId) {
+              // Only fetch if we haven't fetched yet AND aren't currently
+              // fetching. If a previous attempt failed, containerError is
+              // set and the user can click Retry from the error UI to
+              // re-attempt — we do NOT auto-retry on tab click because
+              // repeated clicks would spam a broken backend.
+              if (!containerLoaded && !containerLoading && !containerError && workspaceId) {
                 containerAbortRef.current?.abort()
                 const ac = new AbortController()
                 containerAbortRef.current = ac
                 setContainerLoading(true)
+                setContainerError(null)
                 fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, { signal: ac.signal })
                   .then((r) => {
                     if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -482,10 +502,12 @@ export function FilesPageClient() {
                   .then((data) => {
                     if (!ac.signal.aborted) {
                       setContainerFiles(Array.isArray(data) ? data : [])
+                      setContainerLoaded(true)
                     }
                   })
                   .catch((err: unknown) => {
                     if (err instanceof Error && err.name === "AbortError") return
+                    setContainerError(err instanceof Error ? err.message : "Failed to load container files")
                     toast.error("Failed to load container files")
                   })
                   .finally(() => {
@@ -513,11 +535,15 @@ export function FilesPageClient() {
             onClick={() => {
               if (!crewId) return
               setActiveFileTab("git")
-              if (gitCommits.length === 0 && !gitLoading && workspaceId) {
+              // See containerLoaded/containerError comment above — same
+              // three-state logic (not-loaded / loaded / error) avoids
+              // re-fetching on every tab click and surfaces failures.
+              if (!gitLoaded && !gitLoading && !gitError && workspaceId) {
                 gitAbortRef.current?.abort()
                 const ac = new AbortController()
                 gitAbortRef.current = ac
                 setGitLoading(true)
+                setGitError(null)
                 fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, { signal: ac.signal })
                   .then((r) => {
                     if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -526,10 +552,12 @@ export function FilesPageClient() {
                   .then((data) => {
                     if (!ac.signal.aborted) {
                       setGitCommits(Array.isArray(data) ? data : [])
+                      setGitLoaded(true)
                     }
                   })
                   .catch((err: unknown) => {
                     if (err instanceof Error && err.name === "AbortError") return
+                    setGitError(err instanceof Error ? err.message : "Failed to load git log")
                     toast.error("Failed to load git log")
                   })
                   .finally(() => {
@@ -583,6 +611,53 @@ export function FilesPageClient() {
           <div className="flex-1 overflow-y-auto">
             {containerLoading ? (
               <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : containerError ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12" role="alert">
+                <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" aria-hidden="true" />
+                <p className="text-body font-medium text-destructive">Failed to load container files</p>
+                <p className="text-label text-muted-foreground mt-1 mb-3">{containerError}</p>
+                <button
+                  type="button"
+                  className="text-label text-primary hover:underline"
+                  onClick={() => {
+                    // Clear the error and the loaded flag so the tab's
+                    // onClick handler will re-issue the fetch on next click,
+                    // OR refetch immediately here.
+                    setContainerError(null)
+                    setContainerLoaded(false)
+                    if (!workspaceId) return
+                    containerAbortRef.current?.abort()
+                    const ac = new AbortController()
+                    containerAbortRef.current = ac
+                    setContainerLoading(true)
+                    fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, { signal: ac.signal })
+                      .then((r) => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                        return r.json()
+                      })
+                      .then((data) => {
+                        if (!ac.signal.aborted) {
+                          setContainerFiles(Array.isArray(data) ? data : [])
+                          setContainerLoaded(true)
+                        }
+                      })
+                      .catch((err: unknown) => {
+                        if (err instanceof Error && err.name === "AbortError") return
+                        setContainerError(err instanceof Error ? err.message : "Failed to load container files")
+                      })
+                      .finally(() => {
+                        if (!ac.signal.aborted) setContainerLoading(false)
+                      })
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : !containerLoaded ? (
+              // First-paint guard: the effect will set loading → loaded on
+              // first tab click. Show nothing to avoid flashing the empty
+              // state before the fetch even starts.
+              null
             ) : containerFiles.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
                 <Inbox className="h-10 w-10 text-muted-foreground/40 mb-3" />
@@ -607,6 +682,47 @@ export function FilesPageClient() {
           <div className="flex-1 overflow-y-auto">
             {gitLoading ? (
               <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : gitError ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12" role="alert">
+                <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" aria-hidden="true" />
+                <p className="text-body font-medium text-destructive">Failed to load git history</p>
+                <p className="text-label text-muted-foreground mt-1 mb-3">{gitError}</p>
+                <button
+                  type="button"
+                  className="text-label text-primary hover:underline"
+                  onClick={() => {
+                    setGitError(null)
+                    setGitLoaded(false)
+                    if (!workspaceId) return
+                    gitAbortRef.current?.abort()
+                    const ac = new AbortController()
+                    gitAbortRef.current = ac
+                    setGitLoading(true)
+                    fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, { signal: ac.signal })
+                      .then((r) => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+                        return r.json()
+                      })
+                      .then((data) => {
+                        if (!ac.signal.aborted) {
+                          setGitCommits(Array.isArray(data) ? data : [])
+                          setGitLoaded(true)
+                        }
+                      })
+                      .catch((err: unknown) => {
+                        if (err instanceof Error && err.name === "AbortError") return
+                        setGitError(err instanceof Error ? err.message : "Failed to load git log")
+                      })
+                      .finally(() => {
+                        if (!ac.signal.aborted) setGitLoading(false)
+                      })
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : !gitLoaded ? (
+              null
             ) : gitCommits.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
                 <GitBranch className="h-10 w-10 text-muted-foreground/40 mb-3" />

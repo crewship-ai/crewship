@@ -585,6 +585,17 @@ export function OrchestrationLayout({
                   // is clearly mappable and ignore anything else.
                   const view = savedViews.find((v) => v.id === id)
                   if (!view) return
+
+                  // Reset all filter state BEFORE parsing. If the new view's
+                  // filters_json is malformed we fall through the catch block
+                  // without applying anything, and without this reset the
+                  // previously active view's filters would stick around and
+                  // produce stale results under the newly selected view id.
+                  setFilterProjectId(null)
+                  setFilterCrewId(null)
+                  setFilterAgentId(null)
+                  setIssueSearch("")
+
                   try {
                     const parsed: Record<string, unknown> = view.filters_json
                       ? JSON.parse(view.filters_json)
@@ -607,7 +618,7 @@ export function OrchestrationLayout({
                     // TODO: wire up status/label/priority filters and
                     // sort_json once the issue list supports them.
                   } catch {
-                    /* ignore malformed filters_json */
+                    /* keep cleared defaults when filters_json is malformed */
                   }
                 }}
               />
