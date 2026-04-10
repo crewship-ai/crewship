@@ -68,16 +68,38 @@ function TriggersTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      // Don't leave the tab stuck on a spinner when no workspace is
+      // selected — clear loading and fall through to the empty state.
+      setLoading(false)
+      setAgent(null)
+      return
+    }
+    // Abort in-flight requests on agent/workspace change so a stale response
+    // can't overwrite state for the new selection.
+    const controller = new AbortController()
     setLoading(true)
-    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
-      .then((r) => r.json())
+    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
+      signal: controller.signal,
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
       .then((data) => setAgent(data))
-      .catch(() => {})
-      .finally(() => setLoading(false))
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return
+        console.error("TriggersTab: failed to load agent", err)
+        setAgent(null)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
   }, [agentId, workspaceId])
 
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  if (!workspaceId) return <div className="p-4 text-label text-muted-foreground">Select a workspace to view triggers.</div>
   if (!agent) return <div className="p-4 text-label text-muted-foreground">Unable to load agent</div>
 
   const webhookUrl = agent.crew_id && agent.slug
@@ -132,10 +154,19 @@ function TriggersTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
             <div className="flex items-center gap-1">
               <code className="text-micro bg-accent px-1.5 py-0.5 rounded font-mono truncate flex-1">{webhookUrl}</code>
               <button
-                onClick={() => {
-                  navigator.clipboard.writeText(window.location.origin + webhookUrl)
-                  setCopied(true)
-                  setTimeout(() => setCopied(false), 2000)
+                type="button"
+                aria-label={copied ? "Webhook URL copied" : "Copy webhook URL"}
+                onClick={async () => {
+                  // Clipboard write can reject if the page loses focus or
+                  // the permission is denied — surface a toast instead of
+                  // leaving an unhandled promise rejection.
+                  try {
+                    await navigator.clipboard.writeText(window.location.origin + webhookUrl)
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  } catch {
+                    toast.error("Failed to copy webhook URL")
+                  }
                 }}
                 className="p-1 rounded hover:bg-accent text-muted-foreground"
               >
@@ -175,24 +206,55 @@ function SharedContextTab({ agentId, workspaceId }: { agentId: string; workspace
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setLoading(false)
+      setAgent(null)
+      setCrew(null)
+      return
+    }
+    const controller = new AbortController()
     setLoading(true)
-    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
-      .then((r) => r.json())
+    // Chain the crew fetch into the outer promise so the finally()
+    // block only fires once BOTH have resolved/rejected — otherwise the
+    // crew section "pops in" after the spinner clears.
+    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
+      signal: controller.signal,
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`agent fetch HTTP ${r.status}`)
+        return r.json()
+      })
       .then((data: AgentContextInfo) => {
         setAgent(data)
+        // Always reset crew before conditionally refetching — otherwise the
+        // previously selected agent's crew card stays rendered when the new
+        // agent has no crew_id.
+        setCrew(null)
         if (data.crew_id) {
-          fetch(`/api/v1/crews/${data.crew_id}?workspace_id=${workspaceId}`)
-            .then((r) => r.json())
+          return fetch(`/api/v1/crews/${data.crew_id}?workspace_id=${workspaceId}`, {
+            signal: controller.signal,
+          })
+            .then((r) => {
+              if (!r.ok) throw new Error(`crew fetch HTTP ${r.status}`)
+              return r.json()
+            })
             .then((c) => setCrew(c))
-            .catch(() => {})
         }
       })
-      .catch(() => {})
-      .finally(() => setLoading(false))
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return
+        console.error("SharedContextTab: failed to load", err)
+        setAgent(null)
+        setCrew(null)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
   }, [agentId, workspaceId])
 
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+  if (!workspaceId) return <div className="p-4 text-label text-muted-foreground">Select a workspace to view context.</div>
   if (!agent) return <div className="p-4 text-label text-muted-foreground">Unable to load agent</div>
 
   return (
@@ -271,16 +333,41 @@ function TeamChatTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!workspaceId) return
+    if (!workspaceId) {
+      setLoading(false)
+      setMessages([])
+      setCrewId(null)
+      setAgentSlug(null)
+      return
+    }
+    const controller = new AbortController()
     setLoading(true)
-    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`)
-      .then((r) => r.json())
+    fetch(`/api/v1/agents/${agentId}?workspace_id=${workspaceId}`, {
+      signal: controller.signal,
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`agent fetch HTTP ${r.status}`)
+        return r.json()
+      })
       .then((agent) => {
+        // Defensive shape check — if the API returns an unexpected payload
+        // (e.g. an error object), don't try to read .slug / .crew_id off it.
+        if (!agent || typeof agent !== "object" || typeof agent.slug !== "string") {
+          throw new Error("agent response malformed")
+        }
         setAgentSlug(agent.slug)
-        setCrewId(agent.crew_id)
+        setCrewId(agent.crew_id ?? null)
+        // Always reset the message list when switching agents so a fast-
+        // navigation leaves no residue from the previous selection.
+        setMessages([])
         if (agent.crew_id) {
-          return fetch(`/api/v1/crews/${agent.crew_id}/peer-conversations?workspace_id=${workspaceId}`)
-            .then((r) => r.json())
+          return fetch(`/api/v1/crews/${agent.crew_id}/peer-conversations?workspace_id=${workspaceId}`, {
+            signal: controller.signal,
+          })
+            .then((r) => {
+              if (!r.ok) throw new Error(`peer-conversations fetch HTTP ${r.status}`)
+              return r.json()
+            })
             .then((data) => {
               const all = Array.isArray(data) ? data : []
               // Filter to conversations involving this agent
@@ -288,11 +375,32 @@ function TeamChatTab({ agentId, workspaceId }: { agentId: string; workspaceId: s
             })
         }
       })
-      .catch(() => {})
-      .finally(() => setLoading(false))
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") return
+        console.error("TeamChatTab: failed to load", err)
+        setAgentSlug(null)
+        setCrewId(null)
+        setMessages([])
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
   }, [agentId, workspaceId])
 
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+
+  // Workspace-specific empty state — reachable when useWorkspace() returns
+  // null. Must come BEFORE the !crewId fall-through so users don't see
+  // "Assign agent to a crew…" when the real problem is "no workspace".
+  if (!workspaceId) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-center p-6">
+        <Users className="h-8 w-8 text-muted-foreground/30 mb-2" />
+        <p className="text-label text-muted-foreground">Select a workspace to view team conversations.</p>
+      </div>
+    )
+  }
 
   if (!crewId) {
     return (

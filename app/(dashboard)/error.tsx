@@ -29,7 +29,7 @@ export default function DashboardError({
             This section encountered an error. You can try again or go back to the dashboard.
           </p>
           {error.digest && (
-            <p className="mt-2 text-xs text-muted-foreground font-mono">
+            <p className="mt-2 text-micro text-muted-foreground font-mono">
               Error ID: {error.digest}
             </p>
           )}

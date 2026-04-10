@@ -720,7 +720,7 @@ func (h *CredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	type testResult struct {
-		Valid   bool   `json:"valid"`
+		Valid  bool   `json:"valid"`
 		Status int    `json:"status"`
 		Error  string `json:"error,omitempty"`
 	}

@@ -5,17 +5,16 @@ import { useRouter } from "next/navigation"
 import { Bot, Hourglass, Key, Activity, Plus, Play, CheckCircle, XCircle, Clock, AlertTriangle, MoreHorizontal, MessageSquare, FileText, ScrollText, AlertCircle, Pause, Target, Coins, Loader2, Square, ChevronRight, CheckCircle2, CircleDot } from "lucide-react"
 import { BotIcon as AnimatedBot } from "@/components/ui/bot"
 import { ActivityIcon as AnimatedActivity } from "@/components/ui/activity"
-import { KeyIcon as AnimatedKey } from "@/components/ui/key"
 
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { PageShell, type PageShellStatItem } from "@/components/layout/page-shell"
 import { PageHeader } from "@/components/layout/page-header"
 import { EmptyState } from "@/components/layout/empty-state"
-import { StatCard } from "@/components/layout/stat-card"
+import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SetupNudge } from "@/components/features/onboarding/setup-nudge"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -23,7 +22,8 @@ import { useTick } from "@/hooks/use-tick"
 import { useRealtimeEvent, type RealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
 import { formatRelativeTime } from "@/lib/time"
-import { getCrewDotColor } from "@/lib/crew-icon"
+import { cn } from "@/lib/utils"
+import { getCrewBgClass } from "@/lib/colors"
 import type { Mission } from "@/lib/types/mission"
 
 interface AgentCrew {
@@ -70,29 +70,81 @@ interface RunsResponse {
   stats: { running: number; today: number; failed: number }
 }
 
-const runStatusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ElementType }> = {
-  PENDING: { label: "Pending", variant: "outline", icon: Clock },
-  RUNNING: { label: "Running", variant: "default", icon: Play },
-  COMPLETED: { label: "Completed", variant: "secondary", icon: CheckCircle },
-  FAILED: { label: "Failed", variant: "destructive", icon: XCircle },
-  CANCELLED: { label: "Cancelled", variant: "outline", icon: XCircle },
-  TIMEOUT: { label: "Timeout", variant: "destructive", icon: AlertTriangle },
+const runStatusLabels: Record<string, string> = {
+  PENDING: "Pending",
+  RUNNING: "Running",
+  COMPLETED: "Completed",
+  FAILED: "Failed",
+  CANCELLED: "Cancelled",
+  TIMEOUT: "Timeout",
 }
 
-const agentStatusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon?: React.ElementType }> = {
-  IDLE: { label: "Idle", variant: "outline" },
-  RUNNING: { label: "Running", variant: "default" },
-  ERROR: { label: "Error", variant: "destructive", icon: AlertCircle },
-  STOPPED: { label: "Stopped", variant: "outline", icon: Pause },
+const runStatusIcons: Record<string, React.ElementType> = {
+  PENDING: Clock,
+  RUNNING: Play,
+  COMPLETED: CheckCircle,
+  FAILED: XCircle,
+  CANCELLED: XCircle,
+  TIMEOUT: AlertTriangle,
 }
 
-const missionStatusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ElementType }> = {
-  PLANNING: { label: "Planning", variant: "outline", icon: Clock },
-  IN_PROGRESS: { label: "Running", variant: "default", icon: Loader2 },
-  REVIEW: { label: "Review", variant: "secondary", icon: ChevronRight },
-  COMPLETED: { label: "Completed", variant: "secondary", icon: CheckCircle2 },
-  FAILED: { label: "Failed", variant: "destructive", icon: AlertTriangle },
-  CANCELLED: { label: "Cancelled", variant: "outline", icon: Square },
+// Map run status → the StatusBadge canonical status keys in lib/colors.ts
+const runStatusToBadge: Record<string, string> = {
+  PENDING: "PENDING",
+  RUNNING: "IN_PROGRESS",
+  COMPLETED: "COMPLETED",
+  FAILED: "FAILED",
+  CANCELLED: "CANCELLED",
+  TIMEOUT: "FAILED",
+}
+
+const agentStatusLabels: Record<string, string> = {
+  IDLE: "Idle",
+  RUNNING: "Running",
+  ERROR: "Error",
+  STOPPED: "Stopped",
+}
+
+const agentStatusToBadge: Record<string, string> = {
+  IDLE: "PENDING",
+  RUNNING: "IN_PROGRESS",
+  ERROR: "FAILED",
+  STOPPED: "CANCELLED",
+}
+
+const agentStatusIcons: Record<string, React.ElementType> = {
+  ERROR: AlertCircle,
+  STOPPED: Pause,
+}
+
+const missionStatusLabels: Record<string, string> = {
+  PLANNING: "Planning",
+  IN_PROGRESS: "Running",
+  REVIEW: "Review",
+  COMPLETED: "Completed",
+  FAILED: "Failed",
+  CANCELLED: "Cancelled",
+}
+
+// Map mission status → StatusBadge canonical keys in lib/colors.ts.
+// Without this mapping, missions in PLANNING/REVIEW/CANCELLED would render
+// with default muted styling, inconsistent with the runs and agents tables.
+const missionStatusToBadge: Record<string, string> = {
+  PLANNING: "PENDING",
+  IN_PROGRESS: "IN_PROGRESS",
+  REVIEW: "AWAITING_APPROVAL",
+  COMPLETED: "COMPLETED",
+  FAILED: "FAILED",
+  CANCELLED: "FAILED",
+}
+
+const missionStatusIcons: Record<string, React.ElementType> = {
+  PLANNING: Clock,
+  IN_PROGRESS: Loader2,
+  REVIEW: ChevronRight,
+  COMPLETED: CheckCircle2,
+  FAILED: AlertTriangle,
+  CANCELLED: Square,
 }
 
 function formatDuration(ms: number): string {
@@ -293,101 +345,94 @@ export default function DashboardPage() {
 
   if (error) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+      <div className="p-6 space-y-6">
         <PageHeader title="Dashboard" description="Overview of your AI workforce" />
-        <p className="text-sm text-destructive">{error}</p>
+        <p className="text-body text-destructive">{error}</p>
       </div>
     )
   }
 
+  const dashboardStats: PageShellStatItem[] = isLoading
+    ? []
+    : [
+        {
+          title: "Total Agents",
+          value: totalAgents,
+          subtitle: totalAgents === 0 ? "No agents yet" : `${totalAgents} agent${totalAgents === 1 ? "" : "s"}`,
+          icon: Bot,
+          iconClassName: "bg-primary/10 text-primary",
+          animatedIcon: <AnimatedBot size={16} />,
+        },
+        {
+          title: "Running Now",
+          value: runningNow,
+          subtitle: `of ${totalAgents} agents`,
+          icon: Activity,
+          iconClassName: "bg-primary/10 text-primary",
+          animatedIcon: <AnimatedActivity size={16} />,
+        },
+        {
+          title: "Active Missions",
+          value: activeMissionCount,
+          subtitle: totalMissionCount === 0 ? "No missions yet" : `${totalMissionCount} total`,
+          icon: Target,
+          iconClassName: "bg-primary/10 text-primary",
+        },
+        {
+          title: "Open Issues",
+          value: openIssueCount,
+          subtitle: openIssueCount === 0 ? "No open issues" : `${openIssueCount} issue${openIssueCount === 1 ? "" : "s"} open`,
+          icon: CircleDot,
+          iconClassName: "bg-primary/10 text-primary",
+        },
+        {
+          title: "Today's Runs",
+          value: runsData?.stats.today ?? 0,
+          subtitle:
+            runsData?.stats.failed
+              ? `${runsData.stats.failed} failed`
+              : runsData?.stats.today
+                ? `${runsData.stats.today} run${runsData.stats.today === 1 ? "" : "s"} today`
+                : "No runs today",
+          icon: Hourglass,
+          iconClassName: runsData?.stats.failed ? "bg-destructive/10 text-destructive" : undefined,
+        },
+        {
+          title: "Cost (24h)",
+          value: formatCost(totalCost24h),
+          subtitle: totalCost24h === 0 ? "No cost tracked" : "last 24 hours",
+          icon: Coins,
+          iconClassName: "bg-primary/10 text-primary",
+        },
+        {
+          title: "API Keys Active",
+          value: apiKeysActive,
+          subtitle: apiKeysActive === 0 ? "Add credentials to get started" : `${apiKeysActive} key${apiKeysActive === 1 ? "" : "s"} configured`,
+          icon: Key,
+        },
+      ]
+
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <PageHeader title="Dashboard" description="Overview of your AI workforce">
+    <PageShell
+      title="Dashboard"
+      description="Overview of your AI workforce"
+      actions={
         <Button asChild>
           <Link href="/agents/new">
             <Plus className="mr-2 h-4 w-4" />
             New Agent
           </Link>
         </Button>
-      </PageHeader>
-
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-        {isLoading ? (
-          <>
-            {Array.from({ length: 7 }).map((_, i) => (
-              <Skeleton key={i} className="h-[104px] rounded-xl" />
-            ))}
-          </>
-        ) : (
-          <>
-            <StatCard
-              title="Total Agents"
-              value={totalAgents}
-              subtitle={totalAgents === 0 ? "No agents yet" : `${totalAgents} agent${totalAgents === 1 ? "" : "s"}`}
-              icon={Bot}
-              iconClassName="bg-primary/10 text-primary"
-              animatedIcon={<AnimatedBot size={16} />}
-            />
-            <StatCard
-              title="Running Now"
-              value={runningNow}
-              subtitle={`of ${totalAgents} agents`}
-              icon={Activity}
-              iconClassName="bg-emerald-500/10 text-emerald-600"
-              animatedIcon={<AnimatedActivity size={16} />}
-            />
-            <StatCard
-              title="Active Missions"
-              value={activeMissionCount}
-              subtitle={
-                totalMissionCount === 0
-                  ? "No missions yet"
-                  : `${totalMissionCount} total`
-              }
-              icon={Target}
-              iconClassName="bg-purple-500/10 text-purple-600"
-            />
-            <StatCard
-              title="Open Issues"
-              value={openIssueCount}
-              subtitle={openIssueCount === 0 ? "No open issues" : `${openIssueCount} issue${openIssueCount === 1 ? "" : "s"} open`}
-              icon={CircleDot}
-              iconClassName="bg-blue-500/10 text-blue-600"
-            />
-            <StatCard
-              title="Today's Runs"
-              value={runsData?.stats.today ?? 0}
-              subtitle={
-                runsData?.stats.failed
-                  ? `${runsData.stats.failed} failed`
-                  : runsData?.stats.today
-                    ? `${runsData.stats.today} run${runsData.stats.today === 1 ? "" : "s"} today`
-                    : "No runs today"
-              }
-              icon={Hourglass}
-              iconClassName={runsData?.stats.failed ? "bg-destructive/10 text-destructive" : undefined}
-            />
-            <StatCard
-              title="Cost (24h)"
-              value={formatCost(totalCost24h)}
-              subtitle={
-                totalCost24h === 0
-                  ? "No cost tracked"
-                  : "last 24 hours"
-              }
-              icon={Coins}
-              iconClassName="bg-amber-500/10 text-amber-600"
-            />
-            <StatCard
-              title="API Keys Active"
-              value={apiKeysActive}
-              subtitle={apiKeysActive === 0 ? "Add credentials to get started" : `${apiKeysActive} key${apiKeysActive === 1 ? "" : "s"} configured`}
-              icon={Key}
-              animatedIcon={<AnimatedKey size={16} />}
-            />
-          </>
-        )}
-      </div>
+      }
+      stats={isLoading ? undefined : dashboardStats}
+    >
+      {isLoading && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 7 }).map((_, i) => (
+            <Skeleton key={i} className="h-[104px] rounded-xl" />
+          ))}
+        </div>
+      )}
 
       {!isLoading && (
         <SetupNudge
@@ -414,16 +459,16 @@ export default function DashboardPage() {
               </TableHeader>
               <TableBody>
                 {Array.from(containerStats.entries()).map(([containerId, stats]) => {
-                  const cpuColor = stats.cpu_percent > 80 ? "text-red-600" : stats.cpu_percent > 50 ? "text-amber-600" : "text-emerald-600"
-                  const memColor = stats.memory_percent > 80 ? "text-red-600" : stats.memory_percent > 50 ? "text-amber-600" : "text-emerald-600"
+                  const cpuColor = stats.cpu_percent > 80 ? "text-destructive" : stats.cpu_percent > 50 ? "text-foreground" : "text-muted-foreground"
+                  const memColor = stats.memory_percent > 80 ? "text-destructive" : stats.memory_percent > 50 ? "text-foreground" : "text-muted-foreground"
                   const memMB = Math.round(stats.memory_used / 1024 / 1024)
                   const memLimitMB = Math.round(stats.memory_limit / 1024 / 1024)
                   return (
                     <TableRow key={containerId}>
-                      <TableCell className="font-mono text-xs">{stats.crew_id.slice(0, 8)}…</TableCell>
-                      <TableCell className={cpuColor + " font-medium text-xs"}>{stats.cpu_percent.toFixed(1)}%</TableCell>
-                      <TableCell className={memColor + " text-xs"}>{memMB} / {memLimitMB} MB ({stats.memory_percent.toFixed(0)}%)</TableCell>
-                      <TableCell className="text-xs">{stats.pids}</TableCell>
+                      <TableCell className="font-mono text-micro">{stats.crew_id.slice(0, 8)}…</TableCell>
+                      <TableCell className={cn(cpuColor, "font-medium text-micro")}>{stats.cpu_percent.toFixed(1)}%</TableCell>
+                      <TableCell className={cn(memColor, "text-micro")}>{memMB} / {memLimitMB} MB ({stats.memory_percent.toFixed(0)}%)</TableCell>
+                      <TableCell className="text-micro">{stats.pids}</TableCell>
                     </TableRow>
                   )
                 })}
@@ -458,8 +503,9 @@ export default function DashboardPage() {
               </TableHeader>
               <TableBody>
                 {recentMissions.map((mission) => {
-                  const cfg = missionStatusConfig[mission.status] ?? missionStatusConfig.PLANNING
-                  const StatusIcon = cfg.icon
+                  const label = missionStatusLabels[mission.status] ?? mission.status
+                  const StatusIcon = missionStatusIcons[mission.status] ?? Clock
+                  const missionBadgeStatus = missionStatusToBadge[mission.status] ?? "PENDING"
                   const stats = mission.task_stats
                   const completed = stats?.completed ?? 0
                   const total = stats?.total ?? 0
@@ -479,16 +525,15 @@ export default function DashboardPage() {
                         </Link>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={cfg.variant} className="gap-1">
-                          {mission.status === "IN_PROGRESS" && (
-                            <span className="relative flex h-2 w-2">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
-                            </span>
-                          )}
-                          <StatusIcon className="h-3 w-3" />
-                          {cfg.label}
-                        </Badge>
+                        <StatusBadge status={missionBadgeStatus} label={
+                          <span className="inline-flex items-center gap-1.5">
+                            {mission.status === "IN_PROGRESS" && (
+                              <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
+                            )}
+                            <StatusIcon className="h-3 w-3" />
+                            {label}
+                          </span>
+                        } />
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2 min-w-[100px]">
@@ -589,10 +634,12 @@ export default function DashboardPage() {
               <TableBody>
                 {sortedAgents.map((agent) => {
                   const lastRun = agentLastRun.get(agent.id)
-                  const statusCfg = agentStatusConfig[agent.status] ?? agentStatusConfig.IDLE
-                  const runCfg = lastRun ? (runStatusConfig[lastRun.status] ?? runStatusConfig.PENDING) : null
-                  const RunIcon = runCfg?.icon
-                  const StatusIcon = statusCfg.icon
+                  const agentBadgeStatus = agentStatusToBadge[agent.status] ?? "PENDING"
+                  const agentLabel = agentStatusLabels[agent.status] ?? agent.status
+                  const StatusIcon = agentStatusIcons[agent.status]
+                  const runBadgeStatus = lastRun ? (runStatusToBadge[lastRun.status] ?? "PENDING") : null
+                  const runLabel = lastRun ? (runStatusLabels[lastRun.status] ?? lastRun.status) : null
+                  const RunIcon = lastRun ? (runStatusIcons[lastRun.status] ?? Clock) : null
 
                   return (
                     <TableRow key={agent.id} className="transition-colors duration-500">
@@ -607,10 +654,7 @@ export default function DashboardPage() {
                       <TableCell>
                         {agent.crew ? (
                           <div className="flex items-center gap-1.5">
-                            <span
-                              className="h-2 w-2 rounded-full shrink-0"
-                              style={{ backgroundColor: getCrewDotColor(agent.crew.color) }}
-                            />
+                            <span className={cn("h-2 w-2 rounded-full shrink-0", getCrewBgClass(agent.crew.color))} />
                             <span className="text-body">{agent.crew.name}</span>
                           </div>
                         ) : (
@@ -618,23 +662,26 @@ export default function DashboardPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={statusCfg.variant} className="gap-1.5">
-                          {agent.status === "RUNNING" && (
-                            <span className="relative flex h-2 w-2">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                        <StatusBadge
+                          status={agentBadgeStatus}
+                          label={
+                            <span className="inline-flex items-center gap-1.5">
+                              {agent.status === "RUNNING" && (
+                                <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
+                              )}
+                              {StatusIcon && <StatusIcon className="h-3 w-3" />}
+                              {agentLabel}
                             </span>
-                          )}
-                          {StatusIcon && <StatusIcon className="h-3 w-3" />}
-                          {statusCfg.label}
-                        </Badge>
+                          }
+                        />
                       </TableCell>
                       <TableCell>
-                        {lastRun ? (
+                        {lastRun && runBadgeStatus && RunIcon ? (
                           <div className="flex items-center gap-1.5">
-                            {RunIcon && <RunIcon className="h-3.5 w-3.5 text-muted-foreground" />}
+                            <StatusDot status={runBadgeStatus} className="h-1.5 w-1.5" />
+                            <RunIcon className="h-3.5 w-3.5 text-muted-foreground" />
                             <span className="text-body text-muted-foreground">
-                              {runCfg!.label} {formatRelativeTime(lastRun.started_at ?? lastRun.created_at)}
+                              {runLabel} {formatRelativeTime(lastRun.started_at ?? lastRun.created_at)}
                             </span>
                           </div>
                         ) : (
@@ -682,6 +729,6 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   )
 }

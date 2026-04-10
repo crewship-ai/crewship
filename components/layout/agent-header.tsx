@@ -4,23 +4,27 @@ import { useCallback, useState } from "react"
 import { Pause, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { StatusDot } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAgentDetail } from "@/hooks/use-agent-detail"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { getAgentAvatarUrl } from "@/lib/agent-avatar"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { cn } from "@/lib/utils"
 
-const AGENT_ROLE_COLORS: Record<string, string> = {
-  AGENT: "text-blue-600 border-blue-300 bg-blue-50 dark:bg-blue-950/30",
-  LEAD: "text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/30",
-  COORDINATOR: "text-purple-600 border-purple-300 bg-purple-50 dark:bg-purple-950/30",
-}
+// Role label tone — neutral semantic tokens, no hardcoded palette shades.
+const AGENT_ROLE_TONE = "text-muted-foreground border-border bg-muted/40"
 
-const STATUS_STYLES: Record<string, { class: string; dot: string; pulse: boolean }> = {
-  IDLE: { class: "bg-muted text-muted-foreground", dot: "bg-gray-400", pulse: false },
-  RUNNING: { class: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400", dot: "bg-emerald-500", pulse: true },
-  ERROR: { class: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400", dot: "bg-red-500", pulse: false },
-  STOPPED: { class: "bg-neutral-100 text-neutral-600 dark:bg-neutral-900 dark:text-neutral-400", dot: "bg-neutral-400", pulse: false },
+// Map agent status to canonical status identifiers used by StatusDot/StatusBadge.
+// RUNNING → IN_PROGRESS, ERROR → FAILED, STOPPED/IDLE → PENDING.
+function mapAgentStatus(status: string): string {
+  switch (status) {
+    case "RUNNING": return "IN_PROGRESS"
+    case "ERROR": return "FAILED"
+    case "STOPPED": return "CANCELLED"
+    case "IDLE": return "PENDING"
+    default: return status
+  }
 }
 
 interface AgentHeaderProps {
@@ -64,7 +68,7 @@ export function AgentHeader({ agentId }: AgentHeaderProps) {
     )
   }
 
-  const statusStyle = STATUS_STYLES[agent.status] ?? STATUS_STYLES.IDLE
+  const canonicalStatus = mapAgentStatus(agent.status)
   const isRunning = agent.status === "RUNNING"
 
   return (
@@ -76,24 +80,24 @@ export function AgentHeader({ agentId }: AgentHeaderProps) {
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap">
-          <h1 className="text-default font-semibold">{agent.name}</h1>
-          <Badge variant="secondary" className={`${statusStyle.class} text-micro gap-1.5`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${statusStyle.dot} ${statusStyle.pulse ? "animate-pulse" : ""}`} />
+          <h1 className="text-display font-semibold truncate">{agent.name}</h1>
+          <Badge variant="outline" className="gap-1.5 text-micro border-border bg-muted/40 text-muted-foreground">
+            <StatusDot status={canonicalStatus} live={isRunning} className="h-1.5 w-1.5" />
             {agent.status}
           </Badge>
-          <Badge variant="outline" className={`${AGENT_ROLE_COLORS[agent.agent_role] ?? ""} text-micro`}>
+          <Badge variant="outline" className={cn("text-micro", AGENT_ROLE_TONE)}>
             {agent.agent_role}
           </Badge>
         </div>
         {agent.crew && (
-          <p className="text-label text-muted-foreground mt-0.5">{agent.crew.name}</p>
+          <p className="text-label text-muted-foreground mt-0.5 truncate">{agent.crew.name}</p>
         )}
       </div>
       {isRunning && (
         <Button
           variant="outline"
           size="sm"
-          className="text-destructive border-destructive/30 hover:bg-destructive/10 gap-1.5 shrink-0"
+          className="gap-1.5 shrink-0 text-destructive border-destructive/30 hover:bg-destructive/10"
           onClick={handleStop}
           disabled={stopping}
         >

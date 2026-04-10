@@ -11,6 +11,7 @@ import {
   File as FileIcon,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StatusDot } from "@/components/ui/status-badge"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import type { BundledLanguage } from "shiki"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -131,28 +132,30 @@ function isPreviewable(name: string): boolean {
 }
 
 function getFileIcon(name: string, isDir: boolean, isOpen?: boolean) {
-  if (isDir) return isOpen ? <FolderOpen className="h-4 w-4 text-amber-500" /> : <FolderClosed className="h-4 w-4 text-amber-500" />
+  // All file/folder icons render with muted-foreground — semantic distinction
+  // comes from the icon glyph (FileCode, FileJson, Terminal, etc.), not color.
+  const cls = "h-4 w-4 text-muted-foreground"
+  if (isDir) return isOpen ? <FolderOpen className={cls} /> : <FolderClosed className={cls} />
   const ext = name.split(".").pop()?.toLowerCase() ?? ""
   const n = name.toLowerCase()
-  if (n === "dockerfile" || n === "docker-compose.yml") return <Box className="h-4 w-4 text-blue-400" />
-  if (n.startsWith(".git")) return <GitBranch className="h-4 w-4 text-orange-500" />
-  if (n === "makefile") return <Terminal className="h-4 w-4 text-green-600" />
+  if (n === "dockerfile" || n === "docker-compose.yml") return <Box className={cls} />
+  if (n.startsWith(".git")) return <GitBranch className={cls} />
+  if (n === "makefile") return <Terminal className={cls} />
   switch (ext) {
-    case "py": return <FileCode className="h-4 w-4 text-yellow-500" />
-    case "js": case "jsx": return <FileCode className="h-4 w-4 text-yellow-400" />
-    case "ts": case "tsx": return <FileCode className="h-4 w-4 text-blue-500" />
-    case "go": return <FileCode className="h-4 w-4 text-cyan-500" />
-    case "rs": return <FileCode className="h-4 w-4 text-orange-600" />
-    case "json": return <FileJson className="h-4 w-4 text-yellow-600" />
-    case "yaml": case "yml": return <FileJson className="h-4 w-4 text-red-400" />
-    case "md": case "mdx": return <FileText className="h-4 w-4 text-blue-300" />
-    case "txt": return <FileText className="h-4 w-4 text-gray-500" />
-    case "sh": case "bash": return <Terminal className="h-4 w-4 text-green-500" />
-    case "env": return <Settings className="h-4 w-4 text-gray-600" />
-    case "html": return <FileCode className="h-4 w-4 text-orange-500" />
-    case "css": case "scss": return <FileCode className="h-4 w-4 text-blue-400" />
-    case "sql": return <FileCode className="h-4 w-4 text-blue-600" />
-    default: return <FileIcon className="h-4 w-4 text-gray-400" />
+    case "py": case "js": case "jsx": case "ts": case "tsx":
+    case "go": case "rs": case "html": case "css": case "scss":
+    case "sql":
+      return <FileCode className={cls} />
+    case "json": case "yaml": case "yml":
+      return <FileJson className={cls} />
+    case "md": case "mdx": case "txt":
+      return <FileText className={cls} />
+    case "sh": case "bash":
+      return <Terminal className={cls} />
+    case "env":
+      return <Settings className={cls} />
+    default:
+      return <FileIcon className={cls} />
   }
 }
 
@@ -227,17 +230,9 @@ export function FilesPageClient() {
   const [activeFileTab, setActiveFileTab] = useState<"home" | "container" | "git">("home")
   const [containerFiles, setContainerFiles] = useState<FileEntry[]>([])
   const [containerLoading, setContainerLoading] = useState(false)
-  // containerLoaded / containerError disambiguate "not yet fetched",
-  // "loaded successfully (possibly empty)", and "fetch failed". Without
-  // these, the tab falls back to treating length-0 as "not loaded" — so a
-  // real empty container would re-fetch on every tab click, and a failed
-  // fetch would show the same "No container files" empty state as a
-  // successful empty response, hiding the error entirely.
-  const [containerLoaded, setContainerLoaded] = useState(false)
   const [containerError, setContainerError] = useState<string | null>(null)
   const [gitCommits, setGitCommits] = useState<{ hash: string; message: string; author: string; date: string }[]>([])
   const [gitLoading, setGitLoading] = useState(false)
-  const [gitLoaded, setGitLoaded] = useState(false)
   const [gitError, setGitError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [copied, setCopied] = useState(false)
@@ -252,23 +247,6 @@ export function FilesPageClient() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useRealtimeChannel(crewId ? `crew:${crewId}` : null)
-
-  useEffect(() => {
-    containerAbortRef.current?.abort()
-    containerAbortRef.current = null
-    gitAbortRef.current?.abort()
-    gitAbortRef.current = null
-    setActiveFileTab("home")
-    setContainerFiles([])
-    setContainerLoading(false)
-    setContainerLoaded(false)
-    setContainerError(null)
-    setGitCommits([])
-    setGitLoading(false)
-    setGitLoaded(false)
-    setGitError(null)
-    setSearch("")
-  }, [agentId, workspaceId])
 
   useEffect(() => {
     if (wsLoading) return
@@ -325,6 +303,21 @@ export function FilesPageClient() {
       gitAbortRef.current?.abort()
     }
   }, [])
+
+  // Reset per-tab caches + abort in-flight fetches on agent/workspace switch
+  // so the previous agent's container files or git log can't bleed into the
+  // new selection. The onClick handlers below re-fetch lazily.
+  useEffect(() => {
+    containerAbortRef.current?.abort()
+    gitAbortRef.current?.abort()
+    setActiveFileTab("home")
+    setContainerFiles([])
+    setContainerLoading(false)
+    setContainerError(null)
+    setGitCommits([])
+    setGitLoading(false)
+    setGitError(null)
+  }, [agentId, workspaceId])
 
   const fetchSubdir = useCallback(async (dirPath: string) => {
     if (!workspaceId) return
@@ -461,8 +454,8 @@ export function FilesPageClient() {
             <span className="text-micro text-muted-foreground bg-muted rounded-full px-1.5">{fileCount}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-micro text-emerald-600">Live</span>
+            <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
+            <span className="text-micro text-muted-foreground">Live</span>
             <RefreshCw className="h-3 w-3 text-muted-foreground cursor-pointer hover:text-foreground ml-1" />
           </div>
         </div>
@@ -473,42 +466,31 @@ export function FilesPageClient() {
             onClick={() => setActiveFileTab("home")}
           >Agent Home</button>
           <button
-            disabled={!crewId}
-            className={cn(
-              "px-2.5 py-1 text-micro rounded-md",
-              activeFileTab === "container" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent",
-              !crewId && "opacity-50 cursor-not-allowed hover:bg-transparent",
-            )}
-            title={crewId ? "Browse container filesystem" : "No crew assigned"}
+            className={cn("px-2.5 py-1 text-micro rounded-md", activeFileTab === "container" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent")}
             onClick={() => {
-              if (!crewId) return
               setActiveFileTab("container")
-              // Only fetch if we haven't fetched yet AND aren't currently
-              // fetching. If a previous attempt failed, containerError is
-              // set and the user can click Retry from the error UI to
-              // re-attempt — we do NOT auto-retry on tab click because
-              // repeated clicks would spam a broken backend.
-              if (!containerLoaded && !containerLoading && !containerError && workspaceId) {
+              if (containerFiles.length === 0 && !containerLoading && workspaceId) {
                 containerAbortRef.current?.abort()
                 const ac = new AbortController()
                 containerAbortRef.current = ac
-                setContainerLoading(true)
                 setContainerError(null)
-                fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, { signal: ac.signal })
+                setContainerLoading(true)
+                fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, {
+                  signal: ac.signal,
+                })
                   .then((r) => {
                     if (!r.ok) throw new Error(`HTTP ${r.status}`)
                     return r.json()
                   })
                   .then((data) => {
-                    if (!ac.signal.aborted) {
-                      setContainerFiles(Array.isArray(data) ? data : [])
-                      setContainerLoaded(true)
-                    }
+                    if (ac.signal.aborted) return
+                    setContainerFiles(Array.isArray(data) ? data : [])
                   })
-                  .catch((err: unknown) => {
-                    if (err instanceof Error && err.name === "AbortError") return
-                    setContainerError(err instanceof Error ? err.message : "Failed to load container files")
-                    toast.error("Failed to load container files")
+                  .catch((err) => {
+                    if (err instanceof DOMException && err.name === "AbortError") return
+                    console.error("failed to load container files", err)
+                    setContainerFiles([])
+                    setContainerError("Failed to load container files")
                   })
                   .finally(() => {
                     if (!ac.signal.aborted) setContainerLoading(false)
@@ -525,40 +507,31 @@ export function FilesPageClient() {
             onClick={() => crewId && router.push(`/crews/${crewId}/files`)}
           >Crew</button>
           <button
-            disabled={!crewId}
-            className={cn(
-              "px-2.5 py-1 text-micro rounded-md flex items-center gap-1",
-              activeFileTab === "git" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent",
-              !crewId && "opacity-50 cursor-not-allowed hover:bg-transparent",
-            )}
-            title={crewId ? "View git history" : "No crew assigned"}
+            className={cn("px-2.5 py-1 text-micro rounded-md flex items-center gap-1", activeFileTab === "git" ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:bg-accent")}
             onClick={() => {
-              if (!crewId) return
               setActiveFileTab("git")
-              // See containerLoaded/containerError comment above — same
-              // three-state logic (not-loaded / loaded / error) avoids
-              // re-fetching on every tab click and surfaces failures.
-              if (!gitLoaded && !gitLoading && !gitError && workspaceId) {
+              if (gitCommits.length === 0 && !gitLoading && workspaceId) {
                 gitAbortRef.current?.abort()
                 const ac = new AbortController()
                 gitAbortRef.current = ac
-                setGitLoading(true)
                 setGitError(null)
-                fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, { signal: ac.signal })
+                setGitLoading(true)
+                fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, {
+                  signal: ac.signal,
+                })
                   .then((r) => {
                     if (!r.ok) throw new Error(`HTTP ${r.status}`)
                     return r.json()
                   })
                   .then((data) => {
-                    if (!ac.signal.aborted) {
-                      setGitCommits(Array.isArray(data) ? data : [])
-                      setGitLoaded(true)
-                    }
+                    if (ac.signal.aborted) return
+                    setGitCommits(Array.isArray(data) ? data : [])
                   })
-                  .catch((err: unknown) => {
-                    if (err instanceof Error && err.name === "AbortError") return
-                    setGitError(err instanceof Error ? err.message : "Failed to load git log")
-                    toast.error("Failed to load git log")
+                  .catch((err) => {
+                    if (err instanceof DOMException && err.name === "AbortError") return
+                    console.error("failed to load git log", err)
+                    setGitCommits([])
+                    setGitError("Failed to load git log")
                   })
                   .finally(() => {
                     if (!ac.signal.aborted) setGitLoading(false)
@@ -574,7 +547,7 @@ export function FilesPageClient() {
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <input
-                  className="w-full h-7 rounded-md border bg-card pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+                  className="w-full h-7 rounded-md border border-border bg-card pl-8 pr-3 text-label outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
                   placeholder="Filter files..."
                   aria-label="Filter files"
                   value={search}
@@ -612,52 +585,11 @@ export function FilesPageClient() {
             {containerLoading ? (
               <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
             ) : containerError ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12" role="alert">
-                <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" aria-hidden="true" />
-                <p className="text-body font-medium text-destructive">Failed to load container files</p>
-                <p className="text-label text-muted-foreground mt-1 mb-3">{containerError}</p>
-                <button
-                  type="button"
-                  className="text-label text-primary hover:underline"
-                  onClick={() => {
-                    // Clear the error and the loaded flag so the tab's
-                    // onClick handler will re-issue the fetch on next click,
-                    // OR refetch immediately here.
-                    setContainerError(null)
-                    setContainerLoaded(false)
-                    if (!workspaceId) return
-                    containerAbortRef.current?.abort()
-                    const ac = new AbortController()
-                    containerAbortRef.current = ac
-                    setContainerLoading(true)
-                    fetch(`/api/v1/agents/${agentId}/container-files?workspace_id=${workspaceId}`, { signal: ac.signal })
-                      .then((r) => {
-                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-                        return r.json()
-                      })
-                      .then((data) => {
-                        if (!ac.signal.aborted) {
-                          setContainerFiles(Array.isArray(data) ? data : [])
-                          setContainerLoaded(true)
-                        }
-                      })
-                      .catch((err: unknown) => {
-                        if (err instanceof Error && err.name === "AbortError") return
-                        setContainerError(err instanceof Error ? err.message : "Failed to load container files")
-                      })
-                      .finally(() => {
-                        if (!ac.signal.aborted) setContainerLoading(false)
-                      })
-                  }}
-                >
-                  Retry
-                </button>
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
+                <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" />
+                <p className="text-body font-medium text-destructive">{containerError}</p>
+                <p className="text-label text-muted-foreground mt-1">Check that the container is running and try again.</p>
               </div>
-            ) : !containerLoaded ? (
-              // First-paint guard: the effect will set loading → loaded on
-              // first tab click. Show nothing to avoid flashing the empty
-              // state before the fetch even starts.
-              null
             ) : containerFiles.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
                 <Inbox className="h-10 w-10 text-muted-foreground/40 mb-3" />
@@ -667,7 +599,7 @@ export function FilesPageClient() {
             ) : (
               <div className="p-2 space-y-0.5">
                 {containerFiles.map((f) => (
-                  <div key={f.path} className="flex items-center gap-2 px-2 py-1 rounded text-xs hover:bg-accent">
+                  <div key={f.path} className="flex items-center gap-2 px-2 py-1 rounded text-label hover:bg-accent">
                     {f.is_dir ? <FolderClosed className="h-3.5 w-3.5 text-muted-foreground" /> : <FileText className="h-3.5 w-3.5 text-muted-foreground" />}
                     <span className="truncate flex-1">{f.path}</span>
                     {!f.is_dir && <span className="text-micro text-muted-foreground shrink-0">{fmtSize(f.size)}</span>}
@@ -683,46 +615,11 @@ export function FilesPageClient() {
             {gitLoading ? (
               <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
             ) : gitError ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12" role="alert">
-                <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" aria-hidden="true" />
-                <p className="text-body font-medium text-destructive">Failed to load git history</p>
-                <p className="text-label text-muted-foreground mt-1 mb-3">{gitError}</p>
-                <button
-                  type="button"
-                  className="text-label text-primary hover:underline"
-                  onClick={() => {
-                    setGitError(null)
-                    setGitLoaded(false)
-                    if (!workspaceId) return
-                    gitAbortRef.current?.abort()
-                    const ac = new AbortController()
-                    gitAbortRef.current = ac
-                    setGitLoading(true)
-                    fetch(`/api/v1/agents/${agentId}/git-log?workspace_id=${workspaceId}`, { signal: ac.signal })
-                      .then((r) => {
-                        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-                        return r.json()
-                      })
-                      .then((data) => {
-                        if (!ac.signal.aborted) {
-                          setGitCommits(Array.isArray(data) ? data : [])
-                          setGitLoaded(true)
-                        }
-                      })
-                      .catch((err: unknown) => {
-                        if (err instanceof Error && err.name === "AbortError") return
-                        setGitError(err instanceof Error ? err.message : "Failed to load git log")
-                      })
-                      .finally(() => {
-                        if (!ac.signal.aborted) setGitLoading(false)
-                      })
-                  }}
-                >
-                  Retry
-                </button>
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
+                <AlertCircle className="h-10 w-10 text-destructive/60 mb-3" />
+                <p className="text-body font-medium text-destructive">{gitError}</p>
+                <p className="text-label text-muted-foreground mt-1">The agent workspace may be unreachable.</p>
               </div>
-            ) : !gitLoaded ? (
-              null
             ) : gitCommits.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-12">
                 <GitBranch className="h-10 w-10 text-muted-foreground/40 mb-3" />
@@ -733,7 +630,7 @@ export function FilesPageClient() {
               <div className="p-2 space-y-1">
                 {gitCommits.map((c) => (
                   <div key={c.hash} className="px-2 py-1.5 rounded hover:bg-accent">
-                    <p className="text-xs font-medium truncate">{c.message}</p>
+                    <p className="text-label font-medium truncate">{c.message}</p>
                     <div className="flex items-center gap-2 text-micro text-muted-foreground mt-0.5">
                       <code className="font-mono">{c.hash.slice(0, 7)}</code>
                       <span>{c.author}</span>
@@ -768,7 +665,7 @@ export function FilesPageClient() {
                 <>
                   <button
                     onClick={handleDiscard}
-                    className="h-6 px-2 flex items-center gap-1 rounded text-xs text-muted-foreground hover:bg-accent"
+                    className="h-6 px-2 flex items-center gap-1 rounded text-label text-muted-foreground hover:bg-accent"
                   >
                     <X className="h-3 w-3" /> Discard
                   </button>
@@ -789,7 +686,7 @@ export function FilesPageClient() {
                     </button>
                   )}
                   <button onClick={handleCopy} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Copy path" aria-label="Copy file path">
-                    {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
+                    {copied ? <Check className="h-3 w-3 text-primary" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
                   </button>
                   <button onClick={handleDownload} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Download" aria-label="Download file">
                     <Download className="h-3 w-3 text-muted-foreground" />
@@ -822,7 +719,7 @@ export function FilesPageClient() {
                 saveRef={editorSaveRef}
               />
             ) : fileContent !== null ? (
-              <div className="h-full overflow-y-auto dark bg-[#24292e]">
+              <div className="h-full overflow-y-auto dark bg-surface-subtle">
                 <CodeBlock code={fileContent} language={getLang(selectedFile.name) as BundledLanguage} showLineNumbers />
               </div>
             ) : fileError ? (

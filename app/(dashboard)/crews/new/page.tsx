@@ -7,15 +7,15 @@ import {
   ArrowLeft, Loader2, Users, Sparkles, Bot, RefreshCw, AlertTriangle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { PageHeader } from "@/components/layout/page-header"
+import { PageShell } from "@/components/layout/page-shell"
+import { SectionCard } from "@/components/ui/section-card"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { slugify } from "@/lib/utils/slugify"
-import { CREW_COLORS, CREW_BG_CLASSES } from "@/lib/colors"
+import { CREW_COLORS, CREW_BG_CLASSES, STATUS_BG_LIGHT } from "@/lib/colors"
 import { cn } from "@/lib/utils"
 
 type CrewPaletteId = keyof typeof CREW_COLORS
@@ -326,14 +326,17 @@ export default function NewCrewPage() {
 
   if (mode === "choose") {
     return (
-      <div className="p-4 sm:p-6 space-y-6 max-w-3xl">
-        <PageHeader title="New Crew" description="Create a new crew to organize your agents">
+      <PageShell
+        title="New Crew"
+        description="Create a new crew to organize your agents"
+        actions={
           <Button variant="outline" size="sm" asChild>
             <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back</Link>
           </Button>
-        </PageHeader>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        }
+        className="max-w-3xl"
+      >
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {/* Create with AI */}
           <button
             onClick={handleCreateWithAI}
@@ -346,12 +349,12 @@ export default function NewCrewPage() {
               ) : (
                 <Sparkles className="h-5 w-5 text-primary" />
               )}
-              <span className="font-semibold">Create with AI</span>
+              <span className="text-body font-semibold">Create with AI</span>
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-label text-muted-foreground">
               Chat with your Coordinator agent — describe what the crew should do and it will create it for you.
             </p>
-            <Badge className="text-xs">Recommended</Badge>
+            <Badge className="text-micro">Recommended</Badge>
           </button>
 
           {/* Start from Template */}
@@ -361,9 +364,9 @@ export default function NewCrewPage() {
           >
             <div className="flex items-center gap-2">
               <Bot className="h-5 w-5 text-muted-foreground" />
-              <span className="font-semibold">Start from Template</span>
+              <span className="text-body font-semibold">Start from Template</span>
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-label text-muted-foreground">
               Choose a pre-built crew blueprint with agents and system prompts ready to deploy.
             </p>
           </button>
@@ -375,9 +378,9 @@ export default function NewCrewPage() {
           >
             <div className="flex items-center gap-2">
               <Users className="h-5 w-5 text-muted-foreground" />
-              <span className="font-semibold">From Scratch</span>
+              <span className="text-body font-semibold">From Scratch</span>
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-label text-muted-foreground">
               Set up an empty crew and configure every agent manually.
             </p>
           </button>
@@ -388,7 +391,7 @@ export default function NewCrewPage() {
           loading={loadingTemplates}
           onSelect={handleSelectTemplate}
         />
-      </div>
+      </PageShell>
     )
   }
 
@@ -396,23 +399,27 @@ export default function NewCrewPage() {
 
   if (mode === "no-coordinator") {
     return (
-      <div className="p-4 sm:p-6 space-y-6 max-w-3xl">
-        <PageHeader title="Coordinator Required" description="Create with AI needs a Coordinator agent">
+      <PageShell
+        title="Coordinator Required"
+        description="Create with AI needs a Coordinator agent"
+        actions={
           <Button variant="outline" size="sm" onClick={() => setMode("choose")}>
             <ArrowLeft className="mr-2 h-4 w-4" />Back
           </Button>
-        </PageHeader>
-        <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-5 space-y-3">
+        }
+        className="max-w-3xl"
+      >
+        <div className={cn("rounded-lg border border-border p-5 space-y-3", STATUS_BG_LIGHT.BLOCKED)}>
           <div className="flex items-start gap-3">
-            <AlertTriangle className="h-5 w-5 text-yellow-500 mt-0.5 shrink-0" />
+            <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
             <div className="space-y-2">
-              <p className="font-medium text-sm">No Coordinator agent found in this workspace.</p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-body font-medium">No Coordinator agent found in this workspace.</p>
+              <p className="text-body text-muted-foreground">
                 The &ldquo;Create with AI&rdquo; feature works by chatting with a COORDINATOR agent.
                 Create one first, then come back to use this feature.
               </p>
-              <p className="text-sm text-muted-foreground">
-                The Coordinator agent needs <code className="text-xs bg-muted px-1 rounded">agent_role = COORDINATOR</code>.
+              <p className="text-body text-muted-foreground">
+                The Coordinator agent needs <code className="text-micro bg-muted px-1 rounded">agent_role = COORDINATOR</code>.
                 You can create one manually or deploy a crew template that includes a Coordinator.
               </p>
             </div>
@@ -422,7 +429,7 @@ export default function NewCrewPage() {
             <Button size="sm" variant="outline" onClick={() => setMode("manual")}>Create Manually</Button>
           </div>
         </div>
-      </div>
+      </PageShell>
     )
   }
 
@@ -430,32 +437,32 @@ export default function NewCrewPage() {
 
   if (mode === "ai") {
     return (
-      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
-        <PageHeader title="Create with AI" description="Describe your crew and AI will design it for you">
+      <PageShell
+        title="Create with AI"
+        description="Describe your crew and AI will design it for you"
+        actions={
           <Button variant="outline" size="sm" onClick={() => setMode("choose")}>
             <ArrowLeft className="mr-2 h-4 w-4" />Back
           </Button>
-        </PageHeader>
-
+        }
+        className="max-w-3xl"
+      >
         {hasAnthropicKey === false && (
-          <div className="flex items-start gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-4">
-            <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
-            <div className="text-sm">
-              <span className="font-medium text-yellow-600 dark:text-yellow-400">Anthropic API key required.</span>
+          <div className={cn("flex items-start gap-3 rounded-lg border border-border p-4", STATUS_BG_LIGHT.BLOCKED)}>
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            <div className="text-body">
+              <span className="font-medium">Anthropic API key required.</span>
               {" "}
               <Link href="/settings/credentials" className="underline hover:no-underline">
                 Add one in Settings → Credentials
               </Link>
-              {" "}(type: <code className="text-xs bg-yellow-500/20 px-1 rounded">API_KEY</code>, provider: <code className="text-xs bg-yellow-500/20 px-1 rounded">ANTHROPIC</code>). Claude Code OAuth tokens cannot be used here.
+              {" "}(type: <code className="text-micro bg-muted px-1 rounded">API_KEY</code>, provider: <code className="text-micro bg-muted px-1 rounded">ANTHROPIC</code>). Claude Code OAuth tokens cannot be used here.
             </div>
           </div>
         )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">What should this crew do?</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        <SectionCard title="What should this crew do?">
+          <div className="space-y-4">
             <Textarea
               value={aiDescription}
               onChange={(e) => setAiDescription(e.target.value)}
@@ -463,7 +470,7 @@ export default function NewCrewPage() {
               rows={5}
               className="resize-none"
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-label text-muted-foreground">
               Be specific about the tasks, tools, and domain. The more detail, the better the agents.
             </p>
             <Button
@@ -483,9 +490,9 @@ export default function NewCrewPage() {
                 </>
               )}
             </Button>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </SectionCard>
+      </PageShell>
     )
   }
 
@@ -493,16 +500,16 @@ export default function NewCrewPage() {
 
   if (mode === "ai-preview" && aiSuggestion) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
-        <PageHeader
-          title="AI-Designed Crew"
-          description={aiSuggestion.description || "Review and deploy your AI-designed crew"}
-        >
+      <PageShell
+        title="AI-Designed Crew"
+        description={aiSuggestion.description || "Review and deploy your AI-designed crew"}
+        actions={
           <Button variant="outline" size="sm" onClick={() => setMode("ai")}>
             <ArrowLeft className="mr-2 h-4 w-4" />Back
           </Button>
-        </PageHeader>
-
+        }
+        className="max-w-3xl"
+      >
         <CrewNameSlugFields
           name={name}
           slug={slug}
@@ -530,7 +537,7 @@ export default function NewCrewPage() {
           </Button>
           <Button variant="ghost" onClick={() => setMode("choose")}>Cancel</Button>
         </div>
-      </div>
+      </PageShell>
     )
   }
 
@@ -538,16 +545,16 @@ export default function NewCrewPage() {
 
   if (mode === "template" && selectedTemplate) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
-        <PageHeader
-          title={`Deploy: ${selectedTemplate.name}`}
-          description={selectedTemplate.description || "Deploy this crew template"}
-        >
+      <PageShell
+        title={`Deploy: ${selectedTemplate.name}`}
+        description={selectedTemplate.description || "Deploy this crew template"}
+        actions={
           <Button variant="outline" size="sm" onClick={() => { setMode("choose"); setSelectedTemplate(null) }}>
             <ArrowLeft className="mr-2 h-4 w-4" />Back
           </Button>
-        </PageHeader>
-
+        }
+        className="max-w-3xl"
+      >
         <CrewNameSlugFields
           name={name}
           slug={slug}
@@ -570,7 +577,7 @@ export default function NewCrewPage() {
             Cancel
           </Button>
         </div>
-      </div>
+      </PageShell>
     )
   }
 
@@ -578,57 +585,61 @@ export default function NewCrewPage() {
 
   if (mode === "template" && !selectedTemplate) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
-        <PageHeader title="Choose a Template" description="Pick a crew blueprint to get started quickly">
+      <PageShell
+        title="Choose a Template"
+        description="Pick a crew blueprint to get started quickly"
+        actions={
           <Button variant="outline" size="sm" onClick={() => setMode("choose")}>
             <ArrowLeft className="mr-2 h-4 w-4" />Back
           </Button>
-        </PageHeader>
-
+        }
+        className="max-w-3xl"
+      >
         <TemplateGallery
           templates={templates}
           loading={loadingTemplates}
           onSelect={handleSelectTemplate}
         />
-      </div>
+      </PageShell>
     )
   }
 
   // ── Step 2c: Manual form ─────────────────────────────────────────────────────
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
-      <PageHeader title="New Crew" description="Create a new crew from scratch">
+    <PageShell
+      title="New Crew"
+      description="Create a new crew from scratch"
+      actions={
         <Button variant="outline" size="sm" onClick={() => setMode("choose")}>
           <ArrowLeft className="mr-2 h-4 w-4" />Back
         </Button>
-      </PageHeader>
-
-      <form onSubmit={handleManualSubmit} className="space-y-4 sm:space-y-6">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Crew Details</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      }
+      className="max-w-3xl"
+    >
+      <form onSubmit={handleManualSubmit} className="space-y-6">
+        <SectionCard title="Crew Details">
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="name">Name *</Label>
                 <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Marketing" required />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="slug">Slug *</Label>
-                <Input id="slug" value={slug} onChange={(e) => { setSlugManual(true); setSlug(slugify(e.target.value)) }} placeholder="marketing" className="font-mono text-sm" required />
+                <Input id="slug" value={slug} onChange={(e) => { setSlugManual(true); setSlug(slugify(e.target.value)) }} placeholder="marketing" className="font-mono text-body" required />
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
               <Textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What is this crew responsible for?" rows={3} />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
-        <Card>
-          <CardHeader><CardTitle className="text-base">Appearance</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <SectionCard title="Appearance">
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Color</Label>
                 <div className="flex items-center gap-2" role="radiogroup" aria-label="Crew color">
@@ -665,8 +676,8 @@ export default function NewCrewPage() {
                 />
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
         <div className="flex items-center gap-3 pt-2">
           <Button type="submit" disabled={submitting || !workspaceId} className="gap-2">
@@ -676,6 +687,6 @@ export default function NewCrewPage() {
           <Button type="button" variant="outline" onClick={() => setMode("choose")}>Cancel</Button>
         </div>
       </form>
-    </div>
+    </PageShell>
   )
 }

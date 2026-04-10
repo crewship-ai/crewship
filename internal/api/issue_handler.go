@@ -107,27 +107,27 @@ func (h *IssueHandler) broadcastIssueEvent(wsID, eventType string, payload map[s
 // ── Response types ──────────────────────────────────────────────────────────
 
 type issueResponse struct {
-	ID           string          `json:"id"`
-	WorkspaceID  string          `json:"workspace_id"`
-	CrewID       string          `json:"crew_id"`
-	CrewName     string          `json:"crew_name,omitempty"`
-	CrewSlug     string          `json:"crew_slug,omitempty"`
-	Number       *int            `json:"number"`
-	Identifier   *string         `json:"identifier"`
-	Title        string          `json:"title"`
-	Description  *string         `json:"description"`
-	Status       string          `json:"status"`
-	Priority     string          `json:"priority"`
-	AssigneeType *string         `json:"assignee_type"`
-	AssigneeID   *string         `json:"assignee_id"`
-	AssigneeName *string         `json:"assignee_name,omitempty"`
-	DueDate      *string         `json:"due_date"`
-	SortOrder    float64         `json:"sort_order"`
-	MissionType  string          `json:"mission_type"`
-	LeadAgentID  string          `json:"lead_agent_id"`
-	CreatedAt    string          `json:"created_at"`
-	UpdatedAt    string          `json:"updated_at"`
-	CompletedAt  *string         `json:"completed_at"`
+	ID             string          `json:"id"`
+	WorkspaceID    string          `json:"workspace_id"`
+	CrewID         string          `json:"crew_id"`
+	CrewName       string          `json:"crew_name,omitempty"`
+	CrewSlug       string          `json:"crew_slug,omitempty"`
+	Number         *int            `json:"number"`
+	Identifier     *string         `json:"identifier"`
+	Title          string          `json:"title"`
+	Description    *string         `json:"description"`
+	Status         string          `json:"status"`
+	Priority       string          `json:"priority"`
+	AssigneeType   *string         `json:"assignee_type"`
+	AssigneeID     *string         `json:"assignee_id"`
+	AssigneeName   *string         `json:"assignee_name,omitempty"`
+	DueDate        *string         `json:"due_date"`
+	SortOrder      float64         `json:"sort_order"`
+	MissionType    string          `json:"mission_type"`
+	LeadAgentID    string          `json:"lead_agent_id"`
+	CreatedAt      string          `json:"created_at"`
+	UpdatedAt      string          `json:"updated_at"`
+	CompletedAt    *string         `json:"completed_at"`
 	Labels         []labelResponse `json:"labels"`
 	ProjectID      *string         `json:"project_id"`
 	ProjectName    *string         `json:"project_name,omitempty"`
@@ -146,10 +146,10 @@ type labelResponse struct {
 }
 
 type relationResponse struct {
-	ID           string  `json:"id"`
-	SourceID     string  `json:"source_id"`
-	TargetID     string  `json:"target_id"`
-	RelationType string  `json:"relation_type"`
+	ID           string `json:"id"`
+	SourceID     string `json:"source_id"`
+	TargetID     string `json:"target_id"`
+	RelationType string `json:"relation_type"`
 	// Resolved target info
 	TargetIdentifier *string `json:"target_identifier,omitempty"`
 	TargetTitle      string  `json:"target_title,omitempty"`

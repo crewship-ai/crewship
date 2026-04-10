@@ -1,13 +1,20 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Activity, Clock, AlertTriangle, CheckCircle, XCircle, Play, ExternalLink } from "lucide-react"
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle,
+  ExternalLink,
+  ListOrdered,
+  Play,
+  XCircle,
+} from "lucide-react"
 import { RocketIcon as AnimatedRocket } from "@/components/ui/rocket"
-import { AnimatedNumber } from "@/components/ui/animated-number"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { PageHeader } from "@/components/layout/page-header"
+import { PageShell } from "@/components/layout/page-shell"
 import { EmptyState } from "@/components/layout/empty-state"
+import { StatusBadge, StatusDot } from "@/components/ui/status-badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Table,
@@ -27,6 +34,7 @@ import {
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 import Link from "next/link"
+
 interface Run {
   id: string
   agent_id: string
@@ -49,13 +57,35 @@ interface RunsResponse {
   pagination: { page: number; limit: number; total: number; total_pages: number }
 }
 
-const statusConfig: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ElementType }> = {
-  PENDING: { label: "Pending", variant: "outline", icon: Clock },
-  RUNNING: { label: "Running", variant: "default", icon: Play },
-  COMPLETED: { label: "Completed", variant: "secondary", icon: CheckCircle },
-  FAILED: { label: "Failed", variant: "destructive", icon: XCircle },
-  CANCELLED: { label: "Cancelled", variant: "outline", icon: XCircle },
-  TIMEOUT: { label: "Timeout", variant: "destructive", icon: AlertTriangle },
+// Map run API status → canonical status used in lib/colors STATUS_BADGE_CLASSES.
+function toCanonicalStatus(status: string): string {
+  switch (status) {
+    case "RUNNING":
+      return "IN_PROGRESS"
+    case "TIMEOUT":
+      return "FAILED"
+    default:
+      return status
+  }
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case "PENDING":
+      return "Pending"
+    case "RUNNING":
+      return "Running"
+    case "COMPLETED":
+      return "Completed"
+    case "FAILED":
+      return "Failed"
+    case "CANCELLED":
+      return "Cancelled"
+    case "TIMEOUT":
+      return "Timeout"
+    default:
+      return status
+  }
 }
 
 function formatDuration(start: string | null, end: string | null): string {
@@ -125,80 +155,79 @@ export default function RunsPage() {
 
   const isLoading = wsLoading || loading
 
+  const stats = data
+    ? [
+        {
+          title: "Running Now",
+          value: data.stats.running,
+          subtitle: "live executions",
+          icon: Play,
+          iconClassName: "bg-primary/10 text-primary",
+        },
+        {
+          title: "Today's Runs",
+          value: data.stats.today,
+          subtitle: "last 24 hours",
+          icon: Activity,
+          iconClassName: "bg-muted text-muted-foreground",
+        },
+        {
+          title: "Failed",
+          value: data.stats.failed,
+          subtitle: "needs attention",
+          icon: XCircle,
+          iconClassName: "bg-destructive/10 text-destructive",
+        },
+        {
+          title: "Total",
+          value: data.pagination.total,
+          subtitle: "across workspace",
+          icon: ListOrdered,
+          iconClassName: "bg-muted text-muted-foreground",
+        },
+      ]
+    : undefined
+
+  const filters = (
+    <div className="flex items-center gap-3 flex-wrap">
+      <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <SelectTrigger className="w-[140px]">
+          <SelectValue placeholder="All Status" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Status</SelectItem>
+          <SelectItem value="RUNNING">Running</SelectItem>
+          <SelectItem value="COMPLETED">Completed</SelectItem>
+          <SelectItem value="FAILED">Failed</SelectItem>
+          <SelectItem value="CANCELLED">Cancelled</SelectItem>
+          <SelectItem value="TIMEOUT">Timeout</SelectItem>
+          <SelectItem value="PENDING">Pending</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select value={triggerFilter} onValueChange={setTriggerFilter}>
+        <SelectTrigger className="w-[140px]">
+          <SelectValue placeholder="All Triggers" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Triggers</SelectItem>
+          <SelectItem value="USER">User</SelectItem>
+          <SelectItem value="WEBHOOK">Webhook</SelectItem>
+          <SelectItem value="CRON">Schedule</SelectItem>
+          <SelectItem value="AGENT">Agent</SelectItem>
+          <SelectItem value="SYSTEM">System</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  )
+
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-      <PageHeader title="Runs" description="Cross-agent run activity across your workspace" />
-
+    <PageShell
+      title="Runs"
+      description="Cross-agent run activity across your workspace"
+      stats={stats}
+      toolbar={filters}
+    >
       {error && <p className="text-body text-destructive">{error}</p>}
-
-      {/* Stats */}
-      {data && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="text-label text-muted-foreground uppercase tracking-wide font-medium">Running Now</div>
-                {data.stats.running > 0 && (
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                  </span>
-                )}
-              </div>
-              <div className="text-title font-bold mt-1 text-emerald-600"><AnimatedNumber value={data.stats.running} /></div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-label text-muted-foreground uppercase tracking-wide font-medium">Today&apos;s Runs</div>
-              <div className="text-title font-bold mt-1"><AnimatedNumber value={data.stats.today} /></div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-label text-muted-foreground uppercase tracking-wide font-medium">Failed</div>
-              <div className="text-title font-bold mt-1 text-destructive"><AnimatedNumber value={data.stats.failed} /></div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="text-label text-muted-foreground uppercase tracking-wide font-medium">Total</div>
-              <div className="text-title font-bold mt-1"><AnimatedNumber value={data.pagination.total} /></div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="All Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="RUNNING">Running</SelectItem>
-            <SelectItem value="COMPLETED">Completed</SelectItem>
-            <SelectItem value="FAILED">Failed</SelectItem>
-            <SelectItem value="CANCELLED">Cancelled</SelectItem>
-            <SelectItem value="TIMEOUT">Timeout</SelectItem>
-            <SelectItem value="PENDING">Pending</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={triggerFilter} onValueChange={setTriggerFilter}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="All Triggers" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Triggers</SelectItem>
-            <SelectItem value="USER">User</SelectItem>
-            <SelectItem value="WEBHOOK">Webhook</SelectItem>
-            <SelectItem value="CRON">Schedule</SelectItem>
-            <SelectItem value="AGENT">Agent</SelectItem>
-            <SelectItem value="SYSTEM">System</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
 
       {isLoading ? (
         <div className="space-y-2">
@@ -230,12 +259,22 @@ export default function RunsPage() {
               </TableHeader>
               <TableBody>
                 {data.data.map((run) => {
-                  const config = statusConfig[run.status] ?? statusConfig.PENDING
-                  const StatusIcon = config.icon
+                  const canonicalStatus = toCanonicalStatus(run.status)
+                  const isRunning = run.status === "RUNNING"
+                  const StatusIcon =
+                    run.status === "COMPLETED"
+                      ? CheckCircle
+                      : run.status === "FAILED"
+                      ? XCircle
+                      : run.status === "TIMEOUT"
+                      ? AlertTriangle
+                      : run.status === "CANCELLED"
+                      ? XCircle
+                      : Play
 
                   return (
                     <TableRow key={run.id}>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
+                      <TableCell className="font-mono text-micro text-muted-foreground">
                         #{run.id.slice(0, 8)}
                       </TableCell>
                       <TableCell className="text-body font-medium">
@@ -251,17 +290,20 @@ export default function RunsPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={config.variant} className="gap-1.5 text-micro">
-                          {run.status === "RUNNING" ? (
-                            <span className="relative flex h-2 w-2 shrink-0">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                        <StatusBadge
+                          status={canonicalStatus}
+                          label={
+                            <span className="inline-flex items-center gap-1.5">
+                              {isRunning ? (
+                                <StatusDot status="IN_PROGRESS" live className="h-1.5 w-1.5" />
+                              ) : (
+                                <StatusIcon className="h-3 w-3" />
+                              )}
+                              {statusLabel(run.status)}
                             </span>
-                          ) : (
-                            <StatusIcon className="h-3 w-3" />
-                          )}
-                          {config.label}
-                        </Badge>
+                          }
+                          className="text-micro"
+                        />
                       </TableCell>
                       <TableCell className="text-label text-muted-foreground">
                         <span className="flex items-center gap-1.5">
@@ -269,8 +311,8 @@ export default function RunsPage() {
                           {run.trigger_type}
                         </span>
                       </TableCell>
-                      <TableCell className="font-mono text-xs tabular-nums">
-                        {run.status === "RUNNING" && run.started_at
+                      <TableCell className="font-mono text-micro tabular-nums">
+                        {isRunning && run.started_at
                           ? <LiveRunDuration startedAt={run.started_at} />
                           : formatDuration(run.started_at, run.finished_at)}
                       </TableCell>
@@ -295,6 +337,6 @@ export default function RunsPage() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </PageShell>
   )
 }

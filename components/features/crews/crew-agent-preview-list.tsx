@@ -15,11 +15,14 @@ interface PreviewAgent {
 
 function AgentRow({ agent }: { agent: PreviewAgent }) {
   const [open, setOpen] = useState(false)
+  const panelId = `agent-preview-${agent.slug}`
   return (
     <div className="rounded-lg border border-border overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={panelId}
         className="w-full flex items-center gap-3 p-3 text-left hover:bg-accent transition-colors"
       >
         <div className="flex-1 min-w-0">
@@ -34,7 +37,7 @@ function AgentRow({ agent }: { agent: PreviewAgent }) {
         <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
-        <div className="px-3 pb-3 border-t border-border bg-muted/30">
+        <div id={panelId} className="px-3 pb-3 border-t border-border bg-muted/30">
           <p className="text-xs text-muted-foreground mt-2 whitespace-pre-wrap leading-relaxed">{agent.system_prompt}</p>
         </div>
       )}

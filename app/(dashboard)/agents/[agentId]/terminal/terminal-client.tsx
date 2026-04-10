@@ -1,8 +1,9 @@
 "use client"
 
 import { useAgentDetail } from "@/hooks/use-agent-detail"
-import { Loader2, AlertTriangle } from "lucide-react"
+import { Loader2, AlertTriangle, TerminalSquare } from "lucide-react"
 import dynamic from "next/dynamic"
+import { EmptyState } from "@/components/layout/empty-state"
 
 const WebTerminal = dynamic(
   () => import("@/components/features/terminal/web-terminal").then((m) => m.WebTerminal),
@@ -22,29 +23,38 @@ export function TerminalPageClient() {
 
   if (error || !agent) {
     return (
-      <div className="flex flex-col items-center justify-center h-[60vh] gap-2 text-muted-foreground">
-        <AlertTriangle className="h-6 w-6" />
-        <p className="text-sm">Failed to load agent</p>
+      <div className="p-4 sm:p-6">
+        <EmptyState
+          icon={AlertTriangle}
+          title="Failed to load agent"
+          description="Refresh the page or check that the workspace is running."
+        />
       </div>
     )
   }
 
   if (!agent.crew_id || !agent.crew) {
     return (
-      <div className="flex flex-col items-center justify-center h-[60vh] gap-2 text-muted-foreground">
-        <AlertTriangle className="h-6 w-6" />
-        <p className="text-sm">Terminal requires agent to be in a crew</p>
+      <div className="p-4 sm:p-6">
+        <EmptyState
+          icon={TerminalSquare}
+          title="Terminal unavailable"
+          description="The terminal requires this agent to be assigned to a crew."
+        />
       </div>
     )
   }
 
   return (
-    <div className="h-[calc(100vh-8rem)]">
-      <WebTerminal
-        crewId={agent.crew_id}
-        crewSlug={agent.crew.slug}
-        defaultAgentSlug={agent.slug}
-      />
+    <div className="flex flex-col h-[calc(100vh-8rem)] p-4 sm:p-6 gap-4">
+      <h2 className="text-title font-semibold">Terminal</h2>
+      <div className="flex-1 min-h-0 rounded-lg border border-border overflow-hidden bg-card">
+        <WebTerminal
+          crewId={agent.crew_id}
+          crewSlug={agent.crew.slug}
+          defaultAgentSlug={agent.slug}
+        />
+      </div>
     </div>
   )
 }

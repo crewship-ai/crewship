@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "motion/react"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
+import { StatusBadge } from "@/components/ui/status-badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -54,22 +54,24 @@ function getDateFrom(range: string): string | undefined {
   }
 }
 
-const actionColors: Record<string, string> = {
-  created: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-  started: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-  completed: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
-  updated: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  rotated: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  invited: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  deleted: "bg-red-500/20 text-red-400 border-red-500/30",
-  failed: "bg-red-500/20 text-red-400 border-red-500/30",
+// Map audit action verbs → canonical StatusBadge keys so colors are routed
+// through STATUS_BADGE_CLASSES instead of hardcoded shade classes.
+const actionStatusKeys: Record<string, string> = {
+  created: "COMPLETED",
+  started: "COMPLETED",
+  completed: "COMPLETED",
+  updated: "IN_PROGRESS",
+  rotated: "BLOCKED",
+  invited: "IN_PROGRESS",
+  deleted: "FAILED",
+  failed: "FAILED",
 }
 
-function getActionColor(action: string): string {
-  for (const [key, cls] of Object.entries(actionColors)) {
-    if (action.includes(key)) return cls
+function getActionStatusKey(action: string): string {
+  for (const [key, statusKey] of Object.entries(actionStatusKeys)) {
+    if (action.includes(key)) return statusKey
   }
-  return "bg-white/[0.06] text-muted-foreground border-white/[0.08]"
+  return "PENDING"
 }
 
 const PAGE_SIZE = 50
@@ -188,10 +190,10 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
               aria-pressed={category === cat.value}
               onClick={() => handleCategoryChange(cat.value)}
               className={cn(
-                "h-7 px-2.5 rounded-[4px] text-[11px] font-medium transition-colors",
+                "h-7 px-2.5 rounded-md text-label font-medium transition-colors",
                 category === cat.value
-                  ? "bg-white/[0.08] text-foreground"
-                  : "text-muted-foreground/50 hover:text-foreground/80 hover:bg-white/[0.03]",
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/60",
               )}
             >
               {cat.label}
@@ -200,7 +202,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         </div>
         <div className="flex items-center gap-2">
           <Select value={dateRange} onValueChange={handleDateRangeChange}>
-            <SelectTrigger aria-label="Date range" className="w-[120px] h-7 text-[11px] bg-white/[0.03] border-white/[0.08]">
+            <SelectTrigger aria-label="Date range" className="w-[120px] h-7 text-label">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -210,11 +212,11 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
             </SelectContent>
           </Select>
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/40" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               aria-label="Filter events on this page"
               placeholder="Filter this page..."
-              className="pl-8 h-7 text-[11px] w-44 bg-white/[0.03] border-white/[0.08]"
+              className="pl-8 h-7 text-label w-44"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -224,35 +226,35 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
 
       {/* Error with stale data */}
       {error && logs.length > 0 && (
-        <Card className="border-red-500/20">
+        <Card className="border-destructive/30">
           <CardContent className="p-4">
-            <p role="alert" className="text-[12px] text-red-400">{error}</p>
+            <p role="alert" className="text-label text-destructive">{error}</p>
           </CardContent>
         </Card>
       )}
 
       {/* Content */}
       {loading ? (
-        <Card className="border-white/[0.06]">
+        <Card>
           <CardContent className="p-0">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className={cn("px-5 py-3.5", i < 4 && "border-b border-white/[0.04]")}>
+              <div key={i} className={cn("px-5 py-3.5", i < 4 && "border-b border-border/40")}>
                 <Skeleton className="h-4 w-full" />
               </div>
             ))}
           </CardContent>
         </Card>
       ) : error ? (
-        <Card className="border-red-500/20">
+        <Card className="border-destructive/30">
           <CardContent className="p-6 text-center">
-            <p role="alert" className="text-[13px] text-red-400 mb-3">{error}</p>
-            <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={fetchLogs}>
+            <p role="alert" className="text-body text-destructive mb-3">{error}</p>
+            <Button variant="outline" size="sm" className="h-7 text-label" onClick={fetchLogs}>
               Retry
             </Button>
           </CardContent>
         </Card>
       ) : filteredLogs.length === 0 ? (
-        <Card className="border-white/[0.06]">
+        <Card>
           <CardContent className="p-8">
             <EmptyState
               icon={Shield}
@@ -263,7 +265,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         </Card>
       ) : (
         <>
-          <Card className="border-white/[0.06] overflow-hidden">
+          <Card className="overflow-hidden p-0">
             <CardContent className="p-0">
               {filteredLogs.map((log, idx) => {
                 const isExpanded = expandedId === log.id
@@ -276,37 +278,35 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                       aria-controls={`audit-detail-${log.id}`}
                       className={cn(
                         "flex w-full items-center justify-between gap-4 px-5 py-3.5 min-h-[48px] cursor-pointer transition-colors text-left",
-                        !isLast && !isExpanded && "border-b border-white/[0.04]",
-                        isExpanded ? "bg-white/[0.03]" : "hover:bg-white/[0.02]",
+                        !isLast && !isExpanded && "border-b border-border/40",
+                        isExpanded ? "bg-surface-subtle" : "hover:bg-muted/40",
                       )}
                       onClick={() => setExpandedId(isExpanded ? null : log.id)}
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <ChevronRight
                           className={cn(
-                            "h-3 w-3 shrink-0 text-muted-foreground/40 transition-transform duration-150",
+                            "h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150",
                             isExpanded && "rotate-90",
                           )}
                         />
-                        <span className="text-[11px] text-muted-foreground/50 font-mono tabular-nums shrink-0">
+                        <span className="text-label text-muted-foreground font-mono tabular-nums shrink-0">
                           {new Date(log.created_at).toLocaleString()}
                         </span>
-                        <span className="text-[12px] text-foreground truncate">
+                        <span className="text-body text-foreground truncate">
                           {log.user?.full_name ?? log.user?.email ?? "System"}
                         </span>
                       </div>
                       <div className="flex items-center gap-2.5 shrink-0">
-                        <Badge
-                          variant="outline"
-                          className={cn("text-[9px] font-medium", getActionColor(log.action))}
-                        >
-                          {log.action}
-                        </Badge>
-                        <span className="text-[12px] text-muted-foreground/60">
+                        <StatusBadge
+                          status={getActionStatusKey(log.action)}
+                          label={log.action}
+                        />
+                        <span className="text-label text-muted-foreground">
                           {log.entity_type}
                         </span>
                         {log.entity_id && (
-                          <span className="font-mono text-[10px] text-muted-foreground/30">
+                          <span className="font-mono text-micro text-muted-foreground">
                             {log.entity_id.slice(0, 8)}
                           </span>
                         )}
@@ -323,31 +323,31 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                           exit={{ height: 0, opacity: 0 }}
                           transition={{ duration: 0.15, ease: "easeInOut" }}
                           className={cn(
-                            "overflow-hidden bg-white/[0.02]",
-                            !isLast && "border-b border-white/[0.04]",
+                            "overflow-hidden bg-surface-subtle",
+                            !isLast && "border-b border-border/40",
                           )}
                         >
                           <div className="px-5 py-4 pl-11">
-                            <div className="bg-white/[0.02] border border-white/[0.06] rounded-md p-4 max-w-2xl">
-                              <div className="grid grid-cols-2 gap-4 text-[11px] mb-3">
+                            <div className="bg-background border border-border rounded-md p-4 max-w-2xl">
+                              <div className="grid grid-cols-2 gap-4 text-label mb-3">
                                 <div>
-                                  <span className="text-muted-foreground/50 uppercase tracking-wider text-[10px]">IP Address</span>
+                                  <span className="text-muted-foreground uppercase tracking-wider text-micro">IP Address</span>
                                   <div className="font-mono text-foreground mt-0.5">{log.ip_address ?? "\u2014"}</div>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground/50 uppercase tracking-wider text-[10px]">User Agent</span>
+                                  <span className="text-muted-foreground uppercase tracking-wider text-micro">User Agent</span>
                                   <div className="font-mono text-foreground mt-0.5 truncate">{log.user_agent ?? "\u2014"}</div>
                                 </div>
                               </div>
                               {log.metadata && Object.keys(log.metadata).length > 0 && (
                                 <>
-                                  <div className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider mb-1.5">Metadata</div>
-                                  <pre className="bg-white/[0.02] border border-white/[0.06] rounded p-2.5 text-[11px] font-mono text-muted-foreground overflow-auto max-h-28">
+                                  <div className="text-micro font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Metadata</div>
+                                  <pre className="bg-background border border-border rounded p-2.5 text-label font-mono text-muted-foreground overflow-auto max-h-28">
                                     {JSON.stringify(log.metadata, null, 2)}
                                   </pre>
                                 </>
                               )}
-                              <div className="flex items-center gap-1.5 mt-3 text-[10px] text-muted-foreground/40">
+                              <div className="flex items-center gap-1.5 mt-3 text-micro text-muted-foreground">
                                 <Shield className="h-3 w-3" />
                                 This record is immutable.
                               </div>
@@ -365,14 +365,14 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
           {/* Pagination */}
           {total > 0 && (
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-muted-foreground/40">
+              <span className="text-label text-muted-foreground">
                 Showing {rangeStart}-{rangeEnd} of {total}
               </span>
               <div className="flex items-center gap-1.5">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 text-[11px] px-2.5 border-white/[0.08] bg-white/[0.03]"
+                  className="h-7 text-label px-2.5"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
@@ -382,7 +382,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 text-[11px] px-2.5 border-white/[0.08] bg-white/[0.03]"
+                  className="h-7 text-label px-2.5"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => p + 1)}
                 >

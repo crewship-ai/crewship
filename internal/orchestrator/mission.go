@@ -34,7 +34,7 @@ type DispatchRequest struct {
 	Task         string
 	TraceID      string // mission trace ID for end-to-end observability
 	MissionID    string
-	LeadPlanning bool   // when true, dispatch as LEAD with sidecar (for task planning phase)
+	LeadPlanning bool // when true, dispatch as LEAD with sidecar (for task planning phase)
 }
 
 // MissionEngine manages the lifecycle of missions and their tasks.
@@ -69,7 +69,7 @@ type EscalationConfig struct {
 }
 
 const (
-	circuitBreakerThreshold = 3     // consecutive failures before tripping
+	circuitBreakerThreshold = 3 // consecutive failures before tripping
 	maxResultSummaryLen     = 8000
 	maxBriefTotalLen        = 32000 // total brief size cap (bytes) to avoid LLM token budget issues
 	maxDepOutputLen         = 4000  // per-dependency output truncation

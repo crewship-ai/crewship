@@ -3,8 +3,8 @@ package api
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -183,10 +183,14 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if missionExists == 1 {
 		var assignerName string
 		_ = h.db.QueryRowContext(r.Context(), `SELECT name FROM agents WHERE id = ?`, assignedByID).Scan(&assignerName)
-		if assignerName == "" { assignerName = "Lead" }
+		if assignerName == "" {
+			assignerName = "Lead"
+		}
 
 		taskPreview := body.Task
-		if len(taskPreview) > 300 { taskPreview = taskPreview[:300] + "..." }
+		if len(taskPreview) > 300 {
+			taskPreview = taskPreview[:300] + "..."
+		}
 
 		// Comment
 		commentID := generateCUID()

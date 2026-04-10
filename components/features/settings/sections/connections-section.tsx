@@ -5,7 +5,8 @@ import {
   Link2, Unlink2, ArrowLeftRight, ArrowRight, Loader2, Trash2,
 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { StatusBadge } from "@/components/ui/status-badge"
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
@@ -55,12 +56,12 @@ function Row({ label, description, children, border = true }: {
   return (
     <div className={cn(
       "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
-      border && "border-b border-white/[0.04] last:border-b-0",
+      border && "border-b border-border/40 last:border-b-0",
     )}>
       {label ? (
         <div className="shrink-0">
-          <div className="text-[13px] text-foreground">{label}</div>
-          {description && <div className="text-[11px] text-muted-foreground/30 mt-0.5">{description}</div>}
+          <div className="text-body text-foreground">{label}</div>
+          {description && <div className="text-label text-muted-foreground mt-0.5">{description}</div>}
         </div>
       ) : <div />}
       <div className="flex items-center gap-2 min-w-0 justify-end">{children}</div>
@@ -190,15 +191,15 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     <div className="space-y-6">
       {/* Create Connection */}
       <div>
-        <h4 className="text-[13px] font-medium text-foreground mb-3">Create Connection</h4>
-        <Card className="border-white/[0.06] bg-white/[0.02]">
+        <h4 className="text-heading font-medium text-foreground mb-3">Create Connection</h4>
+        <Card>
           <CardContent className="p-0">
             <Row label="From" description="Source crew">
               <Select value={fromCrewId} onValueChange={(v) => {
                 setFromCrewId(v)
                 if (v === toCrewId) setToCrewId("")
               }}>
-                <SelectTrigger className="w-[200px] h-[30px] text-[12px] bg-white/[0.03] border-white/[0.06]">
+                <SelectTrigger className="w-[200px] h-[30px] text-label">
                   <SelectValue placeholder="Select crew" />
                 </SelectTrigger>
                 <SelectContent>
@@ -215,15 +216,15 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
             </Row>
 
             <Row label="Direction" description="How tasks can flow">
-              <div className="flex rounded-md overflow-hidden border border-white/[0.08]">
+              <div className="flex rounded-md overflow-hidden border border-border">
                 <button
                   type="button"
                   onClick={() => setDirection("bidirectional")}
                   className={cn(
-                    "flex items-center gap-1.5 px-3 h-[30px] text-[11px] font-medium transition-colors",
+                    "flex items-center gap-1.5 px-3 h-[30px] text-label font-medium transition-colors",
                     direction === "bidirectional"
-                      ? "bg-white/[0.08] text-foreground"
-                      : "bg-transparent text-muted-foreground/50 hover:text-muted-foreground/70",
+                      ? "bg-accent text-foreground"
+                      : "bg-transparent text-muted-foreground hover:text-foreground",
                   )}
                 >
                   <ArrowLeftRight className="size-3" />
@@ -233,10 +234,10 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                   type="button"
                   onClick={() => setDirection("unidirectional")}
                   className={cn(
-                    "flex items-center gap-1.5 px-3 h-[30px] text-[11px] font-medium transition-colors border-l border-white/[0.08]",
+                    "flex items-center gap-1.5 px-3 h-[30px] text-label font-medium transition-colors border-l border-border",
                     direction === "unidirectional"
-                      ? "bg-white/[0.08] text-foreground"
-                      : "bg-transparent text-muted-foreground/50 hover:text-muted-foreground/70",
+                      ? "bg-accent text-foreground"
+                      : "bg-transparent text-muted-foreground hover:text-foreground",
                   )}
                 >
                   <ArrowRight className="size-3" />
@@ -247,7 +248,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
 
             <Row label="To" description="Target crew">
               <Select value={toCrewId} onValueChange={setToCrewId} disabled={!fromCrewId}>
-                <SelectTrigger className="w-[200px] h-[30px] text-[12px] bg-white/[0.03] border-white/[0.06]">
+                <SelectTrigger className="w-[200px] h-[30px] text-label">
                   <SelectValue placeholder={fromCrewId ? "Select crew" : "Select source first"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -264,24 +265,19 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
             </Row>
 
             <Row border={false}>
-              <button
+              <Button
                 type="button"
+                size="sm"
                 disabled={!canConnect}
                 onClick={handleConnect}
-                className={cn(
-                  "h-[26px] px-2.5 rounded-[4px] text-[11px] font-medium inline-flex items-center gap-1.5 transition-colors",
-                  "bg-blue-500/15 border border-blue-500/35 text-blue-400",
-                  "hover:bg-blue-500/25",
-                  "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-500/15",
-                )}
               >
                 {connecting ? (
-                  <Loader2 className="size-3 animate-spin" />
+                  <Loader2 className="mr-1.5 size-3 animate-spin" />
                 ) : (
-                  <Link2 className="size-3" />
+                  <Link2 className="mr-1.5 size-3" />
                 )}
                 Connect
-              </button>
+              </Button>
             </Row>
           </CardContent>
         </Card>
@@ -289,7 +285,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
 
       {/* Active Connections */}
       <div>
-        <h4 className="text-[13px] font-medium text-foreground mb-3">Active Connections</h4>
+        <h4 className="text-heading font-medium text-foreground mb-3">Active Connections</h4>
         {connections.length === 0 ? (
           <EmptyState
             icon={Unlink2}
@@ -297,7 +293,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
             description="Connect crews to enable cross-crew task dispatch in missions."
           />
         ) : (
-          <Card className="border-white/[0.06] bg-white/[0.02]">
+          <Card>
             <CardContent className="p-0">
               {connections.map((conn, i) => {
                 const fromCrew = crewMap.get(conn.from_crew_id)
@@ -308,45 +304,36 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
 
                 return (
                   <Row key={conn.id} border={!isLast}>
-                    <div className="flex items-center gap-2 text-[12px] text-foreground min-w-0">
+                    <div className="flex items-center gap-2 text-body text-foreground min-w-0">
                       <CrewDot color={fromCrew?.color} />
                       <span className="truncate">{conn.from_crew_name}</span>
                       {conn.direction === "bidirectional" ? (
-                        <ArrowLeftRight className="size-3 text-muted-foreground/40 shrink-0" />
+                        <ArrowLeftRight className="size-3 text-muted-foreground shrink-0" />
                       ) : (
-                        <ArrowRight className="size-3 text-muted-foreground/40 shrink-0" />
+                        <ArrowRight className="size-3 text-muted-foreground shrink-0" />
                       )}
                       <CrewDot color={toCrew?.color} />
                       <span className="truncate">{conn.to_crew_name}</span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "text-[10px] px-1.5 py-0 h-[18px] border",
-                          isActive
-                            ? "border-emerald-500/30 text-emerald-400 bg-emerald-500/10"
-                            : "border-white/[0.08] text-muted-foreground/50 bg-white/[0.02]",
-                        )}
-                      >
-                        {conn.status}
-                      </Badge>
-                      <button
+                      <StatusBadge
+                        status={isActive ? "COMPLETED" : "PENDING"}
+                        label={conn.status}
+                      />
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon"
                         disabled={isDisconnecting}
                         onClick={() => handleDisconnect(conn.id)}
-                        className={cn(
-                          "size-6 inline-flex items-center justify-center rounded-[4px] transition-colors",
-                          "text-muted-foreground/40 hover:text-red-400 hover:bg-red-500/10",
-                          "disabled:opacity-40 disabled:cursor-not-allowed",
-                        )}
+                        className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                       >
                         {isDisconnecting ? (
                           <Loader2 className="size-3 animate-spin" />
                         ) : (
                           <Trash2 className="size-3" />
                         )}
-                      </button>
+                      </Button>
                     </div>
                   </Row>
                 )
