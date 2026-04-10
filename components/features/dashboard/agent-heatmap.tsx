@@ -79,7 +79,9 @@ export function AgentHeatmap({ agents, buckets }: AgentHeatmapProps) {
                 return (
                   <div
                     key={b.ts}
+                    role="img"
                     title={`@${a.slug} · ${new Date(b.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · ${v} task${v === 1 ? "" : "s"}`}
+                    aria-label={`@${a.slug} at ${new Date(b.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: ${v} task${v === 1 ? "" : "s"}`}
                     className={cn(
                       "h-[14px] rounded-[2px] transition-colors",
                       intensity === 0 && "bg-white/[0.03]",

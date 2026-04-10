@@ -132,14 +132,26 @@ export function ActivityFeed() {
 
   if (entries.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[240px] text-[11px] text-muted-foreground/50">
+      <div
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label="Live workspace activity feed"
+        className="flex items-center justify-center h-[240px] text-[11px] text-muted-foreground/50"
+      >
         Waiting for activity…
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto pr-1 -mr-1">
+    <div
+      role="log"
+      aria-live="polite"
+      aria-relevant="additions"
+      aria-label="Live workspace activity feed"
+      className="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto pr-1 -mr-1"
+    >
       <AnimatePresence initial={false}>
         {entries.map((e) => (
           <motion.div

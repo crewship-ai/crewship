@@ -174,9 +174,16 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
         </SettingsRow>
 
         <SettingsRow label="Direction" description="How tasks can flow">
-          <div className="flex rounded-md overflow-hidden border border-border/60">
+          <div
+            className="flex rounded-md overflow-hidden border border-border/60"
+            role="radiogroup"
+            aria-label="Connection direction"
+          >
             <button
               type="button"
+              role="radio"
+              aria-checked={direction === "bidirectional"}
+              aria-pressed={direction === "bidirectional"}
               onClick={() => setDirection("bidirectional")}
               className={cn(
                 "flex items-center gap-1.5 px-2.5 h-7 text-xs font-medium transition-colors",
@@ -190,6 +197,9 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
             </button>
             <button
               type="button"
+              role="radio"
+              aria-checked={direction === "unidirectional"}
+              aria-pressed={direction === "unidirectional"}
               onClick={() => setDirection("unidirectional")}
               className={cn(
                 "flex items-center gap-1.5 px-2.5 h-7 text-xs font-medium transition-colors border-l border-border/60",
@@ -293,6 +303,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                     size="icon"
                     disabled={isDisconnecting}
                     onClick={() => handleDisconnect(conn.id)}
+                    aria-label={`Disconnect ${conn.from_crew_name} ${conn.direction === "bidirectional" ? "↔" : "→"} ${conn.to_crew_name}`}
                     className="h-6 w-6 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                   >
                     {isDisconnecting ? (

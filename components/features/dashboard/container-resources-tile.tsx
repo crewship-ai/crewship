@@ -2,12 +2,15 @@
 
 import * as React from "react"
 import { cn } from "@/lib/utils"
+import { Progress } from "@/components/ui/progress"
+import { getCrewBgClass, resolveCrewColor } from "@/lib/colors"
 
 export interface ContainerStatsEntry {
   container_id: string
   crew_id: string
   crew_slug?: string | null
   crew_name?: string | null
+  /** Crew palette ID from lib/colors.ts (e.g. "blue", "emerald"). */
   crew_color?: string | null
   cpu_percent: number
   memory_used: number
@@ -22,7 +25,11 @@ interface ContainerResourcesTileProps {
   entries: ContainerStatsEntry[]
 }
 
-/** Dark dashboard tile showing live container resource utilisation per crew. */
+/**
+ * Dark dashboard tile showing live container resource utilisation per crew.
+ * Uses the shared crew palette helpers (`getCrewBgClass` / `resolveCrewColor`)
+ * so crew colors never drift from lib/colors.ts.
+ */
 export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps) {
   if (entries.length === 0) {
     return (
@@ -37,7 +44,10 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
       {entries.map((e) => {
         const memMB = Math.round(e.memory_used / 1024 / 1024)
         const memLimitMB = Math.round(e.memory_limit / 1024 / 1024)
-        const color = crewColorCSS(e.crew_color)
+        // Tailwind class for HTML fills (dot, memory bar)
+        const bgClass = getCrewBgClass(e.crew_color)
+        // Hex value for SVG stroke/fill (polyline can't take a Tailwind class)
+        const strokeHex = resolveCrewColor(e.crew_color)
         const status =
           e.cpu_percent > 80 ? "hot"
             : e.cpu_percent > 30 ? "running"
@@ -46,20 +56,22 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
         return (
           <div
             key={e.container_id}
-            className="md:grid md:items-center md:gap-3 md:py-2.5 md:border-b md:border-border/60 md:last:border-b-0 p-3 rounded-lg border border-border/60 bg-card/60 md:bg-transparent md:p-0 md:rounded-none md:border-x-0 md:border-t-0"
-            style={{
-              gridTemplateColumns: "60px 1fr 86px 156px 74px",
-            }}
+            className={cn(
+              "md:items-center md:gap-3 md:py-2.5 md:border-b md:border-border/60 md:last:border-b-0",
+              "p-3 rounded-lg border border-border/60 bg-card/60",
+              "md:grid md:bg-transparent md:p-0 md:rounded-none md:border-x-0 md:border-t-0",
+              "md:grid-cols-[60px_1fr_86px_156px_74px]",
+            )}
           >
             {/* Desktop: single row, Mobile: header + body */}
             <div className="flex items-center gap-2 text-[11px] font-medium">
-              <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: color }} />
+              <span className={cn("w-2 h-2 rounded-sm shrink-0", bgClass)} />
               {nameLabel}
               <StatusPill status={status} className="ml-auto md:hidden" />
             </div>
 
             <div className="mt-2 md:mt-0">
-              <CpuSparkline history={e.cpu_history ?? []} color={color} />
+              <CpuSparkline history={e.cpu_history ?? []} color={strokeHex} />
             </div>
 
             <div className={cn("hidden md:block text-[10px] font-mono tabular-nums", e.cpu_percent > 80 && "text-red-400")}>
@@ -75,18 +87,14 @@ export function ContainerResourcesTile({ entries }: ContainerResourcesTileProps)
 
             {/* Desktop: memory bar column */}
             <div className="hidden md:block min-w-0">
-              <div className="relative h-[3px] rounded-full bg-white/[0.05] overflow-hidden">
-                <div
-                  className={cn(
-                    "absolute inset-y-0 left-0 rounded-full transition-all",
-                    e.memory_percent > 85 && "bg-red-400",
-                  )}
-                  style={{
-                    width: `${Math.min(100, e.memory_percent)}%`,
-                    background: e.memory_percent > 85 ? undefined : color,
-                  }}
-                />
-              </div>
+              <Progress
+                value={Math.min(100, e.memory_percent)}
+                className="h-[3px] bg-white/[0.05]"
+                indicatorClassName={cn(
+                  "transition-all",
+                  e.memory_percent > 85 ? "bg-red-400" : bgClass,
+                )}
+              />
               <div className="text-[10px] font-mono text-muted-foreground mt-1 tabular-nums">
                 {memMB} / {memLimitMB} MB · {e.pids} PIDs
               </div>
@@ -107,7 +115,7 @@ function CpuSparkline({ history, color }: { history: number[]; color: string }) 
   const H = 22
   if (history.length < 2) {
     return (
-      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden>
         <line x1="0" y1={H - 2} x2={W} y2={H - 2} stroke="rgba(255,255,255,0.08)" strokeWidth="1" strokeDasharray="2 3" />
       </svg>
     )
@@ -121,7 +129,7 @@ function CpuSparkline({ history, color }: { history: number[]; color: string }) 
   const linePath = points.join(" ")
   const areaPath = `0,${H} ${linePath} ${W},${H}`
   return (
-    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+    <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden>
       <polyline points={areaPath} fill={color} fillOpacity="0.15" stroke="none" />
       <polyline points={linePath} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
@@ -139,20 +147,4 @@ function StatusPill({ status, className }: { status: "hot" | "running" | "idle";
       {cfg.label}
     </span>
   )
-}
-
-// Map crew color palette ID → a CSS color string. Matches the palette IDs
-// used in lib/colors.ts (blue, emerald, violet, amber, rose, cyan, lime, fuchsia).
-function crewColorCSS(color: string | null | undefined): string {
-  switch (color) {
-    case "blue":    return "rgb(96, 165, 250)"
-    case "emerald": return "rgb(52, 211, 153)"
-    case "violet":  return "rgb(167, 139, 250)"
-    case "amber":   return "rgb(251, 191, 36)"
-    case "rose":    return "rgb(251, 113, 133)"
-    case "cyan":    return "rgb(34, 211, 238)"
-    case "lime":    return "rgb(163, 230, 53)"
-    case "fuchsia": return "rgb(232, 121, 249)"
-    default:        return "rgb(148, 163, 184)"
-  }
 }

@@ -230,7 +230,7 @@ func (o *Orchestrator) GetOrCreateContainer(ctx context.Context, crewSlug, crewI
 		Slug: crewSlug,
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("ensure crew runtime for crew %s (workspace %s): %w", crewID, workspaceID, err)
 	}
 	// Register for stats streaming. Without this, the direct-run path (server
 	// routes.go handleAgentStart) is the only thing that registers containers,

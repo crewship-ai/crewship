@@ -2,13 +2,17 @@
 
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { Progress } from "@/components/ui/progress"
+import { getCrewBgClass } from "@/lib/colors"
 
 export interface TopMissionEntry {
   id: string
   identifier: string | null
   title: string
   crew_id: string
-  crew_color: string
+  /** Crew palette ID (e.g. "blue", "emerald"). Resolved to a Tailwind bg class
+   *  via `getCrewBgClass()`. Pass null/undefined to fall back to slate. */
+  crew_color: string | null
   cost: number
   href?: string
 }
@@ -28,6 +32,8 @@ function formatUsd(n: number): string {
 /**
  * Horizontal bar list of the highest-cost missions in the window.
  * Bars are normalised to the max value so the widest bar hits 100%.
+ * Zero-cost entries render an empty bar (no 4 % minimum) — a visible bar
+ * for $0.00 was misleading, it implied spend where none existed.
  */
 export function TopMissionsChart({ missions, format = formatUsd, emptyLabel = "No missions with cost data yet" }: TopMissionsChartProps) {
   if (missions.length === 0) {
@@ -43,7 +49,14 @@ export function TopMissionsChart({ missions, format = formatUsd, emptyLabel = "N
   return (
     <div className="flex flex-col gap-2">
       {missions.map((m) => {
-        const pct = Math.max(4, (m.cost / max) * 100)
+        // Zero-cost entries stay at 0 % — the old `Math.max(4, ...)` floor
+        // was a visual lie. Small but non-zero values get a 4 % floor so the
+        // bar stays visible.
+        const ratio = m.cost > 0 ? (m.cost / max) * 100 : 0
+        const pct = ratio > 0
+          ? Math.max(4, Math.min(100, ratio))
+          : 0
+        const indicatorClass = getCrewBgClass(m.crew_color)
         const content = (
           <>
             <div className="flex items-center gap-2 text-[11px]">
@@ -55,12 +68,11 @@ export function TopMissionsChart({ missions, format = formatUsd, emptyLabel = "N
                 {format(m.cost)}
               </span>
             </div>
-            <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden mt-1">
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{ width: `${pct}%`, background: m.crew_color }}
-              />
-            </div>
+            <Progress
+              value={pct}
+              className="h-1 bg-white/[0.06] mt-1"
+              indicatorClassName={cn(indicatorClass, "transition-all duration-500")}
+            />
           </>
         )
         return m.href ? (

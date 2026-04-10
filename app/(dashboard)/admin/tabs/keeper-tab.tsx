@@ -239,10 +239,7 @@ export const KeeperTab = React.memo(function KeeperTab({
             ) : (
               <>
                 {/* Desktop header */}
-                <div
-                  className="hidden md:grid items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 border-b border-border/60"
-                  style={{ gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1.4fr) 70px 90px 60px 120px" }}
-                >
+                <div className="hidden md:grid md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_70px_90px_60px_120px] items-center gap-3 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 border-b border-border/60">
                   <div>Agent</div>
                   <div>Credential</div>
                   <div>Type</div>
@@ -257,26 +254,28 @@ export const KeeperTab = React.memo(function KeeperTab({
                     type="button"
                     onClick={() => onSelectKeeperEntry(entry)}
                     className={cn(
-                      "grid items-center gap-3 w-full px-4 py-2 text-left hover:bg-white/[0.02] transition-colors",
+                      "flex flex-col gap-1 md:grid md:grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_70px_90px_60px_120px] md:items-center md:gap-3 w-full px-4 py-2.5 text-left hover:bg-white/[0.02] transition-colors",
                       idx < keeperLog.length - 1 && "border-b border-border/40",
                     )}
-                    style={{ gridTemplateColumns: "minmax(0,1.2fr) minmax(0,1.4fr) 70px 90px 60px 120px" }}
                   >
                     <div className="text-xs font-medium truncate">{entry.agent_name}</div>
                     <div className="text-[11px] text-muted-foreground font-mono truncate">
                       {entry.credential_name}
                     </div>
                     <div className="text-[11px] text-muted-foreground">
+                      <span className="md:hidden text-muted-foreground/60">Type: </span>
                       {entry.request_type === "execute" ? "Execute" : "Access"}
                     </div>
-                    <div>
+                    <div className="flex items-center gap-2">
+                      <span className="md:hidden text-[11px] text-muted-foreground/60">Decision:</span>
                       <StatusBadge
                         status={decisionStatusKey(entry.decision)}
                         label={entry.decision ?? "PENDING"}
                         className="text-[10px]"
                       />
                     </div>
-                    <div className="text-[11px] text-muted-foreground font-mono text-right tabular-nums">
+                    <div className="text-[11px] text-muted-foreground font-mono md:text-right tabular-nums">
+                      <span className="md:hidden text-muted-foreground/60">Risk: </span>
                       {entry.risk_score != null ? `${entry.risk_score}/10` : "—"}
                     </div>
                     <div className="text-[11px] text-muted-foreground font-mono truncate">

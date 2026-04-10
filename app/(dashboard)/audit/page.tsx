@@ -146,10 +146,16 @@ export default function AuditPage() {
     fetchLogs()
   }, [fetchLogs])
 
-  // Reset page when filters change (otherwise user stays on e.g. page 4 of an empty filtered set)
-  useEffect(() => {
+  // Filter change handlers — reset page AND update filter in one batched update so
+  // only a single fetchLogs fires (separate effects would double-fetch).
+  const handleCategoryChange = useCallback((next: string) => {
+    setCategory(next)
     setPage(1)
-  }, [category, dateRange])
+  }, [])
+  const handleDateRangeChange = useCallback((next: string) => {
+    setDateRange(next)
+    setPage(1)
+  }, [])
 
   const isLoading = wsLoading || loading
 
@@ -234,7 +240,7 @@ export default function AuditPage() {
           {categories.map((cat) => (
             <button
               key={cat.value}
-              onClick={() => setCategory(cat.value)}
+              onClick={() => handleCategoryChange(cat.value)}
               className={cn(
                 "h-6 px-2.5 rounded text-[11px] font-medium transition-colors",
                 category === cat.value
@@ -248,7 +254,7 @@ export default function AuditPage() {
         </div>
 
         {/* Date range */}
-        <Select value={dateRange} onValueChange={setDateRange}>
+        <Select value={dateRange} onValueChange={handleDateRangeChange}>
           <SelectTrigger className="h-7 w-[140px] text-xs">
             <SelectValue />
           </SelectTrigger>

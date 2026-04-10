@@ -178,6 +178,11 @@ export default function DashboardPage() {
   }, [router])
 
   // ── Fetchers ────────────────────────────────────────────────────────
+  //
+  // Each fetch builds the next snapshot first, then commits it atomically.
+  // If any individual request fails, we still clear the matching slice so a
+  // workspace switch never leaves yesterday's data showing under today's
+  // workspace (use empty-state rather than stale state).
   const fetchData = useCallback(async (showLoading = true) => {
     if (!workspaceId) return
     if (showLoading) setLoading(true)
@@ -202,22 +207,35 @@ export default function DashboardPage() {
         fetch(`/api/v1/escalations/pending-count?workspace_id=${ws}`),
         fetch(`/api/v1/admin/keeper/requests?workspace_id=${ws}&limit=10`),
       ])
-      if (agentsRes.ok) setAgents(await agentsRes.json())
-      if (crewsRes.ok) setCrews(await crewsRes.json())
-      if (projectsRes.ok) setProjects(await projectsRes.json())
-      if (missionsRes.ok) setMissions(await missionsRes.json())
-      if (metricsRes.ok) setMetrics(await metricsRes.json())
-      if (runsRes.ok) setRunsData(await runsRes.json())
+      setAgents(agentsRes.ok ? await agentsRes.json() : [])
+      setCrews(crewsRes.ok ? await crewsRes.json() : [])
+      setProjects(projectsRes.ok ? await projectsRes.json() : [])
+      setMissions(missionsRes.ok ? await missionsRes.json() : [])
+      setMetrics(metricsRes.ok ? await metricsRes.json() : null)
+      setRunsData(runsRes.ok ? await runsRes.json() : null)
       if (escCountRes.ok) {
         const data = await escCountRes.json()
         setEscalationCount(Number(data?.count) || 0)
+      } else {
+        setEscalationCount(0)
       }
       if (keeperRes.ok) {
         const data = await keeperRes.json()
         setKeeperRequests(Array.isArray(data) ? data : (data?.data ?? []))
+      } else {
+        setKeeperRequests([])
       }
     } catch {
-      // silent — empty cards will show empty states
+      // Network-level failure — clear every slice so we don't keep showing
+      // another workspace's data. The UI renders its normal empty states.
+      setAgents([])
+      setCrews([])
+      setProjects([])
+      setMissions([])
+      setMetrics(null)
+      setRunsData(null)
+      setEscalationCount(0)
+      setKeeperRequests([])
     } finally {
       if (showLoading) setLoading(false)
     }
@@ -231,11 +249,20 @@ export default function DashboardPage() {
         fetch(`/api/v1/metrics/timeseries?workspace_id=${ws}&metric=issues_closed&window=24h&bucket=1h&group_by=crew`),
         fetch(`/api/v1/metrics/timeseries?workspace_id=${ws}&metric=cost_usd&window=7d&bucket=1d&group_by=none`),
       ])
-      if (thruRes.ok) setThroughputData(await thruRes.json())
-      if (costRes.ok) setCostData(await costRes.json())
+      setThroughputData(thruRes.ok ? await thruRes.json() : null)
+      setCostData(costRes.ok ? await costRes.json() : null)
     } catch {
-      // metrics endpoint may not be available yet; charts will show empty state
+      setThroughputData(null)
+      setCostData(null)
     }
+  }, [workspaceId])
+
+  // Reset workspace-scoped state when the user switches workspaces — otherwise
+  // state Maps like `containerStats` accumulate across workspace boundaries
+  // and the live resources tile would render the previous workspace's crews
+  // until a fresh container.stats frame arrives for the new one.
+  useEffect(() => {
+    setContainerStats(new Map())
   }, [workspaceId])
 
   useEffect(() => {
@@ -399,7 +426,9 @@ export default function DashboardPage() {
         identifier: m.identifier ?? null,
         title: m.title,
         crew_id: m.crew_id,
-        crew_color: crewColor(crew?.color),
+        // Pass crew palette ID (e.g. "blue"), not a raw hex — TopMissionsChart
+        // resolves it to a Tailwind bg class internally.
+        crew_color: crew?.color ?? null,
         cost: m.total_estimated_cost ?? 0,
         href: m.identifier ? `/orchestration/issues/${m.identifier}` : "/orchestration",
       }
