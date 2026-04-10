@@ -5,7 +5,7 @@ import { z } from "zod"
 import { Blocks, Search, AlertCircle } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { PageHeader } from "@/components/layout/page-header"
+import { PageShell } from "@/components/layout/page-shell"
 import { FilterBar } from "@/components/layout/filter-bar"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -137,14 +137,16 @@ export default function SkillsPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-5 sm:space-y-8">
-      <PageHeader title="Skills" description="Browse and manage agent capabilities">
-        {workspaceId && (
+    <PageShell
+      title="Skills"
+      description="Browse and manage agent capabilities"
+      actions={
+        workspaceId ? (
           <ImportSkillDialog workspaceId={workspaceId} onImported={handleImported} />
-        )}
-      </PageHeader>
-
-      <div className="flex flex-col sm:flex-row gap-3">
+        ) : null
+      }
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -155,13 +157,12 @@ export default function SkillsPage() {
             aria-label="Search skills"
           />
         </div>
+        <FilterBar
+          filters={CATEGORY_FILTERS}
+          active={activeFilter}
+          onFilter={setActiveFilter}
+        />
       </div>
-
-      <FilterBar
-        filters={CATEGORY_FILTERS}
-        active={activeFilter}
-        onFilter={setActiveFilter}
-      />
 
       {error && (
         <div className="flex items-center gap-3">
@@ -171,7 +172,7 @@ export default function SkillsPage() {
       )}
 
       {isLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-[180px] rounded-[var(--radius)]" />
           ))}
@@ -197,12 +198,12 @@ export default function SkillsPage() {
           ) : null}
         </EmptyState>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {skills.map((skill) => (
             <SkillCard key={skill.id} skill={skill} />
           ))}
         </div>
       )}
-    </div>
+    </PageShell>
   )
 }
