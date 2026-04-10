@@ -51,6 +51,26 @@ const MISSION_STATUS_CONFIG: Record<
     className: "bg-gray-100 text-gray-800 dark:bg-gray-900/40 dark:text-gray-300",
     icon: Ban,
   },
+  BACKLOG: {
+    label: "Backlog",
+    className: "bg-slate-100 text-slate-800 dark:bg-slate-900/40 dark:text-slate-300",
+    icon: Clock,
+  },
+  TODO: {
+    label: "Todo",
+    className: "bg-slate-100 text-slate-800 dark:bg-slate-900/40 dark:text-slate-300",
+    icon: Clock,
+  },
+  DONE: {
+    label: "Done",
+    className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+    icon: CheckCircle2,
+  },
+  DUPLICATE: {
+    label: "Duplicate",
+    className: "bg-gray-100 text-gray-800 dark:bg-gray-900/40 dark:text-gray-300",
+    icon: Ban,
+  },
 }
 
 const TASK_STATUS_CONFIG: Record<

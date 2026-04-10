@@ -1,0 +1,315 @@
+---
+title: "API Overview"
+description: "REST API conventions, authentication, error handling, and communication layers for the Crewship platform."
+icon: "code"
+---
+
+## Base URL
+
+```
+http://<host>:8080/api/v1/
+```
+
+All endpoints are prefixed with `/api/v1/` unless otherwise noted. Exceptions:
+
+- **Health check:** `GET /api/health`
+- **NextAuth endpoints:** `/api/auth/*`
+- **WebSocket upgrade:** `GET /ws`
+
+---
+
+## Authentication
+
+Crewship supports four authentication methods depending on the context.
+
+### 1. Session Cookie (Browser)
+
+The web UI authenticates via JWT session tokens stored in HTTP-only cookies. The Go backend validates these tokens directly (no external NextAuth server required).
+
+| Cookie Name | Condition |
+|---|---|
+| `authjs.session-token` | HTTP connections |
+| `__Secure-authjs.session-token` | HTTPS connections |
+
+Tokens are set by the `POST /api/auth/callback/credentials` login endpoint and expire after 30 days.
+
+### 2. CLI Token (Programmatic)
+
+CLI tokens are long-lived bearer tokens prefixed with `crewship_cli_`. Create them via the API or CLI:
+
+```bash
+# Create a CLI token
+POST /api/v1/auth/cli-token
+
+# Use in API calls
+curl -H "Authorization: Bearer crewship_cli_xxxxx" \
+  http://localhost:8080/api/v1/crews?workspace_id=<id>
+```
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `POST /api/v1/auth/cli-token` | POST | Create a new CLI token |
+| `GET /api/v1/auth/cli-token/validate` | GET | Validate the current token |
+| `GET /api/v1/auth/cli-tokens` | GET | List all CLI tokens for the user |
+| `DELETE /api/v1/auth/cli-tokens/{tokenId}` | DELETE | Revoke a CLI token |
+
+### 3. WebSocket Token (Real-time)
+
+Short-lived JWT tokens for establishing WebSocket connections.
+
+```bash
+# Get a WS token (requires session or CLI auth)
+GET /api/v1/ws-token
+
+# Connect
+ws://localhost:8080/ws?token=<jwt>
+```
+
+### 4. Internal Token (IPC)
+
+Used by the crewshipd sidecar process for internal communication over Unix socket. Passed via `X-Internal-Token` header. Not available to external clients.
+
+### 5. Webhook Secret (Inbound)
+
+Per-agent HMAC secrets for authenticating inbound webhook triggers:
+
+```
+POST /api/v1/webhooks/{crewId}/{agentId}/trigger
+Header: X-Webhook-Secret: <per-agent-secret>
+```
+
+---
+
+## Authorization (RBAC)
+
+Workspace membership is required for all workspace-scoped endpoints. The `workspace_id` query parameter (or `{workspaceId}` path parameter) identifies the workspace context.
+
+| Role | Permissions |
+|---|---|
+| `OWNER` | Full access, can manage workspace settings and members |
+| `ADMIN` | Can create, update, delete resources; manage credentials |
+| `MANAGER` | Can create and update resources |
+| `MEMBER` | Read-only access |
+
+Permission mapping:
+
+| Action | Required Roles |
+|---|---|
+| `read` | Any authenticated member |
+| `create` | `OWNER`, `ADMIN`, `MANAGER` |
+| `manage` | `OWNER`, `ADMIN` |
+
+---
+
+## Request Format
+
+- **Content-Type:** `application/json`
+- **Body size limit:** 1 MB
+- **Timestamps:** ISO 8601 / RFC 3339 in UTC (e.g., `2024-01-15T10:30:00Z`)
+- **IDs:** CUID strings (e.g., `cm1a2b3c4d5e6f7g8h9i`)
+- **Slugs:** Lowercase alphanumeric with hyphens, 2-50 characters (regex: `^[a-z0-9][a-z0-9_-]*$`)
+- **Soft delete:** `DELETE` endpoints set `deleted_at` rather than removing rows (credentials, crews, agents)
+
+---
+
+## Pagination
+
+List endpoints use **offset-based** pagination:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `limit` | integer | 20 or 50 | Maximum items per page (max 100) |
+| `offset` | integer | 0 | Number of items to skip |
+
+```bash
+GET /api/v1/missions?workspace_id=ws123&limit=20&offset=40
+```
+
+Response is a JSON array of items. There is no envelope -- the array is returned directly.
+
+---
+
+## Error Format
+
+Errors use [RFC 7807 Problem Details](https://tools.ietf.org/html/rfc7807) where supported:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "name must be 2-100 characters",
+  "instance": "/api/v1/crews"
+}
+```
+
+Some older endpoints return a simpler format:
+
+```json
+{
+  "error": "Unauthorized"
+}
+```
+
+### Common Status Codes
+
+| Code | Meaning |
+|---|---|
+| `200` | Success |
+| `201` | Created |
+| `204` | No Content (successful delete) |
+| `400` | Bad Request -- validation error |
+| `401` | Unauthorized -- missing or invalid token |
+| `402` | Payment Required -- license limit exceeded |
+| `403` | Forbidden -- insufficient role |
+| `404` | Not Found |
+| `409` | Conflict -- duplicate slug, relation already exists |
+| `500` | Internal Server Error |
+
+---
+
+## Communication Layers
+
+| Layer | Transport | Purpose |
+|---|---|---|
+| **REST API** | HTTP | CRUD operations, management, auth |
+| **WebSocket** | WS | Real-time log streaming, chat, event broadcasting |
+| **Webhooks** | HTTP (inbound) | External triggers (GitHub, Grafana, etc.) |
+| **IPC** | HTTP over Unix socket | Internal sidecar communication |
+
+---
+
+## Endpoint Groups
+
+<CardGroup cols={2}>
+  <Card title="Crews" href="/api-reference/crews">
+    CRUD for crews, members, container config, network policies.
+  </Card>
+  <Card title="Agents" href="/api-reference/agents">
+    CRUD for agents, skills, credentials, chats, runs, fleet status.
+  </Card>
+  <Card title="Missions" href="/api-reference/missions">
+    Mission lifecycle, tasks, start/restart/resume/clone, metrics.
+  </Card>
+  <Card title="Issues" href="/api-reference/issues">
+    Issue tracking, labels, comments, relations, activity, projects.
+  </Card>
+  <Card title="Credentials" href="/api-reference/credentials">
+    Credential vault CRUD, testing, agent assignment.
+  </Card>
+  <Card title="Skills" href="/api-reference/skills">
+    Skill marketplace, import, workflow templates, crew templates.
+  </Card>
+  <Card title="Integrations" href="/api-reference/integrations">
+    MCP server integrations at workspace/crew/agent level, OAuth flow.
+  </Card>
+  <Card title="Webhooks" href="/api-reference/webhooks">
+    Inbound webhook trigger endpoint.
+  </Card>
+  <Card title="WebSocket" href="/api-reference/websocket">
+    Real-time channels, subscriptions, chat, event types.
+  </Card>
+</CardGroup>
+
+---
+
+## Additional Endpoints
+
+These endpoints are documented here for completeness but do not have dedicated pages.
+
+### Health Check
+
+```
+GET /api/health
+```
+
+No authentication required. Returns `{"status": "ok"}` with HTTP 200.
+
+### System
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/system/runtime` | Runtime info (Go version, uptime, etc.) |
+| `GET /api/v1/system/license` | License status and limits |
+| `GET /api/v1/system/keeper` | Keeper (credential access control) status |
+| `GET /api/v1/crewshipd` | Crewshipd process health and status |
+
+### Activity
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/activity` | Cross-crew activity feed (assignments, peer conversations, escalations). Supports `crew_id` and `limit` query parameters. See also `crewship activity` CLI command. |
+
+### Captain (Workspace AI Assistant)
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/v1/captain/chat` | POST | Send message to Captain (SSE streaming response) |
+| `/api/v1/captain/context` | GET | Get workspace context (phase, counts) |
+| `/api/v1/captain/history` | GET | Load Captain conversation history |
+| `/api/v1/captain/history` | DELETE | Clear Captain conversation history |
+
+See the [Captain guide](/guides/captain) for detailed documentation on tools, streaming protocol, and onboarding phases.
+
+### Auth / Signup
+
+| Endpoint | Auth | Description |
+|---|---|---|
+| `POST /api/v1/bootstrap` | None | Bootstrap first user (empty instance) |
+| `POST /api/v1/auth/signup` | None | Register a new user (when `CREWSHIP_ALLOW_SIGNUP=true`) |
+| `GET /api/v1/ws-token` | Required | Get short-lived WebSocket JWT |
+
+### NextAuth Compatibility
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/auth/csrf` | CSRF token |
+| `GET /api/auth/providers` | Available auth providers |
+| `GET /api/auth/session` | Current session |
+| `POST /api/auth/callback/credentials` | Login with email/password |
+| `GET /api/auth/signin` | Sign-in page redirect |
+| `POST /api/auth/signout` | Sign out (clears cookie) |
+
+### Onboarding
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/onboarding/status` | Check onboarding completion status |
+| `POST /api/v1/onboarding/complete` | Mark onboarding as complete |
+| `POST /api/v1/onboarding/setup` | Run guided setup |
+
+### Admin (OWNER only)
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/admin/stats` | Platform statistics |
+| `GET /api/v1/admin/users` | List all users |
+| `GET /api/v1/admin/workspaces` | List all workspaces |
+| `GET /api/v1/admin/keeper/requests` | Keeper access request log |
+
+### Audit
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/audit` | Audit log (workspace-scoped, requires manage role) |
+| `GET /api/v1/mcp-tool-calls` | MCP tool call audit trail |
+
+### Runs
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/runs` | List agent runs (workspace-scoped) |
+
+### Workspaces
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `GET /api/v1/workspaces` | GET | List user's workspaces |
+| `POST /api/v1/workspaces` | POST | Create a workspace |
+| `GET /api/v1/workspaces/{workspaceId}` | GET | Get workspace details |
+| `PATCH /api/v1/workspaces/{workspaceId}` | PATCH | Update workspace |
+| `GET /api/v1/workspaces/{workspaceId}/members` | GET | List workspace members |
+| `POST /api/v1/workspaces/{workspaceId}/members` | POST | Add a member |
+| `DELETE /api/v1/workspaces/{workspaceId}/members/{memberId}` | DELETE | Remove a member |
+| `GET /api/v1/workspaces/{workspaceId}/invitations` | GET | List invitations |
+| `POST /api/v1/workspaces/{workspaceId}/invitations` | POST | Create invitation |

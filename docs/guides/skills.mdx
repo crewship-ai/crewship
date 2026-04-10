@@ -1,0 +1,193 @@
+---
+title: "Skills & Marketplace"
+description: "Add capabilities to agents with system prompt extensions -- built-in skills, custom skills, and the SKILL.md format."
+icon: "sparkles"
+---
+
+# Skills
+
+Skills are **system prompt extensions** that get injected into an agent's prompt during task execution. They teach agents specialized behaviors, guardrails, and output formats.
+
+## How Skills Work
+
+When an agent has skills assigned, their content is injected as `<skill>` blocks in the system prompt. The agent's LLM reads these instructions and follows them during execution.
+
+```
+[ACTIVE SKILLS]
+<skill name="Network Probe">
+  # Network Probe
+  ## When to Activate
+  - Task involves ping, HTTP checks, DNS resolution...
+  ## Instructions
+  1. Always use -c flag with ping...
+  ## Guardrails
+  - Never ping more than 10 times per host...
+</skill>
+```
+
+## Built-in Skills
+
+Crewship ships with five built-in skills in `cmd/crewship/seeddata/skills.go`:
+
+<CardGroup cols={2}>
+  <Card title="Network Probe" icon="wifi">
+    Network diagnostics: ping, HTTP checks, DNS resolution, speed tests. Category: DEVOPS.
+  </Card>
+  <Card title="File Crafter" icon="file-text">
+    File and directory creation, CSV generation, data formatting. Category: CODING.
+  </Card>
+  <Card title="Web Scraper" icon="globe">
+    Web content fetching, HTML/JSON parsing, API data extraction. Category: RESEARCH.
+  </Card>
+  <Card title="Script Runner" icon="terminal">
+    Python and Bash script creation, execution, and output capture. Category: CODING.
+  </Card>
+  <Card title="System Inspector" icon="cpu">
+    Container environment inspection, tool inventory, resource mapping. Category: DEVOPS.
+  </Card>
+</CardGroup>
+
+## Skill Structure
+
+Every skill has three key sections:
+
+### When to Activate
+Describes the conditions under which the agent should apply this skill. Uses keyword matching against the task description.
+
+### Instructions
+Step-by-step guidance for how to perform the skill. These are concrete, actionable instructions the LLM follows.
+
+### Guardrails
+Safety constraints and limits. For example:
+- "Never ping more than 10 times per host"
+- "Only fetch from public, well-known URLs"
+- "Write only to /tmp/"
+
+## SKILL.md Format
+
+Skills use a YAML frontmatter + markdown content format:
+
+```markdown
+---
+name: "my-skill"
+display_name: "My Custom Skill"
+version: "1.0.0"
+description: "What this skill does"
+category: "CODING"
+icon: "terminal"
+---
+
+# My Custom Skill
+
+## When to Activate
+- Task involves...
+
+## Instructions
+1. First step...
+2. Second step...
+
+## Output Format
+- Save results to...
+
+## Guardrails
+- Never do...
+```
+
+Import via the API endpoint `POST /api/v1/workspaces/{id}/skills/import` with the SKILL.md content as the body.
+
+## Skill Categories
+
+| Category | Description |
+|----------|-------------|
+| `CODING` | Code generation, file operations, scripting |
+| `MESSAGING` | Communication, notifications |
+| `AUTOMATION` | Workflow automation |
+| `DATA` | Data processing, analysis |
+| `DEVOPS` | Infrastructure, monitoring, deployment |
+| `SUPPORT` | Customer support, help desk |
+| `SALES` | Sales automation |
+| `CUSTOM` | User-defined category |
+
+## Skill Assignment
+
+Skills are assigned to specific agents. The seed data maps agents to skills based on their role:
+
+```
+Engineering crew:
+  tomas (Lead):   network-probe, script-runner, file-crafter
+  viktor:         script-runner, file-crafter
+  nela:           file-crafter, web-scraper
+  martin:         network-probe, system-inspector
+
+Quality crew:
+  eva (Lead):     script-runner, file-crafter
+  daniel:         script-runner
+  petra:          file-crafter, script-runner
+  jakub:          system-inspector
+
+DevOps crew:
+  ondrej (Lead):  network-probe, system-inspector
+  radek:          network-probe, system-inspector
+
+Research crew:
+  lucie (Lead):   web-scraper, script-runner
+  filip:          web-scraper, script-runner
+```
+
+## Creating Custom Skills
+
+<Steps>
+  <Step title="Write the SKILL.md file">
+    Create a markdown file with YAML frontmatter defining the skill metadata and content body with activation conditions, instructions, and guardrails.
+  </Step>
+
+  <Step title="Import the skill">
+    Use the API or UI to import the skill into your workspace.
+  </Step>
+
+  <Step title="Assign to agents">
+    Assign the skill to the agents that should use it. An agent can have multiple skills assigned.
+  </Step>
+</Steps>
+
+## Skill Sources
+
+| Source | Description |
+|--------|-------------|
+| `BUNDLED` | Ships with Crewship |
+| `MANAGED` | Created and maintained by workspace admins |
+| `MARKETPLACE` | Installed from the skill marketplace |
+| `CUSTOM` | User-created within a workspace |
+
+## Verification Status
+
+Marketplace skills go through a verification pipeline:
+
+| Status | Meaning |
+|--------|---------|
+| `UNVERIFIED` | Not yet reviewed |
+| `PENDING_REVIEW` | Submitted for review |
+| `VERIFIED` | Approved and safe to use |
+| `REJECTED` | Failed review |
+| `DEPRECATED` | No longer maintained |
+
+<Tip>
+  Skills are injected into the system prompt, so they consume token budget. Keep skills focused and concise -- a skill with 500 words of instructions is more effective than one with 2000 words of edge cases.
+</Tip>
+
+## What's Next
+
+<CardGroup cols={2}>
+  <Card title="Orchestration" icon="sitemap" href="/guides/orchestration">
+    Create multi-agent missions with task delegation and workflow templates.
+  </Card>
+  <Card title="Templates" icon="copy" href="/guides/templates">
+    Deploy pre-configured crews with built-in skill assignments.
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/skill">
+    Import, assign, and manage skills via the CLI.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/skills">
+    Skills API endpoints for programmatic access.
+  </Card>
+</CardGroup>

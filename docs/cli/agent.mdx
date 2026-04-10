@@ -1,0 +1,236 @@
+---
+title: "Agent Commands"
+description: "Create, manage, and monitor AI agents with the Crewship CLI."
+icon: "robot"
+---
+
+# crewship agent
+
+Manage AI agents within a workspace.
+
+```bash
+crewship agent <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List all agents in the workspace |
+| `get` | Show agent details |
+| `create` | Create a new agent |
+| `update` | Update an agent |
+| `delete` | Delete an agent |
+| `runs` | List runs for an agent |
+| `stop` | Stop a running agent |
+| `logs` | Show agent container logs |
+| `debug` | Show agent debug info (container state, env, crewshipd status) |
+| `skills` | List skills assigned to an agent |
+| `credentials` | List credentials assigned to an agent |
+| `mcp` | Show or set MCP server configuration for an agent |
+
+---
+
+## `crewship agent list`
+
+List all agents in the workspace.
+
+```bash
+crewship agent list
+crewship agent list --crew backend-team
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--crew` | `string` | | Filter by crew slug or ID. |
+
+**Output columns:** SLUG, ROLE, CREW, STATUS, ADAPTER, MEMORY
+
+---
+
+## `crewship agent get`
+
+Show detailed information about an agent.
+
+```bash
+crewship agent get <slug-or-id>
+```
+
+**Output fields:** Name, Slug, ID, Role, Role Title, Crew, Status, CLI Adapter, Tool Profile, Memory, Timeout, Created, Skills count, Credentials count.
+
+---
+
+## `crewship agent create`
+
+Create a new agent.
+
+```bash
+crewship agent create --name "Viktor" --crew backend-team --role LEAD
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `string` | _(required)_ | Agent name. |
+| `--slug` | `string` | _(auto from name)_ | Agent slug. |
+| `--crew` | `string` | | Crew slug or ID. |
+| `--role` | `string` | `AGENT` | Agent role: `AGENT`, `LEAD`, or `COORDINATOR`. |
+| `--role-title` | `string` | | Human-readable role title. |
+| `--cli-adapter` | `string` | `CLAUDE_CODE` | CLI adapter: `CLAUDE_CODE`, `CODEX_CLI`, `GEMINI_CLI`, `OPENCODE`. |
+| `--system-prompt` | `string` | | System prompt text or `@file.txt` to read from file. |
+| `--tool-profile` | `string` | `CODING` | Tool profile: `MINIMAL`, `CODING`, `MESSAGING`, `FULL`. |
+| `--llm-provider` | `string` | | LLM provider: `ANTHROPIC`, `OPENAI`, `GOOGLE`. |
+| `--llm-model` | `string` | | LLM model (e.g., `claude-haiku-4-5`). |
+| `--memory` | `bool` | `false` | Enable memory. |
+| `--lead-mode` | `string` | | Lead mode: `active` or `passive`. |
+| `--timeout` | `int` | `0` | Timeout in seconds. |
+| `--avatar-seed` | `string` | _(agent name)_ | Avatar seed for avatar generation. |
+| `--avatar-style` | `string` | | Avatar style: `bottts-neutral`, `adventurer`, `fun-emoji`, `pixel-art`, `micah`, `notionists`, `thumbs`, `lorelei`, `big-smile`, `avataaars`. |
+
+<Tip>
+Use `@file.txt` syntax with `--system-prompt` to load the prompt from a file:
+```bash
+crewship agent create --name Viktor --system-prompt @prompts/backend-lead.md
+```
+</Tip>
+
+---
+
+## `crewship agent update`
+
+Update an existing agent. Only changed flags are sent.
+
+```bash
+crewship agent update <slug-or-id> --role LEAD --memory
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `string` | | Agent name. |
+| `--role` | `string` | | Agent role. |
+| `--role-title` | `string` | | Human-readable role title. |
+| `--cli-adapter` | `string` | | CLI adapter. |
+| `--system-prompt` | `string` | | System prompt text or `@file.txt`. |
+| `--tool-profile` | `string` | | Tool profile. |
+| `--llm-provider` | `string` | | LLM provider: `ANTHROPIC`, `OPENAI`, `GOOGLE`. |
+| `--llm-model` | `string` | | LLM model. |
+| `--memory` | `bool` | `false` | Enable memory. |
+| `--lead-mode` | `string` | | Lead mode. |
+| `--timeout` | `int` | `0` | Timeout in seconds. |
+| `--avatar-seed` | `string` | | Avatar seed. |
+| `--avatar-style` | `string` | | Avatar style. |
+
+---
+
+## `crewship agent delete`
+
+Delete an agent. Prompts for confirmation unless `--yes` is passed.
+
+```bash
+crewship agent delete <slug-or-id>
+crewship agent delete viktor --yes
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |
+
+---
+
+## `crewship agent runs`
+
+List runs for an agent.
+
+```bash
+crewship agent runs <slug-or-id>
+```
+
+**Output columns:** ID, STATUS, TRIGGER, CREATED, FINISHED
+
+---
+
+## `crewship agent stop`
+
+Stop a running agent.
+
+```bash
+crewship agent stop <slug-or-id>
+```
+
+---
+
+## `crewship agent logs`
+
+Show agent container logs.
+
+```bash
+crewship agent logs <slug-or-id>
+crewship agent logs viktor --tail 50
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--tail` | `int` | `100` | Number of log lines to show. |
+
+---
+
+## `crewship agent debug`
+
+Show agent debug info including container state, environment variables, and crewshipd status. Output is always JSON.
+
+```bash
+crewship agent debug <slug-or-id>
+```
+
+---
+
+## `crewship agent skills`
+
+List skills assigned to an agent.
+
+```bash
+crewship agent skills <slug-or-id>
+```
+
+**Output columns:** SKILL ID, NAME, CATEGORY, ENABLED
+
+---
+
+## `crewship agent credentials`
+
+List credentials assigned to an agent.
+
+```bash
+crewship agent credentials <slug-or-id>
+```
+
+**Output columns:** ID, NAME, PROVIDER, TYPE, ENV VAR
+
+---
+
+## `crewship agent mcp`
+
+Show or set MCP server configuration for an agent.
+
+```bash
+# Show agent-specific config
+crewship agent mcp <agent-slug>
+
+# Show effective (merged crew + agent) config
+crewship agent mcp <agent-slug> --resolved
+
+# Set from inline JSON
+crewship agent mcp <agent-slug> --set '{"mcpServers":{...}}'
+
+# Set from file
+crewship agent mcp <agent-slug> --set-file agent-mcp.json
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--set` | `string` | | Set MCP config from JSON string. Pass empty string to clear. |
+| `--set-file` | `string` | | Set MCP config from file path. |
+| `--resolved` | `bool` | `false` | Show effective merged config (crew + agent). Agent overrides crew. |
+
+<Note>
+The JSON must contain a `"mcpServers"` object at the top level. `--set` and `--set-file` are mutually exclusive. `--resolved` cannot be combined with set operations.
+</Note>

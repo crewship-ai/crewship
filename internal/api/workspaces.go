@@ -462,6 +462,18 @@ func (h *WorkspaceHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 		req.Role = "MEMBER"
 	}
 
+	// V-02: Validate role against whitelist and prevent escalation
+	validAssignableRoles := map[string]bool{"ADMIN": true, "MANAGER": true, "MEMBER": true, "VIEWER": true}
+	if !validAssignableRoles[req.Role] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "role must be ADMIN, MANAGER, MEMBER, or VIEWER"})
+		return
+	}
+	// Only OWNER can assign ADMIN role
+	if req.Role == "ADMIN" && role != "OWNER" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Only workspace owner can assign ADMIN role"})
+		return
+	}
+
 	var existingID string
 	err := h.db.QueryRowContext(r.Context(),
 		"SELECT id FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
@@ -668,6 +680,17 @@ func (h *WorkspaceHandler) CreateInvitation(w http.ResponseWriter, r *http.Reque
 	}
 	if req.Role == "" {
 		req.Role = "MEMBER"
+	}
+
+	// V-03: Validate role against whitelist and prevent escalation
+	validInviteRoles := map[string]bool{"ADMIN": true, "MANAGER": true, "MEMBER": true, "VIEWER": true}
+	if !validInviteRoles[req.Role] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "role must be ADMIN, MANAGER, MEMBER, or VIEWER"})
+		return
+	}
+	if req.Role == "ADMIN" && role != "OWNER" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Only workspace owner can invite with ADMIN role"})
+		return
 	}
 
 	var existingMemberID string

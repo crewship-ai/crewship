@@ -1,0 +1,225 @@
+---
+title: "Admin"
+description: "Workspace administration endpoints for stats, user management, Keeper audit logs, and the license system."
+icon: "shield-halved"
+---
+
+# Admin API
+
+Administrative endpoints for workspace management, user listing, and Keeper security audit logs. Most endpoints require the OWNER role.
+
+## GET /api/v1/admin/stats
+
+Returns aggregate statistics for the current workspace.
+
+**Required role:** OWNER
+
+### Response
+
+```json
+{
+  "workspaces": 1,
+  "users": 12,
+  "agents": 8,
+  "running": 3
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workspaces` | `integer` | Always 1 (scoped to current workspace) |
+| `users` | `integer` | Number of workspace members |
+| `agents` | `integer` | Total agents (excluding soft-deleted) |
+| `running` | `integer` | Agents with a currently running agent run |
+
+<Note>
+  Stats are scoped to the current workspace to prevent cross-workspace data leakage. The `workspaces` field always returns 1.
+</Note>
+
+## GET /api/v1/admin/users
+
+Lists all users in the current workspace with their roles.
+
+**Required role:** OWNER
+
+### Response
+
+```json
+[
+  {
+    "id": "user-uuid",
+    "email": "alice@example.com",
+    "full_name": "Alice Chen",
+    "avatar_url": "https://...",
+    "created_at": "2025-01-01T00:00:00Z",
+    "workspace": {
+      "id": "ws-uuid",
+      "name": "Engineering",
+      "slug": "engineering"
+    },
+    "role": "ADMIN"
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | User ID |
+| `email` | `string` | User email address |
+| `full_name` | `string?` | Display name (nullable) |
+| `avatar_url` | `string?` | Avatar URL (nullable) |
+| `created_at` | `string` | ISO 8601 creation timestamp |
+| `workspace` | `object?` | Workspace details (id, name, slug) |
+| `role` | `string?` | Role in this workspace (OWNER, ADMIN, MEMBER, VIEWER) |
+
+## GET /api/v1/admin/workspaces
+
+Lists workspace details with member, agent, and crew counts.
+
+**Required role:** OWNER
+
+### Response
+
+```json
+[
+  {
+    "id": "ws-uuid",
+    "name": "Engineering",
+    "slug": "engineering",
+    "created_at": "2025-01-01T00:00:00Z",
+    "updated_at": "2025-06-15T12:00:00Z",
+    "_count_members": 12,
+    "_count_agents": 8,
+    "_count_crews": 3
+  }
+]
+```
+
+<Note>
+  This endpoint is scoped to the current workspace only. It does not list other workspaces in the system.
+</Note>
+
+## GET /api/v1/admin/keeper/requests
+
+Returns the Keeper access request audit log -- every credential access and command execution request evaluated by the Keeper.
+
+**Required role:** ADMIN or OWNER (manage permission)
+
+### Query Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | `integer` | `50` | Max entries to return (1-200) |
+| `offset` | `integer` | `0` | Offset for pagination |
+
+### Response
+
+```json
+[
+  {
+    "id": "request-uuid",
+    "agent_id": "agent-uuid",
+    "agent_name": "Viktor",
+    "crew_id": "crew-uuid",
+    "credential_id": "cred-uuid",
+    "credential_name": "Anthropic Production",
+    "intent": "Need to call the Claude API to analyze code",
+    "request_type": "credential",
+    "command": null,
+    "decision": "ALLOW",
+    "reason": "Low-risk API call with clear intent",
+    "risk_score": 2,
+    "exit_code": null,
+    "ollama_prompt": "...",
+    "ollama_raw_response": "...",
+    "created_at": "2025-01-15T10:30:00Z",
+    "decided_at": "2025-01-15T10:30:01Z"
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Request ID |
+| `agent_id` | `string` | Requesting agent ID |
+| `agent_name` | `string` | Agent display name |
+| `crew_id` | `string` | Crew the agent belongs to |
+| `credential_id` | `string` | Credential being accessed |
+| `credential_name` | `string` | Credential display name |
+| `intent` | `string` | Agent's stated intent for access |
+| `request_type` | `string` | `credential` or `execute` |
+| `command` | `string?` | Shell command (for execute requests) |
+| `decision` | `string?` | `ALLOW`, `DENY`, or `ESCALATE` |
+| `reason` | `string?` | LLM-generated explanation |
+| `risk_score` | `integer?` | Risk assessment (1-10 scale) |
+| `exit_code` | `integer?` | Command exit code (for execute requests) |
+| `ollama_prompt` | `string?` | Full prompt sent to the Keeper LLM |
+| `ollama_raw_response` | `string?` | Raw LLM response text |
+| `created_at` | `string` | ISO 8601 request timestamp |
+| `decided_at` | `string?` | ISO 8601 decision timestamp |
+
+## License System
+
+Crewship uses a three-tier licensing model that controls workspace limits and feature availability.
+
+### Editions
+
+| Edition | Description | Limits |
+|---------|-------------|--------|
+| **Community** | Free, default edition | 15 crews, 10 agents/crew, 5 members |
+| **Team** | Paid team tier | Higher limits, additional features |
+| **Enterprise** | Full enterprise tier | Unlimited, all features enabled |
+
+### License Claims
+
+Each license contains signed claims:
+
+| Claim | Type | Description |
+|-------|------|-------------|
+| `license_id` | `string` | Unique license identifier |
+| `licensee_name` | `string` | Licensed user name |
+| `licensee_org` | `string` | Licensed organization |
+| `edition` | `string` | `community`, `team`, or `enterprise` |
+| `max_crews` | `integer` | Maximum number of crews |
+| `max_agents_per_crew` | `integer` | Maximum agents per crew |
+| `max_members` | `integer` | Maximum workspace members |
+| `features` | `string[]` | Enabled feature flags |
+| `issued_at` | `integer` | Unix timestamp of issuance |
+| `expires_at` | `integer` | Unix timestamp of expiration |
+
+### License Verification
+
+Licenses are verified using Ed25519 digital signatures:
+
+<Steps>
+  <Step title="Signed format">
+    A license file contains a JSON object with `payload` (the claims as a JSON string) and `signature` (base64-encoded Ed25519 signature).
+  </Step>
+  <Step title="Public key embedding">
+    The Ed25519 public key is embedded into the binary at build time via `ldflags`. This prevents license tampering by tying verification to the specific build.
+  </Step>
+  <Step title="Signature verification">
+    On startup, Crewship decodes the public key and signature from base64, then verifies the payload using `ed25519.Verify()`.
+  </Step>
+  <Step title="Expiration check">
+    If the license has an `expires_at` timestamp and it is in the past, the license is rejected and community defaults apply.
+  </Step>
+  <Step title="Fallback">
+    If no license file exists, verification fails, or the license is expired, Crewship runs with community edition defaults.
+  </Step>
+</Steps>
+
+<Warning>
+  The public key variable is set at build time. Without a valid public key embedded in the binary, license loading will fail with "no public key embedded in binary" and community defaults will apply.
+</Warning>
+
+## What's Next
+
+<CardGroup cols={2}>
+  <Card title="RBAC" icon="users-gear" href="/security/rbac">
+    Role-based access control and permission levels.
+  </Card>
+  <Card title="Keeper Guide" icon="shield-check" href="/guides/keeper">
+    Configure the AI-powered security gatekeeper.
+  </Card>
+</CardGroup>

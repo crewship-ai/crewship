@@ -1,0 +1,170 @@
+---
+title: "Integrations"
+description: "Connect agents to external services via OAuth 2.0, MCP servers, and the official MCP registry."
+icon: "plug"
+---
+
+# Integrations
+
+Crewship supports two integration mechanisms: **OAuth 2.0 connections** for service authentication and **MCP (Model Context Protocol) servers** for extending agent tool capabilities.
+
+## OAuth 2.0 Integrations
+
+Crewship includes pre-configured OAuth providers for popular services. The implementation uses PKCE (Proof Key for Code Exchange) per RFC 7636 for secure authorization.
+
+### Supported OAuth Providers
+
+| Provider | Auth URL | Default Scopes |
+|----------|----------|---------------|
+| **Google** | `accounts.google.com/o/oauth2/v2/auth` | Gmail, Calendar, Drive |
+| **Slack** | `slack.com/oauth/v2/authorize` | channels:read, chat:write |
+| **GitHub** | `github.com/login/oauth/authorize` | repo, user |
+| **Microsoft** | `login.microsoftonline.com/.../authorize` | Mail, Calendars |
+| **Linear** | `linear.app/oauth/authorize` | read, write |
+| **GitLab** | `gitlab.com/oauth/authorize` | api, read_user |
+| **Cloudflare** | `dash.cloudflare.com/oauth2/authorize` | (custom) |
+| **Stripe** | `connect.stripe.com/oauth/authorize` | read_write |
+| **Notion** | `api.notion.com/v1/oauth/authorize` | (custom) |
+
+### OAuth Flow
+
+<Steps>
+  <Step title="Create OAuth credential">
+    In Settings -> Credentials, create an OAuth2 credential with the client ID, client secret, and selected provider.
+  </Step>
+
+  <Step title="Authorize the connection">
+    Click "Connect" to start the PKCE authorization flow:
+    1. Crewship generates a `code_verifier` (32 random bytes, base64url-encoded)
+    2. Computes `code_challenge` = SHA256(code_verifier), base64url-encoded
+    3. Redirects user to provider's authorization URL
+  </Step>
+
+  <Step title="Token exchange">
+    After the user authorizes, the provider redirects back with an authorization code. Crewship exchanges it for access and refresh tokens using the code_verifier.
+  </Step>
+
+  <Step title="Token storage">
+    Tokens are encrypted with AES-256-GCM and stored in the credentials table. Refresh tokens are used automatically to maintain access.
+  </Step>
+</Steps>
+
+### Auto-Bind
+
+When OAuth credentials are created, the `oauth_autobind` system can automatically configure MCP servers or other integrations that use the credential. This eliminates manual setup for common provider-integration pairs.
+
+## MCP Server Integration
+
+Crewship integrates with the [Model Context Protocol](https://modelcontextprotocol.io/) ecosystem, allowing agents to use tools from external MCP servers.
+
+### MCP Architecture
+
+```
+Agent (Claude Code)
+    |
+    | Reads .mcp.json config
+    v
+Sidecar MCP Gateway (internal/sidecar/mcp_gateway.go)
+    |
+    | Connects to MCP servers
+    v
+MCP Server (stdio or HTTP transport)
+    |
+    v
+External Service (GitHub, Slack, etc.)
+```
+
+### Transport Types
+
+| Transport | Description | Use Case |
+|-----------|-------------|----------|
+| `stdio` | Server runs as a subprocess | Local tools, custom scripts |
+| `streamable-http` | HTTP-based communication | Remote/cloud MCP servers |
+| `sse` | Server-Sent Events | Legacy MCP servers |
+
+### MCP Server Configuration
+
+MCP servers are configured per-crew or per-agent via the `.mcp.json` file:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "${GH_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+The sidecar merges crew-level and agent-level MCP configurations at runtime. The merged config is written to `/crew/agents/{slug}/.mcp.json` inside the container.
+
+### MCP Gateway
+
+The `MCPGateway` (`internal/sidecar/mcp_gateway.go`) manages MCP server connections:
+
+1. **Connect:** Establishes connections to all configured MCP servers at sidecar startup (15-second timeout)
+2. **Discover tools:** Queries each server for available tools
+3. **Route calls:** Proxies tool calls from agents to the correct MCP server
+
+### Sidecar MCP Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/mcp/tools` | GET | List all available tools from connected MCP servers |
+| `/mcp/call` | POST | Call a specific tool on an MCP server |
+| `/mcp/status` | GET | Check connection status of all MCP servers |
+
+### MCP Credential Injection
+
+MCP servers can have credentials associated with them:
+
+```go
+type MCPCredInput struct {
+    Token  string `json:"token"`   // Decrypted credential value
+    Type   string `json:"type"`    // "bearer", "api_key", "basic"
+    Header string `json:"header"`  // Custom header name (for api_key type)
+}
+```
+
+The sidecar handles credential injection for MCP server authentication, keeping raw tokens out of the agent's environment.
+
+## MCP Registry
+
+Crewship syncs with the official MCP registry at `registry.modelcontextprotocol.io/v0/servers`. The `SyncMCPRegistry` function (`internal/api/mcp_registry.go`) fetches and caches all registered servers locally.
+
+Registry entries include:
+- Server name and display name
+- Description and category
+- Package information (runtime, environment variables)
+- Remote transport configuration
+- Verification status
+
+This allows users to browse and install MCP servers from the registry without manual configuration.
+
+## Crew Connections
+
+Crews can be connected to share context and enable cross-crew operations:
+
+### Connection Endpoints (via Sidecar)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/crew-connections` | GET | List crew connections |
+| `/crew-connections` | POST | Create a crew connection |
+| `/connections` | GET | List active connections |
+| `/connections/{id}/message` | POST | Send a message to connected crew |
+| `/connections/{id}/messages` | GET | Read messages from connection |
+| `/connections/{id}/files` | GET | Read shared files |
+| `/connections/{id}/files` | POST | Write shared files |
+
+## Integration Testing
+
+The `integration_test_connection.go` handler provides a test endpoint for verifying that integrations are properly configured and credentials are working before deploying to production.
+
+<Tip>
+  When configuring OAuth integrations, always test the connection after setup. OAuth tokens can expire, scopes can be insufficient, and client secrets can be rotated.
+</Tip>

@@ -279,7 +279,7 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 		SELECT ac.credential_id, ac.env_var_name, ac.priority, c.encrypted_value, c.type
 		FROM agent_credentials ac
 		JOIN credentials c ON c.id = ac.credential_id
-		WHERE ac.agent_id = ?
+		WHERE ac.agent_id = ? AND c.deleted_at IS NULL
 		ORDER BY ac.priority ASC
 	`, agentID)
 	if err != nil {

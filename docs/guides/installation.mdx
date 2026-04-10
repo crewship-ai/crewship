@@ -1,0 +1,192 @@
+---
+title: "Installation"
+description: "Install and run Crewship -- a single binary with embedded frontend, SQLite database, and container orchestration."
+icon: "download"
+---
+
+# Installation
+
+Crewship ships as a **single binary** that embeds the Next.js frontend, SQLite database, and Go backend. There is no separate Node.js runtime required at deployment time.
+
+## Prerequisites
+
+<CardGroup cols={2}>
+  <Card title="Go 1.22+" icon="golang">
+    Required for building from source. The binary is statically compiled with `go:embed`.
+  </Card>
+  <Card title="Node.js 20+ & pnpm" icon="node-js">
+    Required only for development (frontend build). Not needed at runtime.
+  </Card>
+  <Card title="Docker or compatible runtime" icon="docker">
+    Agent containers run on Docker, Podman, Colima, OrbStack, Rancher Desktop, or Apple Containers.
+  </Card>
+  <Card title="Encryption key" icon="key">
+    A 256-bit hex-encoded key for AES-256-GCM credential encryption.
+  </Card>
+</CardGroup>
+
+## Quick Start
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/crewship-ai/crewship.git
+    cd crewship
+    ```
+  </Step>
+
+  <Step title="Generate an encryption key">
+    ```bash
+    openssl rand -hex 32
+    ```
+    Save this value -- you will need it for `ENCRYPTION_KEY`.
+  </Step>
+
+  <Step title="Create environment file">
+    Create a `.env.local` file in the project root:
+    ```bash
+    ENCRYPTION_KEY=<your-256-bit-hex-key>
+    NEXTAUTH_SECRET=<random-secret-for-jwt>
+    CREWSHIP_ALLOW_SIGNUP=true
+    ```
+
+    <Note>
+      The `CREWSHIP_INTERNAL_TOKEN` is auto-generated cryptographically at startup if not set. A 32-byte random hex token is created each time, eliminating any hardcoded defaults.
+    </Note>
+  </Step>
+
+  <Step title="Build the binary">
+    ```bash
+    make build
+    ```
+    This runs three stages:
+    1. `pnpm build` -- builds the Next.js frontend as a static export into `out/`
+    2. Copies `out/` to `web/out/` for Go embedding
+    3. `go build` with version/commit ldflags into the `crewship` binary
+
+    Version information is embedded via ldflags:
+    ```
+    -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
+    ```
+  </Step>
+
+  <Step title="Start Crewship">
+    ```bash
+    ./crewship start
+    ```
+    The server starts on `http://localhost:8080` by default. The frontend is served from the embedded static files.
+  </Step>
+</Steps>
+
+## Development Setup
+
+For local development, use the `dev.sh` script which manages both the Go backend and Next.js dev server:
+
+```bash
+./dev.sh start    # Start Go backend + Next.js dev server
+./dev.sh stop     # Stop all services
+./dev.sh restart  # Restart services
+./dev.sh status   # Show service status
+./dev.sh seed     # Seed demo data (crews, agents, skills)
+./dev.sh nuke     # Reset database and start fresh
+./dev.sh logs     # View service logs
+```
+
+<Warning>
+  Never start services manually in development. Always use `./dev.sh` to ensure proper coordination between the Go backend and Next.js frontend.
+</Warning>
+
+### Remote Development Server
+
+Crewship development happens on a remote Proxmox VM via SSH:
+
+```bash
+ssh crewship-dev                    # Connect to dev VM
+cd /opt/crewship && ./dev.sh start  # Start services (run inside tmux)
+```
+
+| Resource | Value |
+|----------|-------|
+| Backend URL | `http://192.168.1.201:8080` |
+| Frontend URL | `http://192.168.1.201:3001` |
+| vCPU | 12 |
+| RAM | 64 GB |
+| Storage | 200 GB NVMe |
+
+<Tip>
+  Use VS Code Remote SSH for the best development experience:
+  ```bash
+  code --remote ssh-remote+crewship-dev /opt/crewship
+  ```
+</Tip>
+
+## Multi-Instance Support
+
+Crewship supports running multiple instances from directories named `crewship_N`:
+
+| Directory | Go Port | Next.js Port |
+|-----------|---------|-------------|
+| `crewship` (default) | 8080 | 3001 |
+| `crewship_1` | 8081 | 3011 |
+| `crewship_2` | 8082 | 3012 |
+
+Each instance uses its own SQLite database and state directory. Set `CREWSHIP_CONTAINER_PREFIX` to isolate Docker container names between instances.
+
+## Build Architecture
+
+```
+Source Code
+    |
+    v
+pnpm build --> out/ (static HTML/JS/CSS)
+    |
+    v
+cp out/ --> web/out/  (Go embed source)
+    |
+    v
+go build --> crewship (single binary)
+              |
+              +-- //go:embed web/out/*
+              +-- Go HTTP server (port 8080)
+              +-- SQLite via modernc.org/sqlite
+              +-- Container orchestrator
+              +-- Sidecar proxy binary
+```
+
+<Warning>
+  The SQLite driver name is `"sqlite"`, **not** `"sqlite3"`. Crewship uses `modernc.org/sqlite` which registers under the `"sqlite"` driver name. Using `"sqlite3"` will cause a runtime panic.
+</Warning>
+
+## Database Migrations
+
+<Warning>
+  Never run `prisma migrate`. Prisma is used only for TypeScript type generation (`pnpm db:generate`). All database migrations are managed in Go via `internal/database/migrate.go`.
+</Warning>
+
+## Verifying the Installation
+
+After starting, verify everything is working:
+
+```bash
+# Check the API is responding
+curl http://localhost:8080/api/v1/health
+
+# Check container runtime detection
+curl http://localhost:8080/api/v1/internal/status
+```
+
+## Seeding Demo Data
+
+The `seed` command creates demo crews, agents, skills, and sample issues:
+
+```bash
+./dev.sh seed
+# Or with an Anthropic API key for functional agents:
+SEED_ANTHROPIC_API_KEY=sk-ant-... ./dev.sh seed
+```
+
+This creates:
+- **4 crews:** Engineering, Quality, DevOps, Research
+- **12 agents:** Each with unique personas, roles, and system prompts
+- **5 skills:** Network Probe, File Crafter, Web Scraper, Script Runner, System Inspector
+- **Credentials:** Anthropic API key (or OAuth token if `sk-ant-oat` prefix detected)

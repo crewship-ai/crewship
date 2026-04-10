@@ -374,6 +374,11 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
 		return
 	}
+	// V-17: Validate slug format to prevent injection via container names / file paths
+	if !validSlugFormat(req.Slug) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must contain only lowercase letters, numbers, and hyphens"})
+		return
+	}
 
 	if req.AgentRole == "" {
 		req.AgentRole = "AGENT"
@@ -625,6 +630,20 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"schedule_cron": "schedule_cron", "schedule_prompt": "schedule_prompt",
 		"schedule_enabled": "schedule_enabled",
 		"mcp_config_json": "mcp_config_json",
+	}
+
+	// Validate slug format if being updated
+	if slugVal, ok := body["slug"]; ok {
+		if slugStr, ok := slugVal.(string); ok {
+			if slugStr == "" || len(slugStr) < 2 || len(slugStr) > 50 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must be 2-50 characters"})
+				return
+			}
+			if !validSlugFormat(slugStr) {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "slug must contain only lowercase letters, numbers, underscores, and hyphens"})
+				return
+			}
+		}
 	}
 
 	// Validate agent_role if being updated

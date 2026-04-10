@@ -1,0 +1,278 @@
+---
+title: "Providers"
+description: "Container, storage, and state provider options including Docker, Apple Containers, BoltDB, and PostgreSQL."
+icon: "server"
+---
+
+# Providers
+
+Crewship uses a provider abstraction for containers, storage, and state management. Each provider implements a Go interface and can be swapped via configuration.
+
+## Container Providers
+
+The `ContainerProvider` interface (`internal/provider/`) defines the contract for container lifecycle management.
+
+### Docker Provider
+
+**Config key:** `container.provider: "docker"`
+
+The Docker provider (`internal/provider/docker/docker.go`) is the primary container backend. It auto-detects Docker-compatible runtimes and manages crew containers.
+
+#### Auto-Detection
+
+The provider probes multiple socket paths in priority order:
+
+| Priority | Socket Path | Runtime |
+|----------|-------------|---------|
+| 1 | `DOCKER_HOST` env var | Explicit |
+| 2 | `/var/run/docker.sock` | Docker Engine |
+| 3 | `~/.colima/default/docker.sock` | Colima (macOS) |
+| 4 | `~/.orbstack/run/docker.sock` | OrbStack (macOS) |
+| 5 | `~/.rd/docker.sock` | Rancher Desktop |
+| 6 | `~/.docker/run/docker.sock` | Docker Desktop (macOS) |
+| 7 | `/run/user/{uid}/podman/podman.sock` | Podman (rootless) |
+| 8 | `~/.local/share/containers/podman/machine/podman.sock` | Podman machine (macOS) |
+| 9 | `/run/podman/podman.sock` | Podman (root) |
+| 10 | `/run/containerd/containerd.sock` | nerdctl |
+
+Each socket gets a **1.5-second ping timeout** (`socketPingTimeout`) to prevent hung daemons from blocking detection.
+
+<Note>
+  Podman masquerades as Docker. The provider checks server components for "Podman Engine" to correctly identify it, even through Docker-compatible sockets.
+</Note>
+
+#### Runtime Selection
+
+| Runtime | Config Value | Security Profile |
+|---------|-------------|-----------------|
+| **runc** | `runc` | Standard Linux namespaces/cgroups. Default Docker runtime. |
+| **gVisor** | `runsc` | Intercepts syscalls at the kernel level. Prevents container escapes. |
+| **Kata Containers** | `kata-runtime` | Each container runs in a lightweight VM. Strongest isolation. |
+| **Sysbox** | `sysbox-runc` | Enhanced container isolation for running nested containers. |
+
+```yaml
+container:
+  default_runtime: "runsc"  # Use gVisor for production
+```
+
+#### Network Management
+
+The provider auto-creates a Docker bridge network (default: `crewship-agents`) for inter-container communication:
+
+```go
+func (p *Provider) ensureNetwork(ctx context.Context, name string) error {
+    // Check if network exists, create if not
+    _, err = p.client.NetworkCreate(ctx, name, network.CreateOptions{
+        Driver: "bridge",
+    })
+}
+```
+
+#### Image Management
+
+The runtime image is pulled automatically if not present locally. The provider lists all local images and checks manually (Docker Desktop can block on filtered queries to remote registries).
+
+#### Container Naming
+
+Containers follow the naming convention: `{prefix}team-{crew-slug}`
+
+| Scenario | Container Name |
+|----------|---------------|
+| Default | `crewship-team-engineering` |
+| With prefix `prod` | `prod-team-engineering` |
+| Multi-instance | `crewship_1-team-engineering` |
+
+#### Provider Interfaces
+
+The Docker provider implements three interfaces:
+
+```go
+var _ provider.ContainerProvider = (*Provider)(nil)
+var _ provider.InteractiveExecProvider = (*Provider)(nil)
+var _ provider.VolumeManager = (*Provider)(nil)
+```
+
+| Interface | Methods |
+|-----------|---------|
+| `ContainerProvider` | `EnsureCrewRuntime`, `Exec`, `ExecInspect`, `StopCrewRuntime`, `RemoveCrewRuntime`, `ContainerStatus`, `ContainerStats`, `CrewContainerName` |
+| `InteractiveExecProvider` | `ExecInteractive` (bidirectional TTY sessions), `ExecResize` (change terminal dimensions) |
+| `VolumeManager` | `RemoveCrewVolumes` (remove persistent home/tools volumes for a crew) |
+
+#### CrewConfig Fields
+
+The `CrewConfig` struct is passed to `EnsureCrewRuntime` when creating or ensuring a crew container:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ID` | `string` | Crew UUID |
+| `Slug` | `string` | Crew slug (used in container naming) |
+| `MemoryMB` | `int` | Memory limit in megabytes |
+| `CPUs` | `float64` | CPU limit (fractional for Docker, integer-only for Apple) |
+| `NetworkMode` | `string` | `"free"` (default) or `"restricted"` |
+| `AllowedDomains` | `[]string` | Domains allowed when NetworkMode is `"restricted"` |
+| `TTLHours` | `int` | Auto-stop after idle period; 0 = no TTL |
+| `Image` | `string` | Custom runtime image; empty = provider default |
+
+### Apple Container Provider
+
+**Config key:** `container.provider: "apple"`
+
+The Apple provider (`internal/provider/apple/apple.go`) uses Apple Containers on macOS Tahoe+. Since there is no Go SDK, all operations shell out to the `container` CLI.
+
+```go
+// Apple Containers run each container as a lightweight VM on macOS (Tahoe+).
+// Since there is no Go SDK, all operations shell out to the `container` CLI.
+```
+
+#### Apple Container Features
+
+- Lightweight VM isolation (stronger than Docker namespaces)
+- Native macOS integration
+- IPv4 networking with gateway
+- JSON output from `container inspect` and `container list`
+
+#### Container Inspection
+
+Apple Containers use a different JSON structure:
+
+```go
+type containerJSON struct {
+    Status        string
+    Configuration struct {
+        ID    string
+        Image struct {
+            Reference string
+        }
+    }
+    Networks []struct {
+        IPv4Address string  // e.g. "192.168.67.4/24"
+        IPv4Gateway string  // e.g. "192.168.67.1"
+    }
+}
+```
+
+#### Apple Containers Limitations
+
+| Feature | Docker | Apple Containers |
+|---------|--------|-----------------|
+| `ContainerStats` | Full CPU/memory/network metrics | Not supported (returns error) |
+| `ExecResize` | Resizes running exec TTY | No-op (CLI does not support resize) |
+| CPU allocation | Fractional (e.g., 1.5 CPUs) | Integer only (rounded) |
+| Stop timeout | 30 seconds | 10 seconds |
+
+### Auto Provider
+
+**Config key:** `container.provider: "auto"`
+
+Auto-detection tries Docker first, then falls back to Apple Containers. Useful for development environments where the runtime may vary.
+
+### Kubernetes Provider
+
+**Config key:** `container.provider: "k8s"`
+
+Kubernetes support for running agent crews as pods in a cluster. This is the recommended provider for production deployments at scale.
+
+## Storage Providers
+
+| Provider | Config Value | Description |
+|----------|-------------|-------------|
+| **Local filesystem** | `localfs` | Stores files on the local disk. Default for single-server deployments. |
+| **S3** | `s3` | Amazon S3 or compatible object storage. For distributed deployments. |
+
+```yaml
+storage:
+  provider: "localfs"
+  base_path: "/var/lib/crewship"  # Where crew files are stored
+  log_path: "/var/log/crewship"    # Agent execution logs
+```
+
+## State Providers
+
+The state provider stores ephemeral agent run states (running, completed, failed):
+
+| Provider | Config Value | Best For |
+|----------|-------------|----------|
+| **BoltDB** | `bbolt` | Single-server deployments, development |
+| **PostgreSQL** | `postgres` | Multi-server, high-throughput deployments |
+
+```yaml
+state:
+  provider: "bbolt"
+  bolt_path: "/var/lib/crewship/state.db"
+```
+
+BoltDB is an embedded key-value store that requires no external dependencies. It stores state in a single file.
+
+For PostgreSQL:
+```yaml
+state:
+  provider: "postgres"
+  # Connection configured via DATABASE_URL or equivalent
+```
+
+## Provider Validation
+
+At startup, the config validates all provider selections:
+
+```go
+var (
+    validContainerProviders = map[string]bool{
+        "docker": true, "apple": true, "auto": true, "k8s": true,
+    }
+    validStorageProviders = map[string]bool{
+        "localfs": true, "s3": true,
+    }
+    validStateProviders = map[string]bool{
+        "bbolt": true, "postgres": true,
+    }
+    validContainerRuntimes = map[string]bool{
+        "runc": true, "runsc": true, "kata-runtime": true, "sysbox-runc": true,
+    }
+)
+```
+
+Invalid provider values cause a startup error with a descriptive message.
+
+## Choosing a Provider Combination
+
+<Tabs>
+  <Tab title="Development">
+    ```yaml
+    container:
+      provider: "docker"    # or "auto" for macOS
+      default_runtime: "runc"
+    storage:
+      provider: "localfs"
+    state:
+      provider: "bbolt"
+    ```
+    Simplest setup. No external dependencies beyond Docker.
+  </Tab>
+
+  <Tab title="Production (Single Server)">
+    ```yaml
+    container:
+      provider: "docker"
+      default_runtime: "runsc"  # gVisor for security
+      sidecar_enabled: true
+    storage:
+      provider: "localfs"
+    state:
+      provider: "bbolt"
+    ```
+    Enhanced security with gVisor. Sidecar enabled for credential injection.
+  </Tab>
+
+  <Tab title="Production (Distributed)">
+    ```yaml
+    container:
+      provider: "k8s"
+      sidecar_enabled: true
+    storage:
+      provider: "s3"
+    state:
+      provider: "postgres"
+    ```
+    Kubernetes for container orchestration, S3 for shared storage, PostgreSQL for state.
+  </Tab>
+</Tabs>

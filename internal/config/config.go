@@ -120,7 +120,7 @@ func Default() *Config {
 		Auth: AuthConfig{
 			WSTokenExpiry: 5 * time.Minute,
 			NextjsURL:     "http://localhost:8080",
-			AllowSignup:   true,
+			AllowSignup:   false,
 		},
 		LLMProxy: LLMProxyConfig{
 			Enabled:             true,

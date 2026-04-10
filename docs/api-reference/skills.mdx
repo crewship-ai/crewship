@@ -1,0 +1,287 @@
+---
+title: "Skills & Templates"
+description: "Skill marketplace, skill import, workflow templates, and crew templates."
+icon: "wand-magic-sparkles"
+---
+
+---
+
+## Skills
+
+Skills are reusable capabilities that can be assigned to agents. They may include system prompt snippets, MCP server configurations, credential requirements, and tool definitions.
+
+### List Skills
+
+```
+GET /api/v1/skills?workspace_id={workspaceId}
+```
+
+**Auth:** Session or CLI token + workspace membership
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `category` | string | Filter by category |
+| `source` | string | Filter by source |
+| `search` | string | Search in name, display_name, and description |
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "skill_abc",
+    "name": "github-pr-review",
+    "slug": "github-pr-review",
+    "display_name": "GitHub PR Review",
+    "description": "Review pull requests and suggest improvements",
+    "version": "1.0.0",
+    "author": "Crewship",
+    "category": "coding",
+    "source": "BUNDLED",
+    "icon": "git-pull-request",
+    "verification": "VERIFIED",
+    "downloads": 1250,
+    "rating_avg": 4.8,
+    "rating_count": 45,
+    "tags": "[\"github\", \"code-review\", \"pr\"]",
+    "featured": true,
+    "pricing_tier": "FREE",
+    "tool_count": 3,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-15T00:00:00Z"
+  }
+]
+```
+
+### Skill Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Skill ID |
+| `name` | string | Internal name |
+| `slug` | string | URL-safe identifier |
+| `display_name` | string | Human-readable name |
+| `description` | string? | Description |
+| `version` | string | Semantic version |
+| `author` | string? | Author name |
+| `category` | string | Category |
+| `source` | string | Origin source |
+| `icon` | string? | Lucide icon name |
+| `verification` | string | Verification status |
+| `downloads` | integer | Download count |
+| `rating_avg` | number? | Average rating |
+| `rating_count` | integer | Number of ratings |
+| `tags` | string? | JSON array of tag strings |
+| `featured` | boolean | Whether skill is featured |
+| `pricing_tier` | string | Pricing tier |
+| `tool_count` | integer? | Number of tools provided |
+
+### Get Skill
+
+```
+GET /api/v1/skills/{skillId}?workspace_id={workspaceId}
+```
+
+Returns full skill details including content, credential requirements, and MCP configuration.
+
+**Response:** `200 OK`
+
+Additional fields beyond the list response:
+
+| Field | Type | Description |
+|---|---|---|
+| `content` | string? | Skill content (system prompt, SKILL.md) |
+| `credential_requirements` | string? | JSON of required credentials |
+| `mcp_server_command` | string? | MCP server command |
+| `mcp_server_image` | string? | MCP server Docker image |
+| `mcp_transport` | string? | MCP transport type |
+| `dependencies` | string? | JSON of dependencies |
+| `license` | string? | License identifier |
+| `agent_count` | integer | Number of agents using this skill |
+| `security_score` | integer? | Security score (0-100) |
+| `allowed_domains` | string? | JSON of allowed domains |
+| `changelog` | string? | Changelog text |
+
+| Status | Condition |
+|---|---|
+| `404` | Skill not found |
+
+---
+
+### Import Skill
+
+```
+POST /api/v1/workspaces/{workspaceId}/skills/import
+```
+
+Import a skill from a URL (GitHub raw content) or raw SKILL.md content.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:** Provide exactly one of `url` or `content`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `url` | string | Conditional | URL to fetch SKILL.md from |
+| `content` | string | Conditional | Raw SKILL.md content |
+
+```json
+{
+  "url": "https://raw.githubusercontent.com/org/repo/main/SKILL.md"
+}
+```
+
+or
+
+```json
+{
+  "content": "---\nname: my-skill\n---\n# My Custom Skill\n..."
+}
+```
+
+URLs are validated against SSRF attacks (private IP ranges are blocked).
+
+**Response:** `201 Created` -- imported skill object.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid JSON, no url/content, both provided, invalid URL, parse error |
+| `403` | Insufficient role |
+
+---
+
+## Skill Sources
+
+| Source | Description |
+|---|---|
+| `BUNDLED` | Ships with Crewship |
+| `MANAGED` | Maintained by the Crewship team |
+| `MARKETPLACE` | Community-contributed |
+| `CUSTOM` | Workspace-scoped (user-imported) |
+
+## Skill Categories
+
+`coding`, `messaging`, `automation`, `data`, `devops`, `support`, `sales`, `custom`
+
+---
+
+## Workflow Templates
+
+Workflow templates define reusable task structures for missions.
+
+### List Templates
+
+```
+GET /api/v1/templates?workspace_id={workspaceId}
+```
+
+**Auth:** Session or CLI token + workspace membership
+
+**Response:** `200 OK` -- array of template objects.
+
+### Create Template
+
+```
+POST /api/v1/templates?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `201 Created`
+
+### Get Template
+
+```
+GET /api/v1/templates/{templateId}?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK`
+
+| Status | Condition |
+|---|---|
+| `404` | Template not found |
+
+### Update Template
+
+```
+PATCH /api/v1/templates/{templateId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `200 OK`
+
+### Delete Template
+
+```
+DELETE /api/v1/templates/{templateId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `204 No Content`
+
+---
+
+## Crew Templates (Blueprints)
+
+Crew templates are pre-configured crew blueprints that can be deployed to create a fully set up crew with agents, skills, and credentials.
+
+### List Crew Templates
+
+```
+GET /api/v1/crew-templates?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- array of crew template objects.
+
+### Get Crew Template
+
+```
+GET /api/v1/crew-templates/{slug}?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- full template details including agents and configuration.
+
+### Deploy Crew Template
+
+```
+POST /api/v1/crew-templates/{slug}/deploy?workspace_id={workspaceId}
+```
+
+Deploys the template, creating:
+- A new crew with the template's configuration
+- All agents defined in the template
+- Auto-assignment of credentials and skills
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `201 Created` -- the created crew and agents.
+
+---
+
+## AI Crew Wizard
+
+```
+POST /api/v1/crew-ai-suggest?workspace_id={workspaceId}
+```
+
+Uses AI to suggest a crew configuration based on a natural language description.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `200 OK` -- suggested crew configuration.
+
+---
+
+## Agent Skills (Per-Agent)
+
+See the [Agents](/api-reference/agents) page for per-agent skill management:
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `GET /api/v1/agents/{agentId}/skills` | GET | List skills assigned to agent |
+| `POST /api/v1/agents/{agentId}/skills` | POST | Assign skill to agent |
+| `DELETE /api/v1/agents/{agentId}/skills/{skillId}` | DELETE | Remove skill from agent |

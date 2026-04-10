@@ -1,0 +1,259 @@
+---
+title: "YAML Configuration"
+description: "Configure Crewship via a YAML config file with server, container, storage, auth, Keeper, and LLM proxy settings."
+icon: "file-code"
+---
+
+# YAML Configuration
+
+Crewship can be configured via a YAML file passed at startup. Environment variables override YAML values. The config is loaded and validated in `internal/config/config.go`.
+
+## Loading Order
+
+```
+1. Default values (config.Default())
+2. YAML config file (if path provided)
+3. Environment variable overrides (applyEnvOverrides)
+4. Auto-derived values (NextjsURL, InternalToken)
+5. Validation (Config.Validate)
+```
+
+## Complete Reference
+
+```yaml
+# Server configuration
+server:
+  host: "0.0.0.0"              # Listen address
+  port: 8080                    # Listen port
+  shutdown_timeout: 10s         # Graceful shutdown timeout
+
+# Inter-process communication
+ipc:
+  socket_path: "/tmp/crewship.sock"  # Unix socket for internal API
+
+# Container provider
+container:
+  provider: "docker"            # "docker" | "apple" | "auto" | "k8s"
+  runtime_image: "ghcr.io/crewship-ai/agent-runtime:latest"
+  default_runtime: "runc"       # "runc" | "runsc" | "kata-runtime" | "sysbox-runc"
+  network: "crewship-agents"    # Docker bridge network name
+  container_prefix: ""          # Name prefix for multi-instance isolation
+  default_memory_mb: 512        # Default container memory limit
+  default_cpus: 1.0             # Default container CPU limit
+  sidecar_enabled: false        # Enable sidecar proxy for credential injection
+
+# File storage
+storage:
+  provider: "localfs"           # "localfs" | "s3"
+  base_path: "/var/lib/crewship"
+  log_path: "/var/log/crewship"
+
+# State store (agent run states)
+state:
+  provider: "bbolt"             # "bbolt" | "postgres"
+  bolt_path: "/var/lib/crewship/state.db"
+
+# Logging
+logging:
+  level: "info"                 # "debug" | "info" | "warn" | "error"
+  format: "json"                # "json" | "text"
+
+# Authentication
+auth:
+  jwt_secret: ""                # NEXTAUTH_SECRET (required)
+  ws_token_expiry: 5m           # WebSocket token expiry
+  nextjs_url: ""                # Auto-derived from port if unset
+  internal_token: ""            # Auto-generated if empty
+  allow_signup: false           # Allow new user registration
+
+# LLM proxy (token management)
+llm_proxy:
+  enabled: true
+  token_sync_interval: 30s      # How often to sync token usage
+  health_check_interval: 60s    # LLM provider health checks
+
+# Keeper (AI security gatekeeper)
+keeper:
+  enabled: false
+  ollama_url: "http://localhost:11434"
+  model: "phi3:mini"
+
+# License
+license:
+  file_path: ""                 # Path to license file
+```
+
+## Section Details
+
+### Server
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+  shutdown_timeout: 10s
+```
+
+The `shutdown_timeout` controls how long the server waits for in-flight requests to complete during graceful shutdown. The server port must be between 1 and 65535.
+
+### Container
+
+```yaml
+container:
+  provider: "docker"
+  runtime_image: "ghcr.io/crewship-ai/agent-runtime:latest"
+  default_runtime: "runc"
+  network: "crewship-agents"
+  container_prefix: ""
+  default_memory_mb: 512
+  default_cpus: 1.0
+  sidecar_enabled: false
+```
+
+<Accordion title="Provider options">
+  | Provider | Description |
+  |----------|-------------|
+  | `docker` | Standard Docker (auto-detects Docker, Podman, Colima, OrbStack, Rancher) |
+  | `apple` | Apple Containers on macOS Tahoe+ (lightweight VMs) |
+  | `auto` | Auto-detect between docker and apple |
+  | `k8s` | Kubernetes pods |
+</Accordion>
+
+<Accordion title="Runtime options">
+  | Runtime | Security | Performance |
+  |---------|----------|-------------|
+  | `runc` | Standard Linux namespaces | Fast |
+  | `runsc` (gVisor) | Kernel-level syscall interception | Moderate |
+  | `kata-runtime` | Lightweight VM isolation | Slower |
+  | `sysbox-runc` | Enhanced container isolation | Moderate |
+</Accordion>
+
+<Note>
+  The `container_prefix` is prepended to container names. For example, with `container_prefix: "prod"`, a container would be named `prod-team-engineering` instead of `crewship-team-engineering`. Essential for multi-instance deployments.
+</Note>
+
+### Storage
+
+```yaml
+storage:
+  provider: "localfs"
+  base_path: "/var/lib/crewship"
+  log_path: "/var/log/crewship"
+```
+
+The `base_path` stores crew workspace files, agent output, and persistent data. The `log_path` stores agent execution logs.
+
+### State
+
+```yaml
+state:
+  provider: "bbolt"
+  bolt_path: "/var/lib/crewship/state.db"
+```
+
+BoltDB is the default state store for agent run tracking. For high-throughput deployments, switch to PostgreSQL:
+
+```yaml
+state:
+  provider: "postgres"
+  # Connection string via DATABASE_URL env var
+```
+
+### Auth
+
+```yaml
+auth:
+  jwt_secret: ""           # Set via NEXTAUTH_SECRET env var
+  ws_token_expiry: 5m
+  nextjs_url: ""           # Auto-derived: http://localhost:{port}
+  internal_token: ""       # Auto-generated if empty
+  allow_signup: false
+```
+
+<Warning>
+  Never commit the `jwt_secret` or `internal_token` to version control. Use environment variables for sensitive values.
+</Warning>
+
+### LLM Proxy
+
+```yaml
+llm_proxy:
+  enabled: true
+  token_sync_interval: 30s
+  health_check_interval: 60s
+```
+
+The LLM proxy manages token usage tracking and provider health monitoring.
+
+### Keeper
+
+```yaml
+keeper:
+  enabled: false
+  ollama_url: "http://localhost:11434"
+  model: "phi3:mini"
+```
+
+<Tip>
+  For development, start Ollama with models on an external SSD:
+  ```bash
+  OLLAMA_MODELS="/Volumes/SSD/ollama-models" ollama serve
+  ```
+  Then enable Keeper: `KEEPER_OLLAMA_URL=http://localhost:11434 ./dev.sh start`
+</Tip>
+
+## Minimal Configuration
+
+The minimum viable configuration requires only:
+
+```yaml
+# No YAML file needed -- just environment variables:
+# ENCRYPTION_KEY=<64-hex-chars>
+# NEXTAUTH_SECRET=<random-secret>
+```
+
+All other values have sensible defaults. The server will:
+- Listen on `0.0.0.0:8080`
+- Use Docker as container provider
+- Store data in `/var/lib/crewship`
+- Use BoltDB for state
+- Auto-generate the internal token
+- Auto-derive the NextJS URL
+
+## Production Configuration
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+  shutdown_timeout: 30s
+
+container:
+  provider: "docker"
+  runtime_image: "ghcr.io/crewship-ai/agent-runtime:v1.0.0"
+  default_runtime: "runsc"      # gVisor for production security
+  network: "crewship-agents"
+  default_memory_mb: 1024
+  default_cpus: 2.0
+  sidecar_enabled: true
+
+storage:
+  provider: "localfs"
+  base_path: "/data/crewship"
+  log_path: "/var/log/crewship"
+
+state:
+  provider: "postgres"
+
+logging:
+  level: "info"
+  format: "json"
+
+auth:
+  allow_signup: false
+
+keeper:
+  enabled: true
+  ollama_url: "http://ollama-host:11434"
+  model: "phi3:mini"
+```

@@ -1,0 +1,223 @@
+---
+title: "Captain"
+description: "Your workspace-level AI assistant with 11 tools, SSE streaming, and onboarding-aware context."
+icon: "compass"
+---
+
+# Captain
+
+Captain is Crewship's workspace-level AI assistant -- the "AI CEO" that helps manage crews, agents, credentials, and missions. It uses direct LLM API calls with native tool calling and SSE streaming.
+
+## Architecture
+
+Captain is implemented in `internal/api/captain.go` and `internal/api/captain_tools.go`.
+
+```
+User Message
+    |
+    v
+POST /api/v1/captain/chat
+    |
+    v
+Rate limiter (20 req/min/user)
+    |
+    v
+Load conversation history (captain_chats table)
+    |
+    v
+Build dynamic system prompt (workspace phase, counts)
+    |
+    v
+SSE streaming with tool loop (max 10 iterations)
+    |
+    v
+Save updated history
+```
+
+## LLM Provider Selection
+
+Captain selects its LLM model based on available credentials:
+
+| Provider | Model | Priority |
+|----------|-------|----------|
+| Anthropic | `claude-haiku-4-5-20251001` | 1 (highest) |
+| OpenAI | `gpt-4o-mini` | 2 |
+
+Provider resolution (`getProvider`):
+1. Query active `API_KEY` credentials for `ANTHROPIC` and `OPENAI`
+2. Decrypt the credential value
+3. Return the first successfully decrypted provider
+
+<Note>
+  Captain requires at least one active API credential in the workspace. Without credentials, it returns a 422 error guiding the user to Settings -> Credentials.
+</Note>
+
+## Rate Limiting
+
+Captain enforces a sliding window rate limit of **20 requests per minute per user**. This is implemented as an in-memory map of timestamps per user ID in `captainRateLimiter`.
+
+## Onboarding Phases
+
+Captain adapts its behavior based on the workspace state. The `captainWorkspacePhase` function returns one of four phases:
+
+| Phase | Name | Condition | Guidance |
+|-------|------|-----------|----------|
+| 1 | EMPTY | 0 crews | Recommend crew templates |
+| 2 | SETUP | Crews exist, 0 agents | Help add agents to crews |
+| 3 | CREDENTIALS_NEEDED | Agents exist, 0 credentials | Guide to Settings -> Credentials |
+| 4 | OPERATIONAL | Everything configured | Help with missions, escalations, proposals |
+
+The system prompt dynamically includes onboarding guidance based on the current phase.
+
+## System Prompt Structure
+
+Captain's system prompt is built in `buildCaptainSystemPrompt`:
+
+```
+[IDENTITY]
+You are Captain -- the AI CEO and right hand of the user...
+
+[LANGUAGE]       (if detected: Czech or workspace preference)
+Always respond in: {language}
+
+[GOALS]
+1. Help the user set up a working workspace
+2. Monitor mission status and flag problems
+3. Approve or reject proposals from Coordinators
+4. Be proactive
+
+[RULES]
+- NEVER take destructive actions without confirmation
+- Always explain WHAT and WHY before doing it
+- NEVER reveal API keys or credential values
+- Keep responses to 3-4 sentences max
+
+[DYNAMIC CONTEXT]
+Workspace phase: {EMPTY|SETUP|CREDENTIALS_NEEDED|OPERATIONAL}
+Crews: N | Agents: N | Active missions: N
+
+[ONBOARDING GUIDANCE]
+{Phase-specific guidance text}
+```
+
+<Tip>
+  Captain auto-detects Czech language from message content (using character and word indicators) and responds in the user's language.
+</Tip>
+
+## Tools (11 Functions)
+
+Captain has access to 11 tool functions:
+
+<Accordion title="get_workspace_stats">
+  Returns an overview: crew count, agent count, active missions, pending escalations, pending proposals.
+</Accordion>
+
+<Accordion title="list_crews">
+  Lists all crews in the workspace with their IDs, names, slugs, and descriptions.
+</Accordion>
+
+<Accordion title="list_agents">
+  Lists agents, optionally filtered by `crew_id`. Returns name, slug, role, status.
+</Accordion>
+
+<Accordion title="list_credentials">
+  Lists credentials showing id, name, provider, type, status. **Never exposes secret values.**
+</Accordion>
+
+<Accordion title="list_missions">
+  Lists missions filtered by status (`PLANNING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`, `CANCELLED`). Returns up to 20 most recent.
+</Accordion>
+
+<Accordion title="list_escalations">
+  Lists pending escalations that require human attention.
+</Accordion>
+
+<Accordion title="create_crew">
+  Creates a new crew. Requires `name`, optional `slug`, `description`, `icon`, `color`.
+</Accordion>
+
+<Accordion title="create_agent">
+  Creates an agent and adds it to a crew. Requires `name` and `crew_id`. Optional: `slug`, `role_title`, `agent_role` (AGENT/LEAD), `system_prompt`, `tool_profile` (CODING/MINIMAL/FULL).
+</Accordion>
+
+<Accordion title="create_mission">
+  Creates and immediately starts a mission. Requires `crew_id` and `title`. Optionally accepts pre-defined `tasks` with `title`, `description`, `assigned_agent_id`, `task_order`.
+</Accordion>
+
+<Accordion title="approve_proposal">
+  Approves a pending mission proposal and auto-creates the planned missions. Requires `proposal_id`.
+</Accordion>
+
+<Accordion title="apply_crew_template">
+  Deploys a pre-configured crew template. Requires `template_slug` and `crew_name`.
+</Accordion>
+
+## Tool Loop
+
+Captain uses an iterative tool-calling loop with a maximum of **10 iterations**. Each iteration:
+
+1. Stream the LLM response via SSE
+2. If the response includes tool calls, execute them
+3. Append tool results to the conversation
+4. Send the updated conversation back to the LLM
+
+If the LLM returns `end_turn` (no more tool calls), the loop exits. If 10 iterations are reached, a warning is sent to the user.
+
+## SSE Streaming Protocol
+
+Captain streams responses via Server-Sent Events:
+
+| Event Type | Content |
+|-----------|---------|
+| `text` | Streaming text content from the LLM |
+| `tool_call` | Tool invocation notification (`id`, `name`) |
+| `tool_result` | Tool execution result (`id`, `name`, `content`) |
+| `error` | Error message from LLM or tool execution |
+| `warning` | Non-fatal warning (e.g., max iterations reached) |
+| `done` | Stream complete |
+
+Optimized fast-path: `writeCaptainTextSSE` avoids map allocation for text events, writing JSON directly.
+
+## Conversation Management
+
+- **History storage:** `captain_chats` table, keyed by `cap_{wsID}_{userID}`
+- **Chat ID derivation:** Always server-side (`captainChatID`) to prevent cross-user history access
+- **Pruning:** Conversations are pruned to fit within ~160K tokens (640K chars). Tool results are truncated to 2000 chars. Oldest messages are dropped first, keeping at least the last 4 messages.
+- **Endpoints:**
+  - `POST /api/v1/captain/chat` -- Send message (SSE response)
+  - `GET /api/v1/captain/history` -- Load conversation history
+  - `DELETE /api/v1/captain/history` -- Clear conversation
+  - `GET /api/v1/captain/context` -- Get workspace context (counts, phase)
+
+## Audit Trail
+
+Every tool call is logged to the audit trail:
+```go
+WriteAuditLog(ctx, h.db, "captain_tool_call", "CAPTAIN", tc.Name,
+    userID, wsID, map[string]interface{}{"tool_id": tc.ID})
+```
+
+## Security Rules
+
+- Captain **never reveals** API keys, passwords, or credential values -- even if the user asks directly
+- Destructive actions require explicit user confirmation
+- Chat IDs are derived server-side to prevent cross-user access
+- Rate limiting prevents abuse (20 req/min/user)
+- SSE write deadline is disabled to prevent timeout during long LLM calls (overall 10-minute cap)
+
+## What's Next
+
+<CardGroup cols={2}>
+  <Card title="Your First Crew" icon="users" href="/guides/first-crew">
+    Let Captain help you create and configure your first crew.
+  </Card>
+  <Card title="Orchestration" icon="sitemap" href="/guides/orchestration">
+    Create missions that Captain can monitor and manage.
+  </Card>
+  <Card title="Coordinator" icon="globe" href="/guides/coordinator">
+    Learn about the Coordinator role for cross-crew orchestration.
+  </Card>
+  <Card title="Keeper" icon="shield-check" href="/guides/keeper">
+    Captain works alongside Keeper for credential security.
+  </Card>
+</CardGroup>

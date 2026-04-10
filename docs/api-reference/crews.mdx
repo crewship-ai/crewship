@@ -1,0 +1,364 @@
+---
+title: "Crews"
+description: "Manage crews -- isolated agent teams with their own containers, network policies, and members."
+icon: "users"
+---
+
+All crew endpoints require authentication and workspace context (`workspace_id` query parameter).
+
+---
+
+## List Crews
+
+```
+GET /api/v1/crews?workspace_id={workspaceId}
+```
+
+Returns all crews in the workspace, ordered by creation date descending.
+
+**Auth:** Session or CLI token + workspace membership
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "cm1abc123",
+    "workspace_id": "ws_123",
+    "name": "Engineering",
+    "slug": "engineering",
+    "description": "Core engineering team",
+    "color": "blue",
+    "icon": "code",
+    "avatar_style": "bottts",
+    "container_memory_mb": 4096,
+    "container_cpus": 2.0,
+    "container_ttl_hours": 24,
+    "network_mode": "restricted",
+    "allowed_domains": ["api.github.com", "registry.npmjs.org"],
+    "mcp_config_json": null,
+    "escalation_config": null,
+    "issue_prefix": "ENG",
+    "created_at": "2024-01-15T10:00:00Z",
+    "updated_at": "2024-01-15T10:00:00Z",
+    "_count": {
+      "agents": 3,
+      "members": 2
+    }
+  }
+]
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Crew ID |
+| `workspace_id` | string | Parent workspace ID |
+| `name` | string | Display name |
+| `slug` | string | URL-safe identifier |
+| `description` | string? | Crew description |
+| `color` | string? | Palette color ID |
+| `icon` | string? | Lucide icon name |
+| `avatar_style` | string? | Avatar style for agents (e.g., `"bottts"`) |
+| `container_memory_mb` | integer | Container memory limit in MB |
+| `container_cpus` | number | Container CPU limit |
+| `container_ttl_hours` | integer? | Container TTL in hours |
+| `network_mode` | string | `"free"` or `"restricted"` |
+| `allowed_domains` | string[] | Allowed domains (restricted mode only) |
+| `mcp_config_json` | string? | Raw MCP server config JSON |
+| `escalation_config` | string? | Escalation policy config JSON |
+| `issue_prefix` | string? | Issue identifier prefix (e.g., `"ENG"`) |
+| `created_at` | string | ISO 8601 timestamp |
+| `updated_at` | string | ISO 8601 timestamp |
+| `_count.agents` | integer | Number of active agents |
+| `_count.members` | integer | Number of crew members |
+
+---
+
+## Create Crew
+
+```
+POST /api/v1/crews?workspace_id={workspaceId}
+```
+
+**Auth:** Session or CLI token + `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | string | Yes | -- | Display name (2-100 characters) |
+| `slug` | string | Yes | -- | URL-safe identifier (2-50 chars, `^[a-z0-9][a-z0-9_-]*$`) |
+| `description` | string | No | `null` | Crew description |
+| `color` | string | No | `null` | Palette ID (`blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `lime`, `fuchsia`) |
+| `icon` | string | No | `null` | Lucide icon name (`code`, `rocket`, `clipboard`, etc.) |
+| `container_memory_mb` | integer | No | `4096` | Container memory limit in MB |
+| `container_cpus` | number | No | `2.0` | Container CPU limit |
+| `container_ttl_hours` | integer | No | `null` | Container time-to-live in hours |
+| `network_mode` | string | No | `"free"` | `"free"` or `"restricted"` |
+| `allowed_domains` | string[] | No | `[]` | Allowed domains when `network_mode` is `"restricted"` |
+
+```json
+{
+  "name": "Engineering",
+  "slug": "engineering",
+  "description": "Core engineering team",
+  "color": "blue",
+  "icon": "code",
+  "container_memory_mb": 4096,
+  "container_cpus": 2.0,
+  "network_mode": "restricted",
+  "allowed_domains": ["api.github.com", "registry.npmjs.org"]
+}
+```
+
+**Response:** `201 Created` -- returns the created crew object (same shape as List response item).
+
+**Error Responses:**
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid name length, slug format, or network_mode value |
+| `402` | License crew limit exceeded |
+| `403` | Insufficient role |
+| `409` | Slug already taken in this workspace |
+
+---
+
+## Get Crew
+
+```
+GET /api/v1/crews/{crewId}?workspace_id={workspaceId}
+```
+
+**Auth:** Session or CLI token + workspace membership
+
+| Path Parameter | Description |
+|---|---|
+| `crewId` | Crew ID |
+
+**Response:** `200 OK` -- full crew object including `_count`, `issue_prefix`, `mcp_config_json`, and `escalation_config`.
+
+| Status | Condition |
+|---|---|
+| `404` | Crew not found or does not belong to workspace |
+
+---
+
+## Update Crew
+
+```
+PATCH /api/v1/crews/{crewId}?workspace_id={workspaceId}
+PUT /api/v1/crews/{crewId}?workspace_id={workspaceId}
+```
+
+Both `PATCH` and `PUT` are supported and behave identically (partial update -- only provided fields are changed).
+
+**Auth:** Session or CLI token + `OWNER` or `ADMIN` role
+
+**Request Body:** All fields are optional.
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Display name (2-100 characters) |
+| `slug` | string | URL-safe identifier (2-50 characters) |
+| `description` | string | Crew description |
+| `color` | string | Palette ID |
+| `icon` | string | Lucide icon name |
+| `avatar_style` | string | Avatar style for agents |
+| `container_memory_mb` | integer | Container memory limit in MB |
+| `container_cpus` | number | Container CPU limit |
+| `container_ttl_hours` | integer | Container TTL in hours |
+| `network_mode` | string | `"free"` or `"restricted"` |
+| `allowed_domains` | string[] | Allowed domains (restricted mode) |
+| `mcp_config_json` | string | Raw MCP server config JSON |
+| `escalation_config` | string | Escalation policy config JSON |
+| `issue_prefix` | string | Issue identifier prefix (e.g., `"ENG"`) |
+
+**Response:** `200 OK` -- updated crew object.
+
+**Note:** Changing `network_mode` or `allowed_domains` triggers a container restart to apply the new network policy.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid field values |
+| `403` | Insufficient role |
+| `404` | Crew not found |
+| `409` | Slug already taken |
+
+---
+
+## Delete Crew
+
+```
+DELETE /api/v1/crews/{crewId}?workspace_id={workspaceId}
+```
+
+Soft-deletes the crew (sets `deleted_at`). The slug is freed for reuse.
+
+**Auth:** Session or CLI token + `OWNER` or `ADMIN` role
+
+**Response:** `204 No Content`
+
+| Status | Condition |
+|---|---|
+| `403` | Insufficient role |
+| `404` | Crew not found |
+
+**WebSocket event:** `crew.deleted` broadcast to `workspace:{workspaceId}`
+
+---
+
+## Crew Members
+
+### List Members
+
+```
+GET /api/v1/crews/{crewId}/members?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- array of member objects.
+
+### Add Member
+
+```
+POST /api/v1/crews/{crewId}/members?workspace_id={workspaceId}
+```
+
+**Request Body:**
+
+```json
+{
+  "user_id": "user_abc123"
+}
+```
+
+**Response:** `201 Created`
+
+### Remove Member
+
+```
+DELETE /api/v1/crews/{crewId}/members/{memberId}?workspace_id={workspaceId}
+```
+
+**Response:** `204 No Content`
+
+---
+
+## Apply Avatar Style
+
+```
+POST /api/v1/crews/{crewId}/apply-avatar-style?workspace_id={workspaceId}
+```
+
+Applies the crew's `avatar_style` to all agents in the crew.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `200 OK`
+
+---
+
+## Crew Connections
+
+Crew connections define which crews can communicate with each other for cross-crew task assignment and messaging.
+
+### List Connections
+
+```
+GET /api/v1/crew-connections?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- array of connection objects.
+
+### Create Connection
+
+```
+POST /api/v1/crew-connections?workspace_id={workspaceId}
+```
+
+```json
+{
+  "source_crew_id": "crew_abc",
+  "target_crew_id": "crew_xyz"
+}
+```
+
+**Response:** `201 Created`
+
+### Delete Connection
+
+```
+DELETE /api/v1/crew-connections/{connectionId}?workspace_id={workspaceId}
+```
+
+**Response:** `204 No Content`
+
+---
+
+## Crew Files (Proxy)
+
+File operations are proxied through the crewshipd sidecar to the crew's container filesystem.
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `GET /api/v1/crews/{crewId}/files` | GET | List files in crew workspace |
+| `GET /api/v1/crews/{crewId}/files/download?path=...` | GET | Download a file |
+| `PUT /api/v1/crews/{crewId}/files/save` | PUT | Save/upload a file |
+
+---
+
+## Crew Assignments
+
+```
+GET /api/v1/crews/{crewId}/assignments?workspace_id={workspaceId}
+```
+
+List task assignments for a crew.
+
+**Response:** `200 OK` -- array of assignment objects.
+
+---
+
+## Crew Peer Conversations
+
+```
+GET /api/v1/crews/{crewId}/peer-conversations?workspace_id={workspaceId}
+```
+
+List peer-to-peer conversations between agents in a crew.
+
+---
+
+## Crew Standup
+
+```
+GET /api/v1/crews/{crewId}/standup?workspace_id={workspaceId}
+```
+
+Get standup summary for a crew.
+
+---
+
+## Crew Escalations
+
+### List Escalations
+
+```
+GET /api/v1/crews/{crewId}/escalations?workspace_id={workspaceId}
+```
+
+### Resolve Escalation
+
+```
+PATCH /api/v1/escalations/{escalationId}/resolve?workspace_id={workspaceId}
+```
+
+### Pending Escalation Count
+
+```
+GET /api/v1/escalations/pending-count?workspace_id={workspaceId}
+```
+
+Returns count of pending escalations across the workspace.

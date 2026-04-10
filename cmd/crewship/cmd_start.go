@@ -23,6 +23,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/localfs"
 	"github.com/crewship-ai/crewship/internal/scheduler"
 	"github.com/crewship-ai/crewship/internal/server"
+	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/crewship-ai/crewship/web"
 	"github.com/spf13/cobra"
 )
@@ -169,6 +170,11 @@ var startCmd = &cobra.Command{
 			logger,
 		)
 		srv.SetChatHandler(bridge)
+
+		// V-01: Wire up channel authorizer for WebSocket subscription access control
+		if deps.DB != nil {
+			srv.SetChannelAuthorizer(ws.NewDBChannelAuthorizer(deps.DB))
+		}
 
 		// Start agent scheduler (cron-based scheduled runs)
 		if deps.DB != nil && deps.Container != nil {

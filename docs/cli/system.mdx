@@ -1,0 +1,511 @@
+---
+title: "System & Admin Commands"
+description: "System info, escalations, proposals, templates, integrations, projects, and seed data."
+icon: "server"
+---
+
+# crewship system
+
+Show system information including container runtime, license, and Keeper security status.
+
+```bash
+crewship system <subcommand>
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `info` | Show runtime and license information |
+| `keeper` | Show Keeper security system status |
+| `stats` | Show admin stats (workspaces, users, agents, running) |
+| `onboarding` | Show onboarding status for the current user |
+
+---
+
+## `crewship system info`
+
+Show container runtime details and license information.
+
+```bash
+crewship system info
+```
+
+**Runtime output:** Available, Runtime name, Version, Socket path.
+
+**License output:** Edition, Max crews, Max agents/crew, Max members, Licensee.
+
+---
+
+## `crewship system keeper`
+
+Show Keeper security system status.
+
+```bash
+crewship system keeper
+```
+
+**Output:** Status (enabled/disabled), Ollama URL, Model, Ollama status (online/offline), Secret credential count.
+
+---
+
+## `crewship system stats`
+
+Show admin-level statistics.
+
+```bash
+crewship system stats
+```
+
+**Output:** Workspaces, Users, Agents, Running agents.
+
+---
+
+## `crewship system onboarding`
+
+Show onboarding status for the current user. Output is always JSON.
+
+```bash
+crewship system onboarding
+```
+
+---
+
+# crewship escalation
+
+Manage crew escalations -- issues that agents have flagged for human review.
+
+```bash
+crewship escalation <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List escalations for a crew |
+| `resolve` | Mark an escalation as resolved |
+
+---
+
+## `crewship escalation list`
+
+List escalations for a crew.
+
+```bash
+crewship escalation list --crew backend-team
+crewship escalation list --crew backend-team --status PENDING
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--crew` | `string` | _(required)_ | Crew slug or ID. |
+| `--status` | `string` | | Filter by status: `PENDING` or `RESOLVED`. |
+
+**Output columns:** ID, FROM, REASON, STATUS, CREATED
+
+---
+
+## `crewship escalation resolve`
+
+Mark an escalation as resolved.
+
+```bash
+crewship escalation resolve <id>
+crewship escalation resolve <id> --resolution "Fixed the API key issue"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--resolution` | `string` | | Resolution notes. |
+
+---
+
+# crewship proposal
+
+Manage mission proposals -- proposed work plans submitted by agents for human review.
+
+```bash
+crewship proposal <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List mission proposals |
+| `get` | Show proposal details |
+| `approve` | Approve a mission proposal (creates the missions) |
+| `reject` | Reject a mission proposal |
+| `delete` | Delete a mission proposal |
+
+---
+
+## `crewship proposal list`
+
+List mission proposals, optionally filtered by status.
+
+```bash
+crewship proposal list
+crewship proposal list --status PENDING
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--status` | `string` | | Filter by status: `PENDING`, `APPROVED`, `REJECTED`. |
+
+**Output columns:** ID, TITLE, STATUS, PROPOSED BY, MISSIONS, CREATED
+
+---
+
+## `crewship proposal get`
+
+Show proposal details including contained missions and tasks.
+
+```bash
+crewship proposal get <id>
+```
+
+**Output fields:** Title, ID, Status, Proposed by, Description, Review notes, Reviewed at, Created.
+
+In table format, missions are listed below the detail view.
+
+---
+
+## `crewship proposal approve`
+
+Approve a mission proposal. This creates the actual missions and tasks.
+
+```bash
+crewship proposal approve <id>
+crewship proposal approve <id> --notes "Looks good, proceed"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--notes` | `string` | | Review notes. |
+
+---
+
+## `crewship proposal reject`
+
+Reject a mission proposal.
+
+```bash
+crewship proposal reject <id>
+crewship proposal reject <id> --notes "Needs more detail on the testing plan"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--notes` | `string` | | Review notes. |
+
+---
+
+## `crewship proposal delete`
+
+Delete a mission proposal. Prompts for confirmation.
+
+```bash
+crewship proposal delete <id>
+crewship proposal delete <id> --yes
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |
+
+---
+
+# crewship template
+
+Manage crew templates -- blueprints for pre-configured crews with agents.
+
+```bash
+crewship template <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List available crew templates |
+| `get` | Show crew template details |
+| `deploy` | Deploy a crew template (creates crew + agents) |
+
+---
+
+## `crewship template list`
+
+List available crew templates.
+
+```bash
+crewship template list
+```
+
+**Output columns:** SLUG, NAME, CATEGORY, AGENTS, BUILTIN, DESCRIPTION
+
+---
+
+## `crewship template get`
+
+Show crew template details including the agent configuration.
+
+```bash
+crewship template get <slug>
+```
+
+**Output fields:** Name, Slug, Category, Builtin, Description, ID, Created.
+
+In table format, agents are listed below with columns: SLUG, NAME, ROLE, TYPE.
+
+---
+
+## `crewship template deploy`
+
+Deploy a crew template, creating a new crew with all preconfigured agents.
+
+```bash
+crewship template deploy <slug> --name "My Backend Crew"
+crewship template deploy engineering --name "Engineering v2" --slug eng-v2
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `string` | _(required)_ | Custom crew name for the deployed template. |
+| `--slug` | `string` | _(auto-generated)_ | Custom crew slug. |
+
+---
+
+# crewship integration
+
+Manage MCP server integrations at the workspace and agent level.
+
+```bash
+crewship integration <subcommand> [flags]
+```
+
+**Aliases:** `crewship intg`, `crewship mcp`
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List workspace integrations |
+| `add` | Add a workspace integration |
+| `remove` | Remove a workspace integration |
+| `enable` | Enable a workspace integration |
+| `disable` | Disable a workspace integration |
+| `bind` | Bind an integration to an agent with a credential |
+| `unbind` | Remove an integration binding from an agent |
+| `agent-bindings` | List integration bindings for an agent |
+| `resolve` | Show effective integrations for an agent (cascade resolution) |
+
+---
+
+## `crewship integration list`
+
+List all workspace integrations.
+
+```bash
+crewship integration list
+```
+
+**Output columns:** NAME, DISPLAY, TRANSPORT, ENDPOINT, ENABLED, AGENTS, CREWS
+
+---
+
+## `crewship integration add`
+
+Add a workspace integration (MCP server).
+
+```bash
+crewship integration add --name gmail --display "Google Gmail" --transport streamable-http --endpoint https://mcp.example.com/gmail
+crewship integration add --name local-tools --transport stdio --command "npx @modelcontextprotocol/server-github"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `string` | _(required)_ | Integration name (slug). |
+| `--display` | `string` | _(same as name)_ | Display name. |
+| `--transport` | `string` | `streamable-http` | Transport: `streamable-http` or `stdio`. |
+| `--endpoint` | `string` | | MCP server endpoint URL. |
+| `--command` | `string` | | MCP server command (for stdio transport). |
+| `--icon` | `string` | | Lucide icon name. |
+
+---
+
+## `crewship integration remove`
+
+Remove a workspace integration.
+
+```bash
+crewship integration remove <id-or-name>
+```
+
+---
+
+## `crewship integration enable`
+
+Enable a workspace integration.
+
+```bash
+crewship integration enable <id-or-name>
+```
+
+---
+
+## `crewship integration disable`
+
+Disable a workspace integration.
+
+```bash
+crewship integration disable <id-or-name>
+```
+
+---
+
+## `crewship integration bind`
+
+Bind an integration to an agent with a credential.
+
+```bash
+crewship integration bind --agent pepa --server gmail --credential pepa-gmail-token
+crewship integration bind --agent franta --server gmail --credential franta-gmail-token --cred-type api_key
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--agent` | `string` | _(required)_ | Agent slug. |
+| `--server` | `string` | _(required)_ | Integration name. |
+| `--credential` | `string` | | Credential name to bind. |
+| `--cred-type` | `string` | `bearer` | Credential type: `bearer`, `api_key`, `basic`. |
+| `--cred-header` | `string` | | Custom header for `api_key` type. |
+
+---
+
+## `crewship integration unbind`
+
+Remove an integration binding from an agent.
+
+```bash
+crewship integration unbind --agent pepa --binding-id <binding-id>
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--agent` | `string` | _(required)_ | Agent slug. |
+| `--binding-id` | `string` | _(required)_ | Binding ID to remove. |
+
+---
+
+## `crewship integration agent-bindings`
+
+List integration bindings for an agent.
+
+```bash
+crewship integration agent-bindings <agent-slug>
+```
+
+**Output columns:** BINDING ID, SERVER, SCOPE, CREDENTIAL, TYPE, ENABLED
+
+---
+
+## `crewship integration resolve`
+
+Show effective integrations for an agent after cascade resolution (workspace + crew + agent).
+
+```bash
+crewship integration resolve <agent-slug>
+```
+
+**Output columns:** NAME, DISPLAY, SCOPE, TRANSPORT, CREDENTIAL
+
+---
+
+# crewship project
+
+Manage projects -- high-level containers that group related issues.
+
+```bash
+crewship project <subcommand> [flags]
+```
+
+**Alias:** `crewship projects`
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List all projects |
+| `get` | Show project details |
+| `create` | Create a project |
+
+---
+
+## `crewship project list`
+
+List all projects in the workspace.
+
+```bash
+crewship project list
+```
+
+**Output columns:** NAME, STATUS, PRIORITY, HEALTH, ISSUES, PROGRESS, TARGET
+
+---
+
+## `crewship project get`
+
+Show project details.
+
+```bash
+crewship project get <id-or-slug>
+```
+
+**Output fields:** Name, ID, Status, Priority, Health, Lead, Issues (total/done), Progress, Target, Description.
+
+---
+
+## `crewship project create`
+
+Create a new project.
+
+```bash
+crewship project create --name "Q2 Roadmap"
+crewship project create --name "Auth Rewrite" --status in_progress --priority high --target-date 2024-06-30
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name` | `string` | _(required)_ | Project name. |
+| `--description` | `string` | | Project description. |
+| `--color` | `string` | | Hex color (e.g., `#3B82F6`). |
+| `--status` | `string` | `planned` | Status: `backlog`, `planned`, `in_progress`, `paused`, `completed`, `cancelled`. |
+| `--priority` | `string` | `none` | Priority: `none`, `low`, `medium`, `high`, `urgent`. |
+| `--icon` | `string` | | Lucide icon name. |
+| `--target-date` | `string` | | Target date in ISO format. |
+
+---
+
+# crewship version
+
+Print version information.
+
+```bash
+crewship version
+```
+
+**Output:** Version string, commit hash, build date, Go version, OS/architecture.
+
+---
+
+# crewship doctor
+
+Check system requirements and health.
+
+```bash
+crewship doctor
+```
+
+Checks container runtime availability (Docker, Podman, Colima, OrbStack, Apple Containers), data directory status, and database existence.

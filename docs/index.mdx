@@ -1,0 +1,71 @@
+---
+title: "Crewship Documentation"
+description: "Open-source platform for orchestrating AI agents as virtual employees. Organize agents into teams, assign credentials and skills, and run them in isolated containers."
+---
+
+# Welcome to Crewship
+
+Crewship lets you organize AI agents into teams, assign them roles, credentials, and skills, and run them in isolated containers. Think of it as an **HR platform for AI workers**.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Install Crewship and run your first agent in under 5 minutes.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Understand the sidecar model, container isolation, and IPC layer.
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
+    Full reference for every `crewship` command and flag.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/overview">
+    REST API, WebSocket, and Webhook endpoints.
+  </Card>
+</CardGroup>
+
+## Core Concepts
+
+<CardGroup cols={3}>
+  <Card title="Crews" icon="users" href="/guides/first-crew">
+    Teams of agents with shared context, integrations, and goals.
+  </Card>
+  <Card title="Agents" icon="robot" href="/guides/first-crew">
+    Individual AI workers with roles, credentials, and skills.
+  </Card>
+  <Card title="Credentials" icon="key" href="/guides/credentials">
+    AES-256-GCM encrypted API keys with priority-based failover.
+  </Card>
+  <Card title="Skills" icon="puzzle-piece" href="/guides/skills">
+    Reusable capabilities from the marketplace or custom-built.
+  </Card>
+  <Card title="Missions" icon="flag" href="/guides/orchestration">
+    Project-level work broken into tasks and assigned to agents.
+  </Card>
+  <Card title="Issues" icon="circle-dot" href="/guides/orchestration">
+    Linear-style issue tracker for human-in-the-loop PM.
+  </Card>
+</CardGroup>
+
+## Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Agents as employees** | Each agent has a role, team, credentials, and work history |
+| **Team-based organization** | Group agents into crews with shared context |
+| **Credential vault** | AES-256-GCM encrypted keys with priority-based failover |
+| **Isolated execution** | Every crew runs in its own Docker container |
+| **Role-based access** | 5-tier RBAC: Owner, Admin, Manager, Member, Viewer |
+| **Real-time logs** | JSONL streaming via WebSocket |
+| **Multi-workspace** | Manage multiple organizations from a single instance |
+| **Self-hosted** | Run on your own infrastructure, keep your data |
+| **CLI adapters** | Claude Code, Codex CLI, Gemini CLI, OpenCode |
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Backend | Go single binary (REST API + WebSocket + embedded UI) |
+| UI | Next.js 16, React 19, Tailwind CSS 4, shadcn/ui |
+| Auth | NextAuth.js v5 (Auth.js) compatible, JWE tokens |
+| Database | SQLite (default) or PostgreSQL |
+| Containers | Docker, Apple Containers (macOS 26+), Kubernetes (planned) |
+| Agent runtime | CLI adapters in isolated containers with sidecar proxy |

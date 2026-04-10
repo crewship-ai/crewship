@@ -1,0 +1,81 @@
+---
+title: "Captain Commands"
+description: "Chat with Captain, the workspace AI assistant, and view context and history."
+icon: "message-bot"
+---
+
+# crewship captain
+
+Chat with Captain -- the workspace AI assistant that helps manage crews and agents.
+
+```bash
+crewship captain <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `chat` | Send a message to Captain and stream the response |
+| `context` | Show Captain's workspace context (phase, counts) |
+| `history` | Show Captain chat history |
+| `history clear` | Clear Captain chat history |
+
+---
+
+## `crewship captain chat`
+
+Send a message to Captain and stream the response via Server-Sent Events (SSE).
+
+```bash
+crewship captain chat <message>
+crewship captain chat "How many agents are running?"
+crewship captain chat "Create a crew for backend development"
+```
+
+The message is passed as positional arguments (all arguments are joined with spaces).
+
+Captain responds with streamed text, processing your request against the full workspace context.
+
+---
+
+## `crewship captain context`
+
+Show Captain's workspace context including the current onboarding phase and resource counts.
+
+```bash
+crewship captain context
+```
+
+**Output fields:**
+- **Workspace Phase** -- `EMPTY`, `SETUP`, `CREDENTIALS_NEEDED`, or `OPERATIONAL`
+- **Crews** -- total crew count
+- **Agents** -- total agent count
+- **Active missions** -- missions currently in progress
+- **Pending escalations** -- escalations awaiting resolution
+- **Pending proposals** -- mission proposals awaiting review
+
+---
+
+## `crewship captain history`
+
+Show Captain chat history (previous messages in the conversation).
+
+```bash
+crewship captain history
+```
+
+Messages are displayed with role labels (`You:` for user messages, `Captain:` for assistant messages). Assistant messages are truncated to 300 characters in the display.
+
+### `crewship captain history clear`
+
+Clear Captain chat history. Prompts for confirmation.
+
+```bash
+crewship captain history clear
+crewship captain history clear --yes
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |

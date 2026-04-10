@@ -50,6 +50,7 @@ interface Crew {
   container_cpus: number
   network_mode: string
   allowed_domains: string[]
+  issue_prefix: string | null
   created_at: string
   _count: { agents: number; members: number }
 }
@@ -263,6 +264,42 @@ export default function CrewDetailPage() {
       {/* MCP Server Configuration */}
       {canEdit && workspaceId && (
         <CrewMCPConfig crewId={crew.id} workspaceId={workspaceId} />
+      )}
+
+      {/* Issue Prefix */}
+      {canEdit && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-medium">Issue Prefix</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Used for issue identifiers (e.g. ENG-42). Defaults to first 3 letters of slug.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                defaultValue={crew.issue_prefix || ""}
+                placeholder={crew.slug.toUpperCase().slice(0, 3)}
+                className="w-20 h-8 text-xs text-center font-mono uppercase border rounded-md bg-background px-2"
+                maxLength={5}
+                onBlur={(e) => {
+                  const val = e.target.value.trim().toUpperCase()
+                  if (val !== (crew.issue_prefix || "")) {
+                    void patchCrew({ issue_prefix: val || null }).catch((err) => {
+                      toast.error(err instanceof Error ? err.message : "Failed to update issue prefix")
+                    })
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur()
+                }}
+              />
+            </div>
+          </div>
+        </Card>
       )}
 
       {/* Advanced — Container Config */}

@@ -1,0 +1,472 @@
+---
+title: "Missions"
+description: "Mission lifecycle management -- create, start, monitor, and control multi-agent task execution."
+icon: "flag"
+---
+
+All mission endpoints require authentication and workspace context.
+
+---
+
+## List All Missions (Workspace)
+
+```
+GET /api/v1/missions?workspace_id={workspaceId}
+```
+
+List all missions across the workspace.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `workspace_id` | string | Required | Workspace ID |
+| `status` | string | -- | Filter by status (e.g., `IN_PROGRESS`) |
+| `include_tasks` | string | `"false"` | Set to `"true"` to include task details |
+| `limit` | integer | `20` | Max items (1-100) |
+| `offset` | integer | `0` | Pagination offset |
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "mission_abc",
+    "workspace_id": "ws_123",
+    "crew_id": "crew_456",
+    "lead_agent_id": "agent_789",
+    "lead_agent_name": "Tech Lead",
+    "lead_agent_slug": "tech-lead",
+    "trace_id": "mission-cm1abc123",
+    "title": "Implement user authentication",
+    "description": "Add JWT-based auth with refresh tokens",
+    "status": "IN_PROGRESS",
+    "plan": "1. Create auth middleware\n2. Add login endpoint...",
+    "workflow_template": null,
+    "total_token_count": 15000,
+    "total_estimated_cost": 0.45,
+    "created_at": "2024-01-15T10:00:00Z",
+    "updated_at": "2024-01-15T11:00:00Z",
+    "completed_at": null,
+    "task_stats": {
+      "total": 4,
+      "pending": 1,
+      "blocked": 0,
+      "in_progress": 1,
+      "completed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "awaiting_approval": 0
+    },
+    "tasks": []
+  }
+]
+```
+
+---
+
+## List Crew Missions
+
+```
+GET /api/v1/crews/{crewId}/missions?workspace_id={workspaceId}
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `status` | string | -- | Filter by status |
+| `limit` | integer | `20` | Max items (1-100) |
+| `offset` | integer | `0` | Pagination offset |
+
+**Response:** `200 OK` -- array of mission objects with `task_stats`.
+
+---
+
+## Create Mission
+
+```
+POST /api/v1/crews/{crewId}/missions?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `title` | string | Yes | Mission title |
+| `description` | string | No | Mission description |
+| `lead_agent_id` | string | Yes | ID of the LEAD agent in the crew |
+| `workflow_template` | string | No | Workflow template ID to use |
+
+```json
+{
+  "title": "Implement user authentication",
+  "description": "Add JWT-based auth with refresh tokens",
+  "lead_agent_id": "agent_789"
+}
+```
+
+The lead agent must exist in the specified crew and have the `LEAD` role.
+
+**Response:** `201 Created` -- mission object with status `PLANNING`.
+
+| Status | Condition |
+|---|---|
+| `400` | Missing title, missing/invalid lead_agent_id, agent not LEAD role |
+| `403` | Insufficient role |
+
+**WebSocket events:** `mission.created` on `crew:{crewId}`, `mission.updated` on `workspace:{workspaceId}`
+
+---
+
+## Get Mission
+
+```
+GET /api/v1/crews/{crewId}/missions/{missionId}?workspace_id={workspaceId}
+```
+
+Returns the mission with all tasks and task stats.
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "mission_abc",
+  "title": "Implement user authentication",
+  "status": "IN_PROGRESS",
+  "tasks": [
+    {
+      "id": "task_001",
+      "mission_id": "mission_abc",
+      "assigned_agent_id": "agent_dev1",
+      "agent_name": "Backend Dev",
+      "agent_slug": "backend-dev",
+      "title": "Create auth middleware",
+      "description": "Implement JWT validation middleware",
+      "status": "COMPLETED",
+      "task_order": 1,
+      "depends_on": "[]",
+      "iteration": 1,
+      "max_iterations": 3,
+      "result_summary": "Created middleware with token validation",
+      "output_path": "/workspace/internal/auth/middleware.go",
+      "error_message": null,
+      "assignment_id": "assign_abc",
+      "token_count": 5000,
+      "estimated_cost": 0.15,
+      "started_at": "2024-01-15T10:05:00Z",
+      "completed_at": "2024-01-15T10:15:00Z",
+      "duration_ms": 600000,
+      "confidence": 0.95,
+      "needs_review": false,
+      "handoff_context": null,
+      "evaluation_status": "PASS",
+      "evaluation_notes": null,
+      "approval_required": false,
+      "approval_status": null,
+      "approved_by": null,
+      "approved_at": null,
+      "created_at": "2024-01-15T10:00:00Z",
+      "updated_at": "2024-01-15T10:15:00Z"
+    }
+  ],
+  "task_stats": { ... }
+}
+```
+
+| Status | Condition |
+|---|---|
+| `404` | Mission not found |
+
+---
+
+## Update Mission
+
+```
+PATCH /api/v1/crews/{crewId}/missions/{missionId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:** All fields optional.
+
+| Field | Type | Description |
+|---|---|---|
+| `title` | string | Mission title |
+| `description` | string | Mission description |
+| `plan` | string | Mission plan (markdown) |
+| `status` | string | New status (must be a valid transition) |
+
+**Status Transitions:**
+
+| From | Allowed To |
+|---|---|
+| `PLANNING` | `IN_PROGRESS`, `CANCELLED` |
+| `IN_PROGRESS` | `REVIEW`, `FAILED`, `CANCELLED` |
+| `REVIEW` | `COMPLETED`, `IN_PROGRESS`, `FAILED`, `CANCELLED` |
+
+When status changes to `COMPLETED`, `FAILED`, or `CANCELLED`, `completed_at` is automatically set.
+
+**Response:** `200 OK` -- updated mission object.
+
+| Status | Condition |
+|---|---|
+| `400` | Invalid status transition |
+| `404` | Mission not found |
+
+---
+
+## Delete Mission
+
+```
+DELETE /api/v1/crews/{crewId}/missions/{missionId}?workspace_id={workspaceId}
+```
+
+Only missions in `PLANNING` or `CANCELLED` status can be deleted (hard delete).
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `204 No Content`
+
+| Status | Condition |
+|---|---|
+| `400` | Mission is not in PLANNING or CANCELLED status |
+| `404` | Mission not found |
+
+---
+
+## Start Mission
+
+```
+POST /api/v1/crews/{crewId}/missions/{missionId}/start?workspace_id={workspaceId}
+```
+
+Transitions a `PLANNING` mission to `IN_PROGRESS` and starts the MissionEngine.
+
+Validates the task dependency DAG before starting. Uses atomic compare-and-swap to prevent concurrent start races.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "mission_abc",
+  "status": "IN_PROGRESS"
+}
+```
+
+| Status | Condition |
+|---|---|
+| `400` | Mission not in PLANNING state, or invalid task DAG |
+| `404` | Mission not found |
+| `409` | Mission was already started by another request |
+| `500` | MissionEngine failed to start (rolls back to PLANNING) |
+
+---
+
+## Restart Mission
+
+```
+POST /api/v1/crews/{crewId}/missions/{missionId}/restart?workspace_id={workspaceId}
+```
+
+Restarts a `FAILED`, `COMPLETED`, or `CANCELLED` mission. Resets all tasks to `PENDING` and sets status to `IN_PROGRESS`.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `200 OK`
+
+---
+
+## Resume Mission
+
+```
+POST /api/v1/crews/{crewId}/missions/{missionId}/resume?workspace_id={workspaceId}
+```
+
+Resumes an `IN_PROGRESS` mission that has stalled (e.g., after a server restart). Re-engages the MissionEngine to continue dispatching pending tasks.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `200 OK`
+
+---
+
+## Clone Mission
+
+```
+POST /api/v1/crews/{crewId}/missions/{missionId}/clone?workspace_id={workspaceId}
+```
+
+Creates a copy of the mission with all its tasks, resetting statuses to `PLANNING`/`PENDING`.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Response:** `201 Created` -- the new cloned mission object.
+
+---
+
+## Create Task
+
+```
+POST /api/v1/crews/{crewId}/missions/{missionId}/tasks?workspace_id={workspaceId}
+```
+
+Add a task to a mission.
+
+**Auth:** `OWNER`, `ADMIN`, or `MANAGER` role
+
+**Request Body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `title` | string | Yes | -- | Task title |
+| `description` | string | No | `null` | Task description |
+| `assigned_agent_id` | string | No | `null` | Agent to assign to |
+| `task_order` | integer | No | auto | Position in task list |
+| `depends_on` | string[] | No | `[]` | Array of task IDs this depends on |
+| `max_iterations` | integer | No | `null` | Max retry iterations |
+| `approval_required` | boolean | No | `false` | Require human approval |
+
+**Response:** `201 Created`
+
+---
+
+## Update Task
+
+```
+PATCH /api/v1/crews/{crewId}/missions/{missionId}/tasks/{taskId}?workspace_id={workspaceId}
+```
+
+**Request Body:** All fields optional.
+
+| Field | Type | Description |
+|---|---|---|
+| `title` | string | Task title |
+| `description` | string | Task description |
+| `assigned_agent_id` | string | Reassign to a different agent |
+| `status` | string | New status (valid transition required) |
+| `task_order` | integer | Position in task list |
+| `depends_on` | string[] | Dependency task IDs |
+| `max_iterations` | integer | Max iterations |
+| `approval_required` | boolean | Require approval |
+
+**Task Status Transitions:**
+
+| From | Allowed To |
+|---|---|
+| `PENDING` | `IN_PROGRESS`, `SKIPPED` |
+| `BLOCKED` | `PENDING`, `SKIPPED` |
+| `IN_PROGRESS` | `COMPLETED`, `FAILED`, `SKIPPED` |
+
+**Response:** `200 OK`
+
+---
+
+## Mission Metrics
+
+```
+GET /api/v1/mission-metrics?workspace_id={workspaceId}
+```
+
+Aggregated mission metrics for the workspace, covering the last 24 hours.
+
+**Response:** `200 OK`
+
+```json
+{
+  "total_missions": 45,
+  "active_missions": 3,
+  "completed_24h": 8,
+  "failed_24h": 1,
+  "total_tokens_24h": 125000,
+  "total_cost_24h": 3.75,
+  "avg_completion_time_ms": 180000,
+  "tasks_completed_24h": 24,
+  "tasks_failed_24h": 2
+}
+```
+
+---
+
+## Mission Proposals
+
+Agents (typically COORDINATOR role) can propose missions that require human approval before execution.
+
+### List Proposals
+
+```
+GET /api/v1/mission-proposals?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- array of proposal objects.
+
+### Create Proposal
+
+```
+POST /api/v1/mission-proposals?workspace_id={workspaceId}
+```
+
+**Response:** `201 Created`
+
+### Get Proposal
+
+```
+GET /api/v1/mission-proposals/{proposalId}?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK`
+
+### Approve Proposal
+
+```
+POST /api/v1/mission-proposals/{proposalId}/approve?workspace_id={workspaceId}
+```
+
+Approves the proposal and optionally starts the resulting mission.
+
+**Response:** `200 OK`
+
+### Reject Proposal
+
+```
+POST /api/v1/mission-proposals/{proposalId}/reject?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK`
+
+### Delete Proposal
+
+```
+DELETE /api/v1/mission-proposals/{proposalId}?workspace_id={workspaceId}
+```
+
+**Response:** `204 No Content`
+
+---
+
+## Mission Statuses
+
+| Status | Description |
+|---|---|
+| `PLANNING` | Lead is analyzing and creating task breakdown |
+| `IN_PROGRESS` | Agents are working on tasks |
+| `REVIEW` | All tasks done, lead is reviewing results |
+| `COMPLETED` | Successfully finished |
+| `FAILED` | Unresolvable problem encountered |
+| `CANCELLED` | Cancelled by user or system |
+
+## Task Statuses
+
+| Status | Description |
+|---|---|
+| `PENDING` | Not yet started, waiting for dependencies |
+| `BLOCKED` | Blocked by unfinished dependency tasks |
+| `IN_PROGRESS` | Agent is currently working on it |
+| `COMPLETED` | Successfully finished |
+| `FAILED` | Agent failed the task |
+| `SKIPPED` | Manually skipped |
+| `AWAITING_APPROVAL` | Waiting for human approval |

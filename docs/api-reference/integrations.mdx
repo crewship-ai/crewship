@@ -1,0 +1,362 @@
+---
+title: "Integrations"
+description: "MCP server integrations at workspace, crew, and agent levels, plus OAuth flow."
+icon: "plug"
+---
+
+Crewship uses a three-tier integration model: workspace-level MCP servers cascade down to crews, which cascade down to agent bindings. Each level can override or extend the configuration.
+
+All integration endpoints require authentication and workspace context.
+
+---
+
+## Workspace Integrations
+
+Workspace-level MCP server definitions available to all crews and agents.
+
+### List Workspace Integrations
+
+```
+GET /api/v1/integrations?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK`
+
+```json
+[
+  {
+    "id": "int_abc",
+    "workspace_id": "ws_123",
+    "name": "github-mcp",
+    "display_name": "GitHub MCP Server",
+    "transport": "stdio",
+    "endpoint": null,
+    "command": "npx",
+    "args_json": "[\"-y\", \"@modelcontextprotocol/server-github\"]",
+    "env_json": "{\"GITHUB_TOKEN\": \"{{credential:github-token}}\"}",
+    "config_json": null,
+    "icon": "github",
+    "enabled": true,
+    "created_at": "2024-01-15T10:00:00Z",
+    "updated_at": "2024-01-15T10:00:00Z",
+    "agent_binding_count": 5,
+    "crew_server_count": 2
+  }
+]
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Integration ID |
+| `workspace_id` | string | Workspace ID |
+| `name` | string | Internal name |
+| `display_name` | string | Human-readable name |
+| `transport` | string | Transport type (`stdio`, `sse`, `streamable-http`) |
+| `endpoint` | string? | Server endpoint URL (for SSE/HTTP transport) |
+| `command` | string? | Command to execute (for stdio transport) |
+| `args_json` | string? | JSON array of command arguments |
+| `env_json` | string? | JSON object of environment variables |
+| `config_json` | string? | Additional configuration JSON |
+| `icon` | string? | Display icon name |
+| `enabled` | boolean | Whether the integration is active |
+| `agent_binding_count` | integer | Number of agent bindings |
+| `crew_server_count` | integer | Number of crew-level servers |
+
+### Create Workspace Integration
+
+```
+POST /api/v1/integrations?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Request Body:**
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | string | Yes | -- | Internal name |
+| `display_name` | string | Yes | -- | Display name |
+| `transport` | string | Yes | -- | Transport type |
+| `endpoint` | string | No | `null` | Server endpoint URL |
+| `command` | string | No | `null` | Command to execute |
+| `args_json` | string | No | `null` | JSON array of arguments |
+| `env_json` | string | No | `null` | JSON object of env vars |
+| `config_json` | string | No | `null` | Additional config JSON |
+| `icon` | string | No | `null` | Display icon |
+
+```json
+{
+  "name": "github-mcp",
+  "display_name": "GitHub MCP Server",
+  "transport": "stdio",
+  "command": "npx",
+  "args_json": "[\"-y\", \"@modelcontextprotocol/server-github\"]",
+  "env_json": "{\"GITHUB_TOKEN\": \"{{credential:github-token}}\"}"
+}
+```
+
+**Response:** `201 Created`
+
+### Get Workspace Integration
+
+```
+GET /api/v1/integrations/{integrationId}?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK`
+
+### Update Workspace Integration
+
+```
+PATCH /api/v1/integrations/{integrationId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER` or `ADMIN` role
+
+All fields optional: `display_name`, `transport`, `endpoint`, `command`, `args_json`, `env_json`, `config_json`, `icon`, `enabled`.
+
+**Response:** `200 OK`
+
+### Delete Workspace Integration
+
+```
+DELETE /api/v1/integrations/{integrationId}?workspace_id={workspaceId}
+```
+
+**Auth:** `OWNER` or `ADMIN` role
+
+**Response:** `204 No Content`
+
+### Test Workspace Integration
+
+```
+POST /api/v1/integrations/{integrationId}/test?workspace_id={workspaceId}
+```
+
+Tests the MCP server connection.
+
+**Response:** `200 OK` -- test results.
+
+---
+
+## All Crew Integrations
+
+```
+GET /api/v1/integrations/crews?workspace_id={workspaceId}
+```
+
+Cross-crew overview of all crew-level integration bindings.
+
+**Response:** `200 OK` -- array of crew integration objects.
+
+---
+
+## Crew Integrations
+
+### List Crew Integrations
+
+```
+GET /api/v1/crews/{crewId}/integrations?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- array of crew MCP server bindings.
+
+### Create Crew Integration
+
+```
+POST /api/v1/crews/{crewId}/integrations?workspace_id={workspaceId}
+```
+
+**Response:** `201 Created`
+
+### Update Crew Integration
+
+```
+PATCH /api/v1/crews/{crewId}/integrations/{integrationId}?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK`
+
+### Delete Crew Integration
+
+```
+DELETE /api/v1/crews/{crewId}/integrations/{integrationId}?workspace_id={workspaceId}
+```
+
+**Response:** `204 No Content`
+
+### Test Crew Integration
+
+```
+POST /api/v1/crews/{crewId}/integrations/{integrationId}/test?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- test results.
+
+---
+
+## Agent MCP Bindings
+
+Agent bindings link MCP servers (workspace or crew level) to specific agents, optionally with credential overrides.
+
+### List Agent Bindings
+
+```
+GET /api/v1/agents/{agentId}/integrations?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK` -- array of agent MCP binding objects.
+
+### Create Agent Binding
+
+```
+POST /api/v1/agents/{agentId}/integrations?workspace_id={workspaceId}
+```
+
+**Response:** `201 Created`
+
+### Update Agent Binding
+
+```
+PATCH /api/v1/agents/{agentId}/integrations/{integrationId}?workspace_id={workspaceId}
+```
+
+**Response:** `200 OK`
+
+### Delete Agent Binding
+
+```
+DELETE /api/v1/agents/{agentId}/integrations/{integrationId}?workspace_id={workspaceId}
+```
+
+**Response:** `204 No Content`
+
+### Resolve Agent Integrations
+
+```
+GET /api/v1/agents/{agentId}/integrations/resolved?workspace_id={workspaceId}
+```
+
+Returns the effective set of MCP servers for an agent after cascading workspace, crew, and agent-level configurations. Includes resolved credentials.
+
+**Response:** `200 OK` -- array of resolved integration objects.
+
+---
+
+## OAuth Flow
+
+OAuth 2.0 flow for connecting external services (GitHub, Slack, Google, etc.) and storing tokens as credentials.
+
+### List OAuth Providers
+
+```
+GET /api/v1/oauth/providers
+```
+
+Returns available OAuth provider configurations.
+
+**Auth:** Session or CLI token (no workspace context needed)
+
+**Response:** `200 OK`
+
+### Initiate OAuth Flow
+
+```
+POST /api/v1/oauth/initiate?workspace_id={workspaceId}
+```
+
+Starts the OAuth authorization flow by generating an authorization URL.
+
+**Auth:** Session or CLI token + workspace membership
+
+**Response:** `200 OK` -- includes the authorization URL to redirect the user to.
+
+### OAuth Callback
+
+```
+GET /api/v1/oauth/callback?code={code}&state={state}
+```
+
+Handles the OAuth callback from the provider. **No authentication required** -- uses the state token for validation.
+
+### Exchange Token
+
+```
+POST /api/v1/oauth/exchange?workspace_id={workspaceId}
+```
+
+Exchanges an authorization code for access and refresh tokens.
+
+**Response:** `200 OK`
+
+### Loopback
+
+```
+POST /api/v1/oauth/loopback?workspace_id={workspaceId}
+```
+
+Handles loopback redirect for local OAuth flows.
+
+**Response:** `200 OK`
+
+### Discover OAuth Endpoints
+
+```
+POST /api/v1/oauth/discover
+```
+
+Discovers OAuth endpoints from an OpenID Connect discovery document or well-known URL.
+
+**Auth:** Session or CLI token (no workspace context needed)
+
+**Response:** `200 OK` -- discovered endpoints.
+
+### Auto-Connect Integration
+
+```
+POST /api/v1/oauth/auto-connect?workspace_id={workspaceId}
+```
+
+Automatically creates an integration from an OAuth connection.
+
+**Response:** `200 OK`
+
+---
+
+## MCP Registry
+
+Public registry of MCP server definitions for easy discovery and installation.
+
+### List Registry Entries
+
+```
+GET /api/v1/mcp-registry
+```
+
+**Auth:** Session or CLI token (no workspace context needed)
+
+**Response:** `200 OK` -- array of registry entries.
+
+### Search Registry
+
+```
+GET /api/v1/mcp-registry/search?q={query}
+```
+
+**Auth:** Session or CLI token
+
+**Response:** `200 OK` -- matching registry entries.
+
+### Sync Registry
+
+```
+POST /api/v1/mcp-registry/sync?workspace_id={workspaceId}
+```
+
+Triggers a manual sync of the MCP registry.
+
+**Auth:** Session or CLI token + workspace membership
+
+**Response:** `200 OK`

@@ -870,6 +870,39 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		)
 	}
 
+	// Auto-post agent comment on the issue with completion summary
+	if assignedAgentID.Valid {
+		var commentBody string
+		if handoff.Parsed && handoff.Summary != "" {
+			commentBody = fmt.Sprintf("**Task completed** (confidence: %s)\n\n%s", handoff.Confidence, handoff.Summary)
+			if handoff.Artifacts != "" {
+				commentBody += "\n\nArtifacts: " + handoff.Artifacts
+			}
+		} else if taskStatus == "COMPLETED" {
+			commentBody = "Task completed successfully."
+		} else if taskStatus == "FAILED" {
+			commentBody = "Task failed."
+			if errorMessage != "" {
+				commentBody += " Error: " + errorMessage
+			}
+		}
+		if commentBody != "" {
+			commentID := generateID()
+			_, _ = e.db.ExecContext(ctx,
+				`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
+				commentID, missionID, assignedAgentID.String, commentBody, now, now)
+			// Activity log
+			activityID := generateID()
+			action := "task_completed"
+			if taskStatus == "FAILED" {
+				action = "task_failed"
+			}
+			_, _ = e.db.ExecContext(ctx,
+				`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, 'agent', ?, ?, ?, ?)`,
+				activityID, missionID, assignedAgentID.String, action, commentBody, now)
+		}
+	}
+
 	// Approval gate: check if this task requires human approval before unblocking dependents.
 	if taskStatus == "COMPLETED" {
 		taskStatus = e.checkApprovalGate(ctx, taskID, missionID)

@@ -1,0 +1,211 @@
+---
+title: "Mission Commands"
+description: "Create, run, and manage missions and their tasks with the Crewship CLI."
+icon: "flag"
+---
+
+# crewship mission
+
+Manage missions -- structured multi-step work plans executed by agent crews.
+
+```bash
+crewship mission <subcommand> [flags]
+```
+
+## Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `list` | List all missions |
+| `get` | Show mission details with tasks |
+| `create` | Create a mission |
+| `update` | Update a mission |
+| `delete` | Delete a mission |
+| `start` | Start a PLANNING mission (kicks off the MissionEngine DAG loop) |
+| `resume` | Resume a FAILED mission from the point of failure |
+| `restart` | Restart a mission from the beginning (resets all tasks) |
+| `add-task` | Add a task to a mission |
+| `task-update` | Update a mission task |
+| `clone` | Clone a mission with all its tasks |
+
+---
+
+## `crewship mission list`
+
+List all missions, optionally filtered by crew.
+
+```bash
+crewship mission list
+crewship mission list --crew backend-team
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--crew` | `string` | | Filter by crew slug or ID. |
+
+**Output columns:** ID, TITLE, STATUS, LEAD, TASKS, CREATED
+
+<Tip>
+The TASKS column shows completion as `completed/total` (e.g., `3/5`).
+</Tip>
+
+---
+
+## `crewship mission get`
+
+Show mission details including all tasks.
+
+```bash
+crewship mission get <id>
+```
+
+Accepts full mission IDs or prefix matches (minimum 8 characters).
+
+**Output fields:** Title, ID, Status, Lead, Description, Created, Completed.
+
+In table format, tasks are displayed below the detail view with columns: #, TASK ID, TITLE, STATUS, AGENT.
+
+---
+
+## `crewship mission create`
+
+Create a new mission.
+
+```bash
+crewship mission create --title "Deploy v2.0" --crew backend-team
+crewship mission create --title "Refactor auth" --crew backend-team --lead viktor
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--title` | `string` | _(required)_ | Mission title. |
+| `--description` | `string` | | Mission description. |
+| `--crew` | `string` | _(required)_ | Crew slug or ID. |
+| `--lead` | `string` | _(auto-detected)_ | Lead agent slug or ID. Auto-detects the LEAD agent in the crew if omitted. |
+
+<Note>
+If `--lead` is not specified, the CLI automatically finds the LEAD-role agent in the specified crew. An error is returned if no LEAD agent exists.
+</Note>
+
+---
+
+## `crewship mission update`
+
+Update a mission. Only changed flags are sent.
+
+```bash
+crewship mission update <id> --title "Deploy v2.1"
+crewship mission update <id> --status COMPLETED
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--title` | `string` | | Mission title. |
+| `--description` | `string` | | Mission description. |
+| `--status` | `string` | | Status: `PLANNING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`. |
+
+---
+
+## `crewship mission delete`
+
+Delete a mission. Prompts for confirmation.
+
+```bash
+crewship mission delete <id>
+crewship mission delete <id> --yes
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |
+
+---
+
+## `crewship mission start`
+
+Start a PLANNING mission, kicking off the MissionEngine DAG loop.
+
+```bash
+crewship mission start <id>
+```
+
+The DAG engine evaluates task dependencies and dispatches ready tasks to agents.
+
+---
+
+## `crewship mission resume`
+
+Resume a FAILED mission from the point of failure. Only failed tasks and their dependents are reset.
+
+```bash
+crewship mission resume <id>
+```
+
+Reports the number of tasks that were reset.
+
+---
+
+## `crewship mission restart`
+
+Restart a mission from the beginning, resetting all tasks to PENDING. Prompts for confirmation.
+
+```bash
+crewship mission restart <id>
+crewship mission restart <id> --yes
+```
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--yes` | `-y` | `bool` | `false` | Skip confirmation prompt. |
+
+---
+
+## `crewship mission add-task`
+
+Add a task to a mission.
+
+```bash
+crewship mission add-task <missionId> --title "Write unit tests"
+crewship mission add-task <missionId> --title "Deploy" --agent viktor --order 3 --depends-on <taskId1>,<taskId2>
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--title` | `string` | _(required)_ | Task title. |
+| `--description` | `string` | | Task description. |
+| `--agent` | `string` | | Agent slug or ID to assign. |
+| `--order` | `int` | `0` | Task order (1-based). |
+| `--depends-on` | `string` | | Comma-separated task IDs this task depends on. |
+
+---
+
+## `crewship mission task-update`
+
+Update a specific task within a mission.
+
+```bash
+crewship mission task-update <mission-id> <task-id> --status COMPLETED
+crewship mission task-update <mission-id> <task-id> --title "Updated title" --assigned-agent <agent-id>
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--title` | `string` | | New task title. |
+| `--description` | `string` | | New task description. |
+| `--status` | `string` | | New status: `PENDING`, `IN_PROGRESS`, `COMPLETED`, `FAILED`. |
+| `--assigned-agent` | `string` | | Agent ID to assign. |
+
+---
+
+## `crewship mission clone`
+
+Clone a mission with all its tasks.
+
+```bash
+crewship mission clone <mission-id>
+crewship mission clone <mission-id> --title "Cloned: Deploy v2.0"
+```
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--title` | `string` | | Override title for the cloned mission. |

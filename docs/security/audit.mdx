@@ -1,0 +1,195 @@
+---
+title: "Audit Log"
+description: "Immutable audit trail for all mutations, Captain tool calls, and Keeper security decisions."
+icon: "scroll"
+---
+
+# Audit Log
+
+Crewship maintains an append-only audit log that records every mutation in the system. The audit log provides a complete trail for security review, compliance, and debugging.
+
+## What Is Audited
+
+Every state-changing operation is recorded in the audit log:
+
+| Category | Actions | Example |
+|----------|---------|---------|
+| **Agents** | `create`, `update`, `delete` | Agent created with name "Viktor" |
+| **Crews** | `create`, `update`, `delete` | Crew settings updated |
+| **Missions** | `create`, `update`, `delete` | Mission started |
+| **Credentials** | `create`, `update`, `delete` | Credential assigned to agent |
+| **Captain** | `captain_tool_call` | Captain invoked a tool (tool_id, tool_name recorded) |
+| **Keeper** | `credential`, `execute` | Keeper evaluated a credential access or command execution request |
+
+### Captain Tool Call Auditing
+
+When Captain (the AI assistant) invokes a tool, the audit log records:
+
+```json
+{
+  "action": "captain_tool_call",
+  "entity_type": "CAPTAIN",
+  "entity_id": "tool_name",
+  "metadata": {
+    "tool_id": "toolu_abc123",
+    "tool_name": "create_agent"
+  }
+}
+```
+
+### Keeper Decision Auditing
+
+Keeper security decisions are stored in the `keeper_requests` table with detailed fields:
+
+| Field | Description |
+|-------|-------------|
+| `intent` | The agent's stated reason for access |
+| `request_type` | `credential` or `execute` |
+| `command` | Shell command (for execute requests) |
+| `decision` | `ALLOW`, `DENY`, or `ESCALATE` |
+| `reason` | LLM-generated explanation |
+| `risk_score` | Numeric risk assessment (1-10) |
+| `ollama_prompt` | Full prompt sent to the Keeper LLM |
+| `ollama_raw_response` | Raw LLM response for review |
+
+## Audit Log Table Structure
+
+```sql
+CREATE TABLE audit_logs (
+  id          TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  user_id     TEXT,
+  action      TEXT NOT NULL,
+  entity_type TEXT NOT NULL,
+  entity_id   TEXT,
+  metadata    TEXT,          -- JSON object
+  ip_address  TEXT,
+  user_agent  TEXT,
+  created_at  TEXT NOT NULL   -- ISO 8601
+);
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | `TEXT` | Random hex ID (32 chars) |
+| `workspace_id` | `TEXT` | Workspace the action occurred in |
+| `user_id` | `TEXT` | User who performed the action (null for system actions) |
+| `action` | `TEXT` | Action type (create, update, delete, captain_tool_call) |
+| `entity_type` | `TEXT` | Entity type (AGENT, CREW, MISSION, CAPTAIN, etc.) |
+| `entity_id` | `TEXT` | ID of the affected entity |
+| `metadata` | `TEXT` | JSON object with action-specific details |
+| `ip_address` | `TEXT` | Client IP address |
+| `user_agent` | `TEXT` | Client user agent string |
+| `created_at` | `TEXT` | ISO 8601 timestamp |
+
+<Warning>
+  The audit log is append-only. There is no API or mechanism to delete or modify audit log entries. This ensures an immutable record for security review.
+</Warning>
+
+## Querying the Audit Log
+
+### GET /api/v1/audit
+
+**Required role:** OWNER or ADMIN (manage permission)
+
+### Query Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | `integer` | `1` | Page number (1-based) |
+| `limit` | `integer` | `50` | Entries per page (1-100) |
+| `action` | `string` | | Filter by action (e.g., `create`, `delete`) |
+| `entity_type` | `string` | | Filter by entity type (e.g., `AGENT`, `CREW`) |
+| `entity_id` | `string` | | Filter by specific entity ID |
+| `user_id` | `string` | | Filter by user who performed the action |
+| `date_from` | `string` | | ISO 8601 start date |
+| `date_to` | `string` | | ISO 8601 end date |
+
+### Response
+
+```json
+{
+  "data": [
+    {
+      "id": "a1b2c3d4...",
+      "workspace_id": "ws-uuid",
+      "user_id": "user-uuid",
+      "action": "create",
+      "entity_type": "AGENT",
+      "entity_id": "agent-uuid",
+      "metadata": "{\"name\":\"Viktor\",\"role\":\"AGENT\"}",
+      "ip_address": "192.168.1.100",
+      "user_agent": "Mozilla/5.0...",
+      "created_at": "2025-01-15T10:30:00Z",
+      "user_email": "alice@example.com",
+      "user_name": "Alice Chen"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 50,
+    "total": 234,
+    "total_pages": 5
+  }
+}
+```
+
+The response includes `user_email` and `user_name` joined from the users table for convenience.
+
+### Pagination
+
+The audit log uses offset-based pagination:
+
+- **Default limit:** 50 entries per page
+- **Maximum limit:** 100 entries per page
+- **Minimum limit:** 1 entry per page
+- Pages are 1-based (page 1 is the first page)
+
+### Example Queries
+
+<Tabs>
+  <Tab title="All agent deletions">
+    ```
+    GET /api/v1/audit?action=delete&entity_type=AGENT
+    ```
+  </Tab>
+  <Tab title="Actions by a specific user">
+    ```
+    GET /api/v1/audit?user_id=user-uuid
+    ```
+  </Tab>
+  <Tab title="Recent activity (date range)">
+    ```
+    GET /api/v1/audit?date_from=2025-01-01T00:00:00Z&date_to=2025-01-31T23:59:59Z
+    ```
+  </Tab>
+  <Tab title="Captain tool calls">
+    ```
+    GET /api/v1/audit?action=captain_tool_call&entity_type=CAPTAIN
+    ```
+  </Tab>
+</Tabs>
+
+## How Audit Entries Are Written
+
+Audit entries are written synchronously during mutation handlers using the `WriteAuditLog` function:
+
+```go
+WriteAuditLog(ctx, db, "create", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
+    "name": agent.Name,
+    "role": agent.Role,
+})
+```
+
+The function generates a random hex ID and writes the entry in the same request context. If the write fails, a warning is logged but the original operation is not rolled back -- the audit log is best-effort to avoid blocking user operations.
+
+## What's Next
+
+<CardGroup cols={2}>
+  <Card title="Admin API" icon="shield-halved" href="/api-reference/admin">
+    Keeper audit log endpoint and workspace administration.
+  </Card>
+  <Card title="RBAC" icon="users-gear" href="/security/rbac">
+    Role-based access control that determines who can view audit logs.
+  </Card>
+</CardGroup>

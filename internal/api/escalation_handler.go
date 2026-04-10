@@ -153,6 +153,12 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request) {
 	escalationID := r.PathValue("escalationId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
+	role := RoleFromContext(r.Context())
+	// Require at least MANAGER to resolve escalations (data-modifying operation)
+	if !canRole(role, "create") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden"})
+		return
+	}
 
 	var body struct {
 		Resolution string `json:"resolution"`
