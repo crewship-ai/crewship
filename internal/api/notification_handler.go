@@ -54,19 +54,14 @@ func CreateNotification(db *sql.DB, hub *ws.Hub, wsID, userID, actorType, actorI
 		return // best-effort; caller should not fail because of notification
 	}
 
-	if hub != nil {
-		hub.Broadcast("user:"+userID, ws.ServerMessage{
-			Type:    "notification.created",
-			Channel: "user:" + userID,
-			Payload: map[string]string{
-				"id":           id,
-				"action":       action,
-				"entity_type":  entityType,
-				"entity_id":    entityID,
-				"entity_title": entityTitle,
-			},
+	broadcastChannelEvent(hub, "user", userID, "notification.created",
+		map[string]string{
+			"id":           id,
+			"action":       action,
+			"entity_type":  entityType,
+			"entity_id":    entityID,
+			"entity_title": entityTitle,
 		})
-	}
 }
 
 // ── 1. List — GET /api/v1/notifications ───────────────────────────────────

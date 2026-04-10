@@ -25,12 +25,7 @@ type keeperWSBroadcaster struct {
 
 // BroadcastKeeperEvent sends a Keeper event to all WebSocket clients subscribed to the workspace.
 func (b *keeperWSBroadcaster) BroadcastKeeperEvent(workspaceID string, event map[string]any) {
-	channel := "keeper:" + workspaceID
-	b.hub.Broadcast(channel, ws.ServerMessage{
-		Type:    "keeper_event",
-		Channel: channel,
-		Payload: event,
-	})
+	broadcastChannelEvent(b.hub, "keeper", workspaceID, "keeper_event", event)
 }
 
 // Router is the top-level HTTP multiplexer that registers all API, internal, and static routes.
