@@ -366,4 +366,155 @@ govulncheck ./...                     # Go vulnerability database
 
 ---
 
+## 11. LICENSE POLICY & QUALITY GATES (CRE-122, 2026-04-10)
+
+Doplnění k bodu 9 (Security audit). Explicitní license whitelist/blacklist
+a popis CI quality gates implementovaných v rámci CRE-122.
+
+### 11.1 Accepted licenses
+
+Pouze tyto licence jsou povolené pro knihovny embedded v `crewship` binárce:
+
+| License | Typ | Poznámka |
+|---|---|---|
+| **MIT** | permisivní | ✅ |
+| **BSD-2-Clause, BSD-3-Clause** | permisivní | ✅ |
+| **Apache-2.0** | permisivní + patent grant | ✅ preferovaná pro nové věci |
+| **ISC** | permisivní | ✅ |
+| **MPL-2.0** | file-level copyleft | ✅ (MPL soubor zůstane MPL, zbytek kódu neovlivní) |
+| **Public Domain / CC0 / Unlicense** | no rights reserved | ✅ |
+
+### 11.2 Rejected licenses
+
+**NIKDY** nepřidávat dependency s těmito licencemi — blokuje komerční
+`/ee` tier nebo SaaS hosting:
+
+| License | Důvod |
+|---|---|
+| **GPL-2.0, GPL-3.0, LGPL** | Copyleft kontaminuje embedding |
+| **AGPL-3.0** | Network copyleft kontaminuje SaaS hosting |
+| **BSL / BUSL-1.1** | Non-compete (HashiCorp Terraform, Vault) |
+| **SSPL** | Není OSI-approved (MongoDB, Elastic) |
+| **CC-BY-NC** | Non-commercial klauzule |
+| **Proprietární** | Bez výjimky |
+
+### 11.3 CI quality gates (`.github/workflows/security.yml`)
+
+Po CRE-122 běží každá PR a push do main přes tyto automated checks:
+
+1. **`gitleaks`** — secret scan (staged diff na PR, full history na main)
+   - Config: `.gitleaks.toml` (allowlist) + `.gitleaksignore` (fingerprints)
+2. **`govulncheck`** — Go vulnerability scan (continue-on-error pro known accepted CVEs)
+3. **`grype`** — source tree vulnerability scan (SARIF upload do GitHub Security tab)
+4. **`go-licenses`** — forbidden license check (`--disallowed_types=forbidden,restricted`)
+5. **`golangci-lint`** — Phase 1 conservative config (`.golangci.yml`)
+   - Enabled: `govet`, `ineffassign`, `staticcheck` (SA* only), `unused`, `gofmt`
+   - Deferred to Phase 2: `errcheck`, `gosec`, `gocritic`, `revive`, QF/S/ST staticcheck checks
+
+### 11.4 Release supply chain (`.goreleaser.yml` + `release.yml`)
+
+CRE-122 přidalo do release pipeline:
+
+1. **SBOM generation** (syft) — každá release archive dostane `*.spdx.json`
+   a `*.cdx.json` (SPDX pro US federal procurement, CycloneDX pro OWASP)
+2. **Keyless signing** (cosign + GitHub OIDC) — každý artifact + checksum + SBOM
+   je podepsaný bez správy klíčů. Ověření:
+   ```bash
+   cosign verify-blob \
+     --certificate-identity-regexp "https://github.com/crewship-ai/crewship/.github/workflows/release.yml@.*" \
+     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+     --signature crewship_vX.Y.Z_linux_amd64.tar.gz.sig \
+     --certificate crewship_vX.Y.Z_linux_amd64.tar.gz.pem \
+     crewship_vX.Y.Z_linux_amd64.tar.gz
+   ```
+
+### 11.5 Local developer parity (`Makefile`)
+
+```bash
+make lint       # golangci-lint + pnpm lint
+make security   # govulncheck + gitleaks
+make sbom       # generate local SBOMs (sbom.spdx.json, sbom.cdx.json)
+make notices    # regenerate THIRD-PARTY-NOTICES.md
+```
+
+Install tools:
+```bash
+brew install golangci-lint gitleaks syft grype cosign goreleaser
+go install golang.org/x/vuln/cmd/govulncheck@latest
+go install github.com/google/go-licenses@latest
+```
+
+### 11.6 Git pre-commit hook (`scripts/install-hooks.sh`)
+
+Auto-instalovaný při `./dev.sh start`. Kontroluje staged soubory proti
+gitleaks a golangci-lint PŘED commitem. Graceful degradation — pokud
+nástroje nejsou lokálně, hook warnuje ale commit nezablokuje (CI je
+backup enforcement).
+
+### 11.7 Adding a new dependency — procedura
+
+1. **License first** — check `LICENSE` file in the upstream repo proti §11.1/§11.2
+2. **Add the dep:** `go get github.com/example/library && go mod tidy`
+3. **Regenerate notices:** `make notices`
+4. **Run checks:** `make lint && make security`
+5. **Commit all of:** `go.mod`, `go.sum`, `THIRD-PARTY-NOTICES.md`, usage
+6. **CI verifies:** `go-licenses check`, `govulncheck`, `gitleaks`, `golangci-lint`
+
+### 11.8 Known exceptions (2026-04-10)
+
+**`modernc.org/mathutil`** — BSD-3-Clause (verified), ale `go-licenses` ho
+nedetekuje kvůli edge-case v file-matching. CI license-check používá
+`--ignore modernc.org/mathutil`. Remove once upstream fix lands.
+
+**GO-2026-4887 + GO-2026-4883** (docker/docker) — 2 CVEs bez upstream fix.
+Neni reachable v Crewshipově usage patternu (nepoužíváme AuthZ plugins).
+govulncheck CI job je `continue-on-error`. Monitorovat upstream.
+
+### 11.9 Rejected libraries log (CRE-122 ecosystem audit)
+
+Doplňuje sekci 10. Tyhle Go knihovny byly zvažované v CRE-122 a
+**explicitně odmítnuté** — nepřidávat bez nové analýzy:
+
+**Licenčně nevhodné (BSL/GPL/AGPL):**
+- Ansible, Terraform, Packer, Vault, Nomad, Consul
+- Duplicity, Bitwarden CLI
+- MinIO server (AGPL — lze použít samostatně jako restic backend, ne embedded)
+
+**Duplicitní s existujícími řešeními:**
+- `viper`, `koanf` — máme custom config
+- `zap`, `zerolog` — máme `log/slog`
+- `kong`, `urfave/cli` — máme `cobra`
+- `chi`, `gin`, `echo`, `fiber` — máme custom handler + gorilla/websocket
+- `gocron` — máme `robfig/cron/v3`
+- `bleve` — máme SQLite FTS5
+- `atlas`, `golang-migrate`, `goose` — máme custom `migrate.go`
+- `ent`, `gorm` — ORM zakázán projektem
+
+**Ne-MVP (revisit později):**
+- `temporal` — durable workflows, Q3-Q4 2026 kandidát
+- `ipfs-lite` — `croc` je jednodušší pro brain transfer
+- `bubbletea`, `pterm` — CLI polish sprint
+
+### 11.10 Accepted additions (CRE-122 top-5 pro budoucí adopci)
+
+Tyhle knihovny prošly CRE-122 review a jsou doporučené, ale **implementace
+je odložena** na samostatné sub-issues (vyžadují refactor nebo feature work):
+
+1. **`filippo.io/age`** — refactor credstore (A3, risky migration)
+2. **`github.com/charmbracelet/huh`** — backup destination wizard (A1, tied to CRE-119)
+3. **`github.com/charmbracelet/{lipgloss,glamour,log}`** — CLI polish (A2)
+4. **`github.com/spf13/afero`** — FS abstraction pro testy (C2)
+5. **`github.com/testcontainers/testcontainers-go`** — integration tests (C3)
+
+Viz CRE-122 v Linearu pro kompletní seznam.
+
+---
+
+*Sekce 11 přidána 2026-04-10 jako součást CRE-122. Implementace: `.golangci.yml`,
+`.gitleaks.toml`, `.gitleaksignore`, `THIRD-PARTY-NOTICES.md`, `.github/workflows/security.yml`,
+aktualizovaný `.goreleaser.yml` + `release.yml`, nový `Makefile` targets (lint/security/sbom/notices),
+`scripts/install-hooks.sh`, `scripts/gen-notices.sh`.*
+
+---
+
 *Aktualizovano 2026-02-17. Plne reflektuje skutecny stav package.json, go.mod a AGENTS.md.*

@@ -109,6 +109,27 @@ jobs:
       - name: Go test
         run: go test ./... -count=1
 
+  # ── Go lint: golangci-lint (CRE-122 Phase 1 — conservative ruleset) ──
+  go-lint:
+    name: Go Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # Same embed stub requirement as the go job
+      - name: Create embed stub
+        run: mkdir -p web/out && echo '<!doctype html>' > web/out/index.html
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
   # ── Full binary build (push to main only — verifies embed works) ──
   binary:
     name: Binary Build

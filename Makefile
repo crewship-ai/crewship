@@ -1,4 +1,4 @@
-.PHONY: up down restart status dev dev\:go dev\:next build test lint e2e e2e\:ui validate
+.PHONY: up down restart status dev dev\:go dev\:next build test lint security sbom notices e2e e2e\:ui validate
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
@@ -56,7 +56,40 @@ test:
 
 lint:
 	pnpm lint
-	go vet ./...
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run ./...; \
+	else \
+		echo "golangci-lint not installed — falling back to go vet. Install with: brew install golangci-lint"; \
+		go vet ./...; \
+	fi
+
+# === Security (CRE-122) ===
+
+security:
+	@echo "→ Running govulncheck..."
+	@if command -v govulncheck >/dev/null 2>&1; then \
+		govulncheck ./... || echo "⚠ govulncheck reported issues — see THIRD-PARTY-NOTICES.md for known accepted vulns"; \
+	else \
+		echo "⚠ govulncheck not installed — go install golang.org/x/vuln/cmd/govulncheck@latest"; \
+	fi
+	@echo "→ Running gitleaks..."
+	@if command -v gitleaks >/dev/null 2>&1; then \
+		gitleaks detect --no-banner --redact; \
+	else \
+		echo "⚠ gitleaks not installed — brew install gitleaks"; \
+	fi
+
+sbom:
+	@echo "→ Generating SBOMs (SPDX + CycloneDX)..."
+	@if command -v syft >/dev/null 2>&1; then \
+		syft . -o spdx-json=sbom.spdx.json -o cyclonedx-json=sbom.cdx.json; \
+		echo "✓ sbom.spdx.json and sbom.cdx.json generated"; \
+	else \
+		echo "⚠ syft not installed — brew install syft"; \
+	fi
+
+notices:
+	@./scripts/gen-notices.sh
 
 e2e:
 	pnpm test:e2e
