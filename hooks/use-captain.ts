@@ -45,6 +45,10 @@ function convertHistory(raw: HistoryMessage[]): CaptainMessage[] {
   return result
 }
 
+/**
+ * High-level hook for the Captain AI assistant panel.
+ * Manages SSE-streamed chat, conversation history, badge count polling, and abort/clear actions.
+ */
 export function useCaptain() {
   const store = useCaptainStore()
   const { workspaceId } = useWorkspace()

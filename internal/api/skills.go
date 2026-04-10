@@ -10,6 +10,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/skills"
 )
 
+// SkillHandler provides endpoints for listing, importing, and managing agent skills.
 type SkillHandler struct {
 	db     *sql.DB
 	logger *slog.Logger
@@ -17,6 +18,7 @@ type SkillHandler struct {
 	SkipURLValidation bool
 }
 
+// NewSkillHandler creates a SkillHandler with the given database and logger.
 func NewSkillHandler(db *sql.DB, logger *slog.Logger) *SkillHandler {
 	return &SkillHandler{db: db, logger: logger}
 }
@@ -44,6 +46,8 @@ type skillResponse struct {
 	UpdatedAt    string  `json:"updated_at"`
 }
 
+// List returns all skills, optionally filtered by category, source, or search text.
+// GET /api/v1/skills
 func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 	category := r.URL.Query().Get("category")
 	source := r.URL.Query().Get("source")

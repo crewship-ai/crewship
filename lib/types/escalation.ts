@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+/** Zod schema for validating escalation records (agent-to-human requests for help). */
 export const escalationSchema = z.object({
   id: z.string(),
   type: z.enum(["TEXT", "CREDENTIAL", "LINK"]).default("TEXT"),
@@ -18,6 +19,7 @@ export const escalationSchema = z.object({
   created_at: z.string(),
 })
 
+/** Structured evidence attached to an escalation, providing context about what the agent was doing. */
 export interface EvidencePack {
   task_title?: string
   task_id?: string
@@ -34,6 +36,10 @@ const EVIDENCE_PACK_KEYS = [
   "error", "relevant_files", "confidence", "suggested_action",
 ] as const
 
+/**
+ * Parse escalation metadata JSON into a structured EvidencePack.
+ * Returns null if metadata is absent, not valid JSON, or does not contain recognized evidence keys.
+ */
 export function parseEvidencePack(metadata: string | null): EvidencePack | null {
   if (!metadata) return null
   try {
@@ -47,4 +53,5 @@ export function parseEvidencePack(metadata: string | null): EvidencePack | null 
   }
 }
 
+/** An escalation raised by an agent requesting human intervention (text input, credential, or link). */
 export type Escalation = z.infer<typeof escalationSchema>

@@ -172,7 +172,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
     return arr
   }, [issues, sortKey, sortDir])
 
-  function SortIcon({ column }: { column: SortKey }) {
+  const renderSortIcon = useCallback((column: SortKey) => {
     if (sortKey !== column)
       return <ArrowUpDown className="h-3 w-3 text-foreground/40" />
     return sortDir === "asc" ? (
@@ -180,7 +180,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
     ) : (
       <ArrowDown className="h-3 w-3" />
     )
-  }
+  }, [sortKey, sortDir])
 
   if (issues.length === 0) {
     return (
@@ -267,7 +267,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               onClick={() => handleSort("identifier")}
             >
               <span className="flex items-center gap-1">
-                ID <SortIcon column="identifier" />
+                ID {renderSortIcon("identifier")}
               </span>
             </TableHead>
             <TableHead
@@ -275,7 +275,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               onClick={() => handleSort("title")}
             >
               <span className="flex items-center gap-1">
-                Title <SortIcon column="title" />
+                Title {renderSortIcon("title")}
               </span>
             </TableHead>
             <TableHead
@@ -283,7 +283,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               onClick={() => handleSort("status")}
             >
               <span className="flex items-center gap-1">
-                Status <SortIcon column="status" />
+                Status {renderSortIcon("status")}
               </span>
             </TableHead>
             <TableHead
@@ -291,7 +291,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               onClick={() => handleSort("priority")}
             >
               <span className="flex items-center gap-1">
-                Priority <SortIcon column="priority" />
+                Priority {renderSortIcon("priority")}
               </span>
             </TableHead>
             <TableHead
@@ -299,7 +299,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               onClick={() => handleSort("assignee")}
             >
               <span className="flex items-center gap-1">
-                Assignee <SortIcon column="assignee" />
+                Assignee {renderSortIcon("assignee")}
               </span>
             </TableHead>
             <TableHead
@@ -307,7 +307,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               onClick={() => handleSort("crew")}
             >
               <span className="flex items-center gap-1">
-                Crew <SortIcon column="crew" />
+                Crew {renderSortIcon("crew")}
               </span>
             </TableHead>
             <TableHead className="w-[120px]">Labels</TableHead>
@@ -316,7 +316,7 @@ export function IssuesListView({ issues, onIssueClick, selectedIssueId, onBulkAc
               onClick={() => handleSort("updated")}
             >
               <span className="flex items-center gap-1">
-                Updated <SortIcon column="updated" />
+                Updated {renderSortIcon("updated")}
               </span>
             </TableHead>
           </TableRow>

@@ -10,24 +10,28 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+// WSClient is a WebSocket client for streaming chat events from the server.
 type WSClient struct {
 	conn   *websocket.Conn
 	mu     sync.Mutex
 	closed bool
 }
 
+// WSMessage is a JSON-encoded WebSocket message exchanged with the server.
 type WSMessage struct {
 	Type    string          `json:"type"`
 	Channel string          `json:"channel,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
+// ChatEventPayload is the payload of a chat_event WebSocket message.
 type ChatEventPayload struct {
 	Type     string `json:"type"`
 	Content  string `json:"content"`
 	Metadata any    `json:"metadata,omitempty"`
 }
 
+// NewWSClient connects to the server's WebSocket endpoint with JWT authentication.
 func NewWSClient(serverURL, token string) (*WSClient, error) {
 	u, err := url.Parse(serverURL)
 	if err != nil {
@@ -50,6 +54,7 @@ func NewWSClient(serverURL, token string) (*WSClient, error) {
 	return &WSClient{conn: conn}, nil
 }
 
+// Subscribe sends a channel subscription request to the server.
 func (c *WSClient) Subscribe(channel string) error {
 	return c.send(WSMessage{
 		Type:    "subscribe",
@@ -57,6 +62,7 @@ func (c *WSClient) Subscribe(channel string) error {
 	})
 }
 
+// SendMessage sends a chat message to the given channel and session.
 func (c *WSClient) SendMessage(channel, chatID, content string) error {
 	payload := map[string]string{
 		"session_id": chatID,
@@ -73,6 +79,7 @@ func (c *WSClient) SendMessage(channel, chatID, content string) error {
 	})
 }
 
+// CancelMessage sends a cancel request for the active run in the given chat.
 func (c *WSClient) CancelMessage(chatID string) error {
 	payload := map[string]string{
 		"session_id": chatID,
@@ -87,6 +94,7 @@ func (c *WSClient) CancelMessage(chatID string) error {
 	})
 }
 
+// ReadMessage reads and parses the next WebSocket message from the server.
 func (c *WSClient) ReadMessage() (*WSMessage, error) {
 	var raw []byte
 	if err := websocket.Message.Receive(c.conn, &raw); err != nil {
@@ -99,6 +107,7 @@ func (c *WSClient) ReadMessage() (*WSMessage, error) {
 	return &msg, nil
 }
 
+// Close closes the WebSocket connection.
 func (c *WSClient) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

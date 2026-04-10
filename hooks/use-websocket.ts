@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { z } from "zod"
 
+/** WebSocket connection lifecycle status. */
 export type WSStatus = "connecting" | "connected" | "disconnected" | "error"
 
 const wsMessageSchema = z.object({
@@ -11,6 +12,7 @@ const wsMessageSchema = z.object({
   payload: z.union([z.string(), z.record(z.string(), z.unknown())]).optional(),
 }).passthrough()
 
+/** A parsed WebSocket message with type, optional channel, and optional payload. */
 export type WSMessage = z.infer<typeof wsMessageSchema>
 
 interface UseWebSocketOptions {
@@ -28,6 +30,10 @@ function backoffDelay(attempt: number): number {
   return Math.min(base * Math.pow(2, attempt), max) + Math.random() * jitter
 }
 
+/**
+ * Managed WebSocket connection with automatic reconnection (exponential backoff + jitter).
+ * Validates incoming messages against a Zod schema before dispatching to the onMessage callback.
+ */
 export function useWebSocket({
   url,
   token,

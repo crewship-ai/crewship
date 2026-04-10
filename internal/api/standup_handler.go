@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -98,22 +97,22 @@ func formatConversations(b *strings.Builder, convs []standupConvEntry) {
 		return
 	}
 
-	b.WriteString(fmt.Sprintf("Peer interactions (%d):\n\n", len(convs)))
+	fmt.Fprintf(b, "Peer interactions (%d):\n\n", len(convs))
 	for i, c := range convs {
 		ts := formatStandupTimestamp(c.createdAt)
-		b.WriteString(fmt.Sprintf("%d. %s -> %s: \"%s\"\n", i+1, c.fromName, c.toName, c.question))
+		fmt.Fprintf(b, "%d. %s -> %s: \"%s\"\n", i+1, c.fromName, c.toName, c.question)
 		if c.response != "" {
 			resp := c.response
 			if len(resp) > 200 {
 				resp = resp[:200] + "..."
 			}
-			b.WriteString(fmt.Sprintf("   %s: \"%s\"\n", c.toName, resp))
+			fmt.Fprintf(b, "   %s: \"%s\"\n", c.toName, resp)
 		}
 		suffix := ""
 		if c.escalated != 0 {
 			suffix = ", ESCALATED"
 		}
-		b.WriteString(fmt.Sprintf("   (%s%s)\n\n", ts, suffix))
+		fmt.Fprintf(b, "   (%s%s)\n\n", ts, suffix)
 	}
 }
 
@@ -157,16 +156,14 @@ func (h *QueryHandler) Standup(w http.ResponseWriter, r *http.Request) {
 	// When accessed via the public (authenticated) route, validate that the crew
 	// belongs to the caller's workspace to prevent cross-workspace data access.
 	if wsID := WorkspaceIDFromContext(r.Context()); wsID != "" {
-		var exists int
-		if err := h.db.QueryRowContext(r.Context(),
-			`SELECT 1 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-			crewID, wsID).Scan(&exists); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found in workspace"})
-				return
-			}
+		found, err := crewExists(r.Context(), h.db, crewID, wsID)
+		if err != nil {
 			h.logger.Error("standup workspace validation", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+			return
+		}
+		if !found {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "crew not found in workspace"})
 			return
 		}
 	}

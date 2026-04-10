@@ -23,6 +23,87 @@ func NewIssueHandler(db *sql.DB, hub *ws.Hub, me MissionStarter, logger *slog.Lo
 	return &IssueHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }
 
+// issueSelectColumns is the shared SELECT clause for fetching issues/missions.
+const issueSelectColumns = `
+	SELECT m.id, m.workspace_id, m.crew_id, COALESCE(c.name, ''), COALESCE(c.slug, ''),
+	       m.number, m.identifier, m.title, m.description, m.status,
+	       COALESCE(m.priority, 'none'), m.assignee_type, m.assignee_id,
+	       COALESCE(u.full_name, ag.name),
+	       m.due_date, COALESCE(m.sort_order, 0), COALESCE(m.mission_type, 'mission'),
+	       m.lead_agent_id, m.created_at, m.updated_at, m.completed_at,
+	       m.project_id, m.estimate, m.parent_issue_id, m.milestone_id,
+	       COALESCE(sub_cnt.cnt, 0)
+	FROM missions m
+	LEFT JOIN crews c ON m.crew_id = c.id
+	LEFT JOIN users u ON m.assignee_type = 'user' AND u.id = m.assignee_id
+	LEFT JOIN agents ag ON m.assignee_type = 'agent' AND ag.id = m.assignee_id
+	LEFT JOIN (SELECT parent_issue_id, COUNT(*) AS cnt FROM missions WHERE parent_issue_id IS NOT NULL GROUP BY parent_issue_id) sub_cnt ON sub_cnt.parent_issue_id = m.id`
+
+// scanIssue scans a row into an issueResponse using the standard column order.
+func scanIssue(s interface{ Scan(...interface{}) error }) (issueResponse, error) {
+	var issue issueResponse
+	err := s.Scan(
+		&issue.ID, &issue.WorkspaceID, &issue.CrewID, &issue.CrewName, &issue.CrewSlug,
+		&issue.Number, &issue.Identifier, &issue.Title, &issue.Description, &issue.Status,
+		&issue.Priority, &issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName,
+		&issue.DueDate, &issue.SortOrder, &issue.MissionType,
+		&issue.LeadAgentID, &issue.CreatedAt, &issue.UpdatedAt, &issue.CompletedAt,
+		&issue.ProjectID, &issue.Estimate, &issue.ParentIssueID, &issue.MilestoneID,
+		&issue.SubIssuesCount,
+	)
+	if err == nil {
+		issue.Labels = []labelResponse{}
+	}
+	return issue, err
+}
+
+// logActivity inserts a row into mission_activity. Errors are logged but not
+// returned — activity logging is best-effort and should not fail the caller.
+func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, actorID, action, details string) {
+	actID := generateCUID()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.ExecContext(ctx,
+		`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		actID, missionID, actorType, actorID, action, details, now); err != nil {
+		h.logger.Error("insert mission activity", "action", action, "mission_id", missionID, "error", err)
+	}
+}
+
+// setIssueLabels replaces the label associations for a mission by deleting
+// existing rows and inserting new ones. Errors are logged but not returned.
+func (h *IssueHandler) setIssueLabels(ctx context.Context, missionID string, labelIDs []string) {
+	if _, err := h.db.ExecContext(ctx,
+		`DELETE FROM mission_labels WHERE mission_id = ?`, missionID); err != nil {
+		h.logger.Error("delete mission labels", "mission_id", missionID, "error", err)
+		return
+	}
+	for _, labelID := range labelIDs {
+		if _, err := h.db.ExecContext(ctx,
+			`INSERT OR IGNORE INTO mission_labels (mission_id, label_id) VALUES (?, ?)`,
+			missionID, labelID); err != nil {
+			h.logger.Error("insert mission label", "mission_id", missionID, "error", err)
+		}
+	}
+}
+
+// insertComment inserts a row into mission_comments. Errors are logged but not
+// returned — this is used by best-effort comment flows (e.g. review notes).
+func (h *IssueHandler) insertComment(ctx context.Context, missionID, authorType, authorID, body string) {
+	commentID := generateCUID()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.ExecContext(ctx,
+		`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		commentID, missionID, authorType, authorID, body, now, now); err != nil {
+		h.logger.Error("insert mission comment", "mission_id", missionID, "error", err)
+	}
+}
+
+// broadcastIssueEvent sends a workspace-scoped WebSocket event.
+// Delegates to the package-level helper; kept for call-site brevity.
+func (h *IssueHandler) broadcastIssueEvent(wsID, eventType string, payload map[string]string) {
+	broadcastWorkspaceEvent(h.hub, wsID, eventType, payload)
+}
+
 // ── Response types ──────────────────────────────────────────────────────────
 
 type issueResponse struct {
@@ -146,16 +227,10 @@ func (h *IssueHandler) loadIssueLabels(ctx context.Context, missionID string) []
 	return labels
 }
 
-// broadcastIssueEvent sends a WebSocket event if the hub is available.
-func (h *IssueHandler) broadcastIssueEvent(wsID, eventType string, payload map[string]string) {
-	if h.hub != nil {
-		h.hub.Broadcast("workspace:"+wsID, ws.ServerMessage{
-			Type:    eventType,
-			Channel: "workspace:" + wsID,
-			Payload: payload,
-		})
-	}
-}
+// broadcastIssueEvent and logActivity are defined earlier in this file (the
+// merge pulled in main's modernized versions that delegate to the package-level
+// broadcastWorkspaceEvent helper). The duplicates that lived here in the
+// pre-merge feat/code-quality version were removed to avoid redeclaration.
 
 // validateStatusTransition checks if a status transition is allowed.
 func (h *IssueHandler) validateStatusTransition(currentStatus, newStatus string) bool {
@@ -168,16 +243,9 @@ func (h *IssueHandler) validateStatusTransition(currentStatus, newStatus string)
 	return false
 }
 
-// logActivity inserts an activity record.
-func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, actorID, action, details string) {
-	actID := generateCUID()
-	now := time.Now().UTC().Format(time.RFC3339)
-	_, _ = h.db.ExecContext(ctx,
-		`INSERT INTO mission_activity (id, mission_id, actor_type, actor_id, action, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		actID, missionID, actorType, actorID, action, details, now)
-}
-
-// addIssueComment inserts a comment on an issue.
+// addIssueComment inserts a comment on an issue (used by best-effort flows
+// like auto-posted review notes; distinct from the public CreateComment
+// handler in issue_handler_comments.go).
 func (h *IssueHandler) addIssueComment(ctx context.Context, missionID, authorType, authorID, body string) {
 	commentID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)

@@ -11,11 +11,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Formatter renders CLI output in the configured format (table, json, yaml, or quiet).
 type Formatter struct {
 	Format string
 	Writer io.Writer
 }
 
+// NewFormatter creates a Formatter for the given output format.
 func NewFormatter(format string) *Formatter {
 	return &Formatter{
 		Format: format,

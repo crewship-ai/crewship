@@ -58,6 +58,8 @@ type createCrewIntegrationRequest struct {
 // All crew integrations (cross-crew view for Integrations page)
 // ==========================================
 
+// ListAllCrewIntegrations returns all MCP server integrations across all crews in the workspace.
+// GET /api/v1/integrations/crews — used by the cross-crew integrations overview page.
 func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
@@ -173,15 +175,20 @@ func (h *IntegrationHandler) ListAllCrewIntegrations(w http.ResponseWriter, r *h
 // Crew MCP Servers
 // ==========================================
 
+// ListCrewIntegrations returns all MCP server integrations for a specific crew.
+// GET /api/v1/crews/{crewId}/integrations
 func (h *IntegrationHandler) ListCrewIntegrations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	crewID := r.PathValue("crewId")
 
 	// Verify crew belongs to workspace
-	var crewExists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&crewExists); err != nil {
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	if err != nil {
+		h.logger.Error("crew exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
@@ -303,6 +310,8 @@ func (h *IntegrationHandler) populateAuthStatus(ctx context.Context, results []c
 	return nil
 }
 
+// CreateCrewIntegration adds a new MCP server integration to a crew.
+// POST /api/v1/crews/{crewId}/integrations
 func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -313,10 +322,13 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 
 	crewID := r.PathValue("crewId")
 	// Verify crew
-	var crewExists string
-	if err := h.db.QueryRowContext(r.Context(),
-		"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-		crewID, workspaceID).Scan(&crewExists); err != nil {
+	found, err := crewExists(r.Context(), h.db, crewID, workspaceID)
+	if err != nil {
+		h.logger.Error("crew exists check", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
+		return
+	}
+	if !found {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Crew not found"})
 		return
 	}
@@ -367,7 +379,7 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := generateCUID()
 
-	_, err := h.db.ExecContext(r.Context(), `
+	_, err = h.db.ExecContext(r.Context(), `
 		INSERT INTO crew_mcp_servers (id, crew_id, workspace_mcp_server_id, name, display_name, transport,
 			endpoint, command, args_json, env_json, config_json, icon, enabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
@@ -392,6 +404,8 @@ func (h *IntegrationHandler) CreateCrewIntegration(w http.ResponseWriter, r *htt
 	})
 }
 
+// UpdateCrewIntegration modifies an existing MCP server integration on a crew.
+// PATCH /api/v1/crews/{crewId}/integrations/{integrationId}
 func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -461,9 +475,11 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 	// Validate transport/field combination against merged final state
 	if req.Transport != nil {
 		var existingEndpoint, existingCommand sql.NullString
-		_ = h.db.QueryRowContext(r.Context(),
+		if err := h.db.QueryRowContext(r.Context(),
 			"SELECT endpoint, command FROM crew_mcp_servers WHERE id = ?", id).
-			Scan(&existingEndpoint, &existingCommand)
+			Scan(&existingEndpoint, &existingCommand); err != nil {
+			h.logger.Error("load existing crew integration", "id", id, "error", err)
+		}
 
 		finalEndpoint := existingEndpoint.String
 		if req.Endpoint != nil {
@@ -514,6 +530,8 @@ func (h *IntegrationHandler) UpdateCrewIntegration(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, s)
 }
 
+// DeleteCrewIntegration removes an MCP server integration from a crew and its agent bindings.
+// DELETE /api/v1/crews/{crewId}/integrations/{integrationId}
 func (h *IntegrationHandler) DeleteCrewIntegration(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())

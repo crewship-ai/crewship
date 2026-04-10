@@ -1,8 +1,9 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useRealtimeEvent } from "@/hooks/use-realtime"
 
+/** Aggregate agent counts by status for the fleet toolbar badge. */
 export interface FleetStatus {
   total: number
   running: number
@@ -29,13 +30,33 @@ export function useFleetStatus(workspaceId: string | null): FleetStatus | null {
 
   useEffect(() => { refresh() }, [refresh])
 
-  // Real-time: refresh on agent lifecycle events
-  useRealtimeEvent("agent.status", useCallback(() => { refresh() }, [refresh]))
-  useRealtimeEvent("agent.created", useCallback(() => { refresh() }, [refresh]))
-  useRealtimeEvent("agent.deleted", useCallback(() => { refresh() }, [refresh]))
-  useRealtimeEvent("run.started", useCallback(() => { refresh() }, [refresh]))
-  useRealtimeEvent("run.completed", useCallback(() => { refresh() }, [refresh]))
-  useRealtimeEvent("run.failed", useCallback(() => { refresh() }, [refresh]))
+  // Real-time: debounced refresh on agent lifecycle events
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const debouncedRefresh = useCallback(() => {
+    if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null
+      void refresh()
+    }, 150)
+  }, [refresh])
+
+  // Clear any pending timer on unmount / workspace change to avoid
+  // stale setStatus after the component is gone.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current !== null) {
+        clearTimeout(debounceRef.current)
+        debounceRef.current = null
+      }
+    }
+  }, [workspaceId])
+
+  useRealtimeEvent("agent.status", debouncedRefresh)
+  useRealtimeEvent("agent.created", debouncedRefresh)
+  useRealtimeEvent("agent.deleted", debouncedRefresh)
+  useRealtimeEvent("run.started", debouncedRefresh)
+  useRealtimeEvent("run.completed", debouncedRefresh)
+  useRealtimeEvent("run.failed", debouncedRefresh)
 
   return status
 }

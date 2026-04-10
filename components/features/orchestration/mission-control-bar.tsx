@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Play, Square, Clock, Coins, CheckCircle2, AlertTriangle,
   Loader2, ChevronRight, RotateCcw, Copy,
@@ -49,21 +49,26 @@ function LiveDuration({ startedAt }: { startedAt: string }) {
 export function MissionControlBar({ mission, workspaceId, onMissionChanged }: MissionControlBarProps) {
   const [loading, setLoading] = useState<string | null>(null)
   const tasks = mission.tasks || []
-  const completed = tasks.filter((t) => t.status === "COMPLETED").length
-  const failed = tasks.filter((t) => t.status === "FAILED").length
-  const inProgress = tasks.filter((t) => t.status === "IN_PROGRESS").length
-  const total = tasks.length
-  const progress = total > 0 ? (completed / total) * 100 : 0
   const cfg = statusConfig[mission.status] || statusConfig.PLANNING
   const StatusIcon = cfg.icon
 
-  const totalTokens = tasks.reduce((sum, t) => sum + (t.token_count || 0), 0)
-  const totalCost = tasks.reduce((sum, t) => sum + (t.estimated_cost || 0), 0)
-
-  const earliestStart = tasks
-    .filter((t) => t.started_at)
-    .sort((a, b) => new Date(a.started_at!).getTime() - new Date(b.started_at!).getTime())[0]
-    ?.started_at
+  const { completed, failed, inProgress, total, progress, totalTokens, totalCost, earliestStart } = useMemo(() => {
+    let comp = 0, fail = 0, prog = 0, tokens = 0, cost = 0
+    let earliest: string | undefined
+    for (const t of tasks) {
+      if (t.status === "COMPLETED") comp++
+      else if (t.status === "FAILED") fail++
+      else if (t.status === "IN_PROGRESS") prog++
+      tokens += t.token_count || 0
+      cost += t.estimated_cost || 0
+      if (t.started_at && (!earliest || t.started_at < earliest)) earliest = t.started_at
+    }
+    return {
+      completed: comp, failed: fail, inProgress: prog,
+      total: tasks.length, progress: tasks.length > 0 ? (comp / tasks.length) * 100 : 0,
+      totalTokens: tokens, totalCost: cost, earliestStart: earliest,
+    }
+  }, [tasks])
 
   const handleAction = useCallback(async (action: "start" | "cancel" | "complete") => {
     setLoading(action)

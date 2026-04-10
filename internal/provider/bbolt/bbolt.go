@@ -13,10 +13,12 @@ import (
 
 var _ provider.StateProvider = (*Provider)(nil)
 
+// Provider implements StateProvider using an embedded bbolt key-value database.
 type Provider struct {
 	db *bolt.DB
 }
 
+// New opens or creates a bbolt database at the given file path.
 func New(path string) (*Provider, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return nil, fmt.Errorf("create state dir: %w", err)
@@ -33,6 +35,7 @@ func New(path string) (*Provider, error) {
 	return &Provider{db: db}, nil
 }
 
+// Get retrieves the value for key in the named bucket, or nil if not found.
 func (p *Provider) Get(_ context.Context, bucket, key string) ([]byte, error) {
 	var val []byte
 	err := p.db.View(func(tx *bolt.Tx) error {
@@ -53,6 +56,7 @@ func (p *Provider) Get(_ context.Context, bucket, key string) ([]byte, error) {
 	return val, nil
 }
 
+// Set stores value under key in the named bucket, creating the bucket if needed.
 func (p *Provider) Set(_ context.Context, bucket, key string, value []byte) error {
 	return p.db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
@@ -63,6 +67,7 @@ func (p *Provider) Set(_ context.Context, bucket, key string, value []byte) erro
 	})
 }
 
+// Delete removes the key from the named bucket.
 func (p *Provider) Delete(_ context.Context, bucket, key string) error {
 	return p.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
@@ -73,6 +78,7 @@ func (p *Provider) Delete(_ context.Context, bucket, key string) error {
 	})
 }
 
+// List returns all key-value pairs in the named bucket.
 func (p *Provider) List(_ context.Context, bucket string) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 	err := p.db.View(func(tx *bolt.Tx) error {
@@ -93,6 +99,7 @@ func (p *Provider) List(_ context.Context, bucket string) (map[string][]byte, er
 	return result, nil
 }
 
+// ListByPrefix returns all key-value pairs in the bucket whose keys start with prefix.
 func (p *Provider) ListByPrefix(_ context.Context, bucket, prefix string) (map[string][]byte, error) {
 	result := make(map[string][]byte)
 	pfx := []byte(prefix)
@@ -115,6 +122,7 @@ func (p *Provider) ListByPrefix(_ context.Context, bucket, prefix string) (map[s
 	return result, nil
 }
 
+// Close closes the underlying bbolt database.
 func (p *Provider) Close() error {
 	return p.db.Close()
 }

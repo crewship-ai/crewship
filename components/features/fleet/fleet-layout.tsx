@@ -68,6 +68,27 @@ export interface FleetLayoutProps {
   onRefresh: () => void
 }
 
+const ACTIVITY_TYPE_COLORS: Record<string, string> = {
+  status: "text-blue-400", run: "text-emerald-400", mission: "text-purple-400",
+}
+
+const HEALTH_STATUS_COLORS: Record<string, string> = {
+  RUNNING: "text-emerald-400",
+  IDLE: "text-muted-foreground",
+  ERROR: "text-red-400",
+  STOPPED: "text-amber-400",
+}
+
+const FLEET_TABS = [
+  { id: "overview" as const, label: "Overview", icon: LayoutGrid },
+  { id: "activity" as const, label: "Activity", icon: Activity },
+  { id: "connections" as const, label: "Connections", icon: Share2 },
+  { id: "health" as const, label: "Health", icon: HeartPulse },
+]
+
+// FLEET_BOTTOM_TABS was removed when the bottom drawer was extracted into
+// `<FleetBottomDrawer>` — the tab list now lives inside that component.
+
 export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }: FleetLayoutProps) {
   const isMobile = useIsMobile()
 
@@ -125,12 +146,7 @@ export function FleetLayout({ crews, agents, missions, workspaceId, onRefresh }:
       <div className="shrink-0 z-20 flex items-stretch h-8 bg-card border-b border-white/[0.08] px-3 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {/* Left: tabs */}
         <div className="flex items-stretch">
-          {([
-            { id: "overview" as const, label: "Overview", icon: LayoutGrid },
-            { id: "activity" as const, label: "Activity", icon: Activity },
-            { id: "connections" as const, label: "Connections", icon: Share2 },
-            { id: "health" as const, label: "Health", icon: HeartPulse },
-          ]).map(({ id, label, icon: Icon }) => (
+          {FLEET_TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveTab(id)}

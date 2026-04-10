@@ -12,6 +12,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Config holds all configuration for the crewship server, including server,
+// IPC, container, storage, state, logging, auth, LLM proxy, Keeper, and license settings.
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
 	IPC       IPCConfig       `yaml:"ipc"`
@@ -25,20 +27,26 @@ type Config struct {
 	License   LicenseConfig   `yaml:"license"`
 }
 
+// LicenseConfig holds the path to the license key file.
 type LicenseConfig struct {
 	FilePath string `yaml:"file_path"`
 }
 
+// ServerConfig holds HTTP server settings such as bind address, port, and shutdown timeout.
 type ServerConfig struct {
 	Host            string        `yaml:"host"`
 	Port            int           `yaml:"port"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
 }
 
+// IPCConfig holds the Unix socket path used for inter-process communication
+// between the main server and sidecar containers.
 type IPCConfig struct {
 	SocketPath string `yaml:"socket_path"`
 }
 
+// ContainerConfig holds container runtime settings including provider type,
+// runtime image, resource limits, and sidecar configuration.
 type ContainerConfig struct {
 	Provider        string  `yaml:"provider"` // "docker" | "k8s"
 	RuntimeImage    string  `yaml:"runtime_image"`
@@ -50,22 +58,27 @@ type ContainerConfig struct {
 	SidecarEnabled  bool    `yaml:"sidecar_enabled"` // enable sidecar proxy for credential injection
 }
 
+// StorageConfig holds file storage settings for agent outputs and logs.
 type StorageConfig struct {
 	Provider string `yaml:"provider"` // "localfs" | "s3"
 	BasePath string `yaml:"base_path"`
 	LogPath  string `yaml:"log_path"`
 }
 
+// StateConfig holds key-value state storage settings (bbolt or postgres).
 type StateConfig struct {
 	Provider string `yaml:"provider"` // "bbolt" | "postgres"
 	BoltPath string `yaml:"bolt_path"`
 }
 
+// LoggingConfig holds structured logging settings for level and output format.
 type LoggingConfig struct {
 	Level  string `yaml:"level"` // "debug" | "info" | "warn" | "error"
 	Format string `yaml:"format"` // "json" | "text"
 }
 
+// AuthConfig holds authentication settings including JWT secrets, WebSocket
+// token expiry, internal token for IPC auth, and signup policy.
 type AuthConfig struct {
 	JWTSecret       string        `yaml:"jwt_secret"`
 	WSTokenExpiry   time.Duration `yaml:"ws_token_expiry"`
@@ -76,18 +89,23 @@ type AuthConfig struct {
 	GoogleSecret    string        `yaml:"google_client_secret"`
 }
 
+// LLMProxyConfig holds settings for the LLM proxy that tracks token usage
+// and performs health checks on upstream providers.
 type LLMProxyConfig struct {
 	Enabled          bool          `yaml:"enabled"`
 	TokenSyncInterval time.Duration `yaml:"token_sync_interval"`
 	HealthCheckInterval time.Duration `yaml:"health_check_interval"`
 }
 
+// KeeperConfig holds settings for the Keeper AI assistant, which uses a local
+// Ollama model for on-device intelligence.
 type KeeperConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 	OllamaURL string `yaml:"ollama_url"`
 	Model     string `yaml:"model"`
 }
 
+// Default returns a Config populated with sensible defaults for all settings.
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -137,6 +155,9 @@ func Default() *Config {
 	}
 }
 
+// Load reads configuration from the given YAML file path (if non-empty),
+// applies environment variable overrides, auto-generates missing secrets,
+// and validates the result.
 func Load(path string) (*Config, error) {
 	cfg := Default()
 
@@ -181,6 +202,8 @@ var (
 	}
 )
 
+// Validate checks that all configuration values are within acceptable ranges
+// and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port must be between 1 and 65535, got %d", c.Server.Port)

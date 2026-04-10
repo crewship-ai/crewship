@@ -10,6 +10,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
+// MissionHandler provides endpoints for managing missions and their tasks.
 type MissionHandler struct {
 	db            *sql.DB
 	hub           *ws.Hub
@@ -17,6 +18,7 @@ type MissionHandler struct {
 	logger        *slog.Logger
 }
 
+// NewMissionHandler creates a MissionHandler with the given dependencies.
 func NewMissionHandler(db *sql.DB, hub *ws.Hub, me *orchestrator.MissionEngine, logger *slog.Logger) *MissionHandler {
 	return &MissionHandler{db: db, hub: hub, missionEngine: me, logger: logger}
 }
@@ -185,23 +187,63 @@ func (h *MissionHandler) getTaskStats(r *http.Request, missionID string) (*taskS
 		if err := rows.Scan(&status, &count); err != nil {
 			return nil, err
 		}
-		stats.Total += count
-		switch status {
-		case "PENDING":
-			stats.Pending = count
-		case "BLOCKED":
-			stats.Blocked = count
-		case "IN_PROGRESS":
-			stats.InProgress = count
-		case "COMPLETED":
-			stats.Completed = count
-		case "FAILED":
-			stats.Failed = count
-		case "SKIPPED":
-			stats.Skipped = count
-		case "AWAITING_APPROVAL":
-			stats.AwaitingApproval = count
-		}
+		applyTaskStatCount(stats, status, count)
 	}
 	return stats, rows.Err()
+}
+
+// getBatchTaskStats returns task stats for multiple missions in a single query.
+func (h *MissionHandler) getBatchTaskStats(r *http.Request, missionIDs []string) (map[string]*taskStats, error) {
+	if len(missionIDs) == 0 {
+		return map[string]*taskStats{}, nil
+	}
+
+	args := make([]interface{}, len(missionIDs))
+	for i, id := range missionIDs {
+		args[i] = id
+	}
+
+	rows, err := h.db.QueryContext(r.Context(),
+		`SELECT mission_id, status, COUNT(*) FROM mission_tasks WHERE mission_id IN (`+
+			sqlPlaceholders(len(missionIDs))+`) GROUP BY mission_id, status`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]*taskStats, len(missionIDs))
+	for rows.Next() {
+		var missionID, status string
+		var count int
+		if err := rows.Scan(&missionID, &status, &count); err != nil {
+			return nil, err
+		}
+		s, ok := result[missionID]
+		if !ok {
+			s = &taskStats{}
+			result[missionID] = s
+		}
+		applyTaskStatCount(s, status, count)
+	}
+	return result, rows.Err()
+}
+
+func applyTaskStatCount(s *taskStats, status string, count int) {
+	s.Total += count
+	switch status {
+	case "PENDING":
+		s.Pending = count
+	case "BLOCKED":
+		s.Blocked = count
+	case "IN_PROGRESS":
+		s.InProgress = count
+	case "COMPLETED":
+		s.Completed = count
+	case "FAILED":
+		s.Failed = count
+	case "SKIPPED":
+		s.Skipped = count
+	case "AWAITING_APPROVAL":
+		s.AwaitingApproval = count
+	}
 }

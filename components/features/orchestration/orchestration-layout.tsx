@@ -12,7 +12,8 @@ import {
 // Tabs replaced with custom nav for orchestration toolbar
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { WorkflowGraph, type WorkflowGraphRef } from "@/components/features/orchestration/workflow-graph"
+import dynamic from "next/dynamic"
+import { WorkflowGraph } from "@/components/features/orchestration/workflow-graph"
 import { MissionTimeline } from "@/components/features/orchestration/mission-timeline"
 import { OrchestrationActivity } from "@/components/features/orchestration/orchestration-activity"
 // TemplateGallery removed — workflow templates not needed in orchestration UI yet
@@ -50,6 +51,21 @@ export interface OrchestrationLayoutProps {
   onRefresh: () => void
   onMissionCreated: () => void
 }
+
+const ORCH_DRAWER_TABS = [
+  { id: "messages" as const, label: "Messages", icon: MessageSquare },
+  { id: "exec" as const, label: "Exec Log", icon: Terminal },
+  { id: "yaml" as const, label: "YAML", icon: FileCode2 },
+  { id: "docker" as const, label: "Docker", icon: Container },
+]
+
+const ORCH_TABS = [
+  { id: "issues", label: "Issues", icon: CircleDot },
+  { id: "graph", label: "Graph", icon: Workflow },
+  { id: "timeline", label: "Timeline", icon: Clock },
+  { id: "activity", label: "Activity", icon: Activity },
+  { id: "proposals", label: "Approvals", icon: FileText },
+] as const
 
 export function OrchestrationLayout({
   missions,
@@ -99,7 +115,7 @@ export function OrchestrationLayout({
   const [activeViewId, setActiveViewId] = useState<string | null>(null)
   const [savedViewsOpen, setSavedViewsOpen] = useState(false)
 
-  const graphRef = useRef<WorkflowGraphRef>(null)
+  // graphRef removed — was unused
 
   // Auto-collapse left panel on mobile
   useEffect(() => {
@@ -373,13 +389,7 @@ export function OrchestrationLayout({
       {/* ---- Toolbar: Tab navigation + context + actions (single row) ---- */}
       <div className="shrink-0 z-20 flex items-center h-9 bg-card border-b border-white/[0.08] px-2 sm:px-3 gap-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {/* Tabs */}
-        {([
-          { id: "issues", label: "Issues", icon: CircleDot },
-          { id: "graph", label: "Graph", icon: Workflow },
-          { id: "timeline", label: "Timeline", icon: Clock },
-          { id: "activity", label: "Activity", icon: Activity },
-          { id: "proposals", label: "Approvals", icon: FileText },
-        ] as const).map(({ id, label, icon: Icon }) => (
+        {ORCH_TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
@@ -647,7 +657,6 @@ export function OrchestrationLayout({
           {activeTab === "graph" && (
             <>
               <WorkflowGraph
-                ref={graphRef}
                 missions={filteredMissions}
                 crews={crews}
                 agents={agents}
@@ -774,12 +783,7 @@ export function OrchestrationLayout({
               if (!drawerOpen) setDrawerOpen(true)
             }}
           >
-            {([
-              { id: "messages" as const, label: "Messages", icon: MessageSquare },
-              { id: "exec" as const, label: "Exec Log", icon: Terminal },
-              { id: "yaml" as const, label: "YAML", icon: FileCode2 },
-              { id: "docker" as const, label: "Docker", icon: Container },
-            ]).map(({ id, label, icon: Icon }) => (
+            {ORCH_DRAWER_TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 className={cn(

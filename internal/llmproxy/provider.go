@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// ProviderType identifies an LLM provider (Anthropic, OpenAI, Google).
 type ProviderType string
 
 const (
@@ -19,6 +20,7 @@ const (
 	ProviderGoogle    ProviderType = "GOOGLE"
 )
 
+// ConnectionStatus represents the health state of a provider credential.
 type ConnectionStatus string
 
 const (
@@ -29,6 +31,7 @@ const (
 	StatusError       ConnectionStatus = "ERROR"
 )
 
+// CredentialType distinguishes between OAuth CLI tokens and static API keys.
 type CredentialType string
 
 const (
@@ -36,6 +39,8 @@ const (
 	TypeAPIKey     CredentialType = "API_KEY"
 )
 
+// ProviderConnection represents a workspace's connection to an LLM provider,
+// including the credential, its status, and optional OAuth refresh token.
 type ProviderConnection struct {
 	ID             string           `json:"id"`
 	WorkspaceID          string           `json:"workspace_id"`
@@ -57,6 +62,7 @@ type TokenPool struct {
 	logger      *slog.Logger
 }
 
+// NewTokenPool creates an empty TokenPool.
 func NewTokenPool(logger *slog.Logger) *TokenPool {
 	return &TokenPool{
 		roundRobin: make(map[string]int),
@@ -64,6 +70,7 @@ func NewTokenPool(logger *slog.Logger) *TokenPool {
 	}
 }
 
+// Update replaces all connections in the pool with the given set.
 func (tp *TokenPool) Update(connections []ProviderConnection) {
 	tp.mu.Lock()
 	defer tp.mu.Unlock()
@@ -107,6 +114,7 @@ func (tp *TokenPool) MarkStatus(connID string, status ConnectionStatus) {
 	}
 }
 
+// ActiveCount returns the number of active connections for a workspace/provider pair.
 func (tp *TokenPool) ActiveCount(workspaceID string, provider ProviderType) int {
 	tp.mu.RLock()
 	defer tp.mu.RUnlock()
@@ -119,6 +127,7 @@ func (tp *TokenPool) ActiveCount(workspaceID string, provider ProviderType) int 
 	return count
 }
 
+// AllConnections returns a copy of all connections in the pool.
 func (tp *TokenPool) AllConnections() []ProviderConnection {
 	tp.mu.RLock()
 	defer tp.mu.RUnlock()
@@ -137,6 +146,8 @@ type TokenSyncer struct {
 	logger        *slog.Logger
 }
 
+// NewTokenSyncer creates a TokenSyncer that periodically fetches credentials
+// from the internal API and updates the token pool.
 func NewTokenSyncer(pool *TokenPool, nextjsURL, internalToken string, interval time.Duration, logger *slog.Logger) *TokenSyncer {
 	return &TokenSyncer{
 		pool:          pool,
@@ -148,6 +159,7 @@ func NewTokenSyncer(pool *TokenPool, nextjsURL, internalToken string, interval t
 	}
 }
 
+// Run starts the sync loop, blocking until ctx is cancelled.
 func (ts *TokenSyncer) Run(ctx context.Context) {
 	ts.logger.Info("token syncer starting", "interval", ts.interval)
 
@@ -171,6 +183,7 @@ func (ts *TokenSyncer) Run(ctx context.Context) {
 	}
 }
 
+// SyncNow immediately fetches and updates credentials from the internal API.
 func (ts *TokenSyncer) SyncNow(ctx context.Context) error {
 	return ts.sync(ctx)
 }

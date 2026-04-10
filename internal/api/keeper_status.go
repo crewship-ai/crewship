@@ -11,6 +11,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/keeper/gatekeeper"
 )
 
+// KeeperStatusHandler provides the Keeper health and configuration status endpoint.
 type KeeperStatusHandler struct {
 	db     *sql.DB
 	cfg    *config.KeeperConfig
@@ -18,6 +19,7 @@ type KeeperStatusHandler struct {
 	logger *slog.Logger
 }
 
+// NewKeeperStatusHandler creates a KeeperStatusHandler with the given configuration and gatekeeper evaluator.
 func NewKeeperStatusHandler(db *sql.DB, cfg *config.KeeperConfig, gk gatekeeper.Evaluator, logger *slog.Logger) *KeeperStatusHandler {
 	return &KeeperStatusHandler{db: db, cfg: cfg, gk: gk, logger: logger}
 }

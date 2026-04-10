@@ -6,11 +6,31 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/ws"
 )
+
+// missionSelectColumns is the shared SELECT clause for fetching missions with agent info.
+const missionSelectColumns = `
+	SELECT m.id, m.workspace_id, m.crew_id, m.lead_agent_id, m.trace_id, m.title,
+	       m.description, m.status, m.plan, m.workflow_template,
+	       m.total_token_count, m.total_estimated_cost,
+	       m.created_at, m.updated_at, m.completed_at,
+	       a.name, a.slug
+	FROM missions m
+	JOIN agents a ON a.id = m.lead_agent_id`
+
+// scanMission scans a row into a missionResponse using the standard column order.
+func scanMission(s interface{ Scan(...interface{}) error }) (missionResponse, error) {
+	var m missionResponse
+	err := s.Scan(
+		&m.ID, &m.WorkspaceID, &m.CrewID, &m.LeadAgentID, &m.TraceID, &m.Title,
+		&m.Description, &m.Status, &m.Plan, &m.WorkflowTemplate,
+		&m.TotalTokenCount, &m.TotalEstimatedCost,
+		&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
+		&m.LeadAgentName, &m.LeadAgentSlug,
+	)
+	return m, err
+}
 
 // Create handles POST /api/v1/crews/{crewId}/missions
 func (h *MissionHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -114,19 +134,10 @@ func (h *MissionHandler) Create(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:        now,
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("crew:"+crewID, ws.ServerMessage{
-			Type:    "mission.created",
-			Channel: "crew:" + crewID,
-			Payload: map[string]string{"id": id, "title": req.Title},
-		})
-		wsChannel := "workspace:" + wsID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "mission.updated",
-			Channel: wsChannel,
-			Payload: map[string]string{"id": id, "crew_id": crewID, "status": "PLANNING"},
-		})
-	}
+	broadcastChannelEvent(h.hub, "crew", crewID, "mission.created",
+		map[string]string{"id": id, "title": req.Title})
+	broadcastWorkspaceEvent(h.hub, wsID, "mission.updated",
+		map[string]string{"id": id, "crew_id": crewID, "status": "PLANNING"})
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -137,23 +148,9 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	status := r.URL.Query().Get("status")
 
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := parsePagination(r, 20, 100)
 
-	query := `
-		SELECT m.id, m.workspace_id, m.crew_id, m.lead_agent_id, m.trace_id, m.title,
-		       m.description, m.status, m.plan, m.workflow_template,
-		       m.total_token_count, m.total_estimated_cost,
-		       m.created_at, m.updated_at, m.completed_at,
-		       a.name, a.slug
-		FROM missions m
-		JOIN agents a ON a.id = m.lead_agent_id
+	query := missionSelectColumns + `
 		WHERE m.crew_id = ? AND m.workspace_id = ?`
 	args := []interface{}{crewID, wsID}
 
@@ -173,22 +170,14 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	var result []missionResponse
-	var missionIDs []string
 	for rows.Next() {
-		var m missionResponse
-		if err := rows.Scan(
-			&m.ID, &m.WorkspaceID, &m.CrewID, &m.LeadAgentID, &m.TraceID, &m.Title,
-			&m.Description, &m.Status, &m.Plan, &m.WorkflowTemplate,
-			&m.TotalTokenCount, &m.TotalEstimatedCost,
-			&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
-			&m.LeadAgentName, &m.LeadAgentSlug,
-		); err != nil {
+		m, err := scanMission(rows)
+		if err != nil {
 			h.logger.Error("scan mission", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
 		}
 		result = append(result, m)
-		missionIDs = append(missionIDs, m.ID)
 	}
 	if err := rows.Err(); err != nil {
 		h.logger.Error("rows iteration (missions)", "error", err)
@@ -196,14 +185,20 @@ func (h *MissionHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load task stats for each mission
-	for i, m := range result {
-		stats, err := h.getTaskStats(r, m.ID)
-		if err != nil {
-			h.logger.Error("get task stats", "mission_id", m.ID, "error", err)
-			continue
+	// Load task stats for all missions in a single batch query
+	if len(result) > 0 {
+		ids := make([]string, len(result))
+		for i := range result {
+			ids[i] = result[i].ID
 		}
-		result[i].TaskStats = stats
+		statsMap, err := h.getBatchTaskStats(r, ids)
+		if err != nil {
+			h.logger.Error("batch get task stats", "error", err)
+		} else {
+			for i := range result {
+				result[i].TaskStats = statsMap[result[i].ID]
+			}
+		}
 	}
 
 	if result == nil {
@@ -218,23 +213,9 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	includeTasks := r.URL.Query().Get("include_tasks") == "true"
 
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := parsePagination(r, 20, 100)
 
-	query := `
-		SELECT m.id, m.workspace_id, m.crew_id, m.lead_agent_id, m.trace_id, m.title,
-		       m.description, m.status, m.plan, m.workflow_template,
-		       m.total_token_count, m.total_estimated_cost,
-		       m.created_at, m.updated_at, m.completed_at,
-		       a.name, a.slug
-		FROM missions m
-		JOIN agents a ON a.id = m.lead_agent_id
+	query := missionSelectColumns + `
 		WHERE m.workspace_id = ?`
 	args := []interface{}{wsID}
 
@@ -255,14 +236,8 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 
 	var result []missionResponse
 	for rows.Next() {
-		var m missionResponse
-		if err := rows.Scan(
-			&m.ID, &m.WorkspaceID, &m.CrewID, &m.LeadAgentID, &m.TraceID, &m.Title,
-			&m.Description, &m.Status, &m.Plan, &m.WorkflowTemplate,
-			&m.TotalTokenCount, &m.TotalEstimatedCost,
-			&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
-			&m.LeadAgentName, &m.LeadAgentSlug,
-		); err != nil {
+		m, err := scanMission(rows)
+		if err != nil {
 			h.logger.Error("scan mission", "error", err)
 			writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 			return
@@ -275,21 +250,28 @@ func (h *MissionHandler) ListAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load task stats and optionally tasks for each mission
-	for i, m := range result {
-		stats, statsErr := h.getTaskStats(r, m.ID)
-		if statsErr != nil {
-			h.logger.Error("get task stats", "mission_id", m.ID, "error", statsErr)
+	// Load task stats for all missions in a single batch query
+	if len(result) > 0 {
+		ids := make([]string, len(result))
+		for i := range result {
+			ids[i] = result[i].ID
 		}
-		result[i].TaskStats = stats
-
-		if includeTasks {
-			tasks, tasksErr := h.loadTasksForMission(r, m.ID)
-			if tasksErr != nil {
-				h.logger.Error("load tasks for mission", "mission_id", m.ID, "error", tasksErr)
-				result[i].Tasks = []missionTaskResponse{}
-			} else {
-				result[i].Tasks = tasks
+		statsMap, statsErr := h.getBatchTaskStats(r, ids)
+		if statsErr != nil {
+			h.logger.Error("batch get task stats", "error", statsErr)
+		}
+		for i := range result {
+			if statsMap != nil {
+				result[i].TaskStats = statsMap[result[i].ID]
+			}
+			if includeTasks {
+				tasks, tasksErr := h.loadTasksForMission(r, result[i].ID)
+				if tasksErr != nil {
+					h.logger.Error("load tasks for mission", "mission_id", result[i].ID, "error", tasksErr)
+					result[i].Tasks = []missionTaskResponse{}
+				} else {
+					result[i].Tasks = tasks
+				}
 			}
 		}
 	}
@@ -306,23 +288,9 @@ func (h *MissionHandler) Get(w http.ResponseWriter, r *http.Request) {
 	missionID := r.PathValue("missionId")
 	wsID := WorkspaceIDFromContext(r.Context())
 
-	var m missionResponse
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, m.lead_agent_id, m.trace_id, m.title,
-		       m.description, m.status, m.plan, m.workflow_template,
-		       m.total_token_count, m.total_estimated_cost,
-		       m.created_at, m.updated_at, m.completed_at,
-		       a.name, a.slug
-		FROM missions m
-		JOIN agents a ON a.id = m.lead_agent_id
-		WHERE m.id = ? AND m.crew_id = ? AND m.workspace_id = ?`,
-		missionID, crewID, wsID).Scan(
-		&m.ID, &m.WorkspaceID, &m.CrewID, &m.LeadAgentID, &m.TraceID, &m.Title,
-		&m.Description, &m.Status, &m.Plan, &m.WorkflowTemplate,
-		&m.TotalTokenCount, &m.TotalEstimatedCost,
-		&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
-		&m.LeadAgentName, &m.LeadAgentSlug,
-	)
+	m, err := scanMission(h.db.QueryRowContext(r.Context(),
+		missionSelectColumns+` WHERE m.id = ? AND m.crew_id = ? AND m.workspace_id = ?`,
+		missionID, crewID, wsID))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeProblem(w, r, http.StatusNotFound, "Mission not found")
@@ -458,40 +426,20 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return updated mission
-	var m missionResponse
-	if err := h.db.QueryRowContext(r.Context(), `
-		SELECT m.id, m.workspace_id, m.crew_id, m.lead_agent_id, m.trace_id, m.title,
-		       m.description, m.status, m.plan, m.workflow_template,
-		       m.total_token_count, m.total_estimated_cost,
-		       m.created_at, m.updated_at, m.completed_at,
-		       a.name, a.slug
-		FROM missions m
-		JOIN agents a ON a.id = m.lead_agent_id
-		WHERE m.id = ?`, missionID).Scan(
-		&m.ID, &m.WorkspaceID, &m.CrewID, &m.LeadAgentID, &m.TraceID, &m.Title,
-		&m.Description, &m.Status, &m.Plan, &m.WorkflowTemplate,
-		&m.TotalTokenCount, &m.TotalEstimatedCost,
-		&m.CreatedAt, &m.UpdatedAt, &m.CompletedAt,
-		&m.LeadAgentName, &m.LeadAgentSlug,
-	); err != nil {
+	m, err := scanMission(h.db.QueryRowContext(r.Context(),
+		missionSelectColumns+` WHERE m.id = ?`, missionID))
+	if err != nil {
 		h.logger.Error("read updated mission", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
-	if h.hub != nil && req.Status != nil {
-		h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
-			Type:    "mission.status",
-			Channel: "mission:" + missionID,
-			Payload: map[string]string{"id": missionID, "status": *req.Status},
-		})
+	if req.Status != nil {
+		broadcastChannelEvent(h.hub, "mission", missionID, "mission.status",
+			map[string]string{"id": missionID, "status": *req.Status})
 		// Broadcast to workspace for dashboard visibility
-		wsChannel := "workspace:" + m.WorkspaceID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "mission.updated",
-			Channel: wsChannel,
-			Payload: map[string]string{"id": missionID, "crew_id": crewID, "status": *req.Status},
-		})
+		broadcastWorkspaceEvent(h.hub, m.WorkspaceID, "mission.updated",
+			map[string]string{"id": missionID, "crew_id": crewID, "status": *req.Status})
 	}
 
 	writeJSON(w, http.StatusOK, m)
@@ -622,19 +570,10 @@ func (h *MissionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if h.hub != nil {
-		h.hub.Broadcast("mission:"+missionID, ws.ServerMessage{
-			Type:    "mission.updated",
-			Channel: "mission:" + missionID,
-			Payload: map[string]interface{}{"id": missionID, "status": "IN_PROGRESS"},
-		})
-		wsChannel := "workspace:" + wsID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "mission.updated",
-			Channel: wsChannel,
-			Payload: map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "IN_PROGRESS"},
-		})
-	}
+	broadcastChannelEvent(h.hub, "mission", missionID, "mission.updated",
+		map[string]interface{}{"id": missionID, "status": "IN_PROGRESS"})
+	broadcastWorkspaceEvent(h.hub, wsID, "mission.updated",
+		map[string]interface{}{"id": missionID, "crew_id": crewID, "status": "IN_PROGRESS"})
 
 	writeJSON(w, http.StatusOK, map[string]string{"id": missionID, "status": "IN_PROGRESS"})
 }
@@ -665,11 +604,12 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 			COUNT(*) FILTER (WHERE status IN ('IN_PROGRESS', 'PLANNING', 'REVIEW'))
 		FROM missions WHERE workspace_id = ?`, wsID).Scan(&m.TotalMissions, &m.ActiveMissions)
 	if err != nil {
-		// SQLite doesn't support FILTER — fallback to CASE
+		// SQLite doesn't support FILTER — fallback to CASE.
+		// COALESCE needed because SUM returns NULL for empty workspaces.
 		err = h.db.QueryRowContext(r.Context(), `
 			SELECT
 				COUNT(*),
-				SUM(CASE WHEN status IN ('IN_PROGRESS', 'PLANNING', 'REVIEW') THEN 1 ELSE 0 END)
+				COALESCE(SUM(CASE WHEN status IN ('IN_PROGRESS', 'PLANNING', 'REVIEW') THEN 1 ELSE 0 END), 0)
 			FROM missions WHERE workspace_id = ?`, wsID).Scan(&m.TotalMissions, &m.ActiveMissions)
 		if err != nil {
 			h.logger.Error("mission metrics: totals", "error", err)
@@ -678,11 +618,12 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 24h mission counts (completed_at for COMPLETED, updated_at for FAILED since failed missions may lack completed_at)
+	// 24h mission counts (completed_at for COMPLETED, updated_at for FAILED since failed missions may lack completed_at).
+	// COALESCE needed because SUM returns NULL for empty workspaces.
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT
-			SUM(CASE WHEN status = 'COMPLETED' AND completed_at >= ? THEN 1 ELSE 0 END),
-			SUM(CASE WHEN status = 'FAILED' AND updated_at >= ? THEN 1 ELSE 0 END)
+			COALESCE(SUM(CASE WHEN status = 'COMPLETED' AND completed_at >= ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'FAILED' AND updated_at >= ? THEN 1 ELSE 0 END), 0)
 		FROM missions WHERE workspace_id = ?`,
 		cutoff, cutoff, wsID).Scan(&m.Completed24h, &m.Failed24h); err != nil {
 		h.logger.Warn("mission metrics: 24h mission counts query failed", "error", err)
@@ -711,11 +652,11 @@ func (h *MissionHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("mission metrics: avg completion time query failed", "error", err)
 	}
 
-	// 24h task stats
+	// 24h task stats — COALESCE needed because SUM returns NULL for workspaces with no tasks.
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT
-			SUM(CASE WHEN mt.status = 'COMPLETED' AND mt.completed_at >= ? THEN 1 ELSE 0 END),
-			SUM(CASE WHEN mt.status = 'FAILED' AND mt.updated_at >= ? THEN 1 ELSE 0 END)
+			COALESCE(SUM(CASE WHEN mt.status = 'COMPLETED' AND mt.completed_at >= ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN mt.status = 'FAILED' AND mt.updated_at >= ? THEN 1 ELSE 0 END), 0)
 		FROM mission_tasks mt
 		JOIN missions m ON m.id = mt.mission_id
 		WHERE m.workspace_id = ?`,

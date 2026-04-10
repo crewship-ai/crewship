@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // PendingEscalationCount returns the number of unresolved escalations workspace-wide.
@@ -113,29 +111,19 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Broadcast escalation event
-	if h.hub != nil {
-		h.hub.Broadcast("session:"+body.ChatID, ws.ServerMessage{
-			Type:    "escalation_created",
-			Channel: "session:" + body.ChatID,
-			Payload: map[string]string{
-				"id":     escalationID,
-				"from":   body.FromSlug,
-				"reason": body.Reason,
-			},
+	broadcastChannelEvent(h.hub, "session", body.ChatID, "escalation_created",
+		map[string]string{
+			"id":     escalationID,
+			"from":   body.FromSlug,
+			"reason": body.Reason,
 		})
-		// Broadcast to workspace for global visibility
-		wsChannel := "workspace:" + body.WorkspaceID
-		h.hub.Broadcast(wsChannel, ws.ServerMessage{
-			Type:    "escalation.created",
-			Channel: wsChannel,
-			Payload: map[string]string{
-				"id":        escalationID,
-				"crew_id":   body.CrewID,
-				"from_slug": body.FromSlug,
-				"reason":    body.Reason,
-			},
+	broadcastWorkspaceEvent(h.hub, body.WorkspaceID, "escalation.created",
+		map[string]string{
+			"id":        escalationID,
+			"crew_id":   body.CrewID,
+			"from_slug": body.FromSlug,
+			"reason":    body.Reason,
 		})
-	}
 
 	h.logger.Info("escalation created",
 		"escalation_id", escalationID,
@@ -275,31 +263,23 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 		RedirectTo: body.RedirectTo,
 	})
 
-	if h.hub != nil {
-		broadcastResolution := body.Resolution
-		if escalationType == "CREDENTIAL" {
-			broadcastResolution = "[credential submitted]"
-		}
-		h.hub.Broadcast("session:"+chatID, ws.ServerMessage{
-			Type:    "escalation_resolved",
-			Channel: "session:" + chatID,
-			Payload: map[string]string{
-				"id":         escalationID,
-				"resolution": broadcastResolution,
-				"action":     body.Action,
-			},
-		})
-		h.hub.Broadcast("workspace:"+workspaceID, ws.ServerMessage{
-			Type:    "escalation.resolved",
-			Channel: "workspace:" + workspaceID,
-			Payload: map[string]string{
-				"id":        escalationID,
-				"crew_id":   crewID,
-				"from_slug": fromSlug,
-				"action":    body.Action,
-			},
-		})
+	broadcastResolution := body.Resolution
+	if escalationType == "CREDENTIAL" {
+		broadcastResolution = "[credential submitted]"
 	}
+	broadcastChannelEvent(h.hub, "session", chatID, "escalation_resolved",
+		map[string]string{
+			"id":         escalationID,
+			"resolution": broadcastResolution,
+			"action":     body.Action,
+		})
+	broadcastWorkspaceEvent(h.hub, workspaceID, "escalation.resolved",
+		map[string]string{
+			"id":        escalationID,
+			"crew_id":   crewID,
+			"from_slug": fromSlug,
+			"action":    body.Action,
+		})
 
 	h.logger.Info("escalation resolved",
 		"escalation_id", escalationID,
@@ -319,14 +299,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 	crewID := r.PathValue("crewId")
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	if offset < 0 {
-		offset = 0
-	}
+	limit, offset := parsePagination(r, 50, 100)
 
 	type escalationItem struct {
 		ID                 string  `json:"id"`
@@ -363,7 +336,7 @@ func (h *QueryHandler) ListEscalations(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	items := make([]escalationItem, 0)
+	items := make([]escalationItem, 0, limit)
 	for rows.Next() {
 		var item escalationItem
 		if err := rows.Scan(

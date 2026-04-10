@@ -1,13 +1,143 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/ws"
 )
+
+// broadcastChannelEvent is an api-package shortcut to hub.BroadcastChannel.
+// No-op if hub is nil (e.g. when the API is initialized without a WebSocket hub
+// in tests or headless tooling), so call sites don't need their own nil guard.
+func broadcastChannelEvent(hub *ws.Hub, prefix, id, eventType string, payload any) {
+	if hub == nil {
+		return
+	}
+	hub.BroadcastChannel(prefix, id, eventType, payload)
+}
+
+// broadcastWorkspaceEvent is an api-package shortcut to hub.BroadcastWorkspace.
+// No-op if hub is nil — see broadcastChannelEvent.
+func broadcastWorkspaceEvent(hub *ws.Hub, wsID, eventType string, payload any) {
+	if hub == nil {
+		return
+	}
+	hub.BroadcastWorkspace(wsID, eventType, payload)
+}
+
+// parsePagination reads "limit" and "offset" query params, clamping limit to
+// [1, maxLimit] with the given default, and offset to >= 0.
+//
+// Unparseable, missing, or non-positive limits fall back to defaultLimit.
+// Limits larger than maxLimit are clamped DOWN to maxLimit (not reset to
+// defaultLimit) — otherwise a request for ?limit=1000 against
+// (defaultLimit=20, maxLimit=100) would silently return 20 instead of 100 and
+// shift pagination windows in surprising ways.
+func parsePagination(r *http.Request, defaultLimit, maxLimit int) (limit, offset int) {
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ = strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit <= 0 {
+		limit = defaultLimit
+	} else if limit > maxLimit {
+		limit = maxLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return
+}
+
+// sqlPlaceholders returns a comma-separated string of n "?" placeholders
+// for use in SQL IN clauses (e.g. "?,?,?").
+func sqlPlaceholders(n int) string {
+	p := make([]string, n)
+	for i := range p {
+		p[i] = "?"
+	}
+	return strings.Join(p, ",")
+}
+
+// agentExists checks that an agent with the given ID belongs to the workspace
+// and is not soft-deleted. Returns (true, nil) if the agent exists,
+// (false, nil) if it does not exist, or (false, err) on a real DB failure.
+// Callers must distinguish the two zero-value cases: a false/nil return means
+// "legitimately not found" (map to 404), while a non-nil err means an
+// operational error (map to 500).
+func agentExists(ctx context.Context, db *sql.DB, agentID, workspaceID string) (bool, error) {
+	var id string
+	err := db.QueryRowContext(ctx,
+		"SELECT id FROM agents WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		agentID, workspaceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// crewExists checks that a crew with the given ID belongs to the workspace
+// and is not soft-deleted. Returns (true, nil) if the crew exists,
+// (false, nil) if it does not exist, or (false, err) on a real DB failure.
+// See agentExists for the 404-vs-500 contract.
+func crewExists(ctx context.Context, db *sql.DB, crewID, workspaceID string) (bool, error) {
+	var id string
+	err := db.QueryRowContext(ctx,
+		"SELECT id FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		crewID, workspaceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// projectExists checks that a project with the given ID belongs to the workspace.
+// Returns (true, nil) if the project exists, (false, nil) if it does not exist,
+// or (false, err) on a real DB failure. See agentExists for the 404-vs-500 contract.
+func projectExists(ctx context.Context, db *sql.DB, projectID, workspaceID string) (bool, error) {
+	var id int
+	err := db.QueryRowContext(ctx,
+		"SELECT 1 FROM projects WHERE id = ? AND workspace_id = ?",
+		projectID, workspaceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// credentialExists checks that a credential with the given ID belongs to the
+// workspace and is not soft-deleted. Returns (true, nil) if the credential
+// exists, (false, nil) if it does not exist, or (false, err) on a real DB
+// failure. See agentExists for the 404-vs-500 contract.
+func credentialExists(ctx context.Context, db *sql.DB, credentialID, workspaceID string) (bool, error) {
+	var id string
+	err := db.QueryRowContext(ctx,
+		"SELECT id FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+		credentialID, workspaceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
 
 // validSlugRe matches safe slug values: lowercase alphanumeric, starting with a letter or digit.
 var validSlugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
@@ -42,7 +172,7 @@ type updateBuilder struct {
 
 // newUpdate creates an updateBuilder pre-populated with an updated_at clause.
 func newUpdate() *updateBuilder {
-	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	now := time.Now().UTC().Format(time.RFC3339)
 	return &updateBuilder{
 		sets: []string{"updated_at = ?"},
 		args: []any{now},

@@ -35,8 +35,10 @@ func NewAnthropic(apiKey string) *Anthropic {
 	}
 }
 
+// Name returns "anthropic".
 func (a *Anthropic) Name() string { return "anthropic" }
 
+// Complete sends a non-streaming completion request to the Anthropic Messages API.
 func (a *Anthropic) Complete(ctx context.Context, req Request) (*Response, error) {
 	body, err := a.buildRequestBody(req, false)
 	if err != nil {
@@ -59,6 +61,7 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (*Response, error
 	return raw.toResponse(), nil
 }
 
+// Stream sends a streaming completion request, calling handler for each event.
 func (a *Anthropic) Stream(ctx context.Context, req Request, handler func(StreamEvent) error) (*Response, error) {
 	body, err := a.buildRequestBody(req, true)
 	if err != nil {

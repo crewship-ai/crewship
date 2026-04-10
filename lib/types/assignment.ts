@@ -1,3 +1,4 @@
+/** A task assignment from one agent to another, with lifecycle tracking. */
 export interface Assignment {
   id: string
   task: string

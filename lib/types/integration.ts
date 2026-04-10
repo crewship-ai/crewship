@@ -1,3 +1,4 @@
+/** A workspace-level MCP (Model Context Protocol) server configuration. */
 export interface WorkspaceMCPServer {
   id: string
   workspace_id: string
@@ -17,6 +18,7 @@ export interface WorkspaceMCPServer {
   crew_server_count: number
 }
 
+/** A crew-scoped MCP server, optionally linked to a workspace-level server. */
 export interface CrewMCPServer {
   id: string
   crew_id: string
@@ -36,6 +38,7 @@ export interface CrewMCPServer {
   agent_binding_count: number
 }
 
+/** Binding between an agent and an MCP server, with optional credential and config override. */
 export interface AgentMCPBinding {
   id: string
   agent_id: string
@@ -52,6 +55,7 @@ export interface AgentMCPBinding {
   credential_name?: string | null
 }
 
+/** A fully resolved integration combining server config and credential info, ready for agent use. */
 export interface ResolvedIntegration {
   server_id: string
   scope: "workspace" | "crew"
@@ -69,6 +73,7 @@ export interface ResolvedIntegration {
   credential_name?: string | null
 }
 
+/** A recorded MCP tool invocation by an agent, with status and duration tracking. */
 export interface MCPToolCall {
   id: string
   workspace_id: string

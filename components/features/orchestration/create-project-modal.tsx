@@ -26,9 +26,14 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { LabelBadge } from "@/components/features/issues/label-badge"
+import dynamic from "next/dynamic"
 import { PriorityIcon, priorityLabel } from "@/components/features/issues/priority-icon"
-import { TiptapEditor } from "@/components/features/issues/tiptap-editor"
 import { CrewIcon } from "@/components/ui/crew-icon"
+
+const TiptapEditor = dynamic(
+  () => import("@/components/features/issues/tiptap-editor").then(m => m.TiptapEditor),
+  { ssr: false },
+)
 import {
   searchCrewIcons, getCrewIconDef,
   CREW_ICON_CATEGORIES, GRADIENT_PALETTES,
