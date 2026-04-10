@@ -1,5 +1,6 @@
 /**
- * Format a date string as a human-readable relative time (e.g. "5m ago", "2h ago", "yesterday").
+ * Format a date string as a human-readable relative time
+ * (e.g. "5m ago", "2h ago", "yesterday", "2d ago").
  */
 export function timeAgo(dateStr: string): string {
   const now = Date.now()

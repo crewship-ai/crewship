@@ -2,15 +2,23 @@
 
 import { Bot } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { getCrewBgClass } from "@/lib/colors"
+import { CREW_COLORS, getCrewBgClass } from "@/lib/colors"
+
+// Crew colors must be palette IDs (see lib/colors.ts CREW_COLORS), not hex.
+type CrewColor = keyof typeof CREW_COLORS
+
+// Crew icons must be lucide icon names (see lib/crew-icon.ts CREW_ICONS). We
+// keep this as a string because hardcoding the full lucide name union here
+// would be unmaintainable — the single source of truth lives in crew-icon.ts.
+type CrewIconName = string
 
 interface CrewData {
   id: string
   name: string
   slug: string
   description: string | null
-  color: string | null
-  icon: string | null
+  color: CrewColor | null
+  icon: CrewIconName | null
   created_at: string
   _count: { agents: number; members: number }
 }
@@ -49,6 +57,7 @@ export function AllCrewsOverview({ crews, agents, onCrewSelect, onAgentSelect }:
           return (
             <button
               key={crew.id}
+              type="button"
               onClick={() => onCrewSelect(crew.id)}
               className="text-left rounded-xl border border-border/80 bg-card p-4 hover:border-primary/50 hover:bg-accent/30 hover:shadow-md transition-all duration-150 cursor-pointer"
             >
@@ -93,6 +102,7 @@ export function AllCrewsOverview({ crews, agents, onCrewSelect, onAgentSelect }:
             {agents.filter((a) => !a.crew_id).map((agent) => (
               <button
                 key={agent.id}
+                type="button"
                 onClick={() => onAgentSelect(agent.id)}
                 className="text-left rounded-xl border border-border/80 bg-card p-3 hover:border-primary/50 hover:bg-accent/30 transition-all duration-150 cursor-pointer"
               >

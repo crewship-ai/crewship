@@ -160,6 +160,8 @@ type updateCrewRequest struct {
 	IssuePrefix       *string   `json:"issue_prefix"`
 }
 
+// List returns all non-deleted crews in the workspace with member and agent counts.
+// GET /api/v1/crews
 func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if workspaceID == "" {
@@ -220,6 +222,8 @@ func (h *CrewHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// Create provisions a new crew in the workspace with the given name, slug, and configuration.
+// POST /api/v1/crews
 func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
@@ -425,6 +429,8 @@ func (h *CrewHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c)
 }
 
+// Update modifies crew properties such as name, description, network policy, and escalation config.
+// PATCH /api/v1/crews/{crewId}
 func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())

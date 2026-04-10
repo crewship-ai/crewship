@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react"
 import { motion } from "motion/react"
 import {
-  Activity, Play, Square, FileJson, Layers, Download,
+  Activity, Square, FileJson, Layers, Download,
   ChevronUp, ChevronDown, Loader2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -34,9 +34,15 @@ interface FleetBottomDrawerProps {
   crews: CrewExport[]
   agents: AgentExport[]
   isMobile: boolean
+  /**
+   * Called by child actions (bulk stop, etc.) after a successful mutation
+   * so the parent can re-fetch its agent list. Without this, runningAgents
+   * stays stale and duplicate POSTs become easy.
+   */
+  onAgentsChanged?: () => void
 }
 
-export function FleetBottomDrawer({ crews, agents, isMobile }: FleetBottomDrawerProps) {
+export function FleetBottomDrawer({ crews, agents, isMobile, onAgentsChanged }: FleetBottomDrawerProps) {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerTab, setDrawerTab] = useState<"activity" | "bulk" | "export">("activity")
 
@@ -102,7 +108,7 @@ export function FleetBottomDrawer({ crews, agents, isMobile }: FleetBottomDrawer
             <FleetActivityFeed agents={agents} />
           )}
           {drawerTab === "bulk" && (
-            <FleetBulkActions agents={agents} />
+            <FleetBulkActions agents={agents} onSuccessRefresh={onAgentsChanged} />
           )}
           {drawerTab === "export" && (
             <div className="p-4 space-y-3">
@@ -112,8 +118,17 @@ export function FleetBottomDrawer({ crews, agents, isMobile }: FleetBottomDrawer
                   const data = { crews: crews.map((c) => ({ name: c.name, slug: c.slug, color: c.color, icon: c.icon })), agents: agents.map((a) => ({ name: a.name, slug: a.slug, role: a.agent_role, crew_id: a.crew_id, llm_provider: a.llm_provider, llm_model: a.llm_model })) }
                   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" })
                   const url = URL.createObjectURL(blob)
-                  const a = document.createElement("a"); a.href = url; a.download = "fleet-export.json"; a.click()
-                  URL.revokeObjectURL(url)
+                  // Canonical cross-browser download pattern: append anchor
+                  // to the DOM before click(), remove after, and defer
+                  // revokeObjectURL so Safari/Firefox don't race the
+                  // download initiation against URL teardown.
+                  const a = document.createElement("a")
+                  a.href = url
+                  a.download = "fleet-export.json"
+                  document.body.appendChild(a)
+                  a.click()
+                  document.body.removeChild(a)
+                  setTimeout(() => URL.revokeObjectURL(url), 0)
                 }}>
                   <FileJson className="h-3 w-3" /> Export JSON
                 </Button>
@@ -129,31 +144,43 @@ export function FleetBottomDrawer({ crews, agents, isMobile }: FleetBottomDrawer
 
 // ── Bulk Actions ──
 
-function FleetBulkActions({ agents }: { agents: AgentExport[] }) {
-  const [running, setRunning] = useState<string | null>(null)
+function FleetBulkActions({
+  agents,
+  onSuccessRefresh,
+}: {
+  agents: AgentExport[]
+  onSuccessRefresh?: () => void
+}) {
+  const [running, setRunning] = useState<boolean>(false)
   const [result, setResult] = useState<string | null>(null)
 
-  const idleAgents = agents.filter((a) => a.status === "IDLE" && a.crew_id)
+  // "Start All Idle" was removed: Crewship's backend has no
+  // /api/v1/agents/{id}/start route (only /stop — see
+  // internal/api/router.go), so the Start button was guaranteed to 404.
+  // Agents transition to RUNNING implicitly when a chat is sent to them,
+  // not via an explicit start action — there's nothing to wire up here.
+  // Until a backend start handler exists this drawer only exposes Stop.
   const runningAgents = agents.filter((a) => a.status === "RUNNING")
 
-  const bulkAction = useCallback(async (action: "start" | "stop", targets: AgentExport[]) => {
-    setRunning(action)
+  const bulkStop = useCallback(async (targets: AgentExport[]) => {
+    setRunning(true)
     setResult(null)
     let ok = 0
     let fail = 0
-    // Per-request timeout — without this a single hung /start or /stop
-    // would freeze the whole batch loop and leave the buttons stuck in
-    // the loading state forever.
+    // Per-request timeout — without this a single hung /stop would freeze
+    // the whole batch loop and leave the button stuck in the loading state
+    // forever.
     const REQUEST_TIMEOUT_MS = 30_000
     for (const agent of targets) {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
       try {
-        const endpoint = action === "start"
-          ? `/api/v1/agents/${agent.id}/start`
-          : `/api/v1/agents/${agent.id}/stop`
-        const resp = await fetch(endpoint, { method: "POST", signal: controller.signal })
-        if (resp.ok) ok++; else fail++
+        const resp = await fetch(`/api/v1/agents/${agent.id}/stop`, {
+          method: "POST",
+          signal: controller.signal,
+        })
+        if (resp.ok) ok++
+        else fail++
       } catch {
         fail++
       } finally {
@@ -161,35 +188,40 @@ function FleetBulkActions({ agents }: { agents: AgentExport[] }) {
       }
     }
     setResult(`${ok} succeeded, ${fail} failed`)
-    setRunning(null)
-  }, [])
+    setRunning(false)
+    // Re-fetch parent state so runningAgents filter reflects post-action
+    // reality and users cannot accidentally fire the same bulk op twice.
+    if (ok > 0) {
+      onSuccessRefresh?.()
+    }
+  }, [onSuccessRefresh])
 
   return (
     <div className="p-4 space-y-3">
       <p className="text-[12px] text-muted-foreground mb-3">Apply bulk operations to all agents by status.</p>
       <div className="flex items-center gap-2 flex-wrap">
         <Button
+          type="button"
           variant="outline"
           size="sm"
           className="h-7 text-[11px] gap-1.5"
-          disabled={idleAgents.length === 0 || running !== null}
-          onClick={() => bulkAction("start", idleAgents)}
+          disabled={runningAgents.length === 0 || running}
+          onClick={() => bulkStop(runningAgents)}
         >
-          {running === "start" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-          Start All Idle ({idleAgents.length})
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-[11px] gap-1.5"
-          disabled={runningAgents.length === 0 || running !== null}
-          onClick={() => bulkAction("stop", runningAgents)}
-        >
-          {running === "stop" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+          {running ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
           Stop All Running ({runningAgents.length})
         </Button>
       </div>
-      {result && <p className="text-[10px] text-muted-foreground">{result}</p>}
+      {result && (
+        <p
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="text-[10px] text-muted-foreground"
+        >
+          {result}
+        </p>
+      )}
     </div>
   )
 }
