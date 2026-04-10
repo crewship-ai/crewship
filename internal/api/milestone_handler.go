@@ -139,9 +139,11 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Determine next position
 	var maxPos int
-	_ = h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COALESCE(MAX(position), 0) FROM milestones WHERE project_id = ?`,
-		projectID).Scan(&maxPos)
+		projectID).Scan(&maxPos); err != nil {
+		h.logger.Error("get max milestone position", "project_id", projectID, "error", err)
+	}
 
 	id := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)

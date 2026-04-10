@@ -294,9 +294,11 @@ func (h *IntegrationHandler) UpdateWorkspaceIntegration(w http.ResponseWriter, r
 	// Validate transport/field combination against merged final state
 	if req.Transport != nil {
 		var existingEndpoint, existingCommand sql.NullString
-		_ = h.db.QueryRowContext(r.Context(),
+		if err := h.db.QueryRowContext(r.Context(),
 			"SELECT endpoint, command FROM workspace_mcp_servers WHERE id = ?", id).
-			Scan(&existingEndpoint, &existingCommand)
+			Scan(&existingEndpoint, &existingCommand); err != nil {
+			h.logger.Error("load existing workspace integration", "id", id, "error", err)
+		}
 
 		finalEndpoint := existingEndpoint.String
 		if req.Endpoint != nil {

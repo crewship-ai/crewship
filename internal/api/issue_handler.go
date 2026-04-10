@@ -609,9 +609,11 @@ func (h *IssueHandler) GetByIdentifier(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_ = h.db.QueryRowContext(r.Context(),
+	if err := h.db.QueryRowContext(r.Context(),
 		`SELECT COUNT(*) FROM mission_comments WHERE mission_id = ?`,
-		issue.ID).Scan(&issue.CommentCount)
+		issue.ID).Scan(&issue.CommentCount); err != nil {
+		h.logger.Error("load comment count", "issue_id", issue.ID, "error", err)
+	}
 
 	writeJSON(w, http.StatusOK, issue)
 }

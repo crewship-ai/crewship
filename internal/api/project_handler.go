@@ -503,11 +503,13 @@ func (h *ProjectHandler) Stats(w http.ResponseWriter, r *http.Request) {
 	resp.Crews = []string{}
 
 	// Total + completed in one query
-	_ = h.db.QueryRowContext(r.Context(), `
+	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT COUNT(*),
 		       SUM(CASE WHEN status IN ('DONE','COMPLETED') THEN 1 ELSE 0 END)
 		FROM missions WHERE project_id = ? AND mission_type = 'issue'`,
-		projectID).Scan(&resp.TotalIssues, &resp.CompletedIssues)
+		projectID).Scan(&resp.TotalIssues, &resp.CompletedIssues); err != nil {
+		h.logger.Error("load project stats counts", "project_id", projectID, "error", err)
+	}
 
 	// By status
 	statusRows, err := h.db.QueryContext(r.Context(),
