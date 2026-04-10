@@ -238,7 +238,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
         <Card>
           <CardContent className="p-0">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className={cn("px-5 py-3.5", i < 4 && "border-b border-border/40")}>
+              <div key={i} className={cn("px-4 py-2.5", i < 4 && "border-b border-border/40")}>
                 <Skeleton className="h-4 w-full" />
               </div>
             ))}
@@ -277,7 +277,7 @@ export function CrewAuditSection({ workspaceId }: CrewAuditSectionProps) {
                       aria-expanded={isExpanded}
                       aria-controls={`audit-detail-${log.id}`}
                       className={cn(
-                        "flex w-full items-center justify-between gap-4 px-5 py-3.5 min-h-[48px] cursor-pointer transition-colors text-left",
+                        "flex w-full items-center justify-between gap-4 px-4 py-2.5 cursor-pointer transition-colors text-left",
                         !isLast && !isExpanded && "border-b border-border/40",
                         isExpanded ? "bg-surface-subtle" : "hover:bg-muted/40",
                       )}

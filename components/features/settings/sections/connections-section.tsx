@@ -55,7 +55,7 @@ function Row({ label, description, children, border = true }: {
 }) {
   return (
     <div className={cn(
-      "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
+      "flex items-center justify-between gap-4 px-4 py-2.5",
       border && "border-b border-border/40 last:border-b-0",
     )}>
       {label ? (
@@ -191,7 +191,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
     <div className="space-y-6">
       {/* Create Connection */}
       <div>
-        <h4 className="text-heading font-medium text-foreground mb-3">Create Connection</h4>
+        <h4 className="text-body font-medium text-foreground/80 mb-3">Create Connection</h4>
         <Card>
           <CardContent className="p-0">
             <Row label="From" description="Source crew">
@@ -199,7 +199,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                 setFromCrewId(v)
                 if (v === toCrewId) setToCrewId("")
               }}>
-                <SelectTrigger className="w-[200px] h-[30px] text-label">
+                <SelectTrigger className="w-[200px] h-7 text-label">
                   <SelectValue placeholder="Select crew" />
                 </SelectTrigger>
                 <SelectContent>
@@ -221,7 +221,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                   type="button"
                   onClick={() => setDirection("bidirectional")}
                   className={cn(
-                    "flex items-center gap-1.5 px-3 h-[30px] text-label font-medium transition-colors",
+                    "flex items-center gap-1.5 px-3 h-7 text-label font-medium transition-colors",
                     direction === "bidirectional"
                       ? "bg-accent text-foreground"
                       : "bg-transparent text-muted-foreground hover:text-foreground",
@@ -234,7 +234,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
                   type="button"
                   onClick={() => setDirection("unidirectional")}
                   className={cn(
-                    "flex items-center gap-1.5 px-3 h-[30px] text-label font-medium transition-colors border-l border-border",
+                    "flex items-center gap-1.5 px-3 h-7 text-label font-medium transition-colors border-l border-border",
                     direction === "unidirectional"
                       ? "bg-accent text-foreground"
                       : "bg-transparent text-muted-foreground hover:text-foreground",
@@ -248,7 +248,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
 
             <Row label="To" description="Target crew">
               <Select value={toCrewId} onValueChange={setToCrewId} disabled={!fromCrewId}>
-                <SelectTrigger className="w-[200px] h-[30px] text-label">
+                <SelectTrigger className="w-[200px] h-7 text-label">
                   <SelectValue placeholder={fromCrewId ? "Select crew" : "Select source first"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -285,7 +285,7 @@ export function ConnectionsSection({ workspaceId }: ConnectionsSectionProps) {
 
       {/* Active Connections */}
       <div>
-        <h4 className="text-heading font-medium text-foreground mb-3">Active Connections</h4>
+        <h4 className="text-body font-medium text-foreground/80 mb-3">Active Connections</h4>
         {connections.length === 0 ? (
           <EmptyState
             icon={Unlink2}

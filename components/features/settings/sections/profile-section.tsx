@@ -65,7 +65,7 @@ function Row({ label, description, children, border = true }: {
   border?: boolean
 }) {
   return (
-    <div className={cn("flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]", border && "border-b border-border/40 last:border-b-0")}>
+    <div className={cn("flex items-center justify-between gap-4 px-4 py-2.5", border && "border-b border-border/40 last:border-b-0")}>
       <div className="shrink-0">
         <div className="text-body text-foreground">{label}</div>
         {description && <div className="text-label text-muted-foreground mt-0.5">{description}</div>}
@@ -189,7 +189,7 @@ export function ProfileSection({
     <div className="space-y-6">
       {/* ── Account ── */}
       <div>
-        <h3 className="text-heading font-medium text-foreground mb-3">Account</h3>
+        <h3 className="text-body font-medium text-foreground/80 mb-3">Account</h3>
         <Card>
           <CardContent className="p-0">
             <Row label="Profile picture">
@@ -212,7 +212,7 @@ export function ProfileSection({
 
       {/* ── Workspace ── */}
       <div>
-        <h3 className="text-heading font-medium text-foreground mb-3">Workspace</h3>
+        <h3 className="text-body font-medium text-foreground/80 mb-3">Workspace</h3>
         <Card>
           <CardContent className="p-0">
             <Row label="Role">
@@ -242,7 +242,7 @@ export function ProfileSection({
 
       {/* ── Session ── */}
       <div>
-        <h3 className="text-heading font-medium text-foreground mb-3">Session</h3>
+        <h3 className="text-body font-medium text-foreground/80 mb-3">Session</h3>
         <Card>
           <CardContent className="p-0">
             <Row label="Status">
@@ -312,7 +312,7 @@ export function ProfileSection({
       {/* ── CLI Tokens ── */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-heading font-medium text-foreground">CLI Tokens</h3>
+          <h3 className="text-body font-medium text-foreground/80">CLI Tokens</h3>
           {!showCreateForm && (
             <Button size="sm" variant="outline" className="h-7 gap-1.5 text-label" onClick={() => setShowCreateForm(true)}>
               <Plus className="h-3 w-3" />New
@@ -325,7 +325,7 @@ export function ProfileSection({
             <AnimatePresence>
               {showCreateForm && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                  <div className="px-5 py-3.5 border-b border-border/40 flex items-end gap-2">
+                  <div className="px-4 py-2.5 border-b border-border/40 flex items-end gap-2">
                     <Input
                       value={tokenName} onChange={(e) => setTokenName(e.target.value)}
                       placeholder="Token name, e.g. MacBook Pro"

@@ -25,7 +25,7 @@ function Row({ label, description, children, border = true }: {
   border?: boolean
 }) {
   return (
-    <div className={cn("flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]", border && "border-b border-border/40 last:border-b-0")}>
+    <div className={cn("flex items-center justify-between gap-4 px-4 py-2.5", border && "border-b border-border/40 last:border-b-0")}>
       <div className="shrink-0">
         <div className="text-body text-foreground">{label}</div>
         {description && <div className="text-label text-muted-foreground mt-0.5">{description}</div>}
@@ -140,7 +140,7 @@ export function GeneralSection({
     <div className="space-y-6">
       {/* ── Identity ── */}
       <div>
-        <h3 className="text-heading font-medium text-foreground mb-3">Identity</h3>
+        <h3 className="text-body font-medium text-foreground/80 mb-3">Identity</h3>
         <Card>
           <CardContent className="p-0">
             <form onSubmit={handleSave}>
@@ -149,7 +149,7 @@ export function GeneralSection({
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
                   placeholder="My Company"
-                  className="h-8 text-body w-48"
+                  className="h-7 text-label w-48"
                 />
               </Row>
               <Row label="Slug">
@@ -157,7 +157,7 @@ export function GeneralSection({
                   value={formSlug}
                   onChange={(e) => setFormSlug(e.target.value)}
                   placeholder="my-company"
-                  className="h-8 text-body w-48 font-mono"
+                  className="h-7 text-label w-48 font-mono"
                 />
               </Row>
               {(isDirty || saveStatus !== "idle") && (
@@ -228,7 +228,7 @@ export function GeneralSection({
 
       {/* ── Usage ── */}
       <div>
-        <h3 className="text-heading font-medium text-foreground mb-3">Usage</h3>
+        <h3 className="text-body font-medium text-foreground/80 mb-3">Usage</h3>
         <Card>
           <CardContent className="p-0">
             <Row label={
@@ -268,7 +268,7 @@ export function GeneralSection({
       {/* ── Danger Zone ── */}
       {role === "OWNER" && (
         <div>
-          <h3 className="text-heading font-medium text-foreground mb-3">Danger Zone</h3>
+          <h3 className="text-body font-medium text-foreground/80 mb-3">Danger Zone</h3>
           <Card className="border-destructive/30">
             <CardContent className="p-0">
               {deleteError && (

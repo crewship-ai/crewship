@@ -104,7 +104,7 @@ function Row({ label, description, children, border = true }: {
 }) {
   return (
     <div className={cn(
-      "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
+      "flex items-center justify-between gap-4 px-4 py-2.5",
       border && "border-b border-border/40 last:border-b-0",
     )}>
       {label ? (
@@ -165,7 +165,7 @@ export function MembersSection({
         {/* Section title above card */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
-            <h4 className="text-heading font-medium text-foreground">Members</h4>
+            <h4 className="text-body font-medium text-foreground/80">Members</h4>
             <span className="font-mono text-label text-muted-foreground tabular-nums">
               {members.length}
             </span>
@@ -186,7 +186,7 @@ export function MembersSection({
               <div
                 key={member.id}
                 className={cn(
-                  "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
+                  "flex items-center justify-between gap-4 px-4 py-2.5",
                   !isLast && "border-b border-border/40",
                 )}
               >
@@ -285,7 +285,7 @@ export function MembersSection({
               >
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
               </motion.div>
-              <h4 className="text-heading font-medium text-muted-foreground group-hover:text-foreground transition-colors">
+              <h4 className="text-body font-medium text-muted-foreground group-hover:text-foreground transition-colors">
                 Roles &amp; Permissions
               </h4>
             </button>

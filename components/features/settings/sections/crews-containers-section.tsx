@@ -86,7 +86,7 @@ function Row({
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-4 px-5 py-3.5 min-h-[48px]",
+        "flex items-center justify-between gap-4 px-4 py-2.5",
         border && "border-b border-border/40 last:border-b-0",
       )}
     >
@@ -384,7 +384,7 @@ export function CrewsContainersSection({
                         setExpandedId(isExpanded ? null : crew.id)
                       }
                       className={cn(
-                        "flex items-center gap-3 w-full px-5 py-3 text-left transition-colors hover:bg-muted/40",
+                        "flex items-center gap-3 w-full px-4 py-2 text-left transition-colors hover:bg-muted/40",
                         !isLast && !isExpanded && "border-b border-border/40",
                         isExpanded && "border-b border-border/40",
                       )}
@@ -556,7 +556,7 @@ export function CrewsContainersSection({
                                 >
                                   <div
                                     className={cn(
-                                      "flex items-start justify-between gap-4 px-5 py-3.5",
+                                      "flex items-start justify-between gap-4 px-4 py-2.5",
                                       hasChanges &&
                                         "border-b border-border/40",
                                     )}
@@ -595,7 +595,7 @@ export function CrewsContainersSection({
                                   transition={{ duration: 0.15 }}
                                   className="overflow-hidden"
                                 >
-                                  <div className="flex items-center justify-between gap-4 px-5 py-3.5">
+                                  <div className="flex items-center justify-between gap-4 px-4 py-2.5">
                                     <div className="flex items-center gap-2">
                                       <StatusDot status="BLOCKED" />
                                       <span className="text-label text-muted-foreground">
