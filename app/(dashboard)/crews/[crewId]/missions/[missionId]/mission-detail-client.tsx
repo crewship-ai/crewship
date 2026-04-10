@@ -59,35 +59,35 @@ export function MissionDetailPageClient() {
 
   if (!workspaceId && !wsLoading) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 max-w-4xl">
+      <div className="p-6 space-y-6 max-w-4xl">
         <Button variant="ghost" size="sm" asChild>
           <Link href={`/crews/${params.crewId}`}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Crew
           </Link>
         </Button>
-        <p className="text-sm text-muted-foreground">No workspace selected.</p>
+        <p className="text-body text-muted-foreground">No workspace selected.</p>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 max-w-4xl">
+      <div className="p-6 space-y-6 max-w-4xl">
         <Button variant="ghost" size="sm" asChild>
           <Link href={`/crews/${params.crewId}`}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Crew
           </Link>
         </Button>
-        <p className="text-sm text-destructive">{error}</p>
+        <p className="text-body text-destructive">{error}</p>
       </div>
     )
   }
 
   if (isLoading) {
     return (
-      <div className="p-4 sm:p-6 space-y-4 max-w-4xl">
+      <div className="p-6 space-y-6 max-w-4xl">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-[80px] rounded-xl" />
         <Skeleton className="h-[300px] rounded-xl" />
@@ -110,7 +110,7 @@ export function MissionDetailPageClient() {
 
       <MissionBoard tasks={mission.tasks ?? []} taskStats={mission.task_stats} />
 
-      <div className="text-xs text-muted-foreground">
+      <div className="text-micro text-muted-foreground">
         Created {new Date(mission.created_at).toLocaleDateString()}
       </div>
     </div>
