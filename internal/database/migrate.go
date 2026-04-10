@@ -18,9 +18,21 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
 	}
 
 	for _, m := range migrations {
-		var exists bool
-		err := db.QueryRowContext(ctx, "SELECT 1 FROM _migrations WHERE version = ?", m.version).Scan(&exists)
+		var appliedName string
+		err := db.QueryRowContext(ctx, "SELECT name FROM _migrations WHERE version = ?", m.version).Scan(&appliedName)
 		if err == nil {
+			// Version already applied. Guard against the classic two-branch-merge
+			// collision: both PRs claim the same version number with different SQL.
+			// If names disagree, the DB has one migration applied while the code
+			// expects another, and silently continuing would leave prod and dev
+			// on diverged schemas.
+			if appliedName != m.name {
+				return fmt.Errorf(
+					"migration version %d collision: database has %q applied, code expects %q — "+
+						"rename the new migration to the next free version",
+					m.version, appliedName, m.name,
+				)
+			}
 			continue
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -101,6 +113,11 @@ var migrations = []migration{
 	{40, "add_projects", migrationAddProjects},
 	{41, "add_issue_activity", migrationAddIssueActivity},
 	{42, "add_phase2_features", migrationAddPhase2Features},
+	// add_fk_indexes was renumbered from 38 → 43 during the main merge: the
+	// CRE-106 issue tracker series claimed slots 38-42 concurrently, and the
+	// collision-check in Migrate would have failed loudly on startup if both
+	// migrations tried to claim version 38.
+	{43, "add_fk_indexes", migrationAddFKIndexes},
 }
 
 const migrationAddKeeperObservability = `
@@ -1145,6 +1162,56 @@ CREATE TABLE IF NOT EXISTS mcp_registry_servers (
 );
 CREATE INDEX IF NOT EXISTS idx_mcp_registry_name ON mcp_registry_servers(name);
 CREATE INDEX IF NOT EXISTS idx_mcp_registry_category ON mcp_registry_servers(category);
+`
+
+const migrationAddFKIndexes = `
+-- Foreign-key and hot-column indexes missed by earlier migrations.
+-- All additive; safe to re-run via IF NOT EXISTS.
+
+-- NextAuth FKs: scanned on every session/account lookup
+CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(userId);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(userId);
+
+-- Workspace invitations: who invited whom
+CREATE INDEX IF NOT EXISTS idx_invitation_invited_by ON workspace_invitations(invited_by);
+
+-- Chats: created_by FK (existing idx_chat_agent / idx_chat_workspace don't cover this)
+CREATE INDEX IF NOT EXISTS idx_chat_created_by ON chats(created_by);
+
+-- Assignments: pagination query in assignments.go joins via workspace_id
+CREATE INDEX IF NOT EXISTS idx_assignment_workspace ON assignments(workspace_id);
+
+-- Skill authorship & reviews
+CREATE INDEX IF NOT EXISTS idx_skill_author ON skills(author_id);
+CREATE INDEX IF NOT EXISTS idx_skill_review_user ON skill_reviews(user_id);
+
+-- agent_skills: UNIQUE(agent_id, skill_id) covers agent_id lookups but NOT skill_id
+CREATE INDEX IF NOT EXISTS idx_agent_skill_skill ON agent_skills(skill_id);
+
+-- agent_credentials: UNIQUE + idx_agent_credential_env lead with agent_id; credential_id is uncovered
+CREATE INDEX IF NOT EXISTS idx_agent_credential_cred ON agent_credentials(credential_id);
+
+-- credentials.created_by: audit / ownership lookups
+CREATE INDEX IF NOT EXISTS idx_credential_created_by ON credentials(created_by);
+
+-- subscriptions: no secondary indexes at all
+CREATE INDEX IF NOT EXISTS idx_subscription_plan ON subscriptions(plan_id);
+
+-- feature_flag_overrides: UNIQUE(flag_id, workspace_id) covers flag_id but NOT workspace_id
+CREATE INDEX IF NOT EXISTS idx_feature_flag_override_ws ON feature_flag_overrides(workspace_id);
+
+-- agent_config_history.changed_by
+CREATE INDEX IF NOT EXISTS idx_config_history_changed_by ON agent_config_history(changed_by);
+
+-- agent_runs: chat_id and triggered_by FKs
+CREATE INDEX IF NOT EXISTS idx_run_chat ON agent_runs(chat_id);
+CREATE INDEX IF NOT EXISTS idx_run_triggered_by ON agent_runs(triggered_by);
+
+-- mission_tasks.assignment_id
+CREATE INDEX IF NOT EXISTS idx_mission_task_assignment ON mission_tasks(assignment_id);
+
+-- mission_proposals.proposed_by_id
+CREATE INDEX IF NOT EXISTS idx_mission_proposal_proposer ON mission_proposals(proposed_by_id);
 `
 
 const migrationAddIssueTracker = `
