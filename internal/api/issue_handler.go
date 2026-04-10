@@ -74,6 +74,18 @@ func (h *IssueHandler) logActivity(ctx context.Context, missionID, actorType, ac
 	}
 }
 
+// insertComment inserts a row into mission_comments. Errors are logged but not
+// returned — this is used by best-effort comment flows (e.g. review notes).
+func (h *IssueHandler) insertComment(ctx context.Context, missionID, authorType, authorID, body string) {
+	commentID := generateCUID()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := h.db.ExecContext(ctx,
+		`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		commentID, missionID, authorType, authorID, body, now, now); err != nil {
+		h.logger.Error("insert mission comment", "mission_id", missionID, "error", err)
+	}
+}
+
 // ── Response types ──────────────────────────────────────────────────────────
 
 type issueResponse struct {
@@ -1388,14 +1400,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		if req.Comment != "" {
 			commentBody = "Approved: " + req.Comment
 		}
-		commentID := generateCUID()
-		if _, err := h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'user', ?, ?, ?, ?)`,
-			commentID, missionID, user.ID, commentBody, now, now); err != nil {
-			h.logger.Error("insert review comment", "mission_id", missionID, "error", err)
-		}
-
-		// Activity
+		h.insertComment(r.Context(), missionID, "user", user.ID, commentBody)
 		h.logActivity(r.Context(), missionID, "user", user.ID, "review_approved", commentBody)
 
 	} else {
@@ -1428,14 +1433,7 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 		if req.Comment != "" {
 			commentBody = "Changes requested: " + req.Comment
 		}
-		commentID := generateCUID()
-		if _, err := h.db.ExecContext(r.Context(),
-			`INSERT INTO mission_comments (id, mission_id, author_type, author_id, body, created_at, updated_at) VALUES (?, ?, 'user', ?, ?, ?, ?)`,
-			commentID, missionID, user.ID, commentBody, now, now); err != nil {
-			h.logger.Error("insert review comment", "mission_id", missionID, "error", err)
-		}
-
-		// Activity
+		h.insertComment(r.Context(), missionID, "user", user.ID, commentBody)
 		h.logActivity(r.Context(), missionID, "user", user.ID, "review_changes_requested", commentBody)
 	}
 
