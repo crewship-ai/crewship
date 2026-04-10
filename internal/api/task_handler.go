@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/ws"
@@ -242,15 +241,13 @@ func (h *MissionHandler) applyTaskEditableFields(ctx context.Context, tx *sql.Tx
 		}
 		newStatus := "PENDING"
 		if len(depIDs) > 0 {
-			ph := make([]string, len(depIDs))
 			qa := make([]interface{}, 0, len(depIDs)+1)
 			qa = append(qa, missionID)
-			for i, dep := range depIDs {
-				ph[i] = "?"
+			for _, dep := range depIDs {
 				qa = append(qa, dep)
 			}
 			dRows, dErr := tx.QueryContext(ctx,
-				`SELECT id, status FROM mission_tasks WHERE mission_id = ? AND id IN (`+strings.Join(ph, ",")+`)`, qa...)
+				`SELECT id, status FROM mission_tasks WHERE mission_id = ? AND id IN (`+sqlPlaceholders(len(depIDs))+`)`, qa...)
 			if dErr != nil {
 				h.logger.Error("batch query dep tasks", "error", dErr)
 				writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
@@ -294,42 +291,32 @@ func (h *MissionHandler) applyTaskEditableFields(ctx context.Context, tx *sql.Tx
 
 // applyTaskMetadataFields handles result_summary, error_message, output_path,
 // assigned_agent_id, token_count, and estimated_cost updates within the transaction.
-func (h *MissionHandler) applyTaskMetadataFields(ctx context.Context, tx *sql.Tx, req *updateTaskRequest, taskID, now string) error {
-	var setClauses []string
-	var args []interface{}
-
+func (h *MissionHandler) applyTaskMetadataFields(ctx context.Context, tx *sql.Tx, req *updateTaskRequest, taskID string) error {
+	ub := newUpdate()
 	if req.ResultSummary != nil {
-		setClauses = append(setClauses, "result_summary = ?")
-		args = append(args, *req.ResultSummary)
+		ub.Set("result_summary", *req.ResultSummary)
 	}
 	if req.ErrorMessage != nil {
-		setClauses = append(setClauses, "error_message = ?")
-		args = append(args, *req.ErrorMessage)
+		ub.Set("error_message", *req.ErrorMessage)
 	}
 	if req.OutputPath != nil {
-		setClauses = append(setClauses, "output_path = ?")
-		args = append(args, *req.OutputPath)
+		ub.Set("output_path", *req.OutputPath)
 	}
 	if req.AssignedAgentID != nil {
-		setClauses = append(setClauses, "assigned_agent_id = ?")
-		args = append(args, *req.AssignedAgentID)
+		ub.Set("assigned_agent_id", *req.AssignedAgentID)
 	}
 	if req.TokenCount != nil {
-		setClauses = append(setClauses, "token_count = ?")
-		args = append(args, *req.TokenCount)
+		ub.Set("token_count", *req.TokenCount)
 	}
 	if req.EstimatedCost != nil {
-		setClauses = append(setClauses, "estimated_cost = ?")
-		args = append(args, *req.EstimatedCost)
+		ub.Set("estimated_cost", *req.EstimatedCost)
 	}
 
-	if len(setClauses) == 0 {
+	if ub.Empty() {
 		return nil
 	}
 
-	setClauses = append(setClauses, "updated_at = ?")
-	args = append(args, now, taskID)
-	query := "UPDATE mission_tasks SET " + strings.Join(setClauses, ", ") + " WHERE id = ?"
+	query, args := ub.Build("mission_tasks", "id = ?", taskID)
 	_, err := tx.ExecContext(ctx, query, args...)
 	return err
 }
@@ -412,7 +399,7 @@ func (h *MissionHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply result/metadata fields
-	if err := h.applyTaskMetadataFields(r.Context(), tx, &req, taskID, now); err != nil {
+	if err := h.applyTaskMetadataFields(r.Context(), tx, &req, taskID); err != nil {
 		h.logger.Error("update task metadata", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Internal server error")
 		return
