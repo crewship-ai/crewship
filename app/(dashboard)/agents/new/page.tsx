@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft, Bot, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
@@ -16,8 +15,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { PageHeader } from "@/components/layout/page-header"
+import { PageShell } from "@/components/layout/page-shell"
+import { SectionCard } from "@/components/ui/section-card"
 import { useWorkspace } from "@/hooks/use-workspace"
+import { cn } from "@/lib/utils"
 import { slugify } from "@/lib/utils/slugify"
 import { CLI_ADAPTERS, CLI_ADAPTER_KEYS } from "@/lib/cli-adapters"
 
@@ -175,24 +176,24 @@ export default function NewAgentPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-3xl">
-      <PageHeader title="New Agent" description="Create a new AI virtual employee">
+    <PageShell
+      title="New Agent"
+      description="Create a new AI virtual employee"
+      actions={
         <Button variant="outline" size="sm" asChild>
           <Link href="/agents">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Link>
         </Button>
-      </PageHeader>
-
-      <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
+      }
+      className="max-w-3xl"
+    >
+      <form onSubmit={handleSubmit} className="space-y-6">
         {/* General */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-default">General</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <SectionCard title="General">
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="name">Name *</Label>
                 <Input
@@ -213,7 +214,7 @@ export default function NewAgentPage() {
                     setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))
                   }}
                   placeholder="claude-seo-writer"
-                  className="font-mono text-sm"
+                  className="font-mono text-body"
                   pattern="[a-z0-9]+(-[a-z0-9]+)*"
                   maxLength={60}
                   required
@@ -246,7 +247,7 @@ export default function NewAgentPage() {
                 rows={3}
               />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="role_title">Role Title</Label>
                 <Input
@@ -270,15 +271,12 @@ export default function NewAgentPage() {
                 </Select>
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
         {/* Runtime */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-default">Runtime</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+        <SectionCard title="Runtime">
+          <div className="space-y-4">
             <div className="space-y-2">
               <Label>CLI Adapter</Label>
               <div className="grid grid-cols-2 gap-2">
@@ -291,11 +289,12 @@ export default function NewAgentPage() {
                       key={key}
                       type="button"
                       onClick={() => handleAdapterChange(key)}
-                      className={`flex items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
-                        isActive ? "border-primary bg-primary/5" : "border-border hover:bg-muted"
-                      }`}
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg border p-3 text-left transition-colors",
+                        isActive ? "border-primary bg-primary/5" : "border-border hover:bg-muted",
+                      )}
                     >
-                      <Icon className={`h-5 w-5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
+                      <Icon className={cn("h-5 w-5 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
                       <div className="min-w-0">
                         <div className="text-body font-medium">{cfg.label}</div>
                         <div className="text-micro text-muted-foreground">{cfg.description}</div>
@@ -305,7 +304,7 @@ export default function NewAgentPage() {
                 })}
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Model</Label>
                 {showCustomModel ? (
@@ -314,7 +313,7 @@ export default function NewAgentPage() {
                       value={llmModel}
                       onChange={(e) => setLlmModel(e.target.value)}
                       placeholder="Enter model name"
-                      className="font-mono text-xs"
+                      className="font-mono text-micro"
                     />
                     <Button type="button" variant="outline" size="sm" onClick={() => {
                       setShowCustomModel(false)
@@ -326,12 +325,12 @@ export default function NewAgentPage() {
                   </div>
                 ) : (
                   <Select value={llmModel} onValueChange={handleModelSelect}>
-                    <SelectTrigger className="w-full font-mono text-xs">
+                    <SelectTrigger className="w-full font-mono text-micro">
                       <SelectValue placeholder="Select model" />
                     </SelectTrigger>
                     <SelectContent>
                       {(CLI_ADAPTERS[cliAdapter]?.models ?? []).map((m) => (
-                        <SelectItem key={m.value} value={m.value} className="font-mono text-xs">
+                        <SelectItem key={m.value} value={m.value} className="font-mono text-micro">
                           {m.label}
                         </SelectItem>
                       ))}
@@ -357,27 +356,22 @@ export default function NewAgentPage() {
                 </Select>
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </SectionCard>
 
         {/* System Prompt */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-default">System Prompt</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <Label htmlFor="system_prompt">Instructions for the agent</Label>
-              <Textarea
-                id="system_prompt"
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-                placeholder="You are a helpful AI assistant that..."
-                rows={6}
-              />
-            </div>
-          </CardContent>
-        </Card>
+        <SectionCard title="System Prompt">
+          <div className="space-y-2">
+            <Label htmlFor="system_prompt">Instructions for the agent</Label>
+            <Textarea
+              id="system_prompt"
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder="You are a helpful AI assistant that..."
+              rows={6}
+            />
+          </div>
+        </SectionCard>
 
         {/* Error message */}
         {error && (
@@ -399,6 +393,6 @@ export default function NewAgentPage() {
           </Button>
         </div>
       </form>
-    </div>
+    </PageShell>
   )
 }
