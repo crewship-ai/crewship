@@ -11,6 +11,7 @@ import {
   File as FileIcon,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StatusDot } from "@/components/ui/status-badge"
 import { CodeBlock } from "@/components/ai-elements/code-block"
 import type { BundledLanguage } from "shiki"
 import { useWorkspace } from "@/hooks/use-workspace"
@@ -147,28 +148,42 @@ function isPreviewable(name: string): boolean {
 }
 
 function getFileIcon(name: string, isDir: boolean, isOpen?: boolean) {
-  if (isDir) return isOpen ? <FolderOpen className="h-4 w-4 text-amber-500" /> : <FolderClosed className="h-4 w-4 text-amber-500" />
+  const iconClass = "h-4 w-4 text-muted-foreground"
+  const folderClass = "h-4 w-4 text-foreground/80"
+  if (isDir) return isOpen ? <FolderOpen className={folderClass} /> : <FolderClosed className={folderClass} />
   const ext = name.split(".").pop()?.toLowerCase() ?? ""
   const n = name.toLowerCase()
-  if (n === "dockerfile" || n === "docker-compose.yml") return <Box className="h-4 w-4 text-blue-400" />
-  if (n.startsWith(".git")) return <GitBranch className="h-4 w-4 text-orange-500" />
-  if (n === "makefile") return <Terminal className="h-4 w-4 text-green-600" />
+  if (n === "dockerfile" || n === "docker-compose.yml") return <Box className={iconClass} />
+  if (n.startsWith(".git")) return <GitBranch className={iconClass} />
+  if (n === "makefile") return <Terminal className={iconClass} />
   switch (ext) {
-    case "py": return <FileCode className="h-4 w-4 text-yellow-500" />
-    case "js": case "jsx": return <FileCode className="h-4 w-4 text-yellow-400" />
-    case "ts": case "tsx": return <FileCode className="h-4 w-4 text-blue-500" />
-    case "go": return <FileCode className="h-4 w-4 text-cyan-500" />
-    case "rs": return <FileCode className="h-4 w-4 text-orange-600" />
-    case "json": return <FileJson className="h-4 w-4 text-yellow-600" />
-    case "yaml": case "yml": return <FileJson className="h-4 w-4 text-red-400" />
-    case "md": case "mdx": return <FileText className="h-4 w-4 text-blue-300" />
-    case "txt": return <FileText className="h-4 w-4 text-gray-500" />
-    case "sh": case "bash": return <Terminal className="h-4 w-4 text-green-500" />
-    case "env": return <Settings className="h-4 w-4 text-gray-600" />
-    case "html": return <FileCode className="h-4 w-4 text-orange-500" />
-    case "css": case "scss": return <FileCode className="h-4 w-4 text-blue-400" />
-    case "sql": return <FileCode className="h-4 w-4 text-blue-600" />
-    default: return <FileIcon className="h-4 w-4 text-gray-400" />
+    case "py":
+    case "js":
+    case "jsx":
+    case "ts":
+    case "tsx":
+    case "go":
+    case "rs":
+    case "html":
+    case "css":
+    case "scss":
+    case "sql":
+      return <FileCode className={iconClass} />
+    case "json":
+    case "yaml":
+    case "yml":
+      return <FileJson className={iconClass} />
+    case "md":
+    case "mdx":
+    case "txt":
+      return <FileText className={iconClass} />
+    case "sh":
+    case "bash":
+      return <Terminal className={iconClass} />
+    case "env":
+      return <Settings className={iconClass} />
+    default:
+      return <FileIcon className={iconClass} />
   }
 }
 
@@ -421,18 +436,18 @@ export function CrewFilesClient() {
   const filteredTree = filterTree(tree, search)
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full bg-background">
       {/* Left: File tree */}
-      <div className="flex flex-col w-64 shrink-0 border-r overflow-hidden">
-        <div className="flex items-center justify-between h-[41px] px-4 border-b shrink-0">
+      <div className="flex flex-col w-64 shrink-0 border-r border-border overflow-hidden">
+        <div className="flex items-center justify-between h-[41px] px-4 border-b border-border shrink-0">
           <div className="flex items-center gap-2">
             <Users className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-label font-semibold">Crew Files</span>
             <span className="text-micro text-muted-foreground bg-muted rounded-full px-1.5">{fileCount}</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-micro text-emerald-600">Live</span>
+            <StatusDot status="COMPLETED" live className="h-1.5 w-1.5" />
+            <span className="text-micro text-muted-foreground">Live</span>
             <RefreshCw className="h-3 w-3 text-muted-foreground cursor-pointer hover:text-foreground ml-1" />
           </div>
         </div>
@@ -441,7 +456,7 @@ export function CrewFilesClient() {
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <input
-              className="w-full h-7 rounded-md border bg-card pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
+              className="w-full h-7 rounded-md border border-border bg-card pl-8 pr-3 text-label outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring"
               placeholder="Filter files..."
               aria-label="Filter files"
               value={search}
@@ -467,7 +482,7 @@ export function CrewFilesClient() {
           </div>
         )}
 
-        <div className="px-3 py-2 border-t text-micro text-muted-foreground flex items-center justify-between shrink-0">
+        <div className="px-3 py-2 border-t border-border text-micro text-muted-foreground flex items-center justify-between shrink-0">
           <span>{fileCount} file{fileCount !== 1 ? "s" : ""}, {dirCount} folder{dirCount !== 1 ? "s" : ""} · {fmtSize(totalBytes)}</span>
           <span>/crew/</span>
         </div>
@@ -476,7 +491,7 @@ export function CrewFilesClient() {
       {/* Right: File preview/editor or empty state */}
       {selectedPath && selectedFile ? (
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <div className="flex items-center gap-3 h-[41px] px-4 border-b shrink-0">
+          <div className="flex items-center gap-3 h-[41px] px-4 border-b border-border shrink-0">
             <div className="flex items-center gap-1.5 min-w-0">
               {getFileIcon(selectedFile.name, false)}
               <div className="flex items-center gap-1 text-label min-w-0">
@@ -486,7 +501,7 @@ export function CrewFilesClient() {
                     <span className={cn(i === arr.length - 1 ? "text-foreground font-medium" : "text-muted-foreground")}>{seg}</span>
                   </span>
                 ))}
-                {isDirty && <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0" title="Unsaved changes" />}
+                {isDirty && <StatusDot status="BLOCKED" className="shrink-0" aria-label="Unsaved changes" />}
               </div>
             </div>
             <div className="ml-auto flex items-center gap-2 shrink-0">
@@ -494,7 +509,7 @@ export function CrewFilesClient() {
                 <>
                   <button
                     onClick={handleDiscard}
-                    className="h-6 px-2 flex items-center gap-1 rounded text-xs text-muted-foreground hover:bg-accent"
+                    className="h-6 px-2 flex items-center gap-1 rounded text-label text-muted-foreground hover:bg-accent"
                   >
                     <X className="h-3 w-3" /> Discard
                   </button>
@@ -515,7 +530,7 @@ export function CrewFilesClient() {
                     </button>
                   )}
                   <button onClick={handleCopy} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Copy path" aria-label="Copy file path">
-                    {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
+                    {copied ? <Check className="h-3 w-3 text-primary" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
                   </button>
                   <button onClick={handleDownload} className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent" title="Download" aria-label="Download file">
                     <Download className="h-3 w-3 text-muted-foreground" />
@@ -548,7 +563,7 @@ export function CrewFilesClient() {
                 saveRef={editorSaveRef}
               />
             ) : fileContent !== null ? (
-              <div className="h-full overflow-y-auto dark bg-[#24292e]">
+              <div className="h-full overflow-y-auto dark bg-surface-raised">
                 <CodeBlock code={fileContent} language={getLang(selectedFile.name) as BundledLanguage} showLineNumbers />
               </div>
             ) : fileError ? (
@@ -572,8 +587,8 @@ export function CrewFilesClient() {
 
 function FilesSkeleton() {
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between h-[41px] px-4 border-b shrink-0">
+    <div className="flex flex-col h-full bg-background">
+      <div className="flex items-center justify-between h-[41px] px-4 border-b border-border shrink-0">
         <Skeleton className="h-4 w-32" />
         <Skeleton className="h-4 w-16" />
       </div>

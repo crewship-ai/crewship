@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Skeleton } from "@/components/ui/skeleton"
+import { STATUS_BG_LIGHT } from "@/lib/colors"
 import { CrewIconPopover } from "@/components/crew-icon-popover"
 import { CrewStats } from "@/components/features/crews/crew-stats"
 import { CrewAgents } from "@/components/features/crews/crew-agents"
@@ -178,21 +179,26 @@ export default function CrewDetailPage() {
 
   if (error) {
     return (
-      <div className="p-4 sm:p-6">
+      <div className="p-6 space-y-4">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
         </Button>
-        <p className="text-sm text-destructive mt-4">{error}</p>
+        <p className="text-body text-destructive">{error}</p>
       </div>
     )
   }
 
   if (wsLoading || loading) {
     return (
-      <div className="p-4 sm:p-6 space-y-4">
+      <div className="p-6 space-y-6">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-16 w-full rounded-xl" />
-        <div className="grid grid-cols-4 gap-3"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
+          <Skeleton className="h-20" />
+        </div>
       </div>
     )
   }
@@ -211,7 +217,7 @@ export default function CrewDetailPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 space-y-6">
+    <div className="p-6 space-y-6">
       <Button variant="ghost" size="sm" asChild>
         <Link href="/crews"><ArrowLeft className="mr-2 h-4 w-4" />Back to Crews</Link>
       </Button>
@@ -226,13 +232,13 @@ export default function CrewDetailPage() {
         />
         <div className="flex-1 min-w-0 pt-0.5">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold">{crew.name}</h1>
-            <span className="text-xs font-mono text-muted-foreground">{crew.slug}</span>
+            <h1 className="text-title font-semibold">{crew.name}</h1>
+            <span className="text-label font-mono text-muted-foreground">{crew.slug}</span>
           </div>
           {crew.description && (
-            <p className="text-sm text-muted-foreground mt-1">{crew.description}</p>
+            <p className="text-body text-muted-foreground mt-1">{crew.description}</p>
           )}
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-micro text-muted-foreground mt-1">
             Created {new Date(crew.created_at).toLocaleDateString()}
           </p>
         </div>
@@ -268,22 +274,22 @@ export default function CrewDetailPage() {
 
       {/* Issue Prefix */}
       {canEdit && (
-        <Card className="p-4">
-          <div className="flex items-center justify-between">
-            <div>
+        <Card>
+          <CardContent className="flex items-center justify-between gap-4 p-4">
+            <div className="min-w-0">
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-medium">Issue Prefix</span>
+                <span className="text-body font-medium">Issue Prefix</span>
               </div>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-label text-muted-foreground">
                 Used for issue identifiers (e.g. ENG-42). Defaults to first 3 letters of slug.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <input
                 type="text"
                 defaultValue={crew.issue_prefix || ""}
                 placeholder={crew.slug.toUpperCase().slice(0, 3)}
-                className="w-20 h-8 text-xs text-center font-mono uppercase border rounded-md bg-background px-2"
+                className="w-20 h-8 text-label text-center font-mono uppercase border border-border rounded-md bg-background px-2"
                 maxLength={5}
                 onBlur={(e) => {
                   const val = e.target.value.trim().toUpperCase()
@@ -298,7 +304,7 @@ export default function CrewDetailPage() {
                 }}
               />
             </div>
-          </div>
+          </CardContent>
         </Card>
       )}
 
@@ -313,8 +319,8 @@ export default function CrewDetailPage() {
               >
                 <div className="flex items-center gap-2">
                   <Settings2 className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">Advanced Container Settings</span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-body font-medium">Advanced Container Settings</span>
+                  <span className="text-label text-muted-foreground">
                     {crew.container_memory_mb === 4096 && crew.container_cpus === 2 && !crew.container_ttl_hours
                       ? "(using defaults)"
                       : `(${crew.container_memory_mb} MB, ${crew.container_cpus} CPU)`}
@@ -348,8 +354,8 @@ export default function CrewDetailPage() {
             >
               <div className="flex items-center gap-2">
                 <TerminalSquare className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Terminal</span>
-                <span className="text-xs text-muted-foreground">Connect to crew container</span>
+                <span className="text-body font-medium">Terminal</span>
+                <span className="text-label text-muted-foreground">Connect to crew container</span>
               </div>
               <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
             </button>
@@ -384,9 +390,9 @@ export default function CrewDetailPage() {
               >
                 <div className="flex items-center gap-2">
                   <Paintbrush className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">Agent Avatar Style</span>
+                  <span className="text-body font-medium">Agent Avatar Style</span>
                   {avatarStyle && (
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-label text-muted-foreground">
                       ({AVATAR_STYLES[avatarStyle]?.label ?? avatarStyle})
                     </span>
                   )}
@@ -396,7 +402,7 @@ export default function CrewDetailPage() {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="px-4 pb-4 pt-0 space-y-3">
-                <p className="text-xs text-muted-foreground">Choose a style for agent avatars in this crew.</p>
+                <p className="text-label text-muted-foreground">Choose a style for agent avatars in this crew.</p>
                 <AvatarPicker
                   seed={crew.name || "preview"}
                   style={avatarStyle}
@@ -412,7 +418,7 @@ export default function CrewDetailPage() {
                     type="button"
                     onClick={handleApplyToAll}
                     disabled={applying}
-                    className="text-[11px] font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 inline-flex items-center gap-1 disabled:opacity-50"
+                    className="text-micro font-medium text-primary hover:text-primary/80 inline-flex items-center gap-1 disabled:opacity-50"
                   >
                     {applying ? (
                       <Loader2 className="h-3 w-3 animate-spin" />
@@ -452,9 +458,11 @@ export default function CrewDetailPage() {
 
       {/* Credentials reminder */}
       {agents.length > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
-          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-          <p className="text-sm text-amber-800 dark:text-amber-200">
+        <div
+          className={`flex items-center gap-3 rounded-lg border border-border p-3 ${STATUS_BG_LIGHT.BLOCKED}`}
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <p className="text-body">
             Agents need API keys to connect to LLM providers.{" "}
             <Link href="/credentials" className="font-medium underline underline-offset-2">
               Add credentials
