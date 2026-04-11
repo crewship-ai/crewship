@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import {
   ChevronLeft, ChevronRight, Download, RefreshCw, Search, Shield,
 } from "lucide-react"
@@ -104,7 +104,22 @@ export default function AuditPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [category, setCategory] = useState("all")
   const [dateRange, setDateRange] = useState("7d")
+  const [searchInput, setSearchInput] = useState("")
+  // searchQuery is the debounced value that actually drives fetchLogs —
+  // searchInput updates on every keystroke, debounce feeds it through 300ms
+  // later so the backend isn't hammered while the user is typing.
   const [searchQuery, setSearchQuery] = useState("")
+
+  useEffect(() => {
+    const t = setTimeout(() => setSearchQuery(searchInput), 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
+
+  // When the debounced query changes, always reset back to page 1 so the user
+  // sees the first page of matches instead of an out-of-range page.
+  useEffect(() => {
+    setPage(1)
+  }, [searchQuery])
 
   const fetchLogs = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -135,6 +150,7 @@ export default function AuditPage() {
         if (category !== "all") params.set("entity_type", category)
         const dateFrom = getDateFrom(dateRange)
         if (dateFrom) params.set("date_from", dateFrom)
+        if (searchQuery.trim()) params.set("search", searchQuery.trim())
 
         const res = await fetch(`/api/v1/audit?${params}`)
         if (!res.ok) {
@@ -152,7 +168,7 @@ export default function AuditPage() {
         setRefreshing(false)
       }
     },
-    [workspaceId, page, category, dateRange],
+    [workspaceId, page, category, dateRange, searchQuery],
   )
 
   useEffect(() => {
@@ -172,17 +188,6 @@ export default function AuditPage() {
 
   const isLoading = wsLoading || loading
 
-  const filteredLogs = useMemo(() => {
-    if (!searchQuery) return logs
-    const q = searchQuery.toLowerCase()
-    return logs.filter(
-      (log) =>
-        log.action.toLowerCase().includes(q) ||
-        log.entity_type.toLowerCase().includes(q) ||
-        (log.user?.full_name ?? log.user?.email ?? "").toLowerCase().includes(q),
-    )
-  }, [logs, searchQuery])
-
   // Cap the number of rows an export may walk across pages. Audit logs can
   // get large, and blocking the main thread on an unbounded fetch-loop is
   // worse for compliance than a bounded export with a visible warning.
@@ -194,9 +199,10 @@ export default function AuditPage() {
     if (!workspaceId || totalCount === 0) return
     setExporting(true)
     try {
-      // Fetch every page matching the active server-side filters so the CSV
-      // reflects the full filtered set, not just the in-memory page. The
-      // client-side `searchQuery` filter is applied on top after aggregation.
+      // Fetch every page matching the active server-side filters (including
+      // the `search` param) so the CSV reflects the full filtered set, not
+      // just the in-memory page. All filtering now lives in the backend; the
+      // browser just walks the pages and serializes.
       const all: AuditLog[] = []
       const totalToFetch = Math.min(totalCount, EXPORT_MAX_ROWS)
       const pageCount = Math.ceil(totalToFetch / PAGE_SIZE)
@@ -209,6 +215,7 @@ export default function AuditPage() {
         if (category !== "all") params.set("entity_type", category)
         const dateFrom = getDateFrom(dateRange)
         if (dateFrom) params.set("date_from", dateFrom)
+        if (searchQuery.trim()) params.set("search", searchQuery.trim())
         const res = await fetch(`/api/v1/audit?${params}`)
         if (!res.ok) {
           setError("Export failed — partial results discarded")
@@ -218,19 +225,8 @@ export default function AuditPage() {
         all.push(...data.data)
         if (all.length >= EXPORT_MAX_ROWS) break
       }
-      // Apply the same client-side text filter as the on-screen table so the
-      // CSV matches what the user is looking at.
-      const q = searchQuery.toLowerCase()
-      const filtered = searchQuery
-        ? all.filter(
-            (log) =>
-              log.action.toLowerCase().includes(q) ||
-              log.entity_type.toLowerCase().includes(q) ||
-              (log.user?.full_name ?? log.user?.email ?? "").toLowerCase().includes(q),
-          )
-        : all
-      if (filtered.length === 0) return
-      const rows = filtered.map((log) => ({
+      if (all.length === 0) return
+      const rows = all.map((log) => ({
         timestamp: log.created_at,
         action: log.action,
         entity_type: log.entity_type,
@@ -347,8 +343,8 @@ export default function AuditPage() {
           <Input
             placeholder="Search events…"
             className="h-7 pl-7 text-xs"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
           />
         </div>
       </div>
@@ -366,7 +362,7 @@ export default function AuditPage() {
             <Skeleton key={i} className="h-9 rounded-md" />
           ))}
         </div>
-      ) : filteredLogs.length === 0 ? (
+      ) : logs.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="w-10 h-10 rounded-lg bg-muted/50 flex items-center justify-center mb-3">
             <Shield className="h-4 w-4 text-muted-foreground/60" />
@@ -389,7 +385,7 @@ export default function AuditPage() {
 
           {/* Rows — mobile: stacked column; md+: 5-col grid */}
           <div>
-            {filteredLogs.map((log) => {
+            {logs.map((log) => {
               const isExpanded = expandedId === log.id
               return (
                 <Fragment key={log.id}>
