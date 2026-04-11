@@ -515,13 +515,17 @@ func testCredentialValue(client *cli.Client, provider, credType, value string) (
 }
 
 // confirmInvalidKey prompts the user to confirm saving an invalid credential.
-// Uses huh for interactive TTY sessions; falls back to plain stdin read for
-// non-TTY (scripts) — non-TTY is handled by the caller checking term.IsTerminal.
+// Uses huh for interactive TTY sessions; falls back to plain stdin read when
+// either stdin or stdout is not a TTY. We gate on BOTH: a redirected stdout
+// (`crewship credential create ... > out.txt`) would otherwise cause huh to
+// write ANSI escape sequences into the target file.
 func confirmInvalidKey(errMsg string) bool {
 	cli.PrintWarning(fmt.Sprintf("Key validation failed: %s", errMsg))
 
 	// Non-TTY fallback (kept for safety even though caller already checks)
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	stdinTTY := term.IsTerminal(int(os.Stdin.Fd()))
+	stdoutTTY := term.IsTerminal(int(os.Stdout.Fd()))
+	if !stdinTTY || !stdoutTTY {
 		fmt.Print("Save anyway? [y/N] ")
 		scanner := bufio.NewScanner(os.Stdin)
 		if scanner.Scan() {

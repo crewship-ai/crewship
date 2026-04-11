@@ -13,6 +13,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege permissions. Jobs that need more (e.g. grype's SARIF upload
+# to the GitHub Security tab) grant it explicitly at the job level.
+permissions:
+  contents: read
+
 env:
   GO_VERSION: "1.26"
 
@@ -25,16 +30,29 @@ jobs:
     name: Gitleaks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           # Full history so gitleaks can scan commits on push to main.
           fetch-depth: 0
 
-      - name: Install gitleaks
+      # Download the gitleaks release tarball AND the upstream SHA-256
+      # checksums file, then verify the tarball against it before extracting.
+      # This matches the supply-chain hardening applied elsewhere in this
+      # workflow (SHA-pinned actions, cosign keyless signatures on release
+      # artifacts) and protects against a retargeted release asset.
+      - name: Install gitleaks (checksum-verified)
         run: |
+          set -euo pipefail
           GITLEAKS_VERSION="8.29.1"
-          wget -q "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+          BASE_URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          wget -q "${BASE_URL}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
             -O /tmp/gitleaks.tar.gz
+          wget -q "${BASE_URL}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" \
+            -O /tmp/gitleaks_checksums.txt
+          # Extract just the linux_x64 row and feed it to sha256sum -c.
+          grep "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" /tmp/gitleaks_checksums.txt \
+            | awk '{print $1 "  /tmp/gitleaks.tar.gz"}' \
+            | sha256sum -c -
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp
           sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
@@ -58,9 +76,9 @@ jobs:
     name: Go Vuln Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -127,8 +145,13 @@ jobs:
   grype:
     name: Grype Source Scan
     runs-on: ubuntu-latest
+    # SARIF upload to the GitHub Security tab requires write access to
+    # security-events. Granted only to this job (least-privilege).
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Run grype on source tree
         id: scan
@@ -157,9 +180,9 @@ jobs:
     name: License Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         with:
           go-version: ${{ env.GO_VERSION }}
 

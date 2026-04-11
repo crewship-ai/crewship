@@ -131,8 +131,13 @@ func confirmAction(cmd *cobra.Command, message string) error {
 	}
 
 	// Non-TTY fallback: preserve the old plain-stdin behavior so scripts
-	// that pipe "y\n" or "yes\n" continue to work unchanged.
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
+	// that pipe "y\n" or "yes\n" continue to work unchanged. We gate on
+	// BOTH stdin AND stdout being TTYs — if stdout is redirected to a file
+	// (e.g. `crewship delete ... > out.txt`), huh would otherwise dump ANSI
+	// escape sequences into the file.
+	stdinTTY := term.IsTerminal(int(os.Stdin.Fd()))
+	stdoutTTY := term.IsTerminal(int(os.Stdout.Fd()))
+	if !stdinTTY || !stdoutTTY {
 		fmt.Fprintf(os.Stderr, "%s [y/N]: ", message)
 		var answer string
 		_, _ = fmt.Scanln(&answer)
