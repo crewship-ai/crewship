@@ -32,7 +32,7 @@ if [ ! -f web/out/index.html ]; then
 fi
 
 # modernc.org/mathutil is BSD-3-Clause but its LICENSE file has a format
-# go-licenses doesn't detect. Known issue, documented in DEPENDENCIES.md.
+# go-licenses doesn't detect. Known issue, documented in THIRD-PARTY-NOTICES.md.
 # The --ignore flag excludes it from the check but it still appears in the list.
 OUTPUT="THIRD-PARTY-NOTICES.md"
 TMP="$(mktemp)"
