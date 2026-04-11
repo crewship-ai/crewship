@@ -189,10 +189,12 @@ func TestSecurityEmptyCredentialToken(t *testing.T) {
 	req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
 	injectCredential(req, ProviderAnthropic, cred.Token)
 
-	// Empty token should still set header (it's the store's responsibility to not have empty tokens)
-	// but it should NOT crash
-	if req.Header.Get("x-api-key") != "" {
-		// An empty token is set as empty header value -- this is acceptable
+	// Empty token must round-trip as an empty header value (it is the
+	// store's responsibility to reject empty tokens before they reach
+	// injectCredential; the invariant here is that injectCredential never
+	// fabricates or leaks a token when handed "").
+	if val := req.Header.Get("x-api-key"); val != "" {
+		t.Fatalf("expected empty x-api-key header for empty token, got %q", val)
 	}
 }
 

@@ -88,9 +88,9 @@ func TestBuildMemoryContext_AllFiles(t *testing.T) {
 	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
 
 	mc := mockContainerForMemory(map[string]string{
-		"/crew/agents/test-agent/.memory/AGENT.md":                    "# Agent\n## Facts\nUser prefers Czech.",
-		"/crew/agents/test-agent/.memory/daily/" + today + ".md":      "# Today\nFixed auth bug.",
-		"/crew/agents/test-agent/.memory/daily/" + yesterday + ".md":  "# Yesterday\nReviewed PR #42.",
+		"/crew/agents/test-agent/.memory/AGENT.md":                   "# Agent\n## Facts\nUser prefers Czech.",
+		"/crew/agents/test-agent/.memory/daily/" + today + ".md":     "# Today\nFixed auth bug.",
+		"/crew/agents/test-agent/.memory/daily/" + yesterday + ".md": "# Yesterday\nReviewed PR #42.",
 	})
 
 	o := New(mc, newMemState(), slog.Default())

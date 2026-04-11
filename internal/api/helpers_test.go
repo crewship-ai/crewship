@@ -11,10 +11,10 @@ import (
 // pagination window instead of clamping to maxLimit as the godoc promised.
 func TestParsePagination_Clamping(t *testing.T) {
 	cases := []struct {
-		name                      string
-		query                     string
-		defaultLimit, maxLimit    int
-		wantLimit, wantOffset     int
+		name                   string
+		query                  string
+		defaultLimit, maxLimit int
+		wantLimit, wantOffset  int
 	}{
 		{"unspecified uses default", "", 20, 100, 20, 0},
 		{"in-range passes through", "?limit=30&offset=10", 20, 100, 30, 10},

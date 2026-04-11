@@ -25,8 +25,8 @@ func New(path string) (*Provider, error) {
 	}
 
 	db, err := bolt.Open(path, 0600, &bolt.Options{
-		NoSync:   false,
-		Timeout:  0,
+		NoSync:  false,
+		Timeout: 0,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open bbolt: %w", err)

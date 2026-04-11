@@ -269,9 +269,16 @@ func (e *MissionEngine) buildMissionBrief(ctx context.Context, ms *missionState,
 		var hdr bool
 		for rows.Next() {
 			var n, bd string
-			if rows.Scan(&n, &bd) != nil { continue }
-			if !hdr { b.WriteString("[ISSUE COMMENTS]\n"); hdr = true }
-			if len(bd) > 500 { bd = bd[:500] + "..." }
+			if rows.Scan(&n, &bd) != nil {
+				continue
+			}
+			if !hdr {
+				b.WriteString("[ISSUE COMMENTS]\n")
+				hdr = true
+			}
+			if len(bd) > 500 {
+				bd = bd[:500] + "..."
+			}
 			b.WriteString(fmt.Sprintf("@%s: %s\n\n", n, bd))
 		}
 		rows.Close()
@@ -586,7 +593,9 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 			}
 		} else if taskStatus == "COMPLETED" {
 			fallback := resultSummary
-			if len(fallback) > 500 { fallback = fallback[:500] + "..." }
+			if len(fallback) > 500 {
+				fallback = fallback[:500] + "..."
+			}
 			if fallback != "" {
 				commentBody = fmt.Sprintf("**%s completed their work**\n\n%s", agentName, fallback)
 			} else {
@@ -1022,8 +1031,8 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 	}
 
 	type blockedTask struct {
-		id      string
-		deps    []string
+		id   string
+		deps []string
 	}
 	var candidates []blockedTask
 	for rows.Next() {
@@ -1229,7 +1238,7 @@ func (e *MissionEngine) ValidateDAG(ctx context.Context, missionID string) error
 	}
 
 	// Build adjacency list and check for nonexistent deps
-	graph := make(map[string][]string, len(tasks))     // taskID → deps
+	graph := make(map[string][]string, len(tasks)) // taskID → deps
 	inDegree := make(map[string]int, len(tasks))
 	for _, t := range tasks {
 		graph[t.ID] = nil

@@ -13,21 +13,21 @@ import (
 
 // OAuthServerMetadata holds discovered OAuth server configuration (RFC 8414).
 type OAuthServerMetadata struct {
-	Issuer                            string   `json:"issuer"`
-	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
-	TokenEndpoint                     string   `json:"token_endpoint"`
-	RegistrationEndpoint              string   `json:"registration_endpoint,omitempty"`
-	ScopesSupported                   []string `json:"scopes_supported,omitempty"`
-	ResponseTypesSupported            []string `json:"response_types_supported,omitempty"`
-	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported,omitempty"`
-	GrantTypesSupported               []string `json:"grant_types_supported,omitempty"`
+	Issuer                        string   `json:"issuer"`
+	AuthorizationEndpoint         string   `json:"authorization_endpoint"`
+	TokenEndpoint                 string   `json:"token_endpoint"`
+	RegistrationEndpoint          string   `json:"registration_endpoint,omitempty"`
+	ScopesSupported               []string `json:"scopes_supported,omitempty"`
+	ResponseTypesSupported        []string `json:"response_types_supported,omitempty"`
+	CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported,omitempty"`
+	GrantTypesSupported           []string `json:"grant_types_supported,omitempty"`
 }
 
 // ProtectedResourceMetadata holds OAuth protected resource info (RFC 9728).
 type ProtectedResourceMetadata struct {
-	Resource                string   `json:"resource"`
-	AuthorizationServers    []string `json:"authorization_servers,omitempty"`
-	ScopesSupported         []string `json:"scopes_supported,omitempty"`
+	Resource             string   `json:"resource"`
+	AuthorizationServers []string `json:"authorization_servers,omitempty"`
+	ScopesSupported      []string `json:"scopes_supported,omitempty"`
 }
 
 // DiscoveredOAuth holds the result of OAuth metadata discovery for an MCP server.

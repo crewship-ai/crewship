@@ -35,42 +35,42 @@ var builtinCrewTemplates = []struct {
 	{
 		name: "Software Development", slug: "software-development",
 		description: "Full dev team: Tech Lead, Backend Dev, Frontend Dev, QA Engineer",
-		icon: "💻", color: "#3B82F6", category: "ENGINEERING",
+		icon:        "💻", color: "#3B82F6", category: "ENGINEERING",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "Tech Lead", Slug: "tech-lead", RoleTitle: "Technical Architect",
 				AgentRole: "LEAD", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
 				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "FULL",
 				SystemPrompt: "You are the Technical Architect and Lead of this development crew. You coordinate work across team members, review architectural decisions, and ensure code quality standards are met. Break down complex tasks and delegate to specialists.",
-				Skills: []string{"code-review", "architecture"},
+				Skills:       []string{"code-review", "architecture"},
 			},
 			{
 				Name: "Backend Dev", Slug: "backend-dev", RoleTitle: "Backend Engineer",
 				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
 				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
 				SystemPrompt: "You are a Backend Engineer. You implement server-side features, API endpoints, database queries, and write comprehensive tests. Follow TDD — write tests first, then implement.",
-				Skills: []string{"coding-assistant"},
+				Skills:       []string{"coding-assistant"},
 			},
 			{
 				Name: "Frontend Dev", Slug: "frontend-dev", RoleTitle: "Frontend Engineer",
 				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
 				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
 				SystemPrompt: "You are a Frontend Engineer. You build user interfaces, implement responsive designs, and create accessible components. Use modern frameworks and follow established UI patterns.",
-				Skills: []string{"coding-assistant"},
+				Skills:       []string{"coding-assistant"},
 			},
 			{
 				Name: "QA Engineer", Slug: "qa-engineer", RoleTitle: "Quality Assurance",
 				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
 				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
 				SystemPrompt: "You are a QA Engineer. You write and maintain test suites, perform code reviews focused on correctness and security, and ensure test coverage for critical paths.",
-				Skills: []string{"testing-specialist", "code-reviewer"},
+				Skills:       []string{"testing-specialist", "code-reviewer"},
 			},
 		},
 	},
 	{
 		name: "DevOps / SRE", slug: "devops-sre",
 		description: "Infrastructure team: SRE Lead, Platform Engineer, Security Analyst, CI/CD Specialist",
-		icon: "🔧", color: "#EF4444", category: "ENGINEERING",
+		icon:        "🔧", color: "#EF4444", category: "ENGINEERING",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "SRE Lead", Slug: "sre-lead", RoleTitle: "Site Reliability Lead",
@@ -83,28 +83,28 @@ var builtinCrewTemplates = []struct {
 				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
 				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
 				SystemPrompt: "You are a Platform Engineer. You manage container infrastructure, Kubernetes clusters, networking, and cloud resources. Write Infrastructure-as-Code (Terraform, Helm).",
-				Skills: []string{"devops-helper"},
+				Skills:       []string{"devops-helper"},
 			},
 			{
 				Name: "Security Analyst", Slug: "security-analyst", RoleTitle: "Security Analyst",
 				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
 				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "MINIMAL",
 				SystemPrompt: "You are a Security Analyst. You audit codebases for vulnerabilities, review credential handling, verify auth flows, and ensure compliance with security standards (OWASP, SOC2).",
-				Skills: []string{"security-auditor"},
+				Skills:       []string{"security-auditor"},
 			},
 			{
 				Name: "CI/CD Specialist", Slug: "cicd-specialist", RoleTitle: "CI/CD Engineer",
 				AgentRole: "AGENT", CLIAdapter: "CLAUDE_CODE", LLMProvider: "ANTHROPIC",
 				LLMModel: "claude-sonnet-4-20250514", ToolProfile: "CODING",
 				SystemPrompt: "You are a CI/CD Specialist. You build and maintain deployment pipelines, automate testing workflows, manage build systems, and ensure fast, reliable deployments.",
-				Skills: []string{"devops-helper"},
+				Skills:       []string{"devops-helper"},
 			},
 		},
 	},
 	{
 		name: "Content Marketing", slug: "content-marketing",
 		description: "Marketing team: Content Lead, Researcher, Copywriter, SEO Specialist",
-		icon: "📈", color: "#8B5CF6", category: "MARKETING",
+		icon:        "📈", color: "#8B5CF6", category: "MARKETING",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "Content Lead", Slug: "content-lead", RoleTitle: "Content Strategy Lead",
@@ -135,7 +135,7 @@ var builtinCrewTemplates = []struct {
 	{
 		name: "Accounting & Finance", slug: "accounting-finance",
 		description: "Finance team: Finance Lead, Bookkeeper, Tax Analyst, Reporting Specialist",
-		icon: "📊", color: "#10B981", category: "BUSINESS",
+		icon:        "📊", color: "#10B981", category: "BUSINESS",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "Finance Lead", Slug: "finance-lead", RoleTitle: "Finance Director",
@@ -166,7 +166,7 @@ var builtinCrewTemplates = []struct {
 	{
 		name: "Customer Support", slug: "customer-support",
 		description: "Support team: Support Lead, Tier 1 Agent, Tier 2 Specialist, Knowledge Manager",
-		icon: "🎧", color: "#F59E0B", category: "OPERATIONS",
+		icon:        "🎧", color: "#F59E0B", category: "OPERATIONS",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "Support Lead", Slug: "support-lead", RoleTitle: "Support Manager",
@@ -197,7 +197,7 @@ var builtinCrewTemplates = []struct {
 	{
 		name: "Research & Analysis", slug: "research-analysis",
 		description: "Research team: Research Lead, Data Collector, Analyst, Report Writer",
-		icon: "🔍", color: "#06B6D4", category: "RESEARCH",
+		icon:        "🔍", color: "#06B6D4", category: "RESEARCH",
 		agents: []CrewTemplateAgent{
 			{
 				Name: "Research Lead", Slug: "research-lead", RoleTitle: "Research Director",

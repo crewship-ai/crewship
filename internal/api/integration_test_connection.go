@@ -167,7 +167,7 @@ func testStreamableHTTPConnection(ctx context.Context, endpoint string) testConn
 		"method":  "initialize",
 		"params": map[string]interface{}{
 			"protocolVersion": "2025-03-26",
-			"capabilities":   map[string]interface{}{},
+			"capabilities":    map[string]interface{}{},
 			"clientInfo": map[string]string{
 				"name":    "crewship-test",
 				"version": "1.0.0",

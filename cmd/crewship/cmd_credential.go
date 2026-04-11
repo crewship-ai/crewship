@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -514,15 +515,38 @@ func testCredentialValue(client *cli.Client, provider, credType, value string) (
 }
 
 // confirmInvalidKey prompts the user to confirm saving an invalid credential.
+// Uses huh for interactive TTY sessions; falls back to plain stdin read when
+// either stdin or stdout is not a TTY. We gate on BOTH: a redirected stdout
+// (`crewship credential create ... > out.txt`) would otherwise cause huh to
+// write ANSI escape sequences into the target file.
 func confirmInvalidKey(errMsg string) bool {
 	cli.PrintWarning(fmt.Sprintf("Key validation failed: %s", errMsg))
-	fmt.Print("Save anyway? [y/N] ")
-	scanner := bufio.NewScanner(os.Stdin)
-	if scanner.Scan() {
-		answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
-		return answer == "y" || answer == "yes"
+
+	// Non-TTY fallback (kept for safety even though caller already checks)
+	stdinTTY := term.IsTerminal(int(os.Stdin.Fd()))
+	stdoutTTY := term.IsTerminal(int(os.Stdout.Fd()))
+	if !stdinTTY || !stdoutTTY {
+		fmt.Print("Save anyway? [y/N] ")
+		scanner := bufio.NewScanner(os.Stdin)
+		if scanner.Scan() {
+			answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+			return answer == "y" || answer == "yes"
+		}
+		return false
 	}
-	return false
+
+	var confirmed bool
+	err := huh.NewConfirm().
+		Title("Save anyway?").
+		Description("The credential value failed provider validation — it may not work in production.").
+		Affirmative("Save anyway").
+		Negative("Cancel").
+		Value(&confirmed).
+		Run()
+	if err != nil {
+		return false
+	}
+	return confirmed
 }
 
 func init() {

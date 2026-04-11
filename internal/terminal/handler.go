@@ -70,13 +70,13 @@ func New(container provider.ContainerProvider, validator *auth.JWTValidator, db 
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
 			CheckOrigin: func(r *http.Request) bool {
-			origin := r.Header.Get("Origin")
-			if origin == "" {
-				return true // non-browser clients
-			}
-			host := r.Host
-			return origin == "http://"+host || origin == "https://"+host
-		},
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true // non-browser clients
+				}
+				host := r.Host
+				return origin == "http://"+host || origin == "https://"+host
+			},
 		},
 	}
 }
@@ -299,8 +299,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Env:         execEnv,
 		WorkingDir:  workingDir,
 		User:        "1001:1001",
-		Rows:       init.Rows,
-		Cols:       init.Cols,
+		Rows:        init.Rows,
+		Cols:        init.Cols,
 	})
 	if err != nil {
 		h.logger.Error("terminal exec failed", "error", err, "container", containerName)

@@ -98,10 +98,6 @@ var skillGetCmd = &cobra.Command{
 		}
 
 		f := newFormatter()
-		desc := "-"
-		if skill.Description != nil {
-			desc = *skill.Description
-		}
 		author := "-"
 		if skill.Author != nil {
 			author = *skill.Author
@@ -110,6 +106,7 @@ var skillGetCmd = &cobra.Command{
 		if skill.ToolCount != nil {
 			tools = fmt.Sprintf("%d", *skill.ToolCount)
 		}
+		// Description rendered separately via glamour below (see bottom).
 		pairs := [][]string{
 			{"Name", skill.Name},
 			{"Slug", skill.Slug},
@@ -118,11 +115,23 @@ var skillGetCmd = &cobra.Command{
 			{"Version", skill.Version},
 			{"Source", skill.Source},
 			{"Author", author},
-			{"Description", desc},
 			{"Tools", tools},
 			{"Created", skill.CreatedAt},
 		}
-		return f.AutoDetail(skill, pairs)
+		if err := f.AutoDetail(skill, pairs); err != nil {
+			return err
+		}
+
+		// Render markdown description below the metadata table, but ONLY for
+		// human-facing formats. JSON/YAML/quiet already include description
+		// in the serialized struct.
+		if skill.Description != nil && *skill.Description != "" &&
+			(f.Format == "" || f.Format == "table") {
+			fmt.Fprintln(f.Writer)
+			fmt.Fprintf(f.Writer, "%sDescription:%s\n", cli.Bold, cli.Reset)
+			f.Markdown(*skill.Description)
+		}
+		return nil
 	},
 }
 

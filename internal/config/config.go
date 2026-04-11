@@ -73,27 +73,27 @@ type StateConfig struct {
 
 // LoggingConfig holds structured logging settings for level and output format.
 type LoggingConfig struct {
-	Level  string `yaml:"level"` // "debug" | "info" | "warn" | "error"
+	Level  string `yaml:"level"`  // "debug" | "info" | "warn" | "error"
 	Format string `yaml:"format"` // "json" | "text"
 }
 
 // AuthConfig holds authentication settings including JWT secrets, WebSocket
 // token expiry, internal token for IPC auth, and signup policy.
 type AuthConfig struct {
-	JWTSecret       string        `yaml:"jwt_secret"`
-	WSTokenExpiry   time.Duration `yaml:"ws_token_expiry"`
-	NextjsURL       string        `yaml:"nextjs_url"`
-	InternalToken   string        `yaml:"internal_token"`
-	AllowSignup     bool          `yaml:"allow_signup"`
-	GoogleClientID  string        `yaml:"google_client_id"`
-	GoogleSecret    string        `yaml:"google_client_secret"`
+	JWTSecret      string        `yaml:"jwt_secret"`
+	WSTokenExpiry  time.Duration `yaml:"ws_token_expiry"`
+	NextjsURL      string        `yaml:"nextjs_url"`
+	InternalToken  string        `yaml:"internal_token"`
+	AllowSignup    bool          `yaml:"allow_signup"`
+	GoogleClientID string        `yaml:"google_client_id"`
+	GoogleSecret   string        `yaml:"google_client_secret"`
 }
 
 // LLMProxyConfig holds settings for the LLM proxy that tracks token usage
 // and performs health checks on upstream providers.
 type LLMProxyConfig struct {
-	Enabled          bool          `yaml:"enabled"`
-	TokenSyncInterval time.Duration `yaml:"token_sync_interval"`
+	Enabled             bool          `yaml:"enabled"`
+	TokenSyncInterval   time.Duration `yaml:"token_sync_interval"`
 	HealthCheckInterval time.Duration `yaml:"health_check_interval"`
 }
 
@@ -117,12 +117,12 @@ func Default() *Config {
 			SocketPath: "/tmp/crewship.sock",
 		},
 		Container: ContainerConfig{
-			Provider:       "docker",
-			RuntimeImage:   "ghcr.io/crewship-ai/agent-runtime:latest",
-			DefaultRuntime: "runc",
-			Network:        "crewship-agents",
+			Provider:        "docker",
+			RuntimeImage:    "ghcr.io/crewship-ai/agent-runtime:latest",
+			DefaultRuntime:  "runc",
+			Network:         "crewship-agents",
 			DefaultMemoryMB: 512,
-			DefaultCPUs:    1.0,
+			DefaultCPUs:     1.0,
 		},
 		Storage: StorageConfig{
 			Provider: "localfs",

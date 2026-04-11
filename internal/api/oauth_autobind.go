@@ -123,12 +123,12 @@ func (h *OAuthHandler) autoBindCredentialToMCPServers(ctx context.Context, crede
 // matchKnownProvider checks if an MCP server URL matches a known OAuth provider.
 func matchKnownProvider(mcpURL string) *OAuthProvider {
 	urlPatterns := map[string]string{
-		"linear.app":    "linear",
-		"gitlab.com":    "gitlab",
+		"linear.app":     "linear",
+		"gitlab.com":     "gitlab",
 		"cloudflare.com": "cloudflare",
-		"stripe.com":    "stripe",
-		"notion.com":    "notion",
-		"github.com":    "github",
+		"stripe.com":     "stripe",
+		"notion.com":     "notion",
+		"github.com":     "github",
 		"googleapis.com": "google",
 	}
 	lower := strings.ToLower(mcpURL)

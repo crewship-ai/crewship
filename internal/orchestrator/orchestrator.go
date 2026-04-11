@@ -25,32 +25,32 @@ var validSlugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`)
 // AgentRunRequest describes everything needed to execute an agent run inside
 // a container, including identity, credentials, prompts, and resource limits.
 type AgentRunRequest struct {
-	AgentID         string
-	AgentSlug       string
-	AgentRole       string // AGENT, LEAD, COORDINATOR
-	CrewID          string
-	CrewSlug        string
-	ChatID          string
-	WorkspaceID     string
-	ContainerID     string
-	CLIAdapter      string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI
-	LLMModel        string // optional model override (e.g. claude-haiku-4-5-20251001)
-	SystemPrompt    string
-	UserMessage     string
-	ToolProfile     string // MINIMAL, CODING, MESSAGING, FULL
-	Credentials     []Credential
-	TimeoutSecs     int
-	MemoryEnabled   bool
-	CrewMembers     []CrewMember // Populated by bridge for LEAD agents
-	AllCrews        []CrewInfo        // Populated by bridge for COORDINATOR agents
-	ActiveMissions  []MissionSummary  // Active missions in workspace (for COORDINATOR)
-	SkipSidecar     bool         // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
-	SkipConvHistory bool         // When true, skip injecting conversation history (used by assignment sub-agents)
-	NetworkMode     string       // "free" (default) or "restricted" — crew-level network policy
-	AllowedDomains  []string     // Extra allowed domains for restricted mode
-	MemoryMB        int
-	CPUs            float64
-	TTLHours        int
+	AgentID            string
+	AgentSlug          string
+	AgentRole          string // AGENT, LEAD, COORDINATOR
+	CrewID             string
+	CrewSlug           string
+	ChatID             string
+	WorkspaceID        string
+	ContainerID        string
+	CLIAdapter         string // CLAUDE_CODE, OPENCODE, CODEX_CLI, GEMINI_CLI
+	LLMModel           string // optional model override (e.g. claude-haiku-4-5-20251001)
+	SystemPrompt       string
+	UserMessage        string
+	ToolProfile        string // MINIMAL, CODING, MESSAGING, FULL
+	Credentials        []Credential
+	TimeoutSecs        int
+	MemoryEnabled      bool
+	CrewMembers        []CrewMember     // Populated by bridge for LEAD agents
+	AllCrews           []CrewInfo       // Populated by bridge for COORDINATOR agents
+	ActiveMissions     []MissionSummary // Active missions in workspace (for COORDINATOR)
+	SkipSidecar        bool             // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
+	SkipConvHistory    bool             // When true, skip injecting conversation history (used by assignment sub-agents)
+	NetworkMode        string           // "free" (default) or "restricted" — crew-level network policy
+	AllowedDomains     []string         // Extra allowed domains for restricted mode
+	MemoryMB           int
+	CPUs               float64
+	TTLHours           int
 	MCPServers         []MCPServerConfig // Resolved MCP server configs for this agent
 	CrewMCPConfigJSON  string            // Raw crew .mcp.json (merged with agent's at runtime)
 	AgentMCPConfigJSON string            // Raw agent .mcp.json additions
@@ -73,7 +73,7 @@ type MCPServerConfig struct {
 // MCPCredential holds a decrypted credential for MCP server authentication.
 type MCPCredential struct {
 	PlainValue string `json:"token"`
-	Type       string `json:"type"`   // "bearer", "api_key", "basic"
+	Type       string `json:"type"` // "bearer", "api_key", "basic"
 	Header     string `json:"header,omitempty"`
 }
 
@@ -92,7 +92,7 @@ type Credential struct {
 type RunState struct {
 	ID           string    `json:"id"`
 	AgentID      string    `json:"agent_id"`
-	ChatID    string    `json:"chat_id"`
+	ChatID       string    `json:"chat_id"`
 	Status       string    `json:"status"`
 	StartedAt    time.Time `json:"started_at"`
 	ContainerID  string    `json:"container_id"`
@@ -146,11 +146,11 @@ func New(
 	logger *slog.Logger,
 ) *Orchestrator {
 	return &Orchestrator{
-		container:        container,
-		state:            state,
-		scrubber:         scrubber.New(),
-		logger:           logger,
-		cooldown:         NewCooldownManager(),
+		container: container,
+		state:     state,
+		scrubber:  scrubber.New(),
+		logger:    logger,
+		cooldown:  NewCooldownManager(),
 		accepting: true,
 		crews:     make(map[string]*crewState),
 	}
@@ -241,7 +241,7 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 	runState := RunState{
 		ID:          req.ChatID,
 		AgentID:     req.AgentID,
-		ChatID:   req.ChatID,
+		ChatID:      req.ChatID,
 		Status:      "running",
 		StartedAt:   time.Now(),
 		ContainerID: req.ContainerID,
@@ -880,15 +880,15 @@ func (o *Orchestrator) buildConversationContext(ctx context.Context, sessionID s
 // restricted network mode so stdio MCP servers can make outbound API calls.
 var mcpPackageDomains = map[string][]string{
 	"@modelcontextprotocol/server-github": {"api.github.com"},
-	"@anthropic-ai/brave-search-mcp":     {"api.search.brave.com"},
-	"@supabase/mcp-server-supabase":      {"api.supabase.com"},
-	"@notionhq/notion-mcp-server":        {"api.notion.com"},
-	"@stripe/mcp":                        {"api.stripe.com"},
-	"@datadog/mcp-server":                {"api.datadoghq.com"},
-	"linear-mcp":                         {"api.linear.app"},
-	"@anthropic-ai/slack-mcp":            {"slack.com"},
-	"@dguido/google-workspace-mcp":       {"www.googleapis.com", "accounts.google.com", "oauth2.googleapis.com"},
-	"mcp-server-sentry":                  {"sentry.io"},
+	"@anthropic-ai/brave-search-mcp":      {"api.search.brave.com"},
+	"@supabase/mcp-server-supabase":       {"api.supabase.com"},
+	"@notionhq/notion-mcp-server":         {"api.notion.com"},
+	"@stripe/mcp":                         {"api.stripe.com"},
+	"@datadog/mcp-server":                 {"api.datadoghq.com"},
+	"linear-mcp":                          {"api.linear.app"},
+	"@anthropic-ai/slack-mcp":             {"slack.com"},
+	"@dguido/google-workspace-mcp":        {"www.googleapis.com", "accounts.google.com", "oauth2.googleapis.com"},
+	"mcp-server-sentry":                   {"sentry.io"},
 }
 
 // mcpStdioDomains extracts API domains for stdio MCP servers by matching

@@ -9,10 +9,10 @@ import (
 // CrewConfig describes the resource requirements and network policy for a
 // crew's container runtime.
 type CrewConfig struct {
-	ID             string
-	Slug           string
-	MemoryMB       int
-	CPUs           float64
+	ID       string
+	Slug     string
+	MemoryMB int
+	CPUs     float64
 	// Passed through for orchestrator/sidecar layer; not consumed by providers directly yet.
 	NetworkMode    string   // "free" (default) or "restricted"
 	AllowedDomains []string // domains allowed when NetworkMode is "restricted"

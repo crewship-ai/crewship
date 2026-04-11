@@ -146,14 +146,14 @@ func (cm *CredentialMonitor) validateAnthropic(ctx context.Context, conn Provide
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusOK:
 		return StatusActive, ""
-	case resp.StatusCode == http.StatusUnauthorized:
+	case http.StatusUnauthorized:
 		return StatusExpired, "Authentication failed (401)"
-	case resp.StatusCode == http.StatusForbidden:
+	case http.StatusForbidden:
 		return StatusRevoked, "Access revoked (403)"
-	case resp.StatusCode == http.StatusTooManyRequests:
+	case http.StatusTooManyRequests:
 		return StatusRateLimited, "Rate limited (429)"
 	default:
 		return StatusError, fmt.Sprintf("Unexpected status: %d", resp.StatusCode)

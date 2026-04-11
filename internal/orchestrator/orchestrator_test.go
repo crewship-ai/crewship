@@ -68,8 +68,8 @@ type mockContainer struct {
 func (m *mockContainer) EnsureCrewRuntime(_ context.Context, _ provider.CrewConfig) (string, error) {
 	return "container-123", nil
 }
-func (m *mockContainer) StopCrewRuntime(_ context.Context, _ string) error    { return nil }
-func (m *mockContainer) RemoveCrewRuntime(_ context.Context, _ string) error  { return nil }
+func (m *mockContainer) StopCrewRuntime(_ context.Context, _ string) error   { return nil }
+func (m *mockContainer) RemoveCrewRuntime(_ context.Context, _ string) error { return nil }
 func (m *mockContainer) ContainerStatus(_ context.Context, _ string) (*provider.ContainerStatus, error) {
 	return &provider.ContainerStatus{State: "running"}, nil
 }
@@ -139,7 +139,7 @@ func TestRunAgentExecError(t *testing.T) {
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
 		AgentSlug:   "test-agent",
-		ChatID:   "s1",
+		ChatID:      "s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
 		UserMessage: "test",
@@ -186,7 +186,7 @@ func TestRunAgentSuccess(t *testing.T) {
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
 		AgentSlug:   "test-agent",
-		ChatID:   "s1",
+		ChatID:      "s1",
 		ContainerID: "c1",
 		CLIAdapter:  "CLAUDE_CODE",
 		UserMessage: "test",
@@ -238,7 +238,7 @@ func TestRunAgentExitCodeError(t *testing.T) {
 	err := o.RunAgent(context.Background(), AgentRunRequest{
 		AgentID:     "a1",
 		AgentSlug:   "test-agent",
-		ChatID:   "s1",
+		ChatID:      "s1",
 		ContainerID: "c1",
 		TimeoutSecs: 5,
 	}, nil)
@@ -263,7 +263,7 @@ func TestRunAgentInvalidSlug(t *testing.T) {
 		err := o.RunAgent(context.Background(), AgentRunRequest{
 			AgentID:     "a1",
 			AgentSlug:   slug,
-			ChatID:   "s1",
+			ChatID:      "s1",
 			ContainerID: "c1",
 			TimeoutSecs: 5,
 		}, nil)

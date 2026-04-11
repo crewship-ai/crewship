@@ -65,13 +65,18 @@ func TestCredentialMonitor_OnChange(t *testing.T) {
 		changes = append(changes, connID+":"+string(oldStatus)+"->"+string(newStatus))
 	})
 
-	// Manually mark status to simulate a change
+	// MarkStatus on the pool does NOT trigger the onChange callback — only
+	// checkOne does. This test verifies two things:
+	//   1. SetOnChange stores the callback on the monitor
+	//   2. MarkStatus is a no-op with respect to the callback path
 	pool.MarkStatus("c1", StatusRateLimited)
 
 	mu.Lock()
-	// Changes won't be triggered by MarkStatus directly -- only by checkOne
-	// This test validates the callback wiring
+	gotChanges := len(changes)
 	mu.Unlock()
+	if gotChanges != 0 {
+		t.Errorf("MarkStatus should not fire onChange on its own; got %d changes: %v", gotChanges, changes)
+	}
 
 	if monitor.onChange == nil {
 		t.Error("onChange callback should be set")

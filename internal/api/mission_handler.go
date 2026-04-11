@@ -332,10 +332,10 @@ func (h *MissionHandler) Update(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 
 	var req struct {
-		Status      *string  `json:"status"`
-		Title       *string  `json:"title"`
-		Description *string  `json:"description"`
-		Plan        *string  `json:"plan"`
+		Status      *string `json:"status"`
+		Title       *string `json:"title"`
+		Description *string `json:"description"`
+		Plan        *string `json:"plan"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
