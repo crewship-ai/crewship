@@ -176,32 +176,87 @@ export default function AuditPage() {
     )
   }, [logs, searchQuery])
 
-  const handleExport = () => {
-    if (filteredLogs.length === 0) return
-    const rows = filteredLogs.map((log) => ({
-      timestamp: log.created_at,
-      action: log.action,
-      entity_type: log.entity_type,
-      entity_id: log.entity_id,
-      user: log.user?.full_name ?? log.user?.email ?? "",
-      ip_address: log.ip_address ?? "",
-    }))
-    const header = Object.keys(rows[0] ?? {}).join(",")
-    const csv = [
-      header,
-      ...rows.map((r) =>
-        Object.values(r)
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-          .join(","),
-      ),
-    ].join("\n")
-    const blob = new Blob([csv], { type: "text/csv" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+  // Cap the number of rows an export may walk across pages. Audit logs can
+  // get large, and blocking the main thread on an unbounded fetch-loop is
+  // worse for compliance than a bounded export with a visible warning.
+  const EXPORT_MAX_ROWS = 10_000
+
+  const [exporting, setExporting] = useState(false)
+
+  const handleExport = async () => {
+    if (!workspaceId || totalCount === 0) return
+    setExporting(true)
+    try {
+      // Fetch every page matching the active server-side filters so the CSV
+      // reflects the full filtered set, not just the in-memory page. The
+      // client-side `searchQuery` filter is applied on top after aggregation.
+      const all: AuditLog[] = []
+      const totalToFetch = Math.min(totalCount, EXPORT_MAX_ROWS)
+      const pageCount = Math.ceil(totalToFetch / PAGE_SIZE)
+      for (let p = 1; p <= pageCount; p++) {
+        const params = new URLSearchParams({
+          workspace_id: workspaceId as string,
+          page: String(p),
+          limit: String(PAGE_SIZE),
+        })
+        if (category !== "all") params.set("entity_type", category)
+        const dateFrom = getDateFrom(dateRange)
+        if (dateFrom) params.set("date_from", dateFrom)
+        const res = await fetch(`/api/v1/audit?${params}`)
+        if (!res.ok) {
+          setError("Export failed — partial results discarded")
+          return
+        }
+        const data = (await res.json()) as AuditResponse
+        all.push(...data.data)
+        if (all.length >= EXPORT_MAX_ROWS) break
+      }
+      // Apply the same client-side text filter as the on-screen table so the
+      // CSV matches what the user is looking at.
+      const q = searchQuery.toLowerCase()
+      const filtered = searchQuery
+        ? all.filter(
+            (log) =>
+              log.action.toLowerCase().includes(q) ||
+              log.entity_type.toLowerCase().includes(q) ||
+              (log.user?.full_name ?? log.user?.email ?? "").toLowerCase().includes(q),
+          )
+        : all
+      if (filtered.length === 0) return
+      const rows = filtered.map((log) => ({
+        timestamp: log.created_at,
+        action: log.action,
+        entity_type: log.entity_type,
+        entity_id: log.entity_id,
+        user: log.user?.full_name ?? log.user?.email ?? "",
+        ip_address: log.ip_address ?? "",
+      }))
+      const header = Object.keys(rows[0] ?? {}).join(",")
+      const csv = [
+        header,
+        ...rows.map((r) =>
+          Object.values(r)
+            .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+            .join(","),
+        ),
+      ].join("\n")
+      const blob = new Blob([csv], { type: "text/csv" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+      if (totalCount > EXPORT_MAX_ROWS) {
+        setError(
+          `Export capped at ${EXPORT_MAX_ROWS.toLocaleString()} rows (total matches: ${totalCount.toLocaleString()}). Narrow the date range or category for a complete export.`,
+        )
+      }
+    } catch {
+      setError("Export failed")
+    } finally {
+      setExporting(false)
+    }
   }
 
   return (
@@ -230,11 +285,11 @@ export default function AuditPage() {
             variant="outline"
             size="sm"
             className="h-7 px-2.5 text-xs"
-            disabled={filteredLogs.length === 0}
+            disabled={totalCount === 0 || exporting || isLoading}
             onClick={handleExport}
           >
-            <Download className="h-3 w-3 mr-1.5" />
-            Export CSV
+            <Download className={cn("h-3 w-3 mr-1.5", exporting && "animate-pulse")} />
+            {exporting ? "Exporting…" : "Export CSV"}
           </Button>
         </div>
       </div>
@@ -327,6 +382,8 @@ export default function AuditPage() {
                 <Fragment key={log.id}>
                   <button
                     type="button"
+                    aria-expanded={isExpanded}
+                    aria-controls={`audit-log-details-${log.id}`}
                     onClick={() => setExpandedId(isExpanded ? null : log.id)}
                     className={cn(
                       "flex flex-col gap-1 md:grid md:grid-cols-[16px_140px_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1.2fr)] md:items-center md:gap-3 w-full px-4 py-2.5 text-left transition-colors border-b border-border/40 last:border-b-0",
@@ -371,7 +428,12 @@ export default function AuditPage() {
                   </button>
 
                   {isExpanded && (
-                    <div className="px-4 py-3 bg-white/[0.02] border-b border-border/40">
+                    <div
+                      id={`audit-log-details-${log.id}`}
+                      role="region"
+                      aria-label="Audit log details"
+                      className="px-4 py-3 bg-white/[0.02] border-b border-border/40"
+                    >
                       <div className="grid gap-3 text-[11px] sm:grid-cols-2 max-w-3xl">
                         <div>
                           <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60 mb-0.5">

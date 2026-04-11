@@ -67,6 +67,26 @@ function ChartContainer({
   )
 }
 
+// Validate a color string before it is interpolated into the <style> block.
+// Any value containing `;`, `{`, `}`, `<`, `>`, `*/`, `/*`, or a newline is
+// rejected up-front — those are the characters that would let a caller
+// break out of the `--color-key: <value>;` declaration. Then we delegate the
+// shape check to the browser's own CSS parser via `CSS.supports("color", v)`
+// instead of hand-rolling a regex for every valid color form (rgb, rgba, hsl,
+// oklch, color-mix, var(), named colors, …). On the server `CSS` is not
+// defined, so we fall back to the character-level screen alone; the style
+// tag only matters in the browser anyway since it has `data-chart=` scoping.
+function sanitizeCssColor(value: string | undefined): string | null {
+  if (!value) return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (/[;{}<>]|\*\/|\/\*|[\r\n]/.test(trimmed)) return null
+  if (typeof CSS !== "undefined" && typeof CSS.supports === "function") {
+    if (!CSS.supports("color", trimmed)) return null
+  }
+  return trimmed
+}
+
 const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   const colorConfig = Object.entries(config).filter(
     ([, cfg]) => cfg.theme || cfg.color
@@ -87,9 +107,10 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
 ${prefix} [data-chart="${safeChartId}"] {
 ${colorConfig
   .map(([key, itemConfig]) => {
-    const color =
+    const rawColor =
       itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ||
       itemConfig.color
+    const color = sanitizeCssColor(rawColor)
     return color ? `  --color-${key}: ${color};` : null
   })
   .filter(Boolean)
