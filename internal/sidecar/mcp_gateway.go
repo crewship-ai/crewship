@@ -19,14 +19,14 @@ import (
 // MCPGateway manages connections to external MCP servers and routes tool calls
 // with transparent per-agent credential injection (Gateway Offload pattern).
 type MCPGateway struct {
-	mu         sync.RWMutex
-	clients    map[string]*mcpClient // keyed by server name
-	tools      map[string][]MCPTool  // cached tool catalog per server
-	ipc        *IPCConfig
-	logger     *slog.Logger
+	mu           sync.RWMutex
+	clients      map[string]*mcpClient // keyed by server name
+	tools        map[string][]MCPTool  // cached tool catalog per server
+	ipc          *IPCConfig
+	logger       *slog.Logger
 	auditCh      chan auditEntry // bounded audit log channel
-	auditHTTP    *http.Client   // dedicated client for audit calls
-	auditBaseURL string         // base URL for audit HTTP calls
+	auditHTTP    *http.Client    // dedicated client for audit calls
+	auditBaseURL string          // base URL for audit HTTP calls
 	auditDone    chan struct{}   // closed when audit worker exits
 	shutdownCh   chan struct{}   // closed on shutdown to prevent send-to-closed-channel panic
 	closeOnce    sync.Once
@@ -112,9 +112,9 @@ type jsonRPCError struct {
 }
 
 type initializeResult struct {
-	ProtocolVersion string       `json:"protocolVersion"`
-	Capabilities    interface{}  `json:"capabilities"`
-	ServerInfo      *mcpInfo     `json:"serverInfo"`
+	ProtocolVersion string      `json:"protocolVersion"`
+	Capabilities    interface{} `json:"capabilities"`
+	ServerInfo      *mcpInfo    `json:"serverInfo"`
 }
 
 type mcpInfo struct {
@@ -169,10 +169,10 @@ func NewMCPGateway(servers []MCPServerInput, ipc *IPCConfig, logger *slog.Logger
 	}
 
 	g := &MCPGateway{
-		clients:    make(map[string]*mcpClient, len(servers)),
-		tools:      make(map[string][]MCPTool),
-		ipc:        ipc,
-		logger:     logger,
+		clients:      make(map[string]*mcpClient, len(servers)),
+		tools:        make(map[string][]MCPTool),
+		ipc:          ipc,
+		logger:       logger,
 		auditCh:      make(chan auditEntry, 64),
 		auditHTTP:    auditHTTP,
 		auditBaseURL: auditBaseURL,

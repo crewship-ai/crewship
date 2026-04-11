@@ -108,4 +108,3 @@ func parseDSN(dsn string) (string, error) {
 	}
 	return dsn, nil
 }
-

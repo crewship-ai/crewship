@@ -22,16 +22,16 @@ const (
 // Claims holds the verified payload of a signed license, including resource
 // limits, edition, and optional feature flags.
 type Claims struct {
-	LicenseID    string  `json:"license_id"`
-	LicenseeName string  `json:"licensee_name"`
-	LicenseeOrg  string  `json:"licensee_org"`
-	Edition      Edition `json:"edition"`
-	MaxCrews     int     `json:"max_crews"`
-	MaxAgents    int     `json:"max_agents_per_crew"`
-	MaxMembers   int     `json:"max_members"`
+	LicenseID    string   `json:"license_id"`
+	LicenseeName string   `json:"licensee_name"`
+	LicenseeOrg  string   `json:"licensee_org"`
+	Edition      Edition  `json:"edition"`
+	MaxCrews     int      `json:"max_crews"`
+	MaxAgents    int      `json:"max_agents_per_crew"`
+	MaxMembers   int      `json:"max_members"`
 	Features     []string `json:"features,omitempty"`
-	IssuedAt     int64   `json:"issued_at"`
-	ExpiresAt    int64   `json:"expires_at"`
+	IssuedAt     int64    `json:"issued_at"`
+	ExpiresAt    int64    `json:"expires_at"`
 }
 
 var communityDefaults = Claims{

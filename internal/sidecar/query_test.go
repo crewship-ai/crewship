@@ -458,10 +458,8 @@ func TestHandleEscalate_ForwardsEvidencePack(t *testing.T) {
 		ChatID:      "ch1",
 	}, nil)
 
-	evidencePack := `{"task_title":"Process invoices","agent_slug":"nela","error":"403 forbidden"}`
-	reqBody := `{"from":"nela","reason":"Permission denied","evidence_pack":` + "`" + evidencePack + "`" + `}`
-	// Use proper JSON escaping.
-	reqBody = `{"from":"nela","reason":"Permission denied","evidence_pack":"{\"task_title\":\"Process invoices\",\"agent_slug\":\"nela\",\"error\":\"403 forbidden\"}"}`
+	// Uses proper JSON escaping for the evidence_pack payload.
+	reqBody := `{"from":"nela","reason":"Permission denied","evidence_pack":"{\"task_title\":\"Process invoices\",\"agent_slug\":\"nela\",\"error\":\"403 forbidden\"}"}`
 
 	req := httptest.NewRequest(http.MethodPost, "/escalate",
 		strings.NewReader(reqBody))

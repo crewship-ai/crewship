@@ -91,9 +91,10 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	// Filter by read status
 	if readParam := r.URL.Query().Get("read"); readParam != "" {
-		if readParam == "true" {
+		switch readParam {
+		case "true":
 			query += " AND n.read_at IS NOT NULL"
-		} else if readParam == "false" {
+		case "false":
 			query += " AND n.read_at IS NULL"
 		}
 	}

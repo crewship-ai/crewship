@@ -23,9 +23,9 @@ func (h *IssueHandler) Review(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 
 	var req struct {
-		Action     string  `json:"action"`       // "approve" or "request_changes"
+		Action     string  `json:"action"` // "approve" or "request_changes"
 		Comment    string  `json:"comment"`
-		ReassignTo *string `json:"reassign_to"`  // agent slug for request_changes
+		ReassignTo *string `json:"reassign_to"` // agent slug for request_changes
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")

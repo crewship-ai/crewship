@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/huh"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -117,17 +120,48 @@ func requireAuth() error {
 }
 
 // confirmAction prompts for confirmation unless --yes is passed.
+//
+// On a TTY, it uses a styled huh confirmation prompt for better UX.
+// In non-interactive mode (CI, piped input), it falls back to a plain
+// fmt.Scanln read — this keeps scripts that pipe "y" or "n" working.
 func confirmAction(cmd *cobra.Command, message string) error {
 	yes, _ := cmd.Flags().GetBool("yes")
 	if yes {
 		return nil
 	}
-	fmt.Fprintf(os.Stderr, "%s [y/N]: ", message)
-	var answer string
-	fmt.Scanln(&answer)
-	answer = strings.TrimSpace(strings.ToLower(answer))
-	if answer != "y" && answer != "yes" {
-		return fmt.Errorf("aborted")
+
+	// Non-TTY fallback: preserve the old plain-stdin behavior so scripts
+	// that pipe "y\n" or "yes\n" continue to work unchanged. We gate on
+	// BOTH stdin AND stdout being TTYs — if stdout is redirected to a file
+	// (e.g. `crewship delete ... > out.txt`), huh would otherwise dump ANSI
+	// escape sequences into the file.
+	stdinTTY := term.IsTerminal(int(os.Stdin.Fd()))
+	stdoutTTY := term.IsTerminal(int(os.Stdout.Fd()))
+	if !stdinTTY || !stdoutTTY {
+		fmt.Fprintf(os.Stderr, "%s [y/N]: ", message)
+		var answer string
+		_, _ = fmt.Scanln(&answer)
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer != "y" && answer != "yes" {
+			return errors.New("aborted")
+		}
+		return nil
+	}
+
+	// Interactive mode: use huh for a pretty confirmation.
+	var confirmed bool
+	err := huh.NewConfirm().
+		Title(message).
+		Affirmative("Yes").
+		Negative("No").
+		Value(&confirmed).
+		Run()
+	if err != nil {
+		// Ctrl+C or similar — treat as abort.
+		return errors.New("aborted")
+	}
+	if !confirmed {
+		return errors.New("aborted")
 	}
 	return nil
 }

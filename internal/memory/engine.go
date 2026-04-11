@@ -31,11 +31,11 @@ func DefaultConfig() Config {
 
 // Status reports the current state of the memory engine.
 type Status struct {
-	TotalFiles   int       `json:"total_files"`
-	TotalChunks  int       `json:"total_chunks"`
-	IndexedAt    time.Time `json:"indexed_at"`
-	TotalSizeKB  int64     `json:"total_size_kb"`
-	SearchReady  bool      `json:"search_ready"`
+	TotalFiles  int       `json:"total_files"`
+	TotalChunks int       `json:"total_chunks"`
+	IndexedAt   time.Time `json:"indexed_at"`
+	TotalSizeKB int64     `json:"total_size_kb"`
+	SearchReady bool      `json:"search_ready"`
 }
 
 // Engine provides FTS5-backed search over agent memory files.

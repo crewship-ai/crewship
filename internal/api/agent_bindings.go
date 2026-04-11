@@ -8,19 +8,19 @@ import (
 // --- Response types ---
 
 type agentMCPBindingResponse struct {
-	ID               string  `json:"id"`
-	AgentID          string  `json:"agent_id"`
-	MCPServerID      string  `json:"mcp_server_id"`
-	MCPServerScope   string  `json:"mcp_server_scope"`
-	CredentialID     *string `json:"credential_id"`
-	CredType         *string `json:"cred_type"`
-	CredHeader       *string `json:"cred_header"`
-	Enabled          bool    `json:"enabled"`
-	ConfigOverride   *string `json:"config_override_json"`
-	CreatedAt        string  `json:"created_at"`
-	ServerName       string  `json:"server_name"`
-	ServerDisplay    string  `json:"server_display_name"`
-	CredentialName   *string `json:"credential_name"`
+	ID             string  `json:"id"`
+	AgentID        string  `json:"agent_id"`
+	MCPServerID    string  `json:"mcp_server_id"`
+	MCPServerScope string  `json:"mcp_server_scope"`
+	CredentialID   *string `json:"credential_id"`
+	CredType       *string `json:"cred_type"`
+	CredHeader     *string `json:"cred_header"`
+	Enabled        bool    `json:"enabled"`
+	ConfigOverride *string `json:"config_override_json"`
+	CreatedAt      string  `json:"created_at"`
+	ServerName     string  `json:"server_name"`
+	ServerDisplay  string  `json:"server_display_name"`
+	CredentialName *string `json:"credential_name"`
 }
 
 // --- Request types ---
@@ -29,9 +29,9 @@ type createAgentBindingRequest struct {
 	MCPServerID    string  `json:"mcp_server_id"`
 	MCPServerScope string  `json:"mcp_server_scope"`
 	CredentialID   *string `json:"credential_id"`
-	CredType       *string `json:"cred_type"`      // "bearer", "api_key", "basic"
-	CredHeader     *string `json:"cred_header"`     // custom header for api_key type
-	EnvVarName     *string `json:"env_var_name"`    // env var name for stdio credential injection
+	CredType       *string `json:"cred_type"`    // "bearer", "api_key", "basic"
+	CredHeader     *string `json:"cred_header"`  // custom header for api_key type
+	EnvVarName     *string `json:"env_var_name"` // env var name for stdio credential injection
 	Enabled        *bool   `json:"enabled"`
 	ConfigOverride *string `json:"config_override_json"`
 }

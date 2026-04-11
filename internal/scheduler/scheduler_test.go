@@ -471,12 +471,12 @@ func TestTriggerAgent_Success(t *testing.T) {
 
 	resolver := &mockResolver{
 		resolveInfo: &chatbridge.ChatInfo{
-			AgentID:   "a1",
-			AgentSlug: "bob",
-			AgentRole: "AGENT",
-			CrewID:    "crew1",
-			CrewSlug:  "alpha",
-			CLIAdapter: "CLAUDE_CODE",
+			AgentID:     "a1",
+			AgentSlug:   "bob",
+			AgentRole:   "AGENT",
+			CrewID:      "crew1",
+			CrewSlug:    "alpha",
+			CLIAdapter:  "CLAUDE_CODE",
 			WorkspaceID: "ws1",
 		},
 	}

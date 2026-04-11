@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -594,21 +595,21 @@ func TestDefaultEnvVarForProvider(t *testing.T) {
 }
 
 func TestPreRunInstallPackages_InvalidName(t *testing.T) {
-	err := PreRunInstallPackages(nil, nil, "container-1", []string{"gh;rm -rf /"}, slog.Default())
+	err := PreRunInstallPackages(context.TODO(), nil, "container-1", []string{"gh;rm -rf /"}, slog.Default())
 	if err == nil {
 		t.Error("expected error for invalid package name with semicolon")
 	}
 }
 
 func TestPreRunInstallPackages_EmptyList(t *testing.T) {
-	err := PreRunInstallPackages(nil, nil, "container-1", nil, slog.Default())
+	err := PreRunInstallPackages(context.TODO(), nil, "container-1", nil, slog.Default())
 	if err != nil {
 		t.Errorf("expected nil error for empty package list, got %v", err)
 	}
 }
 
 func TestWriteCredentialFiles_NoCredentials(t *testing.T) {
-	err := writeCredentialFiles(nil, nil, "ctr-1", "agent-a", nil, "/secrets/agent-a", "/secrets/shared", slog.Default())
+	err := writeCredentialFiles(context.TODO(), nil, "ctr-1", "agent-a", nil, "/secrets/agent-a", "/secrets/shared", slog.Default())
 	if err != nil {
 		t.Errorf("expected nil error for empty creds, got %v", err)
 	}
@@ -620,7 +621,7 @@ func TestWriteCredentialFiles_SkipsAPIKeys(t *testing.T) {
 		{ID: "c1", EnvVarName: "ANTHROPIC_API_KEY", PlainValue: "sk-ant-123", Type: "API_KEY"},
 		{ID: "c2", EnvVarName: "CLAUDE_CODE_OAUTH_TOKEN", PlainValue: "sk-ant-oat-123", Type: "AI_CLI_TOKEN"},
 	}
-	err := writeCredentialFiles(nil, nil, "ctr-1", "agent-a", creds, "/secrets/agent-a", "/secrets/shared", slog.Default())
+	err := writeCredentialFiles(context.TODO(), nil, "ctr-1", "agent-a", creds, "/secrets/agent-a", "/secrets/shared", slog.Default())
 	if err != nil {
 		t.Errorf("expected nil for API-only creds, got %v", err)
 	}
@@ -631,7 +632,7 @@ func TestWriteCredentialFiles_SkipsEmptyValues(t *testing.T) {
 		{ID: "c1", EnvVarName: "GH_TOKEN", PlainValue: "", Type: "CLI_TOKEN"},
 		{ID: "c2", EnvVarName: "", PlainValue: "some-val", Type: "SECRET"},
 	}
-	err := writeCredentialFiles(nil, nil, "ctr-1", "agent-a", creds, "/secrets/agent-a", "/secrets/shared", slog.Default())
+	err := writeCredentialFiles(context.TODO(), nil, "ctr-1", "agent-a", creds, "/secrets/agent-a", "/secrets/shared", slog.Default())
 	if err != nil {
 		t.Errorf("expected nil for creds with empty name/value, got %v", err)
 	}
@@ -666,7 +667,7 @@ func TestBuildMCPConfig_Stdio(t *testing.T) {
 	servers := []MCPServerConfig{
 		{
 			Name: "github", Transport: "stdio", Command: "npx",
-			Args: []string{"@modelcontextprotocol/server-github"},
+			Args:       []string{"@modelcontextprotocol/server-github"},
 			Credential: &MCPCredential{PlainValue: "ghp_xxx", Type: "bearer", Header: "GITHUB_TOKEN"},
 		},
 	}
@@ -760,9 +761,9 @@ func TestMcpStdioDomains(t *testing.T) {
 		{Transport: "stdio", Command: "npx", Args: []string{"-y", "@anthropic-ai/brave-search-mcp"}},
 		{Transport: "stdio", Command: "npx", Args: []string{"-y", "@anthropic-ai/brave-search-mcp@latest"}}, // versioned
 		{Transport: "stdio", Command: "npx", Args: []string{"-y", "linear-mcp@^2.0.0"}},                     // unscoped versioned
-		{Transport: "streamable-http", Endpoint: "https://mcp.sentry.dev/mcp"},                                // should be ignored
-		{Transport: "stdio", Command: "npx", Args: []string{"-y", "unknown-package"}},                        // no match
-		{Transport: "stdio", Command: "python3", Args: []string{"@stripe/mcp"}},                               // non-launcher, should be ignored
+		{Transport: "streamable-http", Endpoint: "https://mcp.sentry.dev/mcp"},                              // should be ignored
+		{Transport: "stdio", Command: "npx", Args: []string{"-y", "unknown-package"}},                       // no match
+		{Transport: "stdio", Command: "python3", Args: []string{"@stripe/mcp"}},                             // non-launcher, should be ignored
 	}
 	domains := mcpStdioDomains(servers)
 	found := make(map[string]bool)

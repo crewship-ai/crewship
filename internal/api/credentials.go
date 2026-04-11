@@ -779,11 +779,12 @@ func (h *CredentialHandler) Test(w http.ResponseWriter, r *http.Request) {
 		defer resp.Body.Close()
 		io.Copy(io.Discard, resp.Body)
 
-		if resp.StatusCode == http.StatusOK {
+		switch resp.StatusCode {
+		case http.StatusOK:
 			writeJSON(w, http.StatusOK, testResult{Valid: true, Status: resp.StatusCode})
-		} else if resp.StatusCode == http.StatusUnauthorized {
+		case http.StatusUnauthorized:
 			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: "Invalid API key"})
-		} else {
+		default:
 			writeJSON(w, http.StatusOK, testResult{Status: resp.StatusCode, Error: fmt.Sprintf("Unexpected response: %d", resp.StatusCode)})
 		}
 

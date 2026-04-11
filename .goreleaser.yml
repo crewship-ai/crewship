@@ -46,6 +46,40 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+# SBOM generation via syft (CRE-122).
+# Produces both SPDX (US federal procurement standard) and CycloneDX
+# (OWASP Dependency-Track) formats attached to each archive.
+sboms:
+  - id: spdx
+    artifacts: archive
+    documents:
+      - "${artifact}.spdx.json"
+    cmd: syft
+    args: ["$artifact", "--output", "spdx-json=$document"]
+  - id: cyclonedx
+    artifacts: archive
+    documents:
+      - "${artifact}.cdx.json"
+    cmd: syft
+    args: ["$artifact", "--output", "cyclonedx-json=$document"]
+
+# Keyless cosign signing via GitHub Actions OIDC (CRE-122).
+# The absence of `--key` enables keyless mode in cosign ≥ 2.0; ambient
+# OIDC is auto-detected from the GitHub Actions token.
+# `artifacts: all` signs archives, checksums, and SBOMs.
+signs:
+  - id: cosign-all
+    cmd: cosign
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+    artifacts: all
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+
 changelog:
   sort: asc
   filters:
@@ -87,5 +121,20 @@ release:
     ```
 
     Or download the binary for your platform below.
+
+    ### Supply chain verification
+
+    All release artifacts are signed with [Sigstore cosign](https://www.sigstore.dev/)
+    (keyless, GitHub Actions OIDC) and ship with SBOMs in both SPDX and CycloneDX formats.
+
+    Verify a binary signature:
+    ```bash
+    cosign verify-blob \
+      --certificate-identity-regexp "https://github.com/crewship-ai/crewship/.github/workflows/release.yml@.*" \
+      --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+      --signature crewship_{{ .Tag }}_linux_amd64.tar.gz.sig \
+      --certificate crewship_{{ .Tag }}_linux_amd64.tar.gz.pem \
+      crewship_{{ .Tag }}_linux_amd64.tar.gz
+    ```
 
 docker_manifests: []

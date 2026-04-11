@@ -16,7 +16,7 @@ import (
 // sidecarInput is the JSON payload piped via stdin from the orchestrator.
 // It carries credentials, optional memory configuration, and IPC config for assignment routing.
 type sidecarInput struct {
-	Credentials   []sidecar.Credential        `json:"credentials"`
+	Credentials   []sidecar.Credential         `json:"credentials"`
 	Memory        *sidecar.MemoryConfig        `json:"memory,omitempty"`
 	IPC           *sidecar.IPCConfig           `json:"ipc,omitempty"`
 	CrewMembers   []sidecar.CrewMember         `json:"crew_members,omitempty"`

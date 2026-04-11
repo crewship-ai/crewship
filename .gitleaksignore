@@ -1,0 +1,10 @@
+# Crewship .gitleaksignore
+# Commit-level fingerprint allowlist for gitleaks.
+# Format: <commit-sha>:<path>:<rule-id>:<line>
+#
+# Do NOT add entries for REAL secrets — rotate the credential first.
+# Each entry below has been manually verified as a false positive.
+
+# Scrubber source contains regex patterns to DETECT private keys.
+# The regex literal itself matches gitleaks' private-key rule. Not a real key.
+11003c24d54ab4bf2bccfeff49f3f9f7c32a9916:internal/scrubber/scrubber.go:private-key:30

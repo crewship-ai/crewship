@@ -44,22 +44,22 @@ type proposalTask struct {
 }
 
 type proposalResponse struct {
-	ID           string              `json:"id"`
-	WorkspaceID  string              `json:"workspace_id"`
-	ProposedByID *string             `json:"proposed_by_id"`
-	ProposerName *string             `json:"proposer_name,omitempty"`
-	ProposerSlug *string             `json:"proposer_slug,omitempty"`
-	Title        string              `json:"title"`
-	Description  *string             `json:"description"`
-	Plan         *string             `json:"plan"`
-	Status       string              `json:"status"`
-	Missions     []proposalMission   `json:"missions,omitempty"`
-	MissionIDs   []string            `json:"mission_ids,omitempty"`
-	ReviewedBy   *string             `json:"reviewed_by"`
-	ReviewedAt   *string             `json:"reviewed_at"`
-	ReviewNotes  *string             `json:"review_notes"`
-	CreatedAt    string              `json:"created_at"`
-	UpdatedAt    string              `json:"updated_at"`
+	ID           string            `json:"id"`
+	WorkspaceID  string            `json:"workspace_id"`
+	ProposedByID *string           `json:"proposed_by_id"`
+	ProposerName *string           `json:"proposer_name,omitempty"`
+	ProposerSlug *string           `json:"proposer_slug,omitempty"`
+	Title        string            `json:"title"`
+	Description  *string           `json:"description"`
+	Plan         *string           `json:"plan"`
+	Status       string            `json:"status"`
+	Missions     []proposalMission `json:"missions,omitempty"`
+	MissionIDs   []string          `json:"mission_ids,omitempty"`
+	ReviewedBy   *string           `json:"reviewed_by"`
+	ReviewedAt   *string           `json:"reviewed_at"`
+	ReviewNotes  *string           `json:"review_notes"`
+	CreatedAt    string            `json:"created_at"`
+	UpdatedAt    string            `json:"updated_at"`
 }
 
 // List handles GET /api/v1/mission-proposals

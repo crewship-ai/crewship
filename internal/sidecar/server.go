@@ -73,7 +73,7 @@ type MCPServerInput struct {
 // MCPCredInput carries decrypted credential for MCP server authentication.
 type MCPCredInput struct {
 	Token  string `json:"token"`
-	Type   string `json:"type"`   // "bearer", "api_key", "basic"
+	Type   string `json:"type"`             // "bearer", "api_key", "basic"
 	Header string `json:"header,omitempty"` // custom header name (for api_key type)
 }
 

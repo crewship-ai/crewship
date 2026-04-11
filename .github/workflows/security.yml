@@ -1,0 +1,205 @@
+name: Security
+
+# CRE-122 supply chain + quality gates.
+# Runs on every PR and push to main. All checks run in parallel.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege permissions. Jobs that need more (e.g. grype's SARIF upload
+# to the GitHub Security tab) grant it explicitly at the job level.
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+
+jobs:
+  # ── Secret scan: gitleaks ──
+  # Uses the gitleaks CLI binary directly (free, MIT licensed) instead of
+  # gitleaks/gitleaks-action@v2, which requires a paid license key for
+  # organization accounts. The CLI binary has no such restriction.
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          # Full history so gitleaks can scan commits on push to main.
+          fetch-depth: 0
+
+      # Download the gitleaks release tarball AND the upstream SHA-256
+      # checksums file, then verify the tarball against it before extracting.
+      # This matches the supply-chain hardening applied elsewhere in this
+      # workflow (SHA-pinned actions, cosign keyless signatures on release
+      # artifacts) and protects against a retargeted release asset.
+      - name: Install gitleaks (checksum-verified)
+        run: |
+          set -euo pipefail
+          GITLEAKS_VERSION="8.29.1"
+          BASE_URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          wget -q "${BASE_URL}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            -O /tmp/gitleaks.tar.gz
+          wget -q "${BASE_URL}/gitleaks_${GITLEAKS_VERSION}_checksums.txt" \
+            -O /tmp/gitleaks_checksums.txt
+          # Extract just the linux_x64 row and feed it to sha256sum -c.
+          grep "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" /tmp/gitleaks_checksums.txt \
+            | awk '{print $1 "  /tmp/gitleaks.tar.gz"}' \
+            | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Run gitleaks detect
+        run: gitleaks detect --no-banner --redact --verbose
+
+  # ── Go vulnerability scan: govulncheck ──
+  #
+  # Known accepted vulnerabilities (as of 2026-04-10):
+  #   - GO-2026-4887 (docker/docker AuthZ plugin bypass) — no upstream fix,
+  #     not reachable in Crewship's usage (we don't use AuthZ plugins)
+  #   - GO-2026-4883 (docker/docker plugin privilege off-by-one) — no upstream
+  #     fix, not reachable in Crewship's usage
+  #   Both documented in THIRD-PARTY-NOTICES.md.
+  #
+  # We wrap govulncheck in a script that accepts these specific CVE IDs and
+  # fails ONLY on new/unknown vulnerabilities. This way the check stays GREEN
+  # in the PR UI while still alerting on any new vulns that appear.
+  govulncheck:
+    name: Go Vuln Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      # web/embed.go stub required for go-analysis tools.
+      - name: Create embed stub
+        run: mkdir -p web/out && echo '<!doctype html>' > web/out/index.html
+
+      # Pin to a specific govulncheck version so CI runs are reproducible.
+      # '@latest' would silently upgrade across breaking changes.
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: Run govulncheck (known-accepted CVEs allowlisted)
+        run: |
+          set +e
+          govulncheck ./... > /tmp/govuln.log 2>&1
+          exit_code=$?
+          cat /tmp/govuln.log
+
+          # Exit 0 = clean, pass immediately.
+          if [ $exit_code -eq 0 ]; then
+            exit 0
+          fi
+
+          # Exit 3 = vulnerabilities found. Anything else (1, 2, signal, ...)
+          # means a tool/runtime/analysis error — fail loudly, do NOT silently
+          # pass by landing in the allowlist branch with no parsed IDs.
+          if [ $exit_code -ne 3 ]; then
+            echo "::error::govulncheck failed to execute (exit code ${exit_code}). See output above."
+            exit $exit_code
+          fi
+
+          # exit_code == 3: vulnerabilities were reported. Extract the GO IDs
+          # and verify every one of them is on the known-accepted list.
+          accepted_pattern='GO-2026-4887|GO-2026-4883'
+          all_vulns=$(grep -oE 'GO-[0-9]{4}-[0-9]+' /tmp/govuln.log | sort -u)
+          echo ""
+          echo "=== Detected vulnerability IDs ==="
+          echo "$all_vulns"
+          echo ""
+
+          # Defensive: exit 3 without any parseable GO IDs means the output
+          # format changed or parsing is broken — we cannot safely allowlist,
+          # so fail.
+          if [ -z "$all_vulns" ]; then
+            echo "::error::govulncheck reported vulnerabilities (exit 3) but no GO-YYYY-NNNN IDs could be parsed from the output. Output format may have changed."
+            exit 1
+          fi
+
+          unexpected=$(echo "$all_vulns" | grep -vE "^($accepted_pattern)$" || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::New unexpected vulnerability detected — not in accepted list:"
+            echo "$unexpected"
+            echo ""
+            echo "If this is intentional, update .github/workflows/security.yml"
+            echo "and THIRD-PARTY-NOTICES.md §Known accepted vulnerabilities."
+            exit 1
+          fi
+
+          echo "::notice::govulncheck found only known-accepted CVEs (${accepted_pattern}). See THIRD-PARTY-NOTICES.md."
+          exit 0
+
+  # ── Source vulnerability scan: grype ──
+  grype:
+    name: Grype Source Scan
+    runs-on: ubuntu-latest
+    # SARIF upload to the GitHub Security tab requires write access to
+    # security-events. Granted only to this job (least-privilege).
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run grype on source tree
+        id: scan
+        # Pinned to a specific commit SHA so a retargeted mutable tag cannot
+        # silently inject a modified action. Tracks anchore/scan-action v7.
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7
+        with:
+          path: "."
+          fail-build: false  # warning only in Phase 1 — promote after baseline is clean
+          severity-cutoff: high
+          output-format: sarif
+
+      # anchore/scan-action@v7 writes SARIF to a random temp path (not
+      # ./results.sarif in the workspace like v6 did). Reference the output
+      # variable so the upload step finds the file.
+      - name: Upload SARIF to GitHub Security
+        # Pinned to a specific commit SHA for supply-chain hardening.
+        uses: github/codeql-action/upload-sarif@3b1a19a80ab047f35cbb237b5bd9bdc1e14f166c # v3
+        if: always()
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+        continue-on-error: true
+
+  # ── License policy: go-licenses (forbidden-license check) ──
+  license-check:
+    name: License Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Create embed stub
+        run: mkdir -p web/out && echo '<!doctype html>' > web/out/index.html
+
+      # Pin to a specific go-licenses version for reproducible CI runs.
+      # Note: v2.x has a different CLI surface (different `check` / `csv`
+      # subcommand flags). This pin locks to v1.6.0, which matches the
+      # scripts/gen-notices.sh wrapper and the locally-tested behavior.
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@v1.6.0
+
+      # modernc.org/mathutil is BSD-3-Clause but go-licenses cannot detect it
+      # due to a file-matching edge case. Verified and documented.
+      - name: Check for forbidden licenses
+        run: |
+          go-licenses check ./cmd/crewship \
+            --disallowed_types=forbidden,restricted \
+            --ignore modernc.org/mathutil

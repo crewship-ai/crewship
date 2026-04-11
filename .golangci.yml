@@ -1,0 +1,43 @@
+# Crewship golangci-lint configuration
+# CRE-122 Phase 1: conservative linter set.
+# More linters (gosec, gocritic, revive, gocyclo) will be enabled in Phase 2
+# after the baseline is green.
+#
+# Local use:   golangci-lint run ./...
+# CI invokes:  make lint  (which runs this + pnpm lint)
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - govet         # stdlib static analysis (free, already runs)
+    - ineffassign   # dead assignments
+    - staticcheck   # bug detection only in Phase 1 (SA* checks)
+    - unused        # unused code
+  # Phase 1 deliberately disables:
+  #   - errcheck — ~925 existing unchecked errors (db.Exec, rows.Close,
+  #     resp.Body.Close, JSON Encode/Decode patterns). Phase 2 will enable
+  #     errcheck after a targeted cleanup sweep.
+  #   - gosec, gocritic, revive, gocyclo, dupl, gochecknoglobals — save for
+  #     Phase 2 or 3 after baseline is green.
+  settings:
+    staticcheck:
+      # Phase 1: only run bug-detecting SA* checks. Defer QF* (quickfix),
+      # S* (simplify), and ST* (style) rules to a Phase 2 cleanup sweep.
+      # SA1012 ("do not pass nil Context") is the most common bug catcher.
+      checks:
+        - "SA*"
+        - "-ST1005"    # already fixed, keep disabled to avoid regression work
+
+formatters:
+  enable:
+    - gofmt         # formatting
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

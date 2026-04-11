@@ -33,28 +33,28 @@ type ChatResolver interface {
 // ChatInfo holds the resolved configuration for a chat session, including
 // agent identity, crew context, credentials, and resource settings.
 type ChatInfo struct {
-	AgentID        string
-	AgentSlug      string
-	AgentRole      string
-	CrewID         string
-	CrewSlug       string
-	ContainerID    string
-	CLIAdapter     string
-	LLMModel       string
-	SystemPrompt   string
-	ToolProfile    string
-	Credentials    []orchestrator.Credential
-	TimeoutSecs    int
-	WorkspaceID    string
-	MemoryEnabled  bool
-	CrewMembers    []orchestrator.CrewMember
-	AllCrews       []orchestrator.CrewInfo
-	ActiveMissions []orchestrator.MissionSummary
-	NetworkMode    string
-	AllowedDomains []string
-	MemoryMB       int
-	CPUs           float64
-	TTLHours       int
+	AgentID            string
+	AgentSlug          string
+	AgentRole          string
+	CrewID             string
+	CrewSlug           string
+	ContainerID        string
+	CLIAdapter         string
+	LLMModel           string
+	SystemPrompt       string
+	ToolProfile        string
+	Credentials        []orchestrator.Credential
+	TimeoutSecs        int
+	WorkspaceID        string
+	MemoryEnabled      bool
+	CrewMembers        []orchestrator.CrewMember
+	AllCrews           []orchestrator.CrewInfo
+	ActiveMissions     []orchestrator.MissionSummary
+	NetworkMode        string
+	AllowedDomains     []string
+	MemoryMB           int
+	CPUs               float64
+	TTLHours           int
 	MCPServers         []orchestrator.MCPServerConfig
 	CrewMCPConfigJSON  string
 	AgentMCPConfigJSON string
@@ -162,12 +162,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 
 	// For COORDINATOR agents (no crew), use a synthetic crew identity for container management
 	containerKey := info.CrewID
-	containerSlug := info.CrewSlug
 	if info.AgentRole == "COORDINATOR" && info.CrewID == "" {
 		containerKey = "coordinator-" + info.WorkspaceID
-		containerSlug = "coordinator"
 		info.CrewID = containerKey
-		info.CrewSlug = containerSlug
+		info.CrewSlug = "coordinator"
 	}
 
 	// Look up cached container ID for this crew (avoids status noise on repeat messages)
@@ -233,30 +231,30 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	var toolSummaries []string
 
 	req := orchestrator.AgentRunRequest{
-		AgentID:        info.AgentID,
-		AgentSlug:      info.AgentSlug,
-		AgentRole:      info.AgentRole,
-		CrewID:         info.CrewID,
-		CrewSlug:       info.CrewSlug,
-		WorkspaceID:    info.WorkspaceID,
-		ChatID:         chatID,
-		ContainerID:    containerID,
-		CLIAdapter:     info.CLIAdapter,
-		LLMModel:       info.LLMModel,
-		SystemPrompt:   info.SystemPrompt,
-		UserMessage:    content,
-		ToolProfile:    info.ToolProfile,
-		Credentials:    info.Credentials,
-		TimeoutSecs:    info.TimeoutSecs,
-		MemoryEnabled:  info.MemoryEnabled,
-		CrewMembers:    info.CrewMembers,
-		AllCrews:       info.AllCrews,
-		ActiveMissions: info.ActiveMissions,
-		NetworkMode:    info.NetworkMode,
-		AllowedDomains: info.AllowedDomains,
-		MemoryMB:       memoryMB,
-		CPUs:           cpuVal,
-		TTLHours:       info.TTLHours,
+		AgentID:            info.AgentID,
+		AgentSlug:          info.AgentSlug,
+		AgentRole:          info.AgentRole,
+		CrewID:             info.CrewID,
+		CrewSlug:           info.CrewSlug,
+		WorkspaceID:        info.WorkspaceID,
+		ChatID:             chatID,
+		ContainerID:        containerID,
+		CLIAdapter:         info.CLIAdapter,
+		LLMModel:           info.LLMModel,
+		SystemPrompt:       info.SystemPrompt,
+		UserMessage:        content,
+		ToolProfile:        info.ToolProfile,
+		Credentials:        info.Credentials,
+		TimeoutSecs:        info.TimeoutSecs,
+		MemoryEnabled:      info.MemoryEnabled,
+		CrewMembers:        info.CrewMembers,
+		AllCrews:           info.AllCrews,
+		ActiveMissions:     info.ActiveMissions,
+		NetworkMode:        info.NetworkMode,
+		AllowedDomains:     info.AllowedDomains,
+		MemoryMB:           memoryMB,
+		CPUs:               cpuVal,
+		TTLHours:           info.TTLHours,
 		MCPServers:         info.MCPServers,
 		CrewMCPConfigJSON:  info.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: info.AgentMCPConfigJSON,

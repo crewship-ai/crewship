@@ -226,8 +226,8 @@ func TestResolveChat_WithCredentials(t *testing.T) {
 
 func TestResolveChat_LanguagePreference(t *testing.T) {
 	tests := []struct {
-		name     string
-		lang     *string
+		name      string
+		lang      *string
 		wantBlock bool
 		wantLang  string
 	}{

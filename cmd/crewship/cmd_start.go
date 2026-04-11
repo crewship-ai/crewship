@@ -40,15 +40,19 @@ var startCmd = &cobra.Command{
 		detectCtx, detectCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer detectCancel()
 		if !noDocker && !checkAnyRuntime(detectCtx) {
-			return fmt.Errorf("no container runtime found.\n\n" +
-				"Crewship requires a container runtime to run AI agents.\n" +
-				"Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop, Apple Containers\n\n" +
-				"Install Docker Desktop:    https://docs.docker.com/get-docker/\n" +
-				"Install Podman:            https://podman.io/docs/installation\n" +
-				"Install Apple Containers:  brew install container (macOS 26+)\n\n" +
-				"To start without containers (dashboard only, no agents):\n" +
-				"  crewship start --no-docker\n\n" +
-				"Run 'crewship doctor' for full diagnostics.")
+			// Print the help text to stderr, then return a short error.
+			// Avoids ST1005 (error strings should not end with punctuation/newlines)
+			// while preserving the full user-facing guidance.
+			fmt.Fprintln(os.Stderr,
+				"Crewship requires a container runtime to run AI agents.\n"+
+					"Supported: Docker, Podman, Colima, OrbStack, Rancher Desktop, Apple Containers\n\n"+
+					"Install Docker Desktop:    https://docs.docker.com/get-docker/\n"+
+					"Install Podman:            https://podman.io/docs/installation\n"+
+					"Install Apple Containers:  brew install container (macOS 26+)\n\n"+
+					"To start without containers (dashboard only, no agents):\n"+
+					"  crewship start --no-docker\n\n"+
+					"Run 'crewship doctor' for full diagnostics")
+			return fmt.Errorf("no container runtime found")
 		}
 
 		bootstrapLogger := logging.New("info", "json", os.Stdout)

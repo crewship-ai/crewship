@@ -177,10 +177,10 @@ func TestIPCResolverCreateSession(t *testing.T) {
 	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
 
 	err := resolver.CreateChat(context.Background(), CreateChatRequest{
-		ChatID: "chat-001",
-		AgentID:   "agent-1",
-		WorkspaceID:     "org-1",
-		UserID:    "user-1",
+		ChatID:      "chat-001",
+		AgentID:     "agent-1",
+		WorkspaceID: "org-1",
+		UserID:      "user-1",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -197,9 +197,9 @@ func TestIPCResolverCreateSessionError(t *testing.T) {
 	resolver := NewIPCResolver(ts.URL, "crewshipd", slog.Default())
 
 	err := resolver.CreateChat(context.Background(), CreateChatRequest{
-		ChatID: "chat-001",
-		AgentID:   "agent-1",
-		WorkspaceID:     "org-1",
+		ChatID:      "chat-001",
+		AgentID:     "agent-1",
+		WorkspaceID: "org-1",
 	})
 	if err == nil {
 		t.Fatal("expected error for server error")

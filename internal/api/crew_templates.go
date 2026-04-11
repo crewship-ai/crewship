@@ -158,16 +158,16 @@ func NewCrewTemplateHandler(db *sql.DB, logger *slog.Logger) *CrewTemplateHandle
 }
 
 type crewTemplateResponse struct {
-	ID          string                          `json:"id"`
-	Name        string                          `json:"name"`
-	Slug        string                          `json:"slug"`
-	Description *string                         `json:"description"`
-	Icon        *string                         `json:"icon"`
-	Color       *string                         `json:"color"`
-	Category    string                          `json:"category"`
-	Agents      []database.CrewTemplateAgent    `json:"agents"`
-	IsBuiltin   bool                            `json:"is_builtin"`
-	CreatedAt   string                          `json:"created_at"`
+	ID          string                       `json:"id"`
+	Name        string                       `json:"name"`
+	Slug        string                       `json:"slug"`
+	Description *string                      `json:"description"`
+	Icon        *string                      `json:"icon"`
+	Color       *string                      `json:"color"`
+	Category    string                       `json:"category"`
+	Agents      []database.CrewTemplateAgent `json:"agents"`
+	IsBuiltin   bool                         `json:"is_builtin"`
+	CreatedAt   string                       `json:"created_at"`
 }
 
 // List handles GET /api/v1/crew-templates

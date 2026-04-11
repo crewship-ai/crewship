@@ -43,7 +43,7 @@ const (
 // including the credential, its status, and optional OAuth refresh token.
 type ProviderConnection struct {
 	ID             string           `json:"id"`
-	WorkspaceID          string           `json:"workspace_id"`
+	WorkspaceID    string           `json:"workspace_id"`
 	Name           string           `json:"name"`
 	Type           CredentialType   `json:"type"`
 	Provider       ProviderType     `json:"provider"`
