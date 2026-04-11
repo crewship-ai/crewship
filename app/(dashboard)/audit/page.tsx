@@ -109,8 +109,15 @@ export default function AuditPage() {
   const fetchLogs = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!workspaceId) {
-        // Clear loading flags so the empty-state / "select workspace" UI can
-        // render instead of an infinite skeleton once wsLoading flips false.
+        // Clear all workspace-scoped state so the empty-state / "select
+        // workspace" UI renders blank instead of showing stale rows from the
+        // previous workspace. `wsLoading` flips false in that branch too, so
+        // loading flags need to drop with it.
+        setLogs([])
+        setTotalCount(0)
+        setTotalPages(1)
+        setExpandedId(null)
+        setError(null)
         setLoading(false)
         setRefreshing(false)
         return
@@ -231,14 +238,20 @@ export default function AuditPage() {
         user: log.user?.full_name ?? log.user?.email ?? "",
         ip_address: log.ip_address ?? "",
       }))
+      // Neutralize cells that start with =, +, -, @ (after any leading
+      // whitespace) before quoting. Spreadsheet apps evaluate those prefixes
+      // as formulas, so an attacker-controlled `entity_id` or `user` field
+      // could exfiltrate data when the CSV is opened. Prefixing with a
+      // single quote is the standard mitigation.
+      const toCsvCell = (value: unknown): string => {
+        const raw = String(value ?? "")
+        const safe = /^[\t\r\n ]*[=+\-@]/.test(raw) ? `'${raw}` : raw
+        return `"${safe.replace(/"/g, '""')}"`
+      }
       const header = Object.keys(rows[0] ?? {}).join(",")
       const csv = [
         header,
-        ...rows.map((r) =>
-          Object.values(r)
-            .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-            .join(","),
-        ),
+        ...rows.map((r) => Object.values(r).map(toCsvCell).join(",")),
       ].join("\n")
       const blob = new Blob([csv], { type: "text/csv" })
       const url = URL.createObjectURL(blob)
