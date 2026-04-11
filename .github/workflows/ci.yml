@@ -140,7 +140,11 @@ jobs:
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
 
       - name: Run golangci-lint
-        run: $(go env GOPATH)/bin/golangci-lint run --timeout=5m ./...
+        # Block scalar so the inner double-quotes reach the shell. Quoting
+        # $(go env GOPATH) prevents word-splitting if GOPATH contains spaces
+        # on a self-hosted runner. shellcheck SC2046.
+        run: |
+          "$(go env GOPATH)/bin/golangci-lint" run --timeout=5m ./...
 
   # ── Full binary build (push to main only — verifies embed works) ──
   binary:
