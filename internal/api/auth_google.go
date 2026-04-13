@@ -56,13 +56,14 @@ func (h *GoogleAuthHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 	_, _ = rand.Read(b)
 	state := base64.URLEncoding.EncodeToString(b)
 
-	// Store state in DB for CSRF protection
-	id := make([]byte, 16)
-	_, _ = rand.Read(id)
-	now := time.Now().UTC().Format(time.RFC3339)
+	// Store state in DB for CSRF protection (single-use, validated on callback)
+	redirect := r.URL.Query().Get("redirect")
+	if redirect == "" {
+		redirect = "/"
+	}
 	_, err := h.db.ExecContext(r.Context(),
-		`INSERT INTO oauth_states (id, state, workspace_id, redirect_uri, created_at) VALUES (?, ?, '', ?, ?)`,
-		hex.EncodeToString(id), state, r.URL.Query().Get("redirect"), now)
+		`INSERT INTO oauth_states (state, credential_id, workspace_id, redirect_uri) VALUES (?, '', '', ?)`,
+		state, redirect)
 	if err != nil {
 		h.logger.Error("store oauth state", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Internal server error"})
@@ -97,19 +98,24 @@ func (h *GoogleAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify state
-	var redirectURI string
+	// Atomically consume the state token (prevents replay attacks)
+	var redirectURI, createdAt string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT redirect_uri FROM oauth_states WHERE state = ? AND created_at > ?`,
-		state, time.Now().Add(-15*time.Minute).UTC().Format(time.RFC3339)).Scan(&redirectURI)
+		`DELETE FROM oauth_states WHERE state = ? RETURNING redirect_uri, created_at`,
+		state).Scan(&redirectURI, &createdAt)
 	if err != nil {
 		h.logger.Warn("invalid oauth state", "error", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired state"})
 		return
 	}
 
-	// Clean up state
-	h.db.ExecContext(r.Context(), `DELETE FROM oauth_states WHERE state = ?`, state)
+	// Reject states older than 15 minutes
+	if t, parseErr := time.Parse(time.RFC3339, createdAt); parseErr == nil {
+		if time.Since(t) > 15*time.Minute {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "OAuth state expired"})
+			return
+		}
+	}
 
 	// Exchange code for token
 	token, err := h.oauthCfg.Exchange(r.Context(), code)
