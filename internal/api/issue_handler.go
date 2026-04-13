@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/statuses"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -116,18 +117,9 @@ type activityResponse struct {
 	CreatedAt string  `json:"created_at"`
 }
 
-// validIssueTransitions defines allowed status transitions for issues.
-// Issue statuses are a superset of the existing mission statuses.
-var validIssueTransitions = map[string][]string{
-	"BACKLOG":     {"TODO", "IN_PROGRESS", "CANCELLED"},
-	"TODO":        {"IN_PROGRESS", "BACKLOG", "CANCELLED"},
-	"IN_PROGRESS": {"REVIEW", "DONE", "FAILED", "CANCELLED", "TODO"},
-	"REVIEW":      {"DONE", "TODO", "IN_PROGRESS", "FAILED", "CANCELLED"},
-	"DONE":        {"BACKLOG"},
-	"FAILED":      {"BACKLOG", "TODO", "IN_PROGRESS"},
-	"CANCELLED":   {"BACKLOG", "TODO"},
-	"DUPLICATE":   {},
-}
+// validIssueTransitions references the canonical transition map from the
+// statuses package so there is a single source of truth.
+var validIssueTransitions = statuses.ValidIssueTransitions
 
 // ── Helper methods ──────────────────────────────────────────────────────────
 

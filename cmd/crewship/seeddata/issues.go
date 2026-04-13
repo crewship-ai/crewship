@@ -1,5 +1,7 @@
 package seeddata
 
+import "github.com/crewship-ai/crewship/internal/statuses"
+
 // LabelDef defines a label to seed.
 type LabelDef struct {
 	Name  string `json:"name"`
@@ -241,18 +243,9 @@ func StatusPath(target string) []string {
 	return StatusPathFrom("BACKLOG", target)
 }
 
-// validIssueTransitions mirrors the server-side issue status DAG defined in
-// internal/api/issue_handler.go. Keep in sync.
-var validIssueTransitions = map[string][]string{
-	"BACKLOG":     {"TODO", "IN_PROGRESS", "CANCELLED"},
-	"TODO":        {"IN_PROGRESS", "BACKLOG", "CANCELLED"},
-	"IN_PROGRESS": {"REVIEW", "DONE", "FAILED", "CANCELLED", "TODO"},
-	"REVIEW":      {"DONE", "TODO", "IN_PROGRESS", "FAILED", "CANCELLED"},
-	"DONE":        {"BACKLOG"},
-	"FAILED":      {"BACKLOG", "TODO", "IN_PROGRESS"},
-	"CANCELLED":   {"BACKLOG", "TODO"},
-	"DUPLICATE":   {},
-}
+// validIssueTransitions references the canonical transition map from the
+// statuses package — single source of truth.
+var validIssueTransitions = statuses.ValidIssueTransitions
 
 // StatusPathFrom returns the shortest sequence of status transitions needed
 // to move an issue from current to target, using the server-side issue
