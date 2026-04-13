@@ -176,7 +176,9 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		completedMeta := map[string]interface{}{
 			"duration_ms": time.Since(startedAt).Milliseconds(),
 		}
-		_ = h.resolver.UpdateRun(runCtx, runID, status, &exitCode, errMsg, completedMeta)
+		if updateErr := h.resolver.UpdateRun(runCtx, runID, status, &exitCode, errMsg, completedMeta); updateErr != nil {
+			h.logger.Warn("failed to update run status", "run_id", runID, "status", status, "error", updateErr)
+		}
 	}()
 
 	return nil
