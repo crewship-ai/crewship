@@ -176,7 +176,7 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 		completedMeta := map[string]interface{}{
 			"duration_ms": time.Since(startedAt).Milliseconds(),
 		}
-		_ = h.resolver.UpdateRun(context.Background(), runID, status, &exitCode, errMsg, completedMeta)
+		_ = h.resolver.UpdateRun(runCtx, runID, status, &exitCode, errMsg, completedMeta)
 	}()
 
 	return nil
