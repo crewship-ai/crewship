@@ -170,7 +170,10 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 	if metadata != nil {
 		payload["metadata"] = metadata
 	}
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("create run: marshal: %w", err)
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -202,7 +205,10 @@ func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitC
 	if metadata != nil {
 		payload["metadata"] = metadata
 	}
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("update run: marshal: %w", err)
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -224,7 +230,10 @@ func (r *IPCResolver) UpdateRun(ctx context.Context, runID, status string, exitC
 // IncrementMessageCount increments the message count for a chat session.
 func (r *IPCResolver) IncrementMessageCount(ctx context.Context, chatID string, delta int) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/message-count", r.baseURL, url.PathEscape(chatID))
-	body, _ := json.Marshal(map[string]int{"delta": delta})
+	body, err := json.Marshal(map[string]int{"delta": delta})
+	if err != nil {
+		return fmt.Errorf("increment message count: marshal: %w", err)
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -245,7 +254,10 @@ func (r *IPCResolver) IncrementMessageCount(ctx context.Context, chatID string, 
 // UpdateChatTitle updates the display title of a chat session.
 func (r *IPCResolver) UpdateChatTitle(ctx context.Context, chatID, title string) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/chats/%s/title", r.baseURL, url.PathEscape(chatID))
-	body, _ := json.Marshal(map[string]string{"title": title})
+	body, err := json.Marshal(map[string]string{"title": title})
+	if err != nil {
+		return fmt.Errorf("update chat title: marshal: %w", err)
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("update chat title: create request: %w", err)

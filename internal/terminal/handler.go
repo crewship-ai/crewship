@@ -421,6 +421,9 @@ func (h *Handler) writeError(ws *websocket.Conn, msg string) {
 
 // writeInfo sends a JSON info message to the WebSocket client.
 func (h *Handler) writeInfo(ws *websocket.Conn, msg string) {
-	data, _ := json.Marshal(map[string]string{"type": "info", "message": msg})
+	data, err := json.Marshal(map[string]string{"type": "info", "message": msg})
+	if err != nil {
+		return
+	}
 	_ = ws.WriteMessage(websocket.TextMessage, data)
 }
