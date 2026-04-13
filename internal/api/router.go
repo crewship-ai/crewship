@@ -220,9 +220,15 @@ func WithLicense(lic *license.License) RouterOption {
 }
 
 // ServeHTTP dispatches incoming requests to the registered route handlers.
-// It applies per-IP rate limiting: stricter limits on auth endpoints,
-// general limits on public API, and no limits on internal IPC routes.
+// It applies security headers to all responses and per-IP rate limiting:
+// stricter limits on auth endpoints, general limits on public API,
+// and no limits on internal IPC routes.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	SecurityHeaders(http.HandlerFunc(r.routeWithRateLimiting)).ServeHTTP(w, req)
+}
+
+// routeWithRateLimiting applies per-IP rate limiting based on the request path.
+func (r *Router) routeWithRateLimiting(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 
 	// Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token auth)
