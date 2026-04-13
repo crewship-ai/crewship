@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
@@ -56,6 +57,8 @@ type Router struct {
 	license              *license.License
 	agentHandler         *AgentHandler
 	storagePath          string // base path for crew file storage
+	authRateLimiter      *RateLimiter
+	apiRateLimiter       *RateLimiter
 }
 
 // NewRouter creates a Router, applies the given options, and registers all HTTP routes.
@@ -68,10 +71,12 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	authMw := NewAuthMiddleware(validator, db, logger)
 
 	r := &Router{
-		mux:    http.NewServeMux(),
-		db:     db,
-		logger: logger,
-		authMw: authMw,
+		mux:             http.NewServeMux(),
+		db:              db,
+		logger:          logger,
+		authMw:          authMw,
+		authRateLimiter: NewRateLimiter(10),  // 10 req/min per IP for auth endpoints
+		apiRateLimiter:  NewRateLimiter(120), // 120 req/min per IP for general API
 	}
 
 	// Apply options before registering routes so that internalToken,
@@ -215,7 +220,30 @@ func WithLicense(lic *license.License) RouterOption {
 }
 
 // ServeHTTP dispatches incoming requests to the registered route handlers.
+// It applies per-IP rate limiting: stricter limits on auth endpoints,
+// general limits on public API, and no limits on internal IPC routes.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	path := req.URL.Path
+
+	// Skip rate limiting for internal routes (sidecar IPC, X-Internal-Token auth)
+	if strings.HasPrefix(path, "/api/v1/internal/") {
+		r.mux.ServeHTTP(w, req)
+		return
+	}
+
+	// Stricter rate limiting for auth endpoints
+	if strings.HasPrefix(path, "/api/auth/") || strings.HasPrefix(path, "/api/v1/auth/") || path == "/api/v1/bootstrap" {
+		r.authRateLimiter.Middleware(r.mux).ServeHTTP(w, req)
+		return
+	}
+
+	// General API rate limiting
+	if strings.HasPrefix(path, "/api/") {
+		r.apiRateLimiter.Middleware(r.mux).ServeHTTP(w, req)
+		return
+	}
+
+	// Static files / other paths — no rate limiting
 	r.mux.ServeHTTP(w, req)
 }
 
