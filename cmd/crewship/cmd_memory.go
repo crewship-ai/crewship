@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/memory"
@@ -158,6 +160,9 @@ var memoryReindexCmd = &cobra.Command{
 			return err
 		}
 
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
+
 		var succeeded int
 		for _, mp := range paths {
 			eng, err := memory.New(mp.path, memory.DefaultConfig())
@@ -167,7 +172,7 @@ var memoryReindexCmd = &cobra.Command{
 			}
 
 			start := time.Now()
-			if err := eng.Reindex(); err != nil {
+			if err := eng.ReindexContext(ctx); err != nil {
 				eng.Close()
 				fmt.Printf("[%s] reindex failed: %v\n", mp.scope, err)
 				continue

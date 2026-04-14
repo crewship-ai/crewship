@@ -90,8 +90,8 @@ func (s *Server) searchSingleScope(w http.ResponseWriter, r *http.Request, engin
 	}
 
 	scoped := make([]scopedResult, len(results))
-	for i, r := range results {
-		scoped[i] = scopedResult{SearchResult: r, Source: scope}
+	for i, res := range results {
+		scoped[i] = scopedResult{SearchResult: res, Source: scope}
 	}
 
 	writeJSONResponse(w, http.StatusOK, map[string]interface{}{
