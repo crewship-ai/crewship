@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -89,6 +90,15 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// ── Phase 2b: Provision crews with devcontainer config (parallel) ──
+	// Without this, `crewship run <agent>` fails with "Crew has devcontainer
+	// configuration but no provisioned image". Seed is supposed to produce a
+	// demo environment that works out of the box.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	provisionCrews(ctx, client, crewIDs)
+
 	// ── Phase 3: Agents ──
 	if err := ctx.Err(); err != nil {
 		return err
@@ -151,6 +161,128 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stderr, "  crewship seed --smoke-test")
 	}
 	return nil
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Phase 2b: Provisioning
+// ════════════════════════════════════════════════════════════════════════════
+
+// provisionCrews triggers devcontainer provisioning for every crew that has a
+// devcontainer_config and waits for all to finish (in parallel). Errors are
+// reported but do not abort the whole seed — a partially-provisioned demo env
+// is still better than bailing out before agents/skills/issues are created.
+func provisionCrews(ctx context.Context, client *cli.Client, crewIDs map[string]string) {
+	// Map slug → has devcontainer config, from static seed data. If the seed
+	// data evolves to skip devcontainers we silently skip those crews.
+	hasDevcontainer := map[string]bool{}
+	for _, c := range seeddata.Crews {
+		if c.DevcontainerConfig != "" {
+			hasDevcontainer[c.Slug] = true
+		}
+	}
+
+	// Collect only crews we actually need to provision.
+	type target struct{ slug, id string }
+	var targets []target
+	for slug, id := range crewIDs {
+		if hasDevcontainer[slug] {
+			targets = append(targets, target{slug: slug, id: id})
+		}
+	}
+	if len(targets) == 0 {
+		return
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].slug < targets[j].slug })
+
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Provisioning demo crews (pulling images, installing features)...")
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(targets))
+	for _, t := range targets {
+		wg.Add(1)
+		go func(slug, id string) {
+			defer wg.Done()
+			fmt.Fprintf(os.Stderr, "  Provisioning %s...\n", slug)
+			if err := provisionCrewAndWait(ctx, client, id, 5*time.Minute); err != nil {
+				fmt.Fprintf(os.Stderr, "  X %s: %v\n", slug, err)
+				errCh <- fmt.Errorf("%s: %w", slug, err)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "  + %s provisioned\n", slug)
+		}(t.slug, t.id)
+	}
+	wg.Wait()
+	close(errCh)
+
+	failed := 0
+	for range errCh {
+		failed++
+	}
+	if failed > 0 {
+		fmt.Fprintf(os.Stderr,
+			"  WARNING: %d/%d crews failed to provision. Agents in those crews will not run.\n",
+			failed, len(targets),
+		)
+		fmt.Fprintf(os.Stderr,
+			"           Retry with: crewship crew provision <slug>\n")
+	}
+}
+
+// provisionCrewAndWait triggers provisioning for a crew and polls until
+// completion, failure, or timeout. The trigger endpoint returns 202 Accepted
+// (or 409 if a job is already running, which we treat as "fine, keep polling").
+func provisionCrewAndWait(ctx context.Context, client *cli.Client, crewID string, timeout time.Duration) error {
+	// Bound the whole operation with a sub-context so the poll loop terminates
+	// cleanly on timeout / Ctrl-C.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	pollClient := client.WithContext(ctx)
+
+	// Kick off provisioning. 202 = started; 409 = already in progress (still OK
+	// to poll); anything else is an error.
+	resp, err := pollClient.Post("/api/v1/crews/"+crewID+"/provision", nil)
+	if err != nil {
+		return fmt.Errorf("trigger provision: %w", err)
+	}
+	if resp.StatusCode != http.StatusAccepted &&
+		resp.StatusCode != http.StatusOK &&
+		resp.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return fmt.Errorf("trigger provision: HTTP %d: %s",
+			resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	resp.Body.Close()
+
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	lastStatus := "unknown"
+	for {
+		// Check status immediately (so a fast provision returns quickly) then
+		// again on every tick.
+		st, err := fetchProvisionStatus(pollClient, crewID)
+		if err != nil {
+			return fmt.Errorf("poll status: %w", err)
+		}
+		lastStatus = st.Status
+		switch st.Status {
+		case "completed":
+			return nil
+		case "failed":
+			if st.Error != "" {
+				return fmt.Errorf("provision failed: %s", st.Error)
+			}
+			return fmt.Errorf("provision failed")
+		}
+		// pending / running / idle → keep polling
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout after %s (last status: %s)", timeout, lastStatus)
+		case <-ticker.C:
+		}
+	}
 }
 
 // ════════════════════════════════════════════════════════════════════════════

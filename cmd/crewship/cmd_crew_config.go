@@ -99,6 +99,7 @@ type provisionStatus struct {
 	ConfigHash         *string `json:"config_hash"`
 	DevcontainerConfig *string `json:"devcontainer_config"`
 	MiseConfig         *string `json:"mise_config"`
+	Error              string  `json:"error"`
 }
 
 func fetchCrewInfo(client *cli.Client, crewID string) (*crewInfo, error) {
