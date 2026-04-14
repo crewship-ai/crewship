@@ -55,6 +55,8 @@ type ChatInfo struct {
 	MemoryMB           int
 	CPUs               float64
 	TTLHours           int
+	RuntimeImage       string
+	CachedImage        string
 	MCPServers         []orchestrator.MCPServerConfig
 	CrewMCPConfigJSON  string
 	AgentMCPConfigJSON string
@@ -207,10 +209,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		b.logger.Info("creating container", "crew_slug", info.CrewSlug)
 		streamFn(ws.ChatEvent{Type: "status", Content: "Starting container..."})
 		cID, err := b.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
-			ID:       info.CrewID,
-			Slug:     info.CrewSlug,
-			MemoryMB: memoryMB,
-			CPUs:     cpuVal,
+			ID:          info.CrewID,
+			Slug:        info.CrewSlug,
+			MemoryMB:    memoryMB,
+			CPUs:        cpuVal,
+			Image:       info.RuntimeImage,
+			CachedImage: info.CachedImage,
 		})
 		if err != nil {
 			streamFn(ws.ChatEvent{Type: "error", Content: "failed to start agent container"})

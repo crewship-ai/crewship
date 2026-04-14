@@ -62,6 +62,8 @@ type chatResolveResponse struct {
 	MemoryMB           int                      `json:"memory_mb"`
 	CPUs               float64                  `json:"cpus"`
 	TTLHours           int                      `json:"ttl_hours"`
+	RuntimeImage       string                   `json:"runtime_image"`
+	CachedImage        string                   `json:"cached_image"`
 	MCPServers         []mcpServerResponse      `json:"mcp_servers,omitempty"`
 	CrewMCPConfigJSON  string                   `json:"crew_mcp_config_json"`
 	AgentMCPConfigJSON string                   `json:"agent_mcp_config_json"`
@@ -460,6 +462,8 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 		MemoryMB:           data.MemoryMB,
 		CPUs:               data.CPUs,
 		TTLHours:           data.TTLHours,
+		RuntimeImage:       data.RuntimeImage,
+		CachedImage:        data.CachedImage,
 		MCPServers:         mcpServers,
 		CrewMCPConfigJSON:  data.CrewMCPConfigJSON,
 		AgentMCPConfigJSON: data.AgentMCPConfigJSON,

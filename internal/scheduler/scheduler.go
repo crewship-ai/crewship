@@ -251,10 +251,12 @@ func (s *Scheduler) triggerAgent(ag scheduledAgent) {
 			crewSlug = "scheduler"
 		}
 		cID, err := s.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
-			ID:       crewID,
-			Slug:     crewSlug,
-			MemoryMB: s.cfg.DefaultMemoryMB,
-			CPUs:     s.cfg.DefaultCPUs,
+			ID:          crewID,
+			Slug:        crewSlug,
+			MemoryMB:    s.cfg.DefaultMemoryMB,
+			CPUs:        s.cfg.DefaultCPUs,
+			Image:       info.RuntimeImage,
+			CachedImage: info.CachedImage,
 		})
 		if err != nil {
 			s.logger.Error("scheduled: container failed", "agent", ag.Slug, "error", err)

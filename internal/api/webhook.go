@@ -81,10 +81,12 @@ func (h *WebhookHandler) trigger(ctx context.Context, crewID, agentID string, pa
 
 	// 3. Ensure container is running
 	containerID, err := h.container.EnsureCrewRuntime(ctx, provider.CrewConfig{
-		ID:       info.CrewID,
-		Slug:     info.CrewSlug,
-		MemoryMB: info.MemoryMB,
-		CPUs:     info.CPUs,
+		ID:          info.CrewID,
+		Slug:        info.CrewSlug,
+		MemoryMB:    info.MemoryMB,
+		CPUs:        info.CPUs,
+		Image:       info.RuntimeImage,
+		CachedImage: info.CachedImage,
 	})
 	if err != nil {
 		return fmt.Errorf("ensure crew runtime: %w", err)
