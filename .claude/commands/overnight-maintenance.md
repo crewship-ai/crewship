@@ -193,7 +193,7 @@ When creating `MAINTENANCE-CHECKLIST.md` for the first time, use this content:
 # Overnight Maintenance Checklist
 
 Branch: chore/overnight-maintenance
-Started: 2026-04-13
+Started: (fill with today's date at initialization)
 
 ## Go Quality
 
