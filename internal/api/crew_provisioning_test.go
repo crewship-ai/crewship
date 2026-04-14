@@ -9,10 +9,15 @@ import (
 	"testing"
 )
 
-func TestCatalogList(t *testing.T) {
+func newTestProvisioningHandler(t *testing.T) *ProvisioningHandler {
+	t.Helper()
 	db := setupTestDB(t)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger)
+	return NewProvisioningHandler(db, logger)
+}
+
+func TestCatalogList(t *testing.T) {
+	h := newTestProvisioningHandler(t)
 
 	req := httptest.NewRequest("GET", "/api/v1/features/catalog", nil)
 	rr := httptest.NewRecorder()
@@ -35,9 +40,7 @@ func TestCatalogList(t *testing.T) {
 }
 
 func TestCatalogListSearch(t *testing.T) {
-	db := setupTestDB(t)
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	h := NewProvisioningHandler(db, logger)
+	h := newTestProvisioningHandler(t)
 
 	// Search for "python" — should return results.
 	req := httptest.NewRequest("GET", "/api/v1/features/catalog?search=python", nil)

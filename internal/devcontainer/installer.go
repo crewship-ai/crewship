@@ -106,42 +106,13 @@ func (inst *Installer) InstallFeature(ctx context.Context, containerID string, f
 	return nil
 }
 
-// execInContainer runs a command inside the container as root and returns the
-// combined stdout+stderr output, exit code, and any error.
+// execInContainer runs a command inside the container as root (0:0) and returns
+// the combined stdout+stderr output, exit code, and any error.
 func (inst *Installer) execInContainer(ctx context.Context, containerID string, cmd, env []string) (string, int, error) {
-	execCfg := container.ExecOptions{
-		Cmd:          cmd,
-		Env:          env,
-		User:         "0:0",
-		AttachStdout: true,
-		AttachStderr: true,
-	}
-
-	exec, err := inst.docker.ContainerExecCreate(ctx, containerID, execCfg)
-	if err != nil {
-		return "", -1, fmt.Errorf("exec create: %w", err)
-	}
-
-	resp, err := inst.docker.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
-	if err != nil {
-		return "", -1, fmt.Errorf("exec attach: %w", err)
-	}
-	defer resp.Close()
-
-	var buf bytes.Buffer
-	if _, copyErr := io.Copy(&buf, resp.Reader); copyErr != nil {
-		inst.logger.Warn("failed to read exec output", "error", copyErr)
-	}
-
-	inspect, err := inst.docker.ContainerExecInspect(ctx, exec.ID)
-	if err != nil {
-		return buf.String(), -1, fmt.Errorf("exec inspect: %w", err)
-	}
-
-	return buf.String(), inspect.ExitCode, nil
+	return inst.execInContainerAsUser(ctx, containerID, cmd, "0:0", env)
 }
 
-// execInContainerAsUser is like execInContainer but allows specifying the user.
+// execInContainerAsUser runs a command inside the container as the given user.
 // This matches the ExecFunc signature needed by the mise integration.
 func (inst *Installer) execInContainerAsUser(ctx context.Context, containerID string, cmd []string, user string, env []string) (string, int, error) {
 	execCfg := container.ExecOptions{
