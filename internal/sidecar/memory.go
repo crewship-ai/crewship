@@ -221,7 +221,7 @@ func (s *Server) handleMemoryReindex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := engine.Reindex(); err != nil {
+	if err := engine.ReindexContext(r.Context()); err != nil {
 		s.logger.Error("memory reindex failed", "error", err, "scope", scope)
 		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{
 			"error": "reindex failed: " + err.Error(),

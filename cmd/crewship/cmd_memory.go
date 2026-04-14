@@ -18,10 +18,11 @@ var memoryCmd = &cobra.Command{
 	Long: `Directly access memory FTS5 indexes on the local filesystem.
 Useful for development and debugging — does not require a running server.
 
-Scopes:
-  agent      Per-agent memory at <base>/.memory/
-  crew       Crew shared memory at <base>/shared/.memory/
-  workspace  Workspace memory at ~/.crewship/memory/<workspace>/`,
+Scopes (--path meaning depends on scope):
+  agent      --path = agent dir or .memory dir (e.g. /crew/agents/lead/.memory)
+  crew       --path = crew root dir (resolves to <path>/shared/.memory/)
+  workspace  --path = workspace memory dir (e.g. ~/.crewship/memory/<workspace-id>)
+  all        --path = crew root dir (searches agent + crew)`,
 }
 
 var memorySearchCmd = &cobra.Command{
@@ -157,6 +158,7 @@ var memoryReindexCmd = &cobra.Command{
 			return err
 		}
 
+		var succeeded int
 		for _, mp := range paths {
 			eng, err := memory.New(mp.path, memory.DefaultConfig())
 			if err != nil {
@@ -183,6 +185,10 @@ var memoryReindexCmd = &cobra.Command{
 				fmt.Printf("[%s] reindexed %d files (%d chunks) in %s\n",
 					mp.scope, status.TotalFiles, status.TotalChunks, elapsed.Round(time.Millisecond))
 			}
+			succeeded++
+		}
+		if succeeded == 0 {
+			return fmt.Errorf("all reindex operations failed")
 		}
 		return nil
 	},
