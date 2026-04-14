@@ -21,9 +21,11 @@ const DefaultAddr = "127.0.0.1:9119"
 
 // MemoryConfig configures the sidecar memory engine.
 type MemoryConfig struct {
-	Enabled   bool   `json:"enabled"`
-	BasePath  string `json:"base_path"`
-	AgentSlug string `json:"agent_slug"`
+	Enabled        bool   `json:"enabled"`
+	BasePath       string `json:"base_path"`
+	AgentSlug      string `json:"agent_slug"`
+	AgentRole      string `json:"agent_role"`       // "lead" or "agent" — lead owns crew memory index
+	CrewMemoryPath string `json:"crew_memory_path"` // path to crew shared memory (e.g. /crew/shared/.memory)
 }
 
 // IPCConfig holds the crewshipd internal API address for assignment forwarding.
@@ -94,16 +96,17 @@ type ServerConfig struct {
 // It provides an HTTP forward proxy with credential injection,
 // optional memory search API, and assignment routing for lead agents.
 type Server struct {
-	httpServer   *http.Server
-	credStore    *CredStore
-	allowlist    *DomainAllowlist
-	proxy        *Proxy
-	memoryEngine *memory.Engine
-	ipc          *IPCConfig
-	crewMembers  []CrewMember
-	mcpGateway   *MCPGateway
-	logger       *slog.Logger
-	readyCh      chan struct{} // closed when the TCP listener is bound
+	httpServer       *http.Server
+	credStore        *CredStore
+	allowlist        *DomainAllowlist
+	proxy            *Proxy
+	memoryEngine     *memory.Engine
+	crewMemoryEngine *memory.Engine // crew shared memory — only initialized for lead agents
+	ipc              *IPCConfig
+	crewMembers      []CrewMember
+	mcpGateway       *MCPGateway
+	logger           *slog.Logger
+	readyCh          chan struct{} // closed when the TCP listener is bound
 }
 
 // NewServer creates a sidecar server ready to start.
@@ -172,6 +175,21 @@ func NewServer(cfg ServerConfig) *Server {
 				cfg.Logger.Warn("initial memory reindex failed", "error", err)
 			}
 			cfg.Logger.Info("memory engine initialized", "path", cfg.Memory.BasePath)
+		}
+
+		// Initialize crew shared memory engine for lead agents only.
+		// The lead sidecar owns the crew FTS5 index — single writer, zero contention.
+		if cfg.Memory.AgentRole == "lead" && cfg.Memory.CrewMemoryPath != "" {
+			crewEngine, err := memory.New(cfg.Memory.CrewMemoryPath, memory.DefaultConfig())
+			if err != nil {
+				cfg.Logger.Error("failed to init crew memory engine", "error", err, "path", cfg.Memory.CrewMemoryPath)
+			} else {
+				s.crewMemoryEngine = crewEngine
+				if err := crewEngine.Reindex(); err != nil {
+					cfg.Logger.Warn("initial crew memory reindex failed", "error", err)
+				}
+				cfg.Logger.Info("crew memory engine initialized", "path", cfg.Memory.CrewMemoryPath)
+			}
 		}
 	}
 
@@ -439,6 +457,9 @@ func (s *Server) Start(ctx context.Context) error {
 		if s.memoryEngine != nil {
 			s.memoryEngine.Close()
 		}
+		if s.crewMemoryEngine != nil {
+			s.crewMemoryEngine.Close()
+		}
 		if err := s.httpServer.Shutdown(shutCtx); err != nil {
 			s.httpServer.Close()
 			return fmt.Errorf("sidecar shutdown: %w", err)
@@ -450,6 +471,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		if s.memoryEngine != nil {
 			s.memoryEngine.Close()
+		}
+		if s.crewMemoryEngine != nil {
+			s.crewMemoryEngine.Close()
 		}
 		return err
 	}

@@ -272,6 +272,299 @@ func TestBuildHandler_MemoryRouting(t *testing.T) {
 	}
 }
 
+// --- Scope parameter tests (CRE-118: crew shared memory) ---
+
+// setupMemoryServerWithCrew creates a server with both agent and crew memory engines.
+func setupMemoryServerWithCrew(t *testing.T) (*Server, string, string) {
+	t.Helper()
+
+	agentDir := t.TempDir()
+	crewDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(agentDir, "daily"), 0o755)
+	os.MkdirAll(filepath.Join(crewDir, "topics"), 0o755)
+
+	// Agent memory
+	os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("# Agent\n## Facts\nI prefer TypeScript for frontend."), 0o644)
+	// Crew shared memory
+	os.WriteFile(filepath.Join(crewDir, "CREW.md"), []byte("# Crew\n## Conventions\nDeploy via GitHub Actions."), 0o644)
+	os.WriteFile(filepath.Join(crewDir, "topics", "deployment.md"), []byte("# Deployment\nUse Docker Hub for images."), 0o644)
+
+	srv := NewServer(ServerConfig{
+		Addr:   "127.0.0.1:0",
+		Logger: slog.Default(),
+		Memory: &MemoryConfig{
+			Enabled:        true,
+			BasePath:       agentDir,
+			AgentSlug:      "lead",
+			AgentRole:      "lead",
+			CrewMemoryPath: crewDir,
+		},
+	})
+
+	if srv.memoryEngine == nil {
+		t.Fatal("agent memory engine should be initialized")
+	}
+	if srv.crewMemoryEngine == nil {
+		t.Fatal("crew memory engine should be initialized for lead role")
+	}
+
+	t.Cleanup(func() {
+		srv.memoryEngine.Close()
+		srv.crewMemoryEngine.Close()
+	})
+
+	return srv, agentDir, crewDir
+}
+
+func TestMemorySearch_DefaultScopeAgent(t *testing.T) {
+	srv, _, _ := setupMemoryServerWithCrew(t)
+
+	// Default scope (no scope field) should search agent memory only
+	body, _ := json.Marshal(map[string]interface{}{
+		"query": "TypeScript",
+		"limit": 10,
+	})
+
+	req := httptest.NewRequest("POST", "http://localhost:9119/memory/search", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.handleMemorySearch(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Results []json.RawMessage `json:"results"`
+		Count   int               `json:"count"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp.Count == 0 {
+		t.Error("default scope should find agent content 'TypeScript'")
+	}
+
+	// Should NOT find crew content
+	body, _ = json.Marshal(map[string]interface{}{
+		"query": "GitHub Actions",
+		"limit": 10,
+	})
+	req = httptest.NewRequest("POST", "http://localhost:9119/memory/search", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	srv.handleMemorySearch(w, req)
+
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Count != 0 {
+		t.Error("default scope should NOT find crew content 'GitHub Actions'")
+	}
+}
+
+func TestMemorySearch_ScopeCrew(t *testing.T) {
+	srv, _, _ := setupMemoryServerWithCrew(t)
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"query": "GitHub Actions",
+		"limit": 10,
+		"scope": "crew",
+	})
+
+	req := httptest.NewRequest("POST", "http://localhost:9119/memory/search", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.handleMemorySearch(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Results []json.RawMessage `json:"results"`
+		Count   int               `json:"count"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp.Count == 0 {
+		t.Error("crew scope should find 'GitHub Actions'")
+	}
+
+	// Should NOT find agent content
+	body, _ = json.Marshal(map[string]interface{}{
+		"query": "TypeScript",
+		"limit": 10,
+		"scope": "crew",
+	})
+	req = httptest.NewRequest("POST", "http://localhost:9119/memory/search", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	srv.handleMemorySearch(w, req)
+
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Count != 0 {
+		t.Error("crew scope should NOT find agent content 'TypeScript'")
+	}
+}
+
+func TestMemorySearch_ScopeBoth(t *testing.T) {
+	srv, _, _ := setupMemoryServerWithCrew(t)
+
+	// "Docker" appears only in crew topics/deployment.md
+	// "TypeScript" appears only in agent AGENT.md
+	// scope=both should find content from both
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"query": "Docker",
+		"limit": 10,
+		"scope": "both",
+	})
+
+	req := httptest.NewRequest("POST", "http://localhost:9119/memory/search", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.handleMemorySearch(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Results []struct {
+			Source string `json:"source"`
+		} `json:"results"`
+		Count int `json:"count"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp.Count == 0 {
+		t.Error("scope=both should find 'Docker' from crew memory")
+	}
+
+	// Check source field is populated
+	for _, r := range resp.Results {
+		if r.Source == "" {
+			t.Error("results should have 'source' field (agent or crew)")
+		}
+	}
+}
+
+func TestMemorySearch_ScopeCrewNilEngine(t *testing.T) {
+	// Agent-only server (no crew memory — solo agent, not in a crew)
+	srv, _ := setupMemoryServer(t)
+	defer srv.memoryEngine.Close()
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"query": "test",
+		"limit": 10,
+		"scope": "crew",
+	})
+
+	req := httptest.NewRequest("POST", "http://localhost:9119/memory/search", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.handleMemorySearch(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when crew engine is nil, got %d", w.Code)
+	}
+}
+
+func TestMemoryStatus_ScopeCrew(t *testing.T) {
+	srv, _, _ := setupMemoryServerWithCrew(t)
+
+	req := httptest.NewRequest("GET", "http://localhost:9119/memory/status?scope=crew", nil)
+	w := httptest.NewRecorder()
+	srv.handleMemoryStatus(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var status memory.Status
+	json.Unmarshal(w.Body.Bytes(), &status)
+
+	// Crew has CREW.md + topics/deployment.md = 2 files
+	if status.TotalFiles < 2 {
+		t.Errorf("crew status: expected >= 2 files, got %d", status.TotalFiles)
+	}
+}
+
+func TestMemoryReindex_ScopeCrew(t *testing.T) {
+	srv, _, crewDir := setupMemoryServerWithCrew(t)
+
+	// Add new file to crew memory
+	os.WriteFile(filepath.Join(crewDir, "topics", "security.md"), []byte("# Security\nAll agents use mTLS."), 0o644)
+
+	req := httptest.NewRequest("POST", "http://localhost:9119/memory/reindex?scope=crew", nil)
+	w := httptest.NewRecorder()
+	srv.handleMemoryReindex(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify new content is searchable
+	body, _ := json.Marshal(map[string]interface{}{
+		"query": "mTLS",
+		"limit": 10,
+		"scope": "crew",
+	})
+	searchReq := httptest.NewRequest("POST", "http://localhost:9119/memory/search", bytes.NewReader(body))
+	searchW := httptest.NewRecorder()
+	srv.handleMemorySearch(searchW, searchReq)
+
+	var resp struct {
+		Count int `json:"count"`
+	}
+	json.Unmarshal(searchW.Body.Bytes(), &resp)
+	if resp.Count == 0 {
+		t.Error("crew reindex should make new content searchable")
+	}
+}
+
+func TestNewServer_CrewMemoryInitForLead(t *testing.T) {
+	crewDir := t.TempDir()
+	os.WriteFile(filepath.Join(crewDir, "CREW.md"), []byte("test"), 0o644)
+
+	srv := NewServer(ServerConfig{
+		Addr:   "127.0.0.1:0",
+		Logger: slog.Default(),
+		Memory: &MemoryConfig{
+			Enabled:        true,
+			BasePath:       t.TempDir(),
+			AgentSlug:      "lead",
+			AgentRole:      "lead",
+			CrewMemoryPath: crewDir,
+		},
+	})
+
+	if srv.crewMemoryEngine == nil {
+		t.Error("crew memory engine should be initialized for lead role")
+	}
+	if srv.crewMemoryEngine != nil {
+		srv.crewMemoryEngine.Close()
+	}
+	if srv.memoryEngine != nil {
+		srv.memoryEngine.Close()
+	}
+}
+
+func TestNewServer_CrewMemoryNotInitForAgent(t *testing.T) {
+	srv := NewServer(ServerConfig{
+		Addr:   "127.0.0.1:0",
+		Logger: slog.Default(),
+		Memory: &MemoryConfig{
+			Enabled:        true,
+			BasePath:       t.TempDir(),
+			AgentSlug:      "worker",
+			AgentRole:      "agent",
+			CrewMemoryPath: t.TempDir(),
+		},
+	})
+
+	if srv.crewMemoryEngine != nil {
+		srv.crewMemoryEngine.Close()
+		t.Error("crew memory engine should NOT be initialized for non-lead agent")
+	}
+	if srv.memoryEngine != nil {
+		srv.memoryEngine.Close()
+	}
+}
+
 func TestNewServer_MemoryInitialization(t *testing.T) {
 	t.Run("memory enabled with valid path", func(t *testing.T) {
 		dir := t.TempDir()
