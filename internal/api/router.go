@@ -626,6 +626,15 @@ func (r *Router) registerRoutes() {
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
 	r.mux.Handle("GET /api/v1/admin/keeper/requests", authed(wsCtx(http.HandlerFunc(keeperLog.List))))
 
+	// Devcontainer feature catalog (auth required, no workspace context needed)
+	provisioning := NewProvisioningHandler(r.db, r.logger)
+	r.mux.Handle("GET /api/v1/features/catalog", authed(http.HandlerFunc(provisioning.CatalogList)))
+
+	// Crew provisioning (require workspace context)
+	r.mux.Handle("GET /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionStatus))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/provision", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionTrigger))))
+	r.mux.Handle("POST /api/v1/crews/{crewId}/rebuild", authed(wsCtx(http.HandlerFunc(provisioning.ProvisionRebuild))))
+
 	// Crewshipd proxy + agent runtime routes (require IPC socket)
 	socketPath := r.socketPath
 	if socketPath == "" {
