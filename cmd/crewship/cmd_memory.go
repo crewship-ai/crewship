@@ -171,13 +171,18 @@ var memoryReindexCmd = &cobra.Command{
 				continue
 			}
 
-			ctx := context.Background()
-			status, _ := eng.Status(ctx)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			status, err := eng.Status(ctx)
+			cancel()
 			eng.Close()
 
 			elapsed := time.Since(start)
-			fmt.Printf("[%s] reindexed %d files (%d chunks) in %s\n",
-				mp.scope, status.TotalFiles, status.TotalChunks, elapsed.Round(time.Millisecond))
+			if err != nil || status == nil {
+				fmt.Printf("[%s] reindexed in %s (status unavailable)\n", mp.scope, elapsed.Round(time.Millisecond))
+			} else {
+				fmt.Printf("[%s] reindexed %d files (%d chunks) in %s\n",
+					mp.scope, status.TotalFiles, status.TotalChunks, elapsed.Round(time.Millisecond))
+			}
 		}
 		return nil
 	},
@@ -243,15 +248,13 @@ func resolveMemoryPaths(basePath, scope string) ([]memoryPath, error) {
 }
 
 // ensureMemorySubdir appends .memory if the path doesn't already end with it.
+// Always resolves to the .memory subdirectory to prevent creating index.sqlite
+// in the wrong location.
 func ensureMemorySubdir(p string) string {
 	if filepath.Base(p) == ".memory" {
 		return p
 	}
-	candidate := filepath.Join(p, ".memory")
-	if dirExists(candidate) {
-		return candidate
-	}
-	return p
+	return filepath.Join(p, ".memory")
 }
 
 func dirExists(p string) bool {

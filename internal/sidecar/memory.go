@@ -16,13 +16,15 @@ type scopedResult struct {
 }
 
 // resolveMemoryEngine returns the engine for the given scope.
-// Returns nil if the requested scope is not available.
-func (s *Server) resolveMemoryEngine(scope string) *memory.Engine {
+// Returns engine, true if valid scope; nil, false if scope is invalid.
+func (s *Server) resolveMemoryEngine(scope string) (*memory.Engine, bool) {
 	switch scope {
+	case "agent", "":
+		return s.memoryEngine, true
 	case "crew":
-		return s.crewMemoryEngine
+		return s.crewMemoryEngine, true
 	default:
-		return s.memoryEngine
+		return nil, false
 	}
 }
 
@@ -108,12 +110,14 @@ func (s *Server) searchBothScopes(w http.ResponseWriter, r *http.Request, query 
 	}
 
 	var all []scopedResult
+	var searchErrors int
 
 	// Query agent memory
 	if s.memoryEngine != nil {
 		results, err := s.memoryEngine.Search(r.Context(), query, limit)
 		if err != nil {
 			s.logger.Warn("agent memory search failed in scope=both", "error", err)
+			searchErrors++
 		}
 		for _, res := range results {
 			all = append(all, scopedResult{SearchResult: res, Source: "agent"})
@@ -125,10 +129,26 @@ func (s *Server) searchBothScopes(w http.ResponseWriter, r *http.Request, query 
 		results, err := s.crewMemoryEngine.Search(r.Context(), query, limit)
 		if err != nil {
 			s.logger.Warn("crew memory search failed in scope=both", "error", err)
+			searchErrors++
 		}
 		for _, res := range results {
 			all = append(all, scopedResult{SearchResult: res, Source: "crew"})
 		}
+	}
+
+	// If all attempted scopes failed, return error instead of empty 200
+	engineCount := 0
+	if s.memoryEngine != nil {
+		engineCount++
+	}
+	if s.crewMemoryEngine != nil {
+		engineCount++
+	}
+	if searchErrors > 0 && searchErrors >= engineCount {
+		writeJSONResponse(w, http.StatusInternalServerError, map[string]string{
+			"error": "all memory scopes failed to search",
+		})
+		return
 	}
 
 	// Sort by BM25 score (lower = better match in FTS5 rank)
@@ -154,7 +174,13 @@ func (s *Server) handleMemoryStatus(w http.ResponseWriter, r *http.Request) {
 		scope = "agent"
 	}
 
-	engine := s.resolveMemoryEngine(scope)
+	engine, valid := s.resolveMemoryEngine(scope)
+	if !valid {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+			"error": "invalid scope: use agent or crew",
+		})
+		return
+	}
 	if engine == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{
 			"error": scope + " memory engine not available",
@@ -181,7 +207,13 @@ func (s *Server) handleMemoryReindex(w http.ResponseWriter, r *http.Request) {
 		scope = "agent"
 	}
 
-	engine := s.resolveMemoryEngine(scope)
+	engine, valid := s.resolveMemoryEngine(scope)
+	if !valid {
+		writeJSONResponse(w, http.StatusBadRequest, map[string]string{
+			"error": "invalid scope: use agent or crew",
+		})
+		return
+	}
 	if engine == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{
 			"error": scope + " memory engine not available",

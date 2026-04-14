@@ -441,8 +441,11 @@ func (s *Server) Start(ctx context.Context) error {
 	// Periodic reindex for crew shared memory — catches updates from other agents
 	// writing to /crew/shared/.memory/ via filesystem. 60s interval balances freshness
 	// vs SQLite write cost. Only the lead sidecar runs this (owns the index).
+	var crewReindexDone chan struct{}
 	if s.crewMemoryEngine != nil {
+		crewReindexDone = make(chan struct{})
 		go func() {
+			defer close(crewReindexDone)
 			ticker := time.NewTicker(60 * time.Second)
 			defer ticker.Stop()
 			for {
@@ -482,6 +485,9 @@ func (s *Server) Start(ctx context.Context) error {
 		if s.memoryEngine != nil {
 			s.memoryEngine.Close()
 		}
+		if crewReindexDone != nil {
+			<-crewReindexDone // wait for reindex goroutine to finish
+		}
 		if s.crewMemoryEngine != nil {
 			s.crewMemoryEngine.Close()
 		}
@@ -496,6 +502,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		if s.memoryEngine != nil {
 			s.memoryEngine.Close()
+		}
+		if crewReindexDone != nil {
+			<-crewReindexDone // wait for reindex goroutine to finish
 		}
 		if s.crewMemoryEngine != nil {
 			s.crewMemoryEngine.Close()

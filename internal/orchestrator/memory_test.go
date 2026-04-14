@@ -346,6 +346,16 @@ func TestBuildMemoryContext_CrewEmpty_FullBudgetToAgent(t *testing.T) {
 	if !strings.Contains(result, "[AGENT MEMORY]") {
 		t.Error("missing agent memory block")
 	}
+	// Agent block should contain significant agent content (budget reclaimed from empty crew)
+	agentStart := strings.Index(result, "[AGENT MEMORY]")
+	agentEnd := strings.Index(result, "[END AGENT MEMORY]")
+	if agentStart >= 0 && agentEnd > agentStart {
+		agentBlock := result[agentStart:agentEnd]
+		// With 15000 budget and no crew, agent should get most of it
+		if len(agentBlock) < 5000 {
+			t.Errorf("agent block too small (%d chars) — budget not reclaimed from empty crew", len(agentBlock))
+		}
+	}
 	// Should NOT have crew memory block when empty
 	if strings.Contains(result, "[CREW SHARED MEMORY]") {
 		t.Error("should not have crew memory block when no crew files exist")
