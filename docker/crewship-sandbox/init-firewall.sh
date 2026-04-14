@@ -29,11 +29,24 @@ if [ -n "$DOCKER_DNS_RULES" ]; then
     }
 fi
 
-# 3. Allow DNS and localhost BEFORE restrictions
-iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-iptables -A INPUT -p udp --sport 53 -m state --state ESTABLISHED -j ACCEPT
-iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
-iptables -A INPUT -p tcp --sport 53 -m state --state ESTABLISHED -j ACCEPT
+# 3. Allow DNS only to the resolvers listed in /etc/resolv.conf (typically
+# Docker's embedded 127.0.0.11). A broad "allow all :53" rule would let any
+# process inside the sandbox smuggle traffic over DNS; scoping to the known
+# resolver IPs closes that. Inbound replies are gated on ESTABLISHED state.
+NAMESERVERS=$(awk '/^nameserver/ {print $2}' /etc/resolv.conf 2>/dev/null || true)
+if [ -z "$NAMESERVERS" ]; then
+    echo "ERROR: no nameservers in /etc/resolv.conf" >&2
+    exit 1
+fi
+for ns in $NAMESERVERS; do
+    # Skip IPv6 nameservers — we DROP v6 entirely below.
+    [[ "$ns" =~ : ]] && continue
+    echo "Allowing DNS to $ns"
+    iptables -A OUTPUT -p udp -d "$ns" --dport 53 -j ACCEPT
+    iptables -A INPUT  -p udp -s "$ns" --sport 53 -m state --state ESTABLISHED -j ACCEPT
+    iptables -A OUTPUT -p tcp -d "$ns" --dport 53 -j ACCEPT
+    iptables -A INPUT  -p tcp -s "$ns" --sport 53 -m state --state ESTABLISHED -j ACCEPT
+done
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 
@@ -95,15 +108,18 @@ for domain in "${ALLOWED_DOMAINS[@]}"; do
     done <<< "$ips"
 done
 
-# 7. Allow host gateway only (for host.docker.internal -> crewshipd).
-# Use /32 on the gateway IP rather than a /24 around it — Docker bridge
-# networks are typically /16 and other containers sit on the same bridge,
-# so a /24 would silently open east-west traffic we don't need.
+# 7. Allow outbound to crewshipd on the host gateway only.
+# Sandbox needs to reach crewshipd's IPC port (for sidecar-injected credential
+# lookups, keeper requests, etc.). Scope to HOST_IP/32 + specific port rather
+# than opening the whole gateway — Docker bridges are typically /16 and the
+# gateway is reachable from any container on it.
+# Reply traffic is covered by the ESTABLISHED,RELATED rules below, so no
+# blanket INPUT accept is needed.
+CREWSHIPD_PORT="${CREWSHIPD_PORT:-8080}"
 HOST_IP=$(ip route | awk '/default/ {print $3; exit}')
 if [ -n "$HOST_IP" ]; then
-    echo "Allowing host gateway: $HOST_IP"
-    iptables -A INPUT -s "$HOST_IP" -j ACCEPT
-    iptables -A OUTPUT -d "$HOST_IP" -j ACCEPT
+    echo "Allowing crewshipd at $HOST_IP:$CREWSHIPD_PORT"
+    iptables -A OUTPUT -p tcp -d "$HOST_IP" --dport "$CREWSHIPD_PORT" -j ACCEPT
 fi
 
 # 8. Default DROP policies
