@@ -458,7 +458,7 @@ function createSlashCommandsExtension() {
 
             return {
               onStart: (props: {
-                clientRect: (() => DOMRect | null) | null
+                clientRect?: (() => DOMRect | null) | null
                 items: SlashCommandItem[]
                 command: (item: SlashCommandItem) => void
               }) => {
@@ -490,7 +490,7 @@ function createSlashCommandsExtension() {
               },
 
               onUpdate: (props: {
-                clientRect: (() => DOMRect | null) | null
+                clientRect?: (() => DOMRect | null) | null
                 items: SlashCommandItem[]
                 command: (item: SlashCommandItem) => void
               }) => {
