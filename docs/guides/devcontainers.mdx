@@ -303,6 +303,10 @@ The entire pipeline is in `internal/devcontainer/provisioner.go:Provision`:
 
   <Accordion title="6. Install mise tools (if declared)">
     Runs `curl -fsSL https://mise.run | sh` as the `agent` user, then `mise install` for each `{tool: version}` entry. Fails the provisioning job if any tool download 404s or the version is invalid.
+
+    <Warning>
+      **Supply-chain risk:** `curl | sh` from `mise.run` executes whatever that endpoint serves at provision time — no signature, checksum, or version pin. Provisioning also requires outbound HTTPS to `mise.run` from the build container. For high-security environments, vendor a known-good `mise` release into the base image (or a custom feature), pin by SHA256, and drop the `mise` section from `devcontainer_config` so this step is skipped.
+    </Warning>
   </Accordion>
 
   <Accordion title="7. Run postCreateCommand">

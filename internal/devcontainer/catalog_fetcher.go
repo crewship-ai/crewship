@@ -190,13 +190,14 @@ func (f *CatalogFetcher) readDiskCache() ([]CatalogEntry, time.Time, error) {
 	if f.cacheDir == "" {
 		return nil, time.Time{}, errors.New("no cache dir configured")
 	}
-	data, err := os.ReadFile(filepath.Join(f.cacheDir, featureCatalogFile))
+	path := filepath.Join(f.cacheDir, featureCatalogFile)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, time.Time{}, fmt.Errorf("reading catalog cache %s: %w", path, err)
 	}
 	var f1 diskCacheFile
 	if err := json.Unmarshal(data, &f1); err != nil {
-		return nil, time.Time{}, err
+		return nil, time.Time{}, fmt.Errorf("unmarshaling catalog cache %s: %w", path, err)
 	}
 	return f1.Entries, f1.FetchedAt, nil
 }
@@ -207,19 +208,22 @@ func (f *CatalogFetcher) writeDiskCache(entries []CatalogEntry, fetchedAt time.T
 		return nil
 	}
 	if err := os.MkdirAll(f.cacheDir, 0o755); err != nil {
-		return err
+		return fmt.Errorf("creating cache dir %s: %w", f.cacheDir, err)
 	}
 	payload := diskCacheFile{FetchedAt: fetchedAt, Entries: entries}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshaling catalog cache: %w", err)
 	}
 	dst := filepath.Join(f.cacheDir, featureCatalogFile)
 	tmp := dst + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
+		return fmt.Errorf("writing catalog cache tmp %s: %w", tmp, err)
 	}
-	return os.Rename(tmp, dst)
+	if err := os.Rename(tmp, dst); err != nil {
+		return fmt.Errorf("renaming catalog cache %s -> %s: %w", tmp, dst, err)
+	}
+	return nil
 }
 
 // --- helpers ---------------------------------------------------------------

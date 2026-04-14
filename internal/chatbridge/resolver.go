@@ -444,21 +444,26 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 	}
 
 	// Extract containerEnv and postStartCommand from devcontainer_config so
-	// they can flow into CrewConfig at container create time. Use the shared
-	// parser to avoid drift. Parse failures are logged but non-fatal — the
-	// config was validated at write time, but stored configs from older
-	// schema versions may no longer validate.
+	// they can flow into CrewConfig at container create time. Use a tolerant
+	// local decode (not the full ParseBytes validator) so that future schema
+	// changes — or fields added/removed by other writers — don't cause us to
+	// silently drop runtime fields for already-saved crews. We only need two
+	// fields here, so a minimal struct is the right level of coupling.
 	var containerEnv map[string]string
 	var rootPostStart []string
 	if data.DevcontainerConfig != "" {
-		if cfg, err := devcontainer.ParseBytes([]byte(data.DevcontainerConfig)); err != nil {
-			r.logger.Warn("failed to parse stored devcontainer_config for runtime fields",
+		var runtimeFields struct {
+			ContainerEnv     map[string]string `json:"containerEnv"`
+			PostStartCommand any               `json:"postStartCommand"`
+		}
+		if err := json.Unmarshal([]byte(data.DevcontainerConfig), &runtimeFields); err != nil {
+			r.logger.Warn("failed to decode stored devcontainer_config for runtime fields",
 				"error", err)
 		} else {
-			if len(cfg.ContainerEnv) > 0 {
-				containerEnv = cfg.ContainerEnv
+			if len(runtimeFields.ContainerEnv) > 0 {
+				containerEnv = runtimeFields.ContainerEnv
 			}
-			rootPostStart = cfg.NormalizedPostStartCommands()
+			rootPostStart = devcontainer.NormalizeCommand(runtimeFields.PostStartCommand)
 		}
 	}
 
