@@ -475,6 +475,7 @@ func TestBuildMemoryContext_CoordinatorWithWorkspace(t *testing.T) {
 		ContainerID:      "c1",
 		MemoryEnabled:    true,
 		AgentRole:        "COORDINATOR",
+		WorkspaceID:      "ws-1",
 		WorkspaceMemPath: wsDir,
 	}
 

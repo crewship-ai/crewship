@@ -511,6 +511,25 @@ func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handle
 			mkMemResult.Reader.Close()
 		}
 
+		// Create crew shared memory dirs for lead agents (if in a crew)
+		if req.CrewID != "" {
+			crewMemDir := "/crew/shared/.memory"
+			crewMemDailyDir := path.Join(crewMemDir, "daily")
+			crewMemTopicsDir := path.Join(crewMemDir, "topics")
+			mkCrewMemCfg := provider.ExecConfig{
+				ContainerID: req.ContainerID,
+				Cmd:         []string{"mkdir", "-p", crewMemDir, crewMemDailyDir, crewMemTopicsDir},
+				User:        "1001:1001",
+			}
+			mkCrewMemResult, err := o.container.Exec(ctx, mkCrewMemCfg)
+			if err != nil {
+				o.logger.Warn("failed to create crew memory dirs", "error", err)
+			} else {
+				io.Copy(io.Discard, mkCrewMemResult.Reader)
+				mkCrewMemResult.Reader.Close()
+			}
+		}
+
 		// One-time migration: copy memory from old location (/output/{slug}/.memory/)
 		// to new location (/crew/agents/{slug}/.memory/) if not already migrated
 		oldMemoryDir := path.Join(outputDir, ".memory")

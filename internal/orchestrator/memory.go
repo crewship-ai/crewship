@@ -40,9 +40,12 @@ func (o *Orchestrator) buildMemoryContext(ctx context.Context, req AgentRunReque
 	// --- Workspace memory for Coordinator (read from host FS, cap at 20%) ---
 	var wsBlock string
 	var wsUsed int
-	if req.AgentRole == "COORDINATOR" && req.WorkspaceMemPath != "" {
-		wsBudget := charBudget * 20 / 100
-		wsBlock, wsUsed = buildWorkspaceMemoryBlock(req.WorkspaceMemPath, wsBudget)
+	if req.AgentRole == "COORDINATOR" && req.WorkspaceID != "" {
+		wsMemPath := resolveWorkspaceMemPath(req.WorkspaceMemPath, req.WorkspaceID)
+		if wsMemPath != "" {
+			wsBudget := charBudget * 20 / 100
+			wsBlock, wsUsed = buildWorkspaceMemoryBlock(wsMemPath, wsBudget)
+		}
 	}
 
 	// --- Crew memory (cap at 40% of remaining) ---
@@ -122,6 +125,24 @@ func (o *Orchestrator) buildCrewMemoryBlock(ctx context.Context, req AgentRunReq
 
 	block := assembleSections("[CREW SHARED MEMORY]", "[END CREW SHARED MEMORY]", sections, budget)
 	return block, len(block)
+}
+
+// resolveWorkspaceMemPath determines the workspace memory directory path.
+// If explicit path is provided (WorkspaceMemPath), use it. Otherwise, derive
+// from WorkspaceID using the default data directory layout.
+func resolveWorkspaceMemPath(explicit, workspaceID string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if workspaceID == "" {
+		return ""
+	}
+	// Derive from default data dir: ~/.crewship/memory/{workspace-id}/
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".crewship", "memory", workspaceID)
 }
 
 // buildWorkspaceMemoryBlock reads workspace memory files from the host filesystem
